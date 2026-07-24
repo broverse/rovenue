@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n/config";
 import { PagePreview } from "./page-preview";
@@ -61,6 +61,12 @@ const WIRED: ReadonlyArray<{
   { type: "multi_choice", drive: (u) => u.click(screen.getByText("Option B")), options: OPTIONS },
   { type: "yes_no", drive: (u) => u.click(screen.getByText("Yes")) },
   { type: "number_input", drive: (u) => u.click(screen.getByLabelText("increment")) },
+  {
+    type: "slider",
+    drive: async () => {
+      fireEvent.change(screen.getByRole("slider"), { target: { value: "42" } });
+    },
+  },
 ];
 
 /**
@@ -74,7 +80,6 @@ const WIRED: ReadonlyArray<{
  */
 const NOT_WIRED_YET: ReadonlySet<PageType> = new Set([
   "date_input",
-  "slider",
   "rating",
   "picture_choice",
   "legal",

@@ -71,6 +71,16 @@ const numberPage: Page = {
   step: 1,
 } as Page;
 
+const sliderPage: Page = {
+  id: "pg_slider",
+  type: "slider",
+  question_id: "q_slider",
+  title: L("Pick a level"),
+  min: 0,
+  max: 100,
+  step: 1,
+} as Page;
+
 function base(page: Page) {
   return {
     page,
@@ -158,6 +168,31 @@ describe("PagePreview — live mode", () => {
     const onAnswer = vi.fn();
     render(<PagePreview {...base(numberPage)} mode="live" value={null} onAnswer={onAnswer} />);
     expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("slider emits a number on change and nothing at rest", async () => {
+    const onAnswer = vi.fn();
+    const { container } = render(
+      <PagePreview {...base(sliderPage)} mode="live" value={null} onAnswer={onAnswer} />,
+    );
+    expect(onAnswer).not.toHaveBeenCalled(); // resting midpoint is not an answer
+    const range = container.querySelector('input[type="range"]')!;
+    await userEvent.click(range); // ensure it is interactable
+    // jsdom + user-event cannot drag a slider, so drive it directly. A
+    // plain `range.value = "42"` is silently swallowed: React 19 attaches a
+    // value-tracker to the DOM node so a same-value re-set is invisible to
+    // its change detection, and assigning `.value` through the ordinary
+    // setter updates that tracker too, so the follow-up `input` event never
+    // reaches React's onChange. Going through the underlying native
+    // HTMLInputElement setter (the same trick @testing-library/react's
+    // fireEvent uses internally) bypasses the tracker so the event fires.
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    nativeSetter.call(range, "42");
+    range.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(onAnswer).toHaveBeenLastCalledWith(42);
   });
 });
 

@@ -11,7 +11,14 @@ import {
   X,
 } from "lucide-react";
 import { component, useService } from "impair";
-import { useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { PAGE_TYPES, type Page, type ProgressStyle, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import type { LocaleCode } from "@rovenue/shared/i18n";
@@ -436,7 +443,7 @@ export const PagePreview = component(
         )}
         {page.type === "slider" && (
           <Cap>
-            <SliderInput page={resolved} theme={theme} />
+            <SliderInput page={resolved} theme={theme} {...liveProps} />
           </Cap>
         )}
         {page.type === "contact_info" && (
@@ -890,39 +897,60 @@ function DatePicker({ theme }: { theme: Theme }) {
 
 // ---------- Slider ----------
 
-const SliderInput = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
-  const min = page.min ?? 0;
-  const max = page.max ?? 100;
-  const step = page.step ?? 1;
-  const [v, setV] = useState(min + Math.round((max - min) / 2));
-  return (
-    <div
-      className="mt-3 px-4 py-4"
-      style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}
-    >
-      <div className="mb-2 text-center font-rv-mono text-[24px] font-bold tabular-nums">
-        {v}
-        {page.suffix && (
-          <span className="ml-1 text-[12px] font-normal opacity-60">{page.suffix}</span>
-        )}
+const SliderInput = component(
+  ({
+    page,
+    theme,
+    live = false,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    live?: boolean;
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
+    const min = page.min ?? 0;
+    const max = page.max ?? 100;
+    const step = page.step ?? 1;
+    const rest = min + Math.round((max - min) / 2);
+    const [local, setLocal] = useState(rest);
+    const v = live ? (typeof value === "number" ? value : rest) : local;
+    const onRange = (e: ChangeEvent<HTMLInputElement>) => {
+      const next = Number(e.currentTarget.value);
+      if (live) onChange?.(next);
+      else setLocal(next);
+    };
+    return (
+      <div
+        className="mt-3 px-4 py-4"
+        style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}
+      >
+        <div className="mb-2 text-center font-rv-mono text-[24px] font-bold tabular-nums">
+          {v}
+          {page.suffix && (
+            <span className="ml-1 text-[12px] font-normal opacity-60">{page.suffix}</span>
+          )}
+        </div>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={v}
+          onChange={onRange}
+          className="w-full"
+          style={{ accentColor: theme.primary }}
+        />
+        <div className="mt-1 flex justify-between font-rv-mono text-[10px] opacity-50">
+          <span>{min}</span>
+          <span>{max}</span>
+        </div>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={v}
-        onChange={(e) => setV(Number(e.currentTarget.value))}
-        className="w-full"
-        style={{ accentColor: theme.primary }}
-      />
-      <div className="mt-1 flex justify-between font-rv-mono text-[10px] opacity-50">
-        <span>{min}</span>
-        <span>{max}</span>
-      </div>
-    </div>
-  );
-});
+    );
+  },
+);
 
 // ---------- Picture choice ----------
 
