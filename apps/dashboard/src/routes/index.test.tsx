@@ -13,7 +13,11 @@ import { server } from "../../tests/msw/server";
 import { API_BASE_URL } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
 import { Route as RootRouteImport } from "./__root";
-import { Route as IndexRouteImport, _resetCustomHostSlugForTests } from "./index";
+import {
+  Route as IndexRouteImport,
+  _resetCustomHostSlugForTests,
+  resolveCustomHostSlug,
+} from "./index";
 import { Route as LoginRouteImport } from "./login";
 // initialise i18n so login.tsx's email placeholder renders real copy
 // instead of the raw translation key.
@@ -176,6 +180,51 @@ describe("custom-domain funnel serving", () => {
     renderApp("/");
 
     expect(await screen.findByTestId("mock-funnel-runner")).toBeTruthy();
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not remember a FAILED lookup — only an answer", async () => {
+    // A 404 is an answer ("not a funnel") and is worth caching. A 5xx is
+    // not an answer, and remembering it would pin a funnel visitor to the
+    // login screen until they thought to reload — stricter than the
+    // server, which caps its own negative cache at 60s.
+    setHostname("quiz.acme.com");
+    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    const lookupMock = vi.fn();
+    server.use(
+      http.get(`${API_BASE_URL}/public/host/lookup`, () => {
+        lookupMock();
+        return HttpResponse.json(
+          { error: { code: "INTERNAL", message: "boom" } },
+          { status: 500 },
+        );
+      }),
+    );
+
+    expect(await resolveCustomHostSlug()).toBeNull();
+    expect(await resolveCustomHostSlug()).toBeNull();
+
+    // Two asks, two attempts: the failure was not cached.
+    expect(lookupMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("remembers a 404 — that IS an answer", async () => {
+    setHostname("not-ours.example.com");
+    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    const lookupMock = vi.fn();
+    server.use(
+      http.get(`${API_BASE_URL}/public/host/lookup`, () => {
+        lookupMock();
+        return HttpResponse.json(
+          { error: { code: "NOT_FOUND", message: "Unknown host" } },
+          { status: 404 },
+        );
+      }),
+    );
+
+    expect(await resolveCustomHostSlug()).toBeNull();
+    expect(await resolveCustomHostSlug()).toBeNull();
+
     expect(lookupMock).toHaveBeenCalledTimes(1);
   });
 

@@ -41,7 +41,63 @@ export function resolveLandingTarget(projects: ProjectSummary[]): LandingTarget 
  * outlet and the route disagreeing about what this host is. One
  * question, one answer.
  */
-let inFlight: Promise<string | null> | null = null;
+let inFlight: Promise<LookupResult> | null = null;
+
+/**
+ * `definitive` separates "the server answered" from "we never got an
+ * answer". A 404 is an answer — this host is not a funnel. A timeout, a
+ * dropped connection or a 5xx is not, and must not be remembered.
+ */
+interface LookupResult {
+  slug: string | null;
+  definitive: boolean;
+}
+
+/**
+ * The root route awaits this before anything paints, and the router
+ * declares no pending component — so an unbounded request here is a
+ * blank page, not a slow one. An API that REJECTS falls through by
+ * design; one that HANGS would not, which is what this bounds.
+ */
+const LOOKUP_TIMEOUT_MS = 2_000;
+
+/**
+ * Resolve to a non-definitive miss if `work` outruns the budget.
+ *
+ * Deliberately a race rather than an `AbortSignal` on the request: the
+ * requirement is that the first paint is not blocked, not that the
+ * request is cancelled. An abandoned lookup costs one in-flight GET and
+ * settles into the void; wiring cancellation through the typed RPC
+ * client's option shape bought nothing and broke the request.
+ */
+function withTimeout(work: Promise<LookupResult>): Promise<LookupResult> {
+  let timer: ReturnType<typeof setTimeout>;
+  const expired = new Promise<LookupResult>((resolve) => {
+    timer = setTimeout(() => resolve({ slug: null, definitive: false }), LOOKUP_TIMEOUT_MS);
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}
+
+async function lookupCustomHostSlug(): Promise<LookupResult> {
+  if (typeof window === "undefined") return { slug: null, definitive: true };
+  const hostname = window.location.hostname;
+  // Skips the request entirely on the canonical host. UNSET means "not
+  // known to be canonical" and the lookup runs — see lib/custom-host.ts.
+  if (isCanonicalDashboardHost(dashboardHostEnv, hostname)) {
+    return { slug: null, definitive: true };
+  }
+  try {
+    const res = await unwrap<{ funnelId: string; slug: string }>(
+      rpc.public.host.lookup.$get({ query: { host: hostname } }),
+    );
+    return { slug: res.slug, definitive: true };
+  } catch (err) {
+    return {
+      slug: null,
+      definitive: err instanceof ApiError && err.status === 404,
+    };
+  }
+}
 
 /**
  * Resolve the browser's current hostname to a funnel slug, or null.
@@ -58,22 +114,20 @@ let inFlight: Promise<string | null> | null = null;
  * customer's funnel domain.
  */
 export async function resolveCustomHostSlug(): Promise<string | null> {
-  inFlight ??= (async () => {
-    if (typeof window === "undefined") return null;
-    const hostname = window.location.hostname;
-    // Skips one request on the canonical host. UNSET means "not known to be
-    // canonical" and the lookup runs — see lib/custom-host.ts.
-    if (isCanonicalDashboardHost(dashboardHostEnv, hostname)) return null;
-    try {
-      const res = await unwrap<{ funnelId: string; slug: string }>(
-        rpc.public.host.lookup.$get({ query: { host: hostname } }),
-      );
-      return res.slug;
-    } catch {
-      return null;
-    }
-  })();
-  return inFlight;
+  // `.catch` is belt-and-braces: nothing in `lookupCustomHostSlug` throws
+  // today, but a rejected memo would reject in EVERY route's beforeLoad
+  // for the life of the document and take the whole dashboard down.
+  inFlight ??= withTimeout(
+    lookupCustomHostSlug().catch(() => ({ slug: null, definitive: false })),
+  );
+  const result = await inFlight;
+  // Keep only an answer. A failed lookup must not pin a funnel visitor to
+  // the login screen until they think to reload — the server caps its own
+  // negative cache at 60s for exactly this reason, and a client that
+  // remembered a transient 5xx forever would be stricter than the thing
+  // it is caching.
+  if (!result.definitive) inFlight = null;
+  return result.slug;
 }
 
 /** Test-only: drop the memoised lookup between cases. */
