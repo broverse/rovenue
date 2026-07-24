@@ -61,6 +61,16 @@ const yesNoPage: Page = {
   title: L("Are you sure?"),
 };
 
+const numberPage: Page = {
+  id: "pg_num",
+  type: "number_input",
+  question_id: "q_num",
+  title: L("How many?"),
+  min: 0,
+  max: 100,
+  step: 1,
+} as Page;
+
 function base(page: Page) {
   return {
     page,
@@ -134,6 +144,20 @@ describe("PagePreview — live mode", () => {
     );
     await userEvent.click(screen.getByText("Yes"));
     expect(onAnswer).toHaveBeenLastCalledWith("yes");
+  });
+
+  it("number_input emits a real number, not a string, on increment", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(numberPage)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.click(screen.getByLabelText("increment"));
+    expect(onAnswer).toHaveBeenLastCalledWith(1);
+    expect(typeof onAnswer.mock.lastCall![0]).toBe("number");
+  });
+
+  it("number_input records nothing until the visitor interacts (resting position is not an answer)", () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(numberPage)} mode="live" value={null} onAnswer={onAnswer} />);
+    expect(onAnswer).not.toHaveBeenCalled();
   });
 });
 

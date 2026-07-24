@@ -60,6 +60,7 @@ const WIRED: ReadonlyArray<{
   { type: "single_choice", drive: (u) => u.click(screen.getByText("Option B")), options: OPTIONS },
   { type: "multi_choice", drive: (u) => u.click(screen.getByText("Option B")), options: OPTIONS },
   { type: "yes_no", drive: (u) => u.click(screen.getByText("Yes")) },
+  { type: "number_input", drive: (u) => u.click(screen.getByLabelText("increment")) },
 ];
 
 /**
@@ -72,7 +73,6 @@ const WIRED: ReadonlyArray<{
  * `drive` function.
  */
 const NOT_WIRED_YET: ReadonlySet<PageType> = new Set([
-  "number_input",
   "date_input",
   "slider",
   "rating",

@@ -426,7 +426,7 @@ export const PagePreview = component(
         )}
         {page.type === "number_input" && (
           <Cap>
-            <NumberCounter page={resolved} theme={theme} />
+            <NumberCounter page={resolved} theme={theme} {...liveProps} />
           </Cap>
         )}
         {page.type === "date_input" && (
@@ -811,41 +811,64 @@ const YesNoButtons = component(
 
 // ---------- Number counter ----------
 
-const NumberCounter = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
-  const min = page.min ?? 0;
-  const max = page.max ?? 100;
-  const step = page.step ?? 1;
-  const [n, setN] = useState(min);
-  const dec = () => setN((v) => Math.max(min, v - step));
-  const inc = () => setN((v) => Math.min(max, v + step));
-  return (
-    <div className="mt-3 flex items-center justify-center gap-3 px-4 py-3"
-      style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}>
-      <button
-        type="button"
-        onClick={dec}
-        className="flex h-10 w-10 items-center justify-center rounded-full text-[18px] font-bold transition"
-        style={{ background: `${theme.primary}15`, color: theme.primary }}
-      >
-        −
-      </button>
-      <div className="min-w-[60px] text-center font-rv-mono text-[28px] font-bold tabular-nums">
-        {n}
-        {page.suffix && (
-          <span className="ml-1 text-[14px] font-normal opacity-60">{page.suffix}</span>
-        )}
+const NumberCounter = component(
+  ({
+    page,
+    theme,
+    live = false,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    live?: boolean;
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
+    const min = page.min ?? 0;
+    const max = page.max ?? 100;
+    const step = page.step ?? 1;
+    const [local, setLocal] = useState(min);
+    // Live mode shows the recorded answer; before the visitor interacts
+    // there is none, so it rests at `min` FOR DISPLAY ONLY — that resting
+    // value is never sent.
+    const n = live ? (typeof value === "number" ? value : min) : local;
+    const commit = (next: number) => {
+      const clamped = Math.max(min, Math.min(max, next));
+      if (live) onChange?.(clamped);
+      else setLocal(clamped);
+    };
+    return (
+      <div className="mt-3 flex items-center justify-center gap-3 px-4 py-3"
+        style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}>
+        <button
+          type="button"
+          aria-label="decrement"
+          onClick={() => commit(n - step)}
+          className="flex h-10 w-10 items-center justify-center rounded-full text-[18px] font-bold transition"
+          style={{ background: `${theme.primary}15`, color: theme.primary }}
+        >
+          −
+        </button>
+        <div className="min-w-[60px] text-center font-rv-mono text-[28px] font-bold tabular-nums">
+          {n}
+          {page.suffix && (
+            <span className="ml-1 text-[14px] font-normal opacity-60">{page.suffix}</span>
+          )}
+        </div>
+        <button
+          type="button"
+          aria-label="increment"
+          onClick={() => commit(n + step)}
+          className="flex h-10 w-10 items-center justify-center rounded-full text-[18px] font-bold transition"
+          style={{ background: `${theme.primary}15`, color: theme.primary }}
+        >
+          +
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={inc}
-        className="flex h-10 w-10 items-center justify-center rounded-full text-[18px] font-bold transition"
-        style={{ background: `${theme.primary}15`, color: theme.primary }}
-      >
-        +
-      </button>
-    </div>
-  );
-});
+    );
+  },
+);
 
 // ---------- Date picker ----------
 
