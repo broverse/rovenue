@@ -73,6 +73,13 @@ const WIRED: ReadonlyArray<{
   { type: "legal", drive: (u) => u.click(screen.getByRole("checkbox")) },
   { type: "checkbox", drive: (u) => u.click(screen.getByRole("checkbox")) },
   { type: "long_text", drive: (u) => u.type(screen.getByRole("textbox"), "a") },
+  { type: "phone", drive: (u) => u.type(screen.getByRole("textbox"), "5") },
+  {
+    type: "date_input",
+    drive: async () => {
+      fireEvent.change(screen.getByLabelText("date"), { target: { value: "2026-07-25" } });
+    },
+  },
 ];
 
 /**
@@ -84,10 +91,7 @@ const WIRED: ReadonlyArray<{
  * Wiring one of these means moving it here out and into WIRED with a
  * `drive` function.
  */
-const NOT_WIRED_YET: ReadonlySet<PageType> = new Set([
-  "date_input",
-  "phone",
-]);
+const NOT_WIRED_YET: ReadonlySet<PageType> = new Set([]);
 
 describe("answerKind agrees with what the wired inputs actually emit", () => {
   it.each(WIRED.map((w) => [w.type, w] as const))(

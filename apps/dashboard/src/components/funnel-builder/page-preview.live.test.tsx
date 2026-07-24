@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n/config";
 import { evaluateNext, type AnswerMap } from "@rovenue/shared/funnel";
@@ -122,6 +122,20 @@ const legalPage: Page = {
   question_id: "q_legal",
   title: L("Please review and accept"),
   agreementLabel: L("I agree to the terms"),
+} as Page;
+
+const phonePage: Page = {
+  id: "pg_phone",
+  type: "phone",
+  question_id: "q_phone",
+  title: L("Your number"),
+} as Page;
+
+const datePage: Page = {
+  id: "pg_date",
+  type: "date_input",
+  question_id: "q_date",
+  title: L("Pick a date"),
 } as Page;
 
 function base(page: Page) {
@@ -285,6 +299,20 @@ describe("PagePreview — live mode", () => {
     );
     await userEvent.click(screen.getByRole("checkbox")); // uncheck
     expect(onAnswer).toHaveBeenLastCalledWith("");
+  });
+
+  it("phone captures the typed string", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(phonePage)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.type(screen.getByRole("textbox"), "5");
+    expect(onAnswer).toHaveBeenLastCalledWith("5");
+  });
+
+  it("date_input captures an ISO-8601 string", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(datePage)} mode="live" value={null} onAnswer={onAnswer} />);
+    fireEvent.change(screen.getByLabelText("date"), { target: { value: "2026-07-25" } });
+    expect(onAnswer).toHaveBeenLastCalledWith("2026-07-25");
   });
 });
 

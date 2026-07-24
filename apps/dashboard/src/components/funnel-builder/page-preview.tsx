@@ -423,6 +423,7 @@ export const PagePreview = component(
               theme={theme}
               type="tel"
               icon={<Phone size={14} />}
+              {...textLiveProps}
             />
           </Cap>
         )}
@@ -438,7 +439,7 @@ export const PagePreview = component(
         )}
         {page.type === "date_input" && (
           <Cap>
-            <DatePicker theme={theme} />
+            <DatePicker theme={theme} {...textLiveProps} />
           </Cap>
         )}
         {page.type === "slider" && (
@@ -879,7 +880,17 @@ const NumberCounter = component(
 
 // ---------- Date picker ----------
 
-function DatePicker({ theme }: { theme: Theme }) {
+function DatePicker({
+  theme,
+  live = false,
+  value,
+  onChange,
+}: {
+  theme: Theme;
+  live?: boolean;
+  value?: string;
+  onChange?: (next: string) => void;
+}) {
   return (
     <div
       className="mt-3 flex h-10 w-full items-center gap-2 px-3"
@@ -887,9 +898,13 @@ function DatePicker({ theme }: { theme: Theme }) {
     >
       <Calendar size={14} style={{ color: theme.primary }} />
       <input
-        readOnly
+        aria-label="date"
+        readOnly={!live}
         type="date"
         className="h-full flex-1 bg-transparent text-[13px] outline-none"
+        {...(live && onChange
+          ? { value: value ?? "", onChange: (e) => onChange(e.currentTarget.value) }
+          : {})}
       />
     </div>
   );
