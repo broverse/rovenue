@@ -96,11 +96,12 @@ class Rovenue private constructor(
     private val appContext: Context?,
 ) {
     /**
-     * Test-only accessor that exposes the appVersion captured at
-     * configure() time. Used by `AppVersionTest` to verify the wiring
-     * without scraping the actual session-event request body.
+     * The appVersion captured at configure() time. Consumed in production
+     * by RovenuePaywallView (node-visibility min/max app-version gating)
+     * and in tests by AppVersionTest. NOT test-only — do not delete it as
+     * dead test scaffolding; visibility gating reads it.
      */
-    internal val resolvedAppVersionForTesting: String? get() = appVersion
+    internal val configuredAppVersion: String? get() = appVersion
 
     // Background scope for best-effort work that must not block the caller
     // (e.g. the post-configure purchase reconciliation). SupervisorJob so one

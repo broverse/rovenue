@@ -26,7 +26,7 @@ class AppVersionTest {
             baseUrl = "https://api.rovenue.io",
             appVersion = "4.5.6"
         )
-        assertEquals("4.5.6", Rovenue.shared.resolvedAppVersionForTesting)
+        assertEquals("4.5.6", Rovenue.shared.configuredAppVersion)
     }
 
     @Test
@@ -35,7 +35,7 @@ class AppVersionTest {
             apiKey = "pk_test_xyz",
             baseUrl = "https://api.rovenue.io"
         )
-        assertNull(Rovenue.shared.resolvedAppVersionForTesting)
+        assertNull(Rovenue.shared.configuredAppVersion)
     }
 
     @Test
@@ -50,6 +50,6 @@ class AppVersionTest {
             baseUrl = "https://api.rovenue.io",
             appVersion = "2.0.0"
         )
-        assertEquals("2.0.0", Rovenue.shared.resolvedAppVersionForTesting)
+        assertEquals("2.0.0", Rovenue.shared.configuredAppVersion)
     }
 }

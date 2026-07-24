@@ -166,7 +166,7 @@ class RovenuePaywallView @JvmOverloads constructor(
             onRestore = options.onRestore,
             onUrl = options.onUrl,
             loadImage = { imageView, url -> loadImageInto(imageView, url, scopeForImageLoads()) },
-            appVersion = configuredAppVersion(),
+            appVersion = appVersionOrNull(),
         )
 
         val rootView = NodeViewFactory.build(context, cfg.root, ctx, cell = null) ?: return
@@ -185,9 +185,9 @@ class RovenuePaywallView @JvmOverloads constructor(
      * the context — it's the compile-time literal NodeViewFactory.build
      * gates on.
      */
-    private fun configuredAppVersion(): String? =
+    private fun appVersionOrNull(): String? =
         try {
-            Rovenue.shared.resolvedAppVersionForTesting
+            Rovenue.shared.configuredAppVersion
         } catch (_: IllegalStateException) {
             null
         }
