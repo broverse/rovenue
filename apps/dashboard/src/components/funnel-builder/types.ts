@@ -210,21 +210,6 @@ export type Operator =
   | "is_answered"
   | "not_answered";
 
-export const OPERATORS: ReadonlyArray<{ v: Operator; l: string }> = [
-  { v: "equals", l: "equals" },
-  { v: "not_equals", l: "≠" },
-  { v: ">", l: ">" },
-  { v: ">=", l: "≥" },
-  { v: "<", l: "<" },
-  { v: "<=", l: "≤" },
-  { v: "between", l: "between" },
-  { v: "is_one_of", l: "is one of" },
-  { v: "not_one_of", l: "is not one of" },
-  { v: "contains", l: "contains" },
-  { v: "is_answered", l: "is answered" },
-  { v: "not_answered", l: "is not answered" },
-];
-
 export type RuleClause = {
   qid: string;
   op: Operator;
