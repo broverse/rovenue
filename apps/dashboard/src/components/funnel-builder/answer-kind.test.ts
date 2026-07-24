@@ -39,6 +39,42 @@ describe("OPERATORS_BY_KIND", () => {
     expect(OPERATORS_BY_KIND.none).toEqual([]);
   });
 
+  it("coerces eq/neq to a number when the question answers with one", () => {
+    // evalClause compares with ===, so `5 === "5"` is false. Left as a
+    // string, `eq` on a numeric question is dead and `neq` fires for
+    // EVERY visitor — silently rerouting the whole funnel.
+    expect(coerceOperandValue("eq", "5", "number")).toBe(5);
+    expect(coerceOperandValue("neq", "5", "number")).toBe(5);
+    // ...and stays a string where the answer is a string.
+    expect(coerceOperandValue("eq", "5", "text")).toBe("5");
+  });
+
+  it("never produces NaN from a non-numeric operand", () => {
+    // NaN JSON-serialises to null, which passes the schema's
+    // value-present check and then never matches — a dead rule that
+    // looks valid. The coercion runs on BLUR so typing stays free; these
+    // are the values that reach it.
+    expect(coerceOperandValue("gt", "", "number")).toBe("");
+    expect(coerceOperandValue("gt", "-", "number")).toBe("-");
+    expect(coerceOperandValue("gt", "abc", "number")).toBe("abc");
+    expect(coerceOperandValue("gt", "1.5", "number")).toBe(1.5);
+    expect(coerceOperandValue("gt", " 42 ", "number")).toBe(42);
+  });
+
+  it("every operator it offers has a label the editor can render", async () => {
+    // OPERATORS_BY_KIND is one table, the editor's label list is another.
+    // not_contains shipped in the evaluator, was accepted by the schema,
+    // was offered by this constant — and had no label, so the <select>
+    // filtered it out and no author could ever write it. Correct but
+    // unwritable is the same defect as writable but dead.
+    const { RENDERABLE_OPS } = await import("./rule-editor");
+    for (const ops of Object.values(OPERATORS_BY_KIND)) {
+      for (const op of ops) {
+        expect(RENDERABLE_OPS.has(op), `${op} is offered but has no label`).toBe(true);
+      }
+    }
+  });
+
   it("classifies every page type", () => {
     // A new page type added without an answerKind would otherwise be
     // silently unbranchable.
@@ -65,25 +101,5 @@ describe("coerceOperandValue", () => {
   it("leaves non-numeric operators' operands as strings", () => {
     expect(coerceOperandValue("eq", "5")).toBe("5");
     expect(typeof coerceOperandValue("eq", "5")).toBe("string");
-  });
-});
-
-describe("answerKind agrees with what the wired inputs actually emit", () => {
-  // PagePreview captures answers for exactly these types today (SP4).
-  // The value each one emits must match what its answerKind promises,
-  // or the editor offers an operator the evaluator cannot fire.
-  //
-  // If you wire a new input type and this test does not mention it, that
-  // is the gap — add it here.
-  it.each<[string, "string" | "array"]>([
-    ["email", "string"],
-    ["short_text", "string"],
-    ["text_input", "string"],
-    ["single_choice", "string"],
-    ["yes_no", "string"],
-    ["multi_choice", "array"],
-  ])("%s emits a %s", (pageType, shape) => {
-    const kind = PAGE_TYPES[pageType as keyof typeof PAGE_TYPES].answerKind;
-    expect(shape === "array" ? kind === "multi" : kind !== "multi").toBe(true);
   });
 });

@@ -5,20 +5,69 @@ import { ArrowRight, Plus, Trash2, TriangleAlert } from "lucide-react";
 import type { Clause, ClauseOp, NextRule } from "@rovenue/shared/funnel";
 import { cn } from "../../lib/cn";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
-import { OPERATORS_BY_KIND, PAGE_TYPES } from "./types";
+import { OPERATORS_BY_KIND, PAGE_TYPES, type AnswerKind } from "./types";
 
-const NUMERIC_OPS: ReadonlySet<ClauseOp> = new Set(["gt", "gte", "lt", "lte"]);
+const NUMERIC_COMPARISONS: ReadonlySet<ClauseOp> = new Set(["gt", "gte", "lt", "lte"]);
 
 /**
- * `gt`/`gte`/`lt`/`lte` require `typeof clause.value === "number"` in
- * evalClause (see packages/shared/src/funnel/evaluator.ts) — a raw string
- * operand can never match. `between` already coerces its own pair with
- * `Number(...)` above, so it is not in NUMERIC_OPS here.
- * Exported so the coercion — not just the operator filtering — has a unit
- * test that would fail if this regressed to storing the raw string.
+ * What shape of operand an operator takes. Used to reset a stale value
+ * when the operator changes class — `eq` → `in` would otherwise leave a
+ * scalar where an array is required, which validates nowhere and fails
+ * at publish.
  */
-export function coerceOperandValue(op: ClauseOp, raw: string): string | number {
-  return NUMERIC_OPS.has(op) ? Number(raw) : raw;
+export type OperandShape = "none" | "scalar" | "array" | "range";
+
+/** A fresh operand of the right shape for `op`, used when an edit makes
+ * the previous one meaningless. `undefined` for the unary operators,
+ * which the schema forbids from carrying a value at all. */
+export function defaultOperand(op: ClauseOp): unknown {
+  switch (operandShape(op)) {
+    case "none":
+      return undefined;
+    case "array":
+      return [];
+    case "range":
+      return [0, 0];
+    default:
+      return "";
+  }
+}
+
+export function operandShape(op: ClauseOp): OperandShape {
+  if (op === "is_answered" || op === "is_not_answered") return "none";
+  if (op === "in" || op === "not_in") return "array";
+  if (op === "between") return "range";
+  return "scalar";
+}
+
+/**
+ * Store an operand in the type `evalClause` will compare it with.
+ *
+ * `gt`/`gte`/`lt`/`lte` require `typeof clause.value === "number"`. So do
+ * `eq`/`neq` when the question answers with a number, because evalClause
+ * compares with `===` and `5 === "5"` is false — without this, `eq` on a
+ * numeric question is dead and `neq` fires for EVERY visitor.
+ * (`between` coerces its own pair separately.)
+ *
+ * Applied on BLUR, not on every keystroke. Coercing as the author types
+ * makes `1.5` untypeable (`"1."` → `Number` → `1` → re-rendered as `"1"`,
+ * so the `.` can never be followed), turns a cleared box into `0`, and
+ * turns `"-"` into `NaN` — which JSON-serialises to `null`, passes the
+ * schema's value-present check, and then never matches. Leaving the field
+ * is the moment the value is finished, so that is when it is typed.
+ *
+ * A string that is not a number is left alone rather than becoming `NaN`.
+ */
+export function coerceOperandValue(
+  op: ClauseOp,
+  raw: string,
+  kind: AnswerKind = "text",
+): string | number {
+  const needsNumber =
+    NUMERIC_COMPARISONS.has(op) || (kind === "number" && (op === "eq" || op === "neq"));
+  if (!needsNumber) return raw;
+  const n = Number(raw);
+  return raw.trim() === "" || Number.isNaN(n) ? raw : n;
 }
 
 const OPERATORS: ReadonlyArray<{ v: ClauseOp; l: string }> = [
@@ -32,9 +81,15 @@ const OPERATORS: ReadonlyArray<{ v: ClauseOp; l: string }> = [
   { v: "in", l: "is one of" },
   { v: "not_in", l: "is not one of" },
   { v: "contains", l: "contains" },
+  { v: "not_contains", l: "does not contain" },
   { v: "is_answered", l: "is answered" },
   { v: "is_not_answered", l: "is not answered" },
 ];
+
+/** Operators the clause row can actually render. Exported so a test can
+ * prove every operator OPERATORS_BY_KIND offers has a label here — the
+ * two tables drifting is how `not_contains` shipped unselectable. */
+export const RENDERABLE_OPS: ReadonlySet<ClauseOp> = new Set(OPERATORS.map((o) => o.v));
 
 interface Props {
   pageId: string;
@@ -154,9 +209,23 @@ export const RuleEditor = component(({ pageId }: Props) => {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <select
                       value={c.question_id}
-                      onChange={(e) =>
-                        updateClause(ruleIdx, clauseIdx, { question_id: e.currentTarget.value })
-                      }
+                      onChange={(e) => {
+                        const nextQuestionId = e.currentTarget.value;
+                        const nextPage = vm.pages.find((p) => p.question_id === nextQuestionId);
+                        const nextKind = nextPage ? PAGE_TYPES[nextPage.type].answerKind : "none";
+                        const nextAllowed = OPERATORS_BY_KIND[nextKind];
+                        // Without clamping, an operator the new question
+                        // does not allow stays in the clause while the
+                        // <select> — having no matching <option> — shows
+                        // the first one. Displayed and saved diverge.
+                        const nextOp = nextAllowed.includes(c.op) ? c.op : nextAllowed[0];
+                        updateClause(ruleIdx, clauseIdx, {
+                          question_id: nextQuestionId,
+                          ...(nextOp === undefined
+                            ? {}
+                            : { op: nextOp, value: defaultOperand(nextOp) }),
+                        } as Partial<Clause>);
+                      }}
                       className="h-6 max-w-[110px] rounded border border-rv-divider bg-rv-c1 px-1.5 font-rv-mono text-[11px] text-rv-accent-500 outline-none focus:border-rv-accent-500"
                     >
                       {earlierQs.map((q) => (
@@ -167,9 +236,18 @@ export const RuleEditor = component(({ pageId }: Props) => {
                     </select>
                     <select
                       value={c.op}
-                      onChange={(e) =>
-                        updateClause(ruleIdx, clauseIdx, { op: e.currentTarget.value as ClauseOp })
-                      }
+                      onChange={(e) => {
+                        const nextOp = e.currentTarget.value as ClauseOp;
+                        // A stale operand of the wrong shape survives an
+                        // operator change otherwise: eq -> in leaves a
+                        // scalar where an array is required, and eq -> gt
+                        // leaves a string that can never match.
+                        const patch: Partial<Clause> =
+                          operandShape(nextOp) === operandShape(c.op)
+                            ? ({ op: nextOp } as Partial<Clause>)
+                            : ({ op: nextOp, value: defaultOperand(nextOp) } as Partial<Clause>);
+                        updateClause(ruleIdx, clauseIdx, patch);
+                      }}
                       className="h-6 rounded border border-rv-divider bg-rv-c1 px-1.5 text-[11px] text-rv-mute-700 outline-none focus:border-rv-accent-500"
                     >
                       {OPERATORS.filter((o) => allowedOps.includes(o.v)).map((o) => (
@@ -183,7 +261,17 @@ export const RuleEditor = component(({ pageId }: Props) => {
                         value={value === undefined ? "" : String(value)}
                         onChange={(e) =>
                           updateClause(ruleIdx, clauseIdx, {
-                            value: coerceOperandValue(c.op, e.currentTarget.value) as never,
+                            // Raw while typing — see coerceOperandValue.
+                            value: e.currentTarget.value as never,
+                          } as Partial<Clause>)
+                        }
+                        onBlur={(e) =>
+                          updateClause(ruleIdx, clauseIdx, {
+                            value: coerceOperandValue(
+                              c.op,
+                              e.currentTarget.value,
+                              answerKind,
+                            ) as never,
                           } as Partial<Clause>)
                         }
                         className="h-6 max-w-[110px] flex-1 rounded border border-rv-divider bg-rv-c1 px-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
