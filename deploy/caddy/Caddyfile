@@ -72,19 +72,25 @@ rovenue.io, *.rovenue.io, edge.rovenue.io {
 # Custom domains — on-demand TLS, gated by the ask-endpoint.
 #
 # This block matches every host NOT covered above. Caddy will only
-# attempt cert issuance when the ask-endpoint says yes; otherwise
-# it returns a generic TLS error to the client (no cert, no serve).
+# attempt cert issuance when the ask-endpoint says yes (still
+# api:3001/internal/domains/check, unchanged above); otherwise it
+# returns a generic TLS error to the client (no cert, no serve).
+#
+# Once a cert is issued, traffic is proxied to the dashboard origin
+# (not the api): the SPA does its own SPA-fallback routing and, once
+# loaded on a resolving custom host, renders the funnel runner
+# instead of redirecting to /login. It also serves Stripe's Apple
+# Pay domain-association file with the correct Content-Type
+# (Caddyfile.dashboard:22). The SPA's own API calls go straight to
+# the absolute VITE_API_URL, so none of that traffic transits here —
+# no path split is needed.
 # -------------------------------------------------------------
 :443 {
     tls {
         on_demand
     }
     encode zstd gzip
-    reverse_proxy api:3000 {
-        header_up X-Forwarded-Host {host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Real-IP {remote_host}
-    }
+    reverse_proxy dashboard:80
 }
 
 # -------------------------------------------------------------
