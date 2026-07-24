@@ -80,7 +80,9 @@ After the retier, the only issues that can 400 the PATCH are `SCHEMA_INVALID` an
 Even with permanent 400s gone, autosave is throttled at 30s, so a tab closed mid-window loses whatever changed since the last successful save. Two additions:
 
 - **Unmount flush** — when the builder unmounts (closing the builder, navigating away), fire a final save if `isDirty`.
-- **`beforeunload` guard** — if `isDirty` when the tab/window is closing, attempt the save and warn. Browsers restrict what can run in `beforeunload`; use the same `PATCH` via `navigator.sendBeacon` where available and fall back to setting `returnValue` so the browser prompts. Do not claim a guarantee the browser does not give — the spec's requirement is "best effort plus an honest prompt", not "never loses data".
+- **`beforeunload` guard** — if `isDirty` when the tab/window is closing, prompt the browser's "leave site?" dialog (`preventDefault()` + `returnValue`). **No save is attempted here**, and that is deliberate: `navigator.sendBeacon` was the obvious candidate and does not work in this architecture. The API is a separate origin (`API_BASE_URL` comes from `VITE_API_URL`), and a JSON body makes the beacon a non-simple cross-origin request, so it needs a CORS preflight — which browsers drop unreliably during unload. A beacon that silently fails is worse than an honest prompt.
+
+  The unmount flush is what actually saves work, and it covers the common case (closing the builder, navigating within the app). The `beforeunload` prompt covers the rest by handing the decision to the person, which is the only guarantee available. Do not claim a guarantee the browser does not give — the requirement is "flush on unmount, prompt on unload", not "never loses data".
 
 ---
 
