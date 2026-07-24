@@ -88,7 +88,10 @@ async function lookupCustomHostSlug(): Promise<LookupResult> {
   }
   try {
     const res = await unwrap<{ funnelId: string; slug: string }>(
-      rpc.public.host.lookup.$get({ query: { host: hostname } }),
+      rpc.public.host.lookup.$get(
+        { query: { host: hostname } },
+        { init: { credentials: "omit" } },
+      ),
     );
     return { slug: res.slug, definitive: true };
   } catch (err) {
@@ -113,21 +116,28 @@ async function lookupCustomHostSlug(): Promise<LookupResult> {
  * exactly one place in the app that decides whether a host is a
  * customer's funnel domain.
  */
-export async function resolveCustomHostSlug(): Promise<string | null> {
+export async function resolveCustomHost(): Promise<LookupResult> {
   // `.catch` is belt-and-braces: nothing in `lookupCustomHostSlug` throws
   // today, but a rejected memo would reject in EVERY route's beforeLoad
   // for the life of the document and take the whole dashboard down.
+  //
+  // The result is kept even when the lookup FAILED, and that is
+  // deliberate. An earlier version cleared it so a transient 5xx could be
+  // retried — but the root route and "/" both ask, so a retry meant the
+  // two could get different answers and disagree about what this host is:
+  // root committing `<Outlet/>` while "/" decided it was a funnel and
+  // returned early, leaving a blank screen. One lookup per document, one
+  // answer. A failed lookup is surfaced honestly instead (see __root.tsx)
+  // rather than silently retried into a contradiction.
   inFlight ??= withTimeout(
     lookupCustomHostSlug().catch(() => ({ slug: null, definitive: false })),
   );
-  const result = await inFlight;
-  // Keep only an answer. A failed lookup must not pin a funnel visitor to
-  // the login screen until they think to reload — the server caps its own
-  // negative cache at 60s for exactly this reason, and a client that
-  // remembered a transient 5xx forever would be stricter than the thing
-  // it is caching.
-  if (!result.definitive) inFlight = null;
-  return result.slug;
+  return inFlight;
+}
+
+/** Convenience for callers that only care about the slug. */
+export async function resolveCustomHostSlug(): Promise<string | null> {
+  return (await resolveCustomHost()).slug;
 }
 
 /** Test-only: drop the memoised lookup between cases. */

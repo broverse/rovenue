@@ -183,11 +183,13 @@ describe("custom-domain funnel serving", () => {
     expect(lookupMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not remember a FAILED lookup — only an answer", async () => {
-    // A 404 is an answer ("not a funnel") and is worth caching. A 5xx is
-    // not an answer, and remembering it would pin a funnel visitor to the
-    // login screen until they thought to reload — stricter than the
-    // server, which caps its own negative cache at 60s.
+  it("asks once per document even when the lookup FAILS", async () => {
+    // Earlier this retried, so a transient 5xx would not pin a visitor to
+    // the wrong page. That was wrong: root and "/" both ask, so a retry
+    // let them get DIFFERENT answers and disagree about what this host
+    // is — root committing the outlet while "/" returned early as a
+    // funnel, leaving a blank screen. One lookup, one answer; a failure
+    // is surfaced honestly instead (see the unavailable-page test).
     setHostname("quiz.acme.com");
     hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
     const lookupMock = vi.fn();
@@ -204,8 +206,28 @@ describe("custom-domain funnel serving", () => {
     expect(await resolveCustomHostSlug()).toBeNull();
     expect(await resolveCustomHostSlug()).toBeNull();
 
-    // Two asks, two attempts: the failure was not cached.
-    expect(lookupMock).toHaveBeenCalledTimes(2);
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the unavailable page — not the login form — when a custom host's lookup fails", async () => {
+    // Serving Rovenue's login form from a third party's domain is a
+    // credential-looking page on DNS we do not own. A definitive 404 is
+    // different and still falls through to the dashboard.
+    setHostname("quiz.acme.com");
+    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    server.use(
+      http.get(`${API_BASE_URL}/public/host/lookup`, () =>
+        HttpResponse.json(
+          { error: { code: "INTERNAL", message: "boom" } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    renderApp("/");
+
+    expect(await screen.findByTestId("custom-host-unavailable")).toBeTruthy();
+    expect(screen.queryByTestId("mock-funnel-runner")).toBeNull();
   });
 
   it("remembers a 404 — that IS an answer", async () => {

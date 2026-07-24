@@ -4661,5 +4661,10 @@
       "notFound": "We couldn't find that invitation.",
       "acceptFailed": "Couldn't accept the invitation."
     }
+  },
+  "customHost": {
+    "unavailableTitle": "This page isn't available right now",
+    "unavailableBody": "We couldn't reach the service that decides what to show on this domain. This is usually temporary.",
+    "retry": "Try again"
   }
 }
