@@ -18,10 +18,10 @@ except HTML delivery is already built:
 | `GET /host/lookup` | shipped |
 | `GET /funnels/:slug` published runtime bundle | shipped |
 | DNS verification worker + cert poller | shipped |
-| Caddy on-demand TLS gated by an ask-endpoint | shipped (`deploy/caddy/Caddyfile:30-36`) |
+| Caddy on-demand TLS gated by an ask-endpoint | shipped (`deploy/caddy/Caddyfile`, the `on_demand_tls` block) |
 | **HTML delivery to a custom host** | missing |
 
-`deploy/caddy/Caddyfile:78-88` proxies the on-demand `:443` block to `api:3000`,
+The on-demand `:443` block proxied to `api:3000`,
 and the API serves JSON. A visitor to a verified custom domain gets no page.
 
 Two things found while investigating that the ledger did not record:
@@ -58,6 +58,21 @@ need its own work: Stripe's Apple Pay domain-association file ships in the
 dashboard's Vite `public/` directory and is served with the `Content-Type`
 `Caddyfile.dashboard:22` sets. A custom host proxied there serves it
 automatically.
+
+**A pre-existing defect fixed alongside this (found by Task 4's verification).**
+`caddy validate` failed on `main`: Caddy removed the `on_demand_tls` `interval`
+and `burst` options and now refuses to start when they are present, and
+`docker-compose.yml` pins the floating `caddy:2-alpine` tag — so the edge stopped
+booting the moment that tag rolled forward. Verified by validating the
+pre-change file, which fails identically. Nothing SP3 built could have deployed
+while the edge config was invalid.
+
+Those two options were defence in depth against a misconfigured ask-endpoint,
+and they are **gone, not relocated**. `/internal/domains/check` is now the only
+gate on certificate issuance: if it ever starts answering 200 for hostnames it
+should refuse, nothing downstream limits ACME issuance. That endpoint is the
+control worth guarding, and this paragraph exists because a deleted security
+control that lives only in a code comment is a control nobody will remember.
 
 ### Rejected alternatives
 

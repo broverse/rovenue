@@ -578,7 +578,9 @@ function LandingRoute() {
 }
 ```
 
-Keep every existing line of the session/projects/redirect logic exactly as it is — only the early funnel branch and the `component` are new. If the RPC client's path for this endpoint differs from `rpc.host.lookup`, use the real one and note the correction in your report; do not fall back to an untyped `api()` shim.
+Keep every existing line of the session/projects/redirect logic exactly as it is — only the early funnel branch and the `component` are new. If the RPC client's path for this endpoint differs from `rpc.host.lookup`, use the real one and note the correction in your report.
+
+**CORRECTED after the final review — the instruction that stood here caused a Critical bug.** It said "do not fall back to an untyped `api()` shim", pattern-matched from an earlier task without checking that this route family is the exception. `lib/api.ts` bakes `credentials: "include"` into the typed client, and the public funnel routes carry `cors({ origin: "*" })`; browsers reject a wildcard origin together with a credentialed request, so in a real browser the lookup threw and every custom domain fell back to the login page — the exact bug this sub-project removes. MSW intercepts before any CORS check, so no test saw it. `apps/dashboard/src/runner/runner-api.ts` documents the hazard in its header and deliberately avoids `rpc` for these routes. Keep the typing and pass `{ init: { credentials: "omit" } }` as the request's second argument; the client's `{ credentials: "include", ...init }` spread lets it through.
 
 - [ ] **Step 7b: Write the failing test for non-funnel paths on a custom host**
 
