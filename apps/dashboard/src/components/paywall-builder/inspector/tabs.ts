@@ -7,8 +7,14 @@ import { isPublishBlockingIssue, type BuilderIssue, type PaywallNode } from "@ro
 // place to keep in step when a tab is added.
 // =============================================================
 
-export interface InspectorTab {
-  id: "layout" | "style" | "content" | "binding";
+/**
+ * Structural constraint for a table entry. `id` is left as `string` on
+ * purpose: `InspectorTabId` is derived from the TABLE, so a hand-written
+ * union here would make that derivation circular and adding a tab would
+ * need a type edit as well as a table edit.
+ */
+interface InspectorTabShape {
+  id: string;
   /** English fallback; the label is t(`paywalls.builder.inspector.tab.${id}`, fallbackLabel). */
   fallbackLabel: string;
   appliesTo: ReadonlySet<PaywallNode["type"]>;
@@ -23,35 +29,42 @@ export interface InspectorTab {
   issueCodes: ReadonlySet<BuilderIssue["code"]>;
 }
 
-/** Declaration order IS display order. */
-export const INSPECTOR_TABS: readonly InspectorTab[] = [
+/** Declaration order IS display order.
+ *
+ * `as const satisfies` rather than a `readonly InspectorTab[]` annotation:
+ * the annotation would widen every `id` to the interface's type and make
+ * `InspectorTabId` derive from that instead of from these entries. `satisfies`
+ * still type-checks each entry against `InspectorTab`. Same shape as PRESETS. */
+export const INSPECTOR_TABS = [
   {
     id: "layout",
     fallbackLabel: "Layout",
-    appliesTo: new Set(["stack", "image", "packageList", "spacer"]),
-    issueCodes: new Set(["CELL_TEMPLATE_BAD_NODE"]),
+    appliesTo: new Set<PaywallNode["type"]>(["stack", "image", "packageList", "spacer"]),
+    issueCodes: new Set<BuilderIssue["code"]>(["CELL_TEMPLATE_BAD_NODE"]),
   },
   {
     id: "style",
     fallbackLabel: "Style",
-    appliesTo: new Set(["stack", "text", "image", "button"]),
+    appliesTo: new Set<PaywallNode["type"]>(["stack", "text", "image", "button"]),
     issueCodes: new Set<BuilderIssue["code"]>(),
   },
   {
     id: "content",
     fallbackLabel: "Content",
-    appliesTo: new Set(["text", "image", "button", "purchaseButton"]),
-    issueCodes: new Set(["UNKNOWN_LOC_KEY", "EMPTY_LOC_VALUE"]),
+    appliesTo: new Set<PaywallNode["type"]>(["text", "image", "button", "purchaseButton"]),
+    issueCodes: new Set<BuilderIssue["code"]>(["UNKNOWN_LOC_KEY", "EMPTY_LOC_VALUE"]),
   },
   {
     id: "binding",
     fallbackLabel: "Binding",
-    appliesTo: new Set(["button", "packageList"]),
-    issueCodes: new Set(["FOREIGN_PACKAGE_ID"]),
+    appliesTo: new Set<PaywallNode["type"]>(["button", "packageList"]),
+    issueCodes: new Set<BuilderIssue["code"]>(["FOREIGN_PACKAGE_ID"]),
   },
-];
+] as const satisfies readonly InspectorTabShape[];
 
-export type InspectorTabId = (typeof INSPECTOR_TABS)[number]["id"];
+/** One table entry, with its literal `id` preserved. */
+export type InspectorTab = (typeof INSPECTOR_TABS)[number];
+export type InspectorTabId = InspectorTab["id"];
 
 /** The tabs a node type has anything to configure on, in table order. */
 export function tabsForNode(type: PaywallNode["type"]): readonly InspectorTab[] {
