@@ -1329,6 +1329,15 @@
         "safeArea": "Safe area",
         "previewBadge": "Preview — placeholder prices"
       },
+      "inspector": {
+        "tab": {
+          "layout": "Layout",
+          "style": "Style",
+          "content": "Content",
+          "binding": "Binding"
+        },
+        "tabHasIssues": "This tab has a validation issue"
+      },
       "properties": {
         "emptyTitle": "No node selected",
         "emptyBody": "Pick a node from the layer tree or click one in the canvas to edit it here.",

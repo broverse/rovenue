@@ -1115,3 +1115,41 @@ describe("size caps", () => {
     expect(vm.atNodeCapacity).toBe(false);
   });
 });
+
+describe("inspector tab", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it("keeps the chosen tab while it applies to the selected node", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.selectNode("t1");
+
+    vm.setInspectorTab("content");
+
+    expect(vm.inspectorTab).toBe("content");
+  });
+
+  it("re-points to the first applicable tab when the new node has no such tab", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.selectNode("t1");
+    vm.setInspectorTab("content");
+
+    const spacerId = vm.addNode("spacer", "root");
+    vm.selectNode(spacerId!);
+
+    expect(vm.inspectorTab).toBe("layout");
+  });
+
+  it("is null when nothing is selected", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    expect(vm.inspectorTab).toBeNull();
+  });
+});

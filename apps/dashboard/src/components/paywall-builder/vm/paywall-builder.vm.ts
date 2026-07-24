@@ -29,6 +29,7 @@ import {
 import { ApiError } from "../../../lib/api";
 import * as treeOps from "../tree-ops";
 import { PRESETS, type PresetId } from "../presets";
+import { resolveActiveTab, type InspectorTabId } from "../inspector/tabs";
 import type { CanvasDevice, ColorScheme } from "../types";
 import {
   DEFAULT_DEVICE_ID,
@@ -89,6 +90,28 @@ export class PaywallBuilderViewModel {
 
   @state config: BuilderConfig = emptyBuilderConfig();
   @state selectedNodeId: string | null = null;
+
+  /** Which inspector tab the author last chose. Read through `inspectorTab`,
+   * never directly: it may name a tab the currently-selected node has not
+   * got. */
+  @state private inspectorTabRaw: InspectorTabId | null = null;
+
+  /**
+   * The tab to show for the current selection. DERIVED rather than
+   * reconciled in a selection effect: there is no ordering to get wrong and
+   * no window in which the value is stale. It survives selecting another
+   * node when that node has the same tab, so an author styling several
+   * nodes in a row is not thrown back to Layout on every click.
+   */
+  @derived get inspectorTab(): InspectorTabId | null {
+    const node = this.selectedNode;
+    if (!node) return null;
+    return resolveActiveTab(this.inspectorTabRaw, node.type);
+  }
+
+  setInspectorTab(id: InspectorTabId) {
+    this.inspectorTabRaw = id;
+  }
 
   @state editLocale = "en";
   @state defaultLocale = "en";
