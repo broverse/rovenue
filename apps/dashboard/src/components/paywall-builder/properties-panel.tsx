@@ -16,16 +16,13 @@ import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { NODE_TYPE_LABEL } from "./node-meta";
 import {
   AlignField,
-  Field,
-  INPUT_CLASS,
   LocalizedTextField,
   NumberField,
   PaddingField,
-  Section,
-  Segmented,
   SizeField,
   ThemeColorField,
 } from "./inspector/fields";
+import { Field, INPUT_CLASS, Section, Segmented } from "./inspector/primitives";
 import { OverridesSection } from "./inspector/overrides";
 
 export const PropertiesPanel = component(() => {
@@ -411,8 +408,3 @@ function SpacerEditor({ node }: { node: SpacerNode }) {
     </Section>
   );
 }
-
-// =============================================================
-// Overrides (Phase D2) — conditional prop swaps. Available on every
-// node type whose OVERRIDABLE_PROP_KEYS is non-empty (packageList
-// and spacer have none, so the section is a no-op there). The

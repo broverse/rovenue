@@ -9,8 +9,13 @@ import type {
 } from "@rovenue/shared/paywall";
 import { OVERRIDABLE_PROP_KEYS } from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
-import { AlignField, Field, INPUT_CLASS, NumberField, Section, Segmented, ThemeColorField } from "./fields";
+import { AlignField, NumberField, ThemeColorField } from "./fields";
+import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
 
+// =============================================================
+// Overrides (Phase D2) — conditional prop swaps. Available on every
+// node type whose OVERRIDABLE_PROP_KEYS is non-empty (packageList
+// and spacer have none, so the section is a no-op there). The
 // condition is fixed at creation time (one of the two known
 // `OverrideCondition["kind"]` values); the props sub-form below is
 // deliberately SPARSE — it only renders a field editor for that node
