@@ -14,8 +14,8 @@ import {
 // every runtime test still passes, and a bogus id compiles again. If that
 // happens this expect-error becomes UNUSED and tsc fails, which is the whole
 // point: the regression is otherwise invisible to both tsc and vitest.
-// @ts-expect-error — "visibility" is not an id in INSPECTOR_TABS
-const NOT_A_TAB: InspectorTabId = "visibility";
+// @ts-expect-error — "segments" is not an id in INSPECTOR_TABS
+const NOT_A_TAB: InspectorTabId = "segments";
 void NOT_A_TAB;
 
 describe("tabsForNode", () => {
@@ -32,9 +32,9 @@ describe("tabsForNode", () => {
   });
 
   it("filters out tabs a node type has nothing on", () => {
-    expect(tabsForNode("spacer").map((t) => t.id)).toEqual(["layout"]);
-    expect(tabsForNode("purchaseButton").map((t) => t.id)).toEqual(["content"]);
-    expect(tabsForNode("packageList").map((t) => t.id)).toEqual(["layout", "binding"]);
+    expect(tabsForNode("spacer").map((t) => t.id)).toEqual(["layout", "visibility"]);
+    expect(tabsForNode("purchaseButton").map((t) => t.id)).toEqual(["content", "visibility"]);
+    expect(tabsForNode("packageList").map((t) => t.id)).toEqual(["layout", "binding", "visibility"]);
   });
 });
 
@@ -76,18 +76,22 @@ describe("tabIssues", () => {
     expect(map.size).toBe(0);
   });
 
-  // Every code currently mapped to a tab is publish-blocking, so the
-  // "warning" severity is unreachable today. Assert that rather than
-  // writing a test that pretends to exercise it: this documents the fact
-  // and will start failing the day a warning-tier code is mapped, which is
-  // exactly when someone should look at the branch again.
-  it("only ever reports errors today, because no warning-tier code maps to a tab", () => {
+  // VISIBILITY_NEVER_MATCHES is the first warning-tier code mapped to a
+  // tab (added with the Visibility tab): bounds that cross make a node
+  // render nowhere, which is dead content rather than a broken config, so
+  // it must not block publish. Every other mapped code is still
+  // publish-blocking, so the dot split is exactly one tab wide today.
+  it("reports VISIBILITY_NEVER_MATCHES as a warning and every other mapped code as an error", () => {
     const everyMappedCode = INSPECTOR_TABS.flatMap((t) => [...t.issueCodes]);
     const map = tabIssues(
       everyMappedCode.map((code) => ({ code, nodeId: "n1", message: "" })),
       "n1",
     );
-    expect([...map.values()].every((s) => s.severity === "error")).toBe(true);
+    expect(map.get("visibility")?.severity).toBe("warning");
+    for (const [id, summary] of map) {
+      if (id === "visibility") continue;
+      expect(summary.severity).toBe("error");
+    }
   });
 });
 

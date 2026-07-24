@@ -69,6 +69,20 @@ export const INSPECTOR_TABS = [
     appliesTo: new Set<PaywallNode["type"]>(["button", "packageList"]),
     issueCodes: new Set<BuilderIssue["code"]>(["FOREIGN_PACKAGE_ID"]),
   },
+  {
+    id: "visibility",
+    fallbackLabel: "Visibility",
+    appliesTo: new Set<PaywallNode["type"]>([
+      "stack",
+      "text",
+      "image",
+      "button",
+      "packageList",
+      "purchaseButton",
+      "spacer",
+    ]),
+    issueCodes: new Set<BuilderIssue["code"]>(["VISIBILITY_NEVER_MATCHES"]),
+  },
 ] as const satisfies readonly InspectorTabShape[];
 
 /** One table entry, with its literal `id` preserved. */

@@ -1334,7 +1334,8 @@
           "layout": "Layout",
           "style": "Style",
           "content": "Content",
-          "binding": "Binding"
+          "binding": "Binding",
+          "visibility": "Visibility"
         },
         "tabHasIssues_one": "{{count}} validation issue on this tab",
         "tabHasIssues_other": "{{count}} validation issues on this tab"
@@ -1411,7 +1412,15 @@
         "cellTemplateHint": "Replace the built-in name + price cell with a custom subtree, editable in the layer tree.",
         "cellTemplateActive": "Custom template active",
         "cellTemplateRemove": "Remove cell template",
-        "cellTemplateAdd": "Add default template"
+        "cellTemplateAdd": "Add default template",
+        "visibility": "Visibility",
+        "visibilityIos": "iOS",
+        "visibilityAndroid": "Android",
+        "visibilityWeb": "Web",
+        "visibilityMinVersion": "Min app version",
+        "visibilityMaxVersion": "Max app version",
+        "visibilityHint": "Leave everything unset to show this node on every platform and version.",
+        "visibilityAudienceHint": "Audience/segment targeting is not set here — it lives on the placement's audience rows."
       },
       "topbar": {
         "close": "Close builder",

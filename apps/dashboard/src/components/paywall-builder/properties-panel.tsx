@@ -9,6 +9,7 @@ import { LayoutTab } from "./inspector/layout-tab";
 import { StyleTab } from "./inspector/style-tab";
 import { ContentTab } from "./inspector/content-tab";
 import { BindingTab } from "./inspector/binding-tab";
+import { VisibilityTab } from "./inspector/visibility-tab";
 import { OverridesSection } from "./inspector/overrides";
 
 /** Tab id -> the module that renders it. Keyed by the same ids the table
@@ -18,6 +19,7 @@ const TAB_BODY: Record<InspectorTabId, typeof LayoutTab> = {
   style: StyleTab,
   content: ContentTab,
   binding: BindingTab,
+  visibility: VisibilityTab,
 };
 
 export const PropertiesPanel = component(() => {
