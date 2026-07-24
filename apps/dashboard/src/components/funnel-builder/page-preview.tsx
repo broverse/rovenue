@@ -402,7 +402,7 @@ export const PagePreview = component(
         )}
         {page.type === "long_text" && (
           <Cap>
-            <TextArea placeholder={resolved.placeholder} theme={theme} />
+            <TextArea placeholder={resolved.placeholder} theme={theme} {...textLiveProps} />
           </Cap>
         )}
         {page.type === "email" && (
@@ -1199,14 +1199,29 @@ function TextField({
   );
 }
 
-function TextArea({ placeholder, theme }: { placeholder?: string; theme: Theme }) {
+function TextArea({
+  placeholder,
+  theme,
+  live = false,
+  value,
+  onChange,
+}: {
+  placeholder?: string;
+  theme: Theme;
+  live?: boolean;
+  value?: string;
+  onChange?: (next: string) => void;
+}) {
   return (
     <textarea
-      readOnly
+      readOnly={!live}
       rows={3}
       placeholder={placeholder ?? "Type your answer…"}
       className="mt-3 w-full resize-none px-3 py-2 text-[13px] outline-none"
       style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}
+      {...(live && onChange
+        ? { value: value ?? "", onChange: (e) => onChange(e.currentTarget.value) }
+        : {})}
     />
   );
 }

@@ -37,6 +37,13 @@ const emailPage: Page = {
   title: L("Your email"),
 };
 
+const longTextPage: Page = {
+  id: "pg_long",
+  type: "long_text",
+  question_id: "q_long",
+  title: L("Tell us more"),
+} as Page;
+
 const singleChoicePage: Page = {
   id: "pg_single",
   type: "single_choice",
@@ -133,6 +140,13 @@ describe("PagePreview — live mode", () => {
     render(
       <PagePreview {...base(emailPage)} mode="live" value={null} onAnswer={onAnswer} />,
     );
+    await userEvent.type(screen.getByRole("textbox"), "a");
+    expect(onAnswer).toHaveBeenLastCalledWith("a");
+  });
+
+  it("long_text captures the typed string", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(longTextPage)} mode="live" value={null} onAnswer={onAnswer} />);
     await userEvent.type(screen.getByRole("textbox"), "a");
     expect(onAnswer).toHaveBeenLastCalledWith("a");
   });

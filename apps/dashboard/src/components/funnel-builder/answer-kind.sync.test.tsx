@@ -72,6 +72,7 @@ const WIRED: ReadonlyArray<{
   { type: "picture_choice", drive: (u) => u.click(screen.getByText("Option B")), options: OPTIONS },
   { type: "legal", drive: (u) => u.click(screen.getByRole("checkbox")) },
   { type: "checkbox", drive: (u) => u.click(screen.getByRole("checkbox")) },
+  { type: "long_text", drive: (u) => u.type(screen.getByRole("textbox"), "a") },
 ];
 
 /**
@@ -85,7 +86,6 @@ const WIRED: ReadonlyArray<{
  */
 const NOT_WIRED_YET: ReadonlySet<PageType> = new Set([
   "date_input",
-  "long_text",
   "phone",
 ]);
 
