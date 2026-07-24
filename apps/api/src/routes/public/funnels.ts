@@ -66,6 +66,9 @@ const answerValueSchema: z.ZodType<unknown> = z.lazy(() =>
   ]),
 );
 
+/** Hard cap on a serialised answer payload (F16). */
+const ANSWER_MAX_BYTES = 16_384;
+
 
 interface PublishedRuntimeConfig {
   id: string;
@@ -374,7 +377,7 @@ export const publicFunnelsRoute = new Hono()
       const sid = c.req.param("sessionId");
       const body = c.req.valid("json");
       // Hard 16 KB byte cap on answer payload (F16).
-      if (JSON.stringify(body.answer).length > 16_384) {
+      if (JSON.stringify(body.answer).length > ANSWER_MAX_BYTES) {
         throw new HTTPException(413, { message: "Answer payload too large" });
       }
       const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
@@ -405,13 +408,44 @@ export const publicFunnelsRoute = new Hono()
   .post(
     "/funnel-sessions/:sessionId/advance",
     endpointRateLimit({ name: "funnel:advance", max: 120 }),
-    validate("json", z.object({ from_page_id: z.string() })),
+    validate(
+      "json",
+      z.object({
+        from_page_id: z.string(),
+        // Optional so the Phase-1 click-through shape keeps working. When
+        // present it is written BEFORE the answer map is read below, so a
+        // rule keyed on this answer sees it on this very call. That
+        // ordering is the reason the answer rides along instead of going
+        // through /answers first: a client that advanced before recording
+        // would branch on the PREVIOUS answer, silently, and only on the
+        // first pass through each page.
+        answer: z
+          .object({ question_id: z.string(), answer: answerValueSchema })
+          .optional(),
+      }),
+    ),
     async (c) => {
       const sid = c.req.param("sessionId");
       const body = c.req.valid("json");
       const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
       if (!session) {
         throw new HTTPException(404, { message: "Session not found" });
+      }
+      if (body.answer) {
+        // Same two protections the sibling /answers endpoint applies. A
+        // cap enforced on one door and not the other is not a cap.
+        if (JSON.stringify(body.answer.answer).length > ANSWER_MAX_BYTES) {
+          throw new HTTPException(413, { message: "Answer payload too large" });
+        }
+        if (session.state !== "in_progress") {
+          throw new HTTPException(409, { message: "Session is closed" });
+        }
+        await drizzle.funnelAnswerRepo.upsert(drizzle.db, {
+          sessionId: sid,
+          pageId: body.from_page_id,
+          questionId: body.answer.question_id,
+          answerJson: { value: body.answer.answer },
+        });
       }
       const version = await drizzle.funnelVersionRepo.findById(
         drizzle.db,
