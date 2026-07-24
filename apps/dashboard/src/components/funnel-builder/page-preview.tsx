@@ -382,7 +382,7 @@ export const PagePreview = component(
         )}
         {(page.type === "legal" || page.type === "checkbox") && (
           <Cap>
-            <LegalCheckbox page={resolved} theme={theme} />
+            <LegalCheckbox page={resolved} theme={theme} {...liveProps} />
           </Cap>
         )}
         {page.type === "opinion_scale" && (
@@ -1009,22 +1009,53 @@ const PictureChoiceList = component(
 
 // ---------- Legal / checkbox ----------
 
-const LegalCheckbox = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
-  <label className="mt-3 flex cursor-pointer items-start gap-2 text-[12px]">
-    <span
-      className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded"
-      style={{ border: `1.5px solid ${theme.primary}`, background: "transparent" }}
-    />
-    <span className="leading-snug">
-      {page.agreementLabel || "I agree"}
-      {page.termsUrl && (
-        <a className="ml-1 underline" style={{ color: theme.primary }} href={page.termsUrl}>
-          Read terms
-        </a>
-      )}
-    </span>
-  </label>
-));
+// A checked consent box is `answerKind: "choice"`, so it must emit a
+// STRING (a boolean could never match a string operand — the yes_no
+// lesson). This is a stable branching key, deliberately NOT the localized
+// agreementLabel, so editing consent copy never changes what a rule matches.
+export const LEGAL_CHECKBOX_CHECKED = "checked";
+
+const LegalCheckbox = component(
+  ({
+    page,
+    theme,
+    live = false,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    live?: boolean;
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
+    const checked = live && value === LEGAL_CHECKBOX_CHECKED;
+    return (
+      <label className="mt-3 flex cursor-pointer items-start gap-2 text-[12px]">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 flex-shrink-0"
+          style={{ accentColor: theme.primary }}
+          readOnly={!live}
+          checked={checked}
+          onChange={
+            live
+              ? (e) => onChange?.(e.currentTarget.checked ? LEGAL_CHECKBOX_CHECKED : "")
+              : undefined
+          }
+        />
+        <span className="leading-snug">
+          {page.agreementLabel || "I agree"}
+          {page.termsUrl && (
+            <a className="ml-1 underline" style={{ color: theme.primary }} href={page.termsUrl}>
+              Read terms
+            </a>
+          )}
+        </span>
+      </label>
+    );
+  },
+);
 
 // ---------- Opinion scale 1-5 ----------
 

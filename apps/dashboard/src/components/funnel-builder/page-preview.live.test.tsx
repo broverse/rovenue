@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n/config";
 import { evaluateNext, type AnswerMap } from "@rovenue/shared/funnel";
-import { PagePreview } from "./page-preview";
+import { PagePreview, LEGAL_CHECKBOX_CHECKED } from "./page-preview";
 import type { Page, Theme } from "./types";
 
 // =============================================================
@@ -107,6 +107,14 @@ const picturePage: Page = {
     { label: L("Option A") as never, value: "opt_a", imageUrl: "" },
     { label: L("Option B") as never, value: "opt_b", imageUrl: "" },
   ],
+} as Page;
+
+const legalPage: Page = {
+  id: "pg_legal",
+  type: "legal",
+  question_id: "q_legal",
+  title: L("Please review and accept"),
+  agreementLabel: L("I agree to the terms"),
 } as Page;
 
 function base(page: Page) {
@@ -242,6 +250,27 @@ describe("PagePreview — live mode", () => {
     render(<PagePreview {...base(picturePage)} mode="live" value={null} onAnswer={onAnswer} />);
     await userEvent.click(screen.getByText("Option B"));
     expect(onAnswer).toHaveBeenLastCalledWith("opt_b");
+  });
+
+  it("legal emits the checked constant when checked", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(legalPage)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.click(screen.getByRole("checkbox"));
+    expect(onAnswer).toHaveBeenLastCalledWith(LEGAL_CHECKBOX_CHECKED);
+  });
+
+  it("legal returns to unanswered when unchecked", async () => {
+    const onAnswer = vi.fn();
+    render(
+      <PagePreview
+        {...base(legalPage)}
+        mode="live"
+        value={LEGAL_CHECKBOX_CHECKED}
+        onAnswer={onAnswer}
+      />,
+    );
+    await userEvent.click(screen.getByRole("checkbox")); // uncheck
+    expect(onAnswer).toHaveBeenLastCalledWith("");
   });
 });
 
