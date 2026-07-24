@@ -671,21 +671,30 @@ export class PaywallBuilderViewModel {
   }
 
   /** Force-flush the current config to the backend, bypassing the autosave throttle. */
-  async saveNow() {
-    const run = this.saveNowInner();
-    // Identity-checked, not null-checked. Two saveNow calls can overlap —
+  /**
+   * Publish a request that rewrites the server-side draft to the reopen
+   * barrier, so a builder mounted while it is in flight waits for it rather
+   * than reading — and later overwriting — the pre-write row.
+   *
+   * Identity-checked, not null-checked. Two saveNow calls can overlap —
     // `publish()` awaits one while the unmount handler fires another on the
     // same instance, because isDirty stays true until a save SUCCEEDS. The
-    // older call settles first (the newer one aborted its controller), and
-    // an unconditional `pendingFlush = null` would then clear the NEWER
-    // flush's promise while its PATCH is still in flight, reopening exactly
-    // the stale-overwrite race this barrier exists to close.
+   * older call settles first (the newer one aborted its controller), and
+   * an unconditional `pendingFlush = null` would then clear the NEWER
+   * flush's promise while its PATCH is still in flight, reopening exactly
+   * the stale-overwrite race this barrier exists to close.
+   */
+  private trackFlush<T>(run: Promise<T>): Promise<T> {
     const flush = run.catch(() => {});
     pendingFlush = flush;
     void flush.finally(() => {
       if (pendingFlush === flush) pendingFlush = null;
     });
     return run;
+  }
+
+  async saveNow() {
+    return this.trackFlush(this.saveNowInner());
   }
 
   private async saveNowInner() {
@@ -778,10 +787,10 @@ export class PaywallBuilderViewModel {
   }
 
   async revertTo(versionNo: number) {
-    const detail = await this.api.revert(
-      this.props.projectId,
-      this.props.paywallId,
-      versionNo,
+    // Barriered like a flush: this rewrites the draft server-side, so a
+    // builder reopened mid-revert would otherwise read the pre-revert row.
+    const detail = await this.trackFlush(
+      this.api.revert(this.props.projectId, this.props.paywallId, versionNo),
     );
     this.applyServer(detail);
     await this.refreshPublishState();
@@ -793,9 +802,9 @@ export class PaywallBuilderViewModel {
    * local edits.
    */
   async discardToPublished() {
-    const detail = await this.api.discardToPublished(
-      this.props.projectId,
-      this.props.paywallId,
+    // Barriered for the same reason as revertTo — it rewrites the draft.
+    const detail = await this.trackFlush(
+      this.api.discardToPublished(this.props.projectId, this.props.paywallId),
     );
     this.applyServer(detail);
     await this.refreshPublishState();

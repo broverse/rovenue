@@ -868,6 +868,44 @@ describe("reopen after an unmount flush", () => {
     expect(order).toEqual(["patch:start", "get"]);
   });
 
+  it("barriers a revert too, not just the unmount flush", async () => {
+    const order: string[] = [];
+    const revertGate = deferred<PaywallBuilderDetailDto>();
+
+    const oldVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn(),
+      revert: vi.fn().mockImplementation(() => {
+        order.push("revert:start");
+        return revertGate.promise;
+      }),
+      refreshPublishState: undefined,
+    } as never);
+    await oldVm.load(() => {});
+
+    // revertTo rewrites the draft server-side, so a builder reopened while
+    // it is open would read the pre-revert row and later overwrite it.
+    void oldVm.revertTo(1);
+    await Promise.resolve();
+
+    const newVm = makeVm({
+      get: vi.fn().mockImplementation(async () => {
+        order.push("reopen:get");
+        return fakeDetail();
+      }),
+      patchBuilderConfig: vi.fn(),
+    });
+    const loading = newVm.load(() => {});
+    await Promise.resolve();
+
+    expect(order).toEqual(["revert:start"]);
+
+    revertGate.resolve(fakeDetail());
+    await loading;
+
+    expect(order).toEqual(["revert:start", "reopen:get"]);
+  });
+
   it("keeps the barrier up when an older overlapping flush settles first", async () => {
     const order: string[] = [];
     const gate1 = deferred<PaywallBuilderDetailDto>();
