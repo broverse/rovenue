@@ -3,6 +3,7 @@ import type { ProjectSummary } from "@rovenue/shared";
 import { getSession } from "../lib/auth";
 import { ApiError, rpc, unwrap } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
+import { dashboardHostEnv, isCanonicalDashboardHost } from "../lib/custom-host";
 
 export type LandingTarget =
   | { kind: "setup" }
@@ -29,8 +30,46 @@ export function resolveLandingTarget(projects: ProjectSummary[]): LandingTarget 
   return { kind: "project", projectId: fallback, wroteLastProjectId: true };
 }
 
+/**
+ * Resolve the browser's current hostname to a funnel slug, or null.
+ *
+ * Runs before the session check because a funnel visitor on a customer's
+ * domain has no dashboard session and must not be bounced to /login.
+ *
+ * A failing lookup returns null and falls through to the dashboard
+ * landing: a lookup outage must never stop the dashboard loading.
+ *
+ * Exported so `__root.tsx` can reuse this exact lookup for its own
+ * "render the funnel instead of the router outlet" branch — there is
+ * exactly one place in the app that decides whether a host is a
+ * customer's funnel domain.
+ */
+export async function resolveCustomHostSlug(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  const hostname = window.location.hostname;
+  // Skips one request on the canonical host. UNSET means "not known to be
+  // canonical" and the lookup runs — see lib/custom-host.ts.
+  if (isCanonicalDashboardHost(dashboardHostEnv, hostname)) return null;
+  try {
+    const res = await unwrap<{ funnelId: string; slug: string }>(
+      rpc.public.host.lookup.$get({ query: { host: hostname } }),
+    );
+    return res.slug;
+  } catch {
+    return null;
+  }
+}
+
 export const Route = createFileRoute("/")({
   beforeLoad: async () => {
+    // __root.tsx already resolved the same host and, if it's a funnel
+    // domain, is rendering `<FunnelRunner>` in place of the router
+    // outlet — this route's own component never mounts in that case.
+    // This check only exists so the session redirect below doesn't
+    // also fire and change the URL out from under that visitor.
+    const funnelSlug = await resolveCustomHostSlug();
+    if (funnelSlug) return;
+
     const session = await getSession();
     if (!session.data) {
       throw redirect({ to: "/login", search: { error: undefined } });
