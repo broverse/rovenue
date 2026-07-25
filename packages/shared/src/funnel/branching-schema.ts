@@ -12,11 +12,31 @@ export const CLAUSE_OPS = [
   "not_in",
   "contains",
   "not_contains",
+  "before",
+  "after",
+  "on_or_before",
+  "on_or_after",
   "is_answered",
   "is_not_answered",
 ] as const;
 
 export type ClauseOp = (typeof CLAUSE_OPS)[number];
+
+/**
+ * An ISO-8601 calendar date, zero-padded: `YYYY-MM-DD`.
+ *
+ * Load-bearing, not cosmetic. The date operators compare lexicographically
+ * because that equals chronological order for THIS format — and only for
+ * this format. `"2026-1-5"` sorts after `"2026-01-10"` as text while being
+ * earlier as a date, so comparing unvalidated input silently routes to the
+ * wrong branch. Both the answer and the operand are checked against this
+ * before any date operator compares them.
+ *
+ * Calendar validity is deliberately not enforced: `2026-02-31` compares
+ * consistently and harmlessly, and a regex that also policed month lengths
+ * would be a liability for no gain.
+ */
+export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const clauseSchema = z
   .object({

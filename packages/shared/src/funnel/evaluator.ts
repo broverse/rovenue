@@ -1,4 +1,5 @@
 import type { Clause, NextRule } from "./branching-schema";
+import { ISO_DATE_RE } from "./branching-schema";
 
 export type AnswerValue = string | number | boolean | string[] | null;
 export type AnswerMap = Map<string, AnswerValue>;
@@ -153,6 +154,37 @@ function evalClause(clause: Clause, answers: AnswerMap): boolean {
       return isArray && typeof clause.value === "string" && (a as string[]).includes(clause.value);
     case "not_contains":
       return isArray && typeof clause.value === "string" && !(a as string[]).includes(clause.value);
+    // ---- date operators ----
+    //
+    // Lexicographic comparison IS chronological comparison for zero-padded
+    // YYYY-MM-DD, so these need no date parsing — and must not do any.
+    // Parsing would attach a time and a zone to a value that has neither
+    // (`new Date("2026-03-01")` is midnight UTC, i.e. the previous day west
+    // of Greenwich).
+    //
+    // The guard is what makes that equivalence safe rather than merely
+    // convenient: an unpadded "2026-1-5" sorts AFTER "2026-01-10" as text
+    // while being EARLIER as a date. Either side failing the pattern means
+    // the operator cannot compare, so it returns false rather than
+    // answering true by accident.
+    case "before":
+    case "after":
+    case "on_or_before":
+    case "on_or_after": {
+      if (
+        typeof a !== "string" ||
+        typeof clause.value !== "string" ||
+        !ISO_DATE_RE.test(a) ||
+        !ISO_DATE_RE.test(clause.value)
+      ) {
+        return false;
+      }
+      const other = clause.value;
+      if (clause.op === "before") return a < other;
+      if (clause.op === "after") return a > other;
+      if (clause.op === "on_or_before") return a <= other;
+      return a >= other;
+    }
     default:
       return false;
   }
