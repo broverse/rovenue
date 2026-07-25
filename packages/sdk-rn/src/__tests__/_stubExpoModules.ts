@@ -32,3 +32,18 @@ export class EventEmitter {
   }
   removeAllListeners(_eventName: string): void {}
 }
+
+// Records what the native view was rendered with, so bridge tests can
+// assert on prop marshalling without a native runtime. Each call returns
+// a fresh component so tests cannot leak state into one another.
+export const __nativeViewRenders: Array<Record<string, unknown>> = [];
+
+export function requireNativeViewManager<P>(
+  _moduleName: string,
+  _viewName?: string,
+): (props: P) => null {
+  return (props: P) => {
+    __nativeViewRenders.push(props as Record<string, unknown>);
+    return null;
+  };
+}

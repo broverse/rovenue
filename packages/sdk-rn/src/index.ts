@@ -132,12 +132,9 @@ export type { LogEntry } from "./api/log";
 export type { FunnelClaimResult, ClaimInstallParams } from "./api/funnel";
 export { extractFunnelToken } from "./api/funnel";
 
-// Builder-paywall rendering (React Native components; JS-side sibling of
-// the web renderer and the Swift/Kotlin native views).
-export {
-  RovenuePaywallView,
-  type RovenuePaywallViewProps,
-  decodeBuilderConfig,
-  type BuilderConfigModel,
-  type BuilderNode,
-} from "./paywall-ui";
+// The paywall renders through the platform's native view, not a JS
+// component tree — see the 2026-07-25 bridge design. `decodeBuilderConfig`
+// and friends stay exported from ./paywall-ui until that directory is
+// retired, so this commit changes rendering only.
+export { RovenuePaywallView, type RovenuePaywallViewProps } from "./paywall-view";
+export { decodeBuilderConfig, type BuilderConfigModel, type BuilderNode } from "./paywall-ui";

@@ -79,3 +79,12 @@ export function Pressable(p: StubProps) {
 export function Image(p: StubProps) {
   return createElement("img", { ...domProps(p), src: p.source?.uri });
 }
+
+// Minimal `StyleSheet.create` stand-in: the real one returns opaque style
+// IDs on native, but no consumer in this test environment reads through
+// it — it only needs to hand back an object shaped like the input.
+export const StyleSheet = {
+  create<T extends Record<string, unknown>>(styles: T): T {
+    return styles;
+  },
+};
