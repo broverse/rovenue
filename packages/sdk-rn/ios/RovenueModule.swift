@@ -127,6 +127,33 @@ public class RovenueModule: Module {
         // and let the native side auto-read it).
         Function("getAppVersion") { () -> String? in resolvedAppVersion }
 
+        // The React Native paywall renders through the SwiftUI view rather
+        // than a JS component tree — see the 2026-07-25 bridge design.
+        View(RovenuePaywallExpoView.self) {
+            Events(
+                "onPurchaseCompleted",
+                "onPurchaseFailed",
+                "onCloseRequested",
+                "onRestoreRequested",
+                "onUrlRequested"
+            )
+            Prop("placementIdentifier") { (view: RovenuePaywallExpoView, value: String?) in
+                view.placementIdentifier = value
+            }
+            Prop("locale") { (view: RovenuePaywallExpoView, value: String?) in
+                view.locale = value
+            }
+            Prop("colorSchemeOverride") { (view: RovenuePaywallExpoView, value: String?) in
+                view.colorSchemeOverride = value
+            }
+            Prop("hasRestoreHandler") { (view: RovenuePaywallExpoView, value: Bool) in
+                view.hasRestoreHandler = value
+            }
+            Prop("hasUrlHandler") { (view: RovenuePaywallExpoView, value: Bool) in
+                view.hasUrlHandler = value
+            }
+        }
+
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { (foreground: Bool) in
             Rovenue.shared.setForeground(foreground)
@@ -683,7 +710,7 @@ public class RovenueModule: Module {
         ]
     }
 
-    private static func dtoFromPurchaseResult(_ r: PurchaseResult) -> [String: Any?] {
+    static func dtoFromPurchaseResult(_ r: PurchaseResult) -> [String: Any?] {
         [
             "entitlements": r.entitlements.map(dtoFromEntitlement),
             "virtualCurrencies": r.virtualCurrencies.mapValues { Double($0) },
