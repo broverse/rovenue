@@ -12,6 +12,17 @@ import { compareVersions } from "./visibility";
 // gate) decides severity by `code`.
 // =============================================================
 
+/**
+ * Own-property test. `Object.hasOwn` would read better, but it is ES2022
+ * and this module is re-exported through `@rovenue/shared/paywall`, which
+ * the React Native SDK bundles — so it executes on Hermes, where older
+ * engines in the supported fleet lack it. This form needs no lib bump and
+ * still avoids the prototype walk a bare `in` would do.
+ */
+function hasOwnKey(table: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(table, key);
+}
+
 export type BuilderIssue = {
   code:
     | "DUPLICATE_NODE_ID"
@@ -102,7 +113,7 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
 /** Anything unlisted blocks the save — the strictest tier, so a code added
  * later fails closed until it is deliberately classified.
  *
- * `Object.hasOwn`-guarded like `UNKNOWN_LOC_KEY`'s defaultLocaleTable lookup
+ * own-property-guarded like `UNKNOWN_LOC_KEY`'s defaultLocaleTable lookup
  * above: an unguarded `ISSUE_SEVERITY[issue.code]` also resolves inherited
  * `Object` prototype properties (`issue.code === "constructor"` returns the
  * `Object` constructor function, a truthy non-"save" value), which would fail
@@ -111,7 +122,7 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
  * documents.
  */
 export function issueSeverity(issue: { code: string }): IssueSeverity {
-  return Object.hasOwn(ISSUE_SEVERITY, issue.code) ? ISSUE_SEVERITY[issue.code]! : "save";
+  return hasOwnKey(ISSUE_SEVERITY, issue.code) ? ISSUE_SEVERITY[issue.code]! : "save";
 }
 
 /** True when an issue must block the SAVE (the API's builderConfig PATCH). */
@@ -325,7 +336,7 @@ export function validateBuilderConfig(
     for (const key of keysToCheck) {
       if (checked.has(key)) continue;
       checked.add(key);
-      if (!Object.hasOwn(defaultLocaleTable, key)) {
+      if (!hasOwnKey(defaultLocaleTable, key)) {
         issues.push({
           code: "UNKNOWN_LOC_KEY",
           nodeId: node.id,
