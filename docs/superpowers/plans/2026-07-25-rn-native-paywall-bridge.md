@@ -93,13 +93,23 @@ final class RovenuePaywallExpoView: ExpoView {
 
     private var host: UIHostingController<AnyView>?
     private var loadTask: Task<Void, Never>?
+    private var cachedPaywall: Paywall?
+    /// The (placement, locale) pair `cachedPaywall` was fetched for. Only a
+    /// change to THIS re-fetches; cosmetic props rebuild the content from
+    /// the cached paywall.
+    private var resolvedKey: String?
 
     required init(appContext: AppContext? = nil) {
         super.init(appContext: appContext)
         clipsToBounds = true
     }
 
-    override func didSetProps(_ changedProps: [String]) {
+    /// Called from `OnViewDidUpdateProps` — the architecture-agnostic hook.
+    /// Do NOT override `didSetProps`: it is declared only on React Native's
+    /// old-architecture `RCTComponent` protocol, so under Fabric (this SDK's
+    /// floor is React Native 0.76+, and the repo vendors 0.86) it matches no
+    /// superclass member and fails to compile.
+    func onViewDidUpdateProps() {
         reload()
     }
 
@@ -108,23 +118,40 @@ final class RovenuePaywallExpoView: ExpoView {
     }
 
     private func reload() {
-        loadTask?.cancel()
         guard let placementIdentifier, !placementIdentifier.isEmpty else {
+            loadTask?.cancel()
+            cachedPaywall = nil
+            resolvedKey = nil
             mount(nil)
             return
         }
+        let key = placementIdentifier + KEY_SEPARATOR + (locale ?? "")
+        // Toggling colorSchemeOverride or a handler flag must not re-fetch:
+        // a re-fetch rebuilds the SwiftUI view, whose `didLogShow` is @State,
+        // which would re-fire logPaywallShown and inflate paywall_view.
+        if key == resolvedKey {
+            mount(cachedPaywall)
+            return
+        }
+        loadTask?.cancel()
+        resolvedKey = key
         let requestedLocale = locale
         loadTask = Task { [weak self] in
             // A resolution failure renders nothing, matching what the
             // SwiftUI view already does when its decoded config is nil.
             // Adding an error prop here would break the byte-for-byte
-            // props contract, so the failure is logged, not surfaced.
+            // props contract, so the failure is swallowed rather than
+            // surfaced — the SDK's own log channel already records it.
             let paywall = try? await Rovenue.shared.getPaywall(
                 placementId: placementIdentifier,
                 locale: requestedLocale
             )
             guard !Task.isCancelled else { return }
-            await MainActor.run { self?.mount(paywall) }
+            await MainActor.run {
+                guard let self, self.resolvedKey == key else { return }
+                self.cachedPaywall = paywall
+                self.mount(paywall)
+            }
         }
     }
 
@@ -136,11 +163,28 @@ final class RovenuePaywallExpoView: ExpoView {
         }
     }
 
+    /// Containment has to wait for a window, because that is when
+    /// `reactViewController()` can hand us a parent to attach to.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            detachHost()
+        } else {
+            mount(cachedPaywall)
+        }
+    }
+
+    private func detachHost() {
+        guard let host else { return }
+        host.willMove(toParent: nil)
+        host.view.removeFromSuperview()
+        host.removeFromParent()
+        self.host = nil
+    }
+
     private func mount(_ paywall: Paywall?) {
-        host?.view.removeFromSuperview()
-        host?.removeFromParent()
-        host = nil
-        guard let paywall else { return }
+        detachHost()
+        guard let paywall, window != nil, let parent = reactViewController() else { return }
 
         let content = RovenuePaywallView(
             paywall: paywall,
@@ -172,9 +216,15 @@ final class RovenuePaywallExpoView: ExpoView {
             } : nil
         )
 
+        // The full containment dance, in the order Expo's own
+        // SwiftUIHostingView uses. Without addChild/didMove the hosted
+        // SwiftUI tree loses appearance callbacks and, critically here,
+        // safe-area and trait propagation — the paywall would draw under
+        // the notch and the home indicator.
         let controller = UIHostingController(rootView: AnyView(content))
         controller.view.backgroundColor = .clear
         controller.view.translatesAutoresizingMaskIntoConstraints = false
+        parent.addChild(controller)
         addSubview(controller.view)
         NSLayoutConstraint.activate([
             controller.view.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -182,9 +232,19 @@ final class RovenuePaywallExpoView: ExpoView {
             controller.view.topAnchor.constraint(equalTo: topAnchor),
             controller.view.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        controller.didMove(toParent: parent)
         host = controller
     }
 }
+```
+
+`KEY_SEPARATOR` is the separator for the resolve key. Declare it beside
+`UNMAPPED_ERROR_CODE` at the top of the file:
+
+```swift
+/// Separates placement from locale in the resolve key. A character that
+/// cannot occur in either, so two different pairs cannot collide.
+private let KEY_SEPARATOR = "\u{0000}"
 ```
 
 If `RovenueError` has no `.unknown(String)` case, use whichever case the existing `RovenueCodedError` initialiser accepts for an unmapped error — grep `RovenueCodedError` in `ios/RovenueModule.swift` and follow what `AsyncFunction("purchase")` already does at line 261.
@@ -218,6 +278,14 @@ In `packages/sdk-rn/ios/RovenueModule.swift`, inside `definition()`, immediately
             }
             Prop("hasUrlHandler") { (view: RovenuePaywallExpoView, value: Bool) in
                 view.hasUrlHandler = value
+            }
+            // The architecture-agnostic "props batch settled" hook. Expo
+            // wires it into both ComponentData (old architecture) and
+            // ExpoFabricView.viewDidUpdateProps (Fabric), which is why the
+            // view must NOT override didSetProps — that exists only on the
+            // old architecture and would not compile under Fabric.
+            OnViewDidUpdateProps { (view: RovenuePaywallExpoView) in
+                view.onViewDidUpdateProps()
             }
         }
 ```
@@ -765,7 +833,8 @@ Record pass/fail for each, on each platform:
 1. The paywall appears and fills its container (not zero-height, not clipped).
 2. Scrolling works through the full content.
 3. Rotating the device re-lays-out the paywall correctly — **this is the single most likely failure on Android**, where React Native does not measure views it did not create.
-4. Content respects the safe area: nothing is hidden under the notch, the status bar, or the home indicator. `UIHostingController` inside a React Native hierarchy is the risk the spec names in §9.
+4. Content respects the safe area: nothing is hidden under the notch, the status bar, or the home indicator. `UIHostingController` inside a React Native hierarchy is the risk the spec names in §9, and the containment wiring in Task 1 is what makes trait and safe-area propagation work at all.
+   Also check, on iOS: changing only `colorScheme` (not the placement) must NOT re-fire `paywall_view` and must NOT reset the selected package. The iOS view guards the re-fetch on a placement+locale key for this reason, but whether SwiftUI preserves `@State` across the rebuild can only be observed on a device.
 5. Tapping a purchase button reaches the store sheet, and completing it fires `onPurchaseCompleted` with a result object.
 6. A failed or cancelled purchase fires `onPurchaseFailed` with a readable `message` — not the raw `@rovenue/err1:` string.
 7. The close affordance fires `onClose`.
