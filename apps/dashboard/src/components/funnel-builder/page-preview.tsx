@@ -22,7 +22,7 @@ import {
 import { PAGE_TYPES, type Page, type ProgressStyle, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import type { LocaleCode } from "@rovenue/shared/i18n";
-import type { AnswerValue } from "@rovenue/shared/funnel";
+import type { AnswerValue, ContactAnswer } from "@rovenue/shared/funnel";
 import { resolvePage, type ResolvedPage } from "./i18n";
 
 function isFilledColor(c?: string): c is string {
@@ -449,7 +449,7 @@ export const PagePreview = component(
         )}
         {page.type === "contact_info" && (
           <Cap>
-            <ContactInfoFields page={resolved} theme={theme} />
+            <ContactInfoFields page={resolved} theme={theme} {...liveProps} />
           </Cap>
         )}
         {page.type === "welcome" && <WelcomeBody page={resolved} theme={theme} />}
@@ -1243,17 +1243,74 @@ function TextArea({
 
 // ---------- Contact info ----------
 
-const ContactInfoFields = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
-  <div className="mt-3 flex flex-col gap-2">
-    {page.collectName !== false && (
-      <TextField placeholder="Full name" theme={theme} />
-    )}
-    {page.collectEmail !== false && (
-      <TextField placeholder="you@example.com" theme={theme} type="email" />
-    )}
-    {page.collectPhone && <TextField placeholder="+1 555 0000" theme={theme} type="tel" />}
-  </div>
-));
+/** The fields a contact page can ask for, and the order they render in. One
+ *  list so the component, the emitted key set and the placeholders cannot
+ *  drift apart. */
+const CONTACT_FIELDS = [
+  { key: "name" as const, placeholder: "Full name", type: "text" as const },
+  { key: "email" as const, placeholder: "you@example.com", type: "email" as const },
+  { key: "phone" as const, placeholder: "+1 555 0000", type: "tel" as const },
+];
+
+/** Which fields THIS page asks for. `collectName`/`collectEmail` default ON
+ *  (`!== false`); `collectPhone` defaults OFF. That asymmetry is the existing
+ *  product behaviour and is preserved deliberately. */
+function asksFor(page: ResolvedPage): ReadonlyArray<(typeof CONTACT_FIELDS)[number]> {
+  return CONTACT_FIELDS.filter(({ key }) => {
+    if (key === "name") return page.collectName !== false;
+    if (key === "email") return page.collectEmail !== false;
+    return Boolean(page.collectPhone);
+  });
+}
+
+const ContactInfoFields = component(
+  ({
+    page,
+    theme,
+    live = false,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    // Passed explicitly, never inferred — see ChoiceListReadOnly.
+    live?: boolean;
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
+    const fields = asksFor(page);
+    const current: ContactAnswer =
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? (value as ContactAnswer)
+        : {};
+
+    // Emit a key for EVERY field this page asks for, not just the touched
+    // one: the key set is what isAnswered reads to decide what was
+    // requested, so a missing key would read as "never asked" and a
+    // required page would advance on one filled field.
+    const emit = (key: "name" | "email" | "phone", next: string) => {
+      const out: ContactAnswer = {};
+      for (const f of fields) out[f.key] = f.key === key ? next : (current[f.key] ?? "");
+      onChange?.(out);
+    };
+
+    return (
+      <div className="mt-3 flex flex-col gap-2">
+        {fields.map((f) => (
+          <TextField
+            key={f.key}
+            placeholder={f.placeholder}
+            theme={theme}
+            type={f.type}
+            live={live}
+            value={current[f.key] ?? ""}
+            onChange={(next) => emit(f.key, next)}
+          />
+        ))}
+      </div>
+    );
+  },
+);
 
 // ---------- Welcome / Statement / Feature / End ----------
 

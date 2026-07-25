@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n/config";
-import { evaluateNext, type AnswerMap } from "@rovenue/shared/funnel";
+import { evaluateNext, type AnswerMap, type ContactAnswer } from "@rovenue/shared/funnel";
 import { PagePreview, LEGAL_CHECKBOX_CHECKED } from "./page-preview";
 import type { Page, Theme } from "./types";
 
@@ -148,6 +148,19 @@ const datePage: Page = {
   type: "date_input",
   question_id: "q_date",
   title: L("Pick a date"),
+} as Page;
+
+// collectName/collectEmail default ON; collectPhone defaults OFF. That
+// asymmetry is existing product behaviour, so the fixture states it rather
+// than relying on defaults.
+const contactPage: Page = {
+  id: "pg_c",
+  type: "contact_info",
+  question_id: "q_c",
+  title: L("Your details"),
+  collectName: true,
+  collectEmail: true,
+  collectPhone: false,
 } as Page;
 
 function base(page: Page) {
@@ -320,6 +333,62 @@ describe("PagePreview — live mode", () => {
     expect(onAnswer).toHaveBeenLastCalledWith(LEGAL_CHECKBOX_CHECKED);
   });
 
+  it("contact_info fields are editable in live mode", () => {
+    // The defect this fixes: every field rendered read-only, so a visitor
+    // could not type their details at all.
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(contactPage)} mode="live" value={null} onAnswer={onAnswer} />);
+    const boxes = screen.getAllByRole("textbox");
+    expect(boxes).toHaveLength(2); // name + email; phone is off for this page
+    for (const box of boxes) {
+      expect(box, "a contact field is still read-only in live mode").not.toHaveAttribute(
+        "readonly",
+      );
+    }
+  });
+
+  it("contact_info emits a key for every field it asks for", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(contactPage)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.type(screen.getAllByRole("textbox")[1]!, "a");
+
+    const emitted = onAnswer.mock.lastCall![0] as ContactAnswer;
+    // The key SET records what the page asked for — that is what lets
+    // isAnswered decide without the page's collect* flags. So `name` must be
+    // present-but-empty, and `phone` must be absent.
+    expect(Object.keys(emitted).sort()).toEqual(["email", "name"]);
+    expect(emitted.email).toBe("a");
+    expect(emitted.name).toBe("");
+  });
+
+  it("contact_info includes phone only when the page asks for it", async () => {
+    const onAnswer = vi.fn();
+    const withPhone = { ...contactPage, collectPhone: true } as Page;
+    render(<PagePreview {...base(withPhone)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.type(screen.getAllByRole("textbox")[0]!, "x");
+    expect(Object.keys(onAnswer.mock.lastCall![0] as ContactAnswer).sort()).toEqual([
+      "email",
+      "name",
+      "phone",
+    ]);
+  });
+
+  it("contact_info keeps the other fields when one changes", async () => {
+    const onAnswer = vi.fn();
+    render(
+      <PagePreview
+        {...base(contactPage)}
+        mode="live"
+        value={{ name: "Ada", email: "" }}
+        onAnswer={onAnswer}
+      />,
+    );
+    await userEvent.type(screen.getAllByRole("textbox")[1]!, "b");
+    const emitted = onAnswer.mock.lastCall![0] as ContactAnswer;
+    expect(emitted.name, "typing in one field discarded another").toBe("Ada");
+    expect(emitted.email).toBe("b");
+  });
+
   it("phone captures the typed string", async () => {
     const onAnswer = vi.fn();
     render(<PagePreview {...base(phonePage)} mode="live" value={null} onAnswer={onAnswer} />);
@@ -354,6 +423,14 @@ describe("PagePreview — preview mode stays inert", () => {
     render(<PagePreview {...base(singleChoicePage)} onAnswer={onAnswer} />);
     await userEvent.click(screen.getByText("Option B"));
     expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("keeps contact_info read-only in preview even when onAnswer is passed", () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(contactPage)} mode="preview" onAnswer={onAnswer} />);
+    for (const box of screen.getAllByRole("textbox")) {
+      expect(box).toHaveAttribute("readonly");
+    }
   });
 
   it("does not fire onAnswer from a choice click even when onAnswer is passed", async () => {
