@@ -73,7 +73,7 @@ export type PageTone = "" | "result" | "paywall" | "success";
  * `none` is every page that asks nothing — it is not offered as a
  * question in the rule editor at all.
  */
-export type AnswerKind = "text" | "choice" | "multi" | "number" | "none";
+export type AnswerKind = "text" | "choice" | "multi" | "number" | "date" | "none";
 
 /**
  * Operators the rule editor offers for each answer kind.
@@ -91,6 +91,15 @@ export const OPERATORS_BY_KIND: Record<AnswerKind, ReadonlyArray<ClauseOp>> = {
     "eq", "neq", "gt", "gte", "lt", "lte", "between", "in", "not_in",
     "is_answered", "is_not_answered",
   ],
+  // Additive against the `text` classification date_input used to carry:
+  // eq/neq/in/not_in are kept, so no rule authored since date_input was
+  // wired gets clamped to a different operator. Only the four ordered
+  // operators require the ISO shape, because only they compare.
+  date: [
+    "eq", "neq", "in", "not_in",
+    "before", "after", "on_or_before", "on_or_after",
+    "is_answered", "is_not_answered",
+  ],
   none: [],
 };
 
@@ -106,7 +115,7 @@ export const PAGE_TYPES: Record<PageType, PageTypeMeta> = {
   multi_choice: { label: "Multiple choice", icon: SquareCheck, tone: "", answerKind: "multi" },
   text_input: { label: "Text input", icon: TypeIcon, tone: "", answerKind: "text" },
   number_input: { label: "Number input", icon: Hash, tone: "", answerKind: "number" },
-  date_input: { label: "Date", icon: Calendar, tone: "", answerKind: "text" },
+  date_input: { label: "Date", icon: Calendar, tone: "", answerKind: "date" },
   slider: { label: "Slider", icon: SlidersHorizontal, tone: "", answerKind: "number" },
   rating: { label: "Rating", icon: Star, tone: "", answerKind: "number" },
   info: { label: "Info screen", icon: Info, tone: "", answerKind: "none" },

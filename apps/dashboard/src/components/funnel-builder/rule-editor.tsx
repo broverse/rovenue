@@ -71,6 +71,16 @@ export function operandShape(op: ClauseOp): OperandShape {
   return "scalar";
 }
 
+/** Operators whose operand is a calendar date, so the row offers a date
+ *  picker instead of free text — an author should not have to type a
+ *  format they cannot see. */
+const DATE_COMPARISONS: ReadonlySet<ClauseOp> = new Set([
+  "before",
+  "after",
+  "on_or_before",
+  "on_or_after",
+]);
+
 const OPERATORS: ReadonlyArray<{ v: ClauseOp; l: string }> = [
   { v: "eq", l: "equals" },
   { v: "neq", l: "≠" },
@@ -83,6 +93,10 @@ const OPERATORS: ReadonlyArray<{ v: ClauseOp; l: string }> = [
   { v: "not_in", l: "is not one of" },
   { v: "contains", l: "contains" },
   { v: "not_contains", l: "does not contain" },
+  { v: "before", l: "is before" },
+  { v: "after", l: "is after" },
+  { v: "on_or_before", l: "is on or before" },
+  { v: "on_or_after", l: "is on or after" },
   { v: "is_answered", l: "is answered" },
   { v: "is_not_answered", l: "is not answered" },
 ];
@@ -324,6 +338,7 @@ export const RuleEditor = component(({ pageId }: Props) => {
                     </select>
                     {!isRange && !isArr && !isUnary && (
                       <input
+                        type={DATE_COMPARISONS.has(c.op) ? "date" : "text"}
                         value={value === undefined ? "" : String(value)}
                         onChange={(e) =>
                           updateClause(ruleIdx, clauseIdx, {

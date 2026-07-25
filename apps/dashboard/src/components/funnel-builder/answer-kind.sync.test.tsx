@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n/config";
+import { ISO_DATE_RE } from "@rovenue/shared/funnel";
 import { PagePreview } from "./page-preview";
 import { OPERATORS_BY_KIND, PAGE_TYPES, type AnswerKind } from "./types";
 import type { Page, PageType, Theme } from "./types";
@@ -131,6 +132,16 @@ describe("answerKind agrees with what the wired inputs actually emit", () => {
         expect(Array.isArray(emitted), `${wired.type} is multi but emitted a scalar`).toBe(true);
       } else if (kind === "number") {
         expect(typeof emitted, `${wired.type} is number but emitted otherwise`).toBe("number");
+      } else if (kind === "date") {
+        // A `date` kind must emit a value the date operators can compare.
+        // Asserting only "it is a string" would verify this kind no more
+        // strictly than plain text, and the whole point of the kind is the
+        // format.
+        expect(typeof emitted, `${wired.type} is date but emitted a non-string`).toBe("string");
+        expect(
+          ISO_DATE_RE.test(emitted as string),
+          `${wired.type} is date but emitted ${String(emitted)}, not YYYY-MM-DD`,
+        ).toBe(true);
       } else {
         expect(Array.isArray(emitted), `${wired.type} is ${kind} but emitted an array`).toBe(false);
         expect(typeof emitted, `${wired.type} is ${kind} but emitted a non-string`).toBe("string");
