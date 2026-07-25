@@ -30,7 +30,7 @@
 | File | Responsibility |
 |---|---|
 | `packages/sdk-rn/ios/RovenuePaywallExpoView.swift` | iOS `ExpoView` — resolves the paywall, hosts the SwiftUI view, emits five events |
-| `packages/sdk-rn/android/src/main/java/dev/rovenue/sdkrn/RovenuePaywallExpoView.kt` | Android `ExpoView` — same responsibility, plus RN measure/layout forwarding |
+| `packages/sdk-rn/android/src/main/java/dev/rovenue/sdkrn/RovenuePaywallExpoView.kt` | Android `ExpoView` — same responsibility, opting into `shouldUseAndroidLayout` |
 | `packages/sdk-rn/src/paywall-view/native-view.ts` | The single `requireNativeView` call and the native-side props type |
 | `packages/sdk-rn/src/paywall-view/RovenuePaywallView.tsx` | Public component: props → native props, native events → callbacks |
 | `packages/sdk-rn/src/paywall-view/index.ts` | Barrel |
@@ -373,6 +373,7 @@ import android.content.Context
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
+import dev.rovenue.sdk.Paywall
 import dev.rovenue.sdk.Rovenue
 import dev.rovenue.sdk.paywallui.PaywallViewOptions
 import dev.rovenue.sdk.paywallui.RovenuePaywallView
@@ -385,25 +386,41 @@ import kotlinx.coroutines.launch
 /**
  * Hosts the Android [RovenuePaywallView] inside a React Native view tree.
  *
- * Two things here are load-bearing and easy to lose in a refactor:
+ * Three things here are load-bearing and easy to lose in a refactor:
  *
- *  1. React Native's Yoga layout does not measure or lay out a view that
- *     is outside its own shadow tree, so [onLayout] and [requestLayout]
- *     below do it by hand. Without them the paywall renders at zero
- *     height and the screen looks blank.
- *  2. Props arrive one at a time; the reload is deferred to
+ *  1. React Native does not lay out a view outside its own shadow tree.
+ *     [shouldUseAndroidLayout] is ExpoView's supported answer: it makes
+ *     `requestLayout` force a measure+layout pass. Do NOT hand-roll that
+ *     — ExpoView.requestLayout already posts its own measureAndLayout(),
+ *     and duplicating it would be dead weight that drifts.
+ *  2. [ExpoView] extends `LinearLayout`, so a child added without explicit
+ *     LayoutParams gets `wrap_content` and the paywall sizes to its content
+ *     instead of filling. Hence MATCH_PARENT below.
+ *  3. Props arrive one at a time; the reload is deferred to
  *     [onViewDidUpdateProps] so one mount triggers one paywall fetch.
+ *
+ * Note the asymmetry with the iOS bridge: that one has to work hard to
+ * preserve the hosted view's state, because SwiftUI `@State` is scoped to
+ * the UIHostingController instance. Here [RovenuePaywallView.bind] is
+ * already idempotent by content key — it resets `didLogShow` and
+ * `selectedPackageId` only when the content actually changes — so keeping
+ * ONE long-lived [inner] instance is all that is required.
  */
 class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
     ExpoView(context, appContext) {
 
+    override val shouldUseAndroidLayout: Boolean = true
+
     // Native event names are deliberately NOT the JS callback names
     // (`onClose` etc.) — the JS wrapper owns those.
-    private val onPurchaseCompleted by EventDispatcher()
-    private val onPurchaseFailed by EventDispatcher()
-    private val onCloseRequested by EventDispatcher()
-    private val onRestoreRequested by EventDispatcher()
-    private val onUrlRequested by EventDispatcher()
+    // `EventDispatcher` is a View extension function with both a
+    // reified-generic and a Map overload, so a bare `EventDispatcher()`
+    // is ambiguous — the type argument is required.
+    private val onPurchaseCompleted by EventDispatcher<Map<String, Any>>()
+    private val onPurchaseFailed by EventDispatcher<Map<String, Any>>()
+    private val onCloseRequested by EventDispatcher<Map<String, Any>>()
+    private val onRestoreRequested by EventDispatcher<Map<String, Any>>()
+    private val onUrlRequested by EventDispatcher<Map<String, Any>>()
 
     var placementIdentifier: String? = null
     var locale: String? = null
@@ -411,12 +428,21 @@ class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
     var hasRestoreHandler: Boolean = false
     var hasUrlHandler: Boolean = false
 
+    // ONE instance for this view's lifetime. bind() is idempotent by
+    // content key, so re-binding the same paywall neither re-logs the
+    // impression nor drops the user's package selection.
     private val inner = RovenuePaywallView(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var loadJob: Job? = null
+    private var cachedPaywall: Paywall? = null
+    /** The (placement, locale) pair [cachedPaywall] was fetched for. Only a
+     *  change to this re-fetches; cosmetic props re-bind from cache. */
+    private var resolvedKey: String? = null
 
     init {
-        addView(inner)
+        // ExpoView is a LinearLayout: without explicit params the child
+        // would be wrap_content and the paywall would not fill the frame.
+        addView(inner, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     fun onViewDidUpdateProps() {
@@ -424,15 +450,31 @@ class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
     }
 
     private fun reload() {
-        loadJob?.cancel()
         val placement = placementIdentifier
-        if (placement.isNullOrEmpty()) return
+        if (placement.isNullOrEmpty()) {
+            loadJob?.cancel()
+            cachedPaywall = null
+            resolvedKey = null
+            return
+        }
+        val key = placement + KEY_SEPARATOR + (locale ?: "")
+        // Toggling colorSchemeOverride or a handler flag must not cost a
+        // network round-trip. Re-binding from cache is safe: bind() is
+        // idempotent by content key.
+        if (key == resolvedKey) {
+            cachedPaywall?.let { inner.bind(it, options()) }
+            return
+        }
+        loadJob?.cancel()
+        resolvedKey = key
         loadJob = scope.launch {
             // A resolution failure renders nothing, matching what the
             // Android view already does with a null config. Surfacing it
             // would need a new prop, which the props contract forbids.
             val paywall = runCatching { Rovenue.shared.getPaywall(placement, locale) }
                 .getOrNull() ?: return@launch
+            if (resolvedKey != key) return@launch
+            cachedPaywall = paywall
             inner.bind(paywall, options())
         }
     }
@@ -463,26 +505,22 @@ class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
         super.onDetachedFromWindow()
         loadJob?.cancel()
     }
-
-    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        inner.layout(0, 0, r - l, b - t)
-    }
-
-    private val measureAndLayout = Runnable {
-        measure(
-            MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
-        )
-        layout(left, top, right, bottom)
-    }
-
-    override fun requestLayout() {
-        super.requestLayout()
-        // React Native never re-measures children it did not create.
-        post(measureAndLayout)
-    }
 }
 ```
+
+Declare the resolve-key separator as a top-level `private const` in the same
+file — the same value and rationale as the iOS view:
+
+```kotlin
+/** Separates placement from locale in the resolve key. A character that
+ *  cannot occur in either, so two different pairs cannot collide. */
+private const val KEY_SEPARATOR = "\u0000"
+```
+
+There is deliberately **no** `onLayout`, `requestLayout` or `measureAndLayout`
+override: `shouldUseAndroidLayout = true` makes `ExpoView.requestLayout`
+post its own `measureAndLayout()`, so writing those here would duplicate
+framework code verbatim.
 
 `codedError(...)` and `dtoFromPurchaseResult(...)` currently live on `RovenueModule` — see Step 3.
 
