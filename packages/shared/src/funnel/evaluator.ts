@@ -183,7 +183,14 @@ function evalClause(clause: Clause, answers: AnswerMap): boolean {
       if (clause.op === "before") return a < other;
       if (clause.op === "after") return a > other;
       if (clause.op === "on_or_before") return a <= other;
-      return a >= other;
+      if (clause.op === "on_or_after") return a >= other;
+      // `on_or_after` is spelled out rather than left as the fall-through so
+      // that a FIFTH date operator added to the case labels above cannot
+      // silently inherit `>=` semantics. Reaching here means an operator
+      // arrived that nobody taught this block to compare, and the rule this
+      // whole area is built on says such an operator returns false rather
+      // than answering true by accident.
+      return false;
     }
     default:
       return false;
