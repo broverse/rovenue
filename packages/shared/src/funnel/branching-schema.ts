@@ -102,6 +102,25 @@ const clauseSchema = z
         });
       }
     }
+    if (
+      c.op === "before" ||
+      c.op === "after" ||
+      c.op === "on_or_before" ||
+      c.op === "on_or_after"
+    ) {
+      // evalClause compares these as TEXT, which equals chronological
+      // order only for zero-padded YYYY-MM-DD. An unpadded or otherwise
+      // off-format operand would validate here and then compare in the
+      // wrong direction — worse than never firing. Reject it at the
+      // boundary, the same reasoning as the contains and numeric guards.
+      if (typeof c.value !== "string" || !ISO_DATE_RE.test(c.value)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Op ${c.op} requires an ISO date (YYYY-MM-DD)`,
+          path: ["value"],
+        });
+      }
+    }
   });
 
 export type Clause = z.infer<typeof clauseSchema>;
