@@ -1,8 +1,45 @@
 import type { Clause, NextRule } from "./branching-schema";
 import { ISO_DATE_RE } from "./branching-schema";
 
-export type AnswerValue = string | number | boolean | string[] | null;
+/**
+ * A `contact_info` page's answer.
+ *
+ * A key is present for each field the page ASKS for, and only those. So the
+ * key set records what was requested while the values record what was
+ * given — which is what makes `isAnswered` decidable from the value alone,
+ * without the page's collectName/collectEmail/collectPhone flags. The
+ * runner knows those flags and the evaluator does not, so any definition
+ * that needed them would give the two layers different answers.
+ */
+export type ContactAnswer = {
+  name?: string;
+  email?: string;
+  phone?: string;
+};
+
+export type AnswerValue = string | number | boolean | string[] | null | ContactAnswer;
 export type AnswerMap = Map<string, AnswerValue>;
+
+/**
+ * The ONE definition of "answered", called by both the evaluator's
+ * `is_answered` operator and the runner's `required` gate.
+ *
+ * It exists as a shared function rather than as the same expression written
+ * twice: those two copies were aligned by hand, and a composite answer
+ * breaks that alignment in a way neither copy would have caught — an object
+ * with every field blank is not `null`, not `""`, and not an empty array.
+ *
+ * `0` and `false` are answers. A truthiness check would silently drop both.
+ */
+export function isAnswered(value: AnswerValue | undefined): boolean {
+  if (value === undefined || value === null || value === "") return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") {
+    const entries = Object.values(value);
+    return entries.length > 0 && entries.every((v) => typeof v === "string" && v.trim() !== "");
+  }
+  return true;
+}
 
 // Minimal page shape the runtime evaluator needs. Matches the flat
 // dashboard page (see pages-schema.ts) — only the routing fields are
@@ -101,15 +138,10 @@ function matches(
 function evalClause(clause: Clause, answers: AnswerMap): boolean {
   const a = answers.get(clause.question_id);
 
-  // One definition of "answered", matching the runner's own gate: an
-  // empty string and an empty selection are not answers. The evaluator
-  // and the client disagreeing about this was two definitions one hop
-  // apart.
-  const answered =
-    a !== undefined &&
-    a !== null &&
-    a !== "" &&
-    !(Array.isArray(a) && a.length === 0);
+  // One definition of "answered", shared with the runner's own gate — see
+  // isAnswered. The evaluator and the client each computing it was two
+  // definitions one hop apart.
+  const answered = isAnswered(a);
 
   // A multi_choice answer is a string[]. Comparing it with a scalar
   // operator is a type mismatch, not a question with an answer — so the
