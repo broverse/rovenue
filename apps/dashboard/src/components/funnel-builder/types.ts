@@ -28,7 +28,7 @@ import {
 
 import type { Localized, LocaleCode } from "@rovenue/shared/i18n";
 import { pick } from "@rovenue/shared/i18n";
-import type { ClauseOp } from "@rovenue/shared/funnel";
+import type { ClauseOp, NextRule } from "@rovenue/shared/funnel";
 
 export type PageType =
   // Original primitives
@@ -196,33 +196,6 @@ export const PAGE_GROUPS: ReadonlyArray<{ label: string; types: PageType[] }> = 
   },
 ];
 
-export type Operator =
-  | "equals"
-  | "not_equals"
-  | ">"
-  | ">="
-  | "<"
-  | "<="
-  | "between"
-  | "is_one_of"
-  | "not_one_of"
-  | "contains"
-  | "is_answered"
-  | "not_answered";
-
-export type RuleClause = {
-  qid: string;
-  op: Operator;
-  value: string | number | Array<string | number>;
-};
-
-export type Rule = {
-  id: string;
-  combinator: "all" | "any";
-  clauses: RuleClause[];
-  goto: string;
-};
-
 export type Option = { label: Localized<string>; value: string; imageUrl?: string };
 
 export type Page = {
@@ -343,7 +316,10 @@ export type Funnel = {
   theme: Theme;
   settings: Settings;
   pages: Page[];
-  rules: Record<string, Rule[]>;
+  // The real rule type. Nothing reads this field today — the view model
+  // holds rules in `this.rules: Record<string, NextRule[]>` — but typing
+  // it as the shipping shape keeps a fourth vocabulary from growing here.
+  rules: Record<string, NextRule[]>;
   default_next: Record<string, string | null>;
 
   /** Canonical authoring locale; resolver's terminal fallback. */
