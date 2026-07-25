@@ -13,8 +13,12 @@ private let KEY_SEPARATOR = "\u{0000}"
 /// Hosts the SwiftUI `RovenuePaywallView` inside a React Native view tree.
 ///
 /// Props arrive one at a time, so the reload is deferred to
-/// `didSetProps` — otherwise setting five props would start five paywall
-/// fetches for one mount.
+/// `onViewDidUpdateProps()` — otherwise setting five props would start five
+/// paywall fetches for one mount.
+///
+/// The hosted controller is created once per resolved paywall and reused for
+/// cosmetic prop changes and for window detach/reattach, because React Native
+/// recycles views and the SwiftUI view's impression flag lives in `@State`.
 final class RovenuePaywallExpoView: ExpoView {
     // Native event names are deliberately NOT the JS callback names
     // (`onClose` etc.). The JS wrapper owns those; keeping the wire names
@@ -33,6 +37,9 @@ final class RovenuePaywallExpoView: ExpoView {
     var hasUrlHandler: Bool = false
 
     private var host: UIHostingController<AnyView>?
+    /// The `resolvedKey` the current `host` was built for. When this still
+    /// matches, the controller is reused and only its `rootView` is updated.
+    private var hostKey: String?
     private var loadTask: Task<Void, Never>?
     private var cachedPaywall: Paywall?
     /// The (placement, locale) pair `cachedPaywall` was fetched for. Only a
@@ -106,26 +113,59 @@ final class RovenuePaywallExpoView: ExpoView {
 
     /// Containment has to wait for a window, because that is when
     /// `reactViewController()` can hand us a parent to attach to.
+    ///
+    /// On losing the window we detach from the parent controller but KEEP
+    /// the controller object. React Native recycles views; destroying the
+    /// controller here would reset the hosted SwiftUI tree's `@State` on
+    /// every recycle, re-firing `logPaywallShown`.
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil {
-            detachHost()
+            detachFromParent()
         } else {
             mount(cachedPaywall)
         }
     }
 
-    private func detachHost() {
-        guard let host else { return }
+    /// Removes the hosted controller from the view/controller hierarchy but
+    /// keeps the instance, so its SwiftUI state survives. Idempotent.
+    private func detachFromParent() {
+        guard let host, host.parent != nil else { return }
         host.willMove(toParent: nil)
         host.view.removeFromSuperview()
         host.removeFromParent()
-        self.host = nil
+    }
+
+    /// Drops the controller entirely. Only correct when the paywall itself
+    /// changes — a different paywall SHOULD start a fresh impression.
+    private func destroyHost() {
+        detachFromParent()
+        host = nil
+        hostKey = nil
+    }
+
+    /// Adds the controller to `parent` in the order Expo's own
+    /// SwiftUIHostingView uses. Idempotent: already-attached is a no-op.
+    private func attach(_ controller: UIHostingController<AnyView>, to parent: UIViewController) {
+        guard controller.parent !== parent || controller.view.superview !== self else { return }
+        controller.view.backgroundColor = .clear
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        parent.addChild(controller)
+        addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            controller.view.topAnchor.constraint(equalTo: topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        controller.didMove(toParent: parent)
     }
 
     private func mount(_ paywall: Paywall?) {
-        detachHost()
-        guard let paywall, window != nil, let parent = reactViewController() else { return }
+        guard let paywall, window != nil, let parent = reactViewController() else {
+            detachFromParent()
+            return
+        }
 
         let content = RovenuePaywallView(
             paywall: paywall,
@@ -157,23 +197,21 @@ final class RovenuePaywallExpoView: ExpoView {
             } : nil
         )
 
-        // The full containment dance, in the order Expo's own
-        // SwiftUIHostingView uses. Without addChild/didMove the hosted
-        // SwiftUI tree loses appearance callbacks and, critically here,
-        // safe-area and trait propagation — the paywall would draw under
-        // the notch and the home indicator.
+        // Same paywall, cosmetic change only: push the new content into the
+        // EXISTING controller. Recreating it would reset the SwiftUI view's
+        // @State — didLogShow and selectedPackageId — which re-fires
+        // logPaywallShown and drops the user's package selection.
+        if let host, hostKey == resolvedKey {
+            host.rootView = AnyView(content)
+            attach(host, to: parent)
+            return
+        }
+
+        // A different paywall: a fresh impression is correct here.
+        destroyHost()
         let controller = UIHostingController(rootView: AnyView(content))
-        controller.view.backgroundColor = .clear
-        controller.view.translatesAutoresizingMaskIntoConstraints = false
-        parent.addChild(controller)
-        addSubview(controller.view)
-        NSLayoutConstraint.activate([
-            controller.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-            controller.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-            controller.view.topAnchor.constraint(equalTo: topAnchor),
-            controller.view.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        controller.didMove(toParent: parent)
+        hostKey = resolvedKey
+        attach(controller, to: parent)
         host = controller
     }
 }
