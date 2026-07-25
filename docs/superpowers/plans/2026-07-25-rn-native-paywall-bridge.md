@@ -36,7 +36,7 @@
 | `packages/sdk-rn/src/paywall-view/index.ts` | Barrel |
 | `packages/sdk-rn/src/paywall-view/__tests__/bridge.test.tsx` | Marshalling and event-mapping tests |
 
-**Modified:** `ios/RovenueModule.swift` and `android/.../RovenueModule.kt` (add the `View` definition and widen one helper); `src/index.ts` (export from the new path); `src/__tests__/_stubExpoModules.ts` (add `requireNativeView`).
+**Modified:** `ios/RovenueModule.swift` and `android/.../RovenueModule.kt` (add the `View` definition and widen one helper); `src/index.ts` (export from the new path); `src/__tests__/_stubExpoModules.ts` (add `requireNativeViewManager`).
 
 **Deleted in Task 5:** `packages/sdk-rn/src/paywall-ui/` entirely.
 
@@ -638,7 +638,7 @@ In the commit body and your report, state: *the Kotlin half was not compiled or 
 - Create: `packages/sdk-rn/src/paywall-view/RovenuePaywallView.tsx`
 - Create: `packages/sdk-rn/src/paywall-view/index.ts`
 - Create: `packages/sdk-rn/src/paywall-view/__tests__/bridge.test.tsx`
-- Modify: `packages/sdk-rn/src/__tests__/_stubExpoModules.ts` — add `requireNativeView`
+- Modify: `packages/sdk-rn/src/__tests__/_stubExpoModules.ts` — add `requireNativeViewManager`
 - Modify: `packages/sdk-rn/src/index.ts:137-143` — export `RovenuePaywallView` from the new path
 
 **Interfaces:**
@@ -657,7 +657,7 @@ In `packages/sdk-rn/src/__tests__/_stubExpoModules.ts`, append:
 // a fresh component so tests cannot leak state into one another.
 export const __nativeViewRenders: Array<Record<string, unknown>> = [];
 
-export function requireNativeView<P>(
+export function requireNativeViewManager<P>(
   _moduleName: string,
   _viewName?: string,
 ): (props: P) => null {
@@ -800,7 +800,12 @@ Expected: FAIL — `Cannot find module '../RovenuePaywallView'`.
 Create `packages/sdk-rn/src/paywall-view/native-view.ts`:
 
 ```ts
-import { requireNativeView } from "expo-modules-core";
+// `requireNativeViewManager` — NOT `requireNativeView`, which does not
+// exist in expo-modules-core 2.5.0. This is the only view accessor the
+// package exports (build/index.d.ts:11) and it is documented as a drop-in
+// replacement for RN's `requireNativeComponent`, which is why events
+// arrive wrapped in `nativeEvent`.
+import { requireNativeViewManager } from "expo-modules-core";
 
 /** Wire props for the native paywall view. Deliberately narrower than
  *  `RovenuePaywallViewProps`: the paywall itself does not cross the
@@ -820,10 +825,12 @@ export type NativePaywallViewProps = {
 };
 
 const MODULE_NAME = "Rovenue";
-const VIEW_NAME = "RovenuePaywallView";
 
+// No view name: both native modules register the paywall as the module's
+// single default view (`View(RovenuePaywallExpoView.self) { … }` with no
+// name argument), so the manager is looked up by module name alone.
 export const NativePaywallView =
-  requireNativeView<NativePaywallViewProps>(MODULE_NAME, VIEW_NAME);
+  requireNativeViewManager<NativePaywallViewProps>(MODULE_NAME);
 ```
 
 - [ ] **Step 5: Write the component**
