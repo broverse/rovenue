@@ -152,6 +152,14 @@ public class RovenueModule: Module {
             Prop("hasUrlHandler") { (view: RovenuePaywallExpoView, value: Bool) in
                 view.hasUrlHandler = value
             }
+            // The architecture-agnostic "props batch settled" hook. Expo
+            // wires it into both ComponentData (old architecture) and
+            // ExpoFabricView.viewDidUpdateProps (Fabric), which is why the
+            // view must NOT override didSetProps — that exists only on the
+            // old architecture and would not compile under Fabric.
+            OnViewDidUpdateProps { (view: RovenuePaywallExpoView) in
+                view.onViewDidUpdateProps()
+            }
         }
 
         Function("shutdown") { Rovenue.shared.shutdown() }
