@@ -31,7 +31,7 @@
 |---|---|
 | `packages/sdk-rn/ios/RovenuePaywallExpoView.swift` | iOS `ExpoView` — resolves the paywall, hosts the SwiftUI view, emits five events |
 | `packages/sdk-rn/android/src/main/java/dev/rovenue/sdkrn/RovenuePaywallExpoView.kt` | Android `ExpoView` — same responsibility, opting into `shouldUseAndroidLayout` |
-| `packages/sdk-rn/src/paywall-view/native-view.ts` | The single `requireNativeView` call and the native-side props type |
+| `packages/sdk-rn/src/paywall-view/native-view.ts` | The single `requireNativeViewManager` call and the native-side props type |
 | `packages/sdk-rn/src/paywall-view/RovenuePaywallView.tsx` | Public component: props → native props, native events → callbacks |
 | `packages/sdk-rn/src/paywall-view/index.ts` | Barrel |
 | `packages/sdk-rn/src/paywall-view/__tests__/bridge.test.tsx` | Marshalling and event-mapping tests |
@@ -647,7 +647,7 @@ In the commit body and your report, state: *the Kotlin half was not compiled or 
 
 > **This task IS verifiable here.** It must end with a green `npx vitest run`.
 
-- [ ] **Step 1: Add `requireNativeView` to the test stub**
+- [ ] **Step 1: Add `requireNativeViewManager` to the test stub**
 
 In `packages/sdk-rn/src/__tests__/_stubExpoModules.ts`, append:
 
