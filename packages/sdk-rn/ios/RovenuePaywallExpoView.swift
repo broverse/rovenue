@@ -77,6 +77,11 @@ final class RovenuePaywallExpoView: ExpoView {
         // Toggling colorSchemeOverride or a handler flag must not re-fetch:
         // a re-fetch rebuilds the SwiftUI view, whose `didLogShow` is @State,
         // which would re-fire logPaywallShown and inflate paywall_view.
+        //
+        // This holds only while the last resolve SUCCEEDED. A failed resolve
+        // clears the key deliberately, so the next prop update — cosmetic or
+        // not — retries the fetch. That is the price of not being stuck
+        // blank, and it stops as soon as a resolve succeeds.
         if key == resolvedKey {
             mount(cachedPaywall)
             return
