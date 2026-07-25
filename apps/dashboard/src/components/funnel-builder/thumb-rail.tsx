@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
 import { component, useService } from "impair";
-import { Plus, Sparkles } from "lucide-react";
+import { Copy, Plus, Sparkles } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { PAGE_TYPES } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
@@ -98,12 +98,13 @@ export const ThumbRail = component(() => {
                   </button>
                 </div>
               )}
+              <div className="group relative">
               <button
                 type="button"
                 onClick={() => vm.selectPage(p.id)}
                 title={label}
                 className={cn(
-                  "group relative flex w-full cursor-pointer items-center gap-2.5 rounded-md border bg-rv-c2 px-2.5 py-2 text-left transition",
+                  "flex w-full cursor-pointer items-center gap-2.5 rounded-md border bg-rv-c2 px-2.5 py-2 text-left transition",
                   selected
                     ? "border-rv-accent-500/60 bg-rv-accent-500/10 shadow-[0_0_0_2px_color-mix(in_srgb,var(--color-rv-accent-500)_18%,transparent)]"
                     : "border-rv-divider hover:border-rv-divider-strong hover:bg-rv-c3",
@@ -145,6 +146,26 @@ export const ThumbRail = component(() => {
                   </div>
                 )}
               </button>
+              {/* A sibling of the row, never a child: a <button> cannot
+                  contain a <button>, and nesting them breaks both the
+                  click target and keyboard semantics. Being a sibling is
+                  also what makes this safe without stopPropagation — the
+                  click never passes through the row's handler, so it
+                  cannot duplicate and navigate at once. Deliberately NOT
+                  calling stopPropagation: it would be dead code here, and
+                  it would make a future nesting regression pass the test
+                  that exists to catch it. Hidden until the row is hovered
+                  or the action is focused, so it stays out of the way
+                  without becoming mouse-only. */}
+              <button
+                type="button"
+                aria-label={`Duplicate ${label}`}
+                onClick={() => vm.duplicatePage(p.id)}
+                className="absolute right-1.5 top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-500 opacity-0 transition hover:bg-rv-c3 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <Copy size={10} />
+              </button>
+              </div>
             </Fragment>
           );
         })}
