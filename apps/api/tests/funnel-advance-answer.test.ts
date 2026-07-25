@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetInsurance } from "../src/middleware/insurance-rate-limit";
 
 // =============================================================
 // POST /public/funnel-sessions/:sessionId/advance — answer rides along
@@ -101,10 +102,18 @@ describe("POST /public/funnel-sessions/:sessionId/advance — answer", () => {
   // "not called" assertion. One slow import, two red tests. Paying it
   // once here moves the one-time cost out of every test's budget.
   //
-  // `vi.resetModules()` is deliberately NOT used. Every dependency here is
-  // a hoisted `vi.mock` factory whose behaviour is reset below, and the two
-  // stateful stores are cleared explicitly, so a fresh module registry
-  // bought nothing while forcing the re-import. Do not restore it.
+  // `vi.resetModules()` is deliberately NOT used: every dependency here is
+  // a hoisted `vi.mock` factory whose behaviour is reset below, so a fresh
+  // registry bought nothing while forcing the re-import.
+  //
+  // The catch: it WAS also resetting module-level state as a side effect.
+  // The redis stub below has no `multi()`, so every request falls into
+  // rate-limit.ts's insurance-limiter fallback, whose `buckets` Map lives
+  // at module scope. Clearing `redisStore` does not touch it. Each store
+  // that outlives a test therefore has to be reset by name in `beforeEach`
+  // — see `__resetInsurance()`. If you add a dependency that keeps
+  // module-level state, reset it there too rather than restoring
+  // `resetModules()`; the re-import is what made this file flaky.
   let app: ReturnType<typeof import("../src/app").createApp>;
 
   beforeAll(async () => {
@@ -114,6 +123,12 @@ describe("POST /public/funnel-sessions/:sessionId/advance — answer", () => {
 
   beforeEach(() => {
     redisStore.clear();
+    // The insurance limiter's bucket Map is module-level and survives the
+    // test now that the app graph is imported once. Without this the
+    // per-key counter accumulates down the file, making the tests
+    // order-dependent and leaving their headroom to depend on
+    // INSURANCE_MAX — a constant that has nothing to do with this suite.
+    __resetInsurance();
     answerRows.length = 0;
 
     findSessionById.mockReset().mockResolvedValue({
