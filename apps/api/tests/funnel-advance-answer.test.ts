@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // =============================================================
 // POST /public/funnel-sessions/:sessionId/advance — answer rides along
@@ -92,8 +92,27 @@ const PAGE_WITH_RULE = {
 };
 
 describe("POST /public/funnel-sessions/:sessionId/advance — answer", () => {
+  // Importing the app graph — every route and service behind it — costs
+  // roughly four seconds to transform and evaluate. Paying that inside
+  // whichever test happened to run first left it about 800ms under the
+  // 5000ms default testTimeout, so under the load of a concurrent suite
+  // that test timed out; its orphaned upsert then completed after the
+  // next test's beforeEach had cleared `answerRows` and broke that test's
+  // "not called" assertion. One slow import, two red tests. Paying it
+  // once here moves the one-time cost out of every test's budget.
+  //
+  // `vi.resetModules()` is deliberately NOT used. Every dependency here is
+  // a hoisted `vi.mock` factory whose behaviour is reset below, and the two
+  // stateful stores are cleared explicitly, so a fresh module registry
+  // bought nothing while forcing the re-import. Do not restore it.
+  let app: ReturnType<typeof import("../src/app").createApp>;
+
+  beforeAll(async () => {
+    const { createApp } = await import("../src/app");
+    app = createApp();
+  });
+
   beforeEach(() => {
-    vi.resetModules();
     redisStore.clear();
     answerRows.length = 0;
 
@@ -125,8 +144,6 @@ describe("POST /public/funnel-sessions/:sessionId/advance — answer", () => {
   });
 
   async function advance(body: Record<string, unknown>, sessionId = "session-id") {
-    const { createApp } = await import("../src/app");
-    const app = createApp();
     return app.request(`/public/funnel-sessions/${sessionId}/advance`, {
       method: "POST",
       headers: { "content-type": "application/json" },
