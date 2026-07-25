@@ -666,6 +666,13 @@
       "when": 1784680712519,
       "tag": "0094_funnel_purchase_fence",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1784680712600,
+      "tag": "0095_coerce_funnel_numeric_operands",
+      "breakpoints": true
     }
   ]
 }

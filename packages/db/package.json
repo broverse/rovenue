@@ -15,6 +15,7 @@
     "db:verify:clickhouse": "tsx --env-file-if-exists=../../.env scripts/verify-clickhouse.ts",
     "db:partition:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate-hypertable-to-partitioned.ts",
     "db:clickhouse:migrate": "tsx --env-file-if-exists=../../.env src/clickhouse-migrate.ts",
+    "db:audit:funnel-operands": "tsx --env-file-if-exists=../../.env scripts/audit-funnel-clause-operands.ts",
     "db:studio": "drizzle-kit studio",
     "seed": "tsx --env-file-if-exists=../../.env seed.ts"
   },
