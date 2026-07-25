@@ -97,6 +97,11 @@ final class RovenuePaywallExpoView: ExpoView {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.resolvedKey == key else { return }
+                // A failed resolve must NOT leave the key marked resolved. The fast
+                // path above would then mount nil on every later prop update, so the
+                // paywall would stay blank forever unless the placement value itself
+                // changed.
+                if paywall == nil { self.resolvedKey = nil }
                 self.cachedPaywall = paywall
                 self.mount(paywall)
             }

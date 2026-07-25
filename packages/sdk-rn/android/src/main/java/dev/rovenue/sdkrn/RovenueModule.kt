@@ -134,6 +134,12 @@ class RovenueModule : Module() {
             OnViewDidUpdateProps { view: RovenuePaywallExpoView ->
                 view.onViewDidUpdateProps()
             }
+            // "Really gone", as opposed to onDetachedFromWindow, which also
+            // fires on the transient detaches React Native does when it
+            // recycles a view.
+            OnViewDestroys { view: RovenuePaywallExpoView ->
+                view.onViewDestroys()
+            }
         }
 
         Function("shutdown") { Rovenue.shared.shutdown() }
