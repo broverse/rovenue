@@ -156,6 +156,11 @@ final class RovenuePaywallExpoView: ExpoView {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.resolvedKey == key else { return }
+                // A failed resolve must NOT leave the key marked resolved.
+                // The fast path above would then mount nil on every later
+                // prop update, so the paywall would stay blank forever
+                // unless the placement value itself changed.
+                if paywall == nil { self.resolvedKey = nil }
                 self.cachedPaywall = paywall
                 self.mount(paywall)
             }
@@ -370,6 +375,7 @@ Create `packages/sdk-rn/android/src/main/java/dev/rovenue/sdkrn/RovenuePaywallEx
 package dev.rovenue.sdkrn
 
 import android.content.Context
+import android.view.View
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -381,6 +387,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
@@ -455,6 +462,11 @@ class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
             loadJob?.cancel()
             cachedPaywall = null
             resolvedKey = null
+            // RovenuePaywallView has no unbind(), so hiding is how we match
+            // the iOS bridge's mount(nil), which removes the hosted view.
+            // Without this the last paywall stays on screen after the host
+            // clears the placement.
+            inner.visibility = View.GONE
             return
         }
         val key = placement + KEY_SEPARATOR + (locale ?: "")
@@ -472,9 +484,17 @@ class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
             // Android view already does with a null config. Surfacing it
             // would need a new prop, which the props contract forbids.
             val paywall = runCatching { Rovenue.shared.getPaywall(placement, locale) }
-                .getOrNull() ?: return@launch
+                .getOrNull()
             if (resolvedKey != key) return@launch
+            if (paywall == null) {
+                // Same reason as the iOS bridge: a failed resolve must not
+                // stay marked resolved, or the cache-hit path returns
+                // nothing forever and the view is permanently blank.
+                resolvedKey = null
+                return@launch
+            }
             cachedPaywall = paywall
+            inner.visibility = View.VISIBLE
             inner.bind(paywall, options())
         }
     }
@@ -501,9 +521,13 @@ class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
         onUrl = if (hasUrlHandler) ({ url -> onUrlRequested(mapOf("url" to url)) }) else null,
     )
 
-    override fun onDetachedFromWindow() {
-        super.onDetachedFromWindow()
-        loadJob?.cancel()
+    /// Called from `OnViewDestroys`. Deliberately NOT `onDetachedFromWindow`:
+    /// React Native recycles views, so a transient detach during a
+    /// navigation transition would cancel an in-flight fetch and leave the
+    /// paywall blank with nothing to retrigger it. The iOS bridge cancels
+    /// only in `deinit` for the same reason.
+    fun onViewDestroys() {
+        scope.cancel()
     }
 }
 ```
@@ -556,6 +580,12 @@ In `packages/sdk-rn/android/src/main/java/dev/rovenue/sdkrn/RovenueModule.kt`, i
             }
             OnViewDidUpdateProps { view: RovenuePaywallExpoView ->
                 view.onViewDidUpdateProps()
+            }
+            // "Really gone", as opposed to onDetachedFromWindow, which also
+            // fires on the transient detaches React Native does when it
+            // recycles a view.
+            OnViewDestroys { view: RovenuePaywallExpoView ->
+                view.onViewDestroys()
             }
         }
 ```
