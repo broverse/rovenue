@@ -11,7 +11,7 @@ import { FunnelApi, type FunnelDetailDto } from "../../lib/services/funnel-api";
 // =============================================================
 // Gap 1 (SP5 stale-clause fix): a clause authored before c65a761d can
 // still point at a question whose answerKind is "none" (e.g.
-// contact_info). branchableQuestionIds now excludes that question from
+// stored JSON). branchableQuestionIds excludes that question from
 // the picker, so on render the question <select> would carry a stored
 // `value` with no matching <option>, and the operator <select> would
 // resolve to zero <option>s (OPERATORS_BY_KIND.none === []). That is
@@ -39,9 +39,15 @@ function fakeFunnel(): FunnelDetailDto {
         question_id: BRANCHABLE_QUESTION_ID,
         options: [{ label: { en: "A" }, value: "a" }],
       } as never,
-      // contact_info carries a question_id but answerKind "none" — a
+      // A stored page carrying a question_id on a type whose answerKind is
+      // "none". contact_info used to be the shipping example; SP9 gave it a
+      // comparable answer, so the case that still reaches this guard is
+      // stored JSON — a funnel authored through the API, or written before a
+      // page type was removed. That is also the only way a clause can now
+      // point at an unbranchable question, which is exactly what this test
+      // is about.
       // clause referencing it is exactly the stale state Gap 1 covers.
-      { id: "pg_contact", type: "contact_info", question_id: STALE_QUESTION_ID } as never,
+      { id: "pg_contact", type: "info", question_id: STALE_QUESTION_ID } as never,
       { id: BRANCH_PAGE_ID, type: "info", title: { en: "Branch page" } } as never,
     ],
     draftTheme: {} as never,

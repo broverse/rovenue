@@ -32,7 +32,7 @@ import {
 import { PaymentStep, type FunnelPaymentOutcome } from "./payment-step";
 import { writeFunnelTokenToClipboard } from "./clipboard";
 import { type LocaleCode } from "@rovenue/shared/i18n";
-import type { AnswerValue } from "@rovenue/shared/funnel";
+import { isAnswered, type AnswerValue, type ContactAnswer } from "@rovenue/shared/funnel";
 import { useRunnerLocale } from "./use-runner-locale";
 
 /** Maps the server-hydrated offering shape into the renderer's minimal contract. */
@@ -198,6 +198,37 @@ interface State {
   currentPageId: string;
 }
 
+/**
+ * The email the PaymentStep should pre-fill, read from the funnel's answers.
+ *
+ * Exported and pure because it was previously an inline `useMemo` body that
+ * no test could reach: deleting its contact_info branch broke nothing, so
+ * the whole pre-fill was unverified.
+ *
+ * Tie-break is deliberate: a funnel may legitimately have more than one
+ * email source, and "last in PAGE ORDER" is deterministic where "most
+ * recently answered" would depend on back-navigation. A contact_info page is
+ * one such source and takes part in the same ordering rather than getting
+ * its own precedence.
+ */
+export function pickCollectedEmail(
+  pages: ReadonlyArray<{ type?: string; question_id?: string }>,
+  answers: Record<string, AnswerValue>,
+): string | undefined {
+  let found: string | undefined;
+  for (const p of pages) {
+    if (!p.question_id) continue;
+    const v = answers[p.question_id];
+    if (p.type === "email") {
+      if (typeof v === "string" && v.trim()) found = v.trim();
+    } else if (p.type === "contact_info") {
+      const email = (v as ContactAnswer | undefined)?.email;
+      if (typeof email === "string" && email.trim()) found = email.trim();
+    }
+  }
+  return found;
+}
+
 export function FunnelRunner({ slug }: { slug: string }) {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [state, setState] = useState<State | null>(null);
@@ -257,31 +288,22 @@ export function FunnelRunner({ slug }: { slug: string }) {
 
   const questionId = (currentPage as { question_id?: string } | null)?.question_id;
   const currentAnswer = questionId ? answers[questionId] : undefined;
-  const answered =
-    currentAnswer !== undefined &&
-    currentAnswer !== null &&
-    currentAnswer !== "" &&
-    !(Array.isArray(currentAnswer) && currentAnswer.length === 0);
+  // The shared definition, so this gate and the evaluator's `is_answered`
+  // operator cannot drift. They were the same expression written twice
+  // until a composite answer — an object, so never null/""/[] however
+  // blank — would have been called answered by both copies.
+  const answered = isAnswered(currentAnswer);
   const required = Boolean((currentPage as { required?: boolean } | null)?.required);
 
   // The email PaymentStep should pre-fill. Tie-break is deliberate: a
-  // funnel may legitimately have more than one email page, and "last in
+  // funnel may legitimately have more than one email source, and "last in
   // PAGE ORDER" is deterministic where "most recently answered" would
-  // depend on back-navigation. contact_info also collects an email but is
-  // not among the wired types, so it is not consulted.
-  const collectedEmail = useMemo(() => {
-    const pages = (state?.config.pages ?? []) as Array<{
-      type?: string;
-      question_id?: string;
-    }>;
-    let found: string | undefined;
-    for (const p of pages) {
-      if (p.type !== "email" || !p.question_id) continue;
-      const v = answers[p.question_id];
-      if (typeof v === "string" && v.trim()) found = v.trim();
-    }
-    return found;
-  }, [state?.config.pages, answers]);
+  // depend on back-navigation. A contact_info page is one such source and
+  // takes part in the same ordering rather than getting its own precedence.
+  const collectedEmail = useMemo(
+    () => pickCollectedEmail(state?.config.pages ?? [], answers),
+    [state?.config.pages, answers],
+  );
 
   const handleAdvance = async () => {
     if (!state || !currentPage || busy) return;

@@ -76,6 +76,10 @@ const WIRED: ReadonlyArray<{
   { type: "long_text", drive: (u) => u.type(screen.getByRole("textbox"), "a") },
   { type: "phone", drive: (u) => u.type(screen.getByRole("textbox"), "5") },
   {
+    type: "contact_info",
+    drive: (u) => u.type(screen.getAllByRole("textbox")[0]!, "a"),
+  },
+  {
     type: "date_input",
     drive: async () => {
       fireEvent.change(screen.getByLabelText("date"), { target: { value: "2026-07-25" } });
@@ -142,6 +146,17 @@ describe("answerKind agrees with what the wired inputs actually emit", () => {
           ISO_DATE_RE.test(emitted as string),
           `${wired.type} is date but emitted ${String(emitted)}, not YYYY-MM-DD`,
         ).toBe(true);
+      } else if (kind === "composite") {
+        // An object whose values are all strings. Falling through to the
+        // string default would fail for the right reason but with a
+        // confusing message.
+        expect(typeof emitted, `${wired.type} is composite but emitted a non-object`).toBe("object");
+        expect(Array.isArray(emitted), `${wired.type} is composite but emitted an array`).toBe(
+          false,
+        );
+        for (const v of Object.values(emitted as Record<string, unknown>)) {
+          expect(typeof v, `${wired.type} emitted a non-string field`).toBe("string");
+        }
       } else {
         expect(Array.isArray(emitted), `${wired.type} is ${kind} but emitted an array`).toBe(false);
         expect(typeof emitted, `${wired.type} is ${kind} but emitted a non-string`).toBe("string");

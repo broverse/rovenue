@@ -20,28 +20,46 @@ describe("answerKindFor (M-1)", () => {
 describe("branchableQuestionIds (M-2)", () => {
   const pages: Page[] = [
     { id: "pg_1", type: "single_choice", question_id: "q_a", options: [] },
-    // contact_info carries a question_id despite answerKind "none" (its
-    // answer is a composite of name/email/phone, not a single value) — it
-    // must not be offered as a branching target, or a clause ends up with
-    // zero valid operators.
+    // contact_info used to be the one page type carrying a question_id
+    // while classified "none". SP9 gave it answerKind "composite" (it
+    // offers is_answered), so it IS branchable now and appears below.
     { id: "pg_2", type: "contact_info", question_id: "q_b" },
     { id: "pg_3", type: "info", title: {} },
     { id: "pg_4", type: "number_input", question_id: "q_d" },
   ];
 
   it("includes questions whose answer kind can actually be compared", () => {
-    expect(branchableQuestionIds(pages, 4)).toEqual(["q_a", "q_d"]);
+    expect(branchableQuestionIds(pages, 4)).toEqual(["q_a", "q_b", "q_d"]);
   });
 
-  it("excludes a 'none'-kind question even when it carries a question_id", () => {
-    const ids = branchableQuestionIds(pages, 4);
-    expect(ids).not.toContain("q_b");
+  it("still excludes a question whose type resolves to a kind with no operators", () => {
+    // After SP9 no page type SHIPS in this state — contact_info was the
+    // last one — so the guard is exercised with the case that can still
+    // reach it: stored JSON. A funnel authored through the API, or written
+    // before a page type was removed, can hold a question_id on a type
+    // that maps to "none". Offering it would leave a clause whose operator
+    // <select> renders zero options.
+    const stored: Page[] = [
+      { id: "pg_a", type: "single_choice", question_id: "q_ok", options: [] } as never,
+      { id: "pg_b", type: "info", question_id: "q_dead" } as never,
+      { id: "pg_c", type: "some_removed_page_type", question_id: "q_gone" } as never,
+    ];
+    expect(branchableQuestionIds(stored, 3)).toEqual(["q_ok"]);
+  });
+
+  it("offers contact_info now that it has a comparable answer", () => {
+    // It was the standing example of a question_id with no usable operators.
+    // SP9 gave it is_answered, so excluding it would hide a rule an author
+    // can legitimately write. The none-kind guard itself is covered by the
+    // stored-JSON case above.
+    expect(branchableQuestionIds(pages, 4)).toContain("q_b");
   });
 
   it("excludes a page with no question_id at all", () => {
     const ids = branchableQuestionIds(pages, 4);
     expect(ids).not.toContain(undefined);
-    expect(ids.length).toBe(2);
+    // pg_3 is an info page with no question_id; the other three all have one.
+    expect(ids.length).toBe(3);
   });
 
   it("only looks at pages before uptoIdx", () => {

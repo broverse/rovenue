@@ -102,7 +102,7 @@ describe("OPERATORS_BY_KIND", () => {
     // happens — a new page type added without an answerKind, or with one
     // outside the union, is what this exists to catch.
     const VALID_KINDS: ReadonlySet<AnswerKind> = new Set([
-      "text", "choice", "multi", "number", "date", "none",
+      "text", "choice", "multi", "number", "date", "composite", "none",
     ]);
     for (const [type, meta] of Object.entries(PAGE_TYPES)) {
       expect(VALID_KINDS.has(meta.answerKind), `${type} has an invalid answerKind: ${meta.answerKind}`).toBe(

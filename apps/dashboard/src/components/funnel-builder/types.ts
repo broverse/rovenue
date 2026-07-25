@@ -73,7 +73,14 @@ export type PageTone = "" | "result" | "paywall" | "success";
  * `none` is every page that asks nothing — it is not offered as a
  * question in the rule editor at all.
  */
-export type AnswerKind = "text" | "choice" | "multi" | "number" | "date" | "none";
+export type AnswerKind =
+  | "text"
+  | "choice"
+  | "multi"
+  | "number"
+  | "date"
+  | "composite"
+  | "none";
 
 /**
  * Operators the rule editor offers for each answer kind.
@@ -100,6 +107,10 @@ export const OPERATORS_BY_KIND: Record<AnswerKind, ReadonlyArray<ClauseOp>> = {
     "before", "after", "on_or_before", "on_or_after",
     "is_answered", "is_not_answered",
   ],
+  // A composite answer is an object, so every comparison operator refuses
+  // it — offering one would be a writable dead rule. "Did they give their
+  // details?" is the question this page can actually answer.
+  composite: ["is_answered", "is_not_answered"],
   none: [],
 };
 
@@ -124,7 +135,7 @@ export const PAGE_TYPES: Record<PageType, PageTypeMeta> = {
   paywall: { label: "Payment screen", icon: CreditCard, tone: "paywall", answerKind: "none" },
   success: { label: "Success", icon: PartyPopper, tone: "success", answerKind: "none" },
 
-  contact_info: { label: "Contact info", icon: Contact, tone: "", answerKind: "none" },
+  contact_info: { label: "Contact info", icon: Contact, tone: "", answerKind: "composite" },
   email: { label: "Email", icon: Mail, tone: "", answerKind: "text" },
   phone: { label: "Phone number", icon: Phone, tone: "", answerKind: "text" },
 

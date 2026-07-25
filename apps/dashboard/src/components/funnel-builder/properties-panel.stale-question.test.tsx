@@ -86,14 +86,25 @@ function renderPanel(vm: FunnelDraftViewModel) {
 }
 
 describe("PropertiesPanel — branching gate vs personalization chips (Gap 2)", () => {
-  it("branching gate treats a contact_info-only earlier question as NO earlier questions", async () => {
+  it("branching gate now OPENS for a contact_info-only earlier question", async () => {
+    // Inverted deliberately by SP9. contact_info was the one page type
+    // carrying a question_id while classified "none", which is why it was
+    // the example of an earlier question that did not count for branching.
+    // It now has answerKind "composite" and offers is_answered, so a rule
+    // keyed on it is one an author can legitimately write and the gate must
+    // not claim there is nothing to branch on.
+    //
+    // The gate's own filtering (branchableQuestionIds) is still covered —
+    // see rule-editor.branching.test.ts, which exercises it with the case
+    // that can still reach it: stored JSON carrying a question_id on a
+    // none-kind type.
     const vm = await makeLoadedVm(BRANCH_TARGET_PAGE_ID);
     renderPanel(vm);
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Branching/i }));
 
-    expect(screen.getByText(/No earlier questions yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No earlier questions yet/i)).not.toBeInTheDocument();
   });
 
   it("personalization chips still offer a contact_info-only earlier question", async () => {
