@@ -37,9 +37,20 @@ describe("OPERATORS_BY_KIND", () => {
   });
 
   it("offers the unary operators to every answering kind", () => {
-    for (const kind of ["text", "choice", "multi", "number"] as AnswerKind[]) {
-      expect(OPERATORS_BY_KIND[kind]).toContain("is_answered");
-      expect(OPERATORS_BY_KIND[kind]).toContain("is_not_answered");
+    // DERIVED from OPERATORS_BY_KIND, not hand-listed. This loop used to
+    // enumerate ["text", "choice", "multi", "number"] under a name claiming
+    // "every answering kind" — and when `date` joined AnswerKind the test
+    // kept passing while silently covering one kind fewer. A kind is
+    // "answering" precisely when it offers operators, so read that off the
+    // table instead of restating it.
+    const answering = (Object.keys(OPERATORS_BY_KIND) as AnswerKind[]).filter(
+      (kind) => OPERATORS_BY_KIND[kind].length > 0,
+    );
+    for (const kind of answering) {
+      expect(OPERATORS_BY_KIND[kind], `${kind} does not offer is_answered`).toContain("is_answered");
+      expect(OPERATORS_BY_KIND[kind], `${kind} does not offer is_not_answered`).toContain(
+        "is_not_answered",
+      );
     }
   });
 
