@@ -32,16 +32,17 @@ export type RovenueConfig = {
   environment?: "prod" | "staging" | "development";
 };
 
-// The host app's version, as passed to `configure()`. Already in JS
-// hands (it's forwarded to the native module below) but not otherwise
-// retained JS-side; stashed here so the paywall render layer can read it
-// for `visibility.minAppVersion`/`maxAppVersion` evaluation without a
-// native round-trip. `undefined` until `configure()` runs, or when the
-// caller omits it (native auto-reads its own value in that case, which
-// this getter has no way to see).
+// The host app's version as `configure()` RESOLVED it — the caller's
+// `appVersion` when given, otherwise the bundle/packageManager value the
+// native module auto-read. Stashed here so the paywall render layer can
+// evaluate `visibility.minAppVersion`/`maxAppVersion` without a native
+// round-trip per node. `undefined` until `configure()` runs, and on a JS
+// bundle running against a native binary predating `getAppVersion` (an
+// RN dev can reload JS without rebuilding native) — version bounds then
+// fail open, matching every other unknown in the visibility evaluator.
 let configuredAppVersion: string | undefined;
 
-/** The `appVersion` most recently passed to `configure()`, if any. */
+/** The host app version `configure()` resolved, if any. */
 export function getConfiguredAppVersion(): string | undefined {
   return configuredAppVersion;
 }
@@ -53,7 +54,6 @@ export function configure(opts: RovenueConfig): void {
   if (opts.baseUrl !== undefined && !/^https?:\/\//.test(opts.baseUrl)) {
     throw new RovenueError("InvalidApiKey", "baseUrl must start with http:// or https://");
   }
-  configuredAppVersion = opts.appVersion;
   const native = getNative();
   native.configure(
     opts.apiKey,
@@ -62,6 +62,13 @@ export function configure(opts: RovenueConfig): void {
     opts.appVersion,
     opts.environment,
   );
+  // Read back rather than reusing `opts.appVersion`: most callers omit it
+  // and let native auto-read, and this getter is what drives version-based
+  // node visibility. Guarded for the stale-native-binary case above.
+  configuredAppVersion =
+    typeof native.getAppVersion === "function"
+      ? (native.getAppVersion() ?? undefined)
+      : opts.appVersion;
   startEventBridge();
   startSessionTracker();
 }

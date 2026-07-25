@@ -88,8 +88,11 @@ public class RovenueModule: Module {
 
         // ---------------- Sync ----------------
         //
-        // appVersion is optional from JS — when nil/omitted, the Swift
-        // façade falls back to Bundle.main.infoDictionary[CFBundleShortVersionString].
+        // appVersion is optional from JS — when nil/omitted we resolve
+        // Bundle.main.infoDictionary[CFBundleShortVersionString] HERE
+        // rather than letting the Swift façade do it internally, so the
+        // resolved value can be handed back to JS via `getAppVersion`
+        // (the Swift SDK's own accessor is `internal` to that module).
         // For Expo apps that's the value baked from app.json's `expo.version`
         // at prebuild time; for bare RN it's the host project's plist.
         Function("configure") { (apiKey: String, baseUrl: String?, logLevel: String, appVersion: String?, environment: String?) in
@@ -104,16 +107,26 @@ public class RovenueModule: Module {
                 default:      return .warn
                 }
             }()
+            let resolved = appVersion
+                ?? Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            resolvedAppVersion = resolved
             try rovenueCallSync {
                 try Rovenue.configure(
                     apiKey: apiKey,
                     baseUrl: baseUrl,
                     logLevel: level,
-                    appVersion: appVersion,
+                    appVersion: resolved,
                     environment: environment
                 )
             }
         }
+        // The version `configure` actually resolved, so JS can read back
+        // what it did NOT pass. Node-level `visibility.minAppVersion` /
+        // `maxAppVersion` gating runs in JS and would otherwise be inert
+        // for the documented default (callers are told to omit appVersion
+        // and let the native side auto-read it).
+        Function("getAppVersion") { () -> String? in resolvedAppVersion }
+
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { (foreground: Bool) in
             Rovenue.shared.setForeground(foreground)

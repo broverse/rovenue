@@ -34,6 +34,10 @@ export type MockNative = RovenueModuleSpec & {
     };
     changeListeners: Array<(payload: { event: string }) => void>;
     logListeners: Array<(entry: NativeLogPayload) => void>;
+    /** Stands in for the bundle / packageManager value the real bridges auto-read. */
+    autoReadAppVersion: string | null;
+    /** What `configure` resolved — what the real `getAppVersion` hands back. */
+    resolvedAppVersion: string | null;
   };
   __emit(event: string): void;
   __emitLog(entry: LogEntryDTO): void;
@@ -52,6 +56,8 @@ export function makeMockNative(): MockNative {
     },
     changeListeners: [] as Array<(payload: { event: string }) => void>,
     logListeners: [] as Array<(entry: NativeLogPayload) => void>,
+    autoReadAppVersion: null as string | null,
+    resolvedAppVersion: null as string | null,
   };
 
   const mock: MockNative = {
@@ -84,10 +90,23 @@ export function makeMockNative(): MockNative {
         if (i >= 0) state.logListeners.splice(i, 1);
       };
     },
-    configure: vi.fn(),
+    // Mirrors the real bridges: `configure` resolves the host-app version
+    // — the argument when JS passes one, else the auto-read value — and
+    // `getAppVersion` hands the resolved value back.
+    configure: vi.fn(
+      (
+        _apiKey: string,
+        _baseUrl: string | undefined,
+        _logLevel: string,
+        appVersion?: string,
+      ) => {
+        state.resolvedAppVersion = appVersion ?? state.autoReadAppVersion;
+      },
+    ),
     shutdown: vi.fn(),
     setForeground: vi.fn(),
     getVersion: vi.fn(() => "0.1.0"),
+    getAppVersion: vi.fn(() => state.resolvedAppVersion),
     currentUser: vi.fn(async () => state.user),
     identify: vi.fn(async (appUserId: string) => {
       state.user = { ...state.user, appUserId };

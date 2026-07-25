@@ -56,8 +56,29 @@ describe("configure forwards appVersion to native", () => {
     expect(getConfiguredAppVersion()).toBe("2.7.0");
   });
 
-  it("getConfiguredAppVersion() is undefined when configure() omits appVersion", () => {
+  // The documented default: callers omit appVersion and let the bridge
+  // read the bundle / packageManager value. Without reading it back,
+  // version-based node visibility would be inert for exactly the config
+  // the docs tell people to use.
+  it("getConfiguredAppVersion() reports the version native auto-read when JS omits it", () => {
+    native.__state.autoReadAppVersion = "3.1.0";
+    configure({ apiKey: "pk_test", baseUrl: "https://api.example.com" });
+    expect(getConfiguredAppVersion()).toBe("3.1.0");
+  });
+
+  it("getConfiguredAppVersion() is undefined when neither JS nor native has a version", () => {
     configure({ apiKey: "pk_test", baseUrl: "https://api.example.com" });
     expect(getConfiguredAppVersion()).toBeUndefined();
+  });
+
+  // An RN dev can reload the JS bundle against a native binary built
+  // before `getAppVersion` existed. Falling back to what JS passed keeps
+  // configure() from throwing "not a function" on the happy path.
+  it("falls back to the JS-supplied version against a native binary without getAppVersion", () => {
+    const legacy = makeMockNative();
+    delete (legacy as Partial<MockNative>).getAppVersion;
+    _setNativeForTesting(legacy);
+    configure({ apiKey: "pk_test", baseUrl: "https://api.example.com", appVersion: "2.7.0" });
+    expect(getConfiguredAppVersion()).toBe("2.7.0");
   });
 });

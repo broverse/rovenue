@@ -164,6 +164,10 @@ export interface RovenueModuleSpec {
   shutdown(): void;
   setForeground(foreground: boolean): void;
   getVersion(): string;
+  // The host-app version `configure` resolved — the value JS passed, or
+  // the auto-read bundle/packageManager one when JS passed nothing. Null
+  // before `configure` runs, or when neither source yielded a version.
+  getAppVersion(): string | null;
 
   // Identity
   currentUser(): Promise<UserDTO>;

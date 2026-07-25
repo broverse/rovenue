@@ -64,6 +64,9 @@ class RovenueModule : Module() {
     private var funnelClaimsJob: Job? = null
     private var logUnsub: (() -> Unit)? = null
 
+    /** Set by `configure`; read back by JS via `getAppVersion`. */
+    private var resolvedAppVersion: String? = null
+
     override fun definition() = ModuleDefinition {
         Name("Rovenue")
 
@@ -76,6 +79,7 @@ class RovenueModule : Module() {
         // versionName); for bare RN it's the host project's gradle config.
         Function("configure") { apiKey: String, baseUrl: String?, logLevel: String, appVersion: String?, environment: String? ->
             val resolved = appVersion ?: readPackageVersionName()
+            resolvedAppVersion = resolved
             val level = when (logLevel) {
                 "off"   -> LogLevel.OFF
                 "error" -> LogLevel.ERROR
@@ -95,6 +99,13 @@ class RovenueModule : Module() {
                 environment = environment,
             )
         }
+        // The version `configure` actually resolved, so JS can read back
+        // what it did NOT pass. Node-level `visibility.minAppVersion` /
+        // `maxAppVersion` gating runs in JS and would otherwise be inert
+        // for the documented default (callers are told to omit appVersion
+        // and let the native side auto-read it).
+        Function("getAppVersion") { resolvedAppVersion }
+
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { foreground: Boolean ->
             Rovenue.shared.setForeground(foreground)
