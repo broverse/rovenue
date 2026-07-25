@@ -136,6 +136,11 @@ final class RovenuePaywallExpoView: ExpoView {
         // Toggling colorSchemeOverride or a handler flag must not re-fetch:
         // a re-fetch rebuilds the SwiftUI view, whose `didLogShow` is @State,
         // which would re-fire logPaywallShown and inflate paywall_view.
+        //
+        // This holds only while the last resolve SUCCEEDED. A failed resolve
+        // clears the key deliberately, so the next prop update — cosmetic or
+        // not — retries the fetch. That is the price of not being stuck
+        // blank, and it stops as soon as a resolve succeeds.
         if key == resolvedKey {
             mount(cachedPaywall)
             return
@@ -473,6 +478,11 @@ class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
         // Toggling colorSchemeOverride or a handler flag must not cost a
         // network round-trip. Re-binding from cache is safe: bind() is
         // idempotent by content key.
+        //
+        // This holds only while the last resolve SUCCEEDED. A failed resolve
+        // clears the key deliberately, so the next prop update — cosmetic or
+        // not — retries the fetch. That is the price of not being stuck
+        // blank, and it stops as soon as a resolve succeeds.
         if (key == resolvedKey) {
             cachedPaywall?.let { inner.bind(it, options()) }
             return
@@ -491,6 +501,13 @@ class RovenuePaywallExpoView(context: Context, appContext: AppContext) :
                 // stay marked resolved, or the cache-hit path returns
                 // nothing forever and the view is permanently blank.
                 resolvedKey = null
+                // It must also not leave the PREVIOUS placement's paywall on
+                // screen. Switch from a placement that resolved to one that
+                // fails, and without these two lines the old paywall stays
+                // up indefinitely. iOS mounts nil unconditionally here; this
+                // is the equivalent.
+                cachedPaywall = null
+                inner.visibility = View.GONE
                 return@launch
             }
             cachedPaywall = paywall
