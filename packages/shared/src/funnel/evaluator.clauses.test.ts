@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { evaluateNext, type AnswerMap, type AnswerValue } from "./evaluator";
-import type { ClauseOp } from "./branching-schema";
+import { CLAUSE_OPS, type ClauseOp } from "./branching-schema";
 
 // Does a single clause fire? Routed through evaluateNext because
 // evalClause is module-private: a matching rule goes to "pg_hit", a
@@ -38,20 +38,55 @@ function fires(op: ClauseOp, answer: AnswerValue | undefined, value?: unknown): 
 describe("evalClause — an array answer never matches a scalar operator", () => {
   const ARRAY: AnswerValue = ["a", "b"];
 
-  // The load-bearing assertion of this whole sub-project. Listing every
-  // scalar operator rather than only the two that were broken means the
-  // next one added cannot regress quietly.
-  it.each<[ClauseOp, unknown]>([
-    ["eq", "a"],
-    ["neq", "a"],
-    ["in", ["a", "z"]],
-    ["not_in", ["a", "z"]],
-    ["gt", 1],
-    ["gte", 1],
-    ["lt", 1],
-    ["lte", 1],
-    ["between", [0, 5]],
-  ])("%s does not fire for an array answer", (op, value) => {
+  // The load-bearing assertion of this whole sub-project: no operator may
+  // answer `true` for an array by accident, because an accidental match
+  // routes the visitor somewhere nobody chose.
+  //
+  // DERIVED from CLAUSE_OPS, not hand-listed. This list used to be written
+  // out by hand under a comment promising that "the next one added cannot
+  // regress quietly" — and then four date operators were added and duly
+  // slipped past it, because nothing forced the list to grow. The operand
+  // map below is typed `Record<ClauseOp, unknown>`, so adding an operator
+  // to CLAUSE_OPS without giving it an operand here fails the BUILD rather
+  // than silently shrinking this guard's coverage.
+  const ARRAY_MAY_FIRE: ReadonlySet<ClauseOp> = new Set<ClauseOp>([
+    // Genuinely array operators — these are SUPPOSED to fire.
+    "contains",
+    "not_contains",
+    // Presence checks rather than comparisons: a non-empty array really is
+    // answered, so excluding them is correct, not an exemption.
+    "is_answered",
+    "is_not_answered",
+  ]);
+
+  /** A representative operand of the right type per operator, so each one
+   *  is rejected for being handed an ARRAY answer and not for a mismatched
+   *  operand. */
+  const OPERAND: Record<ClauseOp, unknown> = {
+    eq: "a",
+    neq: "a",
+    in: ["a", "z"],
+    not_in: ["a", "z"],
+    gt: 1,
+    gte: 1,
+    lt: 1,
+    lte: 1,
+    between: [0, 5],
+    contains: "a",
+    not_contains: "a",
+    before: "2026-03-01",
+    after: "2026-03-01",
+    on_or_before: "2026-03-01",
+    on_or_after: "2026-03-01",
+    is_answered: undefined,
+    is_not_answered: undefined,
+  };
+
+  it.each(
+    CLAUSE_OPS.filter((op) => !ARRAY_MAY_FIRE.has(op)).map(
+      (op) => [op, OPERAND[op]] as [ClauseOp, unknown],
+    ),
+  )("%s does not fire for an array answer", (op, value) => {
     expect(fires(op, ARRAY, value)).toBe(false);
   });
 
