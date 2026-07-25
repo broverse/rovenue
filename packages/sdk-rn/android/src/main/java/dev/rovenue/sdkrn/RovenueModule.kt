@@ -106,6 +106,36 @@ class RovenueModule : Module() {
         // and let the native side auto-read it).
         Function("getAppVersion") { resolvedAppVersion }
 
+        // The React Native paywall renders through the Android view rather
+        // than a JS component tree — see the 2026-07-25 bridge design.
+        View(RovenuePaywallExpoView::class) {
+            Events(
+                "onPurchaseCompleted",
+                "onPurchaseFailed",
+                "onCloseRequested",
+                "onRestoreRequested",
+                "onUrlRequested",
+            )
+            Prop("placementIdentifier") { view: RovenuePaywallExpoView, value: String? ->
+                view.placementIdentifier = value
+            }
+            Prop("locale") { view: RovenuePaywallExpoView, value: String? ->
+                view.locale = value
+            }
+            Prop("colorSchemeOverride") { view: RovenuePaywallExpoView, value: String? ->
+                view.colorSchemeOverride = value
+            }
+            Prop("hasRestoreHandler") { view: RovenuePaywallExpoView, value: Boolean ->
+                view.hasRestoreHandler = value
+            }
+            Prop("hasUrlHandler") { view: RovenuePaywallExpoView, value: Boolean ->
+                view.hasUrlHandler = value
+            }
+            OnViewDidUpdateProps { view: RovenuePaywallExpoView ->
+                view.onViewDidUpdateProps()
+            }
+        }
+
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { foreground: Boolean ->
             Rovenue.shared.setForeground(foreground)
@@ -343,13 +373,6 @@ class RovenueModule : Module() {
         }
     }
 
-    private fun dtoFromEntitlement(e: Entitlement): Map<String, Any?> = mapOf(
-        "id"        to e.id,
-        "active"    to e.isActive,
-        "expiresAt" to e.expiresIso,
-        "productId" to e.productIdentifier,
-    )
-
     private fun dtoFromExperimentAssignment(a: ExperimentAssignment): Map<String, Any?> = mapOf(
         "experimentId" to a.experimentId,
         "key"          to a.key,
@@ -554,24 +577,6 @@ class RovenueModule : Module() {
         "servedFromFallback" to p.servedFromFallback,
     )
 
-    private fun dtoFromPurchaseResult(r: PurchaseResult): Map<String, Any?> = mapOf(
-        "entitlements"      to r.entitlements.map(::dtoFromEntitlement),
-        "virtualCurrencies" to r.virtualCurrencies.mapValues { it.value.toDouble() },
-        "productId"         to r.productId,
-        "storeTransactionId" to r.storeTransactionId,
-        "isDeferred"        to r.isDeferred,
-    )
-
-    /**
-     * Convert a [RovenueException] to a [RovenueCodedError] so the Expo bridge
-     * surfaces a structured `code` (= `error.kind.name` = UPPER_SNAKE_CASE) and
-     * extras (`serverCode`, `httpStatus`, `retryable`) to JS. The JS
-     * `mapNativeError()` normaliser resolves UPPER_SNAKE back to PascalCase.
-     * Non-RovenueException throwables propagate unchanged.
-     */
-    private fun codedError(e: Throwable): Throwable =
-        if (e is RovenueException) RovenueCodedError(e) else e
-
     /**
      * Reads the host app's `versionName` from its installed PackageInfo.
      * Returns null if the context isn't available (module instantiated
@@ -661,6 +666,40 @@ class RovenueModule : Module() {
         }
     }
 }
+
+// ---------------- Top-level DTO / error helpers ----------------
+//
+// dtoFromPurchaseResult and codedError are `internal` (not `private`) because
+// RovenuePaywallExpoView — a different class in this same package — calls
+// them from PaywallViewOptions' purchase callbacks. dtoFromEntitlement stays
+// `private`: it is only ever reached through dtoFromPurchaseResult, which
+// lives in this file too, so file-private visibility is already sufficient
+// and there is no reason to widen it further.
+
+private fun dtoFromEntitlement(e: Entitlement): Map<String, Any?> = mapOf(
+    "id"        to e.id,
+    "active"    to e.isActive,
+    "expiresAt" to e.expiresIso,
+    "productId" to e.productIdentifier,
+)
+
+internal fun dtoFromPurchaseResult(r: PurchaseResult): Map<String, Any?> = mapOf(
+    "entitlements"      to r.entitlements.map(::dtoFromEntitlement),
+    "virtualCurrencies" to r.virtualCurrencies.mapValues { it.value.toDouble() },
+    "productId"         to r.productId,
+    "storeTransactionId" to r.storeTransactionId,
+    "isDeferred"        to r.isDeferred,
+)
+
+/**
+ * Convert a [RovenueException] to a [RovenueCodedError] so the Expo bridge
+ * surfaces a structured `code` (= `error.kind.name` = UPPER_SNAKE_CASE) and
+ * extras (`serverCode`, `httpStatus`, `retryable`) to JS. The JS
+ * `mapNativeError()` normaliser resolves UPPER_SNAKE back to PascalCase.
+ * Non-RovenueException throwables propagate unchanged.
+ */
+internal fun codedError(e: Throwable): Throwable =
+    if (e is RovenueException) RovenueCodedError(e) else e
 
 /**
  * Single Expo CodedException that wraps any [RovenueException] from the Kotlin façade.
