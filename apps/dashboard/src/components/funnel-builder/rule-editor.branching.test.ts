@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { answerKindFor, branchableQuestionIds, coerceOperandValue } from "./rule-editor";
+import {
+  answerKindFor,
+  answerKindForTarget,
+  branchableQuestionIds,
+  coerceOperandValue,
+} from "./rule-editor";
 import type { Page } from "./types";
 
 describe("answerKindFor (M-1)", () => {
@@ -29,7 +34,15 @@ describe("branchableQuestionIds (M-2)", () => {
   ];
 
   it("includes questions whose answer kind can actually be compared", () => {
-    expect(branchableQuestionIds(pages, 4)).toEqual(["q_a", "q_b", "q_d"]);
+    // pg_2 is contact_info with no collect* flags, so it contributes the
+    // composite plus its two default-ON sub-fields (name, email).
+    expect(branchableQuestionIds(pages, 4)).toEqual([
+      "q_a",
+      "q_b",
+      "q_b.name",
+      "q_b.email",
+      "q_d",
+    ]);
   });
 
   it("still excludes a question whose type resolves to a kind with no operators", () => {
@@ -58,8 +71,9 @@ describe("branchableQuestionIds (M-2)", () => {
   it("excludes a page with no question_id at all", () => {
     const ids = branchableQuestionIds(pages, 4);
     expect(ids).not.toContain(undefined);
-    // pg_3 is an info page with no question_id; the other three all have one.
-    expect(ids.length).toBe(3);
+    // pg_3 is an info page with no question_id. The other three have one, and
+    // the contact page adds two sub-fields on top.
+    expect(ids.length).toBe(5);
   });
 
   it("only looks at pages before uptoIdx", () => {
@@ -88,3 +102,45 @@ describe("coerceOperandValue — 'between' (I-3)", () => {
     expect(coerceOperandValue("between", "18", "text")).toBe(18);
   });
 });
+
+describe("contact_info sub-fields (SP11)", () => {
+  const contactPages: Page[] = [
+    {
+      id: "pg_c",
+      type: "contact_info",
+      question_id: "q_c",
+      collectName: true,
+      collectEmail: true,
+      collectPhone: false,
+    } as never,
+    { id: "pg_x", type: "info", title: {} } as never,
+  ];
+
+  it("offers the composite AND one entry per field the page asks for", () => {
+    // The composite answers "did they give their details"; the sub-fields
+    // answer "is the email X". Both are legitimate questions.
+    expect(branchableQuestionIds(contactPages, 2)).toEqual(["q_c", "q_c.name", "q_c.email"]);
+  });
+
+  it("never offers a field the page does not collect", () => {
+    // Driven by the SHARED contactFieldsAsked, so the editor cannot offer a
+    // sub-field the renderer never shows — two definitions of "which fields
+    // does this page ask for" is the drift this consolidation prevents.
+    expect(branchableQuestionIds(contactPages, 2)).not.toContain("q_c.phone");
+
+    const withPhone = [{ ...contactPages[0], collectPhone: true } as never] as Page[];
+    expect(branchableQuestionIds(withPhone, 1)).toContain("q_c.phone");
+  });
+
+  it("respects the collectName/collectEmail default-ON asymmetry", () => {
+    // Flags absent entirely: name and email are asked for, phone is not.
+    const bare = [{ id: "pg_c", type: "contact_info", question_id: "q_c" } as never] as Page[];
+    expect(branchableQuestionIds(bare, 1)).toEqual(["q_c", "q_c.name", "q_c.email"]);
+  });
+
+  it("classifies a sub-field target as text, and the composite as composite", () => {
+    expect(answerKindForTarget(contactPages, "q_c.email")).toBe("text");
+    expect(answerKindForTarget(contactPages, "q_c")).toBe("composite");
+    expect(answerKindForTarget(contactPages, "q_nope")).toBe("none");
+  });
+})

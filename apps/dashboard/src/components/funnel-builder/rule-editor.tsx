@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { component, useService } from "impair";
 import { createId } from "@paralleldrive/cuid2";
 import { ArrowRight, Plus, Trash2, TriangleAlert } from "lucide-react";
-import type { Clause, ClauseOp, NextRule } from "@rovenue/shared/funnel";
+import { contactFieldsAsked, type Clause, type ClauseOp, type NextRule } from "@rovenue/shared/funnel";
 import { cn } from "../../lib/cn";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { OPERATORS_BY_KIND, PAGE_TYPES, type AnswerKind, type Page } from "./types";
@@ -31,13 +31,29 @@ export function answerKindFor(type: string): AnswerKind {
  * with zero valid operators — the `<select>` for `op` would render no
  * `<option>`s at all. */
 export function branchableQuestionIds(pages: Page[], uptoIdx: number): string[] {
-  return pages
-    .slice(0, uptoIdx)
-    .filter(
-      (p): p is Page & { question_id: string } =>
-        Boolean(p.question_id) && answerKindFor(p.type) !== "none",
-    )
-    .map((p) => p.question_id);
+  const out: string[] = [];
+  for (const p of pages.slice(0, uptoIdx)) {
+    if (!p.question_id || answerKindFor(p.type) === "none") continue;
+    out.push(p.question_id);
+    // A contact_info page also contributes one addressable SUB-FIELD per
+    // field it asks for, so an author can branch on the email specifically
+    // rather than only on "gave their details". Driven by the SHARED
+    // contactFieldsAsked, so the editor can never offer a field the
+    // renderer does not show.
+    if (p.type === "contact_info") {
+      for (const f of contactFieldsAsked(p)) out.push(`${p.question_id}.${f}`);
+    }
+  }
+  return out;
+}
+
+/** The answer kind for a clause target, which may be a `q.field` sub-field.
+ *  A resolved sub-field is a plain string, so it branches like text — no new
+ *  kind and no new operator. */
+export function answerKindForTarget(pages: Page[], questionId: string): AnswerKind {
+  if (questionId.includes(".")) return "text";
+  const page = pages.find((p) => p.question_id === questionId);
+  return page ? answerKindFor(page.type) : "none";
 }
 
 /**
@@ -229,8 +245,9 @@ export const RuleEditor = component(({ pageId }: Props) => {
               const value = "value" in c ? c.value : undefined;
               // The clause's question, not the page being edited — the
               // operators offered depend on what the ANSWER looks like.
-              const questionPage = vm.pages.find((p) => p.question_id === c.question_id);
-              const answerKind = questionPage ? answerKindFor(questionPage.type) : "none";
+              // Resolves a `q.field` sub-field target too, which branches as
+              // text because a resolved sub-field is a plain string.
+              const answerKind = answerKindForTarget(vm.pages, c.question_id);
               const allowedOps = OPERATORS_BY_KIND[answerKind];
 
               // A clause authored before branchableQuestionIds excluded

@@ -22,7 +22,7 @@ import {
 import { PAGE_TYPES, type Page, type ProgressStyle, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import type { LocaleCode } from "@rovenue/shared/i18n";
-import type { AnswerValue, ContactAnswer } from "@rovenue/shared/funnel";
+import { contactFieldsAsked, type AnswerValue, type ContactAnswer } from "@rovenue/shared/funnel";
 import { resolvePage, type ResolvedPage } from "./i18n";
 
 function isFilledColor(c?: string): c is string {
@@ -1252,15 +1252,11 @@ const CONTACT_FIELDS = [
   { key: "phone" as const, placeholder: "+1 555 0000", type: "tel" as const },
 ];
 
-/** Which fields THIS page asks for. `collectName`/`collectEmail` default ON
- *  (`!== false`); `collectPhone` defaults OFF. That asymmetry is the existing
- *  product behaviour and is preserved deliberately. */
+/** Which fields THIS page asks for, resolved through the SHARED definition so
+ *  the rule editor cannot offer a sub-field the renderer never shows. */
 function asksFor(page: ResolvedPage): ReadonlyArray<(typeof CONTACT_FIELDS)[number]> {
-  return CONTACT_FIELDS.filter(({ key }) => {
-    if (key === "name") return page.collectName !== false;
-    if (key === "email") return page.collectEmail !== false;
-    return Boolean(page.collectPhone);
-  });
+  const asked = new Set<string>(contactFieldsAsked(page));
+  return CONTACT_FIELDS.filter(({ key }) => asked.has(key));
 }
 
 const ContactInfoFields = component(

@@ -17,6 +17,31 @@ export type ContactAnswer = {
   phone?: string;
 };
 
+export type ContactField = keyof ContactAnswer;
+
+/**
+ * Which contact fields a page asks for, in render order.
+ *
+ * ONE definition, used by the renderer (which fields to show and emit) and
+ * by the rule editor (which sub-fields to offer). Two copies of "which
+ * fields does this page ask for" would let the editor offer a field the page
+ * does not collect — the drift class this codebase keeps paying for.
+ *
+ * The flag asymmetry is existing product behaviour: name and email default
+ * ON (`!== false`), phone defaults OFF.
+ */
+export function contactFieldsAsked(page: {
+  collectName?: boolean;
+  collectEmail?: boolean;
+  collectPhone?: boolean;
+}): ContactField[] {
+  const out: ContactField[] = [];
+  if (page.collectName !== false) out.push("name");
+  if (page.collectEmail !== false) out.push("email");
+  if (page.collectPhone) out.push("phone");
+  return out;
+}
+
 export type AnswerValue = string | number | boolean | string[] | null | ContactAnswer;
 export type AnswerMap = Map<string, AnswerValue>;
 
@@ -174,8 +199,47 @@ function matches(
   return condition.clauses.some((c) => evalClause(c, answers, today));
 }
 
+/**
+ * The set of `contact_info` sub-fields a clause may address. Kept beside the
+ * ContactAnswer type so the two cannot drift.
+ */
+const CONTACT_FIELDS: ReadonlySet<string> = new Set(["name", "email", "phone"]);
+
+/**
+ * Resolve a clause's `question_id` to an answer, supporting
+ * `<question_id>.<field>` for a contact_info sub-field.
+ *
+ * Splits on the first dot. A page's own question_id cannot contain one —
+ * qid() builds ids from a base36 cuid2 slice, and pages-schema rejects a
+ * stored id carrying a dot — so the text before it is always the whole base.
+ *
+ * Recorded from mutation-checking: first-dot vs last-dot is observationally
+ * EQUIVALENT here, because valid field names are single words and base ids
+ * have no dots. Switching to lastIndexOf reds no test. first is kept for
+ * readability, not because behaviour depends on it — do not add a test
+ * claiming to pin the difference.
+ *
+ * Anything that cannot resolve returns undefined, i.e. unanswered: an
+ * unknown field name, a base that is not a composite, a base that does not
+ * exist, or a second dot. The object check is what stops a MISSING base from
+ * throwing (`undefined["email"]`), which is what mutation-checking showed it
+ * actually carries — indexing a string merely yields undefined.
+ */
+function resolveAnswer(questionId: string, answers: AnswerMap): AnswerValue | undefined {
+  const dot = questionId.indexOf(".");
+  if (dot === -1) return answers.get(questionId);
+
+  const base = questionId.slice(0, dot);
+  const field = questionId.slice(dot + 1);
+  if (!CONTACT_FIELDS.has(field)) return undefined;
+
+  const value = answers.get(base);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return (value as ContactAnswer)[field as keyof ContactAnswer];
+}
+
 function evalClause(clause: Clause, answers: AnswerMap, today?: string): boolean {
-  const a = answers.get(clause.question_id);
+  const a = resolveAnswer(clause.question_id, answers);
 
   // One definition of "answered", shared with the runner's own gate — see
   // isAnswered. The evaluator and the client each computing it was two

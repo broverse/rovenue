@@ -89,7 +89,15 @@ export const pageSchema = z
       .union([z.string(), z.literal("paywall"), z.literal("end")])
       .optional(),
     // Shared fields
-    question_id: z.string().optional(),
+    // `.` is RESERVED as the contact_info sub-field separator
+    // (`<question_id>.<field>`), so a page's own question id must not
+    // contain one. Enforced rather than assumed: without this a stored id of
+    // `q.c` would make `q.c.email` ambiguous, and the resolver's
+    // split-on-first-dot rule would silently pick the wrong base.
+    question_id: z
+      .string()
+      .refine((v) => !v.includes("."), { message: "question_id must not contain a dot" })
+      .optional(),
     title: z.string().optional(),
     subtitle: z.string().optional(),
     body: z.string().optional(),
