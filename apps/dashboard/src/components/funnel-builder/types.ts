@@ -105,6 +105,7 @@ export const OPERATORS_BY_KIND: Record<AnswerKind, ReadonlyArray<ClauseOp>> = {
   date: [
     "eq", "neq", "in", "not_in",
     "before", "after", "on_or_before", "on_or_after",
+    "within_last_days", "more_than_days_ago",
     "is_answered", "is_not_answered",
   ],
   // A composite answer is an object, so every comparison operator refuses

@@ -22,6 +22,8 @@ describe("the date answer kind", () => {
       "after",
       "on_or_before",
       "on_or_after",
+      "within_last_days",
+      "more_than_days_ago",
       "is_answered",
       "is_not_answered",
     ]);
@@ -44,6 +46,29 @@ describe("the date answer kind", () => {
       // Coercing a date to a number yields NaN -> null -> a dead clause.
       expect(coerceOperandValue(op, "2026-03-01", "date")).toBe("2026-03-01");
     }
+  });
+
+  it("stores a relative operand as a NUMBER of days, not a date string", async () => {
+    // The operand is a day COUNT. Left as the string "30" it would never
+    // satisfy evalClause, which requires a whole non-negative number — the
+    // same writable-but-dead shape the numeric operators once had.
+    const { coerceOperandValue: coerce } = await import("./coerce-operand");
+    for (const op of ["within_last_days", "more_than_days_ago"] as const) {
+      expect(coerce(op, "30", "date")).toBe(30);
+      expect(typeof coerce(op, "30", "date")).toBe("number");
+    }
+  });
+
+  it("does NOT render a date picker for the relative operators", async () => {
+    // They take a day count, so DATE_COMPARISONS must not contain them even
+    // though they live on the `date` kind. The two sets differ on purpose.
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync("src/components/funnel-builder/rule-editor.tsx", "utf8"),
+    );
+    const dateSet = /DATE_COMPARISONS[^=]*= new Set\(\[(.*?)\]\)/s.exec(src)?.[1] ?? "";
+    expect(dateSet).not.toContain("within_last_days");
+    expect(dateSet).not.toContain("more_than_days_ago");
+    expect(dateSet).toContain("before");
   });
 
   it("exports one ISO pattern rather than each layer inventing its own", () => {

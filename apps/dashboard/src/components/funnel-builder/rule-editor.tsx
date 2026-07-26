@@ -97,6 +97,8 @@ const OPERATORS: ReadonlyArray<{ v: ClauseOp; l: string }> = [
   { v: "after", l: "is after" },
   { v: "on_or_before", l: "is on or before" },
   { v: "on_or_after", l: "is on or after" },
+  { v: "within_last_days", l: "in the last N days" },
+  { v: "more_than_days_ago", l: "more than N days ago" },
   { v: "is_answered", l: "is answered" },
   { v: "is_not_answered", l: "is not answered" },
 ];

@@ -5,7 +5,19 @@ import type { AnswerKind } from "./types";
 // evaluator.ts requires `typeof === "number"` for all five. Grouped here so
 // coerceOperandValue treats them identically instead of `between` needing
 // its own separate coercion path.
-const NUMERIC_COMPARISONS: ReadonlySet<ClauseOp> = new Set(["gt", "gte", "lt", "lte", "between"]);
+const NUMERIC_COMPARISONS: ReadonlySet<ClauseOp> = new Set([
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "between",
+  // The relative date operators take a COUNT OF DAYS, not a date. They
+  // belong here (the operand must be stored as a number, or evalClause
+  // refuses it) and deliberately NOT in rule-editor's DATE_COMPARISONS,
+  // which is what renders a date picker. The two sets differ on purpose.
+  "within_last_days",
+  "more_than_days_ago",
+]);
 
 /**
  * Store an operand in the type `evalClause` will compare it with.

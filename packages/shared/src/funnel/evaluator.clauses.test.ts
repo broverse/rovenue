@@ -78,6 +78,9 @@ describe("evalClause — an array answer never matches a scalar operator", () =>
     after: "2026-03-01",
     on_or_before: "2026-03-01",
     on_or_after: "2026-03-01",
+    // A relative operator's operand is a DAY COUNT, not a date.
+    within_last_days: 30,
+    more_than_days_ago: 30,
     is_answered: undefined,
     is_not_answered: undefined,
   };

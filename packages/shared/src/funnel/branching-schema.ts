@@ -16,6 +16,8 @@ export const CLAUSE_OPS = [
   "after",
   "on_or_before",
   "on_or_after",
+  "within_last_days",
+  "more_than_days_ago",
   "is_answered",
   "is_not_answered",
 ] as const;
@@ -98,6 +100,19 @@ const clauseSchema = z
         ctx.addIssue({
           code: "custom",
           message: `Op between requires [min, max] as numbers`,
+          path: ["value"],
+        });
+      }
+    }
+    if (c.op === "within_last_days" || c.op === "more_than_days_ago") {
+      // The operand is a COUNT OF DAYS, not a date. A fraction or a negative
+      // has no meaning, and left unvalidated it would silently produce a
+      // cutoff nobody intended rather than an error. Additive for brand-new
+      // operators, so no stored funnel can hold one — no migration.
+      if (typeof c.value !== "number" || !Number.isInteger(c.value) || c.value < 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Op ${c.op} requires a whole number of days (0 or more)`,
           path: ["value"],
         });
       }

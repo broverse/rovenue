@@ -41,6 +41,33 @@ export function isAnswered(value: AnswerValue | undefined): boolean {
   return true;
 }
 
+/**
+ * `iso` shifted by `days`, as another ISO calendar date. Returns null when
+ * `iso` is not a well-formed `YYYY-MM-DD`.
+ *
+ * This DOES parse a date, which the comparison operators deliberately never
+ * do — and the distinction is worth keeping straight in both directions.
+ * `before`/`after` compare two calendar dates, and text comparison is exact
+ * there, so parsing would only add a time and a zone the value does not
+ * have. Here the job is arithmetic: today minus N days cannot be computed
+ * with string operations at all. `Date.UTC` is correct precisely because
+ * both ends are UTC-anchored and no local zone enters it.
+ *
+ * So: do not make the comparisons parse, and do not try to subtract days
+ * with string surgery. The month-end and leap-year cases live here, in one
+ * place, tested once.
+ */
+export function shiftIsoDays(iso: string, days: number): string | null {
+  if (!ISO_DATE_RE.test(iso)) return null;
+  const [y, m, d] = iso.split("-").map(Number) as [number, number, number];
+  const ms = Date.UTC(y, m - 1, d) + days * 86_400_000;
+  const shifted = new Date(ms);
+  const yy = String(shifted.getUTCFullYear()).padStart(4, "0");
+  const mm = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
 // Minimal page shape the runtime evaluator needs. Matches the flat
 // dashboard page (see pages-schema.ts) — only the routing fields are
 // load-bearing here; everything else is opaque from the evaluator's
@@ -69,13 +96,24 @@ interface EvalInput {
   pagesOrder: string[];
   answers: AnswerMap;
   pagesById: PageGraph;
+  /**
+   * Today's calendar date as ISO `YYYY-MM-DD`, for the relative date
+   * operators. INJECTED rather than read from a clock in here, so this stays
+   * pure and testable without freezing time — and so "which clock decided
+   * this route" is a property of the caller, not a hidden global.
+   *
+   * Absent means the relative operators cannot compare, so they return
+   * false. That is the behaviour a caller which forgot to pass it gets, and
+   * a silent false routes to default_next, which is defined.
+   */
+  today?: string;
 }
 
 export function evaluateNext(input: EvalInput): EvalResult {
-  const { page, answers, pagesOrder, pagesById } = input;
+  const { page, answers, pagesOrder, pagesById, today } = input;
   const rules = page.next_rules ?? [];
   for (const rule of rules) {
-    if (matches(rule.condition, answers)) {
+    if (matches(rule.condition, answers, today)) {
       return resolveGoto(rule.goto, page.id, pagesOrder, pagesById);
     }
   }
@@ -128,14 +166,15 @@ function resolveGoto(
 function matches(
   condition: { op: "all" | "any"; clauses: Clause[] },
   answers: AnswerMap,
+  today?: string,
 ): boolean {
   if (condition.op === "all") {
-    return condition.clauses.every((c) => evalClause(c, answers));
+    return condition.clauses.every((c) => evalClause(c, answers, today));
   }
-  return condition.clauses.some((c) => evalClause(c, answers));
+  return condition.clauses.some((c) => evalClause(c, answers, today));
 }
 
-function evalClause(clause: Clause, answers: AnswerMap): boolean {
+function evalClause(clause: Clause, answers: AnswerMap, today?: string): boolean {
   const a = answers.get(clause.question_id);
 
   // One definition of "answered", shared with the runner's own gate — see
@@ -223,6 +262,40 @@ function evalClause(clause: Clause, answers: AnswerMap): boolean {
       // whole area is built on says such an operator returns false rather
       // than answering true by accident.
       return false;
+    }
+    // ---- relative date operators ----
+    //
+    // The operand is a COUNT OF DAYS, and `today` comes from the caller.
+    // Both are validated before any comparison: an operator that cannot
+    // compare returns false rather than answering true by accident.
+    //
+    // Inclusive at both ends for within_last_days, strictly older for
+    // more_than_days_ago — so the two partition the past with no overlap
+    // and no gap. A FUTURE date matches neither, deliberately.
+    case "within_last_days":
+    case "more_than_days_ago": {
+      if (
+        typeof a !== "string" ||
+        !ISO_DATE_RE.test(a) ||
+        typeof clause.value !== "number" ||
+        !Number.isInteger(clause.value) ||
+        clause.value < 0 ||
+        // Redundant at RUNTIME — shiftIsoDays(undefined) fails its pattern
+        // test and returns null, which the next line already turns into
+        // false, so removing this line reds no test. It stays for TYPE
+        // NARROWING: without it `today` is `string | undefined` here and the
+        // call below needs a cast, which would mean leaning on `undefined`
+        // being coerced to the string "undefined". The contract ("absent
+        // means false") is tested; this line is how it is expressed without
+        // a cast.
+        today === undefined
+      ) {
+        return false;
+      }
+      const cutoff = shiftIsoDays(today, -clause.value);
+      if (cutoff === null || !ISO_DATE_RE.test(today)) return false;
+      if (clause.op === "within_last_days") return a >= cutoff && a <= today;
+      return a < cutoff;
     }
     default:
       return false;

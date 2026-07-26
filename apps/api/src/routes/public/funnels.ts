@@ -51,6 +51,16 @@ import { chargesEnabled } from "../../lib/stripe-platform";
 // ---------------------------------------------------------------------------
 // Bounded recursive answer schema (F16).
 // ---------------------------------------------------------------------------
+/** Today's UTC calendar date as ISO `YYYY-MM-DD` — what the relative date
+ *  operators compare against. Exported so a test can assert the shape
+ *  without reaching for a clock. */
+export function utcToday(now: Date = new Date()): string {
+  const y = String(now.getUTCFullYear()).padStart(4, "0");
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(now.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 const answerValueSchema: z.ZodType<unknown> = z.lazy(() =>
   z.union([
     z.string().max(2000),
@@ -486,6 +496,12 @@ export const publicFunnelsRoute = new Hono()
         pagesOrder,
         answers: answerMap,
         pagesById,
+        // The one authority for "now". Real routing is server-side only —
+        // funnel-runner.tsx never evaluates — so a relative date rule is
+        // decided here or nowhere. UTC by choice: deterministic and needing
+        // no extra input, at the documented cost that a visitor west of
+        // Greenwich late in their day is already on UTC's next date.
+        today: utcToday(),
       });
       if (result.next === "page") {
         const prevPageId = session.currentPageId;
