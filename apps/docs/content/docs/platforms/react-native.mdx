@@ -265,6 +265,42 @@ See [Processing Purchases](/docs/guides/processing-purchases) for the full API r
 
 ---
 
+## Paywalls
+
+`RovenuePaywallView` renders a builder paywall (see
+[Placements & Paywalls](/docs/guides/placements-and-paywalls)) through the
+platform's own native paywall renderer — SwiftUI on iOS, Android Views on
+Android — hosted inside an Expo view, for pixel parity with the Swift and
+Kotlin SDKs. Its props are unchanged from the JS renderer it replaced:
+
+```tsx
+import { RovenuePaywallView, getPaywall } from '@rovenue/react-native-sdk';
+
+const paywall = await getPaywall('onboarding_end', 'en');
+// Renders nothing when the paywall has no builderConfig.
+<RovenuePaywallView
+  paywall={paywall}
+  locale="en"
+  colorScheme="dark"
+  onPurchaseCompleted={(result) => close()}
+  onPurchaseFailed={(error) => {/* keep the paywall up */}}
+  onClose={() => close()}
+  onUrl={(url) => {/* scheme-check, then open */}}
+/>
+```
+
+<Callout type="warn">
+The view only sends `paywall.placementIdentifier` across the native bridge
+— it does **not** treat the `paywall` object you pass in as authoritative.
+The native side re-resolves the paywall itself from the placement using the
+separate `locale` prop. If you called `getPaywall('onboarding_end', 'fr')`,
+pass `locale="fr"` to `RovenuePaywallView` as well — omitting it resolves
+the paywall's default locale instead of the one you already fetched. Always
+pass the view the same `locale` you passed to `getPaywall`.
+</Callout>
+
+---
+
 ## Change listener
 
 Use `Rovenue.addChangeListener` to react to server-pushed entitlement or virtual-currency updates. It returns an unsubscribe function — call it on cleanup.

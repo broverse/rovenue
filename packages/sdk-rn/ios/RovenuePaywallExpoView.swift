@@ -6,8 +6,10 @@ import Rovenue
 /// normalises an unrecognised kind on the JS side.
 private let UNMAPPED_ERROR_CODE = "Unknown"
 
-/// Separates placement from locale in the resolve key. A character that
-/// cannot occur in either, so two different pairs cannot collide.
+/// Separates the two halves of both the resolve key (placement + locale) and
+/// the content key (paywall identifier + builder config JSON, matching
+/// `RovenuePaywallView.paywallStateKey`). A character that cannot occur in
+/// either half of either pair, so two different pairs cannot collide.
 private let KEY_SEPARATOR = "\u{0000}"
 
 /// Hosts the SwiftUI `RovenuePaywallView` inside a React Native view tree.
@@ -37,15 +39,23 @@ final class RovenuePaywallExpoView: ExpoView {
     var hasUrlHandler: Bool = false
 
     private var host: UIHostingController<AnyView>?
-    /// The `resolvedKey` the current `host` was built for. When this still
-    /// matches, the controller is reused and only its `rootView` is updated.
+    /// The paywall CONTENT key (`contentKey(for:)`) the current `host` was
+    /// built for — the same key the SwiftUI renderer itself keys impressions
+    /// on. When this still matches the paywall about to be mounted, the
+    /// controller is reused and only its `rootView` is updated: no fresh
+    /// impression, no reset of the SwiftUI view's `@State`.
     private var hostKey: String?
     private var loadTask: Task<Void, Never>?
     private var cachedPaywall: Paywall?
-    /// The (placement, locale) pair `cachedPaywall` was fetched for. Only a
-    /// change to THIS re-fetches; cosmetic props rebuild the content from
-    /// the cached paywall.
+    /// The resolve key (placement + locale) `cachedPaywall` was fetched for.
     private var resolvedKey: String?
+    /// The resolve key `cachedPaywall` actually BELONGS to, set only once the
+    /// fetch for that key has landed. `resolvedKey` is assigned up front, so
+    /// while a fetch for a new key is in flight `resolvedKey == key` can be
+    /// true before `cachedPaywall` has been updated to match — this field is
+    /// what distinguishes "cache is for this key" from "a fetch for this key
+    /// just started."
+    private var cachedKey: String?
 
     required init(appContext: AppContext? = nil) {
         super.init(appContext: appContext)
@@ -70,6 +80,7 @@ final class RovenuePaywallExpoView: ExpoView {
             loadTask?.cancel()
             cachedPaywall = nil
             resolvedKey = nil
+            cachedKey = nil
             mount(nil)
             return
         }
@@ -83,6 +94,15 @@ final class RovenuePaywallExpoView: ExpoView {
         // not — retries the fetch. That is the price of not being stuck
         // blank, and it stops as soon as a resolve succeeds.
         if key == resolvedKey {
+            // `resolvedKey` is assigned before the fetch for it lands (below),
+            // so `key == resolvedKey` is also true for the SECOND prop batch
+            // that arrives while that fetch is still in flight. Without also
+            // checking `cachedKey`, that batch would take this fast path and
+            // mount whatever `cachedPaywall` STILL holds — the previous
+            // key's content — producing a spurious extra impression of it.
+            // A fetch is already running for this key; do nothing and let it
+            // land.
+            guard cachedKey == key else { return }
             mount(cachedPaywall)
             return
         }
@@ -108,9 +128,21 @@ final class RovenuePaywallExpoView: ExpoView {
                 // changed.
                 if paywall == nil { self.resolvedKey = nil }
                 self.cachedPaywall = paywall
+                self.cachedKey = paywall == nil ? nil : key
                 self.mount(paywall)
             }
         }
+    }
+
+    /// Identity of "which paywall is this", matching the SwiftUI renderer's
+    /// own `paywallStateKey` exactly (`RovenuePaywallView.swift`) — content,
+    /// not resolve parameters. Two different (placement, locale) resolves
+    /// that land on the byte-identical builder config must NOT be treated as
+    /// a different paywall: Android already compares on content, and a
+    /// locale-only change re-mounting here would re-fire `logPaywallShown`
+    /// for content the user has already seen.
+    private func contentKey(for paywall: Paywall) -> String {
+        (paywall.paywallIdentifier ?? "") + KEY_SEPARATOR + (paywall.builderConfigJson ?? "")
     }
 
     private func scheme() -> ColorScheme? {
@@ -207,20 +239,28 @@ final class RovenuePaywallExpoView: ExpoView {
             } : nil
         )
 
-        // Same paywall, cosmetic change only: push the new content into the
-        // EXISTING controller. Recreating it would reset the SwiftUI view's
-        // @State — didLogShow and selectedPackageId — which re-fires
-        // logPaywallShown and drops the user's package selection.
-        if let host, hostKey == resolvedKey {
+        // Same paywall CONTENT, cosmetic or resolve-parameter change only:
+        // push the new content into the EXISTING controller. Recreating it
+        // would reset the SwiftUI view's @State — didLogShow and
+        // selectedPackageId — which re-fires logPaywallShown and drops the
+        // user's package selection. Keying on content (not `resolvedKey`)
+        // means a locale-only change that resolves to the byte-identical
+        // builder config is also treated as the same paywall here, matching
+        // `RovenuePaywallView`'s own `.onChange(of: paywallStateKey)` — that
+        // onChange only resets/re-logs when `rootView` is actually swapped
+        // to different content, so reusing the controller here is what
+        // keeps this view's behavior aligned with it.
+        let key = contentKey(for: paywall)
+        if let host, hostKey == key {
             host.rootView = AnyView(content)
             attach(host, to: parent)
             return
         }
 
-        // A different paywall: a fresh impression is correct here.
+        // Different paywall content: a fresh impression is correct here.
         destroyHost()
         let controller = UIHostingController(rootView: AnyView(content))
-        hostKey = resolvedKey
+        hostKey = key
         attach(controller, to: parent)
         host = controller
     }

@@ -107,7 +107,20 @@ describe("RovenuePaywallView bridges to the native view", () => {
   it("does not throw when optional callbacks are omitted", () => {
     render(<RovenuePaywallView paywall={PAYWALL} />);
     const p = lastProps();
+    // onPurchaseFailed is safe here only because `f?.(mapNativeError(...))`
+    // short-circuits BEFORE evaluating its argument when `f` is undefined.
+    // A realistic payload (not `{}`) ensures this would actually fail if the
+    // wrapper ever evaluated `mapNativeError(...)` eagerly instead.
+    expect(() =>
+      p.onPurchaseFailed({
+        nativeEvent: { code: "NetworkError", message: "offline" },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      p.onPurchaseCompleted({ nativeEvent: { result: { productId: "pro" } } }),
+    ).not.toThrow();
     expect(() => p.onCloseRequested({ nativeEvent: {} })).not.toThrow();
+    expect(() => p.onRestoreRequested({ nativeEvent: {} })).not.toThrow();
     expect(() => p.onUrlRequested({ nativeEvent: { url: "https://x" } })).not.toThrow();
   });
 });
