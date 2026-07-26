@@ -975,6 +975,7 @@ Record pass/fail for each, on each platform:
 9. With `onUrl` supplied, a url-action button fires it with the right URL; with `onUrl` omitted, the button renders but does nothing.
 10. `colorScheme="dark"` and `colorScheme="light"` both take effect; omitting it follows the system.
 11. Backgrounding and returning does not blank the paywall or double-fire `paywall_view`.
+12. **Android, money path.** Start a purchase, and while the store sheet is up, make the host change a cosmetic prop (`colorScheme` is easiest). Dismiss the sheet and tap purchase again: exactly one purchase flow must run. `bind()` used to clear the in-flight guard on every call, and the bridge's cache-hit re-bind made that reachable — the guard is now scoped to a content change, matching Swift. This one has no unit test: the module has no Android-view test harness, so this checklist item is its only verification.
 
 - [ ] **Step 3: Record the outcome**
 

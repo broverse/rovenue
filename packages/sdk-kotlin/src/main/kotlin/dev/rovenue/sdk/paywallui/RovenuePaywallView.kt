@@ -103,8 +103,18 @@ class RovenuePaywallView @JvmOverloads constructor(
         if (contentChanged) {
             this.selectedPackageId = config?.let { initialSelection(it.root, paywall.offering) }
             this.didLogShow = false
+            // Scoped to a content change on purpose. isPurchasing is the
+            // re-entrancy guard startPurchase() reads, and purchaseScope is
+            // deliberately NOT tied to this view's lifecycle — so clearing
+            // the flag on every bind() would unlock a second purchase while
+            // the first is still running with Play Billing. A same-content
+            // re-bind is now routine: the React Native bridge re-binds from
+            // cache whenever a cosmetic prop changes.
+            //
+            // The Swift renderer already scopes its reset this way, inside
+            // .onChange(of: paywallStateKey).
+            this.isPurchasing = false
         }
-        this.isPurchasing = false
         render()
         if (isAttachedToWindow) maybeLogShown()
     }
