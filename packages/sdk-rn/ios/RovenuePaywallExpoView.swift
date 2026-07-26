@@ -7,9 +7,12 @@ import Rovenue
 private let UNMAPPED_ERROR_CODE = "Unknown"
 
 /// Separates the two halves of both the resolve key (placement + locale) and
-/// the content key (paywall identifier + builder config JSON, matching
-/// `RovenuePaywallView.paywallStateKey`). A character that cannot occur in
-/// either half of either pair, so two different pairs cannot collide.
+/// the content key (paywall identifier + builder config JSON). A character
+/// that cannot occur in either half of either pair, so two different pairs
+/// cannot collide — which is why this is NOT the `"|"` the SwiftUI
+/// renderer's own `paywallStateKey` uses. The two strings are built from the
+/// same fields but are not interchangeable, and neither is ever compared
+/// against the other.
 private let KEY_SEPARATOR = "\u{0000}"
 
 /// Hosts the SwiftUI `RovenuePaywallView` inside a React Native view tree.
@@ -134,9 +137,10 @@ final class RovenuePaywallExpoView: ExpoView {
         }
     }
 
-    /// Identity of "which paywall is this", matching the SwiftUI renderer's
-    /// own `paywallStateKey` exactly (`RovenuePaywallView.swift`) — content,
-    /// not resolve parameters. Two different (placement, locale) resolves
+    /// Identity of "which paywall is this" — content, not resolve parameters.
+    /// Built from the same two fields as the SwiftUI renderer's own
+    /// `paywallStateKey`, though with a different separator; the two are
+    /// never compared against each other. Two different (placement, locale) resolves
     /// that land on the byte-identical builder config must NOT be treated as
     /// a different paywall: Android already compares on content, and a
     /// locale-only change re-mounting here would re-fire `logPaywallShown`
