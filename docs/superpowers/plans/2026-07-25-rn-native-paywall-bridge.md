@@ -958,6 +958,12 @@ Use the existing Expo config-plugin path documented in `apps/docs/content/docs/g
 
 - [ ] **Step 2: Run the checklist on iOS and again on Android**
 
+**First, record which React Native architecture the host app runs.** Old architecture
+(`ComponentData`) and Fabric (`ExpoFabricView`) take different Expo paths for props, events
+*and* layout — including whether `shouldUseAndroidLayout` has any effect. Either run the
+checklist on both, or state explicitly that only the new architecture is supported. Everything
+below is conditional on this answer, which is why it comes first.
+
 Record pass/fail for each, on each platform:
 
 1. The paywall appears and fills its container (not zero-height, not clipped).
@@ -976,6 +982,19 @@ Record pass/fail for each, on each platform:
 10. `colorScheme="dark"` and `colorScheme="light"` both take effect; omitting it follows the system.
 11. Backgrounding and returning does not blank the paywall or double-fire `paywall_view`.
 12. **Android, money path.** Start a purchase, and while the store sheet is up, make the host change a cosmetic prop (`colorScheme` is easiest). Dismiss the sheet and tap purchase again: exactly one purchase flow must run. `bind()` used to clear the in-flight guard on every call, and the bridge's cache-hit re-bind made that reachable — the guard is now scoped to a content change, matching Swift. This one has no unit test: the module has no Android-view test harness, so this checklist item is its only verification.
+
+The remaining items exist because the final review found code paths that two full fix rounds
+went into and that nothing above reaches. They are ordered by what they would catch.
+
+13. **A failed resolve, and the retry that follows.** Turn on airplane mode (or point at an unknown placement): the view must render nothing and must not crash. Then restore connectivity and change **only** `colorScheme` — the paywall must appear. That second half is the contract the retry fix deliberately bought: a failed resolve clears the key so the next prop update re-fetches. Nothing else on this list exercises it.
+14. **The mid-fetch race.** Change the placement and a cosmetic prop in quick succession. Assert exactly one `paywall_view` per paywall, and no flash of the previous paywall.
+15. **Locale change.** Switch `locale` on a paywall that has a localization for it. This is the only prop change that costs a network round trip. Confirm the localized copy appears, and note whether `paywall_view` fires — if the localized paywall's content is identical, it should not.
+16. **Payload shape on item 5.** When `onPurchaseCompleted` fires, inspect the object. Specifically confirm a **null `storeTransactionId` survives** as null rather than arriving undefined or crashing: the DTO is `[String: Any?]` / `Map<String, Any?>`, and nested nulls take a different conversion path for view events than for the `AsyncFunction` returns everything else uses. Reading cannot settle this; a device can.
+17. **Placement A → B → A.** Item 4 covers going A → B. Coming back is what exercises the host-rebuild path and the content-key bookkeeping on both platforms.
+18. **Android rotation and impression count.** Item 3 checks layout only. If the host activity does not declare `configChanges|orientation`, rotation recreates the view — confirm whether that re-fires `paywall_view` on Android when it does not on iOS.
+19. **`paywall_close` count.** Item 7 confirms `onClose` fires. Confirm separately that exactly one `paywall_close` reaches the durable queue.
+20. **Remote-config-only paywall.** Point the view at a placement whose `builderConfigJson` is null. Spec §5 promises it renders nothing — confirm that, and confirm the `flex: 1` container does not still claim space.
+21. **Full unmount with a purchase in flight.** Start a purchase, then navigate away and never return, so `OnViewDestroys` / `deinit` run. The completion callback must either still land or be cleanly dropped — not crash.
 
 - [ ] **Step 3: Record the outcome**
 
