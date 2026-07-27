@@ -235,6 +235,8 @@ enum OverridablePropKeys {
     static let featureList: Set<String> = ["iconColor"]
     static let timeline: Set<String> = ["connectorColor"]
     static let socialProof: Set<String> = ["rating", "starColor"]
+    static let stickyFooter: Set<String> = ["background"]
+    static let countdown: Set<String> = ["color"]
 }
 
 /// A `CodingKey` that accepts ANY string, used to enumerate every key
@@ -464,6 +466,38 @@ public struct SocialProofOverrideProps: Decodable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         rating = try container.decodeIfPresent(Double.self, forKey: .rating)
         starColor = try container.decodeIfPresent(ThemePair.self, forKey: .starColor)
+    }
+}
+
+public struct StickyFooterOverrideProps: Decodable, Equatable, Sendable {
+    public let background: ThemePair?
+
+    public init(background: ThemePair? = nil) {
+        self.background = background
+    }
+
+    private enum CodingKeys: String, CodingKey { case background }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.stickyFooter)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+    }
+}
+
+public struct CountdownOverrideProps: Decodable, Equatable, Sendable {
+    public let color: ThemePair?
+
+    public init(color: ThemePair? = nil) {
+        self.color = color
+    }
+
+    private enum CodingKeys: String, CodingKey { case color }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.countdown)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
     }
 }
 
@@ -936,6 +970,91 @@ public struct SocialProofProps: Decodable {
     }
 }
 
+public struct StickyFooterProps: Decodable {
+    public let id: String
+    public let children: [BuilderNode]
+    /// Absent = `stickyFooterDefaultBackground` (see RovenuePaywallView.swift)
+    /// — a pinned bar needs an opaque background or the content scrolls
+    /// visibly beneath it, so unlike a plain node's colour this is never
+    /// left to inherit.
+    public let background: ThemePair?
+    public let overrides: [NodeOverride<StickyFooterOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, children: [BuilderNode], background: ThemePair? = nil,
+                overrides: [NodeOverride<StickyFooterOverrideProps>]? = nil,
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.children = children; self.background = background
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, children, background, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        children = try container.decode([BuilderNode].self, forKey: .children)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        overrides = try container.decodeIfPresent([NodeOverride<StickyFooterOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
+/// Mirrors schema.ts's `CountdownNode.onExpiry` union.
+public enum CountdownOnExpiry: String, Decodable, Equatable, Sendable {
+    case freeze
+    case hide
+}
+
+public struct CountdownProps: Decodable {
+    public let id: String
+    /// ISO-8601 absolute deadline. Mutually exclusive with `durationSeconds`
+    /// (the strict authoring schema refuses to save both; a lenient decode
+    /// here does not re-validate that — `endsAt` simply wins when both are
+    /// somehow present, mirroring `useCountdownDeadline`'s check order).
+    public let endsAt: String?
+    /// Seconds from this paywall's first show to THIS user, persisted —
+    /// see `countdownFirstShownAt` in RovenuePaywallView.swift.
+    public let durationSeconds: Double?
+    /// Absent = `countdownDefaultOnExpiry`.
+    public let onExpiry: CountdownOnExpiry?
+    public let labelKey: String?
+    /// Absent = inherit the ambient text colour (NOT a substituted default —
+    /// unlike `StickyFooterProps.background`, this is ordinary text).
+    public let color: ThemePair?
+    public let overrides: [NodeOverride<CountdownOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, endsAt: String? = nil, durationSeconds: Double? = nil,
+                onExpiry: CountdownOnExpiry? = nil, labelKey: String? = nil, color: ThemePair? = nil,
+                overrides: [NodeOverride<CountdownOverrideProps>]? = nil,
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.endsAt = endsAt; self.durationSeconds = durationSeconds; self.onExpiry = onExpiry
+        self.labelKey = labelKey; self.color = color
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, endsAt, durationSeconds, onExpiry, labelKey, color, overrides, visibility, fallback
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        endsAt = try container.decodeIfPresent(String.self, forKey: .endsAt)
+        durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
+        onExpiry = try container.decodeIfPresent(CountdownOnExpiry.self, forKey: .onExpiry)
+        labelKey = try container.decodeIfPresent(String.self, forKey: .labelKey)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+        overrides = try container.decodeIfPresent([NodeOverride<CountdownOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
 /// Registry name -> SF Symbol. Unknown names return nil and render nothing:
 /// leniency is deliberate so a newer paywall does not break an older app.
 func sfSymbolName(for name: String) -> String? {
@@ -978,6 +1097,8 @@ public enum BuilderNode: Decodable {
     case featureList(FeatureListProps)
     case timeline(TimelineProps)
     case socialProof(SocialProofProps)
+    case stickyFooter(StickyFooterProps)
+    case countdown(CountdownProps)
     case unknown(id: String, visibility: Visibility?, fallback: BuilderNodeBox?)
 
     private enum TypeKey: String, CodingKey { case type }
@@ -999,6 +1120,8 @@ public enum BuilderNode: Decodable {
         case "featureList": self = .featureList(try FeatureListProps(from: decoder))
         case "timeline": self = .timeline(try TimelineProps(from: decoder))
         case "socialProof": self = .socialProof(try SocialProofProps(from: decoder))
+        case "stickyFooter": self = .stickyFooter(try StickyFooterProps(from: decoder))
+        case "countdown": self = .countdown(try CountdownProps(from: decoder))
         default:
             let container = try decoder.container(keyedBy: UnknownKeys.self)
             let id = try container.decode(String.self, forKey: .id)
@@ -1028,6 +1151,8 @@ public enum BuilderNode: Decodable {
         case .featureList(let p): return p.id
         case .timeline(let p): return p.id
         case .socialProof(let p): return p.id
+        case .stickyFooter(let p): return p.id
+        case .countdown(let p): return p.id
         case .unknown(let id, _, _): return id
         }
     }
@@ -1051,6 +1176,8 @@ public enum BuilderNode: Decodable {
         case .featureList(let p): return p.visibility
         case .timeline(let p): return p.visibility
         case .socialProof(let p): return p.visibility
+        case .stickyFooter(let p): return p.visibility
+        case .countdown(let p): return p.visibility
         case .unknown(_, let v, _): return v
         }
     }

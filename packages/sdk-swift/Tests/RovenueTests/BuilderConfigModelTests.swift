@@ -515,6 +515,82 @@ final class BuilderConfigModelTests: XCTestCase {
         let iconName = resolvedFeatureRowIconName(p.rows[0])
         XCTAssertEqual(sfSymbolName(for: iconName), "checkmark")
     }
+
+    // MARK: - stickyFooter / countdown (Wave C)
+
+    func test_decodesStickyFooterChildren() throws {
+        let node = try firstChild(#"{"type":"stickyFooter","id":"sf","children":[{"type":"spacer","id":"s1","size":8}]}"#)
+        guard case .stickyFooter(let p) = node else { XCTFail("not a stickyFooter"); return }
+        XCTAssertEqual(p.children.count, 1)
+    }
+
+    func test_decodesCountdownBothModes() throws {
+        let abs = try firstChild(#"{"type":"countdown","id":"c1","endsAt":"2027-01-01T00:00:00Z"}"#)
+        guard case .countdown(let a) = abs else { XCTFail("not a countdown"); return }
+        XCTAssertEqual(a.endsAt, "2027-01-01T00:00:00Z")
+        let dur = try firstChild(#"{"type":"countdown","id":"c2","durationSeconds":900}"#)
+        guard case .countdown(let d) = dur else { XCTFail("not a countdown"); return }
+        XCTAssertEqual(d.durationSeconds, 900)
+    }
+
+    // The formatter is where a countdown is actually testable — SwiftUI
+    // views are not inspectable here, so it's extracted as a pure function.
+    func test_formatsRemainingTime() {
+        XCTAssertEqual(countdownText(remaining: 60), "01:00")
+        XCTAssertEqual(countdownText(remaining: 3661), "01:01:01")
+        XCTAssertEqual(countdownText(remaining: 0), "00:00")
+        XCTAssertEqual(countdownText(remaining: -5), "00:00")
+    }
+
+    func test_decodesStickyFooterFixture() throws {
+        let config = try acceptEntry(named: "stickyFooter: pinned footer with a nested purchaseButton")
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root, case .stickyFooter(let p) = root.children[0] else {
+            return XCTFail("expected root.children[0] to be .stickyFooter")
+        }
+        XCTAssertEqual(p.background?.light, "#FFFFFF")
+        guard case .purchaseButton(let pb) = p.children[0] else {
+            return XCTFail("expected the footer's only child to be .purchaseButton")
+        }
+        XCTAssertEqual(pb.labelKey, "cta.buy")
+    }
+
+    func test_decodesCountdownFixture() throws {
+        let config = try acceptEntry(named: "countdown: absolute deadline with a label and onExpiry")
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root, case .countdown(let p) = root.children[0] else {
+            return XCTFail("expected root.children[0] to be .countdown")
+        }
+        XCTAssertEqual(p.endsAt, "2027-01-01T00:00:00.000Z")
+        XCTAssertNil(p.durationSeconds)
+        XCTAssertEqual(p.onExpiry, .freeze)
+        XCTAssertEqual(p.labelKey, "cd.label")
+        XCTAssertEqual(p.color?.light, "#111111")
+    }
+
+    /// `durationSeconds` must anchor to a PERSISTED first-show instant, not
+    /// this render's own mount time — otherwise a countdown restarts on
+    /// every open, which is not a deadline. A second call for the SAME
+    /// paywall identifier must reuse the stored anchor rather than
+    /// re-stamping it. Uses a dedicated `UserDefaults` suite, cleared before
+    /// and after, so this test never depends on (or pollutes) any other
+    /// test's persisted state.
+    func test_countdownAnchorPersistsAcrossRenders() throws {
+        let suiteName = "RovenueTests.countdownAnchor"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = countdownFirstShownAt(paywallIdentifier: "pw_1", defaults: defaults)
+        let second = countdownFirstShownAt(paywallIdentifier: "pw_1", defaults: defaults)
+        XCTAssertEqual(first, second, "a second render of the same paywall must reuse the stored anchor")
+
+        // A DIFFERENT paywall identifier is keyed independently — reading it
+        // back must not disturb (or return) "pw_1"'s already-stored anchor.
+        _ = countdownFirstShownAt(paywallIdentifier: "pw_2", defaults: defaults)
+        let firstAgain = countdownFirstShownAt(paywallIdentifier: "pw_1", defaults: defaults)
+        XCTAssertEqual(firstAgain, first)
+    }
 }
 
 /// Builds a `PackageView?` from a fixture's `pkg` field, which is either a

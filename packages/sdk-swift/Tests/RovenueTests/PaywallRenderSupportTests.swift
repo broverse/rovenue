@@ -100,7 +100,7 @@ final class PaywallRenderSupportTests: XCTestCase {
             selectedPackageId: nil, isPurchasing: false,
             select: { _ in }, purchase: {},
             onClose: nil, onRestore: nil, onUrl: nil,
-            appVersion: appVersion
+            appVersion: appVersion, paywallIdentifier: nil
         )
     }
 

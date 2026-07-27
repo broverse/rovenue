@@ -192,6 +192,33 @@ public func applyOverrides(_ props: SocialProofProps, active: OverrideActiveCond
     return result
 }
 
+public func applyOverrides(_ props: StickyFooterProps, active: OverrideActiveConditions) -> StickyFooterProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = StickyFooterProps(
+            id: result.id, children: result.children,
+            background: patch.background ?? result.background,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
+public func applyOverrides(_ props: CountdownProps, active: OverrideActiveConditions) -> CountdownProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = CountdownProps(
+            id: result.id, endsAt: result.endsAt, durationSeconds: result.durationSeconds,
+            onExpiry: result.onExpiry, labelKey: result.labelKey,
+            color: patch.color ?? result.color,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
 /// Dispatches to the node's own `applyOverrides` overload and re-wraps the
 /// result in the same `BuilderNode` case. `.unknown` nodes carry no
 /// overrides field at all and pass through unchanged.
@@ -209,6 +236,8 @@ public func applyOverrides(_ node: BuilderNode, active: OverrideActiveConditions
     case .featureList(let p): return .featureList(applyOverrides(p, active: active))
     case .timeline(let p): return .timeline(applyOverrides(p, active: active))
     case .socialProof(let p): return .socialProof(applyOverrides(p, active: active))
+    case .stickyFooter(let p): return .stickyFooter(applyOverrides(p, active: active))
+    case .countdown(let p): return .countdown(applyOverrides(p, active: active))
     case .unknown: return node
     }
 }

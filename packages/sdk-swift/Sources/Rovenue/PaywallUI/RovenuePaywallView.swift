@@ -8,6 +8,8 @@
 //  without a handler; the renderer NEVER opens URLs itself.
 //
 
+import Combine
+import Foundation
 import SwiftUI
 
 public struct RovenuePaywallView: View {
@@ -25,6 +27,13 @@ public struct RovenuePaywallView: View {
     @State private var selectedPackageId: String?
     @State private var isPurchasing = false
     @State private var didLogShow = false
+    /// The scrolled content's bottom clearance for a pinned `stickyFooter`,
+    /// updated to the footer's MEASURED height once it lays out (see
+    /// `StickyFooterHeightKey`) — a fixed guess is wrong whenever the footer
+    /// is taller than it (a CTA plus fine print routinely is), leaving the
+    /// last scrolled item unreachable, the same class of bug as no
+    /// scrolling at all, just subtler.
+    @State private var footerClearance: CGFloat = stickyFooterContentClearanceDefault
 
     public init(
         paywall: Paywall,
@@ -98,22 +107,56 @@ public struct RovenuePaywallView: View {
             },
             onRestore: onRestore,
             onUrl: onUrl,
-            appVersion: configuredAppVersionOrNil
+            appVersion: configuredAppVersionOrNil,
+            paywallIdentifier: paywall.paywallIdentifier
         )
+        // Same partition the web renderer performs on `config.root.children`
+        // (see renderer.tsx's `partitionRootChildren`): a `stickyFooter`
+        // found ONLY as the root's last direct child is pulled out and
+        // pinned below the ScrollView; a `stickyFooter` anywhere else is
+        // left in place and reaches the ordinary `BuilderNodeView` dispatch,
+        // which renders it in-flow (see `StickyFooterView`'s doc comment).
+        let partition = partitionRootChildren(config.root)
+        let scrolledRoot = scrolledRootNode(config.root, scrolledChildren: partition.scrolledChildren)
+        let footerNode: BuilderNode? = partition.stickyFooter.map { .stickyFooter($0) }
+
         GeometryReader { proxy in
             ZStack {
                 if let bg = config.background,
                    let rgba = parseHexColor(themeValue(bg, dark: dark)) {
                     color(rgba).ignoresSafeArea()
                 }
-                ScrollView {
-                    // minHeight rather than height, with top alignment, is
-                    // what keeps a short paywall filling the screen — without
-                    // it the ScrollView's content stops filling available
-                    // height, so a flexible Spacer collapses and any stack
-                    // pushing its CTA to the bottom rides up instead.
-                    BuilderNodeView(node: config.root, ctx: ctx, cell: nil)
-                        .frame(minHeight: proxy.size.height, alignment: .top)
+                VStack(spacing: 0) {
+                    ScrollView {
+                        // minHeight rather than height, with top alignment, is
+                        // what keeps a short paywall filling the screen — without
+                        // it the ScrollView's content stops filling available
+                        // height, so a flexible Spacer collapses and any stack
+                        // pushing its CTA to the bottom rides up instead.
+                        BuilderNodeView(node: scrolledRoot, ctx: ctx, cell: nil)
+                            .frame(minHeight: proxy.size.height, alignment: .top)
+                            // Reserve clearance for the pinned footer below,
+                            // or the last scrolled item ends up underneath it
+                            // and unreachable — the same class of bug as no
+                            // scrolling at all, just subtler. `footerClearance`
+                            // starts at a pre-measurement guess and is
+                            // replaced by the footer's real height as soon as
+                            // it lays out (see `StickyFooterHeightKey` below).
+                            .padding(.bottom, footerNode != nil ? footerClearance : 0)
+                    }
+                    if let footerNode {
+                        BuilderNodeView(node: footerNode, ctx: ctx, cell: nil)
+                            .background(
+                                GeometryReader { footerProxy in
+                                    Color.clear.preference(
+                                        key: StickyFooterHeightKey.self, value: footerProxy.size.height)
+                                }
+                            )
+                            .padding(.bottom)
+                    }
+                }
+                .onPreferenceChange(StickyFooterHeightKey.self) { measured in
+                    footerClearance = measured
                 }
             }
         }
@@ -176,6 +219,12 @@ struct PaywallRenderContext {
     /// paywall renders before an appVersion was ever configured; the gate
     /// fails open in that case (see Visibility.swift), never crashes.
     let appVersion: String?
+    /// This paywall's stable identifier — keys `countdown`'s persisted
+    /// first-show anchor (see `countdownFirstShownAt`). `nil` for a
+    /// programmatically-built paywall that never carries one; `CountdownView`
+    /// falls back to a fixed key in that case (still persisted, just shared
+    /// across every identifier-less paywall).
+    let paywallIdentifier: String?
 
     /// Localized + variable-resolved label. `cell` scopes variables to a
     /// package cell; elsewhere the selected package wins.
@@ -239,6 +288,22 @@ let timelineConnectorDefaultColor = dividerDefaultColor
 let socialProofStarDefaultColor = ThemePair(light: "#F59E0B", dark: "#FBBF24")
 let socialProofMaxRating = 5
 
+/// Defaults mirroring packages/shared/src/paywall/schema.ts's
+/// `STICKY_FOOTER_DEFAULT_BACKGROUND` / `COUNTDOWN_DEFAULT_ON_EXPIRY` /
+/// `COUNTDOWN_TICK_MS`. Keep in sync with schema.ts by hand; there is no
+/// codegen step sharing these across platforms.
+private let stickyFooterDefaultBackground = ThemePair(light: "#FFFFFF", dark: "#111827")
+private let countdownDefaultOnExpiry = CountdownOnExpiry.freeze
+/// Milliseconds, matching schema.ts's `COUNTDOWN_TICK_MS` — converted to
+/// seconds at the one call site that needs a `TimeInterval` (`CountdownView`).
+private let countdownTickMs = 1000
+
+/// Pre-measurement initial value for the scrolled content's bottom
+/// clearance under a pinned `stickyFooter`, used only until the footer's
+/// first real layout pass reports its height via `StickyFooterHeightKey` —
+/// mirrors renderer.tsx's `STICKY_FOOTER_CONTENT_CLEARANCE_PX`.
+private let stickyFooterContentClearanceDefault: CGFloat = 96
+
 /// Layout spacing constants for the three row-carrying node types, in
 /// points — named rather than inlined (mirrors NodeViewFactory.kt's
 /// FEATURE_LIST_ROW_SPACING_DP/TIMELINE_MARK_GAP_DP/etc; no cross-platform
@@ -275,6 +340,106 @@ func resolvedFeatureRowIconName(_ row: FeatureRowProps) -> String {
 /// (`Math.floor`) and NodeViewFactory.kt's `socialProofStarFilled`.
 func socialProofStarFilled(index: Int, rating: Double) -> Bool {
     Double(index) < rating.rounded(.down)
+}
+
+// MARK: - stickyFooter root partition
+
+/// Result of splitting the root's direct children into "everything the
+/// scroller owns" and "the pinned footer" — mirrors renderer.tsx's
+/// `partitionRootChildren` return shape.
+struct RootPartition {
+    let scrolledChildren: [BuilderNode]
+    let stickyFooter: StickyFooterProps?
+}
+
+/// Split `root`'s direct children per the LAST direct child only: a
+/// `stickyFooter` anywhere else (not last, not a direct child at all) is
+/// left in place and reaches the ordinary `BuilderNodeView` dispatch, which
+/// renders it in-flow like a stack — see `StickyFooterView`'s doc comment.
+/// The validator's `STICKY_FOOTER_NOT_AT_ROOT` warning is what tells the
+/// author about that case; this function does not warn, only partitions.
+/// `root` is always a `.stack` here — `decodeBuilderConfig` refuses any
+/// other root — but this defensively no-ops for any other case rather than
+/// assuming it.
+func partitionRootChildren(_ root: BuilderNode) -> RootPartition {
+    guard case .stack(let rootProps) = root else {
+        return RootPartition(scrolledChildren: [], stickyFooter: nil)
+    }
+    guard case .stickyFooter(let footer)? = rootProps.children.last else {
+        return RootPartition(scrolledChildren: rootProps.children, stickyFooter: nil)
+    }
+    return RootPartition(scrolledChildren: Array(rootProps.children.dropLast()), stickyFooter: footer)
+}
+
+/// The same root container (spacing/align/background/etc.), fewer children
+/// — the footer itself is rendered and pinned separately (see `content(_:)`
+/// in `RovenuePaywallView`). No-ops (returns `root` unchanged) for the
+/// defensive non-`.stack` case, matching `partitionRootChildren`.
+func scrolledRootNode(_ root: BuilderNode, scrolledChildren: [BuilderNode]) -> BuilderNode {
+    guard case .stack(let rootProps) = root else { return root }
+    return .stack(StackProps(
+        id: rootProps.id, axis: rootProps.axis, children: scrolledChildren,
+        spacing: rootProps.spacing, align: rootProps.align, padding: rootProps.padding,
+        size: rootProps.size, background: rootProps.background, cornerRadius: rootProps.cornerRadius,
+        overrides: rootProps.overrides, visibility: rootProps.visibility, fallback: rootProps.fallback))
+}
+
+/// Carries the pinned footer's measured height up to `RovenuePaywallView`'s
+/// `.onPreferenceChange` — SwiftUI's equivalent of the web renderer's
+/// `ResizeObserver` on the footer element. `reduce` keeps the LATEST value
+/// (there is only ever one footer), not a running combination.
+struct StickyFooterHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = stickyFooterContentClearanceDefault
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+// MARK: - countdown
+
+/// `hh:mm:ss`, dropping the hours segment entirely once it's zero — a
+/// countdown under an hour shows `mm:ss`, never a leading `00:`. Extracted
+/// as a free function (not buried in `CountdownView`'s body) because a
+/// SwiftUI view's body isn't inspectable without a view-testing dependency
+/// this package doesn't carry — this is the only part of a countdown a unit
+/// test here can reach. Mirrors nodes.tsx's `formatCountdown`. A negative
+/// `remaining` (there should never be one live, but a stale/replayed value
+/// could produce one) clamps to zero rather than producing a negative
+/// display.
+private let countdownPadWidth = 2
+
+func countdownText(remaining: Int) -> String {
+    let totalSeconds = max(remaining, 0)
+    let hours = totalSeconds / 3600
+    let minutes = (totalSeconds % 3600) / 60
+    let seconds = totalSeconds % 60
+    func pad(_ n: Int) -> String { String(format: "%0\(countdownPadWidth)d", n) }
+    return hours > 0 ? "\(pad(hours)):\(pad(minutes)):\(pad(seconds))" : "\(pad(minutes)):\(pad(seconds))"
+}
+
+/// `UserDefaults` key prefix for a countdown's persisted "first shown to
+/// this user" instant, one per paywall identifier — every countdown node on
+/// the same paywall shares one anchor, since "first show" is a paywall-level
+/// concept, not a per-node one.
+private let countdownFirstShownKeyPrefix = "rovenue.paywall.countdown.firstShownAt."
+
+/// The persisted instant a `durationSeconds` countdown anchors its deadline
+/// to: on the FIRST call for a given `paywallIdentifier`, stamps and stores
+/// `Date()`; every subsequent call for the same identifier reads the stored
+/// value back rather than re-stamping it. This is what makes
+/// `durationSeconds` an actual deadline rather than a timer that restarts on
+/// every open — the web renderer cannot do this itself (no persistence
+/// layer of its own; see `PaywallRendererProps.firstShownAt`'s doc comment),
+/// but this SDK has `UserDefaults`, so it owns the real thing. `defaults` is
+/// injectable for test isolation; production call sites use `.standard`.
+func countdownFirstShownAt(paywallIdentifier: String?, defaults: UserDefaults = .standard) -> Date {
+    let key = countdownFirstShownKeyPrefix + (paywallIdentifier ?? "")
+    if let existing = defaults.object(forKey: key) as? Date {
+        return existing
+    }
+    let now = Date()
+    defaults.set(now, forKey: key)
+    return now
 }
 
 struct BuilderNodeView: View {
@@ -359,6 +524,8 @@ struct BuilderNodeView: View {
         case .featureList(let p): FeatureListView(props: p, ctx: ctx, cell: cell)
         case .timeline(let p): TimelineView(props: p, ctx: ctx, cell: cell)
         case .socialProof(let p): SocialProofView(props: p, ctx: ctx, cell: cell)
+        case .stickyFooter(let p): StickyFooterView(props: p, ctx: ctx, cell: cell)
+        case .countdown(let p): CountdownView(props: p, ctx: ctx, cell: cell)
         case .unknown(_, _, let fallback):
             if let fallback {
                 BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
@@ -759,6 +926,138 @@ struct SocialProofView: View {
         let overrideColor = props.starColor.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
         let defaultColor = parseHexColor(themeValue(socialProofStarDefaultColor, dark: ctx.dark))
         return (overrideColor ?? defaultColor).map { color($0) } ?? Color.secondary
+    }
+}
+
+/// Renders `stickyFooter` reached through the ORDINARY `BuilderNodeView`
+/// dispatch — always the plain, in-flow shape (background + a `VStack` of
+/// children), never pinned. `RovenuePaywallView.content(_:)` is what gives a
+/// ROOT-level instance its pinned behaviour: it renders this SAME node
+/// through this SAME view (see `footerNode` in `content(_:)`), then wraps
+/// the result in a measured, non-scrolling container below the `ScrollView`
+/// — the pinning lives entirely in that wrapper, not in this view. A
+/// misplaced footer (anywhere but the root's last direct child) therefore
+/// renders identically to this, just without the wrapper — deliberate,
+/// mirrors nodes.tsx's `renderStickyFooter` doc comment. The validator's
+/// `STICKY_FOOTER_NOT_AT_ROOT` warning is what tells the author about that
+/// case.
+struct StickyFooterView: View {
+    let props: StickyFooterProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(props.children.enumerated()), id: \.offset) { entry in
+                BuilderNodeView(node: entry.element, ctx: ctx, cell: cell)
+            }
+        }
+        .background(backgroundColor)
+    }
+
+    /// A pinned bar needs an opaque background or the content scrolls
+    /// visibly beneath it — absent `background` falls back to
+    /// `stickyFooterDefaultBackground`, never `Color.clear`/inherit, unlike
+    /// an ordinary node's colour (see the `.icon`/`.divider` cases above).
+    private var backgroundColor: Color {
+        let overrideColor = props.background.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
+        let defaultColor = parseHexColor(themeValue(stickyFooterDefaultBackground, dark: ctx.dark))
+        return (overrideColor ?? defaultColor).map { color($0) } ?? Color.clear
+    }
+}
+
+/// Renders `countdown`. A real `View` (not a plain struct like its
+/// siblings) because it owns state (the ticking clock) that must live and
+/// die with THIS node's own position in the tree.
+///
+/// Ticks via `Timer.publish(every:).autoconnect()` at
+/// `countdownTickMs`-derived interval, subscribed manually into an
+/// `AnyCancellable` on `.onAppear` and cancelled on `.onDisappear` —
+/// letting the timer run past this view's lifetime would keep firing
+/// against a dead tree.
+///
+/// The deadline is `endsAt` directly when present, else `durationSeconds`
+/// anchored to `countdownFirstShownAt` (a PERSISTED first-show instant,
+/// keyed by `ctx.paywallIdentifier`) — never this view's own mount time,
+/// which would make the deadline restart on every open. `nil` when the node
+/// carries neither (the validator's `COUNTDOWN_NO_DEADLINE` already flags
+/// that at author time; this is a defensive fail-open, not the primary
+/// guard) — falls back to `fallback` else nothing, mirroring every other
+/// node type's unknown/undecidable case.
+struct CountdownView: View {
+    let props: CountdownProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    @State private var now = Date()
+    @State private var tickCancellable: AnyCancellable?
+
+    var body: some View {
+        if let deadline {
+            let remainingSeconds = Int(deadline.timeIntervalSince(now).rounded(.up))
+            let onExpiry = props.onExpiry ?? countdownDefaultOnExpiry
+            if remainingSeconds <= 0 && onExpiry == .hide {
+                // Past its deadline AND told to disappear — unlike the
+                // "no deadline at all" case below, this renders NOTHING, not
+                // `fallback`: the author said "hide once expired", which is
+                // not the same as "could not decide what to show".
+                EmptyView()
+            } else {
+                countdownBody(remainingSeconds: max(remainingSeconds, 0))
+                    .onAppear(perform: startTicking)
+                    .onDisappear(perform: stopTicking)
+            }
+        } else if let fallback = props.fallback {
+            BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
+        }
+    }
+
+    @ViewBuilder
+    private func countdownBody(remainingSeconds: Int) -> some View {
+        HStack(spacing: 4) {
+            if let labelKey = props.labelKey {
+                Text(ctx.label(labelKey, cell: cell))
+            }
+            Text(countdownText(remaining: remainingSeconds))
+        }
+        // Absent `color` passes `nil` to `.foregroundColor` so the text
+        // inherits the ambient ink — never a substituted value (this is
+        // ordinary text, unlike the footer's background).
+        .foregroundColor(props.color.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }.map { color($0) })
+    }
+
+    /// `endsAt` is authored as plain `Z`-suffixed UTC (render-fixtures.json's
+    /// accept entry) but a stray fractional-seconds value is tolerated too —
+    /// `ISO8601DateFormatter` refuses to parse one against the other's
+    /// `formatOptions`, so both are tried.
+    private static let isoFormatter = ISO8601DateFormatter()
+    private static let isoFormatterWithFractionalSeconds: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private var deadline: Date? {
+        if let endsAt = props.endsAt {
+            return Self.isoFormatter.date(from: endsAt) ?? Self.isoFormatterWithFractionalSeconds.date(from: endsAt)
+        }
+        if let durationSeconds = props.durationSeconds {
+            let anchor = countdownFirstShownAt(paywallIdentifier: ctx.paywallIdentifier)
+            return anchor.addingTimeInterval(durationSeconds)
+        }
+        return nil
+    }
+
+    private func startTicking() {
+        guard tickCancellable == nil else { return }
+        tickCancellable = Timer.publish(every: Double(countdownTickMs) / 1000, on: .main, in: .common)
+            .autoconnect()
+            .sink { value in now = value }
+    }
+
+    private func stopTicking() {
+        tickCancellable?.cancel()
+        tickCancellable = nil
     }
 }
 
