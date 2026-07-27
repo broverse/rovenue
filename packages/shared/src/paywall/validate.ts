@@ -2,11 +2,8 @@ import { isKnownIconName } from "./icon-registry";
 import {
   OVERRIDABLE_PROP_KEYS,
   type BuilderConfig,
-  type ButtonNode,
   type PaywallNode,
-  type PurchaseButtonNode,
   type StackNode,
-  type TextNode,
 } from "./schema";
 import { compareVersions } from "./visibility";
 
@@ -40,22 +37,45 @@ function hasOwnKey(table: object, key: string): boolean {
  * A function rather than a list of property names because wave B's
  * featureList/socialProof/timeline carry arrays of localized rows, which a
  * flat name list cannot express.
+ *
+ * Keyed by a mapped type over the discriminant (`[K in PaywallNode["type"]]`)
+ * rather than `Record<PaywallNode["type"], (node: PaywallNode) => string[]>`
+ * so each row's parameter is `Extract<PaywallNode, { type: K }>` — that row's
+ * specific node type — instead of the whole union. That is what lets
+ * `text: (n) => [n.key]` type-check with no cast: `n` really is a `TextNode`
+ * in that row, so reaching for a field the row's own type doesn't have is a
+ * compile error, not a silently-accepted `as` cast to the wrong member. Do
+ * not collapse this back to a plain `Record` — that reintroduces exactly the
+ * per-row cast-to-anything hole this type exists to close.
  */
-export const LOCALIZED_KEYS: Record<PaywallNode["type"], (node: PaywallNode) => string[]> = {
+type LocalizedKeyFns = {
+  [K in PaywallNode["type"]]: (node: Extract<PaywallNode, { type: K }>) => string[];
+};
+
+export const LOCALIZED_KEYS: LocalizedKeyFns = {
   stack: () => [],
-  text: (n) => [(n as TextNode).key],
+  text: (n) => [n.key],
   image: () => [],
-  button: (n) => [(n as ButtonNode).labelKey],
+  button: (n) => [n.labelKey],
   packageList: () => [],
-  purchaseButton: (n) => [(n as PurchaseButtonNode).labelKey],
+  purchaseButton: (n) => [n.labelKey],
   spacer: () => [],
   divider: () => [],
   icon: () => [],
 };
 
-/** Every localization key this node contributes, in declaration order. */
+/**
+ * Every localization key this node contributes, in declaration order.
+ *
+ * The cast is the one deliberate escape hatch `LocalizedKeyFns` leaves open:
+ * indexing `LOCALIZED_KEYS` by a *variable* `node.type` (rather than a
+ * literal `K`) gives back a union of all the row functions, and TypeScript
+ * cannot prove that union member lines up with this particular `node` — so
+ * the call site, not any row, needs the cast. One cast here instead of one
+ * per row is the trade the mapped type buys.
+ */
 export function localizedKeysOf(node: PaywallNode): string[] {
-  return LOCALIZED_KEYS[node.type](node);
+  return (LOCALIZED_KEYS[node.type] as (node: PaywallNode) => string[])(node);
 }
 
 export type BuilderIssue = {
