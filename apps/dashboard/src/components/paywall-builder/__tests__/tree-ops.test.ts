@@ -16,6 +16,7 @@ import {
   moveNode,
   updateNode,
   newNode,
+  COUNTDOWN_DEFAULT_DURATION_SECONDS,
 } from "../tree-ops";
 
 // Fixture tree:
@@ -382,6 +383,22 @@ describe("newNode", () => {
   it("creates socialProof with a label key", () => {
     const node = newNode("socialProof", idGen);
     expect(node).toEqual({ type: "socialProof", id: node.id, labelKey: `socialProof_${node.id}` });
+  });
+
+  it("creates a stickyFooter with no children", () => {
+    const node = newNode("stickyFooter", idGen);
+    expect(node).toEqual({ type: "stickyFooter", id: node.id, children: [] });
+  });
+
+  it("creates a countdown defaulting to a duration", () => {
+    // An absolute date would start invalid and immediately raise
+    // COUNTDOWN_NO_DEADLINE; a duration needs no author input to be valid.
+    const node = newNode("countdown", idGen);
+    expect(node).toEqual({
+      type: "countdown",
+      id: node.id,
+      durationSeconds: COUNTDOWN_DEFAULT_DURATION_SECONDS,
+    });
   });
 });
 

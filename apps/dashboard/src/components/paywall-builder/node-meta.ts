@@ -12,11 +12,13 @@ import {
   ListChecks,
   GitCommitVertical,
   Star,
+  PanelBottom,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 
 // =============================================================
-// Static metadata for the 9 paywall node types, shared by the
+// Static metadata for the 14 paywall node types, shared by the
 // layer tree (row icon/label) and the add-node popover (menu
 // entries). Pure data + one pure helper (`nodeLocKey`) — kept
 // framework-free so it's trivially unit-testable.
@@ -35,6 +37,8 @@ export const NODE_TYPES: ReadonlyArray<PaywallNode["type"]> = [
   "featureList",
   "timeline",
   "socialProof",
+  "stickyFooter",
+  "countdown",
 ];
 
 export const NODE_ICON: Record<PaywallNode["type"], LucideIcon> = {
@@ -50,6 +54,8 @@ export const NODE_ICON: Record<PaywallNode["type"], LucideIcon> = {
   featureList: ListChecks,
   timeline: GitCommitVertical,
   socialProof: Star,
+  stickyFooter: PanelBottom,
+  countdown: Timer,
 };
 
 /** English fallback label per node type — mirrored by the `paywalls.builder.nodeTypes.*` i18n keys. */
@@ -66,6 +72,8 @@ export const NODE_TYPE_LABEL: Record<PaywallNode["type"], string> = {
   featureList: "Feature list",
   timeline: "Timeline",
   socialProof: "Social proof",
+  stickyFooter: "Sticky footer",
+  countdown: "Countdown",
 };
 
 /**

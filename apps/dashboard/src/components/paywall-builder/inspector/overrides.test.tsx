@@ -12,10 +12,12 @@ import {
   SOCIAL_PROOF_MAX_RATING,
   emptyBuilderConfig,
   type BuilderConfig,
+  type CountdownNode,
   type DividerNode,
   type FeatureListNode,
   type IconNode,
   type SocialProofNode,
+  type StickyFooterNode,
   type TimelineNode,
 } from "@rovenue/shared/paywall";
 
@@ -66,6 +68,18 @@ function fakeConfig(): BuilderConfig {
       { when: { kind: "introEligible" }, props: { rating: 4, starColor: { light: "#333333" } } },
     ],
   } as SocialProofNode);
+  config.root.children.push({
+    type: "stickyFooter",
+    id: "sf1",
+    children: [],
+    overrides: [{ when: { kind: "introEligible" }, props: { background: { light: "#444444" } } }],
+  } as StickyFooterNode);
+  config.root.children.push({
+    type: "countdown",
+    id: "cd1",
+    durationSeconds: 900,
+    overrides: [{ when: { kind: "introEligible" }, props: { color: { light: "#555555" } } }],
+  } as CountdownNode);
   return config;
 }
 
@@ -228,5 +242,42 @@ describe("OverridesSection — socialProof override fields", () => {
     fireEvent.change(light!, { target: { value: "#abcdef" } });
     const node = findNode(vm.config.root, "sp1") as SocialProofNode;
     expect(node.overrides?.[0]?.props.starColor).toEqual({ light: "#abcdef" });
+  });
+});
+
+// =============================================================
+// Wave C — stickyFooter.background / countdown.color. Same defect class:
+// Task 1 declared both keys in OVERRIDABLE_PROP_KEYS, and without a case
+// in OverridePropField's switch these would fall through to the removed
+// `default: return null` (now a compile-time exhaustiveness check instead).
+// =============================================================
+
+describe("OverridesSection — stickyFooter override fields", () => {
+  it("renders a real color input, not a silent no-op", async () => {
+    await renderHarness("sf1");
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+  });
+
+  it("writes an edited background back onto the override's props", async () => {
+    const { vm } = await renderHarness("sf1");
+    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(light!, { target: { value: "#123456" } });
+    const node = findNode(vm.config.root, "sf1") as StickyFooterNode;
+    expect(node.overrides?.[0]?.props.background).toEqual({ light: "#123456" });
+  });
+});
+
+describe("OverridesSection — countdown override fields", () => {
+  it("renders a real color input, not a silent no-op", async () => {
+    await renderHarness("cd1");
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+  });
+
+  it("writes an edited color back onto the override's props", async () => {
+    const { vm } = await renderHarness("cd1");
+    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(light!, { target: { value: "#654321" } });
+    const node = findNode(vm.config.root, "cd1") as CountdownNode;
+    expect(node.overrides?.[0]?.props.color).toEqual({ light: "#654321" });
   });
 });

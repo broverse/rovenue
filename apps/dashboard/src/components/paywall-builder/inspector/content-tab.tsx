@@ -1,10 +1,12 @@
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import {
+  COUNTDOWN_DEFAULT_ON_EXPIRY,
   FEATURE_ROW_DEFAULT_INCLUDED,
   ICON_NAMES,
   SOCIAL_PROOF_MAX_RATING,
   type ButtonNode,
+  type CountdownNode,
   type DividerNode,
   type FeatureListNode,
   type FeatureRow,
@@ -17,9 +19,10 @@ import {
   type TimelineNode,
   type TimelineRow,
 } from "@rovenue/shared/paywall";
+import { COUNTDOWN_DEFAULT_DURATION_SECONDS } from "../tree-ops";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { LocalizedTextField, NumberField, SelectField } from "./fields";
-import { Field, INPUT_CLASS, Section } from "./primitives";
+import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
 import { RowListEditor } from "./row-list-editor";
 
 /** A featureList/timeline row (or socialProof) has no rating floor below zero. */
@@ -54,6 +57,8 @@ export const ContentTab = component(({ node }: { node: PaywallNode }) => {
       return <TimelineContent node={node} />;
     case "socialProof":
       return <SocialProofContent node={node} />;
+    case "countdown":
+      return <CountdownContent node={node} />;
     default:
       return null;
   }
@@ -308,6 +313,82 @@ function SocialProofContent({ node }: { node: SocialProofNode }) {
         value={node.rating}
         onChange={(v) => set({ rating: clampRating(v) })}
       />
+    </Section>
+  );
+}
+
+/**
+ * `endsAt` and `durationSeconds` are mutually exclusive (schema-enforced) —
+ * the mode toggle swaps the field shown and clears the other one. A node
+ * with neither set (only reachable via hand-edited/legacy data, never via
+ * `newNode`) reads as duration mode, same as an unset `endsAt`.
+ */
+function CountdownContent({ node }: { node: CountdownNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<CountdownNode>) => vm.updateNode<CountdownNode>(node.id, patch);
+  const mode: "absolute" | "duration" = node.endsAt !== undefined ? "absolute" : "duration";
+
+  return (
+    <Section title={t("paywalls.builder.properties.content", "Content")} defaultOpen>
+      <Field label={t("paywalls.builder.properties.countdownDeadlineMode", "Deadline")}>
+        <Segmented
+          value={mode}
+          onChange={(v) =>
+            v === "absolute"
+              ? set({ endsAt: node.endsAt, durationSeconds: undefined })
+              : set({
+                  endsAt: undefined,
+                  durationSeconds: node.durationSeconds ?? COUNTDOWN_DEFAULT_DURATION_SECONDS,
+                })
+          }
+          options={[
+            { value: "absolute", label: t("paywalls.builder.properties.countdownModeAbsolute", "Fixed date") },
+            { value: "duration", label: t("paywalls.builder.properties.countdownModeDuration", "Duration") },
+          ]}
+        />
+      </Field>
+      {mode === "absolute" ? (
+        <Field className="mt-3" label={t("paywalls.builder.properties.countdownEndsAt", "Ends at")}>
+          <input
+            type="datetime-local"
+            value={node.endsAt ? node.endsAt.slice(0, 16) : ""}
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              set({ endsAt: v ? new Date(v).toISOString() : undefined });
+            }}
+            className={INPUT_CLASS}
+          />
+        </Field>
+      ) : (
+        <NumberField
+          className="mt-3"
+          label={t("paywalls.builder.properties.countdownDurationSeconds", "Duration (seconds)")}
+          value={node.durationSeconds}
+          onChange={(v) => set({ durationSeconds: v })}
+        />
+      )}
+      <Field className="mt-3" label={t("paywalls.builder.properties.countdownOnExpiry", "On expiry")}>
+        <Segmented
+          value={node.onExpiry ?? COUNTDOWN_DEFAULT_ON_EXPIRY}
+          onChange={(v) => set({ onExpiry: v })}
+          options={[
+            { value: "freeze", label: t("paywalls.builder.properties.countdownOnExpiryFreeze", "Freeze at zero") },
+            { value: "hide", label: t("paywalls.builder.properties.countdownOnExpiryHide", "Hide") },
+          ]}
+        />
+      </Field>
+      <Field
+        className="mt-3"
+        label={t("paywalls.builder.properties.countdownLabelKey", "Label key (optional)")}
+      >
+        <input
+          value={node.labelKey ?? ""}
+          onChange={(e) => set({ labelKey: e.currentTarget.value || undefined })}
+          placeholder={t("paywalls.builder.properties.locKeyPlaceholder", "e.g. feature_1")}
+          className={INPUT_CLASS}
+        />
+      </Field>
     </Section>
   );
 }

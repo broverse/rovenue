@@ -2,6 +2,7 @@ import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import type {
   ButtonNode,
+  CountdownNode,
   DividerNode,
   FeatureListNode,
   IconNode,
@@ -9,6 +10,7 @@ import type {
   PaywallNode,
   SocialProofNode,
   StackNode,
+  StickyFooterNode,
   TextNode,
   TimelineNode,
 } from "@rovenue/shared/paywall";
@@ -41,6 +43,10 @@ export const StyleTab = component(({ node }: { node: PaywallNode }) => {
       return <TimelineStyle node={node} />;
     case "socialProof":
       return <SocialProofStyle node={node} />;
+    case "stickyFooter":
+      return <StickyFooterStyle node={node} />;
+    case "countdown":
+      return <CountdownStyle node={node} />;
     default:
       return null;
   }
@@ -211,6 +217,38 @@ function SocialProofStyle({ node }: { node: SocialProofNode }) {
         label={t("paywalls.builder.properties.socialProofStarColor", "Star color")}
         value={node.starColor}
         onChange={(v) => set({ starColor: v })}
+      />
+    </Section>
+  );
+}
+
+function StickyFooterStyle({ node }: { node: StickyFooterNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<StickyFooterNode>) => vm.updateNode<StickyFooterNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.appearance", "Appearance")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.background", "Background")}
+        value={node.background}
+        onChange={(v) => set({ background: v })}
+      />
+    </Section>
+  );
+}
+
+function CountdownStyle({ node }: { node: CountdownNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<CountdownNode>) => vm.updateNode<CountdownNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.appearance", "Appearance")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.color", "Color")}
+        value={node.color}
+        onChange={(v) => set({ color: v })}
       />
     </Section>
   );

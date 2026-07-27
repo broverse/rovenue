@@ -9,6 +9,14 @@ import {
 /** A new icon node starts as a checkmark — the commonest use is a feature-list mark. */
 const DEFAULT_ICON_NAME = "check";
 
+/**
+ * A new countdown starts as a 15-minute session timer, not an absolute
+ * deadline: `durationSeconds` needs no author input to be valid, where
+ * `endsAt` unset would immediately raise COUNTDOWN_NO_DEADLINE — the
+ * author's first look at the node would be an error badge.
+ */
+export const COUNTDOWN_DEFAULT_DURATION_SECONDS = 900;
+
 // =============================================================
 // Pure, immutable manipulation of a paywall builder-config node
 // tree (`BuilderConfig.root`). Every function here returns a NEW
@@ -239,6 +247,10 @@ export function newNode(type: PaywallNode["type"], idGen: () => string): Paywall
       return { type: "timeline", id, rows: [{ labelKey: `timeline_${id}_1` }] };
     case "socialProof":
       return { type: "socialProof", id, labelKey: `socialProof_${id}` };
+    case "stickyFooter":
+      return { type: "stickyFooter", id, children: [] };
+    case "countdown":
+      return { type: "countdown", id, durationSeconds: COUNTDOWN_DEFAULT_DURATION_SECONDS };
     default: {
       const exhaustive: never = type;
       throw new Error(`Unknown node type: ${String(exhaustive)}`);

@@ -1306,7 +1306,9 @@
         "icon": "Icon",
         "featureList": "Feature list",
         "timeline": "Timeline",
-        "socialProof": "Social proof"
+        "socialProof": "Social proof",
+        "stickyFooter": "Sticky footer",
+        "countdown": "Countdown"
       },
       "addNode": {
         "title": "Add node"
@@ -1453,7 +1455,16 @@
         "timelineCaptionKey": "Caption key (optional)",
         "timelineConnectorColor": "Connector color",
         "socialProofRating": "Rating",
-        "socialProofStarColor": "Star color"
+        "socialProofStarColor": "Star color",
+        "countdownDeadlineMode": "Deadline",
+        "countdownModeAbsolute": "Fixed date",
+        "countdownModeDuration": "Duration",
+        "countdownEndsAt": "Ends at",
+        "countdownDurationSeconds": "Duration (seconds)",
+        "countdownOnExpiry": "On expiry",
+        "countdownOnExpiryFreeze": "Freeze at zero",
+        "countdownOnExpiryHide": "Hide",
+        "countdownLabelKey": "Label key (optional)"
       },
       "topbar": {
         "close": "Close builder",

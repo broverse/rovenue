@@ -71,7 +71,9 @@ type OverridablePropCombo =
   | "featureList.iconColor"
   | "timeline.connectorColor"
   | "socialProof.rating"
-  | "socialProof.starColor";
+  | "socialProof.starColor"
+  | "stickyFooter.background"
+  | "countdown.color";
 
 export function OverridesSection({ node }: { node: PaywallNode }) {
   const vm = useService(PaywallBuilderViewModel);
@@ -224,6 +226,8 @@ function OverridePropField({
     case "featureList.iconColor":
     case "timeline.connectorColor":
     case "socialProof.starColor":
+    case "stickyFooter.background":
+    case "countdown.color":
       return (
         <ThemeColorField
           label={label}
