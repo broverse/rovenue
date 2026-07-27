@@ -180,7 +180,15 @@ class RovenuePaywallView @JvmOverloads constructor(
         )
 
         val rootView = NodeViewFactory.build(context, cfg.root, ctx, cell = null) ?: return
-        addView(rootView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        val scroller = androidx.core.widget.NestedScrollView(context).apply {
+            // isFillViewport is the Android spelling of "content still fills
+            // the screen when it is shorter than the viewport". Without it a
+            // stack with a flexible spacer collapses to its natural height,
+            // and any paywall pushing its CTA to the bottom rides up.
+            isFillViewport = true
+            addView(rootView, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
+        addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     /**

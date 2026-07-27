@@ -74,9 +74,18 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
       style={{
         backgroundColor: resolveThemeColor(config.background, colorScheme),
         boxSizing: "border-box",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
-      {renderNode(config.root, ctx)}
+      <div data-rov-paywall-scroll="" style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+        {/* minHeight 100% is what keeps a short paywall filling the screen;
+            without it a flexible spacer collapses and the CTA rides up. */}
+        <div data-rov-paywall-content="" style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}>
+          {renderNode(config.root, ctx)}
+        </div>
+      </div>
     </div>
   );
 }

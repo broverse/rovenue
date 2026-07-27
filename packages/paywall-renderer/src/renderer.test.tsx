@@ -114,6 +114,9 @@ function cfg(node: PaywallNode): BuilderConfig {
 /** The renderer props every single-node test needs beyond `config`. */
 const base = { offering, colorScheme: "light" as const, onPurchase: vi.fn() };
 
+/** A paywall short enough to be shorter than the viewport, for scroll-container tests. */
+const shortConfig = baseConfig();
+
 describe("PaywallRenderer", () => {
   it("renders every node type from the fixture config, each carrying data-rov-node", () => {
     const { container } = render(
@@ -244,6 +247,17 @@ describe("PaywallRenderer", () => {
         />,
       ),
     ).not.toThrow();
+  });
+
+  it("puts the content in a scroller that still fills the viewport", () => {
+    const { container } = render(<PaywallRenderer config={shortConfig} {...base} />);
+    const scroller = container.querySelector("[data-rov-paywall-scroll]") as HTMLElement;
+    expect(scroller).not.toBeNull();
+    expect(scroller.style.overflowY).toBe("auto");
+    const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
+    // The trap: without a viewport minimum the stack stops filling and any
+    // paywall pushing its CTA down with a flexible spacer collapses upward.
+    expect(inner.style.minHeight).toBe("100%");
   });
 
   describe("packageList rendering", () => {

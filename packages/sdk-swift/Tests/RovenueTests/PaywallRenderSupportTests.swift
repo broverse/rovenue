@@ -208,4 +208,39 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertEqual(socialProofStarDefaultColor, try themePair("SOCIAL_PROOF_STAR_DEFAULT_COLOR"))
         XCTAssertEqual(socialProofMaxRating, try XCTUnwrap(defaults["SOCIAL_PROOF_MAX_RATING"] as? Int))
     }
+
+    // MARK: - scroll container (Task 2, wave C)
+    //
+    // Deliberately the weakest test in this plan: it pins that a ScrollView
+    // is composed into `RovenuePaywallView.body` at all, not that the
+    // viewport-minimum (`.frame(minHeight: proxy.size.height)`) actually
+    // works — SwiftUI views aren't inspectable without a view-testing
+    // dependency this package doesn't carry. It still catches the coarser
+    // regression of the ScrollView being removed outright; the real check
+    // for the viewport minimum is the device smoke session.
+
+    func test_body_composesAScrollViewAroundTheRootContent() throws {
+        let json = """
+        {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{"k":"x"}},
+         "root":{"type":"stack","id":"root","axis":"v","children":[{"type":"text","id":"t1","key":"k","role":"body"}]}}
+        """
+        let paywall = Paywall(
+            placementIdentifier: "plc_1",
+            placementRevision: 1,
+            paywallIdentifier: "pw_1",
+            paywallName: "Test",
+            configFormatVersion: 2,
+            remoteConfig: nil,
+            remoteConfigLocale: nil,
+            builderConfigJson: json,
+            offering: nil,
+            presentedContext: nil
+        )
+        let view = RovenuePaywallView(paywall: paywall)
+        let bodyTypeDescription = String(describing: type(of: view.body))
+        XCTAssertTrue(
+            bodyTypeDescription.contains("ScrollView"),
+            "expected the paywall root's body to compose a ScrollView, got: \(bodyTypeDescription)"
+        )
+    }
 }

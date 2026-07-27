@@ -100,12 +100,22 @@ public struct RovenuePaywallView: View {
             onUrl: onUrl,
             appVersion: configuredAppVersionOrNil
         )
-        ZStack {
-            if let bg = config.background,
-               let rgba = parseHexColor(themeValue(bg, dark: dark)) {
-                color(rgba).ignoresSafeArea()
+        GeometryReader { proxy in
+            ZStack {
+                if let bg = config.background,
+                   let rgba = parseHexColor(themeValue(bg, dark: dark)) {
+                    color(rgba).ignoresSafeArea()
+                }
+                ScrollView {
+                    // minHeight rather than height, with top alignment, is
+                    // what keeps a short paywall filling the screen — without
+                    // it the ScrollView's content stops filling available
+                    // height, so a flexible Spacer collapses and any stack
+                    // pushing its CTA to the bottom rides up instead.
+                    BuilderNodeView(node: config.root, ctx: ctx, cell: nil)
+                        .frame(minHeight: proxy.size.height, alignment: .top)
+                }
             }
-            BuilderNodeView(node: config.root, ctx: ctx, cell: nil)
         }
     }
 
