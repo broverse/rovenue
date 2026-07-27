@@ -32,6 +32,15 @@ function emptyPriceRow(packageIdentifier: string): PackagePriceRow {
   return { packageIdentifier, displayName: null, period: null, periodConflict: false, stores: null };
 }
 
+/**
+ * True when `resolved.data` has nothing to say about this package — the
+ * hook is loading, errored, or the id simply isn't in the payload yet.
+ * Drives the fallback to today's single id-only row (never a duplicate id).
+ */
+function isDegradedPriceRow(row: PackagePriceRow): boolean {
+  return row.displayName === null && row.period === null && row.stores === null;
+}
+
 /** First `ok` store's formatted amount (STORE_DISPLAY_ORDER precedence), else the raw package id. */
 function firstOkAmount(row: PackagePriceRow): string {
   if (row.stores) {
@@ -160,6 +169,20 @@ function PackageListBinding({ node }: { node: PackageListNode }) {
         <div className="flex flex-col gap-1.5">
           {offeringPackageIds.map((id) => {
             const row = rowById.get(id) ?? emptyPriceRow(id);
+
+            // No resolved data for this id (hook still loading, errored, or
+            // simply hasn't returned this package) — the readout is an
+            // enhancement layer, never a gate, so this renders EXACTLY
+            // today's id-only row: one mono id span, nothing else.
+            if (isDegradedPriceRow(row)) {
+              return (
+                <label key={id} className="flex cursor-pointer items-center gap-2 text-[12px] text-foreground">
+                  <Checkbox checked={node.packageIds.includes(id)} onChange={() => toggle(id)} ariaLabel={id} />
+                  <span className="font-rv-mono text-[11px]">{id}</span>
+                </label>
+              );
+            }
+
             const label = periodLabel(row.period);
             return (
               <label key={id} className="flex cursor-pointer items-start gap-2 text-[12px] text-foreground">

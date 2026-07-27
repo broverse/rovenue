@@ -201,11 +201,15 @@ describe("PackageListBinding — hook failure degrades to id-only rows", () => {
     expect(screen.queryByText("Monthly")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Annual" })).not.toBeInTheDocument();
 
-    // The raw ids are still rendered (both as the id-only label and the mono
-    // id caption, since displayName is null with no resolved data), and the
-    // checkbox still toggles packageIds.
-    expect(screen.getAllByText("pkg_month")).toHaveLength(2);
+    // The row renders EXACTLY today's id-only markup: the raw id appears
+    // once, in the original mono span (font-rv-mono text-[11px]), not
+    // duplicated across a displayName fallback and a separate id caption.
+    const idMatches = screen.getAllByText("pkg_month");
+    expect(idMatches).toHaveLength(1);
+    expect(idMatches[0]).toHaveClass("font-rv-mono", "text-[11px]");
+    expect(idMatches[0].closest("label")).toHaveClass("items-center");
 
+    // The checkbox still toggles packageIds.
     act(() => {
       fireEvent.click(screen.getByRole("checkbox", { name: "pkg_year" }));
     });
