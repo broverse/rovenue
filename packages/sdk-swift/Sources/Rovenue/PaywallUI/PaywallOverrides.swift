@@ -126,6 +126,32 @@ public func applyOverrides(_ props: SpacerProps, active: OverrideActiveCondition
     props
 }
 
+public func applyOverrides(_ props: DividerProps, active: OverrideActiveConditions) -> DividerProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = DividerProps(
+            id: result.id, color: patch.color ?? result.color,
+            thickness: patch.thickness ?? result.thickness, inset: result.inset,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
+public func applyOverrides(_ props: IconProps, active: OverrideActiveConditions) -> IconProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = IconProps(
+            id: result.id, name: patch.name ?? result.name, size: result.size,
+            color: patch.color ?? result.color,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
 /// Dispatches to the node's own `applyOverrides` overload and re-wraps the
 /// result in the same `BuilderNode` case. `.unknown` nodes carry no
 /// overrides field at all and pass through unchanged.
@@ -138,6 +164,8 @@ public func applyOverrides(_ node: BuilderNode, active: OverrideActiveConditions
     case .packageList(let p): return .packageList(applyOverrides(p, active: active))
     case .purchaseButton(let p): return .purchaseButton(applyOverrides(p, active: active))
     case .spacer(let p): return .spacer(applyOverrides(p, active: active))
+    case .divider(let p): return .divider(applyOverrides(p, active: active))
+    case .icon(let p): return .icon(applyOverrides(p, active: active))
     case .unknown: return node
     }
 }

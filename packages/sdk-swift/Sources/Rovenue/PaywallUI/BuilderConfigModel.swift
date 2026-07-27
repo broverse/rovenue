@@ -230,6 +230,8 @@ enum OverridablePropKeys {
     static let packageList: Set<String> = []
     static let purchaseButton: Set<String> = ["labelKey"]
     static let spacer: Set<String> = []
+    static let divider: Set<String> = ["color", "thickness"]
+    static let icon: Set<String> = ["name", "color"]
 }
 
 /// A `CodingKey` that accepts ANY string, used to enumerate every key
@@ -367,6 +369,42 @@ public struct SpacerOverrideProps: Decodable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.spacer)
+    }
+}
+
+public struct DividerOverrideProps: Decodable, Equatable, Sendable {
+    public let color: ThemePair?
+    public let thickness: Double?
+
+    public init(color: ThemePair? = nil, thickness: Double? = nil) {
+        self.color = color; self.thickness = thickness
+    }
+
+    private enum CodingKeys: String, CodingKey { case color, thickness }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.divider)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+        thickness = try container.decodeIfPresent(Double.self, forKey: .thickness)
+    }
+}
+
+public struct IconOverrideProps: Decodable, Equatable, Sendable {
+    public let name: String?
+    public let color: ThemePair?
+
+    public init(name: String? = nil, color: ThemePair? = nil) {
+        self.name = name; self.color = color
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, color }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.icon)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
     }
 }
 
@@ -656,6 +694,86 @@ public struct SpacerProps: Decodable {
     }
 }
 
+public struct DividerProps: Decodable {
+    public let id: String
+    public let color: ThemePair?
+    public let thickness: Double?
+    public let inset: Double?
+    public let overrides: [NodeOverride<DividerOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, color: ThemePair? = nil, thickness: Double? = nil, inset: Double? = nil,
+                overrides: [NodeOverride<DividerOverrideProps>]? = nil, visibility: Visibility? = nil,
+                fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.color = color; self.thickness = thickness; self.inset = inset
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, color, thickness, inset, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+        thickness = try container.decodeIfPresent(Double.self, forKey: .thickness)
+        inset = try container.decodeIfPresent(Double.self, forKey: .inset)
+        overrides = try container.decodeIfPresent([NodeOverride<DividerOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
+public struct IconProps: Decodable {
+    public let id: String
+    public let name: String
+    public let size: Double?
+    public let color: ThemePair?
+    public let overrides: [NodeOverride<IconOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, name: String, size: Double? = nil, color: ThemePair? = nil,
+                overrides: [NodeOverride<IconOverrideProps>]? = nil, visibility: Visibility? = nil,
+                fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.name = name; self.size = size; self.color = color
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, size, color, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        size = try container.decodeIfPresent(Double.self, forKey: .size)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+        overrides = try container.decodeIfPresent([NodeOverride<IconOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
+/// Registry name -> SF Symbol. Unknown names return nil and render nothing:
+/// leniency is deliberate so a newer paywall does not break an older app.
+func sfSymbolName(for name: String) -> String? {
+    switch name {
+    case "check": return "checkmark"
+    case "x": return "xmark"
+    case "star": return "star.fill"
+    case "lock": return "lock.fill"
+    case "shield": return "checkmark.shield.fill"
+    case "sparkle": return "sparkles"
+    case "bolt": return "bolt.fill"
+    case "gift": return "gift.fill"
+    case "clock": return "clock.fill"
+    case "infinity": return "infinity"
+    case "cloud": return "cloud.fill"
+    case "arrow-right": return "arrow.right"
+    default: return nil
+    }
+}
+
 // MARK: - BuilderNode
 
 /// A single node in the builder-config tree. Decoding switches on the JSON
@@ -673,6 +791,8 @@ public enum BuilderNode: Decodable {
     case packageList(PackageListProps)
     case purchaseButton(PurchaseButtonProps)
     case spacer(SpacerProps)
+    case divider(DividerProps)
+    case icon(IconProps)
     case unknown(id: String, visibility: Visibility?, fallback: BuilderNodeBox?)
 
     private enum TypeKey: String, CodingKey { case type }
@@ -689,6 +809,8 @@ public enum BuilderNode: Decodable {
         case "packageList": self = .packageList(try PackageListProps(from: decoder))
         case "purchaseButton": self = .purchaseButton(try PurchaseButtonProps(from: decoder))
         case "spacer": self = .spacer(try SpacerProps(from: decoder))
+        case "divider": self = .divider(try DividerProps(from: decoder))
+        case "icon": self = .icon(try IconProps(from: decoder))
         default:
             let container = try decoder.container(keyedBy: UnknownKeys.self)
             let id = try container.decode(String.self, forKey: .id)
@@ -713,6 +835,8 @@ public enum BuilderNode: Decodable {
         case .packageList(let p): return p.id
         case .purchaseButton(let p): return p.id
         case .spacer(let p): return p.id
+        case .divider(let p): return p.id
+        case .icon(let p): return p.id
         case .unknown(let id, _, _): return id
         }
     }
@@ -731,6 +855,8 @@ public enum BuilderNode: Decodable {
         case .packageList(let p): return p.visibility
         case .purchaseButton(let p): return p.visibility
         case .spacer(let p): return p.visibility
+        case .divider(let p): return p.visibility
+        case .icon(let p): return p.visibility
         case .unknown(_, let v, _): return v
         }
     }

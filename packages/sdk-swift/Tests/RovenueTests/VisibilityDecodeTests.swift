@@ -91,4 +91,34 @@ final class VisibilityDecodeTests: XCTestCase {
         }
         XCTAssertEqual(node.visibility?.platform, ["ios"])
     }
+
+    // MARK: - divider / icon
+
+    func test_decodesDivider() throws {
+        let node = try firstChild(#"{"type":"divider","id":"d1","thickness":2,"inset":8}"#)
+        guard case .divider(let p) = node else { XCTFail("not a divider"); return }
+        XCTAssertEqual(p.thickness, 2)
+        XCTAssertEqual(p.inset, 8)
+    }
+
+    func test_decodesIcon() throws {
+        let node = try firstChild(#"{"type":"icon","id":"i1","name":"check","size":32}"#)
+        guard case .icon(let p) = node else { XCTFail("not an icon"); return }
+        XCTAssertEqual(p.name, "check")
+        XCTAssertEqual(p.size, 32)
+    }
+
+    // An unknown name must decode — leniency lives in the renderer, not here.
+    func test_decodesIconWithUnknownName() throws {
+        let node = try firstChild(#"{"type":"icon","id":"i1","name":"not-real"}"#)
+        guard case .icon(let p) = node else { XCTFail("not an icon"); return }
+        XCTAssertEqual(p.name, "not-real")
+    }
+
+    // The registry is the contract: every name must map to a symbol.
+    func test_everyRegistryIconHasASymbol() throws {
+        for name in RenderFixtures.iconRegistryNames() {
+            XCTAssertNotNil(sfSymbolName(for: name), "no SF Symbol mapped for \(name)")
+        }
+    }
 }

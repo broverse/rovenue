@@ -198,6 +198,15 @@ struct CellScope {
 /// compile-time literal directly (mirrors the Kotlin/RN siblings).
 private let paywallVisibilityPlatform = "ios"
 
+/// Defaults mirroring packages/shared/src/paywall/schema.ts's
+/// `DIVIDER_DEFAULT_THICKNESS` / `DIVIDER_DEFAULT_INSET` / `ICON_DEFAULT_SIZE`
+/// — device-independent pixels. `dividerDefaultOpacity` has no shared-schema
+/// counterpart: it's this renderer's own choice for an unspecified `color`.
+private let dividerDefaultThickness = 1.0
+private let dividerDefaultInset = 0.0
+private let iconDefaultSize = 24.0
+private let dividerDefaultOpacity = 0.3
+
 struct BuilderNodeView: View {
     let node: BuilderNode
     let ctx: PaywallRenderContext
@@ -251,6 +260,21 @@ struct BuilderNodeView: View {
                 Spacer().frame(width: CGFloat(size), height: CGFloat(size))
             } else {
                 Spacer()
+            }
+        case .divider(let p):
+            let resolved = p.color.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
+            Rectangle()
+                .fill(resolved.map { color($0) } ?? Color.secondary.opacity(dividerDefaultOpacity))
+                .frame(height: CGFloat(p.thickness ?? dividerDefaultThickness))
+                .padding(.horizontal, CGFloat(p.inset ?? dividerDefaultInset))
+        case .icon(let p):
+            if let symbol = sfSymbolName(for: p.name) {
+                let side = CGFloat(p.size ?? iconDefaultSize)
+                Image(systemName: symbol)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: side, height: side)
+                    .foregroundColor(p.color.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }.map { color($0) })
             }
         case .unknown(_, _, let fallback):
             if let fallback {
