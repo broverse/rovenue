@@ -1348,3 +1348,176 @@ describe("LOCALIZED_KEYS for purchaseButton.trialLabelKey", () => {
     expect(issues).toEqual([]);
   });
 });
+
+describe("wave C: STICKY_FOOTER_NOT_AT_ROOT and MULTIPLE_STICKY_FOOTERS", () => {
+  it("says nothing for a single stickyFooter at the root", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "stickyFooter", id: "sf", children: [{ type: "spacer", id: "s1", size: 8 }] },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.some((i) => i.code === "STICKY_FOOTER_NOT_AT_ROOT")).toBe(false);
+    expect(issues.some((i) => i.code === "MULTIPLE_STICKY_FOOTERS")).toBe(false);
+  });
+
+  it("warns when a stickyFooter is nested rather than a direct child of root, without blocking save or publish", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "stack",
+            id: "wrapper",
+            axis: "v",
+            children: [{ type: "stickyFooter", id: "sf", children: [] }],
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "STICKY_FOOTER_NOT_AT_ROOT");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("sf");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("warns when more than one stickyFooter exists, without blocking save or publish", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "stickyFooter", id: "sf1", children: [] },
+          { type: "stickyFooter", id: "sf2", children: [] },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "MULTIPLE_STICKY_FOOTERS");
+    expect(issue).toBeDefined();
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+});
+
+describe("wave C: COUNTDOWN_NO_DEADLINE and COUNTDOWN_DEADLINE_PAST", () => {
+  it("blocks publish but not save when a countdown has neither endsAt nor durationSeconds", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "countdown", id: "cd" }],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "COUNTDOWN_NO_DEADLINE");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("cd");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(true);
+  });
+
+  it("says nothing for a countdown carrying durationSeconds only", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "countdown", id: "cd", durationSeconds: 900 }],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.some((i) => i.code === "COUNTDOWN_NO_DEADLINE")).toBe(false);
+  });
+
+  it("warns when endsAt is already in the past, using the injected clock, without blocking save or publish", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "countdown", id: "cd", endsAt: "2020-01-01T00:00:00.000Z" }],
+      },
+    });
+    const fixedNow = () => new Date("2026-01-01T00:00:00.000Z").getTime();
+    const issues = validateBuilderConfig(config, { offeringPackageIds, now: fixedNow });
+    const issue = issues.find((i) => i.code === "COUNTDOWN_DEADLINE_PAST");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("cd");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("says nothing when endsAt is in the future relative to the injected clock", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "countdown", id: "cd", endsAt: "2030-01-01T00:00:00.000Z" }],
+      },
+    });
+    const fixedNow = () => new Date("2026-01-01T00:00:00.000Z").getTime();
+    const issues = validateBuilderConfig(config, { offeringPackageIds, now: fixedNow });
+    expect(issues.some((i) => i.code === "COUNTDOWN_DEADLINE_PAST")).toBe(false);
+  });
+});
+
+describe("LOCALIZED_KEYS for wave C node types", () => {
+  it("contributes nothing of its own for stickyFooter — its children are walked separately", () => {
+    const config = baseConfig({
+      localizations: { en: { child_key: "Continue" } },
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "stickyFooter",
+            id: "sf",
+            children: [{ type: "text", id: "t1", key: "child_key", role: "body" }],
+          },
+        ],
+      },
+    });
+    const usages = collectLocalizationUsages(config.root);
+    expect(usages.some((u) => u.nodeId === "sf")).toBe(false);
+    expect(usages.map((u) => u.key)).toEqual(expect.arrayContaining(["child_key"]));
+  });
+
+  it("collects a countdown's labelKey when present, and nothing when absent", () => {
+    const withLabel = baseConfig({
+      localizations: { en: { cd_key: "Ends soon" } },
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "countdown", id: "cd", labelKey: "cd_key" }],
+      },
+    });
+    expect(collectLocalizationUsages(withLabel.root).map((u) => u.key)).toEqual(
+      expect.arrayContaining(["cd_key"]),
+    );
+
+    const withoutLabel = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "countdown", id: "cd" }],
+      },
+    });
+    expect(collectLocalizationUsages(withoutLabel.root).some((u) => u.nodeId === "cd")).toBe(false);
+  });
+});

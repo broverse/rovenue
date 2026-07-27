@@ -184,6 +184,14 @@ export const TIMELINE_CONNECTOR_DEFAULT_COLOR = DIVIDER_DEFAULT_COLOR;
 export const SOCIAL_PROOF_STAR_DEFAULT_COLOR = { light: "#F59E0B", dark: "#FBBF24" } as const;
 export const SOCIAL_PROOF_MAX_RATING = 5;
 
+/** A countdown past its deadline holds at zero rather than vanishing —
+ *  hiding it collapses whatever space it occupied, which is a layout jump
+ *  as the out-of-the-box behaviour. */
+export const COUNTDOWN_DEFAULT_ON_EXPIRY = "freeze" as const;
+/** Tick interval, identical on all three platforms. */
+export const COUNTDOWN_TICK_MS = 1000;
+export const STICKY_FOOTER_DEFAULT_BACKGROUND = { light: "#FFFFFF", dark: "#111827" } as const;
+
 export type FeatureRow = {
   labelKey: string;
   /** Registry icon name; unknown names fail open like any icon. */
@@ -233,6 +241,36 @@ export type SocialProofNode = {
   visibility?: NodeVisibility;
 };
 
+export type StickyFooterNode = {
+  type: "stickyFooter";
+  id: string;
+  children: PaywallNode[];
+  /** Absent = STICKY_FOOTER_DEFAULT_BACKGROUND. A pinned bar needs an
+   *  opaque background or the content scrolls visibly beneath it. */
+  background?: ThemeColor;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
+export type CountdownNode = {
+  type: "countdown";
+  id: string;
+  /** ISO-8601 absolute deadline. Mutually exclusive with durationSeconds. */
+  endsAt?: string;
+  /** Seconds from this paywall's first show to this user, persisted.
+   *  Mutually exclusive with endsAt. */
+  durationSeconds?: number;
+  /** Absent = COUNTDOWN_DEFAULT_ON_EXPIRY. */
+  onExpiry?: "freeze" | "hide";
+  labelKey?: string;
+  /** Absent = inherit the ambient text colour. */
+  color?: ThemeColor;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
 export type PaywallNode =
   | StackNode
   | TextNode
@@ -245,7 +283,9 @@ export type PaywallNode =
   | IconNode
   | FeatureListNode
   | TimelineNode
-  | SocialProofNode;
+  | SocialProofNode
+  | StickyFooterNode
+  | CountdownNode;
 
 /**
  * Per node-type whitelist of override-able prop keys — the node's own
@@ -266,6 +306,8 @@ export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[
   featureList: ["iconColor"],
   timeline: ["connectorColor"],
   socialProof: ["rating", "starColor"],
+  stickyFooter: ["background"],
+  countdown: ["color"],
 };
 
 export type BuilderConfig = {
@@ -505,6 +547,35 @@ const socialProofNodeSchema: z.ZodType<SocialProofNode> = z.object({
   visibility: nodeVisibilitySchema.optional(),
 });
 
+const stickyFooterNodeSchema: z.ZodType<StickyFooterNode> = z.object({
+  type: z.literal("stickyFooter"),
+  id: z.string().min(1),
+  children: z.lazy(() => z.array(lazyPaywallNodeSchema)),
+  background: themeColorSchema.optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.stickyFooter).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
+const countdownNodeSchema: z.ZodType<CountdownNode> = z
+  .object({
+    type: z.literal("countdown"),
+    id: z.string().min(1),
+    endsAt: z.string().datetime().optional(),
+    durationSeconds: z.number().positive().optional(),
+    onExpiry: z.enum(["freeze", "hide"]).optional(),
+    labelKey: z.string().min(1).optional(),
+    color: themeColorSchema.optional(),
+    overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.countdown).optional(),
+    fallback: lazyPaywallNodeSchema.optional(),
+    visibility: nodeVisibilitySchema.optional(),
+  })
+  // Both is ambiguous; NEITHER is allowed so a half-authored node still
+  // saves — the validator blocks the publish instead.
+  .refine((n) => !(n.endsAt !== undefined && n.durationSeconds !== undefined), {
+    message: "endsAt and durationSeconds are mutually exclusive",
+  });
+
 const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   stackNodeSchema,
   textNodeSchema,
@@ -518,6 +589,8 @@ const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   featureListNodeSchema,
   timelineNodeSchema,
   socialProofNodeSchema,
+  stickyFooterNodeSchema,
+  countdownNodeSchema,
 ]);
 paywallNodeSchemaRef = paywallNodeSchema;
 

@@ -625,3 +625,53 @@ describe("wave B row-carrying node types", () => {
     expect(OVERRIDABLE_PROP_KEYS.socialProof).toEqual(["rating", "starColor"]);
   });
 });
+
+describe("wave C node types", () => {
+  const wrap = (node: unknown) => ({
+    formatVersion: 2, defaultLocale: "en", localizations: { en: {} },
+    root: { type: "stack", id: "root", axis: "v", children: [node] },
+  });
+
+  it("accepts a stickyFooter with children", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "stickyFooter", id: "sf", children: [{ type: "spacer", id: "s1", size: 8 }],
+    })).success).toBe(true);
+  });
+
+  it("accepts a countdown with an absolute deadline", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "countdown", id: "c1", endsAt: "2027-01-01T00:00:00.000Z",
+    })).success).toBe(true);
+  });
+
+  it("accepts a countdown with a duration", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "countdown", id: "c1", durationSeconds: 900,
+    })).success).toBe(true);
+  });
+
+  // Exactly one deadline source. Both is ambiguous, and ambiguity in a
+  // wire format outlives whoever wrote it.
+  it("rejects a countdown carrying BOTH deadline forms", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "countdown", id: "c1", endsAt: "2027-01-01T00:00:00.000Z", durationSeconds: 900,
+    })).success).toBe(false);
+  });
+
+  // Neither PARSES — an author mid-edit must still save. It is the
+  // validator that refuses the publish.
+  it("accepts a countdown with neither, so it can still be saved", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "countdown", id: "c1" })).success).toBe(true);
+  });
+
+  it("rejects a non-ISO endsAt", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "countdown", id: "c1", endsAt: "next tuesday",
+    })).success).toBe(false);
+  });
+
+  it("gives both types an OVERRIDABLE_PROP_KEYS row", () => {
+    expect(OVERRIDABLE_PROP_KEYS.stickyFooter).toEqual(["background"]);
+    expect(OVERRIDABLE_PROP_KEYS.countdown).toEqual(["color"]);
+  });
+});

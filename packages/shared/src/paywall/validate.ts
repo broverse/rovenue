@@ -66,6 +66,10 @@ export const LOCALIZED_KEYS: LocalizedKeyFns = {
   featureList: (n) => n.rows.map((r) => r.labelKey),
   timeline: (n) => n.rows.flatMap((r) => (r.captionKey ? [r.labelKey, r.captionKey] : [r.labelKey])),
   socialProof: (n) => [n.labelKey],
+  // stickyFooter contributes no key of its own — its children are walked
+  // separately, exactly as stack's are.
+  stickyFooter: () => [],
+  countdown: (n) => (n.labelKey ? [n.labelKey] : []),
 };
 
 /**
@@ -117,7 +121,17 @@ export type BuilderIssue = {
     | "FEATURE_LIST_TOO_LONG"
     // Wave B — a featureList/timeline with no rows. An unfinished node, but
     // it must still save.
-    | "EMPTY_ROWS";
+    | "EMPTY_ROWS"
+    // Wave C — a stickyFooter that is not a direct child of config.root.
+    // It still renders (inline, like a stack), just not pinned.
+    | "STICKY_FOOTER_NOT_AT_ROOT"
+    // Wave C — more than one stickyFooter in the tree.
+    | "MULTIPLE_STICKY_FOOTERS"
+    // Wave C — a countdown with neither endsAt nor durationSeconds. Parses
+    // fine (a normal mid-edit state) but cannot render, so it must not ship.
+    | "COUNTDOWN_NO_DEADLINE"
+    // Wave C — a countdown whose endsAt has already passed.
+    | "COUNTDOWN_DEADLINE_PAST";
   nodeId?: string;
   locale?: string;
   key?: string;
@@ -165,6 +179,11 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   FEATURE_LIST_TOO_LONG: "warning",
   // An unfinished node, almost never an intent — but it must still save.
   EMPTY_ROWS: "warning",
+  // Renders inline instead of pinned — degraded, not broken.
+  STICKY_FOOTER_NOT_AT_ROOT: "warning",
+  MULTIPLE_STICKY_FOOTERS: "warning",
+  // The author's dated promotion has already passed.
+  COUNTDOWN_DEADLINE_PAST: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
   // MUST still persist. Four of these are reachable from the builder UI in
@@ -181,6 +200,9 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   MISSING_PURCHASE_BUTTON: "publish",
   CELL_TEMPLATE_BAD_NODE: "publish",
   OVERRIDE_BAD_PROP: "publish",
+  // Cannot render at all, so it must not ship — but it must still save,
+  // because "I have not chosen the deadline yet" is a normal edit state.
+  COUNTDOWN_NO_DEADLINE: "publish",
 
   // Anything unlisted stays "save" — see issueSeverity. Only DUPLICATE_NODE_ID
   // relies on that today: tree-ops addresses nodes by id, so a duplicate makes
@@ -227,7 +249,7 @@ function walkNodes(
   insideCellTemplate = false,
 ): void {
   visit(node, insideCellTemplate);
-  if (node.type === "stack") {
+  if (node.type === "stack" || node.type === "stickyFooter") {
     for (const child of node.children) walkNodes(child, visit, insideCellTemplate);
   }
   if (node.type === "packageList" && node.cellTemplate) {
@@ -266,7 +288,9 @@ function collectCommerceReach(
   );
   if (node.type === "packageList") out.packageLists.push(effective);
   if (node.type === "purchaseButton") out.purchaseButtons.push(effective);
-  if (node.type === "stack") for (const c of node.children) collectCommerceReach(c, effective, out);
+  if (node.type === "stack" || node.type === "stickyFooter") {
+    for (const c of node.children) collectCommerceReach(c, effective, out);
+  }
   if (node.type === "packageList" && node.cellTemplate) collectCommerceReach(node.cellTemplate, effective, out);
   if (node.fallback) collectCommerceReach(node.fallback, effective, out);
 }
@@ -340,16 +364,27 @@ export function isMissingLocaleValue(value: string | undefined): boolean {
 
 export function validateBuilderConfig(
   config: BuilderConfig,
-  opts: { offeringPackageIds: string[] },
+  opts: {
+    offeringPackageIds: string[];
+    /** Injectable clock for COUNTDOWN_DEADLINE_PAST, so the check does not
+     *  depend on the wall clock in tests. Defaults to Date.now. */
+    now?: () => number;
+  },
 ): BuilderIssue[] {
   const issues: BuilderIssue[] = [];
   const offeringSet = new Set(opts.offeringPackageIds);
+  const now = opts.now ?? Date.now;
 
   const nodesWithCtx: Array<{ node: PaywallNode; insideCellTemplate: boolean }> = [];
   walkNodes(config.root, (node, insideCellTemplate) => {
     nodesWithCtx.push({ node, insideCellTemplate });
   });
   const allNodes: PaywallNode[] = nodesWithCtx.map((n) => n.node);
+
+  // Direct children of config.root, computed once — STICKY_FOOTER_NOT_AT_ROOT
+  // needs this, and it is cheaper to compute up front than to thread a depth
+  // parameter through the existing walk.
+  const rootChildIds = new Set(config.root.children.map((c) => c.id));
 
   // DUPLICATE_NODE_ID — across the whole tree.
   const idCounts = new Map<string, number>();
@@ -438,6 +473,43 @@ export function validateBuilderConfig(
         code: "EMPTY_ROWS",
         nodeId: node.id,
         message: `"${node.id}" has no rows and will render nothing.`,
+      });
+    }
+  }
+
+  // STICKY_FOOTER_NOT_AT_ROOT / MULTIPLE_STICKY_FOOTERS — wave C.
+  const stickyFooterNodes = allNodes.filter((n) => n.type === "stickyFooter");
+  for (const node of stickyFooterNodes) {
+    if (!rootChildIds.has(node.id)) {
+      issues.push({
+        code: "STICKY_FOOTER_NOT_AT_ROOT",
+        nodeId: node.id,
+        message: `stickyFooter "${node.id}" is not a direct child of the root — it will render inline, not pinned.`,
+      });
+    }
+  }
+  if (stickyFooterNodes.length > 1) {
+    issues.push({
+      code: "MULTIPLE_STICKY_FOOTERS",
+      message: `${stickyFooterNodes.length} stickyFooter nodes found; only one pinned footer is expected per paywall.`,
+    });
+  }
+
+  // COUNTDOWN_NO_DEADLINE / COUNTDOWN_DEADLINE_PAST — wave C.
+  for (const node of allNodes) {
+    if (node.type !== "countdown") continue;
+    if (node.endsAt === undefined && node.durationSeconds === undefined) {
+      issues.push({
+        code: "COUNTDOWN_NO_DEADLINE",
+        nodeId: node.id,
+        message: `countdown "${node.id}" has neither endsAt nor durationSeconds, so it cannot render.`,
+      });
+    }
+    if (node.endsAt !== undefined && new Date(node.endsAt).getTime() < now()) {
+      issues.push({
+        code: "COUNTDOWN_DEADLINE_PAST",
+        nodeId: node.id,
+        message: `countdown "${node.id}" has endsAt "${node.endsAt}" which is already in the past.`,
       });
     }
   }

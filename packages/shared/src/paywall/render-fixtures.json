@@ -916,6 +916,70 @@
           ]
         }
       }
+    },
+    {
+      "name": "stickyFooter: pinned footer with a nested purchaseButton",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "cta.buy": "Continue"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "stickyFooter",
+              "id": "sf_1",
+              "background": {
+                "light": "#FFFFFF",
+                "dark": "#111827"
+              },
+              "children": [
+                {
+                  "type": "purchaseButton",
+                  "id": "pb_footer",
+                  "labelKey": "cta.buy"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "countdown: absolute deadline with a label and onExpiry",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "cd.label": "Offer ends soon"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "countdown",
+              "id": "cd_1",
+              "endsAt": "2027-01-01T00:00:00.000Z",
+              "onExpiry": "freeze",
+              "labelKey": "cd.label",
+              "color": {
+                "light": "#111111",
+                "dark": "#EEEEEE"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [
@@ -935,7 +999,7 @@
           "axis": "v",
           "children": [
             {
-              "type": "countdown",
+              "type": "unknownFutureNode",
               "id": "cd_1",
               "endsAt": "2027-01-01T00:00:00Z",
               "fallback": {
