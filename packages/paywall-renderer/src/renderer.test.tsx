@@ -1075,11 +1075,29 @@ describe("featureList, timeline and socialProof nodes", () => {
     expect(container.querySelectorAll('[data-rov-row]')).toHaveLength(3);
   });
 
+  // data-rov-icon carries the RESOLVED mark name, not just "some svg
+  // rendered" — check and x are both real registry icons, so asserting svg
+  // presence alone can't tell them apart (a prior version of this test made
+  // that mistake and a mutated default silently passed it).
+  it("resolves the default mark for an included row with no icon", () => {
+    const { container } = render(<PaywallRenderer config={cfg({
+      type: "featureList", id: "f1", rows: [{ labelKey: "f_a" }],
+    })} {...base} />);
+    expect(container.querySelector('[data-rov-row] [data-rov-icon]')?.getAttribute("data-rov-icon")).toBe("check");
+  });
+
   it("uses the excluded mark for a row with included false", () => {
     const { container } = render(<PaywallRenderer config={cfg({
       type: "featureList", id: "f1", rows: [{ labelKey: "f_a", included: false }],
     })} {...base} />);
-    expect(container.querySelector('[data-rov-row] svg')).not.toBeNull();
+    expect(container.querySelector('[data-rov-row] [data-rov-icon]')?.getAttribute("data-rov-icon")).toBe("x");
+  });
+
+  it("resolves an explicit row icon over the included/excluded default", () => {
+    const { container } = render(<PaywallRenderer config={cfg({
+      type: "featureList", id: "f1", rows: [{ labelKey: "f_a", icon: "star", included: false }],
+    })} {...base} />);
+    expect(container.querySelector('[data-rov-row] [data-rov-icon]')?.getAttribute("data-rov-icon")).toBe("star");
   });
 
   it("renders a timeline caption when present and omits it otherwise", () => {
@@ -1099,12 +1117,16 @@ describe("featureList, timeline and socialProof nodes", () => {
     expect(without.container.querySelectorAll('[data-rov-star]')).toHaveLength(0);
   });
 
-  // Fail open, exactly as an icon node does.
+  // Fail open, exactly as an icon node does: the requested name still shows
+  // up on data-rov-icon (so it's inspectable/debuggable), but no <svg> renders
+  // for it — distinct from a resolved known name, which always has one.
   it("renders a row with an unknown icon without throwing", () => {
     const { container } = render(<PaywallRenderer config={cfg({
       type: "featureList", id: "f1", rows: [{ labelKey: "f_a", icon: "nope" }],
     })} {...base} />);
-    expect(container.querySelector('[data-rov-row]')).not.toBeNull();
+    const mark = container.querySelector('[data-rov-row] [data-rov-icon]');
+    expect(mark?.getAttribute("data-rov-icon")).toBe("nope");
+    expect(mark?.querySelector("svg")).toBeNull();
   });
 
   it("renders nothing for an empty rows array", () => {

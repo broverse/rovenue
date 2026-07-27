@@ -486,7 +486,11 @@ const ROW_GAP = "8px";
 /** A feature row's mark: the row's own `icon` if given; otherwise the
  * excluded mark when `included` is explicitly false, else the included
  * default. Resolved through the same `ICON_COMPONENT` lookup as the `icon`
- * node — an unrecognised name fails open (renders nothing), never throws. */
+ * node — an unrecognised name fails open (renders nothing), never throws.
+ * The resolved name itself is exposed via `data-rov-icon` — the only way
+ * from outside the component to tell which mark was chosen, since fail-open
+ * means an unknown name and a known one can otherwise both render nothing
+ * or both render a glyph. */
 function renderFeatureList(node: FeatureListNode, ctx: RenderCtx): ReactElement {
   // `iconColor` is intentionally NOT defaulted (mirrors renderIcon): absent
   // means the mark inherits the row's own text colour via CSS `currentColor`,
@@ -506,7 +510,7 @@ function renderFeatureList(node: FeatureListNode, ctx: RenderCtx): ReactElement 
             data-rov-row
             style={{ display: "flex", alignItems: "center", gap: ROW_GAP, color: rowTextColor }}
           >
-            <span style={{ display: "inline-flex", flexShrink: 0 }}>
+            <span data-rov-icon={iconName} style={{ display: "inline-flex", flexShrink: 0 }}>
               {Cmp ? <Cmp size={ICON_DEFAULT_SIZE} color={iconColor} /> : null}
             </span>
             {label !== null ? <span>{label}</span> : null}
