@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_BUILDER_DEPTH,
+  OVERRIDABLE_PROP_KEYS,
   builderConfigSchema,
   emptyBuilderConfig,
   measureNodeTree,
@@ -485,5 +486,48 @@ describe("measureNodeTree", () => {
     // the first time `depth` exceeds MAX_BUILDER_DEPTH, i.e. at depth 33,
     // and this chain has exactly one node per depth level.
     expect(measured).toEqual({ depth: MAX_BUILDER_DEPTH + 1, nodes: MAX_BUILDER_DEPTH + 1 });
+  });
+});
+
+describe("divider and icon node types", () => {
+  const wrap = (node: unknown) => ({
+    formatVersion: 2,
+    defaultLocale: "en",
+    localizations: { en: {} },
+    root: { type: "stack", id: "root", axis: "v", children: [node] },
+  });
+
+  it("accepts a minimal divider", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "divider", id: "d1" })).success).toBe(true);
+  });
+
+  it("accepts a divider with all props", () => {
+    const r = builderConfigSchema.safeParse(
+      wrap({ type: "divider", id: "d1", color: { light: "#e5e5e5" }, thickness: 2, inset: 16 }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a minimal icon", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "icon", id: "i1", name: "check" })).success).toBe(true);
+  });
+
+  // The name is deliberately NOT an enum: a thirteenth icon must not be a
+  // wire change that older SDKs reject wholesale.
+  it("accepts an icon name outside the registry", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "icon", id: "i1", name: "not-a-real-icon" })).success).toBe(true);
+  });
+
+  it("rejects an icon with no name", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "icon", id: "i1" })).success).toBe(false);
+  });
+
+  it("rejects an icon whose name is empty", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "icon", id: "i1", name: "" })).success).toBe(false);
+  });
+
+  it("gives both types an OVERRIDABLE_PROP_KEYS row", () => {
+    expect(OVERRIDABLE_PROP_KEYS.divider).toEqual(["color", "thickness"]);
+    expect(OVERRIDABLE_PROP_KEYS.icon).toEqual(["name", "color"]);
   });
 });

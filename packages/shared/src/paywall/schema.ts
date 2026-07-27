@@ -127,6 +127,41 @@ export type SpacerNode = {
   visibility?: NodeVisibility;
 };
 
+/** Default hairline thickness, in device-independent pixels. */
+export const DIVIDER_DEFAULT_THICKNESS = 1;
+/** Default horizontal inset, in device-independent pixels. */
+export const DIVIDER_DEFAULT_INSET = 0;
+/** Default icon edge length, in device-independent pixels. */
+export const ICON_DEFAULT_SIZE = 24;
+
+export type DividerNode = {
+  type: "divider";
+  id: string;
+  color?: ThemeColor;
+  /** Defaults to DIVIDER_DEFAULT_THICKNESS. */
+  thickness?: number;
+  /** Horizontal inset on both sides. Defaults to DIVIDER_DEFAULT_INSET. */
+  inset?: number;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
+export type IconNode = {
+  type: "icon";
+  id: string;
+  /** A name from icon-registry.json. Deliberately a free string: unknown
+   *  names render nothing and fail open, so adding an icon later is not a
+   *  wire change older SDKs reject. */
+  name: string;
+  /** Defaults to ICON_DEFAULT_SIZE. */
+  size?: number;
+  color?: ThemeColor;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
 export type PaywallNode =
   | StackNode
   | TextNode
@@ -134,7 +169,9 @@ export type PaywallNode =
   | ButtonNode
   | PackageListNode
   | PurchaseButtonNode
-  | SpacerNode;
+  | SpacerNode
+  | DividerNode
+  | IconNode;
 
 /**
  * Per node-type whitelist of override-able prop keys — the node's own
@@ -150,6 +187,8 @@ export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[
   packageList: [],
   purchaseButton: ["labelKey"],
   spacer: [],
+  divider: ["color", "thickness"],
+  icon: ["name", "color"],
 };
 
 export type BuilderConfig = {
@@ -323,6 +362,28 @@ const spacerNodeSchema: z.ZodType<SpacerNode> = z.object({
   visibility: nodeVisibilitySchema.optional(),
 });
 
+const dividerNodeSchema: z.ZodType<DividerNode> = z.object({
+  type: z.literal("divider"),
+  id: z.string().min(1),
+  color: themeColorSchema.optional(),
+  thickness: z.number().optional(),
+  inset: z.number().optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.divider).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
+const iconNodeSchema: z.ZodType<IconNode> = z.object({
+  type: z.literal("icon"),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  size: z.number().optional(),
+  color: themeColorSchema.optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.icon).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
 const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   stackNodeSchema,
   textNodeSchema,
@@ -331,6 +392,8 @@ const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   packageListNodeSchema,
   purchaseButtonNodeSchema,
   spacerNodeSchema,
+  dividerNodeSchema,
+  iconNodeSchema,
 ]);
 paywallNodeSchemaRef = paywallNodeSchema;
 
