@@ -565,9 +565,11 @@ Add `StickyFooterProps` and `CountdownProps` beside the wave B structs, the two 
 
 Extract `countdownText(remaining: Int) -> String` as an internal free function — it is the only part of a countdown a unit test in this package can reach, so it must not live inside the view.
 
-Render: the sticky footer is pinned by the root, not by the node case, so `RovenuePaywallView` partitions `config.root.children` the same way the web renderer does and places the footer below the `ScrollView` with `.padding(.bottom)` for the safe area; a `stickyFooter` found anywhere else renders as a plain `VStack`.
+Render: the sticky footer is pinned by the root, not by the node case, so `RovenuePaywallView` partitions `config.root.children` the same way the web renderer does and places the footer below the `ScrollView` with `.padding(.bottom)` for the safe area; a `stickyFooter` found anywhere else renders as a plain `VStack`. The scrolled content's bottom inset must come from the footer's MEASURED height, not a constant — a footer with a CTA plus fine print is routinely taller than one with a CTA alone, and a fixed value leaves the last item unreachable, which is the same failure as having no scrolling at all.
 
 The countdown uses a `Timer.publish(every:)` at `COUNTDOWN_TICK_MS / 1000` seconds, `.autoconnect()`, and **`.onDisappear` cancelling it**. An absent `color` passes `nil` to `.foregroundColor`.
+
+**`durationSeconds` must be anchored to a PERSISTED first-show instant**, keyed by paywall identifier, in `UserDefaults`. The spec requires "first show per user, persisted", and warns that a timer restarting on every open is not a deadline. The web renderer cannot do this — it is a pure component with no storage — so it takes an injected `firstShownAt` and falls back to mount time. This SDK *has* storage, so it owns the real thing: on first render of a countdown for a given paywall, write the instant if absent, then always read it back. Add a test that a second render with the same paywall identifier reuses the stored anchor rather than re-stamping it.
 
 - [ ] **Step 4: Run**
 
@@ -628,9 +630,11 @@ Run: `cd packages/sdk-kotlin && ./gradlew testDebugUnitTest`
 
 Add the two data classes, parser arms, override-props objects and `PaywallOverrides.kt` cases. Extract `countdownText(remaining: Long): String` as an internal top-level function so it is unit-testable — the view itself is not.
 
-`RovenuePaywallView.render()` partitions `cfg.root.children` the same way the other two renderers do: the last direct-child sticky footer is added **below** the `NestedScrollView` in the outer container, with bottom padding for the navigation bar inset; everything else stays inside the scroller. A `stickyFooter` found deeper renders as a plain `LinearLayout` via `NodeViewFactory`.
+`RovenuePaywallView.render()` partitions `cfg.root.children` the same way the other two renderers do: the last direct-child sticky footer is added **below** the `NestedScrollView` in the outer container, with bottom padding for the navigation bar inset; everything else stays inside the scroller. The scroller's bottom padding must come from the footer's MEASURED height, not a constant — a footer with a CTA plus fine print is routinely taller than one with a CTA alone, and a fixed value leaves the last item unreachable, which is the same failure as having no scrolling at all. A `stickyFooter` found deeper renders as a plain `LinearLayout` via `NodeViewFactory`.
 
 The countdown ticks with a `Handler(Looper.getMainLooper())` posting at `COUNTDOWN_TICK_MS`, started in `onAttachedToWindow` and **removed in `onDetachedFromWindow`** — a handler that outlives the view leaks it. An absent `color` must not call `setTextColor`, so the text inherits.
+
+**`durationSeconds` must be anchored to a PERSISTED first-show instant**, keyed by paywall identifier, in `SharedPreferences`. The spec requires "first show per user, persisted", and warns that a timer restarting on every open is not a deadline. The web renderer cannot do this — it is a pure component with no storage — so it takes an injected `firstShownAt` and falls back to mount time. This SDK *has* storage, so it owns the real thing: on first render of a countdown for a given paywall, write the instant if absent, then always read it back. Add a test that a second render with the same paywall identifier reuses the stored anchor rather than re-stamping it.
 
 - [ ] **Step 4: Run**
 
