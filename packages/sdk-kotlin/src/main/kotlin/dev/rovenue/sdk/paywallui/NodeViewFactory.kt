@@ -315,6 +315,50 @@ private const val DIVIDER_DEFAULT_INSET_DP = 0.0
 private const val ICON_DEFAULT_SIZE_DP = 24.0
 private val DIVIDER_DEFAULT_COLOR = ThemePair(light = "#E5E7EB", dark = "#374151")
 
+// Defaults mirroring packages/shared/src/paywall/schema.ts's
+// FEATURE_ROW_DEFAULT_ICON / FEATURE_ROW_EXCLUDED_ICON /
+// FEATURE_ROW_DEFAULT_INCLUDED / TIMELINE_ROW_DEFAULT_ICON /
+// TIMELINE_CONNECTOR_DEFAULT_COLOR (same hex as DIVIDER_DEFAULT_COLOR — the
+// connector is the same hairline as a divider) / SOCIAL_PROOF_STAR_DEFAULT_
+// COLOR / SOCIAL_PROOF_MAX_RATING. Keep in sync with schema.ts by hand;
+// there is no codegen step sharing these across platforms.
+private const val FEATURE_ROW_DEFAULT_ICON = "check"
+private const val FEATURE_ROW_EXCLUDED_ICON = "x"
+private const val FEATURE_ROW_DEFAULT_INCLUDED = true
+private const val TIMELINE_ROW_DEFAULT_ICON = "clock"
+private val TIMELINE_CONNECTOR_DEFAULT_COLOR = DIVIDER_DEFAULT_COLOR
+private val SOCIAL_PROOF_STAR_DEFAULT_COLOR = ThemePair(light = "#F59E0B", dark = "#FBBF24")
+private const val SOCIAL_PROOF_MAX_RATING = 5
+private const val SOCIAL_PROOF_STAR_ICON_NAME = "star"
+private const val UNFILLED_STAR_ALPHA = 0.3f
+
+// Layout constants for the three row-carrying node types, in dp — no
+// cross-platform pixel-parity contract exists for these gaps (see the
+// wave-B notes: star half-fill / connector alignment / row spacing at
+// accessibility text sizes is a device question for the next smoke
+// session), but the values still get names rather than being inlined.
+private const val FEATURE_LIST_ROW_SPACING_DP = 8.0
+private const val FEATURE_ROW_ICON_GAP_DP = 8.0
+private const val TIMELINE_MARK_GAP_DP = 12.0
+private const val TIMELINE_CONNECTOR_WIDTH_DP = 2.0
+private const val SOCIAL_PROOF_STAR_GAP_DP = 2.0
+private const val SOCIAL_PROOF_LABEL_GAP_DP = 4.0
+
+/**
+ * A feature row's mark: its own `icon` if given, otherwise the excluded mark
+ * when `included` resolves to `false`, else the included default. Exposed
+ * (not private) so tests can assert WHICH drawable an excluded row resolves
+ * to via `drawableResFor` — asserting merely that *some* drawable resolved
+ * would pass even with the wrong branch, since both `check` and `x` are
+ * real, vendored drawables. Mirrors the Swift renderer's
+ * `resolvedFeatureRowIconName` / the web renderer's `renderFeatureList` row-
+ * icon resolution.
+ */
+internal fun resolvedFeatureRowIconName(row: FeatureRow): String {
+    val included = row.included ?: FEATURE_ROW_DEFAULT_INCLUDED
+    return row.icon ?: if (included) FEATURE_ROW_DEFAULT_ICON else FEATURE_ROW_EXCLUDED_ICON
+}
+
 private fun dp(context: Context, value: Double): Int =
     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), context.resources.displayMetrics)
         .roundToInt()
@@ -408,6 +452,9 @@ internal object NodeViewFactory {
             is BuilderNode.Spacer -> View(context)
             is BuilderNode.Divider -> buildDivider(context, resolved, ctx)
             is BuilderNode.Icon -> buildIcon(context, resolved, ctx)
+            is BuilderNode.FeatureList -> buildFeatureList(context, resolved, ctx, cell)
+            is BuilderNode.Timeline -> buildTimeline(context, resolved, ctx, cell)
+            is BuilderNode.SocialProof -> buildSocialProof(context, resolved, ctx, cell)
             is BuilderNode.Unknown -> resolved.fallback?.let { build(context, it, ctx, cell) }
         }
     }
@@ -694,6 +741,209 @@ internal object NodeViewFactory {
             }
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
+    }
+
+    /** A vertical LinearLayout of rows, each an ImageView (the row's resolved
+     *  mark, via [resolvedFeatureRowIconName] + the static [drawableResFor]
+     *  map) plus a TextView. Mirrors the web renderer's `renderFeatureList`. */
+    private fun buildFeatureList(
+        context: Context,
+        node: BuilderNode.FeatureList,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View {
+        val container = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val rowSpacing = dp(context, FEATURE_LIST_ROW_SPACING_DP)
+        node.rows.forEachIndexed { index, row ->
+            val rowView = buildFeatureRow(context, row, node.iconColor, ctx, cell)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                if (index > 0) topMargin = rowSpacing
+            }
+            container.addView(rowView, lp)
+        }
+        return container
+    }
+
+    private fun buildFeatureRow(
+        context: Context,
+        row: FeatureRow,
+        iconColor: ThemePair?,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View {
+        val rowLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val resId = drawableResFor(resolvedFeatureRowIconName(row))
+        if (resId != null) {
+            // Absent `iconColor` means inherit — `imageTintList` is simply
+            // never set (no default-tint substitute), same rule buildIcon
+            // follows for the standalone `icon` node.
+            val tint = iconColor?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+            val iv = ImageView(context).apply {
+                setImageResource(resId)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                if (tint != null) {
+                    imageTintList = android.content.res.ColorStateList.valueOf(tint)
+                }
+            }
+            val size = dp(context, ICON_DEFAULT_SIZE_DP)
+            val ivLp = LinearLayout.LayoutParams(size, size).apply {
+                rightMargin = dp(context, FEATURE_ROW_ICON_GAP_DP)
+            }
+            rowLayout.addView(iv, ivLp)
+        }
+        val label = TextView(context).apply {
+            text = ctx.label(row.labelKey, cell)
+            textSize = textStyleFor(TextRole.BODY).sizeSp
+        }
+        rowLayout.addView(label)
+        return rowLayout
+    }
+
+    /** A vertical LinearLayout of rows: each row's mark, a thin connector bar
+     *  below it for every row but the last, the label, and the optional
+     *  caption. `connectorColor` absent falls back to
+     *  [TIMELINE_CONNECTOR_DEFAULT_COLOR] — a rule, not text, so unlike a
+     *  row's own mark (which always inherits — [TimelineRow] carries no
+     *  color at all) it is never left to inherit. Mirrors the web renderer's
+     *  `renderTimeline`. */
+    private fun buildTimeline(
+        context: Context,
+        node: BuilderNode.Timeline,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View {
+        val container = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        node.rows.forEachIndexed { index, row ->
+            val isLast = index == node.rows.size - 1
+            container.addView(buildTimelineRow(context, row, node.connectorColor, isLast, ctx, cell))
+        }
+        return container
+    }
+
+    private fun buildTimelineRow(
+        context: Context,
+        row: TimelineRow,
+        connectorColor: ThemePair?,
+        isLast: Boolean,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View {
+        val rowLayout = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+
+        val markColumn = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        val resId = drawableResFor(row.icon ?: TIMELINE_ROW_DEFAULT_ICON)
+        if (resId != null) {
+            // A timeline row's own mark has no configurable color at all
+            // (TimelineRow carries none) — it always inherits, same as the
+            // feature row's icon does when uncoloured.
+            val iv = ImageView(context).apply {
+                setImageResource(resId)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }
+            val size = dp(context, ICON_DEFAULT_SIZE_DP)
+            markColumn.addView(iv, LinearLayout.LayoutParams(size, size))
+        }
+        if (!isLast) {
+            val resolvedColor = connectorColor?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+                ?: parseHexColor(themeValue(TIMELINE_CONNECTOR_DEFAULT_COLOR, ctx.dark))?.toColorInt()
+            val connector = View(context).apply {
+                setBackgroundColor(resolvedColor ?: 0xFF808080.toInt())
+            }
+            val connectorLp = LinearLayout.LayoutParams(
+                dp(context, TIMELINE_CONNECTOR_WIDTH_DP),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { weight = 1f }
+            markColumn.addView(connector, connectorLp)
+        }
+
+        val textColumn = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        textColumn.addView(
+            TextView(context).apply {
+                text = ctx.label(row.labelKey, cell)
+                textSize = textStyleFor(TextRole.BODY).sizeSp
+            },
+        )
+        row.captionKey?.let { captionKey ->
+            textColumn.addView(
+                TextView(context).apply {
+                    text = ctx.label(captionKey, cell)
+                    textSize = textStyleFor(TextRole.CAPTION).sizeSp
+                },
+            )
+        }
+
+        val markLp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.MATCH_PARENT,
+        ).apply { rightMargin = dp(context, TIMELINE_MARK_GAP_DP) }
+        rowLayout.addView(markColumn, markLp)
+        rowLayout.addView(textColumn)
+        return rowLayout
+    }
+
+    /** [SOCIAL_PROOF_MAX_RATING] star ImageViews (the first `floor(rating)`
+     *  full opacity, the rest dimmed — only one star drawable is vendored,
+     *  so an unfilled star is the same glyph at reduced alpha rather than a
+     *  distinct outline asset; real half/outline fidelity is a device smoke
+     *  question, not this task's), then the label. `rating` absent renders
+     *  no stars at all — not zero filled ones. `starColor` absent falls back
+     *  to [SOCIAL_PROOF_STAR_DEFAULT_COLOR], same pattern as the timeline
+     *  connector. Mirrors the web renderer's `renderSocialProof`. */
+    private fun buildSocialProof(
+        context: Context,
+        node: BuilderNode.SocialProof,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View {
+        val container = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val rating = node.rating
+        if (rating != null) {
+            val starsRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            val tint = node.starColor?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+                ?: parseHexColor(themeValue(SOCIAL_PROOF_STAR_DEFAULT_COLOR, ctx.dark))?.toColorInt()
+            val resId = drawableResFor(SOCIAL_PROOF_STAR_ICON_NAME)
+            if (resId != null) {
+                val size = dp(context, ICON_DEFAULT_SIZE_DP)
+                for (index in 0 until SOCIAL_PROOF_MAX_RATING) {
+                    val filled = index < rating
+                    val iv = ImageView(context).apply {
+                        setImageResource(resId)
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        alpha = if (filled) 1f else UNFILLED_STAR_ALPHA
+                        if (tint != null) {
+                            imageTintList = android.content.res.ColorStateList.valueOf(tint)
+                        }
+                    }
+                    val lp = LinearLayout.LayoutParams(size, size).apply {
+                        if (index > 0) leftMargin = dp(context, SOCIAL_PROOF_STAR_GAP_DP)
+                    }
+                    starsRow.addView(iv, lp)
+                }
+            }
+            container.addView(
+                starsRow,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { bottomMargin = dp(context, SOCIAL_PROOF_LABEL_GAP_DP) },
+            )
+        }
+        container.addView(
+            TextView(context).apply {
+                text = ctx.label(node.labelKey, cell)
+                textSize = textStyleFor(TextRole.BODY).sizeSp
+            },
+        )
+        return container
     }
 }
 

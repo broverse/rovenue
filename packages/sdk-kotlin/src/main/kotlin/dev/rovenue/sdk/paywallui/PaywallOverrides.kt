@@ -138,6 +138,39 @@ fun applyOverrides(node: BuilderNode.Icon, active: OverrideActiveConditions): Bu
     return result
 }
 
+fun applyOverrides(node: BuilderNode.FeatureList, active: OverrideActiveConditions): BuilderNode.FeatureList {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(iconColor = patch.iconColor ?: result.iconColor)
+    }
+    return result
+}
+
+fun applyOverrides(node: BuilderNode.Timeline, active: OverrideActiveConditions): BuilderNode.Timeline {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(connectorColor = patch.connectorColor ?: result.connectorColor)
+    }
+    return result
+}
+
+fun applyOverrides(node: BuilderNode.SocialProof, active: OverrideActiveConditions): BuilderNode.SocialProof {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(
+            rating = patch.rating ?: result.rating,
+            starColor = patch.starColor ?: result.starColor,
+        )
+    }
+    return result
+}
+
 /** Dispatches to the node's own `applyOverrides` overload. `.Unknown` nodes
  *  carry no overrides field at all and pass through unchanged. */
 fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): BuilderNode = when (node) {
@@ -150,6 +183,9 @@ fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): Builder
     is BuilderNode.Spacer -> applyOverrides(node, active)
     is BuilderNode.Divider -> applyOverrides(node, active)
     is BuilderNode.Icon -> applyOverrides(node, active)
+    is BuilderNode.FeatureList -> applyOverrides(node, active)
+    is BuilderNode.Timeline -> applyOverrides(node, active)
+    is BuilderNode.SocialProof -> applyOverrides(node, active)
     is BuilderNode.Unknown -> node
 }
 

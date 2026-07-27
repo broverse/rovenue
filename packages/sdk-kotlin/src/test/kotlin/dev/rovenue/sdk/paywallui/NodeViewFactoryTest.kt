@@ -208,6 +208,12 @@ class NodeViewFactoryTest {
 
     private fun iconNode(size: Double? = null) = BuilderNode.Icon(id = "i", name = "check", size = size)
 
+    private fun featureListNode() = BuilderNode.FeatureList(id = "fl", rows = listOf(FeatureRow(labelKey = "k")))
+
+    private fun timelineNode() = BuilderNode.Timeline(id = "tl", rows = listOf(TimelineRow(labelKey = "k")))
+
+    private fun socialProofNode() = BuilderNode.SocialProof(id = "sp", labelKey = "k")
+
     @Test
     fun `childLayoutFor gives non-stack non-spacer children wrap-content and no weight`() {
         val layout = childLayoutFor(Axis.V, textNode())
@@ -321,6 +327,36 @@ class NodeViewFactoryTest {
         assertEquals(40.0, layout.width.valueDp)
         assertEquals(DimenMode.FIXED, layout.height.mode)
         assertEquals(40.0, layout.height.valueDp)
+    }
+
+    // ---- childLayoutFor (featureList / timeline / socialProof) -----------
+    // These three fall through to the generic WRAP_CONTENT/no-weight arm
+    // (none of them carry a schema-level `size`, unlike stack) — a case per
+    // type here is what would have caught a dropped/misrouted arm, mirroring
+    // the divider/icon coverage above.
+
+    @Test
+    fun `childLayoutFor gives a featureList wrap-content and no weight`() {
+        val layout = childLayoutFor(Axis.V, featureListNode())
+        assertEquals(DimenMode.WRAP_CONTENT, layout.width.mode)
+        assertEquals(DimenMode.WRAP_CONTENT, layout.height.mode)
+        assertEquals(0f, layout.weight)
+    }
+
+    @Test
+    fun `childLayoutFor gives a timeline wrap-content and no weight`() {
+        val layout = childLayoutFor(Axis.V, timelineNode())
+        assertEquals(DimenMode.WRAP_CONTENT, layout.width.mode)
+        assertEquals(DimenMode.WRAP_CONTENT, layout.height.mode)
+        assertEquals(0f, layout.weight)
+    }
+
+    @Test
+    fun `childLayoutFor gives a socialProof wrap-content and no weight`() {
+        val layout = childLayoutFor(Axis.V, socialProofNode())
+        assertEquals(DimenMode.WRAP_CONTENT, layout.width.mode)
+        assertEquals(DimenMode.WRAP_CONTENT, layout.height.mode)
+        assertEquals(0f, layout.weight)
     }
 
     // ---- childLayoutFor + applyOverrides: the RESOLVED node drives layout -
@@ -481,5 +517,12 @@ class NodeViewFactoryTest {
     @Test
     fun `build renders a node with no visibility rules`() {
         assertTrue(NodeViewFactory.build(mockContext(), textNode(), renderContext(), cell = null) != null)
+    }
+
+    @Test
+    fun `build dispatches featureList, timeline and socialProof nodes`() {
+        assertTrue(NodeViewFactory.build(mockContext(), featureListNode(), renderContext(), cell = null) != null)
+        assertTrue(NodeViewFactory.build(mockContext(), timelineNode(), renderContext(), cell = null) != null)
+        assertTrue(NodeViewFactory.build(mockContext(), socialProofNode(), renderContext(), cell = null) != null)
     }
 }

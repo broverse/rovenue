@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -107,6 +108,9 @@ private object OverridablePropKeys {
     val spacer: Set<String> = emptySet()
     val divider: Set<String> = setOf("color", "thickness")
     val icon: Set<String> = setOf("name", "color")
+    val featureList: Set<String> = setOf("iconColor")
+    val timeline: Set<String> = setOf("connectorColor")
+    val socialProof: Set<String> = setOf("rating", "starColor")
 }
 
 /** A single conditional prop swap: `{ when: { kind }, props }`. [T] is the
@@ -144,6 +148,24 @@ object SpacerOverrideProps
 data class DividerOverrideProps(val color: ThemePair? = null, val thickness: Double? = null)
 
 data class IconOverrideProps(val name: String? = null, val color: ThemePair? = null)
+
+data class FeatureListOverrideProps(val iconColor: ThemePair? = null)
+
+data class TimelineOverrideProps(val connectorColor: ThemePair? = null)
+
+data class SocialProofOverrideProps(val rating: Double? = null, val starColor: ThemePair? = null)
+
+// =============================================================
+// Feature-list / timeline row shapes (Wave B) — Kotlin mirror of the shared
+// `FeatureRow`/`TimelineRow` types (packages/shared/src/paywall/schema.ts)
+// and the Swift decoder's `FeatureRowProps`/`TimelineRowProps`. Not nodes
+// themselves, so — like the Swift structs — they carry none of
+// `visibility`/`overrides`/`fallback`.
+// =============================================================
+
+data class FeatureRow(val labelKey: String, val icon: String? = null, val included: Boolean? = null)
+
+data class TimelineRow(val labelKey: String, val captionKey: String? = null, val icon: String? = null)
 
 sealed class BuilderNode {
     abstract val id: String
@@ -250,6 +272,39 @@ sealed class BuilderNode {
         val size: Double? = null,
         val color: ThemePair? = null,
         val overrides: List<NodeOverride<IconOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class FeatureList(
+        override val id: String,
+        val rows: List<FeatureRow>,
+        /** Applied to each row's icon that does not carry its own. Absent
+         *  means inherit (see NodeViewFactory.kt), NOT a default color. */
+        val iconColor: ThemePair? = null,
+        val overrides: List<NodeOverride<FeatureListOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class Timeline(
+        override val id: String,
+        val rows: List<TimelineRow>,
+        /** Absent = TIMELINE_CONNECTOR_DEFAULT_COLOR (NodeViewFactory.kt). */
+        val connectorColor: ThemePair? = null,
+        val overrides: List<NodeOverride<TimelineOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class SocialProof(
+        override val id: String,
+        /** 0..SOCIAL_PROOF_MAX_RATING. Absent renders no stars at all. */
+        val rating: Double? = null,
+        val labelKey: String,
+        /** Absent = SOCIAL_PROOF_STAR_DEFAULT_COLOR (NodeViewFactory.kt). */
+        val starColor: ThemePair? = null,
+        val overrides: List<NodeOverride<SocialProofOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
@@ -449,6 +504,33 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             visibility = visibility,
             fallback = fallback,
         )
+        "featureList" -> BuilderNode.FeatureList(
+            id = id,
+            rows = (obj["rows"] as? JsonArray ?: throw BuilderDecodeException("featureList.rows must be an array"))
+                .map { parseFeatureRow(it as? JsonObject ?: throw BuilderDecodeException("featureList row must be an object")) },
+            iconColor = obj["iconColor"]?.letObject(::parseThemePair),
+            overrides = obj.parseOverrideList(::parseFeatureListOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
+        "timeline" -> BuilderNode.Timeline(
+            id = id,
+            rows = (obj["rows"] as? JsonArray ?: throw BuilderDecodeException("timeline.rows must be an array"))
+                .map { parseTimelineRow(it as? JsonObject ?: throw BuilderDecodeException("timeline row must be an object")) },
+            connectorColor = obj["connectorColor"]?.letObject(::parseThemePair),
+            overrides = obj.parseOverrideList(::parseTimelineOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
+        "socialProof" -> BuilderNode.SocialProof(
+            id = id,
+            rating = obj.optionalDouble("rating"),
+            labelKey = obj.requireString("labelKey"),
+            starColor = obj["starColor"]?.letObject(::parseThemePair),
+            overrides = obj.parseOverrideList(::parseSocialProofOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
         else -> BuilderNode.Unknown(id = id, visibility = visibility, fallback = fallback)
@@ -576,6 +658,38 @@ private fun parseIconOverrideProps(props: JsonObject): IconOverrideProps {
     )
 }
 
+private fun parseFeatureListOverrideProps(props: JsonObject): FeatureListOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.featureList)
+    return FeatureListOverrideProps(iconColor = props["iconColor"]?.letObject(::parseThemePair))
+}
+
+private fun parseTimelineOverrideProps(props: JsonObject): TimelineOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.timeline)
+    return TimelineOverrideProps(connectorColor = props["connectorColor"]?.letObject(::parseThemePair))
+}
+
+private fun parseSocialProofOverrideProps(props: JsonObject): SocialProofOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.socialProof)
+    return SocialProofOverrideProps(
+        rating = props.optionalDouble("rating"),
+        starColor = props["starColor"]?.letObject(::parseThemePair),
+    )
+}
+
+// ----- feature-list / timeline rows -----
+
+private fun parseFeatureRow(obj: JsonObject): FeatureRow = FeatureRow(
+    labelKey = obj.requireString("labelKey"),
+    icon = obj.optionalString("icon"),
+    included = obj.optionalBoolean("included"),
+)
+
+private fun parseTimelineRow(obj: JsonObject): TimelineRow = TimelineRow(
+    labelKey = obj.requireString("labelKey"),
+    captionKey = obj.optionalString("captionKey"),
+    icon = obj.optionalString("icon"),
+)
+
 // ----- icon registry -----
 
 /**
@@ -688,6 +802,13 @@ private fun JsonObject.optionalDouble(key: String): Double? {
     val prim = el as? JsonPrimitive ?: throw BuilderDecodeException("$key must be a number")
     if (prim.content == "null") return null
     return prim.doubleOrNull ?: throw BuilderDecodeException("$key must be a number")
+}
+
+private fun JsonObject.optionalBoolean(key: String): Boolean? {
+    val el = this[key] ?: return null
+    val prim = el as? JsonPrimitive ?: throw BuilderDecodeException("$key must be a boolean")
+    if (prim.content == "null") return null
+    return prim.booleanOrNull ?: throw BuilderDecodeException("$key must be a boolean")
 }
 
 private fun <T> JsonObject.requireEnum(key: String, mapping: Map<String, T>): T {

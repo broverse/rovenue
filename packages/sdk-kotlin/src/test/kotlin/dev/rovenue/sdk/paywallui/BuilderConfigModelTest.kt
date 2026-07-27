@@ -92,6 +92,72 @@ class BuilderConfigModelTest {
         }
     }
 
+    // ---- featureList / timeline / socialProof nodes -----------------------
+    // Same hand-built rootWith/firstChild pattern as divider/icon above —
+    // Tasks 1-2's shared fixture predates these three Wave-B node types too.
+
+    @Test
+    fun decodesFeatureListRows() {
+        val node = firstChild(
+            rootWith("""{"type":"featureList","id":"f1","rows":[{"labelKey":"a"},{"labelKey":"b","included":false}]}"""),
+        )
+        assertTrue(node is BuilderNode.FeatureList)
+        val p = node as BuilderNode.FeatureList
+        assertEquals(2, p.rows.size)
+        assertEquals(false, p.rows[1].included)
+    }
+
+    @Test
+    fun decodesTimelineCaptions() {
+        val node = firstChild(
+            rootWith("""{"type":"timeline","id":"t1","rows":[{"labelKey":"a","captionKey":"ac"},{"labelKey":"b"}]}"""),
+        )
+        val p = node as BuilderNode.Timeline
+        assertEquals("ac", p.rows[0].captionKey)
+        assertNull(p.rows[1].captionKey)
+    }
+
+    @Test
+    fun decodesSocialProofRating() {
+        val node = firstChild(rootWith("""{"type":"socialProof","id":"s1","labelKey":"s","rating":4.5}"""))
+        assertEquals(4.5, (node as BuilderNode.SocialProof).rating)
+    }
+
+    /**
+     * The excluded-mark test that must assert WHICH icon resolves, not
+     * merely that one resolved — `assertNotNull(drawableResFor(...))` alone
+     * would pass even if the excluded branch were wrongly wired to the
+     * included default, since both `check` and `x` are real, vendored
+     * drawables. Mutation-checked (see task report): forcing the excluded
+     * branch to `FEATURE_ROW_DEFAULT_ICON` fails this test naming
+     * `rovenue_ic_check` where `rovenue_ic_x` was expected.
+     */
+    @Test
+    fun excludedFeatureRowResolvesToTheExcludedMarkNotTheDefault() {
+        val excluded = FeatureRow(labelKey = "a", included = false)
+        val resolvedName = resolvedFeatureRowIconName(excluded)
+        assertEquals(
+            drawableResFor("x"),
+            drawableResFor(resolvedName),
+            "an excluded row must resolve to the excluded mark \"x\", not the included default " +
+                "-- resolved icon name was \"$resolvedName\"",
+        )
+    }
+
+    @Test
+    fun `includedFeatureRow resolves to the default included mark`() {
+        val included = FeatureRow(labelKey = "a", included = true)
+        assertEquals(drawableResFor("check"), drawableResFor(resolvedFeatureRowIconName(included)))
+        val absent = FeatureRow(labelKey = "a")
+        assertEquals(drawableResFor("check"), drawableResFor(resolvedFeatureRowIconName(absent)))
+    }
+
+    @Test
+    fun `featureRow's own icon wins over the included-excluded default`() {
+        val row = FeatureRow(labelKey = "a", icon = "star", included = false)
+        assertEquals("star", resolvedFeatureRowIconName(row))
+    }
+
     @Test
     fun `every accept fixture decodes`() {
         for (el in section("accept")) {
