@@ -1,11 +1,21 @@
 import { Fragment, type CSSProperties, type ReactElement } from "react";
 import {
+  ArrowRight, Check, Clock, Cloud, Gift, Infinity as InfinityIcon,
+  Lock, Shield, Sparkles, Star, X, Zap, type LucideIcon,
+} from "lucide-react";
+import {
   applyOverrides,
+  iconRegistry,
   isNodeVisible,
   resolveText,
   resolveVariables,
+  ICON_DEFAULT_SIZE,
+  DIVIDER_DEFAULT_INSET,
+  DIVIDER_DEFAULT_THICKNESS,
   type BuilderConfig,
   type ButtonNode,
+  type DividerNode,
+  type IconNode,
   type ImageNode,
   type PackageListNode,
   type PackageView,
@@ -23,6 +33,17 @@ import {
   stackContainerStyle,
   Z_OVERLAY_CHILD_STYLE,
 } from "./styles";
+
+// Registry web names -> the imported components. Built from the registry so
+// a name added there without a component here is a visible undefined rather
+// than a silently missing icon.
+const LUCIDE_BY_EXPORT: Record<string, LucideIcon> = {
+  ArrowRight, Check, Clock, Cloud, Gift, Infinity: InfinityIcon,
+  Lock, Shield, Sparkles, Star, X, Zap,
+};
+const ICON_COMPONENT: Record<string, LucideIcon | undefined> = Object.fromEntries(
+  iconRegistry.map((e) => [e.name, LUCIDE_BY_EXPORT[e.web]]),
+);
 
 // =============================================================
 // Node rendering + interactivity. Presentational plus a thin layer
@@ -402,6 +423,36 @@ function renderSpacer(node: SpacerNode, ctx: RenderCtx): ReactElement {
   return <div data-rov-node={node.id} style={{ width: size, height: size, flexShrink: 0 }} />;
 }
 
+function renderDivider(node: DividerNode, ctx: RenderCtx): ReactElement {
+  const thickness = node.thickness ?? DIVIDER_DEFAULT_THICKNESS;
+  const inset = node.inset ?? DIVIDER_DEFAULT_INSET;
+  return (
+    <div
+      data-rov-node={node.id}
+      style={{
+        height: `${thickness}px`,
+        marginLeft: `${inset}px`,
+        marginRight: `${inset}px`,
+        backgroundColor: resolveTextColor(node.color, ctx.colorScheme),
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+/** `node.name` is a free string (see IconNode) — an unknown name resolves to
+ * `undefined` in ICON_COMPONENT and renders the empty wrapper span, never a
+ * thrown error. That fail-open behavior is the contract, not a fallback path. */
+function renderIcon(node: IconNode, ctx: RenderCtx): ReactElement {
+  const Cmp = ICON_COMPONENT[node.name];
+  const size = node.size ?? ICON_DEFAULT_SIZE;
+  return (
+    <span data-rov-node={node.id} style={{ display: "inline-flex", flexShrink: 0 }}>
+      {Cmp ? <Cmp size={size} color={resolveTextColor(node.color, ctx.colorScheme)} /> : null}
+    </span>
+  );
+}
+
 /** Recursive dispatcher: known node type -> its component; unknown type or a thrown error -> `fallback` if present, else nothing. Never throws.
  *
  * Every node passes through `applyOverrides` here, BEFORE any style/text
@@ -442,6 +493,10 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         return renderPurchaseButton(resolved, ctx);
       case "spacer":
         return renderSpacer(resolved, ctx);
+      case "divider":
+        return renderDivider(resolved, ctx);
+      case "icon":
+        return renderIcon(resolved, ctx);
       default:
         return renderFallbackOrNull(resolved, ctx);
     }

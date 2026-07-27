@@ -16,14 +16,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@rovenue/shared": "workspace:*"
+    "@rovenue/shared": "workspace:*",
+    "lucide-react": "^1.14.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.1.0",
     "@testing-library/jest-dom": "^6.6.0",
+    "@testing-library/react": "^16.1.0",
     "@types/react": "^19.0.0",
     "jsdom": "^25.0.0",
     "react": "^19.0.0",

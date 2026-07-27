@@ -105,6 +105,14 @@ function baseConfig(overrides?: Partial<BuilderConfig>): BuilderConfig {
 
 function noop() {}
 
+/** Wrap a single node as the whole tree, for tests that only care about one node type. */
+function cfg(node: PaywallNode): BuilderConfig {
+  return baseConfig({ root: { type: "stack", id: "root", axis: "v", children: [node] } });
+}
+
+/** The renderer props every single-node test needs beyond `config`. */
+const base = { offering, colorScheme: "light" as const, onPurchase: vi.fn() };
+
 describe("PaywallRenderer", () => {
   it("renders every node type from the fixture config, each carrying data-rov-node", () => {
     const { container } = render(
@@ -1014,5 +1022,32 @@ describe("node visibility", () => {
     );
     expect(queryByText("Go Pro")).not.toBeInTheDocument();
     expect(queryByText("Unlock everything")).not.toBeInTheDocument();
+  });
+});
+
+describe("divider and icon nodes", () => {
+  it("renders a divider with its thickness and colour", () => {
+    const { container } = render(
+      <PaywallRenderer config={cfg({ type: "divider", id: "d1", thickness: 2 })} {...base} />,
+    );
+    const el = container.querySelector('[data-rov-node="d1"]') as HTMLElement;
+    expect(el).not.toBeNull();
+    expect(el.style.height).toBe("2px");
+  });
+
+  it("renders a registry icon", () => {
+    const { container } = render(
+      <PaywallRenderer config={cfg({ type: "icon", id: "i1", name: "check" })} {...base} />,
+    );
+    expect(container.querySelector('[data-rov-node="i1"]')).not.toBeNull();
+    expect(container.querySelector('[data-rov-node="i1"] svg')).not.toBeNull();
+  });
+
+  // Fail open: an unknown name must not throw and must not render a glyph.
+  it("renders nothing for an unknown icon name", () => {
+    const { container } = render(
+      <PaywallRenderer config={cfg({ type: "icon", id: "i1", name: "nope" })} {...base} />,
+    );
+    expect(container.querySelector('[data-rov-node="i1"] svg')).toBeNull();
   });
 });
