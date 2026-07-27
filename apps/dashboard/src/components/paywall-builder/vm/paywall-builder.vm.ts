@@ -19,6 +19,7 @@ import {
   MAX_BUILDER_NODES,
   emptyBuilderConfig,
   isPublishBlockingIssue,
+  localizedKeysOf,
   measureNodeTree,
   validateBuilderConfig,
 } from "@rovenue/shared/paywall";
@@ -362,11 +363,17 @@ export class PaywallBuilderViewModel {
     return node.id;
   }
 
-  /** Registers an empty string for a freshly-created node's loc key(s) in every locale. */
+  /**
+   * Registers an empty string for a freshly-created node's loc key(s) in
+   * every locale. Sourced from `localizedKeysOf` — the same table
+   * `validate.ts`/`nodeLocKey` read — rather than a hand-maintained
+   * per-type list, so a node type that carries copy can never land here
+   * without its keys being stubbed (the gap that left featureList/timeline/
+   * socialProof rows landing on UNKNOWN_LOC_KEY instead of the normal
+   * "blank, freshly stubbed" EMPTY_LOC_VALUE state every other node gets).
+   */
   private registerFreshLocKeys(node: PaywallNode) {
-    const keys: string[] = [];
-    if (node.type === "text") keys.push(node.key);
-    if (node.type === "button" || node.type === "purchaseButton") keys.push(node.labelKey);
+    const keys = localizedKeysOf(node);
     if (keys.length === 0) return;
 
     const localizations: Record<string, Record<string, string>> = { ...this.config.localizations };

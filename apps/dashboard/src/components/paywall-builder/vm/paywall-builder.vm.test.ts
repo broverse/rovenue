@@ -12,10 +12,12 @@ import {
   emptyBuilderConfig,
   measureNodeTree,
   type BuilderConfig,
+  type FeatureListNode,
   type PackageListNode,
   type PaywallNode,
   type StackNode,
   type TextNode,
+  type TimelineNode,
 } from "@rovenue/shared/paywall";
 
 function treeOpsFindNode(vm: PaywallBuilderViewModel, id: string): PaywallNode | null {
@@ -101,6 +103,39 @@ describe("PaywallBuilderViewModel", () => {
     expect(vm.selectedNodeId).toBe(id);
     expect(vm.config.localizations.en[`text_${id}`]).toBe("");
     expect(vm.config.localizations.tr[`text_${id}`]).toBe("");
+  });
+
+  it("addNode('featureList'/'timeline') stubs the starter row's labelKey in every locale", async () => {
+    // registerFreshLocKeys reads from `localizedKeysOf` (the same table
+    // validate.ts/nodeLocKey read) rather than a hand-maintained per-type
+    // list, so these two — which carry copy on a ROW, not the node itself —
+    // get stubbed exactly like text/button/purchaseButton do.
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.addLocale("tr");
+
+    const flId = vm.addNode("featureList", "root");
+    const flNode = treeOpsFindNode(vm, flId!) as FeatureListNode;
+    const flKey = flNode.rows[0]!.labelKey;
+    expect(vm.config.localizations.en[flKey]).toBe("");
+    expect(vm.config.localizations.tr[flKey]).toBe("");
+
+    const tlId = vm.addNode("timeline", "root");
+    const tlNode = treeOpsFindNode(vm, tlId!) as TimelineNode;
+    const tlKey = tlNode.rows[0]!.labelKey;
+    expect(vm.config.localizations.en[tlKey]).toBe("");
+    expect(vm.config.localizations.tr[tlKey]).toBe("");
+  });
+
+  it("addNode('divider') stubs no loc keys — a divider carries no copy", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const keysBefore = Object.keys(vm.config.localizations.en);
+
+    vm.addNode("divider", "root");
+    expect(Object.keys(vm.config.localizations.en)).toEqual(keysBefore);
   });
 
   it("removeNode clears selection when the removed node was selected", async () => {
