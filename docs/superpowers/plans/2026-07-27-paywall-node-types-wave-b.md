@@ -587,11 +587,15 @@ it("renders one element per feature row", () => {
   expect(container.querySelectorAll('[data-rov-row]')).toHaveLength(3);
 });
 
+// Assert WHICH mark, not that a mark exists: `check` and `x` are both real
+// registry icons and both render an <svg>, so querying for one proves
+// nothing. Each row's mark carries the resolved name.
 it("uses the excluded mark for a row with included false", () => {
   const { container } = render(<PaywallRenderer config={cfg({
-    type: "featureList", id: "f1", rows: [{ labelKey: "f_a", included: false }],
+    type: "featureList", id: "f1", rows: [{ labelKey: "f_a" }, { labelKey: "f_b", included: false }],
   })} {...base} />);
-  expect(container.querySelector('[data-rov-row] svg')).not.toBeNull();
+  const marks = [...container.querySelectorAll('[data-rov-icon]')].map((e) => e.getAttribute("data-rov-icon"));
+  expect(marks).toEqual([FEATURE_ROW_DEFAULT_ICON, FEATURE_ROW_EXCLUDED_ICON]);
 });
 
 it("renders a timeline caption when present and omits it otherwise", () => {
@@ -625,8 +629,11 @@ it("renders nothing for an empty rows array", () => {
 });
 ```
 
-Use the file's existing `cfg`/`base` helpers, and add `data-rov-row`, `data-rov-caption` and
-`data-rov-star` attributes in the implementation so these queries have something to bind to.
+Use the file's existing `cfg`/`base` helpers, and add `data-rov-row`, `data-rov-caption`,
+`data-rov-star` and `data-rov-icon` attributes in the implementation so these queries have
+something to bind to. `data-rov-icon` carries the **resolved** icon name — it is the only way
+from outside to tell which mark was chosen, and asserting on it is what makes the excluded-mark
+test able to fail at all.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -723,7 +730,9 @@ Add `FeatureRowProps`, `FeatureListProps`, `TimelineRowProps`, `TimelineProps` a
 `applyOverrides` overloads in `PaywallOverrides.swift`.
 
 Render each as a `VStack` of rows. A feature row is the resolved SF Symbol beside the resolved
-label; a timeline row is the symbol, a `Rectangle` connector below it for every row but the
+label. Add a test asserting WHICH symbol an excluded row resolves to, not merely that a symbol
+rendered — on web the equivalent test was initially vacuous, because both `check` and `x` are
+real icons that draw. Expose the resolved name from `sfSymbolName(for:)` and assert on it; a timeline row is the symbol, a `Rectangle` connector below it for every row but the
 last, the label and the optional caption; social proof is `SOCIAL_PROOF_MAX_RATING` stars with
 the first `floor(rating)` filled, then the label. Declare the defaults as file-private
 lowerCamelCase constants mirroring the shared values.
@@ -802,7 +811,10 @@ Add `FeatureRow`, `TimelineRow` data classes and `BuilderNode.FeatureList`, `.Ti
 `.SocialProof` beside the wave A entries, with their override-props objects and parser arms; add
 the three `when` arms in `PaywallOverrides.kt`.
 
-Build each as a vertical `LinearLayout`. A feature row is an `ImageView` plus a `TextView`; a
+Build each as a vertical `LinearLayout`. A feature row is an `ImageView` plus a `TextView`. Add a test asserting WHICH drawable an
+excluded row resolves to, not merely that one resolved — on web the equivalent test was
+initially vacuous, because both `check` and `x` are real icons that draw. Assert on
+`drawableNameFor`'s result for the row; a
 timeline row adds a thin connector `View` between steps; social proof is
 `SOCIAL_PROOF_MAX_RATING` star `ImageView`s followed by the label.
 
