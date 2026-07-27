@@ -75,6 +75,20 @@ describe("builderConfigSchema", () => {
             style: "plain",
             action: { kind: "close" },
           },
+          {
+            type: "divider",
+            id: "hr",
+            color: { light: "#e5e5e5", dark: "#333333" },
+            thickness: 2,
+            inset: 16,
+          },
+          {
+            type: "icon",
+            id: "check_icon",
+            name: "check",
+            size: 32,
+            color: { light: "#22c55e" },
+          },
         ],
       },
     };

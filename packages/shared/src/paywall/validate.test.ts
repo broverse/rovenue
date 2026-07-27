@@ -827,6 +827,7 @@ describe("issue severity", () => {
     expect(issueSeverity({ code: "LOCALE_KEY_GAP" })).toBe("warning");
     expect(issueSeverity({ code: "OVERRIDE_SELECTED_OUTSIDE_CELL" })).toBe("warning");
     expect(issueSeverity({ code: "INTRO_VARIABLE_UNGUARDED" })).toBe("warning");
+    expect(issueSeverity({ code: "UNKNOWN_ICON_NAME" })).toBe("warning");
   });
 
   it("defaults an unclassified code to the strictest tier", () => {
@@ -846,6 +847,7 @@ describe("issue severity", () => {
       "LOCALE_KEY_GAP",
       "OVERRIDE_SELECTED_OUTSIDE_CELL",
       "INTRO_VARIABLE_UNGUARDED",
+      "UNKNOWN_ICON_NAME",
       "SOME_CODE_ADDED_LATER",
     ]) {
       // Unconditional: a guarded `if (isBlockingIssue) expect(...)` would run
@@ -900,7 +902,12 @@ describe("save gate scope", () => {
   it("does not change what a publish rejects", () => {
     // The invariant this whole phase must not break: retiering moves codes
     // between save and publish, never in or out of the warning tier.
-    const WARNINGS = ["LOCALE_KEY_GAP", "OVERRIDE_SELECTED_OUTSIDE_CELL", "INTRO_VARIABLE_UNGUARDED"];
+    const WARNINGS = [
+      "LOCALE_KEY_GAP",
+      "OVERRIDE_SELECTED_OUTSIDE_CELL",
+      "INTRO_VARIABLE_UNGUARDED",
+      "UNKNOWN_ICON_NAME",
+    ];
     for (const code of WARNINGS) expect(isPublishBlockingIssue({ code })).toBe(false);
     for (const code of [...MOVED, "DUPLICATE_NODE_ID", "SCHEMA_INVALID", "SOME_CODE_ADDED_LATER"]) {
       expect(isPublishBlockingIssue({ code })).toBe(true);
@@ -1042,5 +1049,32 @@ describe("MISSING_PURCHASE_BUTTON is per-platform once visibility is in play", (
         (i) => i.code === "MISSING_PURCHASE_BUTTON",
       ),
     ).toBe(false);
+  });
+});
+
+describe("UNKNOWN_ICON_NAME", () => {
+  function withIcon(name: string) {
+    return baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "icon", id: "ic", name }],
+      },
+    });
+  }
+
+  it("warns about an icon name not in the registry, without blocking save or publish", () => {
+    const issues = validateBuilderConfig(withIcon("not-a-real-icon"), { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "UNKNOWN_ICON_NAME");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("ic");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("says nothing for a name that is in the registry", () => {
+    const issues = validateBuilderConfig(withIcon("check"), { offeringPackageIds });
+    expect(issues.some((i) => i.code === "UNKNOWN_ICON_NAME")).toBe(false);
   });
 });

@@ -1,0 +1,17 @@
+{
+  "_comment": "Semantic icon name -> the identifier each platform draws it with. NOT geometry: web uses lucide-react (ISC), Android vendors Material Icons VectorDrawables (Apache-2.0, google/material-design-icons), iOS uses SF Symbols. The same paywall therefore looks different on each platform, which is the accepted cost of native sets. SF Symbols here are iOS 13/14-era names, chosen to clear this SDK's iOS 15 floor. Adding a thirteenth icon is one row plus three per-platform mappings.",
+  "icons": [
+    { "name": "check",       "web": "Check",      "androidCategory": "action",     "androidIcon": "done",           "ios": "checkmark" },
+    { "name": "x",           "web": "X",          "androidCategory": "navigation", "androidIcon": "close",          "ios": "xmark" },
+    { "name": "star",        "web": "Star",       "androidCategory": "toggle",     "androidIcon": "star",           "ios": "star.fill" },
+    { "name": "lock",        "web": "Lock",       "androidCategory": "action",     "androidIcon": "lock",           "ios": "lock.fill" },
+    { "name": "shield",      "web": "Shield",     "androidCategory": "action",     "androidIcon": "verified_user",  "ios": "checkmark.shield.fill" },
+    { "name": "sparkle",     "web": "Sparkles",   "androidCategory": "image",      "androidIcon": "auto_awesome",   "ios": "sparkles" },
+    { "name": "bolt",        "web": "Zap",        "androidCategory": "image",      "androidIcon": "flash_on",       "ios": "bolt.fill" },
+    { "name": "gift",        "web": "Gift",       "androidCategory": "action",     "androidIcon": "card_giftcard",  "ios": "gift.fill" },
+    { "name": "clock",       "web": "Clock",      "androidCategory": "action",     "androidIcon": "schedule",       "ios": "clock.fill" },
+    { "name": "infinity",    "web": "Infinity",   "androidCategory": "places",     "androidIcon": "all_inclusive",  "ios": "infinity" },
+    { "name": "cloud",       "web": "Cloud",      "androidCategory": "file",       "androidIcon": "cloud",          "ios": "cloud.fill" },
+    { "name": "arrow-right", "web": "ArrowRight", "androidCategory": "navigation", "androidIcon": "arrow_forward",  "ios": "arrow.right" }
+  ]
+}

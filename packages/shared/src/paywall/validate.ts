@@ -1,3 +1,4 @@
+import { isKnownIconName } from "./icon-registry";
 import { OVERRIDABLE_PROP_KEYS, type BuilderConfig, type PaywallNode, type StackNode } from "./schema";
 import { compareVersions } from "./visibility";
 
@@ -46,7 +47,11 @@ export type BuilderIssue = {
     // Phase D2 — overrides / cellTemplate.
     | "CELL_TEMPLATE_BAD_NODE"
     | "OVERRIDE_BAD_PROP"
-    | "OVERRIDE_SELECTED_OUTSIDE_CELL";
+    | "OVERRIDE_SELECTED_OUTSIDE_CELL"
+    // An icon node whose `name` is not in icon-registry.json. Renders nothing
+    // on every platform (fail open by design — see IconNode), so this is a
+    // typo warning, not a broken config.
+    | "UNKNOWN_ICON_NAME";
   nodeId?: string;
   locale?: string;
   key?: string;
@@ -87,6 +92,9 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   // answer when AUTHORING. Without this the author types "v1.2.0", the node
   // shows everywhere, and nothing anywhere says the bound was ignored.
   VISIBILITY_BOUND_UNPARSEABLE: "warning",
+  // A typo to surface, not a broken config — it renders nothing and the
+  // renderers fail open, so it must block neither save nor publish.
+  UNKNOWN_ICON_NAME: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
   // MUST still persist. Four of these are reachable from the builder UI in
@@ -318,6 +326,19 @@ export function validateBuilderConfig(
         code: "VISIBILITY_NEVER_MATCHES",
         nodeId: node.id,
         message: `Node "${node.id}" has minAppVersion "${minAppVersion}" above maxAppVersion "${maxAppVersion}", so it can never render.`,
+      });
+    }
+  }
+
+  // UNKNOWN_ICON_NAME — an icon node whose name isn't in the registry. This
+  // never blocks rendering (fail open, on every platform), so it exists only
+  // to catch an author's typo.
+  for (const node of allNodes) {
+    if (node.type === "icon" && !isKnownIconName(node.name)) {
+      issues.push({
+        code: "UNKNOWN_ICON_NAME",
+        nodeId: node.id,
+        message: `Icon "${node.name}" (node "${node.id}") is not in the icon registry — it will render nothing.`,
       });
     }
   }
