@@ -700,22 +700,29 @@ public struct PackageListProps: Decodable {
 public struct PurchaseButtonProps: Decodable {
     public let id: String
     public let labelKey: String
+    /// Shown instead of `labelKey` when the selected package's trial/intro
+    /// period is active (see `ctaLabelKey` in PaywallViewModelHelpers.swift,
+    /// the Swift port of variables.ts's `resolveCtaLabelKey`). Absent =
+    /// always `labelKey`. Mirrors schema.ts's `PurchaseButtonNode.trialLabelKey`.
+    public let trialLabelKey: String?
     public let overrides: [NodeOverride<PurchaseButtonOverrideProps>]?
     public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
-    public init(id: String, labelKey: String, overrides: [NodeOverride<PurchaseButtonOverrideProps>]? = nil,
+    public init(id: String, labelKey: String, trialLabelKey: String? = nil,
+                overrides: [NodeOverride<PurchaseButtonOverrideProps>]? = nil,
                 visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
-        self.id = id; self.labelKey = labelKey; self.overrides = overrides
+        self.id = id; self.labelKey = labelKey; self.trialLabelKey = trialLabelKey; self.overrides = overrides
         self.visibility = visibility; self.fallback = fallback
     }
 
-    private enum CodingKeys: String, CodingKey { case id, labelKey, overrides, visibility, fallback }
+    private enum CodingKeys: String, CodingKey { case id, labelKey, trialLabelKey, overrides, visibility, fallback }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         labelKey = try container.decode(String.self, forKey: .labelKey)
+        trialLabelKey = try container.decodeIfPresent(String.self, forKey: .trialLabelKey)
         overrides = try container.decodeIfPresent([NodeOverride<PurchaseButtonOverrideProps>].self, forKey: .overrides)
         visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
         fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)

@@ -327,6 +327,79 @@ final class BuilderConfigModelTests: XCTestCase {
         }
     }
 
+    // MARK: - trialLabel (cross-platform render-fixtures.json vector table)
+
+    /// Runs every `trialLabel` vector in render-fixtures.json through
+    /// `ctaLabelKey` — the Swift port of variables.ts's `resolveCtaLabelKey`.
+    /// `selectedHasIntroPeriod` is the fixture's boolean/null shorthand for a
+    /// selection: `true` -> a selected package mid-trial (`introPeriod` set
+    /// to a non-empty string), `false` -> a selected package with no trial
+    /// (`introPeriod` nil), `null` -> no selection at all (`selectedView`
+    /// nil). Mirrors render-fixtures.test.ts's `toSelected`.
+    func testTrialLabelVectorsAgreeWithSharedFixture() throws {
+        let trialLabel = try XCTUnwrap(fixtures["trialLabel"] as? [String: Any])
+        let cases = try XCTUnwrap(trialLabel["cases"] as? [[String: Any]])
+        XCTAssertFalse(cases.isEmpty)
+        for entry in cases {
+            let name = try XCTUnwrap(entry["name"] as? String)
+            let labelKey = try XCTUnwrap(entry["labelKey"] as? String)
+            let trialLabelKey = entry["trialLabelKey"] as? String
+            let expectedKey = try XCTUnwrap(entry["expectedKey"] as? String)
+            let selectedView: PackageView?
+            if entry["selectedHasIntroPeriod"] is NSNull || entry["selectedHasIntroPeriod"] == nil {
+                selectedView = nil
+            } else {
+                let hasIntroPeriod = try XCTUnwrap(entry["selectedHasIntroPeriod"] as? Bool)
+                selectedView = PackageView(
+                    packageName: "", price: "", pricePerPeriod: "", period: "",
+                    introPeriod: hasIntroPeriod ? "1 week" : nil)
+            }
+            XCTAssertEqual(
+                ctaLabelKey(labelKey: labelKey, trialLabelKey: trialLabelKey, selectedView: selectedView),
+                expectedKey, "trialLabel vector \"\(name)\"")
+        }
+    }
+
+    /// Empty-string `introPeriod` is explicitly NOT a trial — mirroring the
+    /// TS truthiness check (`selected.introPeriod !== ""`). Not represented
+    /// in the shared fixture (which only carries the boolean/null
+    /// shorthand), so pinned directly here.
+    func testEmptyIntroPeriodIsNotATrial() {
+        let selectedView = PackageView(
+            packageName: "", price: "", pricePerPeriod: "", period: "", introPeriod: "")
+        XCTAssertEqual(
+            ctaLabelKey(labelKey: "cta.buy", trialLabelKey: "cta.trial", selectedView: selectedView),
+            "cta.buy")
+    }
+
+    /// Decode-retention: `trialLabelKey` present on the wire is retained on
+    /// `PurchaseButtonProps`; absent decodes to `nil`.
+    func testPurchaseButtonTrialLabelKeyDecodeRetention() throws {
+        let accept = try XCTUnwrap(fixtures["accept"] as? [[String: Any]])
+        let entry = try XCTUnwrap(accept.first {
+            ($0["name"] as? String) == "purchaseButton with trialLabelKey (both keys present in default locale)"
+        })
+        let config = try XCTUnwrap(entry["config"])
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root, case .purchaseButton(let pb) = root.children[0] else {
+            return XCTFail("expected root.children[0] to be .purchaseButton")
+        }
+        XCTAssertEqual(pb.labelKey, "cta.buy")
+        XCTAssertEqual(pb.trialLabelKey, "cta.trial")
+
+        // Absent case, using the canonical every-node fixture's purchaseButton
+        // (pb_1), which carries no trialLabelKey.
+        let canonicalEntry = try XCTUnwrap(accept.first { ($0["name"] as? String) == "canonical every-node multi-locale" })
+        let canonicalConfig = try XCTUnwrap(canonicalEntry["config"])
+        let canonicalDecoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: canonicalConfig)))
+        guard case .stack(let canonicalRoot) = canonicalDecoded.root,
+              case .purchaseButton(let absentPb) = canonicalRoot.children[5]
+        else {
+            return XCTFail("expected canonical root.children[5] to be .purchaseButton")
+        }
+        XCTAssertNil(absentPb.trialLabelKey)
+    }
+
     func testResolveTextWithNilLocaleFallsStraightToDefaultLocale() throws {
         let accept = try XCTUnwrap(fixtures["accept"] as? [[String: Any]])
         let canonicalEntry = try XCTUnwrap(accept.first { ($0["name"] as? String) == "canonical every-node multi-locale" })

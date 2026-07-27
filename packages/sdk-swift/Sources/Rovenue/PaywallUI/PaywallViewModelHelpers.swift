@@ -94,6 +94,22 @@ private func variableValue(named name: String, in pkg: PackageView) -> String? {
     }
 }
 
+/// Which localization key a `purchaseButton` renders: `trialLabelKey` when
+/// it is non-nil AND the selected package's `introPeriod` is a non-empty
+/// string; `labelKey` otherwise — including no selection at all
+/// (`selectedView` is `nil`), which is never a trial. Empty-string
+/// `introPeriod` is deliberately NOT a trial, mirroring the TS truthiness
+/// check (`selected.introPeriod !== ""`) — `PackageView.introPeriod` being
+/// `String?` rather than TS's `string | undefined` makes the nil check do
+/// double duty here, but the empty-string branch still needs its own guard.
+/// Mirrors variables.ts's `resolveCtaLabelKey`.
+public func ctaLabelKey(labelKey: String, trialLabelKey: String?, selectedView: PackageView?) -> String {
+    guard let trialLabelKey, let introPeriod = selectedView?.introPeriod, !introPeriod.isEmpty else {
+        return labelKey
+    }
+    return trialLabelKey
+}
+
 /// Replaces `{{var}}` placeholders in `text` with values from `pkg`. Unknown
 /// variable names are left verbatim. When `pkg` is `nil`, ALL placeholders
 /// (known or not) are left verbatim. Mirrors variables.ts's

@@ -602,8 +602,17 @@ struct PurchaseButtonView: View {
     var body: some View {
         let enabled = purchaseEnabled(
             selectedPackageId: ctx.selectedPackageId, isPurchasing: ctx.isPurchasing)
+        // The GLOBAL selection, not any cellTemplate scope — a purchaseButton
+        // is schema-forbidden inside cellTemplate, so `cell: nil` here always
+        // resolves the same selected PackageView `ctx.label` itself would use
+        // for this node. Mirrors nodes.tsx calling `resolveCtaLabelKey` with
+        // the selected package's view.
+        let selectedView = relevantPackageView(
+            cell: nil, selectedPackageId: ctx.selectedPackageId, offering: ctx.offering)
+        let resolvedLabelKey = ctaLabelKey(
+            labelKey: props.labelKey, trialLabelKey: props.trialLabelKey, selectedView: selectedView)
         Button(action: ctx.purchase) {
-            Text(ctx.label(props.labelKey, cell: nil))
+            Text(ctx.label(resolvedLabelKey, cell: nil))
                 .font(.body.weight(.semibold))
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
