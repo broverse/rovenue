@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { PackageListNode, PaywallNode, StackNode, TextNode } from "@rovenue/shared/paywall";
+import {
+  DIVIDER_DEFAULT_THICKNESS,
+  ICON_DEFAULT_SIZE,
+  type PackageListNode,
+  type PaywallNode,
+  type StackNode,
+  type TextNode,
+} from "@rovenue/shared/paywall";
 import {
   findNode,
   findParent,
@@ -330,6 +337,16 @@ describe("newNode", () => {
   it("creates a spacer node", () => {
     const node = newNode("spacer", idGen);
     expect(node.type).toBe("spacer");
+  });
+
+  it("creates a divider with the default thickness", () => {
+    const node = newNode("divider", idGen);
+    expect(node).toEqual({ type: "divider", id: "gen1", thickness: DIVIDER_DEFAULT_THICKNESS });
+  });
+
+  it("creates an icon defaulting to the check glyph", () => {
+    const node = newNode("icon", idGen);
+    expect(node).toEqual({ type: "icon", id: "gen1", name: "check", size: ICON_DEFAULT_SIZE });
   });
 
   it("uses whatever idGen returns as the node id", () => {

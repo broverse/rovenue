@@ -1,8 +1,17 @@
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
-import type { ButtonNode, ImageNode, PaywallNode, PurchaseButtonNode, TextNode } from "@rovenue/shared/paywall";
+import {
+  ICON_NAMES,
+  type ButtonNode,
+  type DividerNode,
+  type IconNode,
+  type ImageNode,
+  type PaywallNode,
+  type PurchaseButtonNode,
+  type TextNode,
+} from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
-import { LocalizedTextField } from "./fields";
+import { LocalizedTextField, NumberField, SelectField } from "./fields";
 import { Field, INPUT_CLASS, Section } from "./primitives";
 
 // =============================================================
@@ -21,6 +30,10 @@ export const ContentTab = component(({ node }: { node: PaywallNode }) => {
       return <ButtonContent node={node} />;
     case "purchaseButton":
       return <PurchaseButtonContent node={node} />;
+    case "divider":
+      return <DividerContent node={node} />;
+    case "icon":
+      return <IconContent node={node} />;
     default:
       return null;
   }
@@ -83,6 +96,51 @@ function PurchaseButtonContent({ node }: { node: PurchaseButtonNode }) {
   return (
     <Section title={t("paywalls.builder.properties.content", "Content")} defaultOpen>
       <LocalizedTextField label={t("paywalls.builder.properties.label", "Label")} locKey={node.labelKey} />
+    </Section>
+  );
+}
+
+function DividerContent({ node }: { node: DividerNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<DividerNode>) => vm.updateNode<DividerNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.divider", "Divider")} defaultOpen>
+      <NumberField
+        label={t("paywalls.builder.properties.thickness", "Thickness")}
+        value={node.thickness}
+        onChange={(v) => set({ thickness: v })}
+      />
+      <NumberField
+        className="mt-3"
+        label={t("paywalls.builder.properties.inset", "Inset")}
+        value={node.inset}
+        onChange={(v) => set({ inset: v })}
+      />
+    </Section>
+  );
+}
+
+function IconContent({ node }: { node: IconNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<IconNode>) => vm.updateNode<IconNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.icon", "Icon")} defaultOpen>
+      <SelectField
+        label={t("paywalls.builder.properties.iconName", "Icon")}
+        value={node.name}
+        options={ICON_NAMES}
+        onChange={(v) => set({ name: v })}
+      />
+      <NumberField
+        className="mt-3"
+        label={t("paywalls.builder.properties.size", "Size")}
+        value={node.size}
+        onChange={(v) => set({ size: v })}
+      />
     </Section>
   );
 }

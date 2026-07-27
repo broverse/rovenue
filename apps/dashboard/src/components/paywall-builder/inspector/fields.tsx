@@ -202,6 +202,37 @@ export function SizeField({
   );
 }
 
+/** A plain `<select>` over a fixed list of string options (e.g. `ICON_NAMES`). */
+export function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+  className,
+}: {
+  label: string;
+  value: string;
+  options: readonly string[];
+  onChange: (v: string) => void;
+  className?: string;
+}) {
+  return (
+    <Field label={label} className={className}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.currentTarget.value)}
+        className={INPUT_CLASS}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
 export function NumberField({
   label,
   value,

@@ -1,4 +1,7 @@
-import type { PaywallNode, StackNode } from "@rovenue/shared/paywall";
+import { ICON_DEFAULT_SIZE, DIVIDER_DEFAULT_THICKNESS, type PaywallNode, type StackNode } from "@rovenue/shared/paywall";
+
+/** A new icon node starts as a checkmark — the commonest use is a feature-list mark. */
+const DEFAULT_ICON_NAME = "check";
 
 // =============================================================
 // Pure, immutable manipulation of a paywall builder-config node
@@ -220,6 +223,10 @@ export function newNode(type: PaywallNode["type"], idGen: () => string): Paywall
       return { type: "purchaseButton", id, labelKey: `purchaseButton_${id}` };
     case "spacer":
       return { type: "spacer", id, size: 16 };
+    case "divider":
+      return { type: "divider", id, thickness: DIVIDER_DEFAULT_THICKNESS };
+    case "icon":
+      return { type: "icon", id, name: DEFAULT_ICON_NAME, size: ICON_DEFAULT_SIZE };
     default: {
       const exhaustive: never = type;
       throw new Error(`Unknown node type: ${String(exhaustive)}`);

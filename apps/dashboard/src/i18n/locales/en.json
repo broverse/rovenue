@@ -1301,7 +1301,9 @@
         "button": "Button",
         "packageList": "Package list",
         "purchaseButton": "Purchase button",
-        "spacer": "Spacer"
+        "spacer": "Spacer",
+        "divider": "Divider",
+        "icon": "Icon"
       },
       "addNode": {
         "title": "Add node"
@@ -1395,6 +1397,11 @@
         "cellLayoutRow": "Row",
         "cellLayoutColumn": "Column",
         "spacer": "Spacer",
+        "divider": "Divider",
+        "thickness": "Thickness",
+        "inset": "Inset",
+        "icon": "Icon",
+        "iconName": "Icon",
         "locKeyHint": "Key",
         "colorLight": "Light",
         "colorDark": "Dark",

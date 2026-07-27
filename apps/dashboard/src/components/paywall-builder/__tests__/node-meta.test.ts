@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PaywallNode } from "@rovenue/shared/paywall";
-import { NODE_TYPES, nodeLocKey } from "../node-meta";
+import { NODE_ICON, NODE_TYPE_LABEL, NODE_TYPES, nodeLocKey } from "../node-meta";
 
 describe("nodeLocKey", () => {
   it("returns the `key` for text nodes", () => {
@@ -31,15 +31,19 @@ describe("nodeLocKey", () => {
       cellLayout: "row",
     };
     const spacer: PaywallNode = { type: "spacer", id: "sp1" };
+    const divider: PaywallNode = { type: "divider", id: "d1" };
+    const icon: PaywallNode = { type: "icon", id: "i1", name: "check" };
     expect(nodeLocKey(stack)).toBeNull();
     expect(nodeLocKey(image)).toBeNull();
     expect(nodeLocKey(packageList)).toBeNull();
     expect(nodeLocKey(spacer)).toBeNull();
+    expect(nodeLocKey(divider)).toBeNull();
+    expect(nodeLocKey(icon)).toBeNull();
   });
 });
 
 describe("NODE_TYPES", () => {
-  it("lists exactly the 7 node types the add-node popover offers", () => {
+  it("lists exactly the 9 node types the add-node popover offers", () => {
     expect(NODE_TYPES).toEqual([
       "stack",
       "text",
@@ -48,6 +52,20 @@ describe("NODE_TYPES", () => {
       "packageList",
       "purchaseButton",
       "spacer",
+      "divider",
+      "icon",
     ]);
+  });
+
+  it("lists divider and icon in the palette", () => {
+    expect(NODE_TYPES).toContain("divider");
+    expect(NODE_TYPES).toContain("icon");
+  });
+
+  it("gives every node type an icon and a label", () => {
+    for (const t of NODE_TYPES) {
+      expect(NODE_ICON[t], `no icon for ${t}`).toBeTruthy();
+      expect(NODE_TYPE_LABEL[t], `no label for ${t}`).toBeTruthy();
+    }
   });
 });
