@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
-import { iconRegistry } from "@rovenue/shared/paywall";
+import { iconRegistry, SOCIAL_PROOF_MAX_RATING } from "@rovenue/shared/paywall";
 import type { BuilderConfig, OverrideCondition, PackageView, PaywallNode } from "@rovenue/shared/paywall";
 import { PaywallRenderer } from "./renderer";
 import type { RendererOffering } from "./types";
@@ -1063,5 +1063,52 @@ describe("divider and icon nodes", () => {
       <PaywallRenderer config={cfg({ type: "icon", id: "reg", name })} {...base} />,
     );
     expect(container.querySelector('[data-rov-node="reg"] svg')).not.toBeNull();
+  });
+});
+
+describe("featureList, timeline and socialProof nodes", () => {
+  it("renders one element per feature row", () => {
+    const { container } = render(<PaywallRenderer config={cfg({
+      type: "featureList", id: "f1",
+      rows: [{ labelKey: "f_a" }, { labelKey: "f_b" }, { labelKey: "f_c" }],
+    })} {...base} />);
+    expect(container.querySelectorAll('[data-rov-row]')).toHaveLength(3);
+  });
+
+  it("uses the excluded mark for a row with included false", () => {
+    const { container } = render(<PaywallRenderer config={cfg({
+      type: "featureList", id: "f1", rows: [{ labelKey: "f_a", included: false }],
+    })} {...base} />);
+    expect(container.querySelector('[data-rov-row] svg')).not.toBeNull();
+  });
+
+  it("renders a timeline caption when present and omits it otherwise", () => {
+    const { container } = render(<PaywallRenderer config={cfg({
+      type: "timeline", id: "t1",
+      rows: [{ labelKey: "t_a", captionKey: "t_a_cap" }, { labelKey: "t_b" }],
+    })} {...base} />);
+    expect(container.querySelectorAll('[data-rov-caption]')).toHaveLength(1);
+  });
+
+  it("renders the rating as stars, and none when rating is absent", () => {
+    const withRating = render(<PaywallRenderer config={cfg({
+      type: "socialProof", id: "s1", labelKey: "s", rating: 4,
+    })} {...base} />);
+    expect(withRating.container.querySelectorAll('[data-rov-star]').length).toBe(SOCIAL_PROOF_MAX_RATING);
+    const without = render(<PaywallRenderer config={cfg({ type: "socialProof", id: "s2", labelKey: "s" })} {...base} />);
+    expect(without.container.querySelectorAll('[data-rov-star]')).toHaveLength(0);
+  });
+
+  // Fail open, exactly as an icon node does.
+  it("renders a row with an unknown icon without throwing", () => {
+    const { container } = render(<PaywallRenderer config={cfg({
+      type: "featureList", id: "f1", rows: [{ labelKey: "f_a", icon: "nope" }],
+    })} {...base} />);
+    expect(container.querySelector('[data-rov-row]')).not.toBeNull();
+  });
+
+  it("renders nothing for an empty rows array", () => {
+    const { container } = render(<PaywallRenderer config={cfg({ type: "featureList", id: "f1", rows: [] })} {...base} />);
+    expect(container.querySelectorAll('[data-rov-row]')).toHaveLength(0);
   });
 });

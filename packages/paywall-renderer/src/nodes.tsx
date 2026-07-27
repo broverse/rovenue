@@ -13,18 +13,28 @@ import {
   DIVIDER_DEFAULT_COLOR,
   DIVIDER_DEFAULT_INSET,
   DIVIDER_DEFAULT_THICKNESS,
+  FEATURE_ROW_DEFAULT_ICON,
+  FEATURE_ROW_DEFAULT_INCLUDED,
+  FEATURE_ROW_EXCLUDED_ICON,
+  SOCIAL_PROOF_MAX_RATING,
+  SOCIAL_PROOF_STAR_DEFAULT_COLOR,
+  TIMELINE_CONNECTOR_DEFAULT_COLOR,
+  TIMELINE_ROW_DEFAULT_ICON,
   type BuilderConfig,
   type ButtonNode,
   type DividerNode,
+  type FeatureListNode,
   type IconNode,
   type ImageNode,
   type PackageListNode,
   type PackageView,
   type PaywallNode,
   type PurchaseButtonNode,
+  type SocialProofNode,
   type SpacerNode,
   type StackNode,
   type TextNode,
+  type TimelineNode,
   type VisibilityPlatform,
 } from "@rovenue/shared/paywall";
 import type { RendererOffering } from "./types";
@@ -471,6 +481,113 @@ function renderIcon(node: IconNode, ctx: RenderCtx): ReactElement {
   );
 }
 
+const ROW_GAP = "8px";
+
+/** A feature row's mark: the row's own `icon` if given; otherwise the
+ * excluded mark when `included` is explicitly false, else the included
+ * default. Resolved through the same `ICON_COMPONENT` lookup as the `icon`
+ * node — an unrecognised name fails open (renders nothing), never throws. */
+function renderFeatureList(node: FeatureListNode, ctx: RenderCtx): ReactElement {
+  // `iconColor` is intentionally NOT defaulted (mirrors renderIcon): absent
+  // means the mark inherits the row's own text colour via CSS `currentColor`,
+  // set once on the row container rather than repeated per node.
+  const iconColor = resolveThemeColor(node.iconColor, ctx.colorScheme);
+  const rowTextColor = resolveTextColor(undefined, ctx.colorScheme);
+  return (
+    <div data-rov-node={node.id} style={{ display: "flex", flexDirection: "column", gap: ROW_GAP }}>
+      {node.rows.map((row, index) => {
+        const included = row.included ?? FEATURE_ROW_DEFAULT_INCLUDED;
+        const iconName = row.icon ?? (included ? FEATURE_ROW_DEFAULT_ICON : FEATURE_ROW_EXCLUDED_ICON);
+        const Cmp = ICON_COMPONENT[iconName];
+        const label = resolveLabel(ctx, row.labelKey);
+        return (
+          <div
+            key={index}
+            data-rov-row
+            style={{ display: "flex", alignItems: "center", gap: ROW_GAP, color: rowTextColor }}
+          >
+            <span style={{ display: "inline-flex", flexShrink: 0 }}>
+              {Cmp ? <Cmp size={ICON_DEFAULT_SIZE} color={iconColor} /> : null}
+            </span>
+            {label !== null ? <span>{label}</span> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The connector between steps and each row's caption follow the divider
+ * pattern: an absent `connectorColor` falls back to the shared cross-platform
+ * default, never a renderer-invented value. A row's own mark has no
+ * configurable colour (TimelineRow carries none) so it always inherits, same
+ * as the feature list's icon does when uncoloured. */
+function renderTimeline(node: TimelineNode, ctx: RenderCtx): ReactElement {
+  const connectorColor =
+    resolveThemeColor(node.connectorColor, ctx.colorScheme) ??
+    resolveThemeColor(TIMELINE_CONNECTOR_DEFAULT_COLOR, ctx.colorScheme);
+  const rowTextColor = resolveTextColor(undefined, ctx.colorScheme);
+  return (
+    <div data-rov-node={node.id} style={{ display: "flex", flexDirection: "column" }}>
+      {node.rows.map((row, index) => {
+        const Cmp = ICON_COMPONENT[row.icon ?? TIMELINE_ROW_DEFAULT_ICON];
+        const label = resolveLabel(ctx, row.labelKey);
+        const isLast = index === node.rows.length - 1;
+        return (
+          <div key={index} data-rov-row style={{ display: "flex", gap: "12px" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <span style={{ display: "inline-flex", flexShrink: 0, color: rowTextColor }}>
+                {Cmp ? <Cmp size={ICON_DEFAULT_SIZE} /> : null}
+              </span>
+              {!isLast ? (
+                <div style={{ width: "2px", flexGrow: 1, backgroundColor: connectorColor }} />
+              ) : null}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", color: rowTextColor }}>
+              {label !== null ? <span>{label}</span> : null}
+              {row.captionKey !== undefined ? (
+                <span data-rov-caption style={{ fontSize: "12px" }}>
+                  {resolveLabel(ctx, row.captionKey)}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** `rating` absent renders no stars at all — not zero filled ones — so a
+ * paywall author who hasn't set a rating doesn't ship an empty row of
+ * outlines. When present, always draws `SOCIAL_PROOF_MAX_RATING` stars,
+ * filled up to `rating`. `starColor` absent falls back to the shared
+ * cross-platform default, same pattern as the timeline connector. */
+function renderSocialProof(node: SocialProofNode, ctx: RenderCtx): ReactElement {
+  const label = resolveLabel(ctx, node.labelKey);
+  const starColor =
+    resolveThemeColor(node.starColor, ctx.colorScheme) ??
+    resolveThemeColor(SOCIAL_PROOF_STAR_DEFAULT_COLOR, ctx.colorScheme);
+  return (
+    <div data-rov-node={node.id} style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      {node.rating !== undefined ? (
+        <div style={{ display: "flex", gap: "2px" }}>
+          {Array.from({ length: SOCIAL_PROOF_MAX_RATING }, (_, index) => (
+            <span key={index} data-rov-star style={{ display: "inline-flex" }}>
+              <Star
+                size={ICON_DEFAULT_SIZE}
+                color={starColor}
+                fill={index < node.rating! ? starColor : "none"}
+              />
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {label !== null ? <span style={{ color: resolveTextColor(undefined, ctx.colorScheme) }}>{label}</span> : null}
+    </div>
+  );
+}
+
 /** Recursive dispatcher: known node type -> its component; unknown type or a thrown error -> `fallback` if present, else nothing. Never throws.
  *
  * Every node passes through `applyOverrides` here, BEFORE any style/text
@@ -515,6 +632,12 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         return renderDivider(resolved, ctx);
       case "icon":
         return renderIcon(resolved, ctx);
+      case "featureList":
+        return renderFeatureList(resolved, ctx);
+      case "timeline":
+        return renderTimeline(resolved, ctx);
+      case "socialProof":
+        return renderSocialProof(resolved, ctx);
       default:
         return renderFallbackOrNull(resolved, ctx);
     }
