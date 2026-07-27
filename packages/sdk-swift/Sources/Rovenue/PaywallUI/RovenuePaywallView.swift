@@ -199,13 +199,14 @@ struct CellScope {
 private let paywallVisibilityPlatform = "ios"
 
 /// Defaults mirroring packages/shared/src/paywall/schema.ts's
-/// `DIVIDER_DEFAULT_THICKNESS` / `DIVIDER_DEFAULT_INSET` / `ICON_DEFAULT_SIZE`
-/// — device-independent pixels. `dividerDefaultOpacity` has no shared-schema
-/// counterpart: it's this renderer's own choice for an unspecified `color`.
+/// `DIVIDER_DEFAULT_THICKNESS` / `DIVIDER_DEFAULT_INSET` / `ICON_DEFAULT_SIZE` /
+/// `DIVIDER_DEFAULT_COLOR` — device-independent pixels, hex colors. Keep
+/// `dividerDefaultColor` in sync with schema.ts's constant by hand; there is
+/// no codegen step sharing it across platforms.
 private let dividerDefaultThickness = 1.0
 private let dividerDefaultInset = 0.0
 private let iconDefaultSize = 24.0
-private let dividerDefaultOpacity = 0.3
+private let dividerDefaultColor = ThemePair(light: "#E5E7EB", dark: "#374151")
 
 struct BuilderNodeView: View {
     let node: BuilderNode
@@ -262,14 +263,24 @@ struct BuilderNodeView: View {
                 Spacer()
             }
         case .divider(let p):
-            let resolved = p.color.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
+            // A hairline rule, not body text: falls back to the shared
+            // DIVIDER_DEFAULT_COLOR, not Color.secondary — this used to draw
+            // a 30%-opacity secondary bar that read differently from web/
+            // Android's opaque defaults for the exact same uncoloured node.
+            let overrideColor = p.color.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
+            let defaultColor = parseHexColor(themeValue(dividerDefaultColor, dark: ctx.dark))
             Rectangle()
-                .fill(resolved.map { color($0) } ?? Color.secondary.opacity(dividerDefaultOpacity))
+                .fill((overrideColor ?? defaultColor).map { color($0) } ?? Color.secondary)
                 .frame(height: CGFloat(p.thickness ?? dividerDefaultThickness))
                 .padding(.horizontal, CGFloat(p.inset ?? dividerDefaultInset))
         case .icon(let p):
             if let symbol = sfSymbolName(for: p.name) {
                 let side = CGFloat(p.size ?? iconDefaultSize)
+                // No default colour here: `nil` lets `.foregroundColor`
+                // inherit the ambient (text) colour, same as leaving the
+                // modifier off entirely — an icon in a feature row should
+                // take the colour of the text beside it. Web/Android mirror
+                // this by not emitting a colour / not calling imageTintList.
                 Image(systemName: symbol)
                     .resizable()
                     .scaledToFit()

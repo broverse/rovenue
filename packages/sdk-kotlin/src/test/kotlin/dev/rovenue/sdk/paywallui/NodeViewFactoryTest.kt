@@ -201,6 +201,13 @@ class NodeViewFactoryTest {
 
     private fun textNode() = BuilderNode.Text(id = "t", key = "k", role = TextRole.BODY)
 
+    private fun dividerNode(
+        thickness: Double? = null,
+        overrides: List<NodeOverride<DividerOverrideProps>>? = null,
+    ) = BuilderNode.Divider(id = "d", thickness = thickness, overrides = overrides)
+
+    private fun iconNode(size: Double? = null) = BuilderNode.Icon(id = "i", name = "check", size = size)
+
     @Test
     fun `childLayoutFor gives non-stack non-spacer children wrap-content and no weight`() {
         val layout = childLayoutFor(Axis.V, textNode())
@@ -268,6 +275,78 @@ class NodeViewFactoryTest {
         assertEquals(DimenMode.MATCH_PARENT, layout.width.mode)
         assertEquals(DimenMode.MATCH_PARENT, layout.height.mode)
         assertEquals(0f, layout.weight)
+    }
+
+    // ---- childLayoutFor (divider / icon) ----------------------------------
+    // Mirrors the stack/spacer coverage above — the only two arms of
+    // childLayoutFor without a dedicated case before this fix wave.
+
+    @Test
+    fun `childLayoutFor gives a divider match-parent width and its default thickness height`() {
+        val layout = childLayoutFor(Axis.V, dividerNode())
+        assertEquals(DimenMode.MATCH_PARENT, layout.width.mode)
+        assertEquals(DimenMode.FIXED, layout.height.mode)
+        assertEquals(1.0, layout.height.valueDp) // DIVIDER_DEFAULT_THICKNESS_DP (private to NodeViewFactory.kt)
+        assertEquals(0f, layout.weight)
+    }
+
+    @Test
+    fun `childLayoutFor gives a divider match-parent width regardless of the parent axis`() {
+        val layout = childLayoutFor(Axis.H, dividerNode(thickness = 4.0))
+        assertEquals(DimenMode.MATCH_PARENT, layout.width.mode)
+        assertEquals(DimenMode.FIXED, layout.height.mode)
+        assertEquals(4.0, layout.height.valueDp)
+    }
+
+    @Test
+    fun `childLayoutFor honors an explicit divider thickness`() {
+        val layout = childLayoutFor(Axis.V, dividerNode(thickness = 2.0))
+        assertEquals(2.0, layout.height.valueDp)
+    }
+
+    @Test
+    fun `childLayoutFor gives an icon a fixed square at the default size`() {
+        val layout = childLayoutFor(Axis.V, iconNode())
+        assertEquals(DimenMode.FIXED, layout.width.mode)
+        assertEquals(24.0, layout.width.valueDp) // ICON_DEFAULT_SIZE_DP (private to NodeViewFactory.kt)
+        assertEquals(DimenMode.FIXED, layout.height.mode)
+        assertEquals(24.0, layout.height.valueDp)
+        assertEquals(0f, layout.weight)
+    }
+
+    @Test
+    fun `childLayoutFor gives an icon a fixed square at its explicit size`() {
+        val layout = childLayoutFor(Axis.H, iconNode(size = 40.0))
+        assertEquals(DimenMode.FIXED, layout.width.mode)
+        assertEquals(40.0, layout.width.valueDp)
+        assertEquals(DimenMode.FIXED, layout.height.mode)
+        assertEquals(40.0, layout.height.valueDp)
+    }
+
+    // ---- childLayoutFor + applyOverrides: the RESOLVED node drives layout -
+    //
+    // Regresses buildStack's pre-fix bug: `build()` resolves overrides
+    // INTERNALLY before dispatching, so what actually drew reflected an
+    // active override, but `childLayoutFor` was fed the RAW, pre-override
+    // child — an active `thickness` override changed the rendered bar
+    // without changing the box it was laid out in. This proves the fix
+    // belongs at the `applyOverrides` + `childLayoutFor` pairing itself
+    // (which is what buildStack's hoist now does), independent of any
+    // Android view construction this module can't runtime-test.
+
+    @Test
+    fun `an active override's thickness is what childLayoutFor sees, not the raw pre-override value`() {
+        val raw = dividerNode(
+            thickness = 1.0,
+            overrides = listOf(
+                NodeOverride(OverrideConditionKind.SELECTED, DividerOverrideProps(thickness = 10.0)),
+            ),
+        )
+        val inactive = childLayoutFor(Axis.V, applyOverrides(raw, OverrideActiveConditions(introEligible = false, selected = false)))
+        assertEquals(1.0, inactive.height.valueDp)
+
+        val active = childLayoutFor(Axis.V, applyOverrides(raw, OverrideActiveConditions(introEligible = false, selected = true)))
+        assertEquals(10.0, active.height.valueDp)
     }
 
     // ---- gravity mapping -------------------------------------------------

@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
+import { iconRegistry } from "@rovenue/shared/paywall";
 import type { BuilderConfig, OverrideCondition, PackageView, PaywallNode } from "@rovenue/shared/paywall";
 import { PaywallRenderer } from "./renderer";
 import type { RendererOffering } from "./types";
@@ -1049,5 +1050,18 @@ describe("divider and icon nodes", () => {
       <PaywallRenderer config={cfg({ type: "icon", id: "i1", name: "nope" })} {...base} />,
     );
     expect(container.querySelector('[data-rov-node="i1"] svg')).toBeNull();
+  });
+
+  // Registry-coverage guard: mirrors what Swift (SF Symbol switch) and
+  // Kotlin (drawableNameFor switch) each assert against icon-registry.json —
+  // every semantic name in the shared registry must resolve to a real glyph
+  // here too. Web is the quietest place for a miss: `Object.fromEntries`
+  // stores `undefined` for an unmapped export without complaint, and
+  // `Record<string, LucideIcon>` doesn't type-error on that hole.
+  it.each(iconRegistry.map((entry) => entry.name))("registry icon %s resolves to a rendered glyph", (name) => {
+    const { container } = render(
+      <PaywallRenderer config={cfg({ type: "icon", id: "reg", name })} {...base} />,
+    );
+    expect(container.querySelector('[data-rov-node="reg"] svg')).not.toBeNull();
   });
 });

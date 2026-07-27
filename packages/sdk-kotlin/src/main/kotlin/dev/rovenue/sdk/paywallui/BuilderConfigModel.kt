@@ -1,5 +1,6 @@
 package dev.rovenue.sdk.paywallui
 
+import dev.rovenue.sdk.R
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -242,7 +243,7 @@ sealed class BuilderNode {
     data class Icon(
         override val id: String,
         /** A name from icon-registry.json. Deliberately a free string: unknown
-         *  names render nothing and fail open (see [drawableNameFor]), so a
+         *  names render nothing and fail open (see [drawableResFor]), so a
          *  newer paywall never breaks an older app. */
         val name: String,
         /** Defaults to ICON_DEFAULT_SIZE_DP (NodeViewFactory.kt) if absent. */
@@ -577,12 +578,38 @@ private fun parseIconOverrideProps(props: JsonObject): IconOverrideProps {
 
 // ----- icon registry -----
 
-/** Registry name -> vendored Material drawable. Unknown names return null
- *  and render nothing, so a newer paywall never breaks an older app. */
-internal fun drawableNameFor(name: String): String? = when (name) {
-    "check", "x", "star", "lock", "shield", "sparkle",
-    "bolt", "gift", "clock", "infinity", "cloud", "arrow-right" ->
-        "rovenue_ic_" + name.replace('-', '_')
+/**
+ * Registry name -> vendored Material drawable RESOURCE ID, referenced
+ * STATICALLY (`R.drawable.rovenue_ic_*`) rather than resolved at render time
+ * via a name string + `Resources.getIdentifier`. `getIdentifier` is a pure
+ * runtime lookup — nothing in the compiled bytecode statically mentions
+ * `R.drawable.rovenue_ic_*` — so a consuming app's release build with
+ * `shrinkResources true` sees all twelve drawables as unreferenced and can
+ * strip them, after which every icon silently fails open (only visible in a
+ * release build; no test in this repo catches it). Referencing the R
+ * constants directly here keeps them reachable. This also sidesteps a
+ * second latent bug in the old `getIdentifier(name, "drawable",
+ * context.packageName)` call: `context.packageName` returns the
+ * *applicationId*, which an `applicationIdSuffix` build variant shifts away
+ * from the resource-table package, breaking the by-name lookup even before
+ * shrinking enters the picture.
+ *
+ * Unknown names return null and render nothing, so a newer paywall never
+ * breaks an older app.
+ */
+internal fun drawableResFor(name: String): Int? = when (name) {
+    "check" -> R.drawable.rovenue_ic_check
+    "x" -> R.drawable.rovenue_ic_x
+    "star" -> R.drawable.rovenue_ic_star
+    "lock" -> R.drawable.rovenue_ic_lock
+    "shield" -> R.drawable.rovenue_ic_shield
+    "sparkle" -> R.drawable.rovenue_ic_sparkle
+    "bolt" -> R.drawable.rovenue_ic_bolt
+    "gift" -> R.drawable.rovenue_ic_gift
+    "clock" -> R.drawable.rovenue_ic_clock
+    "infinity" -> R.drawable.rovenue_ic_infinity
+    "cloud" -> R.drawable.rovenue_ic_cloud
+    "arrow-right" -> R.drawable.rovenue_ic_arrow_right
     else -> null
 }
 

@@ -10,6 +10,7 @@ import {
   resolveText,
   resolveVariables,
   ICON_DEFAULT_SIZE,
+  DIVIDER_DEFAULT_COLOR,
   DIVIDER_DEFAULT_INSET,
   DIVIDER_DEFAULT_THICKNESS,
   type BuilderConfig,
@@ -29,6 +30,7 @@ import {
 import type { RendererOffering } from "./types";
 import {
   resolveTextColor,
+  resolveThemeColor,
   resolveThemeUrl,
   stackContainerStyle,
   Z_OVERLAY_CHILD_STYLE,
@@ -426,14 +428,23 @@ function renderSpacer(node: SpacerNode, ctx: RenderCtx): ReactElement {
 function renderDivider(node: DividerNode, ctx: RenderCtx): ReactElement {
   const thickness = node.thickness ?? DIVIDER_DEFAULT_THICKNESS;
   const inset = node.inset ?? DIVIDER_DEFAULT_INSET;
+  // A hairline rule, not body text: an uncoloured divider falls back to
+  // DIVIDER_DEFAULT_COLOR (the shared cross-platform default), never the
+  // TEXT ink default — that previously drew an opaque near-black bar.
+  const color =
+    resolveThemeColor(node.color, ctx.colorScheme) ?? resolveThemeColor(DIVIDER_DEFAULT_COLOR, ctx.colorScheme);
   return (
     <div
       data-rov-node={node.id}
       style={{
+        // Flex `align-items: stretch` is the only reason a divider fills
+        // cross-axis width today; a non-stretch stack align (start/center/end)
+        // or a horizontal stack collapses it to zero width without this.
+        width: "100%",
         height: `${thickness}px`,
         marginLeft: `${inset}px`,
         marginRight: `${inset}px`,
-        backgroundColor: resolveTextColor(node.color, ctx.colorScheme),
+        backgroundColor: color,
         flexShrink: 0,
       }}
     />
@@ -442,13 +453,20 @@ function renderDivider(node: DividerNode, ctx: RenderCtx): ReactElement {
 
 /** `node.name` is a free string (see IconNode) — an unknown name resolves to
  * `undefined` in ICON_COMPONENT and renders the empty wrapper span, never a
- * thrown error. That fail-open behavior is the contract, not a fallback path. */
+ * thrown error. That fail-open behavior is the contract, not a fallback path.
+ *
+ * `color` is intentionally NOT defaulted here (unlike divider/text): an
+ * uncoloured icon inherits the ambient text colour via CSS `currentColor` —
+ * `resolveThemeColor` returns `undefined` when the node has no `color`, and
+ * Lucide icons treat an undefined `color` prop as `currentColor`. An icon in
+ * a feature row should match the colour of the text beside it, mirroring
+ * SwiftUI's `nil` -> `.foregroundColor` behaviour. */
 function renderIcon(node: IconNode, ctx: RenderCtx): ReactElement {
   const Cmp = ICON_COMPONENT[node.name];
   const size = node.size ?? ICON_DEFAULT_SIZE;
   return (
     <span data-rov-node={node.id} style={{ display: "inline-flex", flexShrink: 0 }}>
-      {Cmp ? <Cmp size={size} color={resolveTextColor(node.color, ctx.colorScheme)} /> : null}
+      {Cmp ? <Cmp size={size} color={resolveThemeColor(node.color, ctx.colorScheme)} /> : null}
     </span>
   );
 }

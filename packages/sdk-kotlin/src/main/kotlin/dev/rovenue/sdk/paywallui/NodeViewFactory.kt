@@ -300,18 +300,20 @@ private val SELECTED_STROKE_COLOR = ACCENT_COLOR
 private const val UNSELECTED_STROKE_COLOR = 0x59808080 // translucent gray
 
 // Defaults mirroring packages/shared/src/paywall/schema.ts's
-// DIVIDER_DEFAULT_THICKNESS / DIVIDER_DEFAULT_INSET / ICON_DEFAULT_SIZE —
-// device-independent pixels, converted with the display density (see `dp`)
-// before use as view dimensions. DIVIDER_DEFAULT_COLOR/ICON_DEFAULT_TINT_COLOR
-// have no shared-schema counterpart: they're this renderer's own fallback
-// for an unspecified `color`, needed because `android:tint` was stripped
-// from every vendored drawable (see res/drawable/README.md) so nothing else
-// supplies one.
+// DIVIDER_DEFAULT_THICKNESS / DIVIDER_DEFAULT_INSET / ICON_DEFAULT_SIZE /
+// DIVIDER_DEFAULT_COLOR — device-independent pixels, converted with the
+// display density (see `dp`) before use as view dimensions.
+// `DIVIDER_DEFAULT_COLOR` below mirrors schema.ts's constant by hand (no
+// codegen step shares it across platforms). There is deliberately no
+// ICON default tint constant: an uncoloured icon INHERITS the ambient text
+// colour (see `buildIcon`), matching SwiftUI's `nil` -> `.foregroundColor`
+// and the web renderer's un-set `color` -> CSS inheritance. `android:tint`
+// was stripped from every vendored drawable (see res/drawable/README.md),
+// so nothing supplies a colour unless the node has one or we tint it here.
 private const val DIVIDER_DEFAULT_THICKNESS_DP = 1.0
 private const val DIVIDER_DEFAULT_INSET_DP = 0.0
 private const val ICON_DEFAULT_SIZE_DP = 24.0
-private const val DIVIDER_DEFAULT_COLOR = 0x4D808080 // translucent gray (~30% alpha)
-private val ICON_DEFAULT_TINT_COLOR = 0xFF808080L.toInt() // medium gray
+private val DIVIDER_DEFAULT_COLOR = ThemePair(light = "#E5E7EB", dark = "#374151")
 
 private fun dp(context: Context, value: Double): Int =
     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), context.resources.displayMetrics)
@@ -447,7 +449,19 @@ internal object NodeViewFactory {
 
         node.children.forEachIndexed { index, child ->
             val childView = build(context, child, ctx, cell) ?: return@forEachIndexed
-            val dimen = childLayoutFor(node.axis, child)
+            // [build] resolves overrides INTERNALLY before dispatching on
+            // `child`'s type, so an active override (e.g. a divider's
+            // `thickness`) is what actually drew — but the height/width
+            // passed to layout here must come off that SAME resolved node,
+            // not the raw pre-override `child`, or an active override
+            // changes what's drawn without changing the box it's laid out
+            // in (silently clipped/misfit). Web and Swift both read layout
+            // off the resolved node; this mirrors them.
+            val active = activeOverrideConditions(
+                cellPackageId = cell?.packageId, selectedPackageId = ctx.selectedPackageId, offering = ctx.offering,
+            )
+            val resolvedChild = applyOverrides(child, active)
+            val dimen = childLayoutFor(node.axis, resolvedChild)
             val lp = when (node.axis) {
                 Axis.Z -> FrameLayout.LayoutParams(
                     dimen.width.toPx(context),
@@ -638,10 +652,15 @@ internal object NodeViewFactory {
      * View's background, IS respected when laying out a ViewGroup's child.
      */
     private fun buildDivider(context: Context, node: BuilderNode.Divider, ctx: PaywallRenderContext): View {
+        // A hairline rule, not body text: an uncoloured divider falls back to
+        // the shared DIVIDER_DEFAULT_COLOR, not a plain mid-gray — this used
+        // to draw a fixed 0x4D808080 that read differently from web/iOS's
+        // opaque light/dark-aware defaults for the exact same uncoloured node.
         val resolvedColor = node.color?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+            ?: parseHexColor(themeValue(DIVIDER_DEFAULT_COLOR, ctx.dark))?.toColorInt()
         val insetPx = dp(context, node.inset ?: DIVIDER_DEFAULT_INSET_DP)
         val line = View(context).apply {
-            setBackgroundColor(resolvedColor ?: DIVIDER_DEFAULT_COLOR)
+            setBackgroundColor(resolvedColor ?: 0xFF808080.toInt())
         }
         return FrameLayout(context).apply {
             setPadding(insetPx, 0, insetPx, 0)
@@ -651,20 +670,28 @@ internal object NodeViewFactory {
 
     /**
      * Resolves [BuilderNode.Icon.name] to a vendored drawable resource id via
-     * [drawableNameFor] + `getIdentifier`, which returns `0` when nothing
-     * matches. BOTH an unknown name (`drawableNameFor` -> null) and a `0` id
-     * render nothing — `icon.name` is a free string by design, so a paywall
-     * authored against a newer registry must fail open on an older app.
+     * the STATIC [drawableResFor] map (`R.drawable.rovenue_ic_*`), which
+     * returns `null` when nothing matches — `icon.name` is a free string by
+     * design, so a paywall authored against a newer registry must fail open
+     * on an older app.
+     *
+     * No default tint is applied when the node has no `color`:
+     * `imageTintList` is simply never set, so the drawable's own fill shows
+     * through and the ImageView otherwise inherits nothing special — an icon
+     * in a feature row should take the colour of the text beside it, same
+     * intent as SwiftUI's `nil` -> `.foregroundColor` and the web renderer's
+     * un-set `color` prop. (The vendored drawables ship a white fill — see
+     * res/drawable/README.md — so this is only usable uncoloured against a
+     * dark background; anywhere else the config should set a colour.)
      */
     private fun buildIcon(context: Context, node: BuilderNode.Icon, ctx: PaywallRenderContext): View? {
-        val drawableName = drawableNameFor(node.name) ?: return null
-        val resId = context.resources.getIdentifier(drawableName, "drawable", context.packageName)
-        if (resId == 0) return null
+        val resId = drawableResFor(node.name) ?: return null
         val tint = node.color?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
-            ?: ICON_DEFAULT_TINT_COLOR
         return ImageView(context).apply {
             setImageResource(resId)
-            imageTintList = android.content.res.ColorStateList.valueOf(tint)
+            if (tint != null) {
+                imageTintList = android.content.res.ColorStateList.valueOf(tint)
+            }
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
     }

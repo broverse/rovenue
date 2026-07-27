@@ -133,6 +133,10 @@ export const DIVIDER_DEFAULT_THICKNESS = 1;
 export const DIVIDER_DEFAULT_INSET = 0;
 /** Default icon edge length, in device-independent pixels. */
 export const ICON_DEFAULT_SIZE = 24;
+/** Drawn when a divider has no `color`. A hairline rule, not body text —
+ *  the web renderer previously reached for the TEXT colour helper and drew
+ *  an opaque near-black bar. */
+export const DIVIDER_DEFAULT_COLOR = { light: "#E5E7EB", dark: "#374151" } as const;
 
 export type DividerNode = {
   type: "divider";

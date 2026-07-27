@@ -78,7 +78,17 @@ class BuilderConfigModelTest {
             .parseToJsonElement(registry.readText()).jsonObject["icons"]!!.jsonArray
             .map { it.jsonObject["name"]!!.jsonPrimitive.content }
         for (n in names) {
-            assertNotNull(drawableNameFor(n), "no drawable mapped for $n")
+            // `assertNotNull(drawableResFor(n))` alone would pass for any name
+            // present in the `when` branch whether or not the backing XML
+            // actually exists on disk — a JVM unit test never sees a real `R`
+            // that could fail to resolve a stale resource name. Assert the
+            // vendored file is really there too (the files are right there on
+            // disk to check).
+            assertNotNull(drawableResFor(n), "no drawable resource mapped for $n")
+            val drawableFile = java.io.File("src/main/res/drawable/rovenue_ic_${n.replace('-', '_')}.xml")
+                .takeIf { it.exists() }
+                ?: java.io.File("packages/sdk-kotlin/src/main/res/drawable/rovenue_ic_${n.replace('-', '_')}.xml")
+            assertTrue(drawableFile.exists(), "no vendored drawable file for $n at ${drawableFile.path}")
         }
     }
 
