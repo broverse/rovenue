@@ -115,6 +115,7 @@ public func applyOverrides(_ props: PurchaseButtonProps, active: OverrideActiveC
     for patch in patches {
         result = PurchaseButtonProps(
             id: result.id, labelKey: patch.labelKey ?? result.labelKey,
+            trialLabelKey: patch.trialLabelKey ?? result.trialLabelKey,
             overrides: result.overrides, fallback: result.fallback)
     }
     return result

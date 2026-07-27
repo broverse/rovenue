@@ -151,6 +151,34 @@ final class PaywallOverridesTests: XCTestCase {
         XCTAssertEqual(result.labelKey, "buy_selected")
     }
 
+    /// `trialLabelKey` is in TS's `OVERRIDABLE_PROP_KEYS.purchaseButton`
+    /// alongside `labelKey` — an override can swap it just like `labelKey`.
+    func test_purchaseButtonProps_mergesTrialLabelKey() {
+        let overrides = [NodeOverride(
+            when: .selected,
+            props: PurchaseButtonOverrideProps(labelKey: "buy_selected", trialLabelKey: "trial_selected"))]
+        let node = PurchaseButtonProps(id: "pb", labelKey: "buy", trialLabelKey: "trial", overrides: overrides)
+        let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: false, selected: true))
+        XCTAssertEqual(result.labelKey, "buy_selected")
+        XCTAssertEqual(result.trialLabelKey, "trial_selected")
+    }
+
+    /// End-to-end: an active override's `trialLabelKey` survives
+    /// `applyOverrides` and feeds `ctaLabelKey` — the overridden trial key
+    /// (not the node's original one) is what renders when the resulting
+    /// props are paired with a mid-trial selection.
+    func test_purchaseButtonProps_overriddenTrialLabelKeyFeedsCtaLabelKey() {
+        let overrides = [NodeOverride(
+            when: .selected, props: PurchaseButtonOverrideProps(trialLabelKey: "trial_selected"))]
+        let node = PurchaseButtonProps(id: "pb", labelKey: "buy", trialLabelKey: "trial", overrides: overrides)
+        let resolved = applyOverrides(node, active: OverrideActiveConditions(introEligible: false, selected: true))
+        let midTrialSelection = PackageView(
+            packageName: "", price: "", pricePerPeriod: "", period: "", introPeriod: "1 week")
+        XCTAssertEqual(
+            ctaLabelKey(labelKey: resolved.labelKey, trialLabelKey: resolved.trialLabelKey, selectedView: midTrialSelection),
+            "trial_selected")
+    }
+
     func test_spacerProps_isAlwaysANoOp() {
         let overrides = [NodeOverride(when: .selected, props: SpacerOverrideProps())]
         let node = SpacerProps(id: "sp", size: 8, overrides: overrides)

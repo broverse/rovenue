@@ -400,6 +400,23 @@ final class BuilderConfigModelTests: XCTestCase {
         XCTAssertNil(absentPb.trialLabelKey)
     }
 
+    /// Decode-retention for the OVERRIDE side: `trialLabelKey` inside a
+    /// purchaseButton override's `props` decodes and is retained (mirrors
+    /// schema.ts's `OVERRIDABLE_PROP_KEYS.purchaseButton` whitelisting it
+    /// alongside `labelKey`) — this is the wire-format counterpart to
+    /// `test_purchaseButtonProps_mergesTrialLabelKey` in
+    /// PaywallOverridesTests.swift, which exercises the same field once
+    /// already-decoded.
+    func testPurchaseButtonOverrideTrialLabelKeyDecodeRetention() throws {
+        let node = try firstChild(#"""
+            {"type":"purchaseButton","id":"pb","labelKey":"buy","trialLabelKey":"trial",
+             "overrides":[{"when":{"kind":"selected"},"props":{"labelKey":"buy_selected","trialLabelKey":"trial_selected"}}]}
+            """#)
+        guard case .purchaseButton(let props) = node else { return XCTFail("expected .purchaseButton") }
+        let override = try XCTUnwrap(props.overrides?.first)
+        XCTAssertEqual(override.props?.trialLabelKey, "trial_selected")
+    }
+
     func testResolveTextWithNilLocaleFallsStraightToDefaultLocale() throws {
         let accept = try XCTUnwrap(fixtures["accept"] as? [[String: Any]])
         let canonicalEntry = try XCTUnwrap(accept.first { ($0["name"] as? String) == "canonical every-node multi-locale" })

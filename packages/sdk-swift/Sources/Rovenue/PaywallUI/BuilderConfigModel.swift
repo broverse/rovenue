@@ -228,7 +228,7 @@ enum OverridablePropKeys {
     static let image: Set<String> = ["cornerRadius"]
     static let button: Set<String> = ["labelKey", "style"]
     static let packageList: Set<String> = []
-    static let purchaseButton: Set<String> = ["labelKey"]
+    static let purchaseButton: Set<String> = ["labelKey", "trialLabelKey"]
     static let spacer: Set<String> = []
     static let divider: Set<String> = ["color", "thickness"]
     static let icon: Set<String> = ["name", "color"]
@@ -350,17 +350,23 @@ public struct PackageListOverrideProps: Decodable, Equatable, Sendable {
 
 public struct PurchaseButtonOverrideProps: Decodable, Equatable, Sendable {
     public let labelKey: String?
+    /// Mirrors schema.ts's `OVERRIDABLE_PROP_KEYS.purchaseButton`, which
+    /// whitelists `trialLabelKey` alongside `labelKey` — an active
+    /// `introEligible`/`selected` override can swap either.
+    public let trialLabelKey: String?
 
-    public init(labelKey: String? = nil) {
+    public init(labelKey: String? = nil, trialLabelKey: String? = nil) {
         self.labelKey = labelKey
+        self.trialLabelKey = trialLabelKey
     }
 
-    private enum CodingKeys: String, CodingKey { case labelKey }
+    private enum CodingKeys: String, CodingKey { case labelKey, trialLabelKey }
 
     public init(from decoder: Decoder) throws {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.purchaseButton)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         labelKey = try container.decodeIfPresent(String.self, forKey: .labelKey)
+        trialLabelKey = try container.decodeIfPresent(String.self, forKey: .trialLabelKey)
     }
 }
 
