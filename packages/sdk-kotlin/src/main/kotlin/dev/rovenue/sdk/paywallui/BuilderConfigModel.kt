@@ -104,7 +104,7 @@ private object OverridablePropKeys {
     val image: Set<String> = setOf("cornerRadius")
     val button: Set<String> = setOf("labelKey", "style")
     val packageList: Set<String> = emptySet()
-    val purchaseButton: Set<String> = setOf("labelKey")
+    val purchaseButton: Set<String> = setOf("labelKey", "trialLabelKey")
     val spacer: Set<String> = emptySet()
     val divider: Set<String> = setOf("color", "thickness")
     val icon: Set<String> = setOf("name", "color")
@@ -139,7 +139,7 @@ data class ButtonOverrideProps(val labelKey: String? = null, val style: ButtonVi
  *  `props: {}`, so applying it is always a no-op. */
 object PackageListOverrideProps
 
-data class PurchaseButtonOverrideProps(val labelKey: String? = null)
+data class PurchaseButtonOverrideProps(val labelKey: String? = null, val trialLabelKey: String? = null)
 
 /** Empty whitelist (`OVERRIDABLE_PROP_KEYS.spacer == []`) — same as
  *  [PackageListOverrideProps], always a no-op. */
@@ -237,6 +237,13 @@ sealed class BuilderNode {
     data class PurchaseButton(
         override val id: String,
         val labelKey: String,
+        /** Loc key rendered instead of [labelKey] when the selected
+         *  package's resolved [PackageView.introPeriod] is a non-empty
+         *  string — a trial/intro period is active (see `ctaLabelKey` in
+         *  PaywallHelpers.kt, the Kotlin port of variables.ts's
+         *  `resolveCtaLabelKey`). Absent = always [labelKey]. Mirrors
+         *  schema.ts's `PurchaseButtonNode.trialLabelKey`. */
+        val trialLabelKey: String? = null,
         val overrides: List<NodeOverride<PurchaseButtonOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
@@ -475,6 +482,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
         "purchaseButton" -> BuilderNode.PurchaseButton(
             id = id,
             labelKey = obj.requireString("labelKey"),
+            trialLabelKey = obj.optionalString("trialLabelKey"),
             overrides = obj.parseOverrideList(::parsePurchaseButtonOverrideProps),
             visibility = visibility,
             fallback = fallback,
@@ -634,7 +642,10 @@ private fun parsePackageListOverrideProps(props: JsonObject): PackageListOverrid
 
 private fun parsePurchaseButtonOverrideProps(props: JsonObject): PurchaseButtonOverrideProps {
     validateOverridePropKeys(props, OverridablePropKeys.purchaseButton)
-    return PurchaseButtonOverrideProps(labelKey = props.optionalString("labelKey"))
+    return PurchaseButtonOverrideProps(
+        labelKey = props.optionalString("labelKey"),
+        trialLabelKey = props.optionalString("trialLabelKey"),
+    )
 }
 
 private fun parseSpacerOverrideProps(props: JsonObject): SpacerOverrideProps {

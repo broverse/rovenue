@@ -184,6 +184,37 @@ class PaywallOverridesTest {
         assertEquals("buy_selected", result.labelKey)
     }
 
+    /** `trialLabelKey` is in TS's `OVERRIDABLE_PROP_KEYS.purchaseButton`
+     *  alongside `labelKey` — an override can swap it just like `labelKey`. */
+    @Test
+    fun `purchaseButton node merges trialLabelKey`() {
+        val overrides = listOf(
+            NodeOverride(OverrideConditionKind.SELECTED, PurchaseButtonOverrideProps(labelKey = "buy_selected", trialLabelKey = "trial_selected")),
+        )
+        val node = BuilderNode.PurchaseButton(id = "pb", labelKey = "buy", trialLabelKey = "trial", overrides = overrides)
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        assertEquals("buy_selected", result.labelKey)
+        assertEquals("trial_selected", result.trialLabelKey)
+    }
+
+    /**
+     * End-to-end: an active override's `trialLabelKey` survives
+     * `applyOverrides` and feeds `ctaLabelKey` — the overridden trial key
+     * (not the node's original one) is what renders when the resulting
+     * props are paired with a mid-trial selection.
+     */
+    @Test
+    fun `purchaseButton overridden trialLabelKey feeds ctaLabelKey`() {
+        val overrides = listOf(NodeOverride(OverrideConditionKind.SELECTED, PurchaseButtonOverrideProps(trialLabelKey = "trial_selected")))
+        val node = BuilderNode.PurchaseButton(id = "pb", labelKey = "buy", trialLabelKey = "trial", overrides = overrides)
+        val resolved = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        val midTrialSelection = PackageView(packageName = "", price = "", pricePerPeriod = "", period = "", introPeriod = "1 week")
+        assertEquals(
+            "trial_selected",
+            ctaLabelKey(resolved.labelKey, resolved.trialLabelKey, midTrialSelection),
+        )
+    }
+
     @Test
     fun `spacer node is always a no-op`() {
         val overrides = listOf(NodeOverride(OverrideConditionKind.SELECTED, SpacerOverrideProps))

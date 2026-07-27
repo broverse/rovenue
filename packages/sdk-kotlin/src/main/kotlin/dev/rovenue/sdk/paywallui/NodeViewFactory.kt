@@ -724,8 +724,15 @@ internal object NodeViewFactory {
 
     private fun buildPurchaseButton(context: Context, node: BuilderNode.PurchaseButton, ctx: PaywallRenderContext): View {
         val enabled = purchaseEnabled(ctx.selectedPackageId, ctx.isPurchasing)
+        // The GLOBAL selection, not any cellTemplate scope — a purchaseButton
+        // is schema-forbidden inside cellTemplate, so `cell = null` here
+        // always resolves the same selected PackageView `ctx.label` itself
+        // uses for this node. Mirrors nodes.tsx calling `resolveCtaLabelKey`
+        // with the selected package's view and Swift's `PurchaseButtonView`.
+        val selectedView = relevantPackageView(cell = null, selectedPackageId = ctx.selectedPackageId, offering = ctx.offering)
+        val resolvedLabelKey = ctaLabelKey(labelKey = node.labelKey, trialLabelKey = node.trialLabelKey, selectedView = selectedView)
         return Button(context).apply {
-            text = ctx.label(node.labelKey, null)
+            text = ctx.label(resolvedLabelKey, null)
             isAllCaps = false
             isEnabled = enabled
             setTypeface(typeface, Typeface.BOLD)

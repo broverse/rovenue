@@ -70,3 +70,17 @@ fun resolveVariables(text: String, pkg: PackageView?): String {
         }
     }
 }
+
+/**
+ * Which localization key a `purchaseButton` renders: [trialLabelKey] when
+ * it's non-null AND [selectedView]'s [PackageView.introPeriod] is a
+ * non-empty string (a trial/intro period is active for the current
+ * selection); [labelKey] otherwise — including no selection at all
+ * ([selectedView] `null`), which is never a trial. Mirrors
+ * packages/shared/src/paywall/variables.ts's `resolveCtaLabelKey` and
+ * packages/sdk-swift's `ctaLabelKey` (PaywallViewModelHelpers.swift).
+ */
+fun ctaLabelKey(labelKey: String, trialLabelKey: String?, selectedView: PackageView?): String {
+    val hasIntroPeriod = !selectedView?.introPeriod.isNullOrEmpty()
+    return if (trialLabelKey != null && hasIntroPeriod) trialLabelKey else labelKey
+}

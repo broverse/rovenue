@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -472,5 +473,95 @@ class BuilderConfigModelTest {
         is BuilderNode.Unknown -> node
         is BuilderNode.Stack -> node.children.firstNotNullOfOrNull(::firstUnknown)
         else -> null
+    }
+
+    // ---- trialLabel (cross-platform render-fixtures.json vector table) ----
+    // Task 12 — port of the web (56871833) and Swift (8dafb855 + 460ba634)
+    // trial-aware purchase-button label contract.
+
+    /**
+     * Runs every `trialLabel` vector in render-fixtures.json through
+     * [ctaLabelKey] — the Kotlin port of variables.ts's `resolveCtaLabelKey`
+     * and Swift's `ctaLabelKey`. `selectedHasIntroPeriod` is the fixture's
+     * boolean/null shorthand for a selection: `true` -> a selected package
+     * mid-trial (`introPeriod` a non-empty string), `false` -> a selected
+     * package with no trial (`introPeriod` null), `null` -> no selection at
+     * all (`selectedView` null). Mirrors the Swift test's
+     * `testTrialLabelVectorsAgreeWithSharedFixture`.
+     */
+    @Test
+    fun `trialLabel vectors match`() {
+        val cases = fixture["trialLabel"]!!.jsonObject["cases"]!!.jsonArray
+        assertTrue(cases.isNotEmpty())
+        for (el in cases) {
+            val v = el.jsonObject
+            val caseName = name(v)
+            val labelKey = v["labelKey"]!!.jsonPrimitive.content
+            val trialLabelKey = (v["trialLabelKey"] as? JsonPrimitive)?.content
+            val expectedKey = v["expectedKey"]!!.jsonPrimitive.content
+            val hasIntroPeriod = (v["selectedHasIntroPeriod"] as? JsonPrimitive)?.booleanOrNull
+            val selectedView = if (hasIntroPeriod == null) {
+                null
+            } else {
+                PackageView(
+                    packageName = "", price = "", pricePerPeriod = "", period = "",
+                    introPeriod = if (hasIntroPeriod) "1 week" else null,
+                )
+            }
+            assertEquals(expectedKey, ctaLabelKey(labelKey, trialLabelKey, selectedView), caseName)
+        }
+    }
+
+    /**
+     * Empty-string `introPeriod` is explicitly NOT a trial — mirroring the
+     * TS truthiness check (`selected.introPeriod !== ""`). Not represented
+     * in the shared fixture (which only carries the boolean/null shorthand),
+     * so pinned directly here, same as the Swift test.
+     */
+    @Test
+    fun `empty-string introPeriod is not a trial`() {
+        val selectedView = PackageView(packageName = "", price = "", pricePerPeriod = "", period = "", introPeriod = "")
+        assertEquals("cta.buy", ctaLabelKey("cta.buy", "cta.trial", selectedView))
+    }
+
+    /**
+     * Decode-retention: `trialLabelKey` present on the wire is retained on
+     * [BuilderNode.PurchaseButton]; absent decodes to `null`.
+     */
+    @Test
+    fun `purchaseButton trialLabelKey decode retention`() {
+        val entry = entryNamed("accept", "purchaseButton with trialLabelKey (both keys present in default locale)")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val pb = config.root.children[0] as BuilderNode.PurchaseButton
+        assertEquals("cta.buy", pb.labelKey)
+        assertEquals("cta.trial", pb.trialLabelKey)
+
+        // Absent case, using the canonical every-node fixture's
+        // purchaseButton (pb_1, index 5), which carries no trialLabelKey.
+        val canonicalEntry = entryNamed("accept", "canonical every-node multi-locale")
+        val canonicalConfig = decodeBuilderConfig(configJson(canonicalEntry))!!
+        val absentPb = canonicalConfig.root.children[5] as BuilderNode.PurchaseButton
+        assertNull(absentPb.trialLabelKey)
+    }
+
+    /**
+     * Decode-retention for the OVERRIDE side: `trialLabelKey` inside a
+     * purchaseButton override's `props` decodes and is retained (mirrors
+     * schema.ts's `OVERRIDABLE_PROP_KEYS.purchaseButton` whitelisting it
+     * alongside `labelKey`) — the wire-format counterpart to
+     * `purchaseButton node merges trialLabelKey` in PaywallOverridesTest.kt,
+     * which exercises the same field once already-decoded.
+     */
+    @Test
+    fun `purchaseButton override trialLabelKey decode retention`() {
+        val node = firstChild(
+            rootWith(
+                """{"type":"purchaseButton","id":"pb","labelKey":"buy","trialLabelKey":"trial",
+                   "overrides":[{"when":{"kind":"selected"},"props":{"labelKey":"buy_selected","trialLabelKey":"trial_selected"}}]}""",
+            ),
+        )
+        val pb = node as BuilderNode.PurchaseButton
+        val override = pb.overrides!!.first()
+        assertEquals("trial_selected", override.props?.trialLabelKey)
     }
 }

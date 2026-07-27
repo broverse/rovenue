@@ -102,7 +102,10 @@ fun applyOverrides(node: BuilderNode.PurchaseButton, active: OverrideActiveCondi
     if (patches.isEmpty()) return node
     var result = node
     for (patch in patches) {
-        result = result.copy(labelKey = patch.labelKey ?: result.labelKey)
+        result = result.copy(
+            labelKey = patch.labelKey ?: result.labelKey,
+            trialLabelKey = patch.trialLabelKey ?: result.trialLabelKey,
+        )
     }
     return result
 }
