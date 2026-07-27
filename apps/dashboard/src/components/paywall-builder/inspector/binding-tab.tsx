@@ -1,10 +1,47 @@
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import type { ButtonNode, PackageListNode, PaywallNode } from "@rovenue/shared/paywall";
+import { cn } from "../../../lib/cn";
+import { useOfferingResolvedPrices } from "../../../lib/hooks/useOfferingResolvedPrices";
 import { Checkbox } from "../../../ui/checkbox";
 import { NativeSelect } from "../../../ui/native-select";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
+import {
+  activePresetId,
+  availablePresets,
+  buildPriceRows,
+  formatMinorAmount,
+  periodLabel,
+  presetSelection,
+  storeBadgeText,
+  type PackagePriceRow,
+} from "./binding-prices";
 import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
+
+/** apple > google > stripe: display order for per-store price badges and the default-selected option's amount. */
+const STORE_DISPLAY_ORDER = ["apple", "google", "stripe"] as const;
+const STORE_LABELS: Readonly<Record<(typeof STORE_DISPLAY_ORDER)[number], string>> = {
+  apple: "Apple",
+  google: "Google",
+  stripe: "Stripe",
+};
+const PERIOD_CONFLICT_MARKER = "⚠";
+
+/** A row with no id-in-offering match falls back to raw-id-everywhere, matching the pre-fetch shape. */
+function emptyPriceRow(packageIdentifier: string): PackagePriceRow {
+  return { packageIdentifier, displayName: null, period: null, periodConflict: false, stores: null };
+}
+
+/** First `ok` store's formatted amount (STORE_DISPLAY_ORDER precedence), else the raw package id. */
+function firstOkAmount(row: PackagePriceRow): string {
+  if (row.stores) {
+    for (const store of STORE_DISPLAY_ORDER) {
+      const entry = row.stores[store];
+      if (entry?.status === "ok") return formatMinorAmount(entry.amountMinor, entry.currency);
+    }
+  }
+  return row.packageIdentifier;
+}
 
 // =============================================================
 // Binding — which commerce data, or which behaviour, a node points
@@ -68,6 +105,12 @@ function PackageListBinding({ node }: { node: PackageListNode }) {
   const set = (patch: Partial<PackageListNode>) => vm.updateNode<PackageListNode>(node.id, patch);
   const offeringPackageIds = vm.paywall?.offeringPackageIds ?? [];
 
+  const resolved = useOfferingResolvedPrices(vm.projectId, vm.paywall?.offeringId ?? null);
+  const rows = buildPriceRows(offeringPackageIds, resolved.data);
+  const rowById = new Map(rows.map((row) => [row.packageIdentifier, row]));
+  const presets = availablePresets(rows);
+  const activePreset = activePresetId(rows, node.packageIds);
+
   const toggle = (id: string) => {
     const has = node.packageIds.includes(id);
     const packageIds = has ? node.packageIds.filter((p) => p !== id) : [...node.packageIds, id];
@@ -78,6 +121,30 @@ function PackageListBinding({ node }: { node: PackageListNode }) {
 
   return (
     <>
+      {presets.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 border-b border-rv-divider px-4 py-3">
+          {presets.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => set(presetSelection(rows, preset, node.defaultSelected))}
+              className={cn(
+                "cursor-pointer rounded px-2 py-1 text-[11px] font-medium transition",
+                activePreset === preset.id
+                  ? "bg-rv-accent-500 text-white"
+                  : "bg-rv-c2 text-rv-mute-600 hover:text-foreground",
+              )}
+            >
+              {t(`paywalls.builder.properties.presetLabel.${preset.id}`, preset.label)}
+            </button>
+          ))}
+          {activePreset === null && (
+            <span className="cursor-default rounded px-2 py-1 text-[11px] font-medium text-rv-mute-500">
+              {t("paywalls.builder.properties.presetCustom", "Custom")}
+            </span>
+          )}
+        </div>
+      )}
       <Section title={t("paywalls.builder.properties.packages", "Packages")} defaultOpen>
         <div className="mb-2 text-[11px] text-rv-mute-500">
           {t(
@@ -91,12 +158,46 @@ function PackageListBinding({ node }: { node: PackageListNode }) {
           </div>
         )}
         <div className="flex flex-col gap-1.5">
-          {offeringPackageIds.map((id) => (
-            <label key={id} className="flex cursor-pointer items-center gap-2 text-[12px] text-foreground">
-              <Checkbox checked={node.packageIds.includes(id)} onChange={() => toggle(id)} ariaLabel={id} />
-              <span className="font-rv-mono text-[11px]">{id}</span>
-            </label>
-          ))}
+          {offeringPackageIds.map((id) => {
+            const row = rowById.get(id) ?? emptyPriceRow(id);
+            const label = periodLabel(row.period);
+            return (
+              <label key={id} className="flex cursor-pointer items-start gap-2 text-[12px] text-foreground">
+                <Checkbox checked={node.packageIds.includes(id)} onChange={() => toggle(id)} ariaLabel={id} />
+                <span className="flex flex-col gap-0.5">
+                  <span className="flex flex-wrap items-center gap-1">
+                    <span>{row.displayName ?? id}</span>
+                    {label !== null && (
+                      <span
+                        className="rounded bg-rv-c2 px-1 text-[10px] text-rv-mute-500"
+                        title={
+                          row.periodConflict
+                            ? t(
+                                "paywalls.builder.properties.periodConflict",
+                                "Stores disagree on this package's billing period",
+                              )
+                            : undefined
+                        }
+                      >
+                        {label}
+                        {row.periodConflict ? ` ${PERIOD_CONFLICT_MARKER}` : ""}
+                      </span>
+                    )}
+                  </span>
+                  {row.stores && (
+                    <span className="flex flex-wrap gap-1.5 text-[10px] text-rv-mute-500">
+                      {STORE_DISPLAY_ORDER.filter((store) => row.stores?.[store]).map((store) => (
+                        <span key={store}>
+                          {STORE_LABELS[store]} {storeBadgeText(row.stores![store]!)}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                  <span className="font-rv-mono text-[10px] text-rv-mute-500">{id}</span>
+                </span>
+              </label>
+            );
+          })}
         </div>
       </Section>
       <Section title={t("paywalls.builder.properties.selection", "Selection")}>
@@ -108,11 +209,14 @@ function PackageListBinding({ node }: { node: PackageListNode }) {
             <option value="">
               {t("paywalls.builder.properties.defaultSelectedNone", "First available")}
             </option>
-            {(node.packageIds.length ? node.packageIds : offeringPackageIds).map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
+            {(node.packageIds.length ? node.packageIds : offeringPackageIds).map((id) => {
+              const row = rowById.get(id) ?? emptyPriceRow(id);
+              return (
+                <option key={id} value={id}>
+                  {`${periodLabel(row.period) ?? id} — ${firstOkAmount(row)}`}
+                </option>
+              );
+            })}
           </NativeSelect>
         </Field>
       </Section>
