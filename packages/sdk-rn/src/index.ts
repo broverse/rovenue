@@ -133,8 +133,7 @@ export type { FunnelClaimResult, ClaimInstallParams } from "./api/funnel";
 export { extractFunnelToken } from "./api/funnel";
 
 // The paywall renders through the platform's native view, not a JS
-// component tree — see the 2026-07-25 bridge design. `decodeBuilderConfig`
-// and friends stay exported from ./paywall-ui until that directory is
-// retired, so this commit changes rendering only.
+// component tree — see the 2026-07-25 bridge design. The old JS renderer
+// (decodeBuilderConfig, BuilderConfigModel, BuilderNode) was retired
+// once the bridge passed device smoke on both platforms.
 export { RovenuePaywallView, type RovenuePaywallViewProps } from "./paywall-view";
-export { decodeBuilderConfig, type BuilderConfigModel, type BuilderNode } from "./paywall-ui";
