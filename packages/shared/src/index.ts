@@ -155,6 +155,12 @@ export * from "./paywall";
 export * from "./attributes";
 
 // =============================================================
+// Currency utilities — Stripe minor-unit scaling and conversion
+// =============================================================
+
+export { stripeMinorUnitExponent, decimalToMinorUnits } from "./currency";
+
+// =============================================================
 // Copilot — types, tier limits, and intent handling
 // =============================================================
 
