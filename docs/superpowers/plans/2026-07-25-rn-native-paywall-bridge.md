@@ -1008,6 +1008,7 @@ Append the results to `.superpowers/sdd/progress.md` under a `RN BRIDGE SMOKE` h
 - Delete: `packages/sdk-rn/src/paywall-ui/` (all 12 files)
 - Modify: `packages/sdk-rn/src/index.ts` — drop the three remaining `paywall-ui` exports
 - Modify: `packages/shared/src/paywall/render-fixtures.json` — update `_comment` to say three platforms
+- Modify: `packages/sdk-rn/src/__tests__/_stubReactNative.ts` — drop the host-component stand-ins that only the deleted renderer's tests used
 - Modify: `packages/sdk-rn/package.json` — major version bump
 - Modify: `apps/docs/content/docs/platforms/react-native.mdx` — note that the paywall renders natively
 
@@ -1042,6 +1043,17 @@ In `packages/shared/src/paywall/render-fixtures.json`, edit the `_comment` field
 
 Change nothing else in that file — the vectors themselves still bind the three remaining renderers.
 
+- [ ] **Step 3b: Drop the test stubs the deleted renderer needed**
+
+`packages/sdk-rn/src/__tests__/_stubReactNative.ts` exports host-component stand-ins
+(`View`, `Text`, `Pressable`, `Image`) that exist only because the deleted renderer's tests
+rendered a real component tree. Remove the ones nothing imports any more.
+
+Do NOT remove `StyleSheet` — the surviving wrapper uses it — and do not remove `Platform`,
+`AppState` or the event-subscription types, which other suites depend on. Decide by running
+the suite after each removal rather than by reading: this file is aliased for every
+`react-native` import in the package, so its consumers are not obvious from the file itself.
+
 - [ ] **Step 4: Run everything that touches the removal**
 
 ```bash
@@ -1054,7 +1066,9 @@ Expected: all green. The RN suite drops by the six deleted test files; the share
 
 - [ ] **Step 5: Bump and document**
 
-In `packages/sdk-rn/package.json`, bump the major version (removing three public exports is breaking).
+In `packages/sdk-rn/package.json`, bump **0.16.0 → 0.17.0**. Removing three public exports
+is breaking, and for a `0.x` package the minor is where breaking changes go — do NOT jump to
+`1.0.0`, which would signal a stability commitment this SDK has not made.
 
 In `apps/docs/content/docs/platforms/react-native.mdx`, add a short section stating that `RovenuePaywallView` renders through the platform's native paywall view, that its props are unchanged, and that `decodeBuilderConfig` / `BuilderConfigModel` / `BuilderNode` are no longer exported.
 
