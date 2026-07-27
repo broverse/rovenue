@@ -360,6 +360,29 @@ describe("newNode", () => {
     const node = newNode("text", () => `x${++calls}`);
     expect(node.id).toBe("x1");
   });
+
+  it("creates a featureList with one starter row", () => {
+    const node = newNode("featureList", idGen);
+    expect(node).toEqual({
+      type: "featureList",
+      id: node.id,
+      rows: [{ labelKey: `featureList_${node.id}_1` }],
+    });
+  });
+
+  it("creates a timeline with one starter row", () => {
+    const node = newNode("timeline", idGen);
+    expect(node).toEqual({
+      type: "timeline",
+      id: node.id,
+      rows: [{ labelKey: `timeline_${node.id}_1` }],
+    });
+  });
+
+  it("creates socialProof with a label key", () => {
+    const node = newNode("socialProof", idGen);
+    expect(node).toEqual({ type: "socialProof", id: node.id, labelKey: `socialProof_${node.id}` });
+  });
 });
 
 // =============================================================

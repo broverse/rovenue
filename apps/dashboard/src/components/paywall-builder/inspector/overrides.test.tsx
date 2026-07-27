@@ -9,10 +9,14 @@ import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { findNode } from "../tree-ops";
 import {
   ICON_NAMES,
+  SOCIAL_PROOF_MAX_RATING,
   emptyBuilderConfig,
   type BuilderConfig,
   type DividerNode,
+  type FeatureListNode,
   type IconNode,
+  type SocialProofNode,
+  type TimelineNode,
 } from "@rovenue/shared/paywall";
 
 // =============================================================
@@ -42,6 +46,26 @@ function fakeConfig(): BuilderConfig {
     name: "check",
     overrides: [{ when: { kind: "introEligible" }, props: { name: "star", color: { light: "#abcdef" } } }],
   } as IconNode);
+  config.root.children.push({
+    type: "featureList",
+    id: "fl1",
+    rows: [{ labelKey: "k_fl" }],
+    overrides: [{ when: { kind: "introEligible" }, props: { iconColor: { light: "#111111" } } }],
+  } as FeatureListNode);
+  config.root.children.push({
+    type: "timeline",
+    id: "tl1",
+    rows: [{ labelKey: "k_tl" }],
+    overrides: [{ when: { kind: "introEligible" }, props: { connectorColor: { light: "#222222" } } }],
+  } as TimelineNode);
+  config.root.children.push({
+    type: "socialProof",
+    id: "sp1",
+    labelKey: "k_sp",
+    overrides: [
+      { when: { kind: "introEligible" }, props: { rating: 4, starColor: { light: "#333333" } } },
+    ],
+  } as SocialProofNode);
   return config;
 }
 
@@ -139,5 +163,70 @@ describe("OverridesSection — icon override fields", () => {
     fireEvent.change(select, { target: { value: "check" } });
     const node = findNode(vm.config.root, "i1") as IconNode;
     expect(node.overrides?.[0]?.props.name).toBe("check");
+  });
+});
+
+// =============================================================
+// Wave B — featureList.iconColor / timeline.connectorColor /
+// socialProof.rating / socialProof.starColor. These are the four keys
+// Task 1 declared in OVERRIDABLE_PROP_KEYS for the row-carrying node
+// types; the same wave A defect (a declared override key with no
+// rendered field) applies to any of the four left unwired. Verified to
+// fail against the pre-fix switch (see task-3-report.md).
+// =============================================================
+
+describe("OverridesSection — featureList override fields", () => {
+  it("renders a real color input, not a silent no-op", async () => {
+    await renderHarness("fl1");
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+  });
+
+  it("writes an edited icon color back onto the override's props", async () => {
+    const { vm } = await renderHarness("fl1");
+    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(light!, { target: { value: "#123456" } });
+    const node = findNode(vm.config.root, "fl1") as FeatureListNode;
+    expect(node.overrides?.[0]?.props.iconColor).toEqual({ light: "#123456" });
+  });
+});
+
+describe("OverridesSection — timeline override fields", () => {
+  it("renders a real color input, not a silent no-op", async () => {
+    await renderHarness("tl1");
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+  });
+
+  it("writes an edited connector color back onto the override's props", async () => {
+    const { vm } = await renderHarness("tl1");
+    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(light!, { target: { value: "#234567" } });
+    const node = findNode(vm.config.root, "tl1") as TimelineNode;
+    expect(node.overrides?.[0]?.props.connectorColor).toEqual({ light: "#234567" });
+  });
+});
+
+describe("OverridesSection — socialProof override fields", () => {
+  it("renders a real rating number input and a color input, not a silent no-op", async () => {
+    const { container } = await renderHarness("sp1");
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    expect(numberInputs).toHaveLength(1);
+    expect((numberInputs[0] as HTMLInputElement).value).toBe("4");
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+  });
+
+  it("writes an edited rating back onto the override's props, clamped to the max", async () => {
+    const { vm, container } = await renderHarness("sp1");
+    const ratingInput = container.querySelector('input[type="number"]')!;
+    fireEvent.change(ratingInput, { target: { value: "9" } });
+    const node = findNode(vm.config.root, "sp1") as SocialProofNode;
+    expect(node.overrides?.[0]?.props.rating).toBe(SOCIAL_PROOF_MAX_RATING);
+  });
+
+  it("writes an edited star color back onto the override's props", async () => {
+    const { vm } = await renderHarness("sp1");
+    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(light!, { target: { value: "#abcdef" } });
+    const node = findNode(vm.config.root, "sp1") as SocialProofNode;
+    expect(node.overrides?.[0]?.props.starColor).toEqual({ light: "#abcdef" });
   });
 });

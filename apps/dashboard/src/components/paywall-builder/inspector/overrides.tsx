@@ -7,10 +7,13 @@ import type {
   PaywallNode,
   ThemeColor,
 } from "@rovenue/shared/paywall";
-import { ICON_NAMES, OVERRIDABLE_PROP_KEYS } from "@rovenue/shared/paywall";
+import { ICON_NAMES, OVERRIDABLE_PROP_KEYS, SOCIAL_PROOF_MAX_RATING } from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { AlignField, NumberField, SelectField, ThemeColorField } from "./fields";
 import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
+
+/** Ratings never go negative — same floor `content-tab.tsx`'s SocialProof field clamps to. */
+const SOCIAL_PROOF_MIN_RATING = 0;
 
 // =============================================================
 // Overrides (Phase D2) — conditional prop swaps. Available on every
@@ -35,7 +38,40 @@ const OVERRIDE_PROP_LABEL: Record<string, string> = {
   style: "Style",
   thickness: "Thickness",
   name: "Icon",
+  iconColor: "Icon color",
+  connectorColor: "Connector color",
+  rating: "Rating",
+  starColor: "Star color",
 };
+
+/**
+ * Every `${node.type}.${propKey}` combination `OVERRIDABLE_PROP_KEYS` declares.
+ * The schema's arrays are typed as plain `readonly string[]` (not literal
+ * tuples), so nothing forces this union to stay in sync automatically — but
+ * within THIS union, `OverridePropField`'s switch is exhaustive: dropping a
+ * case for a combo listed here fails to compile via the `never` check below,
+ * which is exactly the guard wave A's `default: return null` did not have.
+ */
+type OverridablePropCombo =
+  | "stack.spacing"
+  | "stack.align"
+  | "stack.background"
+  | "stack.cornerRadius"
+  | "text.key"
+  | "text.color"
+  | "text.align"
+  | "image.cornerRadius"
+  | "button.labelKey"
+  | "button.style"
+  | "purchaseButton.labelKey"
+  | "divider.color"
+  | "divider.thickness"
+  | "icon.name"
+  | "icon.color"
+  | "featureList.iconColor"
+  | "timeline.connectorColor"
+  | "socialProof.rating"
+  | "socialProof.starColor";
 
 export function OverridesSection({ node }: { node: PaywallNode }) {
   const vm = useService(PaywallBuilderViewModel);
@@ -148,8 +184,9 @@ function OverridePropField({
   onChange: (v: unknown) => void;
 }) {
   const label = OVERRIDE_PROP_LABEL[propKey] ?? propKey;
+  const combo = `${node.type}.${propKey}` as OverridablePropCombo;
 
-  switch (`${node.type}.${propKey}`) {
+  switch (combo) {
     case "stack.spacing":
     case "stack.cornerRadius":
     case "image.cornerRadius":
@@ -158,6 +195,18 @@ function OverridePropField({
           label={label}
           value={typeof value === "number" ? value : undefined}
           onChange={(v) => onChange(v)}
+        />
+      );
+    case "socialProof.rating":
+      return (
+        <NumberField
+          label={label}
+          value={typeof value === "number" ? value : undefined}
+          onChange={(v) =>
+            onChange(
+              v === undefined ? undefined : Math.min(SOCIAL_PROOF_MAX_RATING, Math.max(SOCIAL_PROOF_MIN_RATING, v)),
+            )
+          }
         />
       );
     case "stack.align":
@@ -172,6 +221,9 @@ function OverridePropField({
     case "text.color":
     case "divider.color":
     case "icon.color":
+    case "featureList.iconColor":
+    case "timeline.connectorColor":
+    case "socialProof.starColor":
       return (
         <ThemeColorField
           label={label}
@@ -221,8 +273,10 @@ function OverridePropField({
           ]}
         />
       );
-    default:
-      return null;
+    default: {
+      const exhaustive: never = combo;
+      return exhaustive;
+    }
   }
 }
 

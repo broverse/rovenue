@@ -43,7 +43,7 @@ describe("nodeLocKey", () => {
 });
 
 describe("NODE_TYPES", () => {
-  it("lists exactly the 9 node types the add-node popover offers", () => {
+  it("lists exactly the 12 node types the add-node popover offers", () => {
     expect(NODE_TYPES).toEqual([
       "stack",
       "text",
@@ -54,6 +54,9 @@ describe("NODE_TYPES", () => {
       "spacer",
       "divider",
       "icon",
+      "featureList",
+      "timeline",
+      "socialProof",
     ]);
   });
 

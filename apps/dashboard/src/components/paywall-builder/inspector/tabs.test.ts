@@ -53,6 +53,16 @@ describe("tabsForNode", () => {
     expect(tabsForNode("purchaseButton").map((t) => t.id)).toEqual(["content", "visibility"]);
     expect(tabsForNode("packageList").map((t) => t.id)).toEqual(["layout", "binding", "visibility"]);
   });
+
+  it("gives featureList, timeline and socialProof the style, content and visibility tabs", () => {
+    for (const type of ["featureList", "timeline", "socialProof"] as const) {
+      expect(tabsForNode(type).map((t) => t.id), `${type} tabs`).toEqual([
+        "style",
+        "content",
+        "visibility",
+      ]);
+    }
+  });
 });
 
 describe("tabIssues", () => {

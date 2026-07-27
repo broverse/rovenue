@@ -233,6 +233,12 @@ export function newNode(type: PaywallNode["type"], idGen: () => string): Paywall
       return { type: "divider", id, thickness: DIVIDER_DEFAULT_THICKNESS, inset: DIVIDER_DEFAULT_INSET };
     case "icon":
       return { type: "icon", id, name: DEFAULT_ICON_NAME, size: ICON_DEFAULT_SIZE };
+    case "featureList":
+      return { type: "featureList", id, rows: [{ labelKey: `featureList_${id}_1` }] };
+    case "timeline":
+      return { type: "timeline", id, rows: [{ labelKey: `timeline_${id}_1` }] };
+    case "socialProof":
+      return { type: "socialProof", id, labelKey: `socialProof_${id}` };
     default: {
       const exhaustive: never = type;
       throw new Error(`Unknown node type: ${String(exhaustive)}`);

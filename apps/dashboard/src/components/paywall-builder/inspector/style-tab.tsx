@@ -3,11 +3,14 @@ import { useTranslation } from "react-i18next";
 import type {
   ButtonNode,
   DividerNode,
+  FeatureListNode,
   IconNode,
   ImageNode,
   PaywallNode,
+  SocialProofNode,
   StackNode,
   TextNode,
+  TimelineNode,
 } from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { AlignField, NumberField, ThemeColorField } from "./fields";
@@ -32,6 +35,12 @@ export const StyleTab = component(({ node }: { node: PaywallNode }) => {
       return <DividerStyle node={node} />;
     case "icon":
       return <IconStyle node={node} />;
+    case "featureList":
+      return <FeatureListStyle node={node} />;
+    case "timeline":
+      return <TimelineStyle node={node} />;
+    case "socialProof":
+      return <SocialProofStyle node={node} />;
     default:
       return null;
   }
@@ -154,6 +163,54 @@ function IconStyle({ node }: { node: IconNode }) {
         label={t("paywalls.builder.properties.color", "Color")}
         value={node.color}
         onChange={(v) => set({ color: v })}
+      />
+    </Section>
+  );
+}
+
+function FeatureListStyle({ node }: { node: FeatureListNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<FeatureListNode>) => vm.updateNode<FeatureListNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.appearance", "Appearance")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.featureListIconColor", "Icon color")}
+        value={node.iconColor}
+        onChange={(v) => set({ iconColor: v })}
+      />
+    </Section>
+  );
+}
+
+function TimelineStyle({ node }: { node: TimelineNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<TimelineNode>) => vm.updateNode<TimelineNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.appearance", "Appearance")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.timelineConnectorColor", "Connector color")}
+        value={node.connectorColor}
+        onChange={(v) => set({ connectorColor: v })}
+      />
+    </Section>
+  );
+}
+
+function SocialProofStyle({ node }: { node: SocialProofNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<SocialProofNode>) => vm.updateNode<SocialProofNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.appearance", "Appearance")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.socialProofStarColor", "Star color")}
+        value={node.starColor}
+        onChange={(v) => set({ starColor: v })}
       />
     </Section>
   );

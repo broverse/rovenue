@@ -9,6 +9,9 @@ import {
   MoveVertical,
   Minus,
   Sparkles,
+  ListChecks,
+  GitCommitVertical,
+  Star,
   type LucideIcon,
 } from "lucide-react";
 
@@ -29,6 +32,9 @@ export const NODE_TYPES: ReadonlyArray<PaywallNode["type"]> = [
   "spacer",
   "divider",
   "icon",
+  "featureList",
+  "timeline",
+  "socialProof",
 ];
 
 export const NODE_ICON: Record<PaywallNode["type"], LucideIcon> = {
@@ -41,6 +47,9 @@ export const NODE_ICON: Record<PaywallNode["type"], LucideIcon> = {
   spacer: MoveVertical,
   divider: Minus,
   icon: Sparkles,
+  featureList: ListChecks,
+  timeline: GitCommitVertical,
+  socialProof: Star,
 };
 
 /** English fallback label per node type — mirrored by the `paywalls.builder.nodeTypes.*` i18n keys. */
@@ -54,6 +63,9 @@ export const NODE_TYPE_LABEL: Record<PaywallNode["type"], string> = {
   spacer: "Spacer",
   divider: "Divider",
   icon: "Icon",
+  featureList: "Feature list",
+  timeline: "Timeline",
+  socialProof: "Social proof",
 };
 
 /**

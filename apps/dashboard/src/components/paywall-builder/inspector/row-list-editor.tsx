@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 
 // =============================================================
@@ -32,6 +33,7 @@ type RowListEditorProps<T> = {
 };
 
 export function RowListEditor<T>({ rows, onChange, newRow, addLabel, renderRow }: RowListEditorProps<T>) {
+  const { t } = useTranslation();
   const replace = (index: number, row: T) => onChange(rows.map((r, i) => (i === index ? row : r)));
 
   const move = (index: number, delta: number) => {
@@ -51,7 +53,7 @@ export function RowListEditor<T>({ rows, onChange, newRow, addLabel, renderRow }
           <div className="flex flex-shrink-0 items-center gap-0.5">
             <button
               type="button"
-              title={`Move up row ${index + 1}`}
+              title={t("paywalls.builder.rowList.moveUp", "Move up row {{index}}", { index: index + 1 })}
               disabled={index === 0}
               onClick={() => move(index, -1)}
               className={ICON_BUTTON_CLASS}
@@ -60,7 +62,7 @@ export function RowListEditor<T>({ rows, onChange, newRow, addLabel, renderRow }
             </button>
             <button
               type="button"
-              title={`Move down row ${index + 1}`}
+              title={t("paywalls.builder.rowList.moveDown", "Move down row {{index}}", { index: index + 1 })}
               disabled={index === rows.length - 1}
               onClick={() => move(index, 1)}
               className={ICON_BUTTON_CLASS}
@@ -69,7 +71,7 @@ export function RowListEditor<T>({ rows, onChange, newRow, addLabel, renderRow }
             </button>
             <button
               type="button"
-              title={`Remove row ${index + 1}`}
+              title={t("paywalls.builder.rowList.remove", "Remove row {{index}}", { index: index + 1 })}
               onClick={() => remove(index)}
               className={REMOVE_BUTTON_CLASS}
             >

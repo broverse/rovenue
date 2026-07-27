@@ -1303,7 +1303,10 @@
         "purchaseButton": "Purchase button",
         "spacer": "Spacer",
         "divider": "Divider",
-        "icon": "Icon"
+        "icon": "Icon",
+        "featureList": "Feature list",
+        "timeline": "Timeline",
+        "socialProof": "Social proof"
       },
       "addNode": {
         "title": "Add node"
@@ -1318,6 +1321,11 @@
         "delete": "Delete",
         "cellTemplate": "Cell template",
         "cellTemplateRemove": "Remove cell template"
+      },
+      "rowList": {
+        "moveUp": "Move up row {{index}}",
+        "moveDown": "Move down row {{index}}",
+        "remove": "Remove row {{index}}"
       },
       "canvas": {
         "zoomOut": "Zoom out",
@@ -1427,7 +1435,18 @@
         "visibilityMinVersion": "Min app version",
         "visibilityMaxVersion": "Max app version",
         "visibilityHint": "Leave everything unset to show this node on every platform and version.",
-        "visibilityAudienceHint": "Audience/segment targeting is not set here — it lives on the placement's audience rows."
+        "visibilityAudienceHint": "Audience/segment targeting is not set here — it lives on the placement's audience rows.",
+        "locKeyLabel": "Key",
+        "locKeyPlaceholder": "e.g. feature_1",
+        "iconDefault": "Default",
+        "featureListAddRow": "Add row",
+        "featureRowIncluded": "Included",
+        "featureListIconColor": "Icon color",
+        "timelineAddRow": "Add row",
+        "timelineCaptionKey": "Caption key (optional)",
+        "timelineConnectorColor": "Connector color",
+        "socialProofRating": "Rating",
+        "socialProofStarColor": "Star color"
       },
       "topbar": {
         "close": "Close builder",
