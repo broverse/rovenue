@@ -1107,3 +1107,120 @@ describe("UNKNOWN_ICON_NAME", () => {
     expect(issue?.nodeId).toBe("cell_icon");
   });
 });
+
+describe("FEATURE_LIST_TOO_LONG and EMPTY_ROWS", () => {
+  function withFeatureList(rowCount: number) {
+    const rows = Array.from({ length: rowCount }, (_, i) => ({ labelKey: `f_${i}` }));
+    return baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "featureList", id: "fl", rows }],
+      },
+    });
+  }
+
+  it("warns when a featureList has more than FEATURE_LIST_SOFT_MAX rows, without blocking save or publish", () => {
+    const issues = validateBuilderConfig(withFeatureList(7), { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "FEATURE_LIST_TOO_LONG");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("fl");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("does not warn at exactly FEATURE_LIST_SOFT_MAX rows", () => {
+    const issues = validateBuilderConfig(withFeatureList(6), { offeringPackageIds });
+    expect(issues.some((i) => i.code === "FEATURE_LIST_TOO_LONG")).toBe(false);
+  });
+
+  it("warns when a featureList has no rows, without blocking save or publish", () => {
+    const issues = validateBuilderConfig(withFeatureList(0), { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "EMPTY_ROWS");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("fl");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("warns when a timeline has no rows, without blocking save or publish", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "timeline", id: "tl", rows: [] }],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "EMPTY_ROWS");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("tl");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("says nothing for a non-empty featureList within the soft max", () => {
+    const issues = validateBuilderConfig(withFeatureList(3), { offeringPackageIds });
+    expect(issues.some((i) => i.code === "EMPTY_ROWS" || i.code === "FEATURE_LIST_TOO_LONG")).toBe(false);
+  });
+});
+
+describe("LOCALIZED_KEYS for wave B row-carrying node types", () => {
+  it("collects every featureList row's labelKey", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "featureList",
+            id: "fl",
+            rows: [{ labelKey: "f_a" }, { labelKey: "f_b" }],
+          },
+        ],
+      },
+    });
+    const usages = collectLocalizationUsages(config.root);
+    expect(usages.map((u) => u.key)).toEqual(expect.arrayContaining(["f_a", "f_b"]));
+  });
+
+  it("collects a timeline row's labelKey and, when present, its captionKey", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "timeline",
+            id: "tl",
+            rows: [
+              { labelKey: "t_a", captionKey: "t_a_cap" },
+              { labelKey: "t_b" },
+            ],
+          },
+        ],
+      },
+    });
+    const usages = collectLocalizationUsages(config.root);
+    expect(usages.map((u) => u.key)).toEqual(
+      expect.arrayContaining(["t_a", "t_a_cap", "t_b"]),
+    );
+  });
+
+  it("collects a socialProof's labelKey", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "socialProof", id: "sp", labelKey: "sp_key" }],
+      },
+    });
+    const usages = collectLocalizationUsages(config.root);
+    expect(usages.map((u) => u.key)).toEqual(expect.arrayContaining(["sp_key"]));
+  });
+});

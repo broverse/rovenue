@@ -545,3 +545,63 @@ describe("divider and icon node types", () => {
     expect(OVERRIDABLE_PROP_KEYS.icon).toEqual(["name", "color"]);
   });
 });
+
+describe("wave B row-carrying node types", () => {
+  const wrap = (node: unknown) => ({
+    formatVersion: 2,
+    defaultLocale: "en",
+    localizations: { en: {} },
+    root: { type: "stack", id: "root", axis: "v", children: [node] },
+  });
+
+  it("accepts a featureList with rows", () => {
+    const r = builderConfigSchema.safeParse(
+      wrap({
+        type: "featureList",
+        id: "f1",
+        rows: [{ labelKey: "f_a" }, { labelKey: "f_b", included: false }, { labelKey: "f_c", icon: "star" }],
+      }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a timeline with captions", () => {
+    const r = builderConfigSchema.safeParse(
+      wrap({
+        type: "timeline",
+        id: "t1",
+        rows: [{ labelKey: "t_a", captionKey: "t_a_cap" }, { labelKey: "t_b", icon: "gift" }],
+      }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts socialProof with and without a rating", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "socialProof", id: "s1", labelKey: "s" })).success).toBe(true);
+    expect(
+      builderConfigSchema.safeParse(wrap({ type: "socialProof", id: "s1", labelKey: "s", rating: 4.5 })).success,
+    ).toBe(true);
+  });
+
+  it("rejects a row with no labelKey", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "featureList", id: "f1", rows: [{}] })).success).toBe(false);
+  });
+
+  // Empty rows parse — an unfinished node must still SAVE. It is a warning,
+  // not a schema error; see the EMPTY_ROWS test below.
+  it("accepts an empty rows array", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "featureList", id: "f1", rows: [] })).success).toBe(true);
+  });
+
+  it("rejects a rating outside the scale", () => {
+    expect(
+      builderConfigSchema.safeParse(wrap({ type: "socialProof", id: "s1", labelKey: "s", rating: 6 })).success,
+    ).toBe(false);
+  });
+
+  it("gives all three an OVERRIDABLE_PROP_KEYS row", () => {
+    expect(OVERRIDABLE_PROP_KEYS.featureList).toEqual(["iconColor"]);
+    expect(OVERRIDABLE_PROP_KEYS.timeline).toEqual(["connectorColor"]);
+    expect(OVERRIDABLE_PROP_KEYS.socialProof).toEqual(["rating", "starColor"]);
+  });
+});

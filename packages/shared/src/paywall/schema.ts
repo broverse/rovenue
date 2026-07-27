@@ -166,6 +166,69 @@ export type IconNode = {
   visibility?: NodeVisibility;
 };
 
+/** A feature row with no icon, when it is included. */
+export const FEATURE_ROW_DEFAULT_ICON = "check";
+/** A feature row with no icon, when `included` is false. */
+export const FEATURE_ROW_EXCLUDED_ICON = "x";
+export const FEATURE_ROW_DEFAULT_INCLUDED = true;
+/** Beyond this many rows a feature list stops converting well — a warning,
+ *  never a block. */
+export const FEATURE_LIST_SOFT_MAX = 6;
+export const TIMELINE_ROW_DEFAULT_ICON = "clock";
+/** The connector between timeline steps is the same hairline as a divider. */
+export const TIMELINE_CONNECTOR_DEFAULT_COLOR = DIVIDER_DEFAULT_COLOR;
+export const SOCIAL_PROOF_STAR_DEFAULT_COLOR = { light: "#F59E0B", dark: "#FBBF24" } as const;
+export const SOCIAL_PROOF_MAX_RATING = 5;
+
+export type FeatureRow = {
+  labelKey: string;
+  /** Registry icon name; unknown names fail open like any icon. */
+  icon?: string;
+  /** Defaults to FEATURE_ROW_DEFAULT_INCLUDED. */
+  included?: boolean;
+};
+
+export type FeatureListNode = {
+  type: "featureList";
+  id: string;
+  rows: FeatureRow[];
+  /** Applied to each row's icon that does not carry its own. Absent = inherit. */
+  iconColor?: ThemeColor;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
+export type TimelineRow = {
+  labelKey: string;
+  captionKey?: string;
+  icon?: string;
+};
+
+export type TimelineNode = {
+  type: "timeline";
+  id: string;
+  rows: TimelineRow[];
+  /** Absent = TIMELINE_CONNECTOR_DEFAULT_COLOR. */
+  connectorColor?: ThemeColor;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
+export type SocialProofNode = {
+  type: "socialProof";
+  id: string;
+  /** 0…SOCIAL_PROOF_MAX_RATING. Absent renders no stars at all. */
+  rating?: number;
+  labelKey: string;
+  /** Absent = SOCIAL_PROOF_STAR_DEFAULT_COLOR. */
+  starColor?: ThemeColor;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
 export type PaywallNode =
   | StackNode
   | TextNode
@@ -175,7 +238,10 @@ export type PaywallNode =
   | PurchaseButtonNode
   | SpacerNode
   | DividerNode
-  | IconNode;
+  | IconNode
+  | FeatureListNode
+  | TimelineNode
+  | SocialProofNode;
 
 /**
  * Per node-type whitelist of override-able prop keys — the node's own
@@ -193,6 +259,9 @@ export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[
   spacer: [],
   divider: ["color", "thickness"],
   icon: ["name", "color"],
+  featureList: ["iconColor"],
+  timeline: ["connectorColor"],
+  socialProof: ["rating", "starColor"],
 };
 
 export type BuilderConfig = {
@@ -388,6 +457,49 @@ const iconNodeSchema: z.ZodType<IconNode> = z.object({
   visibility: nodeVisibilitySchema.optional(),
 });
 
+const featureRowSchema: z.ZodType<FeatureRow> = z.object({
+  labelKey: z.string().min(1),
+  icon: z.string().min(1).optional(),
+  included: z.boolean().optional(),
+});
+
+const featureListNodeSchema: z.ZodType<FeatureListNode> = z.object({
+  type: z.literal("featureList"),
+  id: z.string().min(1),
+  rows: z.array(featureRowSchema),
+  iconColor: themeColorSchema.optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.featureList).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
+const timelineRowSchema: z.ZodType<TimelineRow> = z.object({
+  labelKey: z.string().min(1),
+  captionKey: z.string().min(1).optional(),
+  icon: z.string().min(1).optional(),
+});
+
+const timelineNodeSchema: z.ZodType<TimelineNode> = z.object({
+  type: z.literal("timeline"),
+  id: z.string().min(1),
+  rows: z.array(timelineRowSchema),
+  connectorColor: themeColorSchema.optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.timeline).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
+const socialProofNodeSchema: z.ZodType<SocialProofNode> = z.object({
+  type: z.literal("socialProof"),
+  id: z.string().min(1),
+  rating: z.number().min(0).max(SOCIAL_PROOF_MAX_RATING).optional(),
+  labelKey: z.string().min(1),
+  starColor: themeColorSchema.optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.socialProof).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
 const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   stackNodeSchema,
   textNodeSchema,
@@ -398,6 +510,9 @@ const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   spacerNodeSchema,
   dividerNodeSchema,
   iconNodeSchema,
+  featureListNodeSchema,
+  timelineNodeSchema,
+  socialProofNodeSchema,
 ]);
 paywallNodeSchemaRef = paywallNodeSchema;
 

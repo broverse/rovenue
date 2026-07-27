@@ -1,5 +1,6 @@
 import { isKnownIconName } from "./icon-registry";
 import {
+  FEATURE_LIST_SOFT_MAX,
   OVERRIDABLE_PROP_KEYS,
   type BuilderConfig,
   type PaywallNode,
@@ -62,10 +63,15 @@ export const LOCALIZED_KEYS: LocalizedKeyFns = {
   spacer: () => [],
   divider: () => [],
   icon: () => [],
+  featureList: (n) => n.rows.map((r) => r.labelKey),
+  timeline: (n) => n.rows.flatMap((r) => (r.captionKey ? [r.labelKey, r.captionKey] : [r.labelKey])),
+  socialProof: (n) => [n.labelKey],
 };
 
 /**
- * Every localization key this node contributes, in declaration order.
+ * Every localization key this node contributes, in whatever order its
+ * `LOCALIZED_KEYS` row returns them (declaration order for a single-field
+ * node; row order, then label-before-caption, for featureList/timeline).
  *
  * The cast is the one deliberate escape hatch `LocalizedKeyFns` leaves open:
  * indexing `LOCALIZED_KEYS` by a *variable* `node.type` (rather than a
@@ -105,7 +111,13 @@ export type BuilderIssue = {
     // An icon node whose `name` is not in icon-registry.json. Renders nothing
     // on every platform (fail open by design — see IconNode), so this is a
     // typo warning, not a broken config.
-    | "UNKNOWN_ICON_NAME";
+    | "UNKNOWN_ICON_NAME"
+    // Wave B — a featureList with more rows than FEATURE_LIST_SOFT_MAX.
+    // Authoring guidance from conversion research, not a broken config.
+    | "FEATURE_LIST_TOO_LONG"
+    // Wave B — a featureList/timeline with no rows. An unfinished node, but
+    // it must still save.
+    | "EMPTY_ROWS";
   nodeId?: string;
   locale?: string;
   key?: string;
@@ -149,6 +161,10 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   // A typo to surface, not a broken config — it renders nothing and the
   // renderers fail open, so it must block neither save nor publish.
   UNKNOWN_ICON_NAME: "warning",
+  // Authoring guidance from the conversion research, not a broken config.
+  FEATURE_LIST_TOO_LONG: "warning",
+  // An unfinished node, almost never an intent — but it must still save.
+  EMPTY_ROWS: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
   // MUST still persist. Four of these are reachable from the builder UI in
@@ -300,10 +316,10 @@ export function collectLocalizationUsages(root: StackNode): LocalizationUsage[] 
 }
 
 /**
- * Every localization key referenced by a text/button/purchaseButton node
- * anywhere in the tree (including inside `fallback` and `cellTemplate`
- * subtrees), PLUS any `key`/`labelKey` introduced by an override, deduped
- * in first-seen order.
+ * Every localization key any node contributes per `LOCALIZED_KEYS`, anywhere
+ * in the tree (including inside `fallback` and `cellTemplate` subtrees),
+ * PLUS any `key`/`labelKey` introduced by an override, deduped in
+ * first-seen order.
  */
 export function collectLocalizationKeys(root: StackNode): string[] {
   const seen = new Set<string>();
@@ -390,6 +406,24 @@ export function validateBuilderConfig(
         code: "UNKNOWN_ICON_NAME",
         nodeId: node.id,
         message: `Icon "${node.name}" (node "${node.id}") is not in the icon registry — it will render nothing.`,
+      });
+    }
+  }
+
+  // FEATURE_LIST_TOO_LONG / EMPTY_ROWS — wave B's row-carrying node types.
+  for (const node of allNodes) {
+    if (node.type === "featureList" && node.rows.length > FEATURE_LIST_SOFT_MAX) {
+      issues.push({
+        code: "FEATURE_LIST_TOO_LONG",
+        nodeId: node.id,
+        message: `Feature list "${node.id}" has ${node.rows.length} rows; ${FEATURE_LIST_SOFT_MAX} or fewer converts better.`,
+      });
+    }
+    if ((node.type === "featureList" || node.type === "timeline") && node.rows.length === 0) {
+      issues.push({
+        code: "EMPTY_ROWS",
+        nodeId: node.id,
+        message: `"${node.id}" has no rows and will render nothing.`,
       });
     }
   }
