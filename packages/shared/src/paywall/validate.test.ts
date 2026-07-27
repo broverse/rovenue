@@ -1286,3 +1286,65 @@ describe("LOCALIZED_KEYS for wave B row-carrying node types", () => {
     expect(usages.map((u) => u.key)).toEqual(expect.arrayContaining(["sp_key"]));
   });
 });
+
+describe("LOCALIZED_KEYS for purchaseButton.trialLabelKey", () => {
+  it("reports UNKNOWN_LOC_KEY for a trialLabelKey missing from defaultLocale", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "purchaseButton",
+            id: "purchase",
+            labelKey: "cta_key",
+            trialLabelKey: "cta.trial",
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const gap = issues.find((i) => i.code === "UNKNOWN_LOC_KEY" && i.key === "cta.trial");
+    expect(gap).toMatchObject({ code: "UNKNOWN_LOC_KEY", nodeId: "purchase", key: "cta.trial" });
+  });
+
+  it("reports EMPTY_LOC_VALUE for a trialLabelKey present but blank in defaultLocale", () => {
+    const config = baseConfig({
+      localizations: {
+        en: { title_key: "Go Pro", cta_key: "Continue", "cta.trial": "" },
+        tr: { title_key: "Pro Ol", cta_key: "Devam" },
+      },
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "purchaseButton",
+            id: "purchase",
+            labelKey: "cta_key",
+            trialLabelKey: "cta.trial",
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const gap = issues.find((i) => i.code === "EMPTY_LOC_VALUE" && i.key === "cta.trial");
+    expect(gap).toMatchObject({ code: "EMPTY_LOC_VALUE", nodeId: "purchase", key: "cta.trial" });
+  });
+
+  it("emits neither UNKNOWN_LOC_KEY nor EMPTY_LOC_VALUE for cta.trial when trialLabelKey is absent", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "purchaseButton", id: "purchase", labelKey: "cta_key" }],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.some((i) => i.key === "cta.trial")).toBe(false);
+    expect(issues).toEqual([]);
+  });
+});

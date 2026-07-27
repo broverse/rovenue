@@ -111,6 +111,10 @@ export type PurchaseButtonNode = {
   type: "purchaseButton";
   id: string;
   labelKey: string;
+  /** Shown instead of `labelKey` when the selected package's trial/intro
+   *  period is active (see `resolveCtaLabelKey` in variables.ts). Absent =
+   *  always `labelKey`. */
+  trialLabelKey?: string;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
   /** Which platforms / app versions this node renders on. Absent = everywhere. */
@@ -255,7 +259,7 @@ export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[
   image: ["cornerRadius"],
   button: ["labelKey", "style"],
   packageList: [],
-  purchaseButton: ["labelKey"],
+  purchaseButton: ["labelKey", "trialLabelKey"],
   spacer: [],
   divider: ["color", "thickness"],
   icon: ["name", "color"],
@@ -421,6 +425,7 @@ const purchaseButtonNodeSchema: z.ZodType<PurchaseButtonNode> = z.object({
   type: z.literal("purchaseButton"),
   id: z.string().min(1),
   labelKey: z.string(),
+  trialLabelKey: z.string().min(1).optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.purchaseButton).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
   visibility: nodeVisibilitySchema.optional(),

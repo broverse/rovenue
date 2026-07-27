@@ -59,3 +59,21 @@ export function resolveVariables(text: string, pkg: PackageView | null): string 
     return value !== undefined ? value : match;
   });
 }
+
+/**
+ * Which localization key a `purchaseButton` renders: `trialLabelKey` when
+ * the node has one AND the selected package is in a trial/intro period
+ * (`selected.introPeriod` a non-empty string, mirroring `PackageView`'s own
+ * field); `labelKey` otherwise — including no selection at all (`selected`
+ * is `null`), which is never a trial. `selected` is typed structurally
+ * (only the one field this needs) rather than as `PackageView` so callers
+ * that only have a selection summary, not a full `PackageView`, don't need
+ * to fabricate the rest of the shape.
+ */
+export function resolveCtaLabelKey(
+  node: { labelKey: string; trialLabelKey?: string },
+  selected: { introPeriod?: string } | null,
+): string {
+  const hasIntroPeriod = typeof selected?.introPeriod === "string" && selected.introPeriod !== "";
+  return node.trialLabelKey && hasIntroPeriod ? node.trialLabelKey : node.labelKey;
+}

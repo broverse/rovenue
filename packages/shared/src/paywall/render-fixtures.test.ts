@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { builderConfigSchema, OVERRIDABLE_PROP_KEYS } from "./schema";
 import { resolveText } from "./validate";
 import { isNodeVisible, type NodeVisibility, type VisibilityPlatform } from "./visibility";
-import { resolveVariables, type PackageView } from "./variables";
+import { resolveCtaLabelKey, resolveVariables, type PackageView } from "./variables";
 import type { BuilderConfig, PaywallNode } from "./schema";
 
 // =============================================================
@@ -57,6 +57,18 @@ interface Fixture {
   // Generated from those exports, not retyped — see the generation note
   // near the bottom of this file.
   defaults: Record<string, unknown>;
+  // Task 9 — which loc key a purchaseButton renders (`resolveCtaLabelKey`),
+  // consumed by Tasks 10-12's native/RN CTA rendering.
+  trialLabel: {
+    _comment: string;
+    cases: Array<{
+      name: string;
+      trialLabelKey?: string;
+      labelKey: string;
+      selectedHasIntroPeriod: boolean | null;
+      expectedKey: string;
+    }>;
+  };
 }
 
 const fixture: Fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
@@ -110,6 +122,32 @@ describe("render-fixtures contract", () => {
     for (const v of fixture.resolveText) {
       it(`${v.locale}/${v.key} → ${JSON.stringify(v.expected)}`, () => {
         expect(resolveText(config, v.locale, v.key)).toBe(v.expected);
+      });
+    }
+  });
+
+  // Task 9 — `resolveCtaLabelKey`: which loc key a purchaseButton renders,
+  // given its own labelKey/trialLabelKey and the current selection's
+  // introPeriod. `selectedHasIntroPeriod` is the fixture's boolean/null
+  // shorthand for a `PackageView`-shaped selection: `true` -> a selected
+  // package mid-trial (`introPeriod` set), `false` -> a selected package
+  // with no trial (`introPeriod` absent), `null` -> no selection at all.
+  describe("trialLabel vectors", () => {
+    function toSelected(
+      selectedHasIntroPeriod: boolean | null,
+    ): { introPeriod?: string } | null {
+      if (selectedHasIntroPeriod === null) return null;
+      return selectedHasIntroPeriod ? { introPeriod: "1 week" } : {};
+    }
+
+    for (const c of fixture.trialLabel.cases) {
+      it(c.name, () => {
+        expect(
+          resolveCtaLabelKey(
+            { labelKey: c.labelKey, trialLabelKey: c.trialLabelKey },
+            toSelected(c.selectedHasIntroPeriod),
+          ),
+        ).toBe(c.expectedKey);
       });
     }
   });

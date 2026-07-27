@@ -890,6 +890,32 @@
           ]
         }
       }
+    },
+    {
+      "name": "purchaseButton with trialLabelKey (both keys present in default locale)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "cta.buy": "Continue",
+            "cta.trial": "Start free trial"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "purchaseButton",
+              "id": "pb_trial",
+              "labelKey": "cta.buy",
+              "trialLabelKey": "cta.trial"
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [
@@ -1676,5 +1702,37 @@
       "dark": "#FBBF24"
     },
     "SOCIAL_PROOF_MAX_RATING": 5
+  },
+  "trialLabel": {
+    "_comment": "expectedKey = which loc key the CTA renders. selectedHasIntroPeriod mirrors PackageView.introPeriod non-empty.",
+    "cases": [
+      {
+        "name": "trial selected uses trialLabelKey",
+        "trialLabelKey": "cta.trial",
+        "labelKey": "cta.buy",
+        "selectedHasIntroPeriod": true,
+        "expectedKey": "cta.trial"
+      },
+      {
+        "name": "no trial falls back to labelKey",
+        "trialLabelKey": "cta.trial",
+        "labelKey": "cta.buy",
+        "selectedHasIntroPeriod": false,
+        "expectedKey": "cta.buy"
+      },
+      {
+        "name": "absent trialLabelKey always labelKey",
+        "labelKey": "cta.buy",
+        "selectedHasIntroPeriod": true,
+        "expectedKey": "cta.buy"
+      },
+      {
+        "name": "no selection is not a trial",
+        "trialLabelKey": "cta.trial",
+        "labelKey": "cta.buy",
+        "selectedHasIntroPeriod": null,
+        "expectedKey": "cta.buy"
+      }
+    ]
   }
 }
