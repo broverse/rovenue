@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { BuilderIssue } from "@rovenue/shared/paywall";
+import type { BuilderIssue, PaywallNode } from "@rovenue/shared/paywall";
+import { NODE_TYPE_LABEL } from "../node-meta";
 import {
   INSPECTOR_TABS,
   resolveActiveTab,
@@ -20,8 +21,23 @@ void NOT_A_TAB;
 
 describe("tabsForNode", () => {
   it("gives every node type at least one tab", () => {
-    for (const type of ["stack", "text", "image", "button", "packageList", "purchaseButton", "spacer"] as const) {
-      expect(tabsForNode(type).length).toBeGreaterThan(0);
+    // NODE_TYPE_LABEL is a Record<PaywallNode["type"], string> — TS requires
+    // every union member as a key, so this iterates the type union itself
+    // rather than a hand-written list. A node type added to the schema
+    // without a matching appliesTo entry anywhere fails this loudly instead
+    // of silently leaving that node with no inspector at all (the bug this
+    // test exists to catch: divider/icon shipped with an empty appliesTo
+    // everywhere and had zero reachable tabs).
+    for (const type of Object.keys(NODE_TYPE_LABEL) as PaywallNode["type"][]) {
+      expect(tabsForNode(type).length, `no tabs for ${type}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("gives divider and icon both the content and visibility tabs", () => {
+    for (const type of ["divider", "icon"] as const) {
+      const ids = tabsForNode(type).map((t) => t.id);
+      expect(ids, `${type} tabs`).toContain("content");
+      expect(ids, `${type} tabs`).toContain("visibility");
     }
   });
 

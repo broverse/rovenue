@@ -60,7 +60,14 @@ export const INSPECTOR_TABS = [
   {
     id: "content",
     fallbackLabel: "Content",
-    appliesTo: new Set<PaywallNode["type"]>(["text", "image", "button", "purchaseButton"]),
+    appliesTo: new Set<PaywallNode["type"]>([
+      "text",
+      "image",
+      "button",
+      "purchaseButton",
+      "divider",
+      "icon",
+    ]),
     issueCodes: new Set<BuilderIssue["code"]>(["UNKNOWN_LOC_KEY", "EMPTY_LOC_VALUE"]),
   },
   {
@@ -80,6 +87,8 @@ export const INSPECTOR_TABS = [
       "packageList",
       "purchaseButton",
       "spacer",
+      "divider",
+      "icon",
     ]),
     issueCodes: new Set<BuilderIssue["code"]>(["VISIBILITY_NEVER_MATCHES", "VISIBILITY_BOUND_UNPARSEABLE"]),
   },
