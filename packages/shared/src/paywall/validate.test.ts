@@ -1077,4 +1077,33 @@ describe("UNKNOWN_ICON_NAME", () => {
     const issues = validateBuilderConfig(withIcon("check"), { offeringPackageIds });
     expect(issues.some((i) => i.code === "UNKNOWN_ICON_NAME")).toBe(false);
   });
+
+  it("still catches an unknown icon name nested inside a packageList.cellTemplate subtree", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "packageList",
+            id: "outer",
+            packageIds: ["pkg_monthly"],
+            cellLayout: "row",
+            cellTemplate: {
+              type: "stack",
+              id: "cell_root",
+              axis: "v",
+              children: [{ type: "icon", id: "cell_icon", name: "not-a-real-icon" }],
+            },
+          },
+          { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "UNKNOWN_ICON_NAME");
+    expect(issue).toBeDefined();
+    expect(issue?.nodeId).toBe("cell_icon");
+  });
 });

@@ -1,5 +1,13 @@
 import { isKnownIconName } from "./icon-registry";
-import { OVERRIDABLE_PROP_KEYS, type BuilderConfig, type PaywallNode, type StackNode } from "./schema";
+import {
+  OVERRIDABLE_PROP_KEYS,
+  type BuilderConfig,
+  type ButtonNode,
+  type PaywallNode,
+  type PurchaseButtonNode,
+  type StackNode,
+  type TextNode,
+} from "./schema";
 import { compareVersions } from "./visibility";
 
 // =============================================================
@@ -22,6 +30,32 @@ import { compareVersions } from "./visibility";
  */
 function hasOwnKey(table: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(table, key);
+}
+
+/**
+ * Which localization keys each node type contributes. Same shape as
+ * OVERRIDABLE_PROP_KEYS and exhaustive by construction, so a new node type
+ * cannot be added without deciding this.
+ *
+ * A function rather than a list of property names because wave B's
+ * featureList/socialProof/timeline carry arrays of localized rows, which a
+ * flat name list cannot express.
+ */
+export const LOCALIZED_KEYS: Record<PaywallNode["type"], (node: PaywallNode) => string[]> = {
+  stack: () => [],
+  text: (n) => [(n as TextNode).key],
+  image: () => [],
+  button: (n) => [(n as ButtonNode).labelKey],
+  packageList: () => [],
+  purchaseButton: (n) => [(n as PurchaseButtonNode).labelKey],
+  spacer: () => [],
+  divider: () => [],
+  icon: () => [],
+};
+
+/** Every localization key this node contributes, in declaration order. */
+export function localizedKeysOf(node: PaywallNode): string[] {
+  return LOCALIZED_KEYS[node.type](node);
 }
 
 export type BuilderIssue = {
@@ -235,11 +269,8 @@ export interface LocalizationUsage {
 export function collectLocalizationUsages(root: StackNode): LocalizationUsage[] {
   const usages: LocalizationUsage[] = [];
   walkNodes(root, (node) => {
-    if (node.type === "text") {
-      usages.push({ key: node.key, nodeId: node.id, nodeType: node.type, viaOverride: false });
-    }
-    if (node.type === "button" || node.type === "purchaseButton") {
-      usages.push({ key: node.labelKey, nodeId: node.id, nodeType: node.type, viaOverride: false });
+    for (const key of localizedKeysOf(node)) {
+      usages.push({ key, nodeId: node.id, nodeType: node.type, viaOverride: false });
     }
     for (const key of overrideLocKeys(node)) {
       usages.push({ key, nodeId: node.id, nodeType: node.type, viaOverride: true });
@@ -349,8 +380,7 @@ export function validateBuilderConfig(
   // missing from defaultLocale.
   for (const node of allNodes) {
     const keysToCheck: string[] = [];
-    if (node.type === "text") keysToCheck.push(node.key);
-    if (node.type === "button" || node.type === "purchaseButton") keysToCheck.push(node.labelKey);
+    keysToCheck.push(...localizedKeysOf(node));
     keysToCheck.push(...overrideLocKeys(node));
 
     const checked = new Set<string>();
