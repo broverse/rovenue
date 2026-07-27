@@ -1725,6 +1725,39 @@ export interface DashboardOfferingRow {
   updatedAt: string;
 }
 
+// =============================================================
+// Resolved store prices — offering price resolver (P6 commerce binding)
+// =============================================================
+
+export type ResolvedStoreStatus = "ok" | "not_configured" | "no_mapping" | "error";
+
+export interface ResolvedStorePrice {
+  status: "ok";
+  amountMinor: number;
+  currency: string;
+  period: string | null;
+  trialDays: number | null;
+}
+
+export type ResolvedStoreEntry =
+  | ResolvedStorePrice
+  | { status: Exclude<ResolvedStoreStatus, "ok"> };
+
+export interface ResolvedPackageInfo {
+  packageIdentifier: string;
+  productId: string;
+  displayName: string;
+  /** products.metadata.period convention, the offline fallback. */
+  metadataPeriod: string | null;
+  stores: { apple?: ResolvedStoreEntry; google?: ResolvedStoreEntry; stripe?: ResolvedStoreEntry };
+}
+
+export interface OfferingResolvedPrices {
+  offeringId: string;
+  packages: ResolvedPackageInfo[];
+  fetchedAt: string;
+}
+
 export interface DashboardOfferingsListResponse {
   offerings: DashboardOfferingRow[];
 }
