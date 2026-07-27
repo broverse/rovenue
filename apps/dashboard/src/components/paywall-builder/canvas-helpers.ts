@@ -1,6 +1,12 @@
-import type { DashboardOfferingRow } from "@rovenue/shared";
+import type {
+  DashboardOfferingRow,
+  OfferingResolvedPrices,
+  ResolvedStoreEntry,
+  ResolvedStorePrice,
+} from "@rovenue/shared";
 import type { PackageView } from "@rovenue/shared/paywall";
 import type { RendererOffering } from "@rovenue/paywall-renderer";
+import { formatMinorAmount, periodNoun } from "./inspector/binding-prices";
 
 // =============================================================
 // Pure helpers for the paywall builder canvas: mapping a dashboard
@@ -61,6 +67,124 @@ export function placeholderPriceView(offering: RendererOffering | null): Record<
     };
   });
   return out;
+}
+
+/** ISO period → how many of it fit in a year; the basis for all derived per-period figures. */
+export const PER_YEAR_MULTIPLIER: Readonly<Record<string, number>> = {
+  P1D: 365,
+  P1W: 52,
+  P1M: 12,
+  P3M: 4,
+  P6M: 2,
+  P1Y: 1,
+};
+
+const MONTHS_PER_YEAR = 12;
+const WEEKS_PER_YEAR = 52;
+// Per-day derives from per-week / 7, matching PackageViewMapping.kt/.swift.
+const DAYS_PER_WEEK = 7;
+const PERCENT = 100;
+
+/**
+ * The canvas simulates a device, so it reads the device's own store first:
+ * an iOS frame shows the App Store price, an Android frame the Play price,
+ * with the other store and Stripe as fallbacks.
+ */
+const CANVAS_STORE_PREFERENCE: Readonly<
+  Record<"ios" | "android", ReadonlyArray<"apple" | "google" | "stripe">>
+> = {
+  ios: ["apple", "google", "stripe"],
+  android: ["google", "apple", "stripe"],
+};
+
+export type CanvasPriceCoverage = "none" | "partial" | "full";
+
+function pickStoreEntry(
+  stores: { apple?: ResolvedStoreEntry; google?: ResolvedStoreEntry; stripe?: ResolvedStoreEntry },
+  platform: "ios" | "android",
+): ResolvedStorePrice | null {
+  for (const store of CANVAS_STORE_PREFERENCE[platform]) {
+    const entry = stores[store];
+    if (entry && entry.status === "ok") return entry;
+  }
+  return null;
+}
+
+/**
+ * Real store prices for the canvas preview. Packages with a resolved
+ * ("ok") entry for the preferred store chain get a full `PackageView` —
+ * price, period noun, derived per-day/week/month/year figures and the
+ * cross-package relativeDiscount, all mirroring the SDK renderers'
+ * PackageViewMapping formulas so the canvas matches devices. Unresolved
+ * packages keep their `placeholderPriceView` preset (same cycle index).
+ */
+export function resolvedPriceView(
+  offering: RendererOffering | null,
+  resolved: OfferingResolvedPrices | undefined,
+  platform: "ios" | "android",
+): { view: Record<string, PackageView>; coverage: CanvasPriceCoverage } {
+  const view = placeholderPriceView(offering);
+  if (!offering || !resolved) return { view, coverage: "none" };
+
+  const infoById = new Map(resolved.packages.map((p) => [p.packageIdentifier, p]));
+
+  // First pass: per-year equivalents, the relativeDiscount comparison set.
+  const perYearMinorById = new Map<string, number>();
+  const pickedById = new Map<string, ResolvedStorePrice>();
+  for (const pkg of offering.packages) {
+    const info = infoById.get(pkg.packageIdentifier);
+    if (!info) continue;
+    const entry = pickStoreEntry(info.stores, platform);
+    if (!entry) continue;
+    pickedById.set(pkg.packageIdentifier, entry);
+    const multiplier = entry.period === null ? undefined : PER_YEAR_MULTIPLIER[entry.period];
+    if (multiplier !== undefined) {
+      perYearMinorById.set(pkg.packageIdentifier, entry.amountMinor * multiplier);
+    }
+  }
+  const comparable = [...perYearMinorById.values()];
+  const maxPerYear = comparable.length ? Math.max(...comparable) : 0;
+  const discountComputable = comparable.length >= 2 && maxPerYear > 0;
+
+  for (const pkg of offering.packages) {
+    const entry = pickedById.get(pkg.packageIdentifier);
+    if (!entry) continue;
+
+    const price = formatMinorAmount(entry.amountMinor, entry.currency);
+    const noun = periodNoun(entry.period);
+    const packageView: PackageView = {
+      packageName: pkg.displayName,
+      price,
+      pricePerPeriod: noun ? `${price}/${noun}` : price,
+      period: noun,
+    };
+
+    const perYearMinor = perYearMinorById.get(pkg.packageIdentifier);
+    if (perYearMinor !== undefined) {
+      packageView.pricePerYear = formatMinorAmount(perYearMinor, entry.currency);
+      packageView.pricePerMonth = formatMinorAmount(perYearMinor / MONTHS_PER_YEAR, entry.currency);
+      packageView.pricePerWeek = formatMinorAmount(perYearMinor / WEEKS_PER_YEAR, entry.currency);
+      packageView.pricePerDay = formatMinorAmount(perYearMinor / WEEKS_PER_YEAR / DAYS_PER_WEEK, entry.currency);
+      if (discountComputable) {
+        packageView.relativeDiscount = `${Math.round((1 - perYearMinor / maxPerYear) * PERCENT)}%`;
+      }
+    }
+
+    if (typeof entry.trialDays === "number" && entry.trialDays > 0) {
+      packageView.introPeriod = `${entry.trialDays} days`;
+    }
+
+    view[pkg.packageIdentifier] = packageView;
+  }
+
+  const resolvedCount = pickedById.size;
+  const coverage: CanvasPriceCoverage =
+    offering.packages.length > 0 && resolvedCount === offering.packages.length
+      ? "full"
+      : resolvedCount > 0
+        ? "partial"
+        : "none";
+  return { view, coverage };
 }
 
 /**

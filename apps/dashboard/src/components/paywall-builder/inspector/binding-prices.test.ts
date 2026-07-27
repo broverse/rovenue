@@ -8,6 +8,7 @@ import {
   formatMinorAmount,
   packagePeriod,
   periodLabel,
+  periodNoun,
   presetSelection,
   storeBadgeText,
   type PackagePriceRow,
@@ -263,5 +264,25 @@ describe("storeBadgeText", () => {
     expect(storeBadgeText({ status: "not_configured" })).toBe("not configured");
     expect(storeBadgeText({ status: "no_mapping" })).toBe("no mapping");
     expect(storeBadgeText({ status: "error" })).toBe("unavailable");
+  });
+});
+
+describe("periodNoun", () => {
+  it("maps single-unit ISO periods to the SDK's noun style", () => {
+    expect(periodNoun("P1D")).toBe("day");
+    expect(periodNoun("P1W")).toBe("week");
+    expect(periodNoun("P1M")).toBe("month");
+    expect(periodNoun("P1Y")).toBe("year");
+  });
+
+  it("renders multi-unit periods as a count + plural noun", () => {
+    expect(periodNoun("P3M")).toBe("3 months");
+    expect(periodNoun("P6M")).toBe("6 months");
+  });
+
+  it("returns empty string for unknown or null input", () => {
+    expect(periodNoun("P2X")).toBe("");
+    expect(periodNoun("garbage")).toBe("");
+    expect(periodNoun(null)).toBe("");
   });
 });

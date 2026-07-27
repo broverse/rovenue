@@ -8,12 +8,14 @@ import type { DashboardOfferingRow } from "@rovenue/shared";
 import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
 import { useOfferingById } from "../../lib/hooks/useProjectOfferings";
+import { useOfferingResolvedPrices } from "../../lib/hooks/useOfferingResolvedPrices";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import {
   buildEligibilityMap,
   computeSelectionRect,
-  placeholderPriceView,
+  resolvedPriceView,
   toRendererOffering,
+  type CanvasPriceCoverage,
   type Rect,
 } from "./canvas-helpers";
 import { deviceById, devicesForPlatform } from "./device-catalog";
@@ -49,6 +51,17 @@ function noop() {
   // Preview canvas: purchase/close/restore/url are inert — this is a design surface, not a live paywall.
 }
 
+/** Badge copy tracks how much of the preview is real: all packages resolved, some, or none. */
+function previewBadgeText(t: (key: string, fallback: string) => string, coverage: CanvasPriceCoverage): string {
+  if (coverage === "full") {
+    return t("paywalls.builder.canvas.previewBadgeLive", "Preview — live store prices (US)");
+  }
+  if (coverage === "partial") {
+    return t("paywalls.builder.canvas.previewBadgeMixed", "Preview — mixed live and placeholder prices");
+  }
+  return t("paywalls.builder.canvas.previewBadge", "Preview — placeholder prices");
+}
+
 export const Canvas = component(() => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
@@ -61,7 +74,11 @@ export const Canvas = component(() => {
     () => toRendererOffering(offeringQuery.data?.offering as DashboardOfferingRow | undefined, displayNameById),
     [offeringQuery.data, displayNameById],
   );
-  const priceView = useMemo(() => placeholderPriceView(offering), [offering]);
+  const resolvedQuery = useOfferingResolvedPrices(vm.projectId, vm.paywall?.offeringId ?? null);
+  const { view: priceView, coverage: priceCoverage } = useMemo(
+    () => resolvedPriceView(offering, resolvedQuery.data, vm.canvasPlatform),
+    [offering, resolvedQuery.data, vm.canvasPlatform],
+  );
   const eligibility = useMemo(
     () => buildEligibilityMap(offering, vm.previewEligible),
     [offering, vm.previewEligible],
@@ -334,7 +351,7 @@ export const Canvas = component(() => {
         </button>
 
         <div className="ml-auto font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
-          {t("paywalls.builder.canvas.previewBadge", "Preview — placeholder prices")}
+          {previewBadgeText(t, priceCoverage)}
         </div>
       </div>
 

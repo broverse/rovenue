@@ -126,6 +126,31 @@ export function periodLabel(iso: string | null): string | null {
   return PERIOD_LABELS[iso] ?? iso;
 }
 
+/** ISO unit letter → the SDK renderers' period noun (PackageViewMapping's periodLabel style). */
+const PERIOD_UNIT_NOUNS: Readonly<Record<string, string>> = {
+  D: "day",
+  W: "week",
+  M: "month",
+  Y: "year",
+};
+
+const ISO_PERIOD_RE = /^P(\d+)([DWMY])$/;
+
+/**
+ * "P1M" → "month", "P3M" → "3 months" — the lowercase noun style the SDK
+ * renderers use for `{{period}}` (PackageViewMapping.swift/.kt), so the
+ * canvas matches devices. Unknown or null input → "" (no period figure).
+ */
+export function periodNoun(iso: string | null): string {
+  if (iso === null) return "";
+  const match = ISO_PERIOD_RE.exec(iso);
+  if (!match) return "";
+  const count = Number(match[1]);
+  const noun = PERIOD_UNIT_NOUNS[match[2]!];
+  if (!noun || count < 1) return "";
+  return count === 1 ? noun : `${count} ${noun}s`;
+}
+
 /**
  * Distinct known (non-null) periods across rows, in offering order.
  * Singles first, then the monthly+annual combo iff both exist, then a

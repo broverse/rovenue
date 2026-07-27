@@ -106,3 +106,126 @@ describe("computeSelectionRect", () => {
     expect(computeSelectionRect(container, scroll, target)).toEqual(target);
   });
 });
+
+// =====================================================================
+// resolvedPriceView (P6): real store prices in the canvas preview.
+// =====================================================================
+
+import type { OfferingResolvedPrices, ResolvedStoreEntry } from "@rovenue/shared";
+import { resolvedPriceView } from "../canvas-helpers";
+
+function ok(amountMinor: number, period: string | null, trialDays: number | null = null): ResolvedStoreEntry {
+  return { status: "ok", amountMinor, currency: "USD", period, trialDays };
+}
+
+function resolvedFixture(
+  stores: Record<string, { apple?: ResolvedStoreEntry; google?: ResolvedStoreEntry; stripe?: ResolvedStoreEntry }>,
+): OfferingResolvedPrices {
+  return {
+    offeringId: "off_1",
+    packages: Object.entries(stores).map(([packageIdentifier, s]) => ({
+      packageIdentifier,
+      productId: `prod_${packageIdentifier}`,
+      displayName: packageIdentifier,
+      metadataPeriod: null,
+      stores: s,
+    })),
+    fetchedAt: "2026-07-27T00:00:00.000Z",
+  };
+}
+
+function twoPackageOffering() {
+  const displayNameById = new Map([
+    ["prod_month", "Monthly"],
+    ["prod_year", "Annual"],
+  ]);
+  const row = offeringFixture();
+  row.packages = row.packages.slice(0, 2); // $rov_monthly, $rov_annual
+  return toRendererOffering(row, displayNameById)!;
+}
+
+describe("resolvedPriceView", () => {
+  it("(a) derives per-period figures and the SDK relativeDiscount formula on full coverage", () => {
+    const offering = twoPackageOffering();
+    const resolved = resolvedFixture({
+      $rov_monthly: { apple: ok(999, "P1M") },
+      $rov_annual: { apple: ok(5999, "P1Y") },
+    });
+    const { view, coverage } = resolvedPriceView(offering, resolved, "ios");
+
+    expect(coverage).toBe("full");
+    expect(view["$rov_monthly"]).toMatchObject({
+      packageName: "Monthly",
+      price: "$9.99",
+      pricePerPeriod: "$9.99/month",
+      period: "month",
+      relativeDiscount: "0%",
+    });
+    expect(view["$rov_annual"]).toMatchObject({
+      price: "$59.99",
+      pricePerPeriod: "$59.99/year",
+      period: "year",
+      pricePerMonth: "$5.00",
+      pricePerYear: "$59.99",
+      relativeDiscount: "50%",
+    });
+  });
+
+  it("(b) prefers the platform's own store: apple on ios, google on android", () => {
+    const offering = twoPackageOffering();
+    const resolved = resolvedFixture({
+      $rov_monthly: { apple: ok(999, "P1M"), google: ok(899, "P1M"), stripe: ok(799, "P1M") },
+      $rov_annual: { apple: ok(5999, "P1Y") },
+    });
+    expect(resolvedPriceView(offering, resolved, "ios").view["$rov_monthly"]!.price).toBe("$9.99");
+    expect(resolvedPriceView(offering, resolved, "android").view["$rov_monthly"]!.price).toBe("$8.99");
+  });
+
+  it("(c) keeps the placeholder preset (at the original cycle index) for unresolved packages", () => {
+    const offering = twoPackageOffering();
+    const resolved = resolvedFixture({
+      $rov_monthly: { apple: ok(999, "P1M") },
+      $rov_annual: {}, // mapped nowhere → unresolved
+    });
+    const { view, coverage } = resolvedPriceView(offering, resolved, "ios");
+    expect(coverage).toBe("partial");
+    // Placeholder cycle index 1 belongs to $rov_annual (second package).
+    expect(view["$rov_annual"]).toEqual(placeholderPriceView(offering)["$rov_annual"]);
+    expect(view["$rov_monthly"]!.price).toBe("$9.99");
+  });
+
+  it("(d) maps positive trialDays to introPeriod", () => {
+    const offering = twoPackageOffering();
+    const resolved = resolvedFixture({
+      $rov_monthly: { apple: ok(999, "P1M", 7) },
+      $rov_annual: { apple: ok(5999, "P1Y", 0) },
+    });
+    const { view } = resolvedPriceView(offering, resolved, "ios");
+    expect(view["$rov_monthly"]!.introPeriod).toBe("7 days");
+    expect(view["$rov_annual"]!.introPeriod).toBeUndefined();
+  });
+
+  it("(e) unknown period ISO produces only the four required fields", () => {
+    const offering = twoPackageOffering();
+    const resolved = resolvedFixture({
+      $rov_monthly: { apple: ok(999, "P2X") },
+      $rov_annual: { apple: ok(5999, "P1Y") },
+    });
+    const monthly = resolvedPriceView(offering, resolved, "ios").view["$rov_monthly"]!;
+    expect(monthly.price).toBe("$9.99");
+    expect(monthly.period).toBe("");
+    expect(monthly.pricePerPeriod).toBe("$9.99");
+    expect(monthly.pricePerMonth).toBeUndefined();
+    expect(monthly.pricePerYear).toBeUndefined();
+    expect(monthly.pricePerWeek).toBeUndefined();
+    expect(monthly.pricePerDay).toBeUndefined();
+    expect(monthly.relativeDiscount).toBeUndefined();
+  });
+
+  it("(f) with nothing resolved the output is byte-equal to placeholderPriceView with coverage none", () => {
+    const offering = twoPackageOffering();
+    const none = resolvedPriceView(offering, undefined, "ios");
+    expect(none.coverage).toBe("none");
+    expect(none.view).toEqual(placeholderPriceView(offering));
+  });
+});
