@@ -1,4 +1,10 @@
-import { ICON_DEFAULT_SIZE, DIVIDER_DEFAULT_THICKNESS, type PaywallNode, type StackNode } from "@rovenue/shared/paywall";
+import {
+  ICON_DEFAULT_SIZE,
+  DIVIDER_DEFAULT_THICKNESS,
+  DIVIDER_DEFAULT_INSET,
+  type PaywallNode,
+  type StackNode,
+} from "@rovenue/shared/paywall";
 
 /** A new icon node starts as a checkmark — the commonest use is a feature-list mark. */
 const DEFAULT_ICON_NAME = "check";
@@ -224,7 +230,7 @@ export function newNode(type: PaywallNode["type"], idGen: () => string): Paywall
     case "spacer":
       return { type: "spacer", id, size: 16 };
     case "divider":
-      return { type: "divider", id, thickness: DIVIDER_DEFAULT_THICKNESS };
+      return { type: "divider", id, thickness: DIVIDER_DEFAULT_THICKNESS, inset: DIVIDER_DEFAULT_INSET };
     case "icon":
       return { type: "icon", id, name: DEFAULT_ICON_NAME, size: ICON_DEFAULT_SIZE };
     default: {

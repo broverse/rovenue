@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DIVIDER_DEFAULT_INSET,
   DIVIDER_DEFAULT_THICKNESS,
   ICON_DEFAULT_SIZE,
   type PackageListNode,
@@ -339,9 +340,14 @@ describe("newNode", () => {
     expect(node.type).toBe("spacer");
   });
 
-  it("creates a divider with the default thickness", () => {
+  it("creates a divider with the default thickness and inset", () => {
     const node = newNode("divider", idGen);
-    expect(node).toEqual({ type: "divider", id: "gen1", thickness: DIVIDER_DEFAULT_THICKNESS });
+    expect(node).toEqual({
+      type: "divider",
+      id: "gen1",
+      thickness: DIVIDER_DEFAULT_THICKNESS,
+      inset: DIVIDER_DEFAULT_INSET,
+    });
   });
 
   it("creates an icon defaulting to the check glyph", () => {

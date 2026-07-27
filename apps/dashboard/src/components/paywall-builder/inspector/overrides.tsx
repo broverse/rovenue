@@ -7,9 +7,9 @@ import type {
   PaywallNode,
   ThemeColor,
 } from "@rovenue/shared/paywall";
-import { OVERRIDABLE_PROP_KEYS } from "@rovenue/shared/paywall";
+import { ICON_NAMES, OVERRIDABLE_PROP_KEYS } from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
-import { AlignField, NumberField, ThemeColorField } from "./fields";
+import { AlignField, NumberField, SelectField, ThemeColorField } from "./fields";
 import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
 
 // =============================================================
@@ -33,6 +33,8 @@ const OVERRIDE_PROP_LABEL: Record<string, string> = {
   color: "Color",
   labelKey: "Label key",
   style: "Style",
+  thickness: "Thickness",
+  name: "Icon",
 };
 
 export function OverridesSection({ node }: { node: PaywallNode }) {
@@ -168,10 +170,29 @@ function OverridePropField({
       );
     case "stack.background":
     case "text.color":
+    case "divider.color":
+    case "icon.color":
       return (
         <ThemeColorField
           label={label}
           value={value as ThemeColor | undefined}
+          onChange={(v) => onChange(v)}
+        />
+      );
+    case "divider.thickness":
+      return (
+        <NumberField
+          label={label}
+          value={typeof value === "number" ? value : undefined}
+          onChange={(v) => onChange(v)}
+        />
+      );
+    case "icon.name":
+      return (
+        <SelectField
+          label={label}
+          value={typeof value === "string" && ICON_NAMES.includes(value) ? value : ICON_NAMES[0]!}
+          options={ICON_NAMES}
           onChange={(v) => onChange(v)}
         />
       );

@@ -33,10 +33,11 @@ describe("tabsForNode", () => {
     }
   });
 
-  it("gives divider and icon both the content and visibility tabs", () => {
+  it("gives divider and icon the content, style, and visibility tabs", () => {
     for (const type of ["divider", "icon"] as const) {
       const ids = tabsForNode(type).map((t) => t.id);
       expect(ids, `${type} tabs`).toContain("content");
+      expect(ids, `${type} tabs`).toContain("style");
       expect(ids, `${type} tabs`).toContain("visibility");
     }
   });

@@ -54,7 +54,7 @@ export const INSPECTOR_TABS = [
   {
     id: "style",
     fallbackLabel: "Style",
-    appliesTo: new Set<PaywallNode["type"]>(["stack", "text", "image", "button"]),
+    appliesTo: new Set<PaywallNode["type"]>(["stack", "text", "image", "button", "divider", "icon"]),
     issueCodes: new Set<BuilderIssue["code"]>(),
   },
   {

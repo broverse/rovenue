@@ -1,6 +1,14 @@
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
-import type { ButtonNode, ImageNode, PaywallNode, StackNode, TextNode } from "@rovenue/shared/paywall";
+import type {
+  ButtonNode,
+  DividerNode,
+  IconNode,
+  ImageNode,
+  PaywallNode,
+  StackNode,
+  TextNode,
+} from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { AlignField, NumberField, ThemeColorField } from "./fields";
 import { Field, Section, Segmented } from "./primitives";
@@ -20,6 +28,10 @@ export const StyleTab = component(({ node }: { node: PaywallNode }) => {
       return <ImageStyle node={node} />;
     case "button":
       return <ButtonStyle node={node} />;
+    case "divider":
+      return <DividerStyle node={node} />;
+    case "icon":
+      return <IconStyle node={node} />;
     default:
       return null;
   }
@@ -111,6 +123,38 @@ function ButtonStyle({ node }: { node: ButtonNode }) {
           ]}
         />
       </Field>
+    </Section>
+  );
+}
+
+function DividerStyle({ node }: { node: DividerNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<DividerNode>) => vm.updateNode<DividerNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.appearance", "Appearance")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.color", "Color")}
+        value={node.color}
+        onChange={(v) => set({ color: v })}
+      />
+    </Section>
+  );
+}
+
+function IconStyle({ node }: { node: IconNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<IconNode>) => vm.updateNode<IconNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.appearance", "Appearance")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.color", "Color")}
+        value={node.color}
+        onChange={(v) => set({ color: v })}
+      />
     </Section>
   );
 }
