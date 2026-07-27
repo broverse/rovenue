@@ -1,5 +1,7 @@
 import { SignJWT, importPKCS8 } from "jose";
+import { decimalToMinorUnits } from "@rovenue/shared";
 import { logger } from "../../lib/logger";
+import { isoDurationToDays } from "../../lib/iso-duration";
 
 const log = logger.child("app-store-connect");
 
@@ -172,4 +174,160 @@ export async function listAppStoreCatalog(
 
   log.debug("listed app store catalog", { appId, count: items.length });
   return items;
+}
+
+// =============================================================
+// Subscription prices, periods and trial durations
+// =============================================================
+
+/** Territory used to price subscriptions and detect introductory offers. */
+export const APPLE_REFERENCE_TERRITORY = "USA";
+/** ISO-4217 currency associated with `APPLE_REFERENCE_TERRITORY`. */
+export const APPLE_REFERENCE_CURRENCY = "USD";
+
+/** Maps App Store Connect's `subscriptionPeriod` enum to ISO-8601 durations. */
+const APPLE_PERIOD_TO_ISO: Record<string, string> = {
+  ONE_WEEK: "P1W",
+  ONE_MONTH: "P1M",
+  TWO_MONTHS: "P2M",
+  THREE_MONTHS: "P3M",
+  SIX_MONTHS: "P6M",
+  ONE_YEAR: "P1Y",
+};
+
+export interface AppleSubscriptionPrice {
+  productId: string;
+  /** ISO-8601 duration mapped from `subscriptionPeriod`, or null when unrecognized. */
+  period: string | null;
+  amountMinor: number;
+  currency: string;
+  trialDays: number | null;
+}
+
+function mapSubscriptionPeriod(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const iso = APPLE_PERIOD_TO_ISO[raw];
+  if (!iso) {
+    log.warn("unknown App Store subscriptionPeriod", { subscriptionPeriod: raw });
+    return null;
+  }
+  return iso;
+}
+
+/** Picks the currently-effective price row: the greatest non-null startDate <= today, else the null-startDate row. */
+function pickCurrentPriceRow(rows: any[]): any | undefined {
+  const today = new Date().toISOString().slice(0, 10);
+  const candidates = rows.filter((row) => {
+    const startDate = row.attributes?.startDate;
+    return startDate == null || startDate <= today;
+  });
+  let best: any | undefined;
+  for (const row of candidates) {
+    const startDate = row.attributes?.startDate;
+    if (startDate == null) {
+      if (!best) best = row;
+      continue;
+    }
+    const bestStartDate = best?.attributes?.startDate;
+    if (bestStartDate == null || startDate > bestStartDate) {
+      best = row;
+    }
+  }
+  return best;
+}
+
+async function resolveSubscriptionPrice(
+  subscriptionAscId: string,
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<number> {
+  const url =
+    `${BASE_URL}/v1/subscriptions/${subscriptionAscId}/prices` +
+    `?filter[territory]=${APPLE_REFERENCE_TERRITORY}&include=subscriptionPricePoint&limit=200`;
+  const { data, included } = await ascList(url, token, fetchImpl);
+
+  const current = pickCurrentPriceRow(data);
+  const pricePointId = current?.relationships?.subscriptionPricePoint?.data?.id;
+  const pricePoint = included.find((row) => row.id === pricePointId);
+  const customerPrice = pricePoint?.attributes?.customerPrice;
+  if (customerPrice == null) {
+    throw new StoreApiError(
+      `No current price point found for App Store subscription ${subscriptionAscId}`,
+    );
+  }
+  return decimalToMinorUnits(Number(customerPrice), APPLE_REFERENCE_CURRENCY);
+}
+
+async function resolveSubscriptionTrialDays(
+  subscriptionAscId: string,
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<number | null> {
+  const url =
+    `${BASE_URL}/v1/subscriptions/${subscriptionAscId}/introductoryOffers` +
+    `?filter[territory]=${APPLE_REFERENCE_TERRITORY}&limit=200`;
+  const { data } = await ascList(url, token, fetchImpl);
+
+  const freeTrial = data.find((row) => row.attributes?.offerMode === "FREE_TRIAL");
+  if (!freeTrial) return null;
+  const days = isoDurationToDays(freeTrial.attributes?.duration ?? "");
+  if (days == null) return null;
+  return days * (freeTrial.attributes?.numberOfPeriods ?? 1);
+}
+
+export async function listAppStoreSubscriptionPrices(
+  config: AppStoreConnectConfig,
+  wantedProductIds: ReadonlyArray<string>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Map<string, AppleSubscriptionPrice>> {
+  const token = await mintToken(config);
+  const appId = await resolveAppId(config, token, fetchImpl);
+  const wanted = new Set(wantedProductIds);
+
+  // Step 1: list all subscription groups (paginated), then each group's
+  // subscriptions — the same walk `listAppStoreCatalog` performs.
+  const groups = await ascList(
+    `${BASE_URL}/v1/apps/${appId}/subscriptionGroups?limit=200`,
+    token,
+    fetchImpl,
+  );
+
+  const wantedSubs: Array<{ ascId: string; productId: string; subscriptionPeriod?: string }> = [];
+  for (const group of groups.data) {
+    const groupId = group.id;
+    const groupSubs = await ascList(
+      `${BASE_URL}/v1/subscriptionGroups/${groupId}/subscriptions?limit=200`,
+      token,
+      fetchImpl,
+    );
+    for (const sub of groupSubs.data) {
+      const a = sub.attributes ?? {};
+      if (!a.productId || !wanted.has(a.productId)) continue;
+      wantedSubs.push({ ascId: sub.id, productId: a.productId, subscriptionPeriod: a.subscriptionPeriod });
+    }
+  }
+
+  const result = new Map<string, AppleSubscriptionPrice>();
+
+  for (const sub of wantedSubs) {
+    try {
+      const amountMinor = await resolveSubscriptionPrice(sub.ascId, token, fetchImpl);
+      const trialDays = await resolveSubscriptionTrialDays(sub.ascId, token, fetchImpl);
+      result.set(sub.productId, {
+        productId: sub.productId,
+        period: mapSubscriptionPeriod(sub.subscriptionPeriod),
+        amountMinor,
+        currency: APPLE_REFERENCE_CURRENCY,
+        trialDays,
+      });
+    } catch (err) {
+      log.warn("skipping App Store subscription price resolution", {
+        productId: sub.productId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  log.debug("listed app store subscription prices", { appId, wanted: wanted.size, resolved: result.size });
+  return result;
 }

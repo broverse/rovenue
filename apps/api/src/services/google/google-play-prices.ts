@@ -1,5 +1,6 @@
 import { decimalToMinorUnits } from "@rovenue/shared";
 import { logger } from "../../lib/logger";
+import { isoDurationToDays } from "../../lib/iso-duration";
 import { getGoogleAccessToken } from "./google-auth";
 import type { GoogleServiceAccountCredentials } from "./google-types";
 import { StoreApiError } from "../apple/app-store-connect";
@@ -10,10 +11,6 @@ const BASE = "https://androidpublisher.googleapis.com/androidpublisher/v3/applic
 
 /** Reference region used to price base plans and detect free trial phases. */
 export const GOOGLE_REFERENCE_REGION = "US";
-
-const DAYS_PER_WEEK = 7;
-const DAYS_PER_MONTH = 30;
-const DAYS_PER_YEAR = 365;
 
 interface Deps {
   fetchImpl?: typeof fetch;
@@ -78,29 +75,6 @@ async function gpGet(url: string, token: string, fetchImpl: typeof fetch): Promi
     throw new StoreApiError(`Google Play API error (${res.status}): ${detail}`, res.status);
   }
   return res.json();
-}
-
-/**
- * Parses an ISO-8601 duration of the form `P<n>D|W|M|Y` (a single
- * designator — the only shapes Google Play emits for billing periods
- * and offer phases) into a day count. Returns null when unparseable.
- */
-export function isoDurationToDays(iso: string): number | null {
-  const match = /^P(\d+)([DWMY])$/.exec(iso);
-  if (!match) return null;
-  const n = Number(match[1]);
-  switch (match[2]) {
-    case "D":
-      return n;
-    case "W":
-      return n * DAYS_PER_WEEK;
-    case "M":
-      return n * DAYS_PER_MONTH;
-    case "Y":
-      return n * DAYS_PER_YEAR;
-    default:
-      return null;
-  }
 }
 
 function moneyToDecimal(money: GoogleMoney): number {
