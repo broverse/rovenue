@@ -1106,6 +1106,68 @@ describe("UNKNOWN_ICON_NAME", () => {
     expect(issue).toBeDefined();
     expect(issue?.nodeId).toBe("cell_icon");
   });
+
+  it("warns about an unknown icon name on a featureList row, without blocking save or publish", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "featureList",
+            id: "fl",
+            rows: [{ labelKey: "f_a", icon: "not-a-real-icon" }],
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "UNKNOWN_ICON_NAME");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("fl");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("warns about an unknown icon name on a timeline row, without blocking save or publish", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "timeline",
+            id: "tl",
+            rows: [{ labelKey: "t_a", icon: "not-a-real-icon" }],
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "UNKNOWN_ICON_NAME");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("tl");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("says nothing for a featureList/timeline row icon that is in the registry", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "featureList", id: "fl", rows: [{ labelKey: "f_a", icon: "check" }] },
+          { type: "timeline", id: "tl", rows: [{ labelKey: "t_a", icon: "clock" }] },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.some((i) => i.code === "UNKNOWN_ICON_NAME")).toBe(false);
+  });
 });
 
 describe("FEATURE_LIST_TOO_LONG and EMPTY_ROWS", () => {

@@ -397,9 +397,12 @@ export function validateBuilderConfig(
     }
   }
 
-  // UNKNOWN_ICON_NAME — an icon node whose name isn't in the registry. This
-  // never blocks rendering (fail open, on every platform), so it exists only
-  // to catch an author's typo.
+  // UNKNOWN_ICON_NAME — an icon node whose name isn't in the registry, OR a
+  // featureList/timeline row whose per-row `icon` isn't either. Both fail
+  // open identically (render nothing, on every platform), so this is a typo
+  // warning either way — a row icon is not a lesser case than a standalone
+  // icon node, since an author picks it per row and is just as likely to
+  // typo it there.
   for (const node of allNodes) {
     if (node.type === "icon" && !isKnownIconName(node.name)) {
       issues.push({
@@ -407,6 +410,17 @@ export function validateBuilderConfig(
         nodeId: node.id,
         message: `Icon "${node.name}" (node "${node.id}") is not in the icon registry — it will render nothing.`,
       });
+    }
+    if (node.type === "featureList" || node.type === "timeline") {
+      for (const row of node.rows) {
+        if (row.icon && !isKnownIconName(row.icon)) {
+          issues.push({
+            code: "UNKNOWN_ICON_NAME",
+            nodeId: node.id,
+            message: `Icon "${row.icon}" (row in "${node.id}") is not in the icon registry — it will render nothing.`,
+          });
+        }
+      }
     }
   }
 

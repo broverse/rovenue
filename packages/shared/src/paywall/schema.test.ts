@@ -583,8 +583,16 @@ describe("wave B row-carrying node types", () => {
     ).toBe(true);
   });
 
-  it("rejects a row with no labelKey", () => {
+  it("rejects a featureList row with no labelKey", () => {
     expect(builderConfigSchema.safeParse(wrap({ type: "featureList", id: "f1", rows: [{}] })).success).toBe(false);
+  });
+
+  it("rejects a timeline row with no labelKey", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "timeline", id: "t1", rows: [{}] })).success).toBe(false);
+  });
+
+  it("rejects a socialProof node with no labelKey", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "socialProof", id: "s1" })).success).toBe(false);
   });
 
   // Empty rows parse — an unfinished node must still SAVE. It is a warning,
@@ -597,6 +605,18 @@ describe("wave B row-carrying node types", () => {
     expect(
       builderConfigSchema.safeParse(wrap({ type: "socialProof", id: "s1", labelKey: "s", rating: 6 })).success,
     ).toBe(false);
+  });
+
+  it("rejects a negative rating", () => {
+    expect(
+      builderConfigSchema.safeParse(wrap({ type: "socialProof", id: "s1", labelKey: "s", rating: -1 })).success,
+    ).toBe(false);
+  });
+
+  it("accepts a rating of exactly 0", () => {
+    expect(
+      builderConfigSchema.safeParse(wrap({ type: "socialProof", id: "s1", labelKey: "s", rating: 0 })).success,
+    ).toBe(true);
   });
 
   it("gives all three an OVERRIDABLE_PROP_KEYS row", () => {
