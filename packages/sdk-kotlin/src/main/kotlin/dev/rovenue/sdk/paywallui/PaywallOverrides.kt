@@ -112,6 +112,32 @@ fun applyOverrides(node: BuilderNode.PurchaseButton, active: OverrideActiveCondi
 @Suppress("UNUSED_PARAMETER")
 fun applyOverrides(node: BuilderNode.Spacer, active: OverrideActiveConditions): BuilderNode.Spacer = node
 
+fun applyOverrides(node: BuilderNode.Divider, active: OverrideActiveConditions): BuilderNode.Divider {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(
+            color = patch.color ?: result.color,
+            thickness = patch.thickness ?: result.thickness,
+        )
+    }
+    return result
+}
+
+fun applyOverrides(node: BuilderNode.Icon, active: OverrideActiveConditions): BuilderNode.Icon {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(
+            name = patch.name ?: result.name,
+            color = patch.color ?: result.color,
+        )
+    }
+    return result
+}
+
 /** Dispatches to the node's own `applyOverrides` overload. `.Unknown` nodes
  *  carry no overrides field at all and pass through unchanged. */
 fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): BuilderNode = when (node) {
@@ -122,6 +148,8 @@ fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): Builder
     is BuilderNode.PackageList -> applyOverrides(node, active)
     is BuilderNode.PurchaseButton -> applyOverrides(node, active)
     is BuilderNode.Spacer -> applyOverrides(node, active)
+    is BuilderNode.Divider -> applyOverrides(node, active)
+    is BuilderNode.Icon -> applyOverrides(node, active)
     is BuilderNode.Unknown -> node
 }
 

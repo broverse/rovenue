@@ -233,6 +233,8 @@ private fun dimenFor(spec: NodeSize?, isMainAxis: Boolean): ChildDimen = when (s
 fun childLayoutFor(axis: Axis, child: BuilderNode): ChildLayout = when (child) {
     is BuilderNode.Stack -> stackChildLayout(axis, child.size)
     is BuilderNode.Spacer -> spacerChildLayout(axis, child.size)
+    is BuilderNode.Divider -> dividerChildLayout(child.thickness)
+    is BuilderNode.Icon -> iconChildLayout(child.size)
     else -> ChildLayout(ChildDimen(DimenMode.WRAP_CONTENT), ChildDimen(DimenMode.WRAP_CONTENT), weight = 0f)
 }
 
@@ -268,6 +270,23 @@ private fun spacerChildLayout(axis: Axis, size: Double?): ChildLayout {
     }
 }
 
+/** A divider fills its parent's cross axis (mirrors the SwiftUI renderer's
+ *  bare `Rectangle()`, which fills without an explicit frame, and the web
+ *  renderer's 100%-width bar) and takes exactly its (possibly-default)
+ *  thickness on the other axis, regardless of the parent stack's axis. */
+private fun dividerChildLayout(thickness: Double?): ChildLayout = ChildLayout(
+    width = ChildDimen(DimenMode.MATCH_PARENT),
+    height = ChildDimen(DimenMode.FIXED, thickness ?: DIVIDER_DEFAULT_THICKNESS_DP),
+    weight = 0f,
+)
+
+/** An icon is a fixed square — its (possibly-default) size in both
+ *  dimensions, matching the SwiftUI renderer's `.frame(width:height:)`. */
+private fun iconChildLayout(size: Double?): ChildLayout {
+    val value = size ?: ICON_DEFAULT_SIZE_DP
+    return ChildLayout(ChildDimen(DimenMode.FIXED, value), ChildDimen(DimenMode.FIXED, value), weight = 0f)
+}
+
 // =================================================================
 // Android view construction (requires a real Android runtime — not
 // unit-tested, see class doc above).
@@ -279,6 +298,20 @@ private fun spacerChildLayout(axis: Axis, size: Double?): ChildLayout {
 private val ACCENT_COLOR = 0xFF3478F6L.toInt()
 private val SELECTED_STROKE_COLOR = ACCENT_COLOR
 private const val UNSELECTED_STROKE_COLOR = 0x59808080 // translucent gray
+
+// Defaults mirroring packages/shared/src/paywall/schema.ts's
+// DIVIDER_DEFAULT_THICKNESS / DIVIDER_DEFAULT_INSET / ICON_DEFAULT_SIZE —
+// device-independent pixels, converted with the display density (see `dp`)
+// before use as view dimensions. DIVIDER_DEFAULT_COLOR/ICON_DEFAULT_TINT_COLOR
+// have no shared-schema counterpart: they're this renderer's own fallback
+// for an unspecified `color`, needed because `android:tint` was stripped
+// from every vendored drawable (see res/drawable/README.md) so nothing else
+// supplies one.
+private const val DIVIDER_DEFAULT_THICKNESS_DP = 1.0
+private const val DIVIDER_DEFAULT_INSET_DP = 0.0
+private const val ICON_DEFAULT_SIZE_DP = 24.0
+private const val DIVIDER_DEFAULT_COLOR = 0x4D808080 // translucent gray (~30% alpha)
+private val ICON_DEFAULT_TINT_COLOR = 0xFF808080L.toInt() // medium gray
 
 private fun dp(context: Context, value: Double): Int =
     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), context.resources.displayMetrics)
@@ -371,6 +404,8 @@ internal object NodeViewFactory {
             is BuilderNode.PackageList -> buildPackageList(context, resolved, ctx)
             is BuilderNode.PurchaseButton -> buildPurchaseButton(context, resolved, ctx)
             is BuilderNode.Spacer -> View(context)
+            is BuilderNode.Divider -> buildDivider(context, resolved, ctx)
+            is BuilderNode.Icon -> buildIcon(context, resolved, ctx)
             is BuilderNode.Unknown -> resolved.fallback?.let { build(context, it, ctx, cell) }
         }
     }
@@ -591,6 +626,46 @@ internal object NodeViewFactory {
                 alpha = if (enabled) 255 else 102 // ~0.4 opacity, mirrors the SwiftUI renderer
             }
             setOnClickListener { ctx.purchase() }
+        }
+    }
+
+    /**
+     * A thin colored bar. Height/width are handled generically by
+     * [childLayoutFor] (see [dividerChildLayout]); the horizontal `inset` is
+     * NOT expressible through that generic per-child layout path (it's a
+     * property of this node alone, not every node), so it's applied here as
+     * padding on a wrapping [FrameLayout] instead — padding, unlike a plain
+     * View's background, IS respected when laying out a ViewGroup's child.
+     */
+    private fun buildDivider(context: Context, node: BuilderNode.Divider, ctx: PaywallRenderContext): View {
+        val resolvedColor = node.color?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+        val insetPx = dp(context, node.inset ?: DIVIDER_DEFAULT_INSET_DP)
+        val line = View(context).apply {
+            setBackgroundColor(resolvedColor ?: DIVIDER_DEFAULT_COLOR)
+        }
+        return FrameLayout(context).apply {
+            setPadding(insetPx, 0, insetPx, 0)
+            addView(line, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+    }
+
+    /**
+     * Resolves [BuilderNode.Icon.name] to a vendored drawable resource id via
+     * [drawableNameFor] + `getIdentifier`, which returns `0` when nothing
+     * matches. BOTH an unknown name (`drawableNameFor` -> null) and a `0` id
+     * render nothing — `icon.name` is a free string by design, so a paywall
+     * authored against a newer registry must fail open on an older app.
+     */
+    private fun buildIcon(context: Context, node: BuilderNode.Icon, ctx: PaywallRenderContext): View? {
+        val drawableName = drawableNameFor(node.name) ?: return null
+        val resId = context.resources.getIdentifier(drawableName, "drawable", context.packageName)
+        if (resId == 0) return null
+        val tint = node.color?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+            ?: ICON_DEFAULT_TINT_COLOR
+        return ImageView(context).apply {
+            setImageResource(resId)
+            imageTintList = android.content.res.ColorStateList.valueOf(tint)
+            scaleType = ImageView.ScaleType.FIT_CENTER
         }
     }
 }

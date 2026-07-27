@@ -40,6 +40,48 @@ class BuilderConfigModelTest {
 
     private fun name(entry: JsonObject): String = entry["name"]!!.jsonPrimitive.content
 
+    // ---- divider / icon nodes ---------------------------------------------
+    // Not driven off render-fixtures.json (Tasks 1-2's shared fixture predates
+    // these two node types) — hand-built configs via the same rootWith/
+    // firstChild pattern VisibilityDecodeTest.kt uses for the same reason.
+
+    private fun rootWith(child: String): String =
+        """{"formatVersion":2,"defaultLocale":"en","localizations":{"en":{"k":"x"}},
+           "root":{"type":"stack","id":"root","axis":"v","children":[$child]}}"""
+
+    private fun firstChild(json: String): BuilderNode {
+        val model = decodeBuilderConfig(json)
+        assertNotNull(model, "decode returned null for: $json")
+        return model.root.children.first()
+    }
+
+    @Test
+    fun decodesDivider() {
+        val node = firstChild(rootWith("""{"type":"divider","id":"d1","thickness":2,"inset":8}"""))
+        assertTrue(node is BuilderNode.Divider)
+        assertEquals(2.0, (node as BuilderNode.Divider).thickness)
+    }
+
+    @Test
+    fun decodesIconIncludingUnknownNames() {
+        val known = firstChild(rootWith("""{"type":"icon","id":"i1","name":"check"}"""))
+        assertEquals("check", (known as BuilderNode.Icon).name)
+        val unknown = firstChild(rootWith("""{"type":"icon","id":"i2","name":"not-real"}"""))
+        assertEquals("not-real", (unknown as BuilderNode.Icon).name)
+    }
+
+    @Test
+    fun everyRegistryIconHasADrawable() {
+        val registry = java.io.File("../shared/src/paywall/icon-registry.json")
+            .takeIf { it.exists() } ?: java.io.File("../../packages/shared/src/paywall/icon-registry.json")
+        val names = kotlinx.serialization.json.Json
+            .parseToJsonElement(registry.readText()).jsonObject["icons"]!!.jsonArray
+            .map { it.jsonObject["name"]!!.jsonPrimitive.content }
+        for (n in names) {
+            assertNotNull(drawableNameFor(n), "no drawable mapped for $n")
+        }
+    }
+
     @Test
     fun `every accept fixture decodes`() {
         for (el in section("accept")) {

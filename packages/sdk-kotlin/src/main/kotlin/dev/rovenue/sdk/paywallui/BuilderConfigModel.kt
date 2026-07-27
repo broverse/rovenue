@@ -104,6 +104,8 @@ private object OverridablePropKeys {
     val packageList: Set<String> = emptySet()
     val purchaseButton: Set<String> = setOf("labelKey")
     val spacer: Set<String> = emptySet()
+    val divider: Set<String> = setOf("color", "thickness")
+    val icon: Set<String> = setOf("name", "color")
 }
 
 /** A single conditional prop swap: `{ when: { kind }, props }`. [T] is the
@@ -137,6 +139,10 @@ data class PurchaseButtonOverrideProps(val labelKey: String? = null)
 /** Empty whitelist (`OVERRIDABLE_PROP_KEYS.spacer == []`) — same as
  *  [PackageListOverrideProps], always a no-op. */
 object SpacerOverrideProps
+
+data class DividerOverrideProps(val color: ThemePair? = null, val thickness: Double? = null)
+
+data class IconOverrideProps(val name: String? = null, val color: ThemePair? = null)
 
 sealed class BuilderNode {
     abstract val id: String
@@ -217,6 +223,32 @@ sealed class BuilderNode {
         override val id: String,
         val size: Double? = null,
         val overrides: List<NodeOverride<SpacerOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class Divider(
+        override val id: String,
+        val color: ThemePair? = null,
+        /** Defaults to DIVIDER_DEFAULT_THICKNESS_DP (NodeViewFactory.kt) if absent. */
+        val thickness: Double? = null,
+        /** Horizontal inset on both sides. Defaults to DIVIDER_DEFAULT_INSET_DP if absent. */
+        val inset: Double? = null,
+        val overrides: List<NodeOverride<DividerOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class Icon(
+        override val id: String,
+        /** A name from icon-registry.json. Deliberately a free string: unknown
+         *  names render nothing and fail open (see [drawableNameFor]), so a
+         *  newer paywall never breaks an older app. */
+        val name: String,
+        /** Defaults to ICON_DEFAULT_SIZE_DP (NodeViewFactory.kt) if absent. */
+        val size: Double? = null,
+        val color: ThemePair? = null,
+        val overrides: List<NodeOverride<IconOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
@@ -398,6 +430,24 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             visibility = visibility,
             fallback = fallback,
         )
+        "divider" -> BuilderNode.Divider(
+            id = id,
+            color = obj["color"]?.letObject(::parseThemePair),
+            thickness = obj.optionalDouble("thickness"),
+            inset = obj.optionalDouble("inset"),
+            overrides = obj.parseOverrideList(::parseDividerOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
+        "icon" -> BuilderNode.Icon(
+            id = id,
+            name = obj.requireString("name"),
+            size = obj.optionalDouble("size"),
+            color = obj["color"]?.letObject(::parseThemePair),
+            overrides = obj.parseOverrideList(::parseIconOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
         else -> BuilderNode.Unknown(id = id, visibility = visibility, fallback = fallback)
@@ -507,6 +557,33 @@ private fun parsePurchaseButtonOverrideProps(props: JsonObject): PurchaseButtonO
 private fun parseSpacerOverrideProps(props: JsonObject): SpacerOverrideProps {
     validateOverridePropKeys(props, OverridablePropKeys.spacer)
     return SpacerOverrideProps
+}
+
+private fun parseDividerOverrideProps(props: JsonObject): DividerOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.divider)
+    return DividerOverrideProps(
+        color = props["color"]?.letObject(::parseThemePair),
+        thickness = props.optionalDouble("thickness"),
+    )
+}
+
+private fun parseIconOverrideProps(props: JsonObject): IconOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.icon)
+    return IconOverrideProps(
+        name = props.optionalString("name"),
+        color = props["color"]?.letObject(::parseThemePair),
+    )
+}
+
+// ----- icon registry -----
+
+/** Registry name -> vendored Material drawable. Unknown names return null
+ *  and render nothing, so a newer paywall never breaks an older app. */
+internal fun drawableNameFor(name: String): String? = when (name) {
+    "check", "x", "star", "lock", "shield", "sparkle",
+    "bolt", "gift", "clock", "infinity", "cloud", "arrow-right" ->
+        "rovenue_ic_" + name.replace('-', '_')
+    else -> null
 }
 
 /**
