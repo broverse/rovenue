@@ -41,6 +41,19 @@ export type PaywallRendererProps = {
    */
   now?: Date;
   /**
+   * The instant this paywall was FIRST shown to this user, anchoring a
+   * `durationSeconds` countdown's deadline (`endsAt` countdowns ignore this
+   * entirely — they carry their own absolute deadline). This package has no
+   * persistence layer of its own, so it cannot remember that instant across
+   * remounts; a host with real storage (the native SDKs) should look it up
+   * and supply it here. Absent, the countdown anchors to mount time instead
+   * — which means its deadline restarts every time the component remounts.
+   * That's fine for a demo or the dashboard's canvas preview; a real paywall
+   * needs the real value, because a timer that restarts on every open is not
+   * a deadline and users notice.
+   */
+  firstShownAt?: Date;
+  /**
    * Package -> {{variable}} substitution values, keyed by packageIdentifier.
    * Price fields aren't derivable from the minimal `RendererOffering`
    * contract alone (this package has no SDK/network access); the consumer

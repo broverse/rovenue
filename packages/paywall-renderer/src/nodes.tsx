@@ -83,6 +83,10 @@ export type RenderCtx = {
    *  countdown node ticks its OWN display forward from this anchor rather
    *  than re-reading the wall clock, so it stays driven by the injected value. */
   now: Date;
+  /** See `PaywallRendererProps.firstShownAt` — anchors a `durationSeconds`
+   *  countdown's deadline. Absent falls back to mount time (see
+   *  `useCountdownDeadline`). */
+  firstShownAt?: Date;
   priceView?: Record<string, PackageView>;
   /** Package -> intro-offer eligibility, keyed by packageIdentifier. Absent -> not eligible. */
   eligibility?: Record<string, boolean>;
@@ -654,16 +658,21 @@ function formatCountdown(remainingMs: number): string {
 
 /**
  * The countdown's deadline in epoch ms: `endsAt` directly, or
- * `durationSeconds` anchored to this instance's first render. This package
- * has no persistence layer to remember an actual "first shown to this user"
- * instant across app launches (that's a host-app/SDK concern) — `ctx.now` at
- * mount is the best available stand-in, captured once via `useState`'s lazy
- * initializer so a later prop/ctx change never re-anchors it mid-life. Null
- * when neither field is set; `COUNTDOWN_NO_DEADLINE` already flags that at
- * validate time, so this is a defensive fail-open, not the primary guard.
+ * `durationSeconds` anchored to `ctx.firstShownAt` when the host supplied
+ * it. This package has no persistence layer of its own to remember an
+ * actual "first shown to this user" instant across app launches — that's a
+ * host-app/SDK concern (see `PaywallRendererProps.firstShownAt`) — so
+ * WITHOUT it, this falls back to this instance's own mount time (captured
+ * once via `useState`'s lazy initializer). That fallback is a deliberate
+ * downgrade, not equivalent behaviour: a countdown anchored to mount
+ * restarts on every remount, which is not a deadline. Null when neither
+ * `endsAt` nor `durationSeconds` is set; `COUNTDOWN_NO_DEADLINE` already
+ * flags that at validate time, so this is a defensive fail-open, not the
+ * primary guard.
  */
 function useCountdownDeadline(node: CountdownNode, ctx: RenderCtx): number | null {
-  const [firstShownAt] = useState(() => ctx.now.getTime());
+  const [mountedAt] = useState(() => ctx.now.getTime());
+  const firstShownAt = ctx.firstShownAt?.getTime() ?? mountedAt;
   if (node.endsAt !== undefined) return new Date(node.endsAt).getTime();
   if (node.durationSeconds !== undefined) return firstShownAt + node.durationSeconds * 1000;
   return null;

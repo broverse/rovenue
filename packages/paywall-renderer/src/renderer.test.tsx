@@ -1280,8 +1280,11 @@ describe("trialLabel vectors (render-fixtures contract)", () => {
 });
 
 describe("stickyFooter and countdown nodes", () => {
-  /** A stickyFooter as the LAST direct root child — the case the root pins. */
-  function cfgWithFooter(): BuilderConfig {
+  /** A stickyFooter as the LAST direct root child — the case the root pins.
+   *  `rowCount` varies how many text children the footer itself carries, so
+   *  tests can compare a taller footer's measured height against a shorter
+   *  one's without pinning an exact pixel value. */
+  function cfgWithFooter(rowCount = 1): BuilderConfig {
     return baseConfig({
       root: {
         type: "stack",
@@ -1292,7 +1295,12 @@ describe("stickyFooter and countdown nodes", () => {
           {
             type: "stickyFooter",
             id: "sf",
-            children: [{ type: "text", id: "sf-text", key: "title", role: "body" }],
+            children: Array.from({ length: rowCount }, (_, i) => ({
+              type: "text",
+              id: `sf-text-${i}`,
+              key: "title",
+              role: "body",
+            })),
           },
         ],
       },
@@ -1373,5 +1381,57 @@ describe("stickyFooter and countdown nodes", () => {
       />,
     );
     expect(container.querySelector('[data-rov-node="c1"]')).toBeNull();
+  });
+
+  it("anchors a durationSeconds countdown to firstShownAt when the host supplies it", () => {
+    // deadline = firstShownAt(00:00:00) + 120s = 00:02:00; now = 00:01:00 -> 60s remaining.
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({ type: "countdown", id: "c1", durationSeconds: 120 })}
+        {...base}
+        firstShownAt={new Date("2027-01-01T00:00:00.000Z")}
+        now={new Date("2027-01-01T00:01:00.000Z")}
+      />,
+    );
+    expect(container.querySelector('[data-rov-node="c1"]')!.textContent).toContain("01:00");
+  });
+
+  // jsdom has no ResizeObserver and computes no real layout, so this stub
+  // reports each observed element's height as a function of its own
+  // descendant-element count — enough to make "a taller footer measures
+  // taller" meaningfully true without faking real layout math. Asserting
+  // the two padding values DIFFER (not exact pixels) keeps the test from
+  // pinning jsdom's stand-in behaviour rather than the renderer's contract.
+  class StubResizeObserver {
+    #callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.#callback = callback;
+    }
+    observe(target: Element) {
+      const height = target.querySelectorAll("*").length * 20;
+      this.#callback(
+        [{ target, contentRect: { height } } as unknown as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+
+  it("gives a taller footer more scrolled-content padding than a shorter one", () => {
+    vi.stubGlobal("ResizeObserver", StubResizeObserver);
+    try {
+      const { container: shortContainer } = render(<PaywallRenderer config={cfgWithFooter(1)} {...base} />);
+      const { container: tallContainer } = render(<PaywallRenderer config={cfgWithFooter(6)} {...base} />);
+      const shortPadding = parseFloat(
+        (shortContainer.querySelector("[data-rov-paywall-content]") as HTMLElement).style.paddingBottom,
+      );
+      const tallPadding = parseFloat(
+        (tallContainer.querySelector("[data-rov-paywall-content]") as HTMLElement).style.paddingBottom,
+      );
+      expect(tallPadding).toBeGreaterThan(shortPadding);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

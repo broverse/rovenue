@@ -1,15 +1,15 @@
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import type { PackageListNode, PaywallNode, StickyFooterNode } from "@rovenue/shared/paywall";
 import type { PaywallRendererProps, RendererOffering } from "./types";
 import { effectivePackageIds, renderNode, resolvePackageView, type RenderCtx } from "./nodes";
 import { resolveThemeColor } from "./styles";
 
 /**
- * Reserved clearance under the scrolled content so its last item never sits
- * underneath the pinned footer. This package renders inline styles only,
- * with no DOM measurement anywhere else, so this is a static estimate rather
- * than the footer's live height — generous enough to clear typical footer
- * content (a button row plus safe-area inset).
+ * Pre-measurement initial value for the scrolled content's bottom clearance,
+ * used only until the first `ResizeObserver` callback reports the footer's
+ * real height — a static guess is otherwise wrong whenever the footer is
+ * taller than it (a CTA plus fine print routinely is), leaving the last
+ * scrolled item unreachable, the same class of bug as no scrolling at all.
  */
 const STICKY_FOOTER_CONTENT_CLEARANCE_PX = 96;
 
@@ -84,6 +84,7 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
     locale,
     colorScheme,
     now,
+    firstShownAt: props.firstShownAt,
     priceView,
     eligibility,
     selectedPackageId,
@@ -104,6 +105,27 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
   // the footer itself is rendered and pinned separately below.
   const scrolledRoot: PaywallNode = { ...config.root, children: scrolledChildren };
   const footerElement = stickyFooter !== null ? renderNode(stickyFooter, ctx) : null;
+
+  const footerRef = useRef<HTMLDivElement>(null);
+  const [footerClearance, setFooterClearance] = useState<number>(STICKY_FOOTER_CONTENT_CLEARANCE_PX);
+
+  // Measure the footer's real height rather than guessing it: a static
+  // constant is wrong whenever the footer is taller than it, which a CTA
+  // plus fine print routinely is. Re-attaches only when the footer's
+  // presence/identity actually changes (not on every render, since
+  // `footerElement` is a fresh element each render). Environments without
+  // `ResizeObserver` (none in this codebase today, but defensive) keep the
+  // pre-measurement constant as their permanent value.
+  useEffect(() => {
+    const el = footerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setFooterClearance(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [stickyFooter?.id]);
 
   return (
     <div
@@ -128,7 +150,7 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
             // Reserve clearance for the pinned footer below, or the last
             // scrolled item ends up underneath it and unreachable — the
             // same class of bug as no scrolling at all, just subtler.
-            paddingBottom: footerElement !== null ? `${STICKY_FOOTER_CONTENT_CLEARANCE_PX}px` : undefined,
+            paddingBottom: footerElement !== null ? `${footerClearance}px` : undefined,
           }}
         >
           {renderNode(scrolledRoot, ctx)}
@@ -136,6 +158,7 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
       </div>
       {footerElement !== null ? (
         <div
+          ref={footerRef}
           data-rov-sticky-footer=""
           style={{
             flexShrink: 0,
