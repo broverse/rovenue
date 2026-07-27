@@ -8,6 +8,7 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { ok } from "../../lib/response";
+import { resolveOfferingPrices } from "../../services/offering-price-resolver";
 import type {
   DashboardOfferingRow,
   DashboardOfferingsListResponse,
@@ -183,6 +184,20 @@ export const offeringsDashboardRoute = new Hono()
     });
     purgeProjectCatalogCache(projectId);
     return c.json(ok({ offering: toWire(row) }));
+  })
+  .get("/:id/resolved", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+    const resolved = await resolveOfferingPrices(projectId, id);
+    if (!resolved) {
+      throw new HTTPException(404, { message: "Offering not found" });
+    }
+    return c.json(ok(resolved));
   })
   .get("/:id", async (c) => {
     const projectId = c.req.param("projectId");
