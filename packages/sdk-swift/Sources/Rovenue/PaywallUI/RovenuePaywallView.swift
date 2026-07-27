@@ -202,11 +202,15 @@ private let paywallVisibilityPlatform = "ios"
 /// `DIVIDER_DEFAULT_THICKNESS` / `DIVIDER_DEFAULT_INSET` / `ICON_DEFAULT_SIZE` /
 /// `DIVIDER_DEFAULT_COLOR` — device-independent pixels, hex colors. Keep
 /// `dividerDefaultColor` in sync with schema.ts's constant by hand; there is
-/// no codegen step sharing it across platforms.
-private let dividerDefaultThickness = 1.0
-private let dividerDefaultInset = 0.0
+/// no codegen step sharing it across platforms. NOT `private` (module-
+/// internal instead): `PaywallRenderSupportTests` compares these against
+/// `render-fixtures.json`'s generated `defaults` object by value (see
+/// schema.ts's `_comment` / the `defaults` key), which is only possible if
+/// the test target can see them through `@testable import Rovenue`.
+let dividerDefaultThickness = 1.0
+let dividerDefaultInset = 0.0
 private let iconDefaultSize = 24.0
-private let dividerDefaultColor = ThemePair(light: "#E5E7EB", dark: "#374151")
+let dividerDefaultColor = ThemePair(light: "#E5E7EB", dark: "#374151")
 
 /// Defaults mirroring packages/shared/src/paywall/schema.ts's
 /// `FEATURE_ROW_DEFAULT_ICON` / `FEATURE_ROW_EXCLUDED_ICON` /
@@ -215,14 +219,29 @@ private let dividerDefaultColor = ThemePair(light: "#E5E7EB", dark: "#374151")
 /// the connector is the same hairline as a divider) /
 /// `SOCIAL_PROOF_STAR_DEFAULT_COLOR` / `SOCIAL_PROOF_MAX_RATING`. Keep in
 /// sync with schema.ts by hand; there is no codegen step sharing these
-/// across platforms.
-private let featureRowDefaultIcon = "check"
-private let featureRowExcludedIcon = "x"
-private let featureRowDefaultIncluded = true
-private let timelineRowDefaultIcon = "clock"
-private let timelineConnectorDefaultColor = dividerDefaultColor
-private let socialProofStarDefaultColor = ThemePair(light: "#F59E0B", dark: "#FBBF24")
-private let socialProofMaxRating = 5
+/// across platforms. NOT `private` for the same reason as the divider
+/// defaults above — see that doc comment.
+let featureRowDefaultIcon = "check"
+let featureRowExcludedIcon = "x"
+let featureRowDefaultIncluded = true
+let timelineRowDefaultIcon = "clock"
+let timelineConnectorDefaultColor = dividerDefaultColor
+let socialProofStarDefaultColor = ThemePair(light: "#F59E0B", dark: "#FBBF24")
+let socialProofMaxRating = 5
+
+/// Layout spacing constants for the three row-carrying node types, in
+/// points — named rather than inlined (mirrors NodeViewFactory.kt's
+/// FEATURE_LIST_ROW_SPACING_DP/TIMELINE_MARK_GAP_DP/etc; no cross-platform
+/// pixel-parity contract exists across these, same caveat as the Kotlin
+/// constants' doc comment).
+private let featureListRowSpacing: CGFloat = 8
+private let featureRowIconGap: CGFloat = 8
+private let timelineMarkGap: CGFloat = 12
+private let timelineMarkColumnSpacing: CGFloat = 4
+private let timelineConnectorWidth: CGFloat = 2
+private let timelineTextColumnSpacing: CGFloat = 2
+private let socialProofRowGap: CGFloat = 4
+private let socialProofStarGap: CGFloat = 2
 
 /// A feature row's mark: its own `icon` if given, otherwise the excluded
 /// mark when `included` resolves to `false`, else the included default.
@@ -234,6 +253,18 @@ private let socialProofMaxRating = 5
 func resolvedFeatureRowIconName(_ row: FeatureRowProps) -> String {
     let included = row.included ?? featureRowDefaultIncluded
     return row.icon ?? (included ? featureRowDefaultIcon : featureRowExcludedIcon)
+}
+
+/// Whether the star at `index` (0-based) is filled for `rating`: the first
+/// `floor(rating)` stars, so a 4.5 rating fills indices 0-3 (4 stars), not
+/// 0-4. Exposed (not `private`), and extracted out of `SocialProofView`'s
+/// body, for the same reason as `resolvedFeatureRowIconName` above — a
+/// SwiftUI view's body isn't inspectable without a view-testing dependency
+/// this package doesn't carry, so the fractional-rating rule needs a pure,
+/// directly-testable entry point. Mirrors nodes.tsx's `renderSocialProof`
+/// (`Math.floor`) and NodeViewFactory.kt's `socialProofStarFilled`.
+func socialProofStarFilled(index: Int, rating: Double) -> Bool {
+    Double(index) < rating.rounded(.down)
 }
 
 struct BuilderNodeView: View {
@@ -593,7 +624,7 @@ struct FeatureListView: View {
     let cell: CellScope?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: featureListRowSpacing) {
             ForEach(Array(props.rows.enumerated()), id: \.offset) { entry in
                 row(entry.element)
             }
@@ -603,7 +634,7 @@ struct FeatureListView: View {
     @ViewBuilder
     private func row(_ row: FeatureRowProps) -> some View {
         let iconName = resolvedFeatureRowIconName(row)
-        HStack(spacing: 8) {
+        HStack(spacing: featureRowIconGap) {
             if let symbol = sfSymbolName(for: iconName) {
                 Image(systemName: symbol)
                     .resizable()
@@ -646,8 +677,8 @@ struct TimelineView: View {
 
     @ViewBuilder
     private func row(_ row: TimelineRowProps, isLast: Bool) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 4) {
+        HStack(alignment: .top, spacing: timelineMarkGap) {
+            VStack(spacing: timelineMarkColumnSpacing) {
                 if let symbol = sfSymbolName(for: row.icon ?? timelineRowDefaultIcon) {
                     Image(systemName: symbol)
                         .resizable()
@@ -657,10 +688,10 @@ struct TimelineView: View {
                 if !isLast {
                     Rectangle()
                         .fill(connectorColor)
-                        .frame(width: 2)
+                        .frame(width: timelineConnectorWidth)
                 }
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: timelineTextColumnSpacing) {
                 Text(ctx.label(row.labelKey, cell: cell))
                 if let captionKey = row.captionKey {
                     Text(ctx.label(captionKey, cell: cell))
@@ -689,11 +720,11 @@ struct SocialProofView: View {
     let cell: CellScope?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: socialProofRowGap) {
             if let rating = props.rating {
-                HStack(spacing: 2) {
+                HStack(spacing: socialProofStarGap) {
                     ForEach(0..<socialProofMaxRating, id: \.self) { index in
-                        Image(systemName: Double(index) < rating ? "star.fill" : "star")
+                        Image(systemName: socialProofStarFilled(index: index, rating: rating) ? "star.fill" : "star")
                             .resizable()
                             .scaledToFit()
                             .frame(width: CGFloat(iconDefaultSize), height: CGFloat(iconDefaultSize))

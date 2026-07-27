@@ -1100,12 +1100,33 @@ describe("featureList, timeline and socialProof nodes", () => {
     expect(container.querySelector('[data-rov-row] [data-rov-icon]')?.getAttribute("data-rov-icon")).toBe("star");
   });
 
-  it("renders a timeline caption when present and omits it otherwise", () => {
+  it("renders a timeline caption's resolved text when present and omits it otherwise", () => {
+    const { container } = render(<PaywallRenderer config={baseConfig({
+      localizations: { en: { t_a: "Step A", t_a_cap: "Caption A", t_b: "Step B" } },
+      root: {
+        type: "stack", id: "root", axis: "v",
+        children: [{
+          type: "timeline", id: "t1",
+          rows: [{ labelKey: "t_a", captionKey: "t_a_cap" }, { labelKey: "t_b" }],
+        }],
+      },
+    })} {...base} />);
+    const captions = container.querySelectorAll('[data-rov-caption]');
+    expect(captions).toHaveLength(1);
+    expect(captions[0]).toHaveTextContent("Caption A");
+  });
+
+  // Regression for the bug this test used to hide: the caption span was
+  // previously guarded on `captionKey !== undefined` alone, so a captionKey
+  // that resolves to nothing (missing from every locale) still emitted an
+  // empty `<span data-rov-caption>` occupying a line box. It must be
+  // guarded the same way as the label, on the RESOLVED text.
+  it("omits the caption element when captionKey is present but unresolvable", () => {
     const { container } = render(<PaywallRenderer config={cfg({
       type: "timeline", id: "t1",
-      rows: [{ labelKey: "t_a", captionKey: "t_a_cap" }, { labelKey: "t_b" }],
+      rows: [{ labelKey: "t_a", captionKey: "does_not_exist_anywhere" }],
     })} {...base} />);
-    expect(container.querySelectorAll('[data-rov-caption]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-rov-caption]')).toHaveLength(0);
   });
 
   it("renders the rating as stars, and none when rating is absent", () => {
@@ -1115,6 +1136,20 @@ describe("featureList, timeline and socialProof nodes", () => {
     expect(withRating.container.querySelectorAll('[data-rov-star]').length).toBe(SOCIAL_PROOF_MAX_RATING);
     const without = render(<PaywallRenderer config={cfg({ type: "socialProof", id: "s2", labelKey: "s" })} {...base} />);
     expect(without.container.querySelectorAll('[data-rov-star]')).toHaveLength(0);
+  });
+
+  // A fractional rating fills the FLOOR, not a round-up: 4.5 must render
+  // exactly 4 filled stars, not 5 — showing 4.5 identically to a full 5.0
+  // overstates the rating, the wrong direction for social proof. No test
+  // anywhere exercised a fractional rating before this.
+  it("fills only floor(rating) stars for a fractional rating", () => {
+    const { container } = render(<PaywallRenderer config={cfg({
+      type: "socialProof", id: "s1", labelKey: "s", rating: 4.5,
+    })} {...base} />);
+    const stars = Array.from(container.querySelectorAll('[data-rov-star] svg'));
+    expect(stars).toHaveLength(SOCIAL_PROOF_MAX_RATING);
+    const filled = stars.filter((svg) => svg.getAttribute("fill") !== "none");
+    expect(filled).toHaveLength(4);
   });
 
   // Fail open, exactly as an icon node does: the requested name still shows

@@ -161,4 +161,51 @@ final class PaywallRenderSupportTests: XCTestCase {
         let node = BuilderNode.text(TextProps(id: "t1", key: "k", role: .body))
         XCTAssertTrue(try view(node).isVisible)
     }
+
+    // MARK: - socialProofStarFilled (fractional rating)
+    //
+    // No test anywhere exercised a fractional rating before this fix wave —
+    // `Double(index) < rating` (the pre-fix code) filled index 4 too for a
+    // 4.5 rating (4 < 4.5), overstating a fractional rating as a full one.
+
+    func test_socialProofStarFilled_fillsOnlyTheFloorOfAFractionalRating() {
+        XCTAssertTrue(socialProofStarFilled(index: 0, rating: 4.5))
+        XCTAssertTrue(socialProofStarFilled(index: 3, rating: 4.5))
+        XCTAssertFalse(socialProofStarFilled(index: 4, rating: 4.5), "4.5 must fill 4 stars, not 5")
+    }
+
+    func test_socialProofStarFilled_fillsExactlyUpToAWholeRating() {
+        XCTAssertTrue(socialProofStarFilled(index: 3, rating: 4.0))
+        XCTAssertFalse(socialProofStarFilled(index: 4, rating: 4.0))
+    }
+
+    // MARK: - cross-platform default constants (mutation-checked)
+    //
+    // Compares this SDK's hand-mirrored defaults against
+    // render-fixtures.json's `defaults` object (generated straight off
+    // schema.ts's exported constants — see that file's generation note) BY
+    // VALUE, not just "both exist". Mutation-checked in the task report:
+    // flipping FEATURE_ROW_DEFAULT_ICON in schema.ts without updating this
+    // SDK fails this assertion by value.
+
+    func test_nativeDefaultsMatchTheSharedFixtureByValue() throws {
+        let fixture = RenderFixtures.load()
+        let defaults = try XCTUnwrap(fixture["defaults"] as? [String: Any])
+
+        func themePair(_ key: String) throws -> ThemePair {
+            let dict = try XCTUnwrap(defaults[key] as? [String: Any])
+            return ThemePair(light: try XCTUnwrap(dict["light"] as? String), dark: dict["dark"] as? String)
+        }
+
+        XCTAssertEqual(dividerDefaultThickness, try XCTUnwrap(defaults["DIVIDER_DEFAULT_THICKNESS"] as? Double))
+        XCTAssertEqual(dividerDefaultInset, try XCTUnwrap(defaults["DIVIDER_DEFAULT_INSET"] as? Double))
+        XCTAssertEqual(dividerDefaultColor, try themePair("DIVIDER_DEFAULT_COLOR"))
+        XCTAssertEqual(featureRowDefaultIcon, try XCTUnwrap(defaults["FEATURE_ROW_DEFAULT_ICON"] as? String))
+        XCTAssertEqual(featureRowExcludedIcon, try XCTUnwrap(defaults["FEATURE_ROW_EXCLUDED_ICON"] as? String))
+        XCTAssertEqual(featureRowDefaultIncluded, try XCTUnwrap(defaults["FEATURE_ROW_DEFAULT_INCLUDED"] as? Bool))
+        XCTAssertEqual(timelineRowDefaultIcon, try XCTUnwrap(defaults["TIMELINE_ROW_DEFAULT_ICON"] as? String))
+        XCTAssertEqual(timelineConnectorDefaultColor, try themePair("TIMELINE_CONNECTOR_DEFAULT_COLOR"))
+        XCTAssertEqual(socialProofStarDefaultColor, try themePair("SOCIAL_PROOF_STAR_DEFAULT_COLOR"))
+        XCTAssertEqual(socialProofMaxRating, try XCTUnwrap(defaults["SOCIAL_PROOF_MAX_RATING"] as? Int))
+    }
 }

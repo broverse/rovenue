@@ -482,6 +482,14 @@ function renderIcon(node: IconNode, ctx: RenderCtx): ReactElement {
 }
 
 const ROW_GAP = "8px";
+// Named per the same convention as ROW_GAP above — Kotlin's NodeViewFactory.kt
+// already names its row-carrying-node layout constants (FEATURE_LIST_ROW_
+// SPACING_DP, TIMELINE_MARK_GAP_DP, etc.); these mirror that on web instead of
+// inlining "12px"/"4px"/"2px" literals.
+const TIMELINE_MARK_GAP = "12px";
+const TIMELINE_CONNECTOR_WIDTH = "2px";
+const SOCIAL_PROOF_ROW_GAP = "4px";
+const SOCIAL_PROOF_STAR_GAP = "2px";
 
 /** A feature row's mark: the row's own `icon` if given; otherwise the
  * excluded mark when `included` is explicitly false, else the included
@@ -537,23 +545,25 @@ function renderTimeline(node: TimelineNode, ctx: RenderCtx): ReactElement {
         const Cmp = ICON_COMPONENT[row.icon ?? TIMELINE_ROW_DEFAULT_ICON];
         const label = resolveLabel(ctx, row.labelKey);
         const isLast = index === node.rows.length - 1;
+        // Guarded the SAME way as `label` two lines below: on the RESOLVED
+        // text, not merely on `captionKey !== undefined`. A present-but-
+        // unresolvable caption key (e.g. missing from every locale) used to
+        // still emit an empty `<span data-rov-caption>`, occupying a line
+        // box for nothing.
+        const caption = row.captionKey !== undefined ? resolveLabel(ctx, row.captionKey) : null;
         return (
-          <div key={index} data-rov-row style={{ display: "flex", gap: "12px" }}>
+          <div key={index} data-rov-row style={{ display: "flex", gap: TIMELINE_MARK_GAP }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
               <span style={{ display: "inline-flex", flexShrink: 0, color: rowTextColor }}>
                 {Cmp ? <Cmp size={ICON_DEFAULT_SIZE} /> : null}
               </span>
               {!isLast ? (
-                <div style={{ width: "2px", flexGrow: 1, backgroundColor: connectorColor }} />
+                <div style={{ width: TIMELINE_CONNECTOR_WIDTH, flexGrow: 1, backgroundColor: connectorColor }} />
               ) : null}
             </div>
             <div style={{ display: "flex", flexDirection: "column", color: rowTextColor }}>
               {label !== null ? <span>{label}</span> : null}
-              {row.captionKey !== undefined ? (
-                <span data-rov-caption style={{ fontSize: "12px" }}>
-                  {resolveLabel(ctx, row.captionKey)}
-                </span>
-              ) : null}
+              {caption !== null ? <span data-rov-caption style={ROLE_STYLE.caption}>{caption}</span> : null}
             </div>
           </div>
         );
@@ -564,24 +574,27 @@ function renderTimeline(node: TimelineNode, ctx: RenderCtx): ReactElement {
 
 /** `rating` absent renders no stars at all — not zero filled ones — so a
  * paywall author who hasn't set a rating doesn't ship an empty row of
- * outlines. When present, always draws `SOCIAL_PROOF_MAX_RATING` stars,
- * filled up to `rating`. `starColor` absent falls back to the shared
- * cross-platform default, same pattern as the timeline connector. */
+ * outlines. When present, always draws `SOCIAL_PROOF_MAX_RATING` stars, the
+ * first `floor(rating)` filled — a 4.5 rating fills 4 stars, not 5: showing
+ * a fractional rating identically to the next whole one overstates it, the
+ * wrong direction for social proof. `starColor` absent falls back to the
+ * shared cross-platform default, same pattern as the timeline connector. */
 function renderSocialProof(node: SocialProofNode, ctx: RenderCtx): ReactElement {
   const label = resolveLabel(ctx, node.labelKey);
   const starColor =
     resolveThemeColor(node.starColor, ctx.colorScheme) ??
     resolveThemeColor(SOCIAL_PROOF_STAR_DEFAULT_COLOR, ctx.colorScheme);
+  const filledCount = node.rating !== undefined ? Math.floor(node.rating) : 0;
   return (
-    <div data-rov-node={node.id} style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+    <div data-rov-node={node.id} style={{ display: "flex", flexDirection: "column", gap: SOCIAL_PROOF_ROW_GAP }}>
       {node.rating !== undefined ? (
-        <div style={{ display: "flex", gap: "2px" }}>
+        <div style={{ display: "flex", gap: SOCIAL_PROOF_STAR_GAP }}>
           {Array.from({ length: SOCIAL_PROOF_MAX_RATING }, (_, index) => (
             <span key={index} data-rov-star style={{ display: "inline-flex" }}>
               <Star
                 size={ICON_DEFAULT_SIZE}
                 color={starColor}
-                fill={index < node.rating! ? starColor : "none"}
+                fill={index < filledCount ? starColor : "none"}
               />
             </span>
           ))}

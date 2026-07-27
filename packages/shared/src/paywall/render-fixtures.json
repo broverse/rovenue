@@ -687,6 +687,209 @@
           ]
         }
       }
+    },
+    {
+      "name": "divider: explicit color/thickness/inset, and a bare default-styled hairline",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "divider",
+              "id": "d_custom",
+              "color": {
+                "light": "#FF0000",
+                "dark": "#AA0000"
+              },
+              "thickness": 4,
+              "inset": 8
+            },
+            {
+              "type": "divider",
+              "id": "d_default"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "icon: explicit size/color, and a bare default-size uncolored icon",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "h",
+          "children": [
+            {
+              "type": "icon",
+              "id": "i_custom",
+              "name": "star",
+              "size": 32,
+              "color": {
+                "light": "#F59E0B",
+                "dark": "#FBBF24"
+              }
+            },
+            {
+              "type": "icon",
+              "id": "i_default",
+              "name": "check"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "featureList: multi-row with a mix of included values",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "f1": "Unlimited swipes",
+            "f2": "No ads",
+            "f3": "Priority support"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "featureList",
+              "id": "fl_1",
+              "iconColor": {
+                "light": "#111111",
+                "dark": "#EEEEEE"
+              },
+              "rows": [
+                {
+                  "labelKey": "f1",
+                  "included": true
+                },
+                {
+                  "labelKey": "f2",
+                  "included": false
+                },
+                {
+                  "labelKey": "f3"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "timeline: rows with and without captions",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t1": "Day 0",
+            "t1c": "Start your trial",
+            "t2": "Day 5",
+            "t3": "Day 7",
+            "t3c": "Trial ends"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "timeline",
+              "id": "tl_1",
+              "connectorColor": {
+                "light": "#E5E7EB",
+                "dark": "#374151"
+              },
+              "rows": [
+                {
+                  "labelKey": "t1",
+                  "captionKey": "t1c",
+                  "icon": "gift"
+                },
+                {
+                  "labelKey": "t2"
+                },
+                {
+                  "labelKey": "t3",
+                  "captionKey": "t3c"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "socialProof: with a fractional rating",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "sp1": "Loved by 10,000+ users"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "socialProof",
+              "id": "sp_1",
+              "labelKey": "sp1",
+              "rating": 4.5,
+              "starColor": {
+                "light": "#F59E0B",
+                "dark": "#FBBF24"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "socialProof: without a rating (no stars)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "sp2": "Trusted worldwide"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "socialProof",
+              "id": "sp_2",
+              "labelKey": "sp2"
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [
@@ -1452,5 +1655,26 @@
       "appVersion": "1.0.0",
       "expected": true
     }
-  ]
+  ],
+  "defaults": {
+    "DIVIDER_DEFAULT_THICKNESS": 1,
+    "DIVIDER_DEFAULT_INSET": 0,
+    "DIVIDER_DEFAULT_COLOR": {
+      "light": "#E5E7EB",
+      "dark": "#374151"
+    },
+    "FEATURE_ROW_DEFAULT_ICON": "check",
+    "FEATURE_ROW_EXCLUDED_ICON": "x",
+    "FEATURE_ROW_DEFAULT_INCLUDED": true,
+    "TIMELINE_ROW_DEFAULT_ICON": "clock",
+    "TIMELINE_CONNECTOR_DEFAULT_COLOR": {
+      "light": "#E5E7EB",
+      "dark": "#374151"
+    },
+    "SOCIAL_PROOF_STAR_DEFAULT_COLOR": {
+      "light": "#F59E0B",
+      "dark": "#FBBF24"
+    },
+    "SOCIAL_PROOF_MAX_RATING": 5
+  }
 }

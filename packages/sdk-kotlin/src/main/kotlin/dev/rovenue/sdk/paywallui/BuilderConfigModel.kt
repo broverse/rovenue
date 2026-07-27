@@ -710,11 +710,20 @@ private fun parseTimelineRow(obj: JsonObject): TimelineRow = TimelineRow(
  *
  * Unknown names return null and render nothing, so a newer paywall never
  * breaks an older app.
+ *
+ * `"star_border"` is the one entry NOT in packages/shared/src/paywall/
+ * icon-registry.json — it's not an author-facing icon name (a paywall
+ * config can never reference it via an `icon` node or a `featureList`/
+ * `timeline` row), only NodeViewFactory.kt's `buildSocialProof` resolves it
+ * internally, to draw an unfilled star as a distinct outline glyph rather
+ * than the filled star at reduced alpha. Vendored through the same
+ * fetch-path convention as the other twelve (see res/drawable/README.md).
  */
 internal fun drawableResFor(name: String): Int? = when (name) {
     "check" -> R.drawable.rovenue_ic_check
     "x" -> R.drawable.rovenue_ic_x
     "star" -> R.drawable.rovenue_ic_star
+    "star_border" -> R.drawable.rovenue_ic_star_border
     "lock" -> R.drawable.rovenue_ic_lock
     "shield" -> R.drawable.rovenue_ic_shield
     "sparkle" -> R.drawable.rovenue_ic_sparkle

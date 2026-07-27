@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { builderConfigSchema } from "./schema";
+import { builderConfigSchema, OVERRIDABLE_PROP_KEYS } from "./schema";
 import { resolveText } from "./validate";
 import { isNodeVisible, type NodeVisibility, type VisibilityPlatform } from "./visibility";
 import { resolveVariables, type PackageView } from "./variables";
-import type { BuilderConfig } from "./schema";
+import type { BuilderConfig, PaywallNode } from "./schema";
 
 // =============================================================
 // render-fixtures.json — the cross-platform contract file.
@@ -52,6 +52,11 @@ interface Fixture {
     appVersion: string | null;
     expected: boolean;
   }>;
+  // The cross-platform defaults Swift/Kotlin hand-mirror (see schema.ts's
+  // DIVIDER_DEFAULT_*/FEATURE_ROW_*/TIMELINE_*/SOCIAL_PROOF_* constants).
+  // Generated from those exports, not retyped — see the generation note
+  // near the bottom of this file.
+  defaults: Record<string, unknown>;
 }
 
 const fixture: Fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
@@ -125,5 +130,65 @@ describe("render-fixtures contract", () => {
         );
       });
     }
+  });
+
+  // Guards the fixture itself against the exact gap a fix-wave review
+  // found: featureList/timeline/socialProof (and, it turned out, divider/
+  // icon) had ZERO coverage in accept/acceptLenient despite native
+  // renderers shipping against them. `nodeTypes` is derived from
+  // `OVERRIDABLE_PROP_KEYS`'s own keys rather than hand-written here — that
+  // Record is typed `Record<PaywallNode["type"], readonly string[]>`, so
+  // TypeScript itself guarantees its keys are exactly the PaywallNode union
+  // members (a missing/extra key fails `schema.ts`'s own compile). A
+  // hand-written list in the test would have quietly reproduced the same
+  // bug this test exists to catch.
+  describe("node-type union coverage", () => {
+    const nodeTypes = Object.keys(OVERRIDABLE_PROP_KEYS) as Array<PaywallNode["type"]>;
+
+    function collectNodeTypes(value: unknown, into: Set<string>): void {
+      if (value === null || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        for (const item of value) collectNodeTypes(item, into);
+        return;
+      }
+      const obj = value as Record<string, unknown>;
+      if (typeof obj.type === "string") into.add(obj.type);
+      for (const key of Object.keys(obj)) collectNodeTypes(obj[key], into);
+    }
+
+    it("declares at least one PaywallNode member", () => {
+      expect(nodeTypes.length).toBeGreaterThan(0);
+    });
+
+    it("every PaywallNode type appears somewhere in accept or acceptLenient", () => {
+      const present = new Set<string>();
+      for (const entry of [...fixture.accept, ...fixture.acceptLenient]) {
+        collectNodeTypes(entry.config, present);
+      }
+      const missing = nodeTypes.filter((t) => !present.has(t));
+      expect(missing, `node types missing from the fixture: ${missing.join(", ")}`).toEqual([]);
+    });
+  });
+
+  // The eight (ten-value) cross-platform defaults Swift/Kotlin hand-mirror.
+  // This only pins the TS side carries the right values through to the
+  // fixture — see BuilderConfigModelTests.swift / NodeViewFactoryTest.kt for
+  // the native mutation-checked comparisons against THIS object by value.
+  describe("defaults", () => {
+    it("matches schema.ts's exported constants", async () => {
+      const schema = await import("./schema");
+      expect(fixture.defaults).toEqual({
+        DIVIDER_DEFAULT_THICKNESS: schema.DIVIDER_DEFAULT_THICKNESS,
+        DIVIDER_DEFAULT_INSET: schema.DIVIDER_DEFAULT_INSET,
+        DIVIDER_DEFAULT_COLOR: schema.DIVIDER_DEFAULT_COLOR,
+        FEATURE_ROW_DEFAULT_ICON: schema.FEATURE_ROW_DEFAULT_ICON,
+        FEATURE_ROW_EXCLUDED_ICON: schema.FEATURE_ROW_EXCLUDED_ICON,
+        FEATURE_ROW_DEFAULT_INCLUDED: schema.FEATURE_ROW_DEFAULT_INCLUDED,
+        TIMELINE_ROW_DEFAULT_ICON: schema.TIMELINE_ROW_DEFAULT_ICON,
+        TIMELINE_CONNECTOR_DEFAULT_COLOR: schema.TIMELINE_CONNECTOR_DEFAULT_COLOR,
+        SOCIAL_PROOF_STAR_DEFAULT_COLOR: schema.SOCIAL_PROOF_STAR_DEFAULT_COLOR,
+        SOCIAL_PROOF_MAX_RATING: schema.SOCIAL_PROOF_MAX_RATING,
+      });
+    });
   });
 });

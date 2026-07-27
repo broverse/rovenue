@@ -4,6 +4,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -41,9 +43,11 @@ class BuilderConfigModelTest {
     private fun name(entry: JsonObject): String = entry["name"]!!.jsonPrimitive.content
 
     // ---- divider / icon nodes ---------------------------------------------
-    // Not driven off render-fixtures.json (Tasks 1-2's shared fixture predates
-    // these two node types) — hand-built configs via the same rootWith/
-    // firstChild pattern VisibilityDecodeTest.kt uses for the same reason.
+    // Both types now have dedicated render-fixtures.json accept entries (they
+    // used to predate the fixture, same gap featureList/timeline/socialProof
+    // had — see the node-type union coverage test in render-fixtures.test.ts).
+    // `rootWith`/`firstChild` stay for the one case that genuinely isn't part
+    // of the cross-platform contract: an UNKNOWN icon name still decoding.
 
     private fun rootWith(child: String): String =
         """{"formatVersion":2,"defaultLocale":"en","localizations":{"en":{"k":"x"}},
@@ -57,15 +61,37 @@ class BuilderConfigModelTest {
 
     @Test
     fun decodesDivider() {
-        val node = firstChild(rootWith("""{"type":"divider","id":"d1","thickness":2,"inset":8}"""))
-        assertTrue(node is BuilderNode.Divider)
-        assertEquals(2.0, (node as BuilderNode.Divider).thickness)
+        val entry = entryNamed("accept", "divider: explicit color/thickness/inset, and a bare default-styled hairline")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val custom = config.root.children[0] as BuilderNode.Divider
+        assertEquals(4.0, custom.thickness)
+        assertEquals(8.0, custom.inset)
+        assertEquals("#FF0000", custom.color?.light)
+        val default = config.root.children[1] as BuilderNode.Divider
+        assertNull(default.thickness)
+        assertNull(default.color)
     }
 
     @Test
-    fun decodesIconIncludingUnknownNames() {
-        val known = firstChild(rootWith("""{"type":"icon","id":"i1","name":"check"}"""))
-        assertEquals("check", (known as BuilderNode.Icon).name)
+    fun decodesIconSizeAndColor() {
+        val entry = entryNamed("accept", "icon: explicit size/color, and a bare default-size uncolored icon")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val custom = config.root.children[0] as BuilderNode.Icon
+        assertEquals("star", custom.name)
+        assertEquals(32.0, custom.size)
+        assertEquals("#F59E0B", custom.color?.light)
+        val default = config.root.children[1] as BuilderNode.Icon
+        assertEquals("check", default.name)
+        assertNull(default.size)
+        assertNull(default.color)
+    }
+
+    @Test
+    fun decodesIconWithAnUnknownNameWithoutThrowing() {
+        // Not part of the cross-platform fixture contract: `icon.name` is a
+        // free string by design (see BuilderConfigModel.kt's Icon doc), so a
+        // fabricated/future name must still decode -- resolution/fail-open
+        // happens later, at render time (`drawableResFor`).
         val unknown = firstChild(rootWith("""{"type":"icon","id":"i2","name":"not-real"}"""))
         assertEquals("not-real", (unknown as BuilderNode.Icon).name)
     }
@@ -92,35 +118,55 @@ class BuilderConfigModelTest {
         }
     }
 
+    // `star_border` is deliberately NOT in icon-registry.json (see
+    // BuilderConfigModel.kt's drawableResFor doc) — it's not an author-facing
+    // icon name, only buildSocialProof's internal unfilled-star mark. Same
+    // disk-existence check as the loop above, just outside the registry.
+    @Test
+    fun starBorderDrawableIsVendoredForTheUnfilledSocialProofStar() {
+        assertNotNull(drawableResFor("star_border"))
+        val drawableFile = java.io.File("src/main/res/drawable/rovenue_ic_star_border.xml")
+            .takeIf { it.exists() }
+            ?: java.io.File("packages/sdk-kotlin/src/main/res/drawable/rovenue_ic_star_border.xml")
+        assertTrue(drawableFile.exists(), "no vendored drawable file for star_border at ${drawableFile.path}")
+    }
+
     // ---- featureList / timeline / socialProof nodes -----------------------
-    // Same hand-built rootWith/firstChild pattern as divider/icon above —
-    // Tasks 1-2's shared fixture predates these three Wave-B node types too.
+    // Driven off render-fixtures.json now — these three used to predate the
+    // shared fixture (same gap divider/icon had above).
 
     @Test
     fun decodesFeatureListRows() {
-        val node = firstChild(
-            rootWith("""{"type":"featureList","id":"f1","rows":[{"labelKey":"a"},{"labelKey":"b","included":false}]}"""),
-        )
-        assertTrue(node is BuilderNode.FeatureList)
-        val p = node as BuilderNode.FeatureList
-        assertEquals(2, p.rows.size)
+        val entry = entryNamed("accept", "featureList: multi-row with a mix of included values")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val p = config.root.children[0] as BuilderNode.FeatureList
+        assertEquals(3, p.rows.size)
+        assertEquals(true, p.rows[0].included)
         assertEquals(false, p.rows[1].included)
+        assertNull(p.rows[2].included)
     }
 
     @Test
     fun decodesTimelineCaptions() {
-        val node = firstChild(
-            rootWith("""{"type":"timeline","id":"t1","rows":[{"labelKey":"a","captionKey":"ac"},{"labelKey":"b"}]}"""),
-        )
-        val p = node as BuilderNode.Timeline
-        assertEquals("ac", p.rows[0].captionKey)
+        val entry = entryNamed("accept", "timeline: rows with and without captions")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val p = config.root.children[0] as BuilderNode.Timeline
+        assertEquals("t1c", p.rows[0].captionKey)
         assertNull(p.rows[1].captionKey)
+        assertEquals("t3c", p.rows[2].captionKey)
     }
 
     @Test
     fun decodesSocialProofRating() {
-        val node = firstChild(rootWith("""{"type":"socialProof","id":"s1","labelKey":"s","rating":4.5}"""))
-        assertEquals(4.5, (node as BuilderNode.SocialProof).rating)
+        val withRating = entryNamed("accept", "socialProof: with a fractional rating")
+        val configWithRating = decodeBuilderConfig(configJson(withRating))!!
+        val withP = configWithRating.root.children[0] as BuilderNode.SocialProof
+        assertEquals(4.5, withP.rating)
+
+        val withoutRating = entryNamed("accept", "socialProof: without a rating (no stars)")
+        val configWithoutRating = decodeBuilderConfig(configJson(withoutRating))!!
+        val withoutP = configWithoutRating.root.children[0] as BuilderNode.SocialProof
+        assertNull(withoutP.rating)
     }
 
     /**
@@ -374,6 +420,46 @@ class BuilderConfigModelTest {
                 if (expectedEl is JsonPrimitive && expectedEl.isString) expectedEl.content else null
             assertEquals(expected, resolveText(config, locale, key), "$locale/$key")
         }
+    }
+
+    // ---- cross-platform default constants ---------------------------------
+
+    private fun themePairFrom(el: JsonObject): ThemePair =
+        ThemePair(
+            light = el["light"]!!.jsonPrimitive.content,
+            dark = (el["dark"] as? JsonPrimitive)?.content,
+        )
+
+    /**
+     * Compares NodeViewFactory.kt's hand-mirrored defaults against
+     * render-fixtures.json's `defaults` object (generated straight off
+     * schema.ts's exported constants — see that file's generation note) BY
+     * VALUE. A sync test that only checks "both exist" can never fail when
+     * schema.ts's value changes and a native forgets to follow — this
+     * compares the actual values, so editing the shared side without
+     * touching NodeViewFactory.kt fails THIS test (mutation-checked in the
+     * task report: flipping FEATURE_ROW_DEFAULT_ICON in schema.ts without
+     * updating Kotlin fails this assertion by value).
+     */
+    @Test
+    fun `native defaults match the shared fixture by value`() {
+        val defaults = fixture["defaults"]!!.jsonObject
+        assertEquals(DIVIDER_DEFAULT_THICKNESS_DP, defaults["DIVIDER_DEFAULT_THICKNESS"]!!.jsonPrimitive.double)
+        assertEquals(DIVIDER_DEFAULT_INSET_DP, defaults["DIVIDER_DEFAULT_INSET"]!!.jsonPrimitive.double)
+        assertEquals(DIVIDER_DEFAULT_COLOR, themePairFrom(defaults["DIVIDER_DEFAULT_COLOR"]!!.jsonObject))
+        assertEquals(FEATURE_ROW_DEFAULT_ICON, defaults["FEATURE_ROW_DEFAULT_ICON"]!!.jsonPrimitive.content)
+        assertEquals(FEATURE_ROW_EXCLUDED_ICON, defaults["FEATURE_ROW_EXCLUDED_ICON"]!!.jsonPrimitive.content)
+        assertEquals(FEATURE_ROW_DEFAULT_INCLUDED, defaults["FEATURE_ROW_DEFAULT_INCLUDED"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(TIMELINE_ROW_DEFAULT_ICON, defaults["TIMELINE_ROW_DEFAULT_ICON"]!!.jsonPrimitive.content)
+        assertEquals(
+            TIMELINE_CONNECTOR_DEFAULT_COLOR,
+            themePairFrom(defaults["TIMELINE_CONNECTOR_DEFAULT_COLOR"]!!.jsonObject),
+        )
+        assertEquals(
+            SOCIAL_PROOF_STAR_DEFAULT_COLOR,
+            themePairFrom(defaults["SOCIAL_PROOF_STAR_DEFAULT_COLOR"]!!.jsonObject),
+        )
+        assertEquals(SOCIAL_PROOF_MAX_RATING, defaults["SOCIAL_PROOF_MAX_RATING"]!!.jsonPrimitive.int)
     }
 
     private fun containsUnknown(node: BuilderNode): Boolean = when (node) {

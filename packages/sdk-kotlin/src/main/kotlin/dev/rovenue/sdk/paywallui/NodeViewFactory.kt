@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 // =============================================================
@@ -310,10 +311,16 @@ private const val UNSELECTED_STROKE_COLOR = 0x59808080 // translucent gray
 // and the web renderer's un-set `color` -> CSS inheritance. `android:tint`
 // was stripped from every vendored drawable (see res/drawable/README.md),
 // so nothing supplies a colour unless the node has one or we tint it here.
-private const val DIVIDER_DEFAULT_THICKNESS_DP = 1.0
-private const val DIVIDER_DEFAULT_INSET_DP = 0.0
+//
+// NOT `private` (module-internal instead) for the ones a test needs to
+// compare against packages/shared/src/paywall/render-fixtures.json's
+// generated `defaults` object BY VALUE (see NodeViewFactoryTest's
+// `nativeDefaultsMatchTheSharedFixture` — Kotlin's `private` at file scope
+// is file-local even within the same module, unlike `internal`).
+internal const val DIVIDER_DEFAULT_THICKNESS_DP = 1.0
+internal const val DIVIDER_DEFAULT_INSET_DP = 0.0
 private const val ICON_DEFAULT_SIZE_DP = 24.0
-private val DIVIDER_DEFAULT_COLOR = ThemePair(light = "#E5E7EB", dark = "#374151")
+internal val DIVIDER_DEFAULT_COLOR = ThemePair(light = "#E5E7EB", dark = "#374151")
 
 // Defaults mirroring packages/shared/src/paywall/schema.ts's
 // FEATURE_ROW_DEFAULT_ICON / FEATURE_ROW_EXCLUDED_ICON /
@@ -321,16 +328,31 @@ private val DIVIDER_DEFAULT_COLOR = ThemePair(light = "#E5E7EB", dark = "#374151
 // TIMELINE_CONNECTOR_DEFAULT_COLOR (same hex as DIVIDER_DEFAULT_COLOR — the
 // connector is the same hairline as a divider) / SOCIAL_PROOF_STAR_DEFAULT_
 // COLOR / SOCIAL_PROOF_MAX_RATING. Keep in sync with schema.ts by hand;
-// there is no codegen step sharing these across platforms.
-private const val FEATURE_ROW_DEFAULT_ICON = "check"
-private const val FEATURE_ROW_EXCLUDED_ICON = "x"
-private const val FEATURE_ROW_DEFAULT_INCLUDED = true
-private const val TIMELINE_ROW_DEFAULT_ICON = "clock"
-private val TIMELINE_CONNECTOR_DEFAULT_COLOR = DIVIDER_DEFAULT_COLOR
-private val SOCIAL_PROOF_STAR_DEFAULT_COLOR = ThemePair(light = "#F59E0B", dark = "#FBBF24")
-private const val SOCIAL_PROOF_MAX_RATING = 5
+// there is no codegen step sharing these across platforms. NOT `private`
+// for the same reason as the divider defaults above.
+internal const val FEATURE_ROW_DEFAULT_ICON = "check"
+internal const val FEATURE_ROW_EXCLUDED_ICON = "x"
+internal const val FEATURE_ROW_DEFAULT_INCLUDED = true
+internal const val TIMELINE_ROW_DEFAULT_ICON = "clock"
+internal val TIMELINE_CONNECTOR_DEFAULT_COLOR = DIVIDER_DEFAULT_COLOR
+internal val SOCIAL_PROOF_STAR_DEFAULT_COLOR = ThemePair(light = "#F59E0B", dark = "#FBBF24")
+internal const val SOCIAL_PROOF_MAX_RATING = 5
 private const val SOCIAL_PROOF_STAR_ICON_NAME = "star"
-private const val UNFILLED_STAR_ALPHA = 0.3f
+private const val SOCIAL_PROOF_STAR_BORDER_ICON_NAME = "star_border"
+
+// The row's own text colour when nothing more specific is configured —
+// mirrors paywall-renderer/styles.ts's `DEFAULT_INK` byte-for-byte (a
+// web-only constant, not one of schema.ts's shared cross-platform
+// defaults, so this is hand-picked rather than sync-tested). Used to tint
+// an icon that would otherwise draw with NO tint at all: on Android that
+// means the vendored drawable's own baked-in white fill shows through
+// (see res/drawable/README.md), which disappears on a light background —
+// unlike iOS (`Image` with no `.foregroundColor` inherits the ambient
+// label colour natively) and web (`currentColor` inherits the row's own
+// CSS `color`), Android's ImageView has no such automatic inheritance, so
+// "inherit" has to mean "tint with the same ink the label text resolves
+// to" rather than "apply no tint."
+private val TEXT_INK_DEFAULT_COLOR = ThemePair(light = "#0F172A", dark = "#F8FAFC")
 
 // Layout constants for the three row-carrying node types, in dp — no
 // cross-platform pixel-parity contract exists for these gaps (see the
@@ -358,6 +380,32 @@ internal fun resolvedFeatureRowIconName(row: FeatureRow): String {
     val included = row.included ?: FEATURE_ROW_DEFAULT_INCLUDED
     return row.icon ?: if (included) FEATURE_ROW_DEFAULT_ICON else FEATURE_ROW_EXCLUDED_ICON
 }
+
+/**
+ * The tint an icon/mark draws with when nothing more specific is
+ * configured: [explicit] if given, else [TEXT_INK_DEFAULT_COLOR] — the same
+ * ink a row's own label text resolves to. Exposed (not private) so a test
+ * can assert the fallback equals the resolved ink colour, not white (the
+ * vendored drawables' own baked-in fill — see res/drawable/README.md).
+ * Unlike [buildText] (which only sets a colour when the node has one, and
+ * otherwise leaves the system/theme default text colour alone), an icon
+ * with no tint at all just shows that white fill through — so "inherit"
+ * here has to mean "tint with the ink", never "apply no tint."
+ */
+internal fun resolvedInkTintColorInt(explicit: ThemePair?, dark: Boolean): Int =
+    explicit?.let { parseHexColor(themeValue(it, dark))?.toColorInt() }
+        ?: parseHexColor(themeValue(TEXT_INK_DEFAULT_COLOR, dark))!!.toColorInt()
+
+/**
+ * Whether the star at [index] (0-based) is filled for [rating]: the first
+ * `floor(rating)` stars, so a rating of 4.5 fills indices 0-3 (4 stars),
+ * not 0-4 — showing a fractional rating identically to the next whole one
+ * overstates it, the wrong direction for social proof. Exposed (not
+ * private) so a fractional-rating test can pin it directly. Mirrors the
+ * web renderer's `renderSocialProof` (`Math.floor`) and the Swift
+ * renderer's `socialProofStarFilled` (`rating.rounded(.down)`).
+ */
+internal fun socialProofStarFilled(index: Int, rating: Double): Boolean = index < floor(rating)
 
 private fun dp(context: Context, value: Double): Int =
     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), context.resources.displayMetrics)
@@ -722,23 +770,22 @@ internal object NodeViewFactory {
      * design, so a paywall authored against a newer registry must fail open
      * on an older app.
      *
-     * No default tint is applied when the node has no `color`:
-     * `imageTintList` is simply never set, so the drawable's own fill shows
-     * through and the ImageView otherwise inherits nothing special — an icon
-     * in a feature row should take the colour of the text beside it, same
-     * intent as SwiftUI's `nil` -> `.foregroundColor` and the web renderer's
-     * un-set `color` prop. (The vendored drawables ship a white fill — see
-     * res/drawable/README.md — so this is only usable uncoloured against a
-     * dark background; anywhere else the config should set a colour.)
+     * `color` absent falls back to [resolvedInkTintColorInt]'s default ink,
+     * NEVER "no tint at all": every vendored drawable ships a white fill
+     * (see res/drawable/README.md) with `android:tint` stripped, so leaving
+     * `imageTintList` unset draws that raw white fill through — invisible
+     * on a light background. iOS's `Image` with no `.foregroundColor`
+     * inherits the ambient label colour natively, and web's un-set `color`
+     * inherits the row's own CSS `color` — Android has no equivalent
+     * automatic inheritance, so tinting with the resolved text ink is what
+     * makes "inherit" actually mean something here.
      */
     private fun buildIcon(context: Context, node: BuilderNode.Icon, ctx: PaywallRenderContext): View? {
         val resId = drawableResFor(node.name) ?: return null
-        val tint = node.color?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+        val tint = resolvedInkTintColorInt(node.color, ctx.dark)
         return ImageView(context).apply {
             setImageResource(resId)
-            if (tint != null) {
-                imageTintList = android.content.res.ColorStateList.valueOf(tint)
-            }
+            imageTintList = android.content.res.ColorStateList.valueOf(tint)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
     }
@@ -780,16 +827,15 @@ internal object NodeViewFactory {
         }
         val resId = drawableResFor(resolvedFeatureRowIconName(row))
         if (resId != null) {
-            // Absent `iconColor` means inherit — `imageTintList` is simply
-            // never set (no default-tint substitute), same rule buildIcon
-            // follows for the standalone `icon` node.
-            val tint = iconColor?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+            // Absent `iconColor` falls back to the resolved text ink (see
+            // resolvedInkTintColorInt/buildIcon) — NEVER "no tint", which on
+            // Android draws the vendored drawable's own baked-in white fill,
+            // invisible on a light background.
+            val tint = resolvedInkTintColorInt(iconColor, ctx.dark)
             val iv = ImageView(context).apply {
                 setImageResource(resId)
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                if (tint != null) {
-                    imageTintList = android.content.res.ColorStateList.valueOf(tint)
-                }
+                imageTintList = android.content.res.ColorStateList.valueOf(tint)
             }
             val size = dp(context, ICON_DEFAULT_SIZE_DP)
             val ivLp = LinearLayout.LayoutParams(size, size).apply {
@@ -842,12 +888,15 @@ internal object NodeViewFactory {
         }
         val resId = drawableResFor(row.icon ?: TIMELINE_ROW_DEFAULT_ICON)
         if (resId != null) {
-            // A timeline row's own mark has no configurable color at all
-            // (TimelineRow carries none) — it always inherits, same as the
-            // feature row's icon does when uncoloured.
+            // A timeline row's own mark has NO configurable color at all
+            // (TimelineRow carries none) — no authorable config could ever
+            // fix an untinted mark here, so it ALWAYS resolves through
+            // resolvedInkTintColorInt (explicit = null), same fallback
+            // buildFeatureRow uses when its own iconColor is absent.
             val iv = ImageView(context).apply {
                 setImageResource(resId)
                 scaleType = ImageView.ScaleType.FIT_CENTER
+                imageTintList = android.content.res.ColorStateList.valueOf(resolvedInkTintColorInt(null, ctx.dark))
             }
             val size = dp(context, ICON_DEFAULT_SIZE_DP)
             markColumn.addView(iv, LinearLayout.LayoutParams(size, size))
@@ -890,13 +939,14 @@ internal object NodeViewFactory {
         return rowLayout
     }
 
-    /** [SOCIAL_PROOF_MAX_RATING] star ImageViews (the first `floor(rating)`
-     *  full opacity, the rest dimmed — only one star drawable is vendored,
-     *  so an unfilled star is the same glyph at reduced alpha rather than a
-     *  distinct outline asset; real half/outline fidelity is a device smoke
-     *  question, not this task's), then the label. `rating` absent renders
-     *  no stars at all — not zero filled ones. `starColor` absent falls back
-     *  to [SOCIAL_PROOF_STAR_DEFAULT_COLOR], same pattern as the timeline
+    /** [SOCIAL_PROOF_MAX_RATING] star ImageViews, the first [socialProofStarFilled]
+     *  drawing the filled star glyph and the rest the distinct outline glyph
+     *  (`star_border`, vendored alongside the other twelve — see
+     *  res/drawable/README.md) — a filled/unfilled distinction by DRAWABLE,
+     *  not alpha, so an unearned star reads as "not earned" rather than
+     *  "disabled." Then the label. `rating` absent renders no stars at all —
+     *  not zero filled ones. `starColor` absent falls back to
+     *  [SOCIAL_PROOF_STAR_DEFAULT_COLOR], same pattern as the timeline
      *  connector. Mirrors the web renderer's `renderSocialProof`. */
     private fun buildSocialProof(
         context: Context,
@@ -910,24 +960,22 @@ internal object NodeViewFactory {
             val starsRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
             val tint = node.starColor?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
                 ?: parseHexColor(themeValue(SOCIAL_PROOF_STAR_DEFAULT_COLOR, ctx.dark))?.toColorInt()
-            val resId = drawableResFor(SOCIAL_PROOF_STAR_ICON_NAME)
-            if (resId != null) {
-                val size = dp(context, ICON_DEFAULT_SIZE_DP)
-                for (index in 0 until SOCIAL_PROOF_MAX_RATING) {
-                    val filled = index < rating
-                    val iv = ImageView(context).apply {
-                        setImageResource(resId)
-                        scaleType = ImageView.ScaleType.FIT_CENTER
-                        alpha = if (filled) 1f else UNFILLED_STAR_ALPHA
-                        if (tint != null) {
-                            imageTintList = android.content.res.ColorStateList.valueOf(tint)
-                        }
+            val size = dp(context, ICON_DEFAULT_SIZE_DP)
+            for (index in 0 until SOCIAL_PROOF_MAX_RATING) {
+                val filled = socialProofStarFilled(index, rating)
+                val resId = drawableResFor(if (filled) SOCIAL_PROOF_STAR_ICON_NAME else SOCIAL_PROOF_STAR_BORDER_ICON_NAME)
+                    ?: continue
+                val iv = ImageView(context).apply {
+                    setImageResource(resId)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    if (tint != null) {
+                        imageTintList = android.content.res.ColorStateList.valueOf(tint)
                     }
-                    val lp = LinearLayout.LayoutParams(size, size).apply {
-                        if (index > 0) leftMargin = dp(context, SOCIAL_PROOF_STAR_GAP_DP)
-                    }
-                    starsRow.addView(iv, lp)
                 }
+                val lp = LinearLayout.LayoutParams(size, size).apply {
+                    if (index > 0) leftMargin = dp(context, SOCIAL_PROOF_STAR_GAP_DP)
+                }
+                starsRow.addView(iv, lp)
             }
             container.addView(
                 starsRow,

@@ -1,6 +1,12 @@
 package dev.rovenue.sdk.paywallui
 
 import android.content.Context
+import android.content.res.ColorStateList
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
 import dev.rovenue.sdk.Offering
 import dev.rovenue.sdk.Package
 import dev.rovenue.sdk.PackageType
@@ -9,7 +15,17 @@ import dev.rovenue.sdk.PeriodUnit
 import dev.rovenue.sdk.ProductCategory
 import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.StoreProduct
+import io.mockk.Runs
+import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.mockkConstructor
+import io.mockk.mockkStatic
+import io.mockk.unmockkConstructor
+import io.mockk.unmockkStatic
+import io.mockk.verify
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -23,6 +39,17 @@ import kotlin.test.assertTrue
  * Android-runtime test framework; the once-declared-but-unusable
  * Robolectric dependency has been removed). View construction itself is
  * manually smoked instead — see RovenuePaywallView.kt's class doc.
+ *
+ * The bottom section ("real View-tree assertions") is a narrow, deliberate
+ * exception to that: `mockkConstructor(LinearLayout::class)` /
+ * `mockkConstructor(ImageView::class)` intercept every instance of those
+ * classes `NodeViewFactory.build` constructs, so calls like `addView`/
+ * `setImageTintList` are directly verifiable — real row/star/connector
+ * counts and tint wiring, not just "a View came back non-null". This module's
+ * android.jar stub still reports `getChildCount()`/etc. as always-empty (see
+ * the visibility-gate tests' doc below), so those remain off-limits; this
+ * works because it verifies the MOCKED METHOD CALLS themselves, not state
+ * read back off the constructed object afterward.
  */
 class NodeViewFactoryTest {
 
@@ -519,10 +546,168 @@ class NodeViewFactoryTest {
         assertTrue(NodeViewFactory.build(mockContext(), textNode(), renderContext(), cell = null) != null)
     }
 
+    // ---- resolvedInkTintColorInt / socialProofStarFilled (pure) -----------
+    // BLOCKING fix (item 1): an absent iconColor/color used to leave
+    // imageTintList unset entirely, so Android drew the vendored drawable's
+    // own baked-in white fill (see res/drawable/README.md) instead of
+    // inheriting anything — invisible on a light background, and for
+    // timeline rows (no configurable color field at all) NO authorable
+    // config could fix it. These pin the fallback ink directly, without
+    // needing an Android view tree.
+
     @Test
-    fun `build dispatches featureList, timeline and socialProof nodes`() {
-        assertTrue(NodeViewFactory.build(mockContext(), featureListNode(), renderContext(), cell = null) != null)
-        assertTrue(NodeViewFactory.build(mockContext(), timelineNode(), renderContext(), cell = null) != null)
-        assertTrue(NodeViewFactory.build(mockContext(), socialProofNode(), renderContext(), cell = null) != null)
+    fun `resolvedInkTintColorInt falls back to the resolved text ink, not white`() {
+        val fallback = resolvedInkTintColorInt(explicit = null, dark = false)
+        assertEquals(parseHexColor("#0F172A")!!.toColorInt(), fallback)
+        assertTrue(fallback != 0xFFFFFFFF.toInt(), "must not fall back to white")
+    }
+
+    @Test
+    fun `resolvedInkTintColorInt uses the dark variant in dark mode`() {
+        assertEquals(parseHexColor("#F8FAFC")!!.toColorInt(), resolvedInkTintColorInt(explicit = null, dark = true))
+    }
+
+    @Test
+    fun `resolvedInkTintColorInt prefers an explicit color over the ink default`() {
+        val explicit = ThemePair(light = "#112233")
+        assertEquals(parseHexColor("#112233")!!.toColorInt(), resolvedInkTintColorInt(explicit, dark = false))
+    }
+
+    @Test
+    fun `socialProofStarFilled fills only floor(rating) stars for a fractional rating`() {
+        // 4.5 -> indices 0..3 filled (4 stars), index 4 NOT filled. No test
+        // anywhere exercised a fractional rating before this fix.
+        assertTrue(socialProofStarFilled(index = 0, rating = 4.5))
+        assertTrue(socialProofStarFilled(index = 3, rating = 4.5))
+        assertFalse(socialProofStarFilled(index = 4, rating = 4.5))
+    }
+
+    @Test
+    fun `socialProofStarFilled fills every index up to a whole rating`() {
+        assertTrue(socialProofStarFilled(index = 3, rating = 4.0))
+        assertFalse(socialProofStarFilled(index = 4, rating = 4.0))
+    }
+
+    // ---- real View-tree assertions (mockkConstructor) ---------------------
+    // See the class doc for why this technique works despite the stub
+    // android.jar's always-empty ViewGroup bookkeeping: it verifies the
+    // MOCKED addView/setImageTintList CALLS the real `build()` makes, not
+    // state read back off the constructed object afterward.
+    //
+    // `ColorStateList.valueOf` is mocked class-wide (BeforeEach/AfterEach,
+    // not per-test) because it is now called UNCONDITIONALLY by buildIcon/
+    // buildFeatureRow/buildTimelineRow as of this fix wave's item 1 (an
+    // always-non-null tint, never left unset) — under this module's stub
+    // android.jar (`isReturnDefaultValues = true`), the REAL
+    // `ColorStateList.valueOf(Int)` returns null despite being declared
+    // `@NonNull`, which Kotlin's platform-type null-assertion turns into an
+    // NPE. That's a JVM-unit-test-environment artifact, not a real-device
+    // bug (a real Android runtime's `valueOf` never returns null) — but
+    // every test below that reaches an icon/mark tint needs the stub
+    // bypassed to run at all.
+
+    @BeforeEach
+    fun mockColorStateListValueOf() {
+        mockkStatic(ColorStateList::class)
+        every { ColorStateList.valueOf(any()) } returns mockk(relaxed = true)
+    }
+
+    @AfterEach
+    fun tearDownConstructorMocks() {
+        unmockkConstructor(LinearLayout::class)
+        unmockkConstructor(ImageView::class)
+        unmockkStatic(ColorStateList::class)
+    }
+
+    private fun mockLinearLayoutConstruction() {
+        mockkConstructor(LinearLayout::class)
+        every { anyConstructed<LinearLayout>().addView(any<View>()) } just Runs
+        every { anyConstructed<LinearLayout>().addView(any<View>(), any<ViewGroup.LayoutParams>()) } just Runs
+    }
+
+    private fun mockImageViewConstruction() {
+        mockkConstructor(ImageView::class)
+        every { anyConstructed<ImageView>().setImageResource(any()) } just Runs
+        every { anyConstructed<ImageView>().setImageTintList(any()) } just Runs
+    }
+
+    /**
+     * The hollow assertion this replaces (`build(...) != null`) passes even
+     * with zero stars drawn, rows silently dropped, or a connector rendered
+     * after the timeline's last row — every one of those still returns a
+     * non-null container. Asserts real row/mark/connector counts instead,
+     * the same shape mistake already caught once on web (see
+     * renderer.test.tsx's featureList/timeline/socialProof section).
+     */
+    @Test
+    fun `build renders one row per featureList row, each with its resolved mark`() {
+        mockLinearLayoutConstruction()
+        val node = BuilderNode.FeatureList(
+            id = "fl",
+            rows = listOf(
+                FeatureRow(labelKey = "a", included = true),
+                FeatureRow(labelKey = "b", included = false),
+                FeatureRow(labelKey = "c"),
+            ),
+        )
+        NodeViewFactory.build(mockContext(), node, renderContext(), cell = null)
+
+        verify(exactly = 3) { anyConstructed<LinearLayout>().addView(match<View> { it is TextView }) }
+        verify(exactly = 3) {
+            anyConstructed<LinearLayout>().addView(match<View> { it is ImageView }, any<ViewGroup.LayoutParams>())
+        }
+    }
+
+    @Test
+    fun `build renders exactly SOCIAL_PROOF_MAX_RATING stars, not zero`() {
+        mockLinearLayoutConstruction()
+        val node = BuilderNode.SocialProof(id = "sp", labelKey = "s", rating = 4.5)
+        NodeViewFactory.build(mockContext(), node, renderContext(), cell = null)
+
+        verify(exactly = SOCIAL_PROOF_MAX_RATING) {
+            anyConstructed<LinearLayout>().addView(match<View> { it is ImageView }, any<ViewGroup.LayoutParams>())
+        }
+    }
+
+    @Test
+    fun `build renders no connector after a timeline's final row`() {
+        mockLinearLayoutConstruction()
+        val node = BuilderNode.Timeline(
+            id = "tl",
+            rows = listOf(TimelineRow(labelKey = "a"), TimelineRow(labelKey = "b"), TimelineRow(labelKey = "c")),
+        )
+        NodeViewFactory.build(mockContext(), node, renderContext(), cell = null)
+
+        // The connector is a plain `View` (not an ImageView/TextView),
+        // added via the 2-arg overload with a weighted LayoutParams — one
+        // per row except the last. 3 rows -> exactly 2 connectors; if a
+        // connector followed the last row too (the bug this test guards
+        // against), the count would be 3.
+        verify(exactly = 2) {
+            anyConstructed<LinearLayout>().addView(match<View> { it::class == View::class }, any<ViewGroup.LayoutParams>())
+        }
+    }
+
+    @Test
+    fun `build tints an uncoloured featureList row icon with the resolved ink, not left untinted`() {
+        mockImageViewConstruction()
+        val node = BuilderNode.FeatureList(id = "fl", rows = listOf(FeatureRow(labelKey = "a")))
+        NodeViewFactory.build(mockContext(), node, renderContext(), cell = null)
+        verify(atLeast = 1) { anyConstructed<ImageView>().setImageTintList(any<ColorStateList>()) }
+    }
+
+    @Test
+    fun `build tints an uncoloured timeline row mark with the resolved ink -- no field can configure it otherwise`() {
+        mockImageViewConstruction()
+        val node = BuilderNode.Timeline(id = "tl", rows = listOf(TimelineRow(labelKey = "a")))
+        NodeViewFactory.build(mockContext(), node, renderContext(), cell = null)
+        verify(atLeast = 1) { anyConstructed<ImageView>().setImageTintList(any<ColorStateList>()) }
+    }
+
+    @Test
+    fun `build tints an uncoloured standalone icon node with the resolved ink`() {
+        mockImageViewConstruction()
+        NodeViewFactory.build(mockContext(), iconNode(), renderContext(), cell = null)
+        verify(atLeast = 1) { anyConstructed<ImageView>().setImageTintList(any<ColorStateList>()) }
     }
 }

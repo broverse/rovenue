@@ -336,6 +336,13 @@ final class BuilderConfigModelTests: XCTestCase {
     }
 
     // MARK: - featureList / timeline / socialProof (Wave B)
+    //
+    // These three now have dedicated render-fixtures.json accept entries —
+    // they used to predate the shared fixture (hand-built via `firstChild`
+    // below, the same gap Kotlin's BuilderConfigModelTest.kt had). `firstChild`
+    // stays for cases genuinely outside the cross-platform contract (an empty
+    // `rows` array, and the excluded/included mark-resolution unit checks
+    // just below, which construct a bare `FeatureRowProps` directly).
 
     private func firstChild(_ childJSON: String) throws -> BuilderNode {
         let json = """
@@ -349,24 +356,49 @@ final class BuilderConfigModelTests: XCTestCase {
         return try XCTUnwrap(root.children.first)
     }
 
+    private func acceptEntry(named name: String) throws -> Any {
+        let entries = try XCTUnwrap(fixtures["accept"] as? [[String: Any]])
+        let entry = try XCTUnwrap(entries.first { ($0["name"] as? String) == name }, "no accept fixture named \"\(name)\"")
+        return try XCTUnwrap(entry["config"])
+    }
+
     func test_decodesFeatureListRows() throws {
-        let node = try firstChild(#"{"type":"featureList","id":"f1","rows":[{"labelKey":"a"},{"labelKey":"b","included":false}]}"#)
-        guard case .featureList(let p) = node else { XCTFail("not a featureList"); return }
-        XCTAssertEqual(p.rows.count, 2)
+        let config = try acceptEntry(named: "featureList: multi-row with a mix of included values")
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root, case .featureList(let p) = root.children[0] else {
+            return XCTFail("expected root.children[0] to be .featureList")
+        }
+        XCTAssertEqual(p.rows.count, 3)
+        XCTAssertEqual(p.rows[0].included, true)
         XCTAssertEqual(p.rows[1].included, false)
+        XCTAssertNil(p.rows[2].included)
     }
 
     func test_decodesTimelineCaptions() throws {
-        let node = try firstChild(#"{"type":"timeline","id":"t1","rows":[{"labelKey":"a","captionKey":"ac"},{"labelKey":"b"}]}"#)
-        guard case .timeline(let p) = node else { XCTFail("not a timeline"); return }
-        XCTAssertEqual(p.rows[0].captionKey, "ac")
+        let config = try acceptEntry(named: "timeline: rows with and without captions")
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root, case .timeline(let p) = root.children[0] else {
+            return XCTFail("expected root.children[0] to be .timeline")
+        }
+        XCTAssertEqual(p.rows[0].captionKey, "t1c")
         XCTAssertNil(p.rows[1].captionKey)
+        XCTAssertEqual(p.rows[2].captionKey, "t3c")
     }
 
     func test_decodesSocialProofRating() throws {
-        let node = try firstChild(#"{"type":"socialProof","id":"s1","labelKey":"s","rating":4.5}"#)
-        guard case .socialProof(let p) = node else { XCTFail("not socialProof"); return }
-        XCTAssertEqual(p.rating, 4.5)
+        let withRatingConfig = try acceptEntry(named: "socialProof: with a fractional rating")
+        let withRatingDecoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: withRatingConfig)))
+        guard case .stack(let withRatingRoot) = withRatingDecoded.root, case .socialProof(let withP) = withRatingRoot.children[0] else {
+            return XCTFail("expected root.children[0] to be .socialProof")
+        }
+        XCTAssertEqual(withP.rating, 4.5)
+
+        let withoutRatingConfig = try acceptEntry(named: "socialProof: without a rating (no stars)")
+        let withoutRatingDecoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: withoutRatingConfig)))
+        guard case .stack(let withoutRatingRoot) = withoutRatingDecoded.root, case .socialProof(let withoutP) = withoutRatingRoot.children[0] else {
+            return XCTFail("expected root.children[0] to be .socialProof")
+        }
+        XCTAssertNil(withoutP.rating)
     }
 
     func test_decodesEmptyRows() throws {
