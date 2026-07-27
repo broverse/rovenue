@@ -232,6 +232,9 @@ enum OverridablePropKeys {
     static let spacer: Set<String> = []
     static let divider: Set<String> = ["color", "thickness"]
     static let icon: Set<String> = ["name", "color"]
+    static let featureList: Set<String> = ["iconColor"]
+    static let timeline: Set<String> = ["connectorColor"]
+    static let socialProof: Set<String> = ["rating", "starColor"]
 }
 
 /// A `CodingKey` that accepts ANY string, used to enumerate every key
@@ -405,6 +408,56 @@ public struct IconOverrideProps: Decodable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+    }
+}
+
+public struct FeatureListOverrideProps: Decodable, Equatable, Sendable {
+    public let iconColor: ThemePair?
+
+    public init(iconColor: ThemePair? = nil) {
+        self.iconColor = iconColor
+    }
+
+    private enum CodingKeys: String, CodingKey { case iconColor }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.featureList)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        iconColor = try container.decodeIfPresent(ThemePair.self, forKey: .iconColor)
+    }
+}
+
+public struct TimelineOverrideProps: Decodable, Equatable, Sendable {
+    public let connectorColor: ThemePair?
+
+    public init(connectorColor: ThemePair? = nil) {
+        self.connectorColor = connectorColor
+    }
+
+    private enum CodingKeys: String, CodingKey { case connectorColor }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.timeline)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        connectorColor = try container.decodeIfPresent(ThemePair.self, forKey: .connectorColor)
+    }
+}
+
+public struct SocialProofOverrideProps: Decodable, Equatable, Sendable {
+    public let rating: Double?
+    public let starColor: ThemePair?
+
+    public init(rating: Double? = nil, starColor: ThemePair? = nil) {
+        self.rating = rating; self.starColor = starColor
+    }
+
+    private enum CodingKeys: String, CodingKey { case rating, starColor }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.socialProof)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rating = try container.decodeIfPresent(Double.self, forKey: .rating)
+        starColor = try container.decodeIfPresent(ThemePair.self, forKey: .starColor)
     }
 }
 
@@ -754,6 +807,122 @@ public struct IconProps: Decodable {
     }
 }
 
+/// One row of a `featureList` node — not a node itself, so it carries none of
+/// `visibility`/`overrides`/`fallback`. Codable synthesis is sufficient here:
+/// unlike the node payloads above, none of these fields need lenient decode.
+public struct FeatureRowProps: Decodable, Equatable, Sendable {
+    public let labelKey: String
+    public let icon: String?
+    public let included: Bool?
+
+    public init(labelKey: String, icon: String? = nil, included: Bool? = nil) {
+        self.labelKey = labelKey; self.icon = icon; self.included = included
+    }
+}
+
+/// One row of a `timeline` node — same non-node shape as `FeatureRowProps`.
+public struct TimelineRowProps: Decodable, Equatable, Sendable {
+    public let labelKey: String
+    public let captionKey: String?
+    public let icon: String?
+
+    public init(labelKey: String, captionKey: String? = nil, icon: String? = nil) {
+        self.labelKey = labelKey; self.captionKey = captionKey; self.icon = icon
+    }
+}
+
+public struct FeatureListProps: Decodable {
+    public let id: String
+    public let rows: [FeatureRowProps]
+    /// Applied to each row's icon that does not carry its own. Absent means
+    /// inherit (see RovenuePaywallView.swift), NOT a default color.
+    public let iconColor: ThemePair?
+    public let overrides: [NodeOverride<FeatureListOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, rows: [FeatureRowProps], iconColor: ThemePair? = nil,
+                overrides: [NodeOverride<FeatureListOverrideProps>]? = nil, visibility: Visibility? = nil,
+                fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.rows = rows; self.iconColor = iconColor
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, rows, iconColor, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        rows = try container.decode([FeatureRowProps].self, forKey: .rows)
+        iconColor = try container.decodeIfPresent(ThemePair.self, forKey: .iconColor)
+        overrides = try container.decodeIfPresent([NodeOverride<FeatureListOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
+public struct TimelineProps: Decodable {
+    public let id: String
+    public let rows: [TimelineRowProps]
+    /// Absent = `TIMELINE_CONNECTOR_DEFAULT_COLOR` (see RovenuePaywallView.swift).
+    public let connectorColor: ThemePair?
+    public let overrides: [NodeOverride<TimelineOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, rows: [TimelineRowProps], connectorColor: ThemePair? = nil,
+                overrides: [NodeOverride<TimelineOverrideProps>]? = nil, visibility: Visibility? = nil,
+                fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.rows = rows; self.connectorColor = connectorColor
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, rows, connectorColor, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        rows = try container.decode([TimelineRowProps].self, forKey: .rows)
+        connectorColor = try container.decodeIfPresent(ThemePair.self, forKey: .connectorColor)
+        overrides = try container.decodeIfPresent([NodeOverride<TimelineOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
+public struct SocialProofProps: Decodable {
+    public let id: String
+    /// 0…`SOCIAL_PROOF_MAX_RATING`. Absent renders no stars at all — not zero
+    /// filled ones (see RovenuePaywallView.swift).
+    public let rating: Double?
+    public let labelKey: String
+    /// Absent = `SOCIAL_PROOF_STAR_DEFAULT_COLOR`.
+    public let starColor: ThemePair?
+    public let overrides: [NodeOverride<SocialProofOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, rating: Double? = nil, labelKey: String, starColor: ThemePair? = nil,
+                overrides: [NodeOverride<SocialProofOverrideProps>]? = nil, visibility: Visibility? = nil,
+                fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.rating = rating; self.labelKey = labelKey; self.starColor = starColor
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, rating, labelKey, starColor, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        rating = try container.decodeIfPresent(Double.self, forKey: .rating)
+        labelKey = try container.decode(String.self, forKey: .labelKey)
+        starColor = try container.decodeIfPresent(ThemePair.self, forKey: .starColor)
+        overrides = try container.decodeIfPresent([NodeOverride<SocialProofOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
 /// Registry name -> SF Symbol. Unknown names return nil and render nothing:
 /// leniency is deliberate so a newer paywall does not break an older app.
 func sfSymbolName(for name: String) -> String? {
@@ -793,6 +962,9 @@ public enum BuilderNode: Decodable {
     case spacer(SpacerProps)
     case divider(DividerProps)
     case icon(IconProps)
+    case featureList(FeatureListProps)
+    case timeline(TimelineProps)
+    case socialProof(SocialProofProps)
     case unknown(id: String, visibility: Visibility?, fallback: BuilderNodeBox?)
 
     private enum TypeKey: String, CodingKey { case type }
@@ -811,6 +983,9 @@ public enum BuilderNode: Decodable {
         case "spacer": self = .spacer(try SpacerProps(from: decoder))
         case "divider": self = .divider(try DividerProps(from: decoder))
         case "icon": self = .icon(try IconProps(from: decoder))
+        case "featureList": self = .featureList(try FeatureListProps(from: decoder))
+        case "timeline": self = .timeline(try TimelineProps(from: decoder))
+        case "socialProof": self = .socialProof(try SocialProofProps(from: decoder))
         default:
             let container = try decoder.container(keyedBy: UnknownKeys.self)
             let id = try container.decode(String.self, forKey: .id)
@@ -837,6 +1012,9 @@ public enum BuilderNode: Decodable {
         case .spacer(let p): return p.id
         case .divider(let p): return p.id
         case .icon(let p): return p.id
+        case .featureList(let p): return p.id
+        case .timeline(let p): return p.id
+        case .socialProof(let p): return p.id
         case .unknown(let id, _, _): return id
         }
     }
@@ -857,6 +1035,9 @@ public enum BuilderNode: Decodable {
         case .spacer(let p): return p.visibility
         case .divider(let p): return p.visibility
         case .icon(let p): return p.visibility
+        case .featureList(let p): return p.visibility
+        case .timeline(let p): return p.visibility
+        case .socialProof(let p): return p.visibility
         case .unknown(_, let v, _): return v
         }
     }

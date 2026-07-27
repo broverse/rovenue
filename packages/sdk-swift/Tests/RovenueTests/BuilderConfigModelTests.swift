@@ -334,6 +334,65 @@ final class BuilderConfigModelTests: XCTestCase {
         let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
         XCTAssertEqual(resolveText(decoded, locale: nil, key: "title_1"), "Go Pro")
     }
+
+    // MARK: - featureList / timeline / socialProof (Wave B)
+
+    private func firstChild(_ childJSON: String) throws -> BuilderNode {
+        let json = """
+        {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{"k":"x"}},
+         "root":{"type":"stack","id":"root","axis":"v","children":[\(childJSON)]}}
+        """
+        let model = try XCTUnwrap(decodeBuilderConfig(json))
+        guard case .stack(let root) = model.root else {
+            XCTFail("root did not decode as a stack"); throw XCTSkip("unreachable")
+        }
+        return try XCTUnwrap(root.children.first)
+    }
+
+    func test_decodesFeatureListRows() throws {
+        let node = try firstChild(#"{"type":"featureList","id":"f1","rows":[{"labelKey":"a"},{"labelKey":"b","included":false}]}"#)
+        guard case .featureList(let p) = node else { XCTFail("not a featureList"); return }
+        XCTAssertEqual(p.rows.count, 2)
+        XCTAssertEqual(p.rows[1].included, false)
+    }
+
+    func test_decodesTimelineCaptions() throws {
+        let node = try firstChild(#"{"type":"timeline","id":"t1","rows":[{"labelKey":"a","captionKey":"ac"},{"labelKey":"b"}]}"#)
+        guard case .timeline(let p) = node else { XCTFail("not a timeline"); return }
+        XCTAssertEqual(p.rows[0].captionKey, "ac")
+        XCTAssertNil(p.rows[1].captionKey)
+    }
+
+    func test_decodesSocialProofRating() throws {
+        let node = try firstChild(#"{"type":"socialProof","id":"s1","labelKey":"s","rating":4.5}"#)
+        guard case .socialProof(let p) = node else { XCTFail("not socialProof"); return }
+        XCTAssertEqual(p.rating, 4.5)
+    }
+
+    func test_decodesEmptyRows() throws {
+        let node = try firstChild(#"{"type":"featureList","id":"f1","rows":[]}"#)
+        guard case .featureList(let p) = node else { XCTFail("not a featureList"); return }
+        XCTAssertTrue(p.rows.isEmpty)
+    }
+
+    /// The excluded-mark test that must assert WHICH symbol resolves, not
+    /// merely that a symbol rendered — both `check` and `x` are real,
+    /// drawable SF Symbols, so a test asserting only non-nilness would still
+    /// pass with the wrong branch forced. See mutation-check note in
+    /// RovenuePaywallView.swift's `resolvedFeatureRowIconName`.
+    func test_excludedFeatureRowResolvesToTheExcludedMarkNotTheDefault() throws {
+        let node = try firstChild(#"{"type":"featureList","id":"f1","rows":[{"labelKey":"a","included":false}]}"#)
+        guard case .featureList(let p) = node else { XCTFail("not a featureList"); return }
+        let iconName = resolvedFeatureRowIconName(p.rows[0])
+        XCTAssertEqual(sfSymbolName(for: iconName), "xmark", "an excluded row must resolve to the excluded mark, not the included default")
+    }
+
+    func test_includedFeatureRowResolvesToTheDefaultMark() throws {
+        let node = try firstChild(#"{"type":"featureList","id":"f1","rows":[{"labelKey":"a"}]}"#)
+        guard case .featureList(let p) = node else { XCTFail("not a featureList"); return }
+        let iconName = resolvedFeatureRowIconName(p.rows[0])
+        XCTAssertEqual(sfSymbolName(for: iconName), "checkmark")
+    }
 }
 
 /// Builds a `PackageView?` from a fixture's `pkg` field, which is either a

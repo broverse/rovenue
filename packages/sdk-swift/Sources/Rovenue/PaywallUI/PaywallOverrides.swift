@@ -152,6 +152,45 @@ public func applyOverrides(_ props: IconProps, active: OverrideActiveConditions)
     return result
 }
 
+public func applyOverrides(_ props: FeatureListProps, active: OverrideActiveConditions) -> FeatureListProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = FeatureListProps(
+            id: result.id, rows: result.rows,
+            iconColor: patch.iconColor ?? result.iconColor,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
+public func applyOverrides(_ props: TimelineProps, active: OverrideActiveConditions) -> TimelineProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = TimelineProps(
+            id: result.id, rows: result.rows,
+            connectorColor: patch.connectorColor ?? result.connectorColor,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
+public func applyOverrides(_ props: SocialProofProps, active: OverrideActiveConditions) -> SocialProofProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = SocialProofProps(
+            id: result.id, rating: patch.rating ?? result.rating, labelKey: result.labelKey,
+            starColor: patch.starColor ?? result.starColor,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
 /// Dispatches to the node's own `applyOverrides` overload and re-wraps the
 /// result in the same `BuilderNode` case. `.unknown` nodes carry no
 /// overrides field at all and pass through unchanged.
@@ -166,6 +205,9 @@ public func applyOverrides(_ node: BuilderNode, active: OverrideActiveConditions
     case .spacer(let p): return .spacer(applyOverrides(p, active: active))
     case .divider(let p): return .divider(applyOverrides(p, active: active))
     case .icon(let p): return .icon(applyOverrides(p, active: active))
+    case .featureList(let p): return .featureList(applyOverrides(p, active: active))
+    case .timeline(let p): return .timeline(applyOverrides(p, active: active))
+    case .socialProof(let p): return .socialProof(applyOverrides(p, active: active))
     case .unknown: return node
     }
 }

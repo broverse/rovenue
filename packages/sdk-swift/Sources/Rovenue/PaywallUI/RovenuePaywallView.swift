@@ -208,6 +208,34 @@ private let dividerDefaultInset = 0.0
 private let iconDefaultSize = 24.0
 private let dividerDefaultColor = ThemePair(light: "#E5E7EB", dark: "#374151")
 
+/// Defaults mirroring packages/shared/src/paywall/schema.ts's
+/// `FEATURE_ROW_DEFAULT_ICON` / `FEATURE_ROW_EXCLUDED_ICON` /
+/// `FEATURE_ROW_DEFAULT_INCLUDED` / `TIMELINE_ROW_DEFAULT_ICON` /
+/// `TIMELINE_CONNECTOR_DEFAULT_COLOR` (same hex as `dividerDefaultColor` —
+/// the connector is the same hairline as a divider) /
+/// `SOCIAL_PROOF_STAR_DEFAULT_COLOR` / `SOCIAL_PROOF_MAX_RATING`. Keep in
+/// sync with schema.ts by hand; there is no codegen step sharing these
+/// across platforms.
+private let featureRowDefaultIcon = "check"
+private let featureRowExcludedIcon = "x"
+private let featureRowDefaultIncluded = true
+private let timelineRowDefaultIcon = "clock"
+private let timelineConnectorDefaultColor = dividerDefaultColor
+private let socialProofStarDefaultColor = ThemePair(light: "#F59E0B", dark: "#FBBF24")
+private let socialProofMaxRating = 5
+
+/// A feature row's mark: its own `icon` if given, otherwise the excluded
+/// mark when `included` resolves to `false`, else the included default.
+/// Exposed (not `private`) so tests can assert WHICH symbol an excluded row
+/// resolves to via `sfSymbolName(for:)` — asserting merely that *some*
+/// symbol rendered would pass even with the wrong branch, since both
+/// `check` and `x` are real, drawable SF Symbols. Mirrors nodes.tsx's
+/// `renderFeatureList` row-icon resolution.
+func resolvedFeatureRowIconName(_ row: FeatureRowProps) -> String {
+    let included = row.included ?? featureRowDefaultIncluded
+    return row.icon ?? (included ? featureRowDefaultIcon : featureRowExcludedIcon)
+}
+
 struct BuilderNodeView: View {
     let node: BuilderNode
     let ctx: PaywallRenderContext
@@ -287,6 +315,9 @@ struct BuilderNodeView: View {
                     .frame(width: side, height: side)
                     .foregroundColor(p.color.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }.map { color($0) })
             }
+        case .featureList(let p): FeatureListView(props: p, ctx: ctx, cell: cell)
+        case .timeline(let p): TimelineView(props: p, ctx: ctx, cell: cell)
+        case .socialProof(let p): SocialProofView(props: p, ctx: ctx, cell: cell)
         case .unknown(_, _, let fallback):
             if let fallback {
                 BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
@@ -551,6 +582,133 @@ struct PurchaseButtonView: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+    }
+}
+
+/// Renders `featureList`: a `VStack` of rows, each the row's resolved SF
+/// Symbol beside its resolved label. Mirrors nodes.tsx's `renderFeatureList`.
+struct FeatureListView: View {
+    let props: FeatureListProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(props.rows.enumerated()), id: \.offset) { entry in
+                row(entry.element)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ row: FeatureRowProps) -> some View {
+        let iconName = resolvedFeatureRowIconName(row)
+        HStack(spacing: 8) {
+            if let symbol = sfSymbolName(for: iconName) {
+                Image(systemName: symbol)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: CGFloat(iconDefaultSize), height: CGFloat(iconDefaultSize))
+                    // Absent `iconColor` passes `nil` so the mark inherits the
+                    // row's own text colour — do not substitute a default
+                    // (see the `.icon` node case above; same rule).
+                    .foregroundColor(resolvedIconColor)
+            }
+            Text(ctx.label(row.labelKey, cell: cell))
+        }
+    }
+
+    private var resolvedIconColor: Color? {
+        props.iconColor.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }.map { color($0) }
+    }
+}
+
+/// Renders `timeline`: a `VStack` of rows, each the row's resolved SF Symbol,
+/// a `Rectangle` connector below it for every row but the last, the label,
+/// and the optional caption. `connectorColor` absent falls back to
+/// `timelineConnectorDefaultColor`, never a renderer-invented value — it is a
+/// rule, not text, so unlike the row's own mark it is never left to inherit.
+/// A row's own mark has no configurable colour at all (`TimelineRowProps`
+/// carries none), so it always inherits, same as `FeatureListView`'s icon
+/// does when uncoloured. Mirrors nodes.tsx's `renderTimeline`.
+struct TimelineView: View {
+    let props: TimelineProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(props.rows.enumerated()), id: \.offset) { entry in
+                row(entry.element, isLast: entry.offset == props.rows.count - 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ row: TimelineRowProps, isLast: Bool) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 4) {
+                if let symbol = sfSymbolName(for: row.icon ?? timelineRowDefaultIcon) {
+                    Image(systemName: symbol)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: CGFloat(iconDefaultSize), height: CGFloat(iconDefaultSize))
+                }
+                if !isLast {
+                    Rectangle()
+                        .fill(connectorColor)
+                        .frame(width: 2)
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ctx.label(row.labelKey, cell: cell))
+                if let captionKey = row.captionKey {
+                    Text(ctx.label(captionKey, cell: cell))
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    private var connectorColor: Color {
+        let overrideColor = props.connectorColor.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
+        let defaultColor = parseHexColor(themeValue(timelineConnectorDefaultColor, dark: ctx.dark))
+        return (overrideColor ?? defaultColor).map { color($0) } ?? Color.secondary
+    }
+}
+
+/// Renders `socialProof`: `SOCIAL_PROOF_MAX_RATING` stars with the first
+/// `floor(rating)` filled, then the label. `rating` absent renders no stars
+/// at all — not zero filled ones. `starColor` absent falls back to
+/// `socialProofStarDefaultColor`, same pattern as the timeline connector:
+/// stars are a rule-like mark, not text, so an absent colour is never left
+/// to inherit. Mirrors nodes.tsx's `renderSocialProof`.
+struct SocialProofView: View {
+    let props: SocialProofProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let rating = props.rating {
+                HStack(spacing: 2) {
+                    ForEach(0..<socialProofMaxRating, id: \.self) { index in
+                        Image(systemName: Double(index) < rating ? "star.fill" : "star")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: CGFloat(iconDefaultSize), height: CGFloat(iconDefaultSize))
+                            .foregroundColor(starColor)
+                    }
+                }
+            }
+            Text(ctx.label(props.labelKey, cell: cell))
+        }
+    }
+
+    private var starColor: Color {
+        let overrideColor = props.starColor.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
+        let defaultColor = parseHexColor(themeValue(socialProofStarDefaultColor, dark: ctx.dark))
+        return (overrideColor ?? defaultColor).map { color($0) } ?? Color.secondary
     }
 }
 
