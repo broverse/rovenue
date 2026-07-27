@@ -86,7 +86,7 @@ export const INSPECTOR_TABS = [
   {
     id: "binding",
     fallbackLabel: "Binding",
-    appliesTo: new Set<PaywallNode["type"]>(["button", "packageList"]),
+    appliesTo: new Set<PaywallNode["type"]>(["button", "packageList", "purchaseButton"]),
     issueCodes: new Set<BuilderIssue["code"]>(["FOREIGN_PACKAGE_ID"]),
   },
   {

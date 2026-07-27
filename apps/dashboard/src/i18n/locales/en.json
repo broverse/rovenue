@@ -1337,7 +1337,9 @@
         "devices": "{{platform}} devices",
         "allSizes": "All sizes",
         "safeArea": "Safe area",
-        "previewBadge": "Preview — placeholder prices"
+        "previewBadge": "Preview — placeholder prices",
+        "previewBadgeLive": "Preview — live store prices (US)",
+        "previewBadgeMixed": "Preview — mixed live and placeholder prices"
       },
       "inspector": {
         "tab": {
@@ -1400,6 +1402,11 @@
         "selection": "Selection",
         "defaultSelected": "Default selected",
         "defaultSelectedNone": "First available",
+        "presetCustom": "Custom",
+        "periodConflict": "Stores disagree on this package's billing period",
+        "purchase": "Purchase",
+        "purchaseBinding": "Purchases the selected package.",
+        "trialLabelKey": "Trial-aware label",
         "cells": "Cells",
         "cellLayout": "Layout",
         "cellLayoutRow": "Row",

@@ -1,6 +1,6 @@
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
-import type { ButtonNode, PackageListNode, PaywallNode } from "@rovenue/shared/paywall";
+import type { ButtonNode, PackageListNode, PaywallNode, PurchaseButtonNode } from "@rovenue/shared/paywall";
 import { cn } from "../../../lib/cn";
 import { useOfferingResolvedPrices } from "../../../lib/hooks/useOfferingResolvedPrices";
 import { Checkbox } from "../../../ui/checkbox";
@@ -64,6 +64,8 @@ export const BindingTab = component(({ node }: { node: PaywallNode }) => {
       return <ButtonBinding node={node} />;
     case "packageList":
       return <PackageListBinding node={node} />;
+    case "purchaseButton":
+      return <PurchaseButtonBinding node={node} />;
     default:
       return null;
   }
@@ -104,6 +106,38 @@ function ButtonBinding({ node }: { node: ButtonNode }) {
           />
         </Field>
       )}
+    </Section>
+  );
+}
+
+/**
+ * A purchaseButton always purchases whatever the enclosing packageList (or
+ * cellTemplate selection) has selected — there is no id/behaviour to bind,
+ * unlike `ButtonBinding`'s action or `PackageListBinding`'s packageIds. The
+ * one thing worth configuring here is `trialLabelKey`: which localized key
+ * the button falls back to while the selected package's trial/intro period
+ * is active (see `resolveCtaLabelKey` in `@rovenue/shared/paywall`). The
+ * input mirrors Content tab's optional key-editing fields (e.g.
+ * TimelineContent's captionKey) rather than `LocalizedTextField`, because
+ * this field edits which KEY is pointed at, not a fixed key's text value.
+ */
+function PurchaseButtonBinding({ node }: { node: PurchaseButtonNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<PurchaseButtonNode>) => vm.updateNode<PurchaseButtonNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.purchase", "Purchase")} defaultOpen>
+      <div className="mb-3 text-[11px] text-rv-mute-500">
+        {t("paywalls.builder.properties.purchaseBinding", "Purchases the selected package.")}
+      </div>
+      <Field label={t("paywalls.builder.properties.trialLabelKey", "Trial-aware label")}>
+        <input
+          value={node.trialLabelKey ?? ""}
+          onChange={(e) => set({ trialLabelKey: e.currentTarget.value || undefined })}
+          className={INPUT_CLASS}
+        />
+      </Field>
     </Section>
   );
 }
