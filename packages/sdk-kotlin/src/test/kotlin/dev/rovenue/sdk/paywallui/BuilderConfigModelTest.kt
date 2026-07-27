@@ -170,6 +170,69 @@ class BuilderConfigModelTest {
         assertNull(withoutP.rating)
     }
 
+    @Test
+    fun decodesStickyFooterChildren() {
+        val node = firstChild(rootWith("""{"type":"stickyFooter","id":"sf","children":[{"type":"spacer","id":"s1","size":8}]}"""))
+        assertTrue(node is BuilderNode.StickyFooter)
+        assertEquals(1, (node as BuilderNode.StickyFooter).children.size)
+    }
+
+    @Test
+    fun decodesCountdownBothModes() {
+        val abs = firstChild(rootWith("""{"type":"countdown","id":"c1","endsAt":"2027-01-01T00:00:00Z"}"""))
+        assertEquals("2027-01-01T00:00:00Z", (abs as BuilderNode.Countdown).endsAt)
+        val dur = firstChild(rootWith("""{"type":"countdown","id":"c2","durationSeconds":900}"""))
+        assertEquals(900.0, (dur as BuilderNode.Countdown).durationSeconds)
+    }
+
+    @Test
+    fun `stickyFooter fixture decode matches the shared cross-platform contract`() {
+        val entry = entryNamed("accept", "stickyFooter: pinned footer with a nested purchaseButton")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val footer = config.root.children[0] as BuilderNode.StickyFooter
+        assertEquals("#FFFFFF", footer.background?.light)
+        assertEquals("#111827", footer.background?.dark)
+        assertEquals(1, footer.children.size)
+        assertTrue(footer.children[0] is BuilderNode.PurchaseButton)
+    }
+
+    @Test
+    fun `countdown fixture decode matches the shared cross-platform contract`() {
+        val entry = entryNamed("accept", "countdown: absolute deadline with a label and onExpiry")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val countdown = config.root.children[0] as BuilderNode.Countdown
+        assertEquals("2027-01-01T00:00:00.000Z", countdown.endsAt)
+        assertNull(countdown.durationSeconds)
+        assertEquals(CountdownOnExpiry.FREEZE, countdown.onExpiry)
+        assertEquals("cd.label", countdown.labelKey)
+        assertEquals("#111111", countdown.color?.light)
+        assertEquals("#EEEEEE", countdown.color?.dark)
+    }
+
+    @Test
+    fun `stickyFooter override background decode retention`() {
+        val node = firstChild(
+            rootWith(
+                """{"type":"stickyFooter","id":"sf","children":[],
+                   "overrides":[{"when":{"kind":"selected"},"props":{"background":{"light":"#000000"}}}]}""",
+            ),
+        )
+        val footer = node as BuilderNode.StickyFooter
+        assertEquals("#000000", footer.overrides!!.first().props?.background?.light)
+    }
+
+    @Test
+    fun `countdown override color decode retention`() {
+        val node = firstChild(
+            rootWith(
+                """{"type":"countdown","id":"cd","endsAt":"2027-01-01T00:00:00Z",
+                   "overrides":[{"when":{"kind":"introEligible"},"props":{"color":{"light":"#ABCDEF"}}}]}""",
+            ),
+        )
+        val countdown = node as BuilderNode.Countdown
+        assertEquals("#ABCDEF", countdown.overrides!!.first().props?.color?.light)
+    }
+
     /**
      * The excluded-mark test that must assert WHICH icon resolves, not
      * merely that one resolved — `assertNotNull(drawableResFor(...))` alone

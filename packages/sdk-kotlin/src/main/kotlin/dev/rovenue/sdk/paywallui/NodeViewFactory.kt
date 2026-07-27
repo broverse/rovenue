@@ -366,6 +366,31 @@ private const val TIMELINE_CONNECTOR_WIDTH_DP = 2.0
 private const val SOCIAL_PROOF_STAR_GAP_DP = 2.0
 private const val SOCIAL_PROOF_LABEL_GAP_DP = 4.0
 
+// Defaults mirroring packages/shared/src/paywall/schema.ts's
+// STICKY_FOOTER_DEFAULT_BACKGROUND / COUNTDOWN_DEFAULT_ON_EXPIRY /
+// COUNTDOWN_TICK_MS. Keep in sync with schema.ts by hand; there is no
+// codegen step sharing these across platforms. NOT `private` for the same
+// reason as the divider/feature-row defaults above — a test compares them
+// against render-fixtures.json's generated `defaults` object by value.
+internal val STICKY_FOOTER_DEFAULT_BACKGROUND = ThemePair(light = "#FFFFFF", dark = "#111827")
+internal val COUNTDOWN_DEFAULT_ON_EXPIRY = CountdownOnExpiry.FREEZE
+
+/** Milliseconds between countdown ticks, matching schema.ts's
+ *  `COUNTDOWN_TICK_MS` (identical on all three platforms). */
+internal const val COUNTDOWN_TICK_MS = 1000L
+
+/** Pre-measurement initial value for the scrolled content's bottom
+ *  clearance under a pinned `stickyFooter`, used only until the footer's
+ *  first real layout pass reports its height (see
+ *  [installStickyFooterClearance]) — mirrors the web renderer's
+ *  `STICKY_FOOTER_CONTENT_CLEARANCE_PX` / the Swift renderer's
+ *  `stickyFooterContentClearanceDefault`. Not one of schema.ts's shared
+ *  cross-platform constants (each renderer picks its own pre-measurement
+ *  guess), so this is hand-picked to match rather than sync-tested. */
+internal const val STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT_DP = 96.0
+
+private const val COUNTDOWN_LABEL_GAP_DP = 4.0
+
 /**
  * A feature row's mark: its own `icon` if given, otherwise the excluded mark
  * when `included` resolves to `false`, else the included default. Exposed
@@ -407,7 +432,113 @@ internal fun resolvedInkTintColorInt(explicit: ThemePair?, dark: Boolean): Int =
  */
 internal fun socialProofStarFilled(index: Int, rating: Double): Boolean = index < floor(rating)
 
-private fun dp(context: Context, value: Double): Int =
+// ---------------------------------------------------------------
+// Pure: countdown
+// ---------------------------------------------------------------
+
+/**
+ * `hh:mm:ss`, dropping the hours segment entirely once it's zero — a
+ * countdown under an hour shows `mm:ss`, never a leading `00:`. Exposed
+ * (internal) so it's directly unit-testable without an Android runtime —
+ * this is the only part of a countdown a JVM test here can reach. Mirrors
+ * the Swift renderer's `countdownText` / the web renderer's
+ * `formatCountdown`. A negative [remaining] (there should never be one
+ * live, but a stale/replayed value could produce one) clamps to zero
+ * rather than producing a negative display.
+ */
+internal fun countdownText(remaining: Long): String {
+    val total = maxOf(remaining, 0L)
+    val hours = total / 3600
+    val minutes = (total % 3600) / 60
+    val seconds = total % 60
+    return if (hours > 0) {
+        "%02d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%02d:%02d".format(minutes, seconds)
+    }
+}
+
+/**
+ * Parses an ISO-8601 instant (`endsAt`) to epoch millis. `java.time.Instant
+ * .parse` tolerates both a bare `Z`-suffixed UTC timestamp and one carrying
+ * fractional seconds in one call — unlike the Swift renderer, which needs
+ * two configured `ISO8601DateFormatter`s for the same two shapes. `null` on
+ * any parse failure (never throws) — an unparsable `endsAt` is treated the
+ * same as "no deadline at all" by [countdownDeadlineMillis].
+ */
+internal fun parseIsoInstantMillis(raw: String): Long? = try {
+    java.time.Instant.parse(raw).toEpochMilli()
+} catch (_: Exception) {
+    null
+}
+
+/**
+ * The deadline (epoch millis) a `countdown` node resolves to: [BuilderNode.
+ * Countdown.endsAt] directly when present, else [BuilderNode.Countdown.
+ * durationSeconds] anchored to [anchorMillis] — a PERSISTED first-show
+ * instant (see [countdownFirstShownAtMillis]), never this render's own
+ * construction time, which would make the deadline restart on every open.
+ * [anchorMillis] is a SUPPLIER (not a value) so it is only invoked — and
+ * only then does it read/stamp `SharedPreferences` — when a
+ * `durationSeconds` node actually needs it; an `endsAt` node never touches
+ * storage. `null` when the node carries neither (the validator's
+ * `COUNTDOWN_NO_DEADLINE` already flags that at author time; this is a
+ * defensive fail-open, not the primary guard). Mirrors the Swift renderer's
+ * `CountdownView.deadline`.
+ */
+internal fun countdownDeadlineMillis(node: BuilderNode.Countdown, anchorMillis: () -> Long): Long? {
+    node.endsAt?.let { return parseIsoInstantMillis(it) }
+    node.durationSeconds?.let { seconds -> return anchorMillis() + (seconds * 1000).toLong() }
+    return null
+}
+
+/** Seconds remaining until [deadlineMillis] from [nowMillis], rounded UP —
+ *  mirrors the Swift renderer's `.rounded(.up)` so the displayed second only
+ *  decrements once a full second has actually elapsed, never a moment
+ *  early. Never negative. */
+internal fun countdownRemainingSeconds(deadlineMillis: Long, nowMillis: Long): Long =
+    maxOf(kotlin.math.ceil((deadlineMillis - nowMillis) / 1000.0).toLong(), 0L)
+
+private const val COUNTDOWN_NO_ANCHOR = -1L
+private const val COUNTDOWN_FIRST_SHOWN_KEY_PREFIX = "rovenue.paywall.countdown.firstShownAt."
+
+/** The `SharedPreferences` file name this SDK persists a countdown's
+ *  first-show anchor to. Not `private`: [RovenuePaywallView] opens it by
+ *  name. */
+internal const val COUNTDOWN_PREFS_NAME = "rovenue_paywall_countdown"
+
+/**
+ * The persisted instant (epoch millis) a `durationSeconds` countdown
+ * anchors its deadline to, keyed by [paywallIdentifier] — every countdown
+ * node on the SAME paywall shares one anchor, since "first show" is a
+ * paywall-level concept, not a per-node one. On the FIRST call for a given
+ * identifier, stamps and stores [now]; every subsequent call for the same
+ * identifier reads the stored value back rather than re-stamping it — this
+ * is what makes `durationSeconds` an actual deadline rather than a timer
+ * that restarts on every open. [prefs] is injectable for test isolation
+ * (mirrors the Swift renderer's injectable `UserDefaults` parameter, which
+ * defaults to `.standard`); production call sites pass the real
+ * `SharedPreferences` opened from [COUNTDOWN_PREFS_NAME] ([RovenuePaywallView]
+ * does this). [now] is injectable so a test can assert the SECOND call
+ * reuses the FIRST call's stamp without a real clock racing it.
+ */
+internal fun countdownFirstShownAtMillis(
+    paywallIdentifier: String?,
+    prefs: android.content.SharedPreferences,
+    now: () -> Long = System::currentTimeMillis,
+): Long {
+    val key = COUNTDOWN_FIRST_SHOWN_KEY_PREFIX + (paywallIdentifier ?: "")
+    val existing = prefs.getLong(key, COUNTDOWN_NO_ANCHOR)
+    if (existing != COUNTDOWN_NO_ANCHOR) return existing
+    val stamped = now()
+    prefs.edit().putLong(key, stamped).apply()
+    return stamped
+}
+
+// `internal`, not `private`: RovenuePaywallView.kt needs it too, for the
+// pinned-stickyFooter clearance/inset padding (its own render() lives in a
+// different file, same module).
+internal fun dp(context: Context, value: Double): Int =
     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), context.resources.displayMetrics)
         .roundToInt()
 
@@ -444,6 +575,14 @@ internal class PaywallRenderContext(
      *  paywall renders before an appVersion was ever configured; the
      *  gate fails open in that case (see Visibility.kt), never crashes. */
     val appVersion: String? = null,
+    /** Resolves the persisted first-show anchor (epoch millis) for a
+     *  `durationSeconds` countdown's deadline — see
+     *  [countdownFirstShownAtMillis]. [RovenuePaywallView] closes this over
+     *  the real `SharedPreferences` opened from [COUNTDOWN_PREFS_NAME] and
+     *  this bind's `paywallIdentifier`; the default here (plain "now") only
+     *  ever runs if a caller builds a [PaywallRenderContext] without wiring
+     *  it — production code always does. */
+    val countdownAnchorMillis: () -> Long = System::currentTimeMillis,
 ) {
     /** Localized + variable-resolved label. [cell] scopes variables to a
      *  package cell; elsewhere the selected package wins. */
@@ -503,6 +642,8 @@ internal object NodeViewFactory {
             is BuilderNode.FeatureList -> buildFeatureList(context, resolved, ctx, cell)
             is BuilderNode.Timeline -> buildTimeline(context, resolved, ctx, cell)
             is BuilderNode.SocialProof -> buildSocialProof(context, resolved, ctx, cell)
+            is BuilderNode.StickyFooter -> buildStickyFooter(context, resolved, ctx, cell)
+            is BuilderNode.Countdown -> buildCountdown(context, resolved, ctx, cell)
             is BuilderNode.Unknown -> resolved.fallback?.let { build(context, it, ctx, cell) }
         }
     }
@@ -999,6 +1140,146 @@ internal object NodeViewFactory {
             },
         )
         return container
+    }
+
+    /**
+     * Renders `stickyFooter` reached through the ORDINARY [build] dispatch —
+     * always the plain, in-flow shape (background + a vertical
+     * `LinearLayout` of children), never pinned. [RovenuePaywallView.render]
+     * is what gives a ROOT-level instance its pinned behaviour: it renders
+     * this SAME node through this SAME function, then wraps the result in a
+     * measured, non-scrolling container below the `NestedScrollView` — the
+     * pinning lives entirely in that wrapper, not here. A misplaced footer
+     * (anywhere but the root's last direct child) therefore renders
+     * identically to this, just without the wrapper — deliberate, mirrors
+     * the web/Swift renderers' `stickyFooter` doc comments. The validator's
+     * `STICKY_FOOTER_NOT_AT_ROOT` warning is what tells the author about
+     * that case.
+     */
+    internal fun buildStickyFooter(
+        context: Context,
+        node: BuilderNode.StickyFooter,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View {
+        val container = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        // A pinned bar needs an opaque background or the content scrolls
+        // visibly beneath it — absent `background` falls back to
+        // STICKY_FOOTER_DEFAULT_BACKGROUND, never transparent/inherit,
+        // unlike an ordinary node's colour (see buildIcon/buildDivider).
+        val resolvedColor = node.background?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+            ?: parseHexColor(themeValue(STICKY_FOOTER_DEFAULT_BACKGROUND, ctx.dark))?.toColorInt()
+        container.setBackgroundColor(resolvedColor ?: 0xFFFFFFFF.toInt())
+        node.children.forEach { child ->
+            val childView = build(context, child, ctx, cell) ?: return@forEach
+            container.addView(childView)
+        }
+        return container
+    }
+
+    /**
+     * Renders `countdown`. Builds a dedicated [TickingCountdownRow] (not a
+     * bare `TextView`) so the `Handler`-driven tick is tied to ITS OWN
+     * `onAttachedToWindow`/`onDetachedFromWindow` — started when this node's
+     * view enters a window, stopped when it leaves, so the handler never
+     * outlives the view holding it. This mirrors the Swift renderer's
+     * `.onAppear`/`.onDisappear`-scoped `Timer.publish` subscription, and
+     * the same "cancel on detach" discipline [RovenuePaywallView] already
+     * applies to its own `viewScope` — kept deliberately separate from
+     * `purchaseScope`, which is NOT tied to the view's lifecycle; the
+     * countdown tick belongs with the former, not the latter.
+     *
+     * The deadline is `endsAt` directly when present, else
+     * `durationSeconds` anchored to [countdownFirstShownAtMillis] (a
+     * PERSISTED first-show instant) — never this view's own construction
+     * time, which would make the deadline restart on every open. `null`
+     * when the node carries neither — falls back to
+     * [BuilderNode.Countdown.fallback] else nothing, mirroring every other
+     * node type's unknown/undecidable case.
+     */
+    internal fun buildCountdown(
+        context: Context,
+        node: BuilderNode.Countdown,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View? {
+        val deadlineMillis = countdownDeadlineMillis(node, ctx.countdownAnchorMillis)
+            ?: return node.fallback?.let { build(context, it, ctx, cell) }
+
+        val onExpiry = node.onExpiry ?: COUNTDOWN_DEFAULT_ON_EXPIRY
+        // Absent `color` never calls setTextColor, so both the label and the
+        // time text inherit the ambient ink — never a substituted value
+        // (this is ordinary text, unlike the footer's background).
+        val resolvedColorInt = node.color?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+        val timeView = TextView(context).apply {
+            resolvedColorInt?.let { setTextColor(it) }
+        }
+        val row = TickingCountdownRow(context, deadlineMillis, onExpiry, timeView)
+        node.labelKey?.let { key ->
+            val labelView = TextView(context).apply {
+                text = ctx.label(key, cell)
+                resolvedColorInt?.let { setTextColor(it) }
+            }
+            row.addView(
+                labelView,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { rightMargin = dp(context, COUNTDOWN_LABEL_GAP_DP) },
+            )
+        }
+        row.addView(timeView)
+        row.refresh()
+        return row
+    }
+}
+
+/**
+ * The Handler-ticking row a `countdown` node builds into: a horizontal
+ * `LinearLayout` of an optional label plus the live remaining-time
+ * [timeView]. Ticks at [COUNTDOWN_TICK_MS] via a
+ * `Handler(Looper.getMainLooper())` posted from [onAttachedToWindow] and
+ * removed in [onDetachedFromWindow] — a handler outliving this view would
+ * leak it. Past [deadlineMillis], [onExpiry] decides: [CountdownOnExpiry.
+ * FREEZE] holds the display at `00:00` (still visible), [CountdownOnExpiry.
+ * HIDE] collapses this row ([View.GONE]) instead.
+ */
+private class TickingCountdownRow(
+    context: Context,
+    private val deadlineMillis: Long,
+    private val onExpiry: CountdownOnExpiry,
+    private val timeView: TextView,
+) : LinearLayout(context) {
+    init {
+        orientation = HORIZONTAL
+    }
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val tick: Runnable = object : Runnable {
+        override fun run() {
+            refresh()
+            handler.postDelayed(this, COUNTDOWN_TICK_MS)
+        }
+    }
+
+    fun refresh() {
+        val remaining = countdownRemainingSeconds(deadlineMillis, System.currentTimeMillis())
+        if (remaining <= 0L && onExpiry == CountdownOnExpiry.HIDE) {
+            visibility = GONE
+            return
+        }
+        visibility = VISIBLE
+        timeView.text = countdownText(remaining)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        handler.post(tick)
+    }
+
+    override fun onDetachedFromWindow() {
+        handler.removeCallbacks(tick)
+        super.onDetachedFromWindow()
     }
 }
 

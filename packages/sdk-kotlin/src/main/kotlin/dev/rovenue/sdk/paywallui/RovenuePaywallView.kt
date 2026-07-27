@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.Configuration
 import android.util.AttributeSet
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import dev.rovenue.sdk.Paywall
 import dev.rovenue.sdk.Rovenue
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +57,14 @@ import kotlinx.coroutines.launch
  * dependency this module once declared has been removed (the JUnit5-
  * platform test tasks could never discover its JUnit4-style tests).
  */
+
+/** Extra bottom clearance a ROOT-PINNED `stickyFooter` gets below its own
+ *  content, for the system nav bar it sits flush against — mirrors the
+ *  Swift renderer's trailing `.padding(.bottom)` at its pinned call site.
+ *  Not applied to a nested (non-pinned) `stickyFooter` instance, which
+ *  stays flush with its siblings like any other stack. */
+private const val STICKY_FOOTER_BOTTOM_INSET_DP = 16.0
+
 class RovenuePaywallView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -157,6 +167,9 @@ class RovenuePaywallView @JvmOverloads constructor(
             parseHexColor(themeValue(pair, dark))?.let { setBackgroundColor(it.toColorInt()) }
         }
 
+        val currentPaywall = paywall
+        val countdownPrefs = context.getSharedPreferences(COUNTDOWN_PREFS_NAME, Context.MODE_PRIVATE)
+
         val ctx = PaywallRenderContext(
             config = cfg,
             locale = options.locale,
@@ -177,18 +190,100 @@ class RovenuePaywallView @JvmOverloads constructor(
             onUrl = options.onUrl,
             loadImage = { imageView, url -> loadImageInto(imageView, url, scopeForImageLoads()) },
             appVersion = appVersionOrNull(),
+            // Anchors a `durationSeconds` countdown's deadline to a
+            // PERSISTED first-show instant, keyed by this paywall's
+            // identifier (see countdownFirstShownAtMillis's doc) — real
+            // SharedPreferences here; NodeViewFactoryTest injects a fake
+            // instead so its tests never touch real device state.
+            countdownAnchorMillis = {
+                countdownFirstShownAtMillis(currentPaywall?.paywallIdentifier, countdownPrefs)
+            },
         )
 
-        val rootView = NodeViewFactory.build(context, cfg.root, ctx, cell = null) ?: return
-        val scroller = androidx.core.widget.NestedScrollView(context).apply {
-            // isFillViewport is the Android spelling of "content still fills
-            // the screen when it is shorter than the viewport". Without it a
-            // stack with a flexible spacer collapses to its natural height,
-            // and any paywall pushing its CTA to the bottom rides up.
-            isFillViewport = true
-            addView(rootView, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        // Same partition the web/Swift renderers perform on
+        // `cfg.root.children`: a `stickyFooter` found ONLY as the root's
+        // last direct child is pulled out and pinned below the scroller;
+        // found anywhere else, it stays in `scrolledRoot`'s children and
+        // reaches the ordinary NodeViewFactory dispatch, rendering in-flow
+        // like any other stack (see NodeViewFactory.buildStickyFooter's doc).
+        val footerNode = cfg.root.children.lastOrNull() as? BuilderNode.StickyFooter
+        val scrolledChildren = if (footerNode != null) cfg.root.children.dropLast(1) else cfg.root.children
+        val scrolledRoot = cfg.root.copy(children = scrolledChildren)
+
+        val rootView = NodeViewFactory.build(context, scrolledRoot, ctx, cell = null) ?: return
+        val footerView = footerNode?.let { NodeViewFactory.build(context, it, ctx, cell = null) }
+
+        if (footerView == null) {
+            val scroller = androidx.core.widget.NestedScrollView(context).apply {
+                // isFillViewport is the Android spelling of "content still
+                // fills the screen when it is shorter than the viewport".
+                // Without it a stack with a flexible spacer collapses to its
+                // natural height, and any paywall pushing its CTA to the
+                // bottom rides up.
+                isFillViewport = true
+                addView(rootView, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            }
+            addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            return
         }
-        addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        // A pinned bar sitting flush against the screen edge needs its own
+        // clearance from the system nav bar — mirrors the Swift renderer's
+        // trailing `.padding(.bottom)` at the pinned call site only
+        // (StickyFooterView/buildStickyFooter itself never adds this; a
+        // nested, non-pinned instance stays flush with its siblings).
+        footerView.setPadding(
+            footerView.paddingLeft,
+            footerView.paddingTop,
+            footerView.paddingRight,
+            footerView.paddingBottom + dp(context, STICKY_FOOTER_BOTTOM_INSET_DP),
+        )
+
+        // `scrollContent` wraps `rootView` so the clearance reserved for the
+        // pinned footer is a SEPARATE padding layer from the root stack's
+        // own authored `padding` (already applied inside `rootView` by
+        // NodeViewFactory.buildStack) — mirrors the Swift renderer's
+        // `.padding(.bottom, footerClearance)` modifier, layered OUTSIDE
+        // `StackNodeView`'s own padding, never merged into it.
+        val scrollContent = FrameLayout(context).apply {
+            addView(rootView, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            setPadding(0, 0, 0, dp(context, STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT_DP))
+        }
+        val scroller = androidx.core.widget.NestedScrollView(context).apply {
+            isFillViewport = true
+            addView(scrollContent, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
+
+        // The scroller's bottom clearance comes from the footer's MEASURED
+        // height, not the constant above (that's only the pre-measurement
+        // placeholder) — a footer with a CTA plus fine print is routinely
+        // taller than one with a CTA alone, and a fixed guess leaves the
+        // last scrolled item unreachable, the same failure as no scrolling
+        // at all. This listener replaces the placeholder with the real
+        // value on every layout pass the footer goes through (mirrors the
+        // web renderer's `ResizeObserver` / the Swift renderer's
+        // `StickyFooterHeightKey` preference).
+        footerView.viewTreeObserver.addOnGlobalLayoutListener(
+            object : ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    val measured = footerView.height
+                    if (measured > 0 && scrollContent.paddingBottom != measured) {
+                        scrollContent.setPadding(0, 0, 0, measured)
+                    }
+                }
+            },
+        )
+
+        val outer = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        outer.addView(
+            scroller,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0).apply { weight = 1f },
+        )
+        outer.addView(
+            footerView,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+        )
+        addView(outer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     /**

@@ -174,6 +174,26 @@ fun applyOverrides(node: BuilderNode.SocialProof, active: OverrideActiveConditio
     return result
 }
 
+fun applyOverrides(node: BuilderNode.StickyFooter, active: OverrideActiveConditions): BuilderNode.StickyFooter {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(background = patch.background ?: result.background)
+    }
+    return result
+}
+
+fun applyOverrides(node: BuilderNode.Countdown, active: OverrideActiveConditions): BuilderNode.Countdown {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(color = patch.color ?: result.color)
+    }
+    return result
+}
+
 /** Dispatches to the node's own `applyOverrides` overload. `.Unknown` nodes
  *  carry no overrides field at all and pass through unchanged. */
 fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): BuilderNode = when (node) {
@@ -189,6 +209,8 @@ fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): Builder
     is BuilderNode.FeatureList -> applyOverrides(node, active)
     is BuilderNode.Timeline -> applyOverrides(node, active)
     is BuilderNode.SocialProof -> applyOverrides(node, active)
+    is BuilderNode.StickyFooter -> applyOverrides(node, active)
+    is BuilderNode.Countdown -> applyOverrides(node, active)
     is BuilderNode.Unknown -> node
 }
 

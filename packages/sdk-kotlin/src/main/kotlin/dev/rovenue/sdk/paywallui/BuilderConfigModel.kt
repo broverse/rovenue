@@ -44,6 +44,13 @@ enum class TextRole { TITLE, SUBTITLE, BODY, CAPTION }
 enum class ButtonVisualStyle { PRIMARY, SECONDARY, PLAIN }
 enum class CellLayout { ROW, COLUMN }
 
+/** `countdown.onExpiry` — [FREEZE] holds the display at zero rather than
+ *  vanishing (the default; hiding it collapses whatever space it occupied,
+ *  a layout jump), [HIDE] removes the node once its deadline passes. Kotlin
+ *  mirror of schema.ts's `CountdownNode.onExpiry` union / the Swift
+ *  decoder's `CountdownOnExpiry`. */
+enum class CountdownOnExpiry { FREEZE, HIDE }
+
 sealed class ButtonAction {
     object Close : ButtonAction()
     object Restore : ButtonAction()
@@ -111,6 +118,8 @@ private object OverridablePropKeys {
     val featureList: Set<String> = setOf("iconColor")
     val timeline: Set<String> = setOf("connectorColor")
     val socialProof: Set<String> = setOf("rating", "starColor")
+    val stickyFooter: Set<String> = setOf("background")
+    val countdown: Set<String> = setOf("color")
 }
 
 /** A single conditional prop swap: `{ when: { kind }, props }`. [T] is the
@@ -154,6 +163,10 @@ data class FeatureListOverrideProps(val iconColor: ThemePair? = null)
 data class TimelineOverrideProps(val connectorColor: ThemePair? = null)
 
 data class SocialProofOverrideProps(val rating: Double? = null, val starColor: ThemePair? = null)
+
+data class StickyFooterOverrideProps(val background: ThemePair? = null)
+
+data class CountdownOverrideProps(val color: ThemePair? = null)
 
 // =============================================================
 // Feature-list / timeline row shapes (Wave B) — Kotlin mirror of the shared
@@ -312,6 +325,39 @@ sealed class BuilderNode {
         /** Absent = SOCIAL_PROOF_STAR_DEFAULT_COLOR (NodeViewFactory.kt). */
         val starColor: ThemePair? = null,
         val overrides: List<NodeOverride<SocialProofOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class StickyFooter(
+        override val id: String,
+        val children: List<BuilderNode>,
+        /** Absent = STICKY_FOOTER_DEFAULT_BACKGROUND (NodeViewFactory.kt) —
+         *  a pinned bar needs an opaque background or the content scrolls
+         *  visibly beneath it, unlike an ordinary node's colour. */
+        val background: ThemePair? = null,
+        val overrides: List<NodeOverride<StickyFooterOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class Countdown(
+        override val id: String,
+        /** ISO-8601 absolute deadline. Mutually exclusive with
+         *  [durationSeconds]. */
+        val endsAt: String? = null,
+        /** Seconds from this paywall's first show to this user, persisted
+         *  (see `countdownFirstShownAtMillis` in NodeViewFactory.kt) — a
+         *  timer restarting on every open is not a deadline. Mutually
+         *  exclusive with [endsAt]. */
+        val durationSeconds: Double? = null,
+        /** Absent = COUNTDOWN_DEFAULT_ON_EXPIRY (NodeViewFactory.kt). */
+        val onExpiry: CountdownOnExpiry? = null,
+        val labelKey: String? = null,
+        /** Absent = inherit the ambient text colour, never a substituted
+         *  value. */
+        val color: ThemePair? = null,
+        val overrides: List<NodeOverride<CountdownOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
@@ -539,6 +585,34 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             visibility = visibility,
             fallback = fallback,
         )
+        "stickyFooter" -> BuilderNode.StickyFooter(
+            id = id,
+            children = (obj["children"] as? JsonArray
+                ?: throw BuilderDecodeException("stickyFooter.children must be an array"))
+                .map { parseNode(it as? JsonObject ?: throw BuilderDecodeException("child must be an object")) },
+            background = obj["background"]?.letObject(::parseThemePair),
+            overrides = obj.parseOverrideList(::parseStickyFooterOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
+        "countdown" -> BuilderNode.Countdown(
+            id = id,
+            endsAt = obj.optionalString("endsAt"),
+            durationSeconds = obj.optionalDouble("durationSeconds"),
+            onExpiry = obj["onExpiry"]?.let { el ->
+                val prim = el as? JsonPrimitive ?: throw BuilderDecodeException("onExpiry must be a string")
+                when (prim.content) {
+                    "freeze" -> CountdownOnExpiry.FREEZE
+                    "hide" -> CountdownOnExpiry.HIDE
+                    else -> throw BuilderDecodeException("onExpiry has invalid value \"${prim.content}\"")
+                }
+            },
+            labelKey = obj.optionalString("labelKey"),
+            color = obj["color"]?.letObject(::parseThemePair),
+            overrides = obj.parseOverrideList(::parseCountdownOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
         else -> BuilderNode.Unknown(id = id, visibility = visibility, fallback = fallback)
@@ -685,6 +759,16 @@ private fun parseSocialProofOverrideProps(props: JsonObject): SocialProofOverrid
         rating = props.optionalDouble("rating"),
         starColor = props["starColor"]?.letObject(::parseThemePair),
     )
+}
+
+private fun parseStickyFooterOverrideProps(props: JsonObject): StickyFooterOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.stickyFooter)
+    return StickyFooterOverrideProps(background = props["background"]?.letObject(::parseThemePair))
+}
+
+private fun parseCountdownOverrideProps(props: JsonObject): CountdownOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.countdown)
+    return CountdownOverrideProps(color = props["color"]?.letObject(::parseThemePair))
 }
 
 // ----- feature-list / timeline rows -----

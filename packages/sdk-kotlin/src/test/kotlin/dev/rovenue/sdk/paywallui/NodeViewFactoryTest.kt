@@ -588,6 +588,159 @@ class NodeViewFactoryTest {
         assertFalse(socialProofStarFilled(index = 4, rating = 4.0))
     }
 
+    // ---- countdown (pure) --------------------------------------------------
+
+    @Test
+    fun formatsRemainingTime() {
+        assertEquals("01:00", countdownText(60))
+        assertEquals("01:01:01", countdownText(3661))
+        assertEquals("00:00", countdownText(0))
+        assertEquals("00:00", countdownText(-5))
+    }
+
+    /**
+     * The spec requires `durationSeconds` anchored to a PERSISTED first-show
+     * instant — a timer restarting on every open is not a deadline. This is
+     * the test that pins it: a SECOND render for the SAME paywall identifier
+     * must reuse the FIRST call's stamp, not re-stamp with the current
+     * clock. [FakeSharedPreferences] stands in for real device storage
+     * (mirrors the Swift renderer's injectable `UserDefaults` test double)
+     * so this never touches, or depends on, real device state.
+     *
+     * Mutation-checked (see task report): making the write unconditional
+     * (always `prefs.edit().putLong(key, now()).apply()`, never reading the
+     * existing value back first) makes the second assertion below fail —
+     * `second` becomes `2_000L` instead of reusing `1_000L`.
+     */
+    @Test
+    fun `countdownFirstShownAtMillis stamps on first call and reuses the anchor on the second`() {
+        val prefs = FakeSharedPreferences()
+        val first = countdownFirstShownAtMillis("pw_1", prefs, now = { 1_000L })
+        val second = countdownFirstShownAtMillis("pw_1", prefs, now = { 2_000L })
+        assertEquals(1_000L, first)
+        assertEquals(1_000L, second, "second call must reuse the persisted first-show anchor, not re-stamp it")
+    }
+
+    @Test
+    fun `countdownFirstShownAtMillis keys the anchor per paywall identifier`() {
+        // Two countdown nodes on DIFFERENT paywalls must NOT share an
+        // anchor — "first show" is scoped to one paywall's identifier, not
+        // global to the SDK.
+        val prefs = FakeSharedPreferences()
+        val a = countdownFirstShownAtMillis("pw_a", prefs, now = { 111L })
+        val b = countdownFirstShownAtMillis("pw_b", prefs, now = { 222L })
+        assertEquals(111L, a)
+        assertEquals(222L, b)
+    }
+
+    @Test
+    fun `countdownDeadlineMillis prefers endsAt over durationSeconds, never touching the anchor`() {
+        val node = BuilderNode.Countdown(id = "cd", endsAt = "2027-01-01T00:00:00Z", durationSeconds = 900.0)
+        assertEquals(
+            java.time.Instant.parse("2027-01-01T00:00:00Z").toEpochMilli(),
+            countdownDeadlineMillis(node) { error("must not read the anchor when endsAt is present") },
+        )
+    }
+
+    @Test
+    fun `countdownDeadlineMillis anchors durationSeconds to the supplied anchor, not a fresh mount time`() {
+        val node = BuilderNode.Countdown(id = "cd", durationSeconds = 30.0)
+        assertEquals(1_030_000L, countdownDeadlineMillis(node) { 1_000_000L })
+    }
+
+    @Test
+    fun `countdownDeadlineMillis is null with neither endsAt nor durationSeconds`() {
+        assertNull(countdownDeadlineMillis(BuilderNode.Countdown(id = "cd")) { 0L })
+    }
+
+    @Test
+    fun `countdownRemainingSeconds rounds up and never goes negative`() {
+        assertEquals(1L, countdownRemainingSeconds(deadlineMillis = 1500, nowMillis = 1000))
+        assertEquals(0L, countdownRemainingSeconds(deadlineMillis = 1000, nowMillis = 1000))
+        assertEquals(0L, countdownRemainingSeconds(deadlineMillis = 500, nowMillis = 1000))
+    }
+
+    /**
+     * Minimal in-memory [android.content.SharedPreferences] test double —
+     * only `getLong`/`edit().putLong(...).apply()` are ever exercised by
+     * [countdownFirstShownAtMillis], but the interface must be implemented
+     * in full. Stands in for real device storage so
+     * `countdownFirstShownAtMillis`'s tests never touch, or depend on, real
+     * device state (mirrors the Swift renderer's injectable `UserDefaults`).
+     */
+    private class FakeSharedPreferences : android.content.SharedPreferences {
+        private val values = mutableMapOf<String, Any?>()
+
+        override fun getAll(): MutableMap<String, *> = values
+        override fun getString(key: String?, defValue: String?): String? = values[key] as? String ?: defValue
+
+        @Suppress("UNCHECKED_CAST")
+        override fun getStringSet(key: String?, defValues: MutableSet<String>?): MutableSet<String>? =
+            values[key] as? MutableSet<String> ?: defValues
+        override fun getInt(key: String?, defValue: Int): Int = values[key] as? Int ?: defValue
+        override fun getLong(key: String?, defValue: Long): Long = values[key] as? Long ?: defValue
+        override fun getFloat(key: String?, defValue: Float): Float = values[key] as? Float ?: defValue
+        override fun getBoolean(key: String?, defValue: Boolean): Boolean = values[key] as? Boolean ?: defValue
+        override fun contains(key: String?): Boolean = values.containsKey(key)
+        override fun edit(): android.content.SharedPreferences.Editor = FakeEditor()
+        override fun registerOnSharedPreferenceChangeListener(
+            listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?,
+        ) = Unit
+        override fun unregisterOnSharedPreferenceChangeListener(
+            listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?,
+        ) = Unit
+
+        private inner class FakeEditor : android.content.SharedPreferences.Editor {
+            private val pending = mutableMapOf<String, Any?>()
+            private val removals = mutableSetOf<String>()
+            private var clearAll = false
+
+            override fun putString(key: String?, value: String?): android.content.SharedPreferences.Editor {
+                pending[key!!] = value
+                return this
+            }
+            override fun putStringSet(key: String?, valueSet: MutableSet<String>?): android.content.SharedPreferences.Editor {
+                pending[key!!] = valueSet
+                return this
+            }
+            override fun putInt(key: String?, value: Int): android.content.SharedPreferences.Editor {
+                pending[key!!] = value
+                return this
+            }
+            override fun putLong(key: String?, value: Long): android.content.SharedPreferences.Editor {
+                pending[key!!] = value
+                return this
+            }
+            override fun putFloat(key: String?, value: Float): android.content.SharedPreferences.Editor {
+                pending[key!!] = value
+                return this
+            }
+            override fun putBoolean(key: String?, value: Boolean): android.content.SharedPreferences.Editor {
+                pending[key!!] = value
+                return this
+            }
+            override fun remove(key: String?): android.content.SharedPreferences.Editor {
+                removals.add(key!!)
+                return this
+            }
+            override fun clear(): android.content.SharedPreferences.Editor {
+                clearAll = true
+                return this
+            }
+            override fun commit(): Boolean {
+                applyChanges()
+                return true
+            }
+            override fun apply() = applyChanges()
+
+            private fun applyChanges() {
+                if (clearAll) values.clear()
+                removals.forEach { values.remove(it) }
+                values.putAll(pending)
+            }
+        }
+    }
+
     // ---- real View-tree assertions (mockkConstructor) ---------------------
     // See the class doc for why this technique works despite the stub
     // android.jar's always-empty ViewGroup bookkeeping: it verifies the
