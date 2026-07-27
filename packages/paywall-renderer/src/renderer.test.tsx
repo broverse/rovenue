@@ -1169,3 +1169,98 @@ describe("featureList, timeline and socialProof nodes", () => {
     expect(container.querySelectorAll('[data-rov-row]')).toHaveLength(0);
   });
 });
+
+// =====================================================================
+// trialLabel vectors (P6): the CTA renders trialLabelKey only when the
+// selected package's view carries a non-empty introPeriod. Driven by the
+// shared render-fixtures.json contract so all renderers pin the same
+// table — do not restate the cases by hand.
+// =====================================================================
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const TRIAL_FIXTURE_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../shared/src/paywall/render-fixtures.json",
+);
+
+interface TrialLabelCase {
+  name: string;
+  labelKey: string;
+  trialLabelKey?: string;
+  selectedHasIntroPeriod: boolean | null;
+  expectedKey: string;
+}
+
+const TRIAL_LOCALIZATIONS: Record<string, string> = {
+  "cta.buy": "Buy now",
+  "cta.trial": "Start free trial",
+};
+
+const TRIAL_INTRO_PERIOD = "7 days";
+
+function trialLabelConfig(c: TrialLabelCase): BuilderConfig {
+  const purchaseButton: PaywallNode = {
+    type: "purchaseButton",
+    id: "purchase",
+    labelKey: c.labelKey,
+    ...(c.trialLabelKey ? { trialLabelKey: c.trialLabelKey } : {}),
+  };
+  // selectedHasIntroPeriod === null → no packageList, so nothing is selected.
+  const children: PaywallNode[] =
+    c.selectedHasIntroPeriod === null
+      ? [purchaseButton]
+      : [
+          {
+            type: "packageList",
+            id: "packages",
+            packageIds: ["monthly"],
+            defaultSelected: "monthly",
+            cellLayout: "row",
+          },
+          purchaseButton,
+        ];
+  return {
+    formatVersion: 2,
+    defaultLocale: "en",
+    localizations: { en: { ...TRIAL_LOCALIZATIONS } },
+    background: { light: "#ffffff", dark: "#000000" },
+    root: { type: "stack", id: "root", axis: "v", spacing: 12, children },
+  } as BuilderConfig;
+}
+
+describe("trialLabel vectors (render-fixtures contract)", () => {
+  const fixture = JSON.parse(readFileSync(TRIAL_FIXTURE_PATH, "utf8")) as {
+    trialLabel: { cases: TrialLabelCase[] };
+  };
+
+  it("fixture carries the trialLabel vector section", () => {
+    expect(fixture.trialLabel.cases.length).toBeGreaterThanOrEqual(4);
+  });
+
+  for (const c of JSON.parse(readFileSync(TRIAL_FIXTURE_PATH, "utf8")).trialLabel.cases as TrialLabelCase[]) {
+    it(`case: ${c.name}`, () => {
+      const view: PackageView = {
+        packageName: "Monthly",
+        price: "$4.99",
+        pricePerPeriod: "$4.99/mo",
+        period: "month",
+        ...(c.selectedHasIntroPeriod ? { introPeriod: TRIAL_INTRO_PERIOD } : {}),
+      };
+      const { container } = render(
+        <PaywallRenderer
+          config={trialLabelConfig(c)}
+          offering={offering}
+          priceView={{ monthly: view }}
+          colorScheme="light"
+          onPurchase={vi.fn()}
+        />,
+      );
+      const button = container.querySelector('[data-rov-node="purchase"]') as HTMLButtonElement;
+      expect(button).not.toBeNull();
+      expect(button.textContent).toBe(TRIAL_LOCALIZATIONS[c.expectedKey]);
+    });
+  }
+});

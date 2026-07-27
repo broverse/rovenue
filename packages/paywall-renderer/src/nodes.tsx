@@ -8,6 +8,7 @@ import {
   iconRegistry,
   isNodeVisible,
   resolveText,
+  resolveCtaLabelKey,
   resolveVariables,
   ICON_DEFAULT_SIZE,
   DIVIDER_DEFAULT_COLOR,
@@ -400,7 +401,10 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
 }
 
 function renderPurchaseButton(node: PurchaseButtonNode, ctx: RenderCtx): ReactElement | null {
-  const label = resolveLabel(ctx, node.labelKey);
+  // Trial-aware CTA: the shared evaluator (render-fixtures `trialLabel`
+  // contract) picks trialLabelKey only when the SELECTED package's view
+  // carries a non-empty introPeriod — never reimplement this branch here.
+  const label = resolveLabel(ctx, resolveCtaLabelKey(node, ctx.selectedPackage));
   if (label === null) return renderFallbackOrNull(node, ctx);
   const selectedId = ctx.selectedPackageId;
   const handleClick = () => {
