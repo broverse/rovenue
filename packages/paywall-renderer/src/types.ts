@@ -34,6 +34,13 @@ export type PaywallRendererProps = {
   locale?: string;
   colorScheme: "light" | "dark";
   /**
+   * The "current" instant the renderer treats as now — drives the countdown
+   * node's remaining-time calculation. Defaults to `new Date()`. A renderer
+   * whose output depends on the wall clock is otherwise untestable; the same
+   * injection point lets the dashboard's canvas preview pin a fixed instant.
+   */
+  now?: Date;
+  /**
    * Package -> {{variable}} substitution values, keyed by packageIdentifier.
    * Price fields aren't derivable from the minimal `RendererOffering`
    * contract alone (this package has no SDK/network access); the consumer

@@ -1278,3 +1278,100 @@ describe("trialLabel vectors (render-fixtures contract)", () => {
     });
   }
 });
+
+describe("stickyFooter and countdown nodes", () => {
+  /** A stickyFooter as the LAST direct root child — the case the root pins. */
+  function cfgWithFooter(): BuilderConfig {
+    return baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "text", id: "body", key: "title", role: "body" },
+          {
+            type: "stickyFooter",
+            id: "sf",
+            children: [{ type: "text", id: "sf-text", key: "title", role: "body" }],
+          },
+        ],
+      },
+    });
+  }
+
+  /** A stickyFooter nested inside another stack, not a direct root child at all. */
+  function cfgWithNestedFooter(): BuilderConfig {
+    return baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "stack",
+            id: "wrapper",
+            axis: "v",
+            children: [
+              {
+                type: "stickyFooter",
+                id: "sf",
+                children: [{ type: "text", id: "sf-text", key: "title", role: "body" }],
+              },
+            ],
+          },
+          { type: "text", id: "trailing", key: "title", role: "body" },
+        ],
+      },
+    });
+  }
+
+  function cfgCountdown(endsAt: string, onExpiry?: "freeze" | "hide"): BuilderConfig {
+    return cfg({
+      type: "countdown",
+      id: "c1",
+      endsAt,
+      ...(onExpiry ? { onExpiry } : {}),
+    });
+  }
+
+  it("pins a root-level stickyFooter outside the scroller", () => {
+    const { container } = render(<PaywallRenderer config={cfgWithFooter()} {...base} />);
+    const scroller = container.querySelector("[data-rov-paywall-scroll]")!;
+    expect(scroller.querySelector('[data-rov-node="sf"]')).toBeNull();
+    expect(container.querySelector('[data-rov-sticky-footer]')).not.toBeNull();
+  });
+
+  it("gives the scrolled content bottom padding so the footer never covers it", () => {
+    const { container } = render(<PaywallRenderer config={cfgWithFooter()} {...base} />);
+    const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
+    expect(inner.style.paddingBottom).not.toBe("");
+  });
+
+  it("renders a nested stickyFooter inline instead of pinning it", () => {
+    const { container } = render(<PaywallRenderer config={cfgWithNestedFooter()} {...base} />);
+    const scroller = container.querySelector("[data-rov-paywall-scroll]")!;
+    expect(scroller.querySelector('[data-rov-node="sf"]')).not.toBeNull();
+  });
+
+  it("formats the remaining time and freezes at zero", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfgCountdown("2027-01-01T00:00:00.000Z")}
+        {...base}
+        now={new Date("2026-12-31T23:59:00.000Z")}
+      />,
+    );
+    expect(container.querySelector('[data-rov-node="c1"]')!.textContent).toContain("01:00");
+  });
+
+  it("removes a countdown whose onExpiry is hide once it has passed", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfgCountdown("2026-01-01T00:00:00.000Z", "hide")}
+        {...base}
+        now={new Date("2027-01-01T00:00:00.000Z")}
+      />,
+    );
+    expect(container.querySelector('[data-rov-node="c1"]')).toBeNull();
+  });
+});

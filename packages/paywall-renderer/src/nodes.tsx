@@ -1,4 +1,4 @@
-import { Fragment, type CSSProperties, type ReactElement } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type ReactElement } from "react";
 import {
   ArrowRight, Check, Clock, Cloud, Gift, Infinity as InfinityIcon,
   Lock, Shield, Sparkles, Star, X, Zap, type LucideIcon,
@@ -11,6 +11,8 @@ import {
   resolveCtaLabelKey,
   resolveVariables,
   ICON_DEFAULT_SIZE,
+  COUNTDOWN_DEFAULT_ON_EXPIRY,
+  COUNTDOWN_TICK_MS,
   DIVIDER_DEFAULT_COLOR,
   DIVIDER_DEFAULT_INSET,
   DIVIDER_DEFAULT_THICKNESS,
@@ -19,10 +21,12 @@ import {
   FEATURE_ROW_EXCLUDED_ICON,
   SOCIAL_PROOF_MAX_RATING,
   SOCIAL_PROOF_STAR_DEFAULT_COLOR,
+  STICKY_FOOTER_DEFAULT_BACKGROUND,
   TIMELINE_CONNECTOR_DEFAULT_COLOR,
   TIMELINE_ROW_DEFAULT_ICON,
   type BuilderConfig,
   type ButtonNode,
+  type CountdownNode,
   type DividerNode,
   type FeatureListNode,
   type IconNode,
@@ -34,6 +38,7 @@ import {
   type SocialProofNode,
   type SpacerNode,
   type StackNode,
+  type StickyFooterNode,
   type TextNode,
   type TimelineNode,
   type VisibilityPlatform,
@@ -73,6 +78,11 @@ export type RenderCtx = {
   offering: RendererOffering | null;
   locale: string;
   colorScheme: "light" | "dark";
+  /** The instant the renderer treats as "now" — see `PaywallRendererProps.now`.
+   *  Fixed for the lifetime of a single `PaywallRenderer` render tree; the
+   *  countdown node ticks its OWN display forward from this anchor rather
+   *  than re-reading the wall clock, so it stays driven by the injected value. */
+  now: Date;
   priceView?: Record<string, PackageView>;
   /** Package -> intro-offer eligibility, keyed by packageIdentifier. Absent -> not eligible. */
   eligibility?: Record<string, boolean>;
@@ -609,6 +619,97 @@ function renderSocialProof(node: SocialProofNode, ctx: RenderCtx): ReactElement 
   );
 }
 
+/** A stickyFooter reached through the ORDINARY dispatcher — anywhere other
+ * than a direct root child — renders like a stack: in-flow, no pinning
+ * chrome. `PaywallRenderer` is what gives a root-level instance its pinned
+ * behaviour (it renders this same node through `renderNode` too, then wraps
+ * the result); this function only ever produces the plain, unpinned shape.
+ * That mismatch for a misplaced footer is deliberate — the validator's
+ * `STICKY_FOOTER_NOT_AT_ROOT` warning is what tells the author. */
+function renderStickyFooter(node: StickyFooterNode, ctx: RenderCtx): ReactElement {
+  const background =
+    resolveThemeColor(node.background, ctx.colorScheme) ??
+    resolveThemeColor(STICKY_FOOTER_DEFAULT_BACKGROUND, ctx.colorScheme);
+  return (
+    <div data-rov-node={node.id} style={{ display: "flex", flexDirection: "column", background }}>
+      {node.children.map((child, index) => (
+        <Fragment key={index}>{renderNode(child, ctx)}</Fragment>
+      ))}
+    </div>
+  );
+}
+
+const COUNTDOWN_PAD_WIDTH = 2;
+
+/** `hh:mm:ss`, dropping the hours segment entirely once it's zero — a
+ * countdown under an hour shows `mm:ss`, never a leading `00:`. */
+function formatCountdown(remainingMs: number): string {
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(COUNTDOWN_PAD_WIDTH, "0");
+  return hours > 0 ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+/**
+ * The countdown's deadline in epoch ms: `endsAt` directly, or
+ * `durationSeconds` anchored to this instance's first render. This package
+ * has no persistence layer to remember an actual "first shown to this user"
+ * instant across app launches (that's a host-app/SDK concern) — `ctx.now` at
+ * mount is the best available stand-in, captured once via `useState`'s lazy
+ * initializer so a later prop/ctx change never re-anchors it mid-life. Null
+ * when neither field is set; `COUNTDOWN_NO_DEADLINE` already flags that at
+ * validate time, so this is a defensive fail-open, not the primary guard.
+ */
+function useCountdownDeadline(node: CountdownNode, ctx: RenderCtx): number | null {
+  const [firstShownAt] = useState(() => ctx.now.getTime());
+  if (node.endsAt !== undefined) return new Date(node.endsAt).getTime();
+  if (node.durationSeconds !== undefined) return firstShownAt + node.durationSeconds * 1000;
+  return null;
+}
+
+/**
+ * A real component (not a plain render function like its siblings above) —
+ * it owns hook state (the tick counter) that must live and die with THIS
+ * node's own position in the tree, not with whatever call order the
+ * dispatcher happens to visit siblings in.
+ *
+ * Ticks forward from `ctx.now` by counting elapsed `COUNTDOWN_TICK_MS`
+ * intervals rather than re-reading the wall clock on every tick, so the
+ * displayed value stays anchored to the injected `now` in tests (which never
+ * advance the interval) while still advancing once per second in real usage
+ * (where `now` defaults to `new Date()` at render time). The interval is
+ * cleared on unmount — otherwise it keeps firing against a dead tree.
+ */
+function Countdown({ node, ctx }: { node: CountdownNode; ctx: RenderCtx }): ReactElement | null {
+  const [ticks, setTicks] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTicks((t) => t + 1), COUNTDOWN_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  const deadline = useCountdownDeadline(node, ctx);
+  if (deadline === null) return renderFallbackOrNull(node, ctx);
+
+  const current = ctx.now.getTime() + ticks * COUNTDOWN_TICK_MS;
+  const remainingMs = deadline - current;
+  const onExpiry = node.onExpiry ?? COUNTDOWN_DEFAULT_ON_EXPIRY;
+  if (remainingMs <= 0 && onExpiry === "hide") return null;
+
+  const label = node.labelKey !== undefined ? resolveLabel(ctx, node.labelKey) : null;
+  return (
+    // No colour default here (mirrors renderIcon/renderFeatureList's
+    // uncoloured mark): `resolveThemeColor` returns `undefined` when
+    // `node.color` is absent, so the style prop is omitted and the text
+    // inherits the ambient ink — never a substituted value.
+    <div data-rov-node={node.id} style={{ color: resolveThemeColor(node.color, ctx.colorScheme) }}>
+      {label !== null ? <span>{label} </span> : null}
+      <span>{formatCountdown(Math.max(remainingMs, 0))}</span>
+    </div>
+  );
+}
+
 /** Recursive dispatcher: known node type -> its component; unknown type or a thrown error -> `fallback` if present, else nothing. Never throws.
  *
  * Every node passes through `applyOverrides` here, BEFORE any style/text
@@ -659,6 +760,10 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         return renderTimeline(resolved, ctx);
       case "socialProof":
         return renderSocialProof(resolved, ctx);
+      case "stickyFooter":
+        return renderStickyFooter(resolved, ctx);
+      case "countdown":
+        return <Countdown node={resolved} ctx={ctx} />;
       default:
         return renderFallbackOrNull(resolved, ctx);
     }
