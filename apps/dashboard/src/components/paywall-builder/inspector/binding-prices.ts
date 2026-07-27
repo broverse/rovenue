@@ -188,15 +188,28 @@ export function availablePresets(rows: readonly PackagePriceRow[]): PeriodPreset
   return presets;
 }
 
-/** Ids of rows whose period is in the preset, offering order; defaultSelected kept only if still included. */
+/**
+ * Ids of rows whose period is in the preset, offering order; defaultSelected
+ * kept only if still included.
+ *
+ * ALL_PRESET_ID is special-cased to every row regardless of period: its
+ * `periods` list only ever contains the *known* (non-null) distinct periods
+ * (see availablePresets), so filtering by period would silently drop any
+ * null-period row (e.g. a lifetime package) from "All" — final-review P6
+ * finding. This keeps the explicit all-ids selection, the `[]` shorthand
+ * (see activePresetId), and clicking "All" in agreement, lifetime included.
+ */
 export function presetSelection(
   rows: readonly PackagePriceRow[],
   preset: PeriodPreset,
   currentDefault: string | undefined,
 ): { packageIds: string[]; defaultSelected: string | undefined } {
-  const packageIds = rows
-    .filter((row) => row.period !== null && preset.periods.includes(row.period))
-    .map((row) => row.packageIdentifier);
+  const packageIds =
+    preset.id === ALL_PRESET_ID
+      ? rows.map((row) => row.packageIdentifier)
+      : rows
+          .filter((row) => row.period !== null && preset.periods.includes(row.period))
+          .map((row) => row.packageIdentifier);
 
   const defaultSelected = currentDefault !== undefined && packageIds.includes(currentDefault) ? currentDefault : undefined;
 

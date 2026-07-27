@@ -261,6 +261,29 @@ describe("overrides", () => {
     expect(builderConfigSchema.safeParse(config).success).toBe(true);
   });
 
+  it("accepts a purchaseButton node override with an allowed trialLabelKey prop under selected", () => {
+    // P6 final-review Task 4: Task 9 added trialLabelKey to
+    // OVERRIDABLE_PROP_KEYS.purchaseButton but never got a dedicated
+    // parse-level test (deferred as Task 9 minor). Pinning it here.
+    const config = withRootChild({
+      type: "purchaseButton",
+      id: "pb1",
+      labelKey: "cta_key",
+      overrides: [{ when: { kind: "selected" }, props: { trialLabelKey: "cta.trial" } }],
+    });
+    expect(builderConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it("rejects a purchaseButton node override with a bogus prop key (control)", () => {
+    const config = withRootChild({
+      type: "purchaseButton",
+      id: "pb1",
+      labelKey: "cta_key",
+      overrides: [{ when: { kind: "selected" }, props: { bogusProp: "nope" } }],
+    });
+    expect(builderConfigSchema.safeParse(config).success).toBe(false);
+  });
+
   it("accepts a stack node override with allowed props (spacing, align, background, cornerRadius)", () => {
     const config = withRootChild({
       type: "stack",

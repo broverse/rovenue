@@ -222,6 +222,24 @@ describe("PackageListBinding — hook failure degrades to id-only rows", () => {
     const node = findNode(vm.config.root, "pl1") as PackageListNode;
     expect(node.packageIds).toEqual(["pkg_month"]);
   });
+
+  // P6 final-review finding: `${periodLabel(row.period) ?? id} — ${firstOkAmount(row)}`
+  // degrades to "pkg_id — pkg_id" for a degraded row, since both halves
+  // fall back to the raw id. The "Default selected" option must instead
+  // render the bare id, matching the pre-P6 markup used elsewhere.
+  it("renders the bare id (no ' — ' duplication) in the Default selected option for a degraded row", async () => {
+    await renderHarness(["pkg_month", "pkg_year"]);
+
+    // "Selection" is a collapsed Section by default (no defaultOpen) — open
+    // it to reach the NativeSelect.
+    fireEvent.click(screen.getByRole("button", { name: "Selection" }));
+
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    const options = within(select).getAllByRole("option") as HTMLOptionElement[];
+    const monthOption = options.find((o) => o.value === "pkg_month")!;
+    expect(monthOption.textContent).toBe("pkg_month");
+    expect(monthOption.textContent).not.toContain(" — ");
+  });
 });
 
 describe("PackageListBinding — period conflict marker", () => {

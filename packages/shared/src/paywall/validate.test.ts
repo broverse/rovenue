@@ -408,6 +408,52 @@ describe("validateBuilderConfig — cellTemplate / overrides (Phase D2)", () => 
     expect(bad?.key).toBe("type");
   });
 
+  it("does NOT report OVERRIDE_BAD_PROP for a purchaseButton override carrying trialLabelKey", () => {
+    // P6 final-review Task 4 (deferred from Task 9): trialLabelKey is in
+    // OVERRIDABLE_PROP_KEYS.purchaseButton, so the validator's defensive
+    // re-check must accept it same as the strict parse schema does.
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "purchaseButton",
+            id: "purchase",
+            labelKey: "cta_key",
+            overrides: [{ when: { kind: "selected" }, props: { trialLabelKey: "cta_key" } }],
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("OVERRIDE_BAD_PROP");
+  });
+
+  it("reports OVERRIDE_BAD_PROP for a purchaseButton override with a bogus prop (control)", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "purchaseButton",
+            id: "purchase",
+            labelKey: "cta_key",
+            overrides: [{ when: { kind: "selected" }, props: { bogusProp: "nope" } }],
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const bad = issues.find((i) => i.code === "OVERRIDE_BAD_PROP");
+    expect(bad).toBeDefined();
+    expect(bad?.nodeId).toBe("purchase");
+    expect(bad?.key).toBe("bogusProp");
+  });
+
   it("reports UNKNOWN_LOC_KEY for a key introduced only via an override", () => {
     const config = baseConfig({
       root: {

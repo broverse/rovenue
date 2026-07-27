@@ -203,6 +203,25 @@ describe("presetSelection", () => {
     const result = presetSelection(rows, preset, undefined);
     expect(result.packageIds).toEqual(["pkg_0", "pkg_1", "pkg_2"]);
   });
+
+  // P6 final-review finding: "All" was built from availablePresets' distinct
+  // NON-NULL periods, so a null-period row (e.g. a lifetime package) was
+  // silently dropped from the "all" preset's periods list, and this filter
+  // then excluded it from the selection too. ALL_PRESET_ID is now
+  // special-cased to every row regardless of period.
+  it("the 'all' preset includes every row, including a null-period (e.g. lifetime) row", () => {
+    const rowsWithLifetime = rowsFor(["P1M", "P1Y", null]);
+    const preset = availablePresets(rowsWithLifetime).find((p) => p.id === "all")!;
+    const result = presetSelection(rowsWithLifetime, preset, undefined);
+    expect(result.packageIds).toEqual(["pkg_0", "pkg_1", "pkg_2"]);
+  });
+
+  it("a single-period preset still excludes the null-period row", () => {
+    const rowsWithLifetime = rowsFor(["P1M", "P1Y", null]);
+    const preset = availablePresets(rowsWithLifetime).find((p) => p.id === "P1M")!;
+    const result = presetSelection(rowsWithLifetime, preset, undefined);
+    expect(result.packageIds).toEqual(["pkg_0"]);
+  });
 });
 
 describe("activePresetId", () => {
@@ -227,6 +246,19 @@ describe("activePresetId", () => {
 
   it("treats an empty packageIds as null (custom) when there's no all preset", () => {
     expect(activePresetId(rowsFor(["P1M", "P1M"]), [])).toBeNull();
+  });
+
+  // P6 final-review finding: the explicit all-ids selection, the []
+  // shorthand, and clicking "All" must all agree, including a null-period
+  // (e.g. lifetime) row — see the presetSelection fix above.
+  it("matches 'all' for an explicit selection that includes a null-period (lifetime) row", () => {
+    const rowsWithLifetime = rowsFor(["P1M", "P1Y", null]);
+    expect(activePresetId(rowsWithLifetime, ["pkg_0", "pkg_1", "pkg_2"])).toBe("all");
+  });
+
+  it("still matches 'all' via the [] shorthand when a null-period (lifetime) row exists", () => {
+    const rowsWithLifetime = rowsFor(["P1M", "P1Y", null]);
+    expect(activePresetId(rowsWithLifetime, [])).toBe("all");
   });
 });
 

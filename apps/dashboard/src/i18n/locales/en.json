@@ -1404,6 +1404,12 @@
         "selection": "Selection",
         "defaultSelected": "Default selected",
         "defaultSelectedNone": "First available",
+        "presetLabel": {
+          "P1M": "Monthly",
+          "P1Y": "Annual",
+          "P1M+P1Y": "Monthly + Annual",
+          "all": "All"
+        },
         "presetCustom": "Custom",
         "periodConflict": "Stores disagree on this package's billing period",
         "purchase": "Purchase",

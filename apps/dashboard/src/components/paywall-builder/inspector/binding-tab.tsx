@@ -268,9 +268,13 @@ function PackageListBinding({ node }: { node: PackageListNode }) {
             </option>
             {(node.packageIds.length ? node.packageIds : offeringPackageIds).map((id) => {
               const row = rowById.get(id) ?? emptyPriceRow(id);
+              // Same degraded fallback as the row list above: no resolved
+              // data means no enhancement layer, so this renders the bare
+              // id — not "id — id" (periodLabel(null) ?? id, then firstOkAmount
+              // falling back to the same id, joined with an em dash).
               return (
                 <option key={id} value={id}>
-                  {`${periodLabel(row.period) ?? id} — ${firstOkAmount(row)}`}
+                  {isDegradedPriceRow(row) ? id : `${periodLabel(row.period) ?? id} — ${firstOkAmount(row)}`}
                 </option>
               );
             })}
