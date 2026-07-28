@@ -5,6 +5,7 @@ import {
   type CarouselNode,
   type PaywallNode,
   type StackNode,
+  type StickyFooterNode,
 } from "@rovenue/shared/paywall";
 
 /** A new icon node starts as a checkmark — the commonest use is a feature-list mark. */
@@ -52,11 +53,19 @@ export const COUNTDOWN_DEFAULT_DURATION_SECONDS = 900;
 // moveNode exactly the same way. `isContainerNode` is the single
 // switch every traversal below shares, so a new container type is one
 // line to add here rather than one line in each of six places.
+//
+// `stickyFooter` (Wave C) is the third, and it was MISSING here until
+// Wave D1 — `newNode` gave it an empty `children` array but no op could
+// ever put anything in it, so an author could create a sticky footer and
+// never place the purchase button that is its entire purpose. All three
+// renderers had always drawn `stickyFooter.children` correctly; the gap
+// was authoring-only, which is why a review comparing the three
+// renderers did not surface it.
 // =============================================================
 
 /** Node types whose `children` array is addressable by the ops below. */
-function isContainerNode(node: PaywallNode): node is StackNode | CarouselNode {
-  return node.type === "stack" || node.type === "carousel";
+function isContainerNode(node: PaywallNode): node is StackNode | CarouselNode | StickyFooterNode {
+  return node.type === "stack" || node.type === "carousel" || node.type === "stickyFooter";
 }
 
 /** Depth-first search for `id`, walking container children AND fallback slots. */
@@ -84,7 +93,7 @@ function search(node: PaywallNode, id: string): PaywallNode | null {
 }
 
 /**
- * Finds the container node (stack or carousel) whose `children` array
+ * Finds the container node (stack, carousel or stickyFooter) whose `children` array
  * contains `id`, plus its index in that array. Returns null for the
  * root (no parent), an unknown id, or an id only reachable via a
  * `fallback` slot.
@@ -92,14 +101,14 @@ function search(node: PaywallNode, id: string): PaywallNode | null {
 export function findParent(
   root: StackNode,
   id: string,
-): { parent: StackNode | CarouselNode; index: number } | null {
+): { parent: StackNode | CarouselNode | StickyFooterNode; index: number } | null {
   return searchParent(root, id);
 }
 
 function searchParent(
   node: PaywallNode,
   id: string,
-): { parent: StackNode | CarouselNode; index: number } | null {
+): { parent: StackNode | CarouselNode | StickyFooterNode; index: number } | null {
   if (isContainerNode(node)) {
     const index = node.children.findIndex((c) => c.id === id);
     if (index >= 0) return { parent: node, index };

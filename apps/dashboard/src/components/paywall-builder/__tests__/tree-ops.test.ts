@@ -7,6 +7,7 @@ import {
   type PackageListNode,
   type PaywallNode,
   type StackNode,
+  type StickyFooterNode,
   type TextNode,
 } from "@rovenue/shared/paywall";
 import {
@@ -588,5 +589,66 @@ describe("cellTemplate traversal", () => {
       const next = updateNode<TextNode>(root, "cell_name", { role: "title" });
       expect(findNode(next, "sp_sibling")).toBe(spBefore);
     });
+  });
+});
+
+// =============================================================
+// Wave C shipped `stickyFooter` as a container the BUILDER could not
+// populate: `newNode` gave it an empty `children` array, but it was
+// absent from `isContainerNode`, so `insertNode` silently no-opped
+// exactly as it does for a leaf like `text`. An author could create a
+// sticky footer and never place the purchase button that is its whole
+// purpose. All three renderers had always drawn `stickyFooter.children`
+// correctly, so the gap was authoring-only — which is why the wave's
+// review, comparing the three RENDERERS, never saw it. Found while
+// wiring `carousel` in Wave D1.
+// =============================================================
+describe("stickyFooter as a container", () => {
+  it("accepts children into a stickyFooter", () => {
+    const root: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [{ type: "stickyFooter", id: "foot1", children: [] }],
+    };
+    const node: PaywallNode = { type: "text", id: "t1", key: "k1", role: "body" };
+    const next = insertNode(root, "foot1", node);
+    const footer = findNode(next, "foot1") as StickyFooterNode;
+    expect(footer.children).toHaveLength(1);
+    expect(footer.children[0]?.id).toBe("t1");
+  });
+
+  it("finds a node nested inside a stickyFooter", () => {
+    const root: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        {
+          type: "stickyFooter",
+          id: "foot1",
+          children: [{ type: "text", id: "deep", key: "k1", role: "body" }],
+        },
+      ],
+    };
+    expect(findNode(root, "deep")?.id).toBe("deep");
+    expect(findParent(root, "deep")?.parent.id).toBe("foot1");
+  });
+
+  it("removes a child from a stickyFooter", () => {
+    const root: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        {
+          type: "stickyFooter",
+          id: "foot1",
+          children: [{ type: "text", id: "t1", key: "k1", role: "body" }],
+        },
+      ],
+    };
+    const next = removeNode(root, "t1");
+    expect((findNode(next, "foot1") as StickyFooterNode).children).toHaveLength(0);
   });
 });
