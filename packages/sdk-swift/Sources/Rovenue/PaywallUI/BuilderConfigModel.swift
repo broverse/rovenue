@@ -237,6 +237,7 @@ enum OverridablePropKeys {
     static let socialProof: Set<String> = ["rating", "starColor"]
     static let stickyFooter: Set<String> = ["background"]
     static let countdown: Set<String> = ["color"]
+    static let carousel: Set<String> = ["indicatorColor"]
 }
 
 /// A `CodingKey` that accepts ANY string, used to enumerate every key
@@ -498,6 +499,22 @@ public struct CountdownOverrideProps: Decodable, Equatable, Sendable {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.countdown)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+    }
+}
+
+public struct CarouselOverrideProps: Decodable, Equatable, Sendable {
+    public let indicatorColor: ThemePair?
+
+    public init(indicatorColor: ThemePair? = nil) {
+        self.indicatorColor = indicatorColor
+    }
+
+    private enum CodingKeys: String, CodingKey { case indicatorColor }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.carousel)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        indicatorColor = try container.decodeIfPresent(ThemePair.self, forKey: .indicatorColor)
     }
 }
 
@@ -1055,6 +1072,55 @@ public struct CountdownProps: Decodable {
     }
 }
 
+public struct CarouselProps: Decodable {
+    public let id: String
+    /// Pages. Any node, not only images — the same freedom `stack` gives
+    /// (mirrors schema.ts's `CarouselNode.children`).
+    public let children: [BuilderNode]
+    /// Absent = `carouselDefaultShowsIndicator` (see RovenuePaywallView.swift).
+    public let showsIndicator: Bool?
+    /// Seconds between automatic advances. Absent = no auto-advance at all,
+    /// deliberately not a default interval — a paywall that starts moving on
+    /// its own without the author asking is a surprise (mirrors schema.ts's
+    /// own doc comment on `CarouselNode.autoAdvanceSeconds`).
+    public let autoAdvanceSeconds: Double?
+    /// Absent = `carouselDefaultLoop`.
+    public let loop: Bool?
+    /// Absent = inherit the ambient tint — NOT a substituted default (see
+    /// `CarouselView`'s own doc comment for why this departs from
+    /// `StickyFooterProps.background`'s always-opaque rule).
+    public let indicatorColor: ThemePair?
+    public let overrides: [NodeOverride<CarouselOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, children: [BuilderNode], showsIndicator: Bool? = nil,
+                autoAdvanceSeconds: Double? = nil, loop: Bool? = nil, indicatorColor: ThemePair? = nil,
+                overrides: [NodeOverride<CarouselOverrideProps>]? = nil,
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.children = children; self.showsIndicator = showsIndicator
+        self.autoAdvanceSeconds = autoAdvanceSeconds; self.loop = loop; self.indicatorColor = indicatorColor
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, children, showsIndicator, autoAdvanceSeconds, loop, indicatorColor, overrides, visibility, fallback
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        children = try container.decode([BuilderNode].self, forKey: .children)
+        showsIndicator = try container.decodeIfPresent(Bool.self, forKey: .showsIndicator)
+        autoAdvanceSeconds = try container.decodeIfPresent(Double.self, forKey: .autoAdvanceSeconds)
+        loop = try container.decodeIfPresent(Bool.self, forKey: .loop)
+        indicatorColor = try container.decodeIfPresent(ThemePair.self, forKey: .indicatorColor)
+        overrides = try container.decodeIfPresent([NodeOverride<CarouselOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
 /// Registry name -> SF Symbol. Unknown names return nil and render nothing:
 /// leniency is deliberate so a newer paywall does not break an older app.
 func sfSymbolName(for name: String) -> String? {
@@ -1099,6 +1165,7 @@ public enum BuilderNode: Decodable {
     case socialProof(SocialProofProps)
     case stickyFooter(StickyFooterProps)
     case countdown(CountdownProps)
+    case carousel(CarouselProps)
     case unknown(id: String, visibility: Visibility?, fallback: BuilderNodeBox?)
 
     private enum TypeKey: String, CodingKey { case type }
@@ -1122,6 +1189,7 @@ public enum BuilderNode: Decodable {
         case "socialProof": self = .socialProof(try SocialProofProps(from: decoder))
         case "stickyFooter": self = .stickyFooter(try StickyFooterProps(from: decoder))
         case "countdown": self = .countdown(try CountdownProps(from: decoder))
+        case "carousel": self = .carousel(try CarouselProps(from: decoder))
         default:
             let container = try decoder.container(keyedBy: UnknownKeys.self)
             let id = try container.decode(String.self, forKey: .id)
@@ -1153,6 +1221,7 @@ public enum BuilderNode: Decodable {
         case .socialProof(let p): return p.id
         case .stickyFooter(let p): return p.id
         case .countdown(let p): return p.id
+        case .carousel(let p): return p.id
         case .unknown(let id, _, _): return id
         }
     }
@@ -1178,6 +1247,7 @@ public enum BuilderNode: Decodable {
         case .socialProof(let p): return p.visibility
         case .stickyFooter(let p): return p.visibility
         case .countdown(let p): return p.visibility
+        case .carousel(let p): return p.visibility
         case .unknown(_, let v, _): return v
         }
     }

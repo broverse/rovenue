@@ -219,6 +219,20 @@ public func applyOverrides(_ props: CountdownProps, active: OverrideActiveCondit
     return result
 }
 
+public func applyOverrides(_ props: CarouselProps, active: OverrideActiveConditions) -> CarouselProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = CarouselProps(
+            id: result.id, children: result.children, showsIndicator: result.showsIndicator,
+            autoAdvanceSeconds: result.autoAdvanceSeconds, loop: result.loop,
+            indicatorColor: patch.indicatorColor ?? result.indicatorColor,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
 /// Dispatches to the node's own `applyOverrides` overload and re-wraps the
 /// result in the same `BuilderNode` case. `.unknown` nodes carry no
 /// overrides field at all and pass through unchanged.
@@ -238,6 +252,7 @@ public func applyOverrides(_ node: BuilderNode, active: OverrideActiveConditions
     case .socialProof(let p): return .socialProof(applyOverrides(p, active: active))
     case .stickyFooter(let p): return .stickyFooter(applyOverrides(p, active: active))
     case .countdown(let p): return .countdown(applyOverrides(p, active: active))
+    case .carousel(let p): return .carousel(applyOverrides(p, active: active))
     case .unknown: return node
     }
 }

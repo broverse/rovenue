@@ -346,6 +346,20 @@ private let countdownMillisecondsPerSecond = 1000.0
 /// mirrors renderer.tsx's `STICKY_FOOTER_CONTENT_CLEARANCE_PX`.
 let stickyFooterContentClearanceDefault: CGFloat = 96
 
+/// Defaults mirroring packages/shared/src/paywall/schema.ts's
+/// `CAROUSEL_DEFAULT_SHOWS_INDICATOR` / `CAROUSEL_DEFAULT_LOOP` /
+/// `CAROUSEL_MIN_AUTO_ADVANCE_SECONDS`. Keep in sync with schema.ts by hand;
+/// there is no codegen step sharing these across platforms — NOT `private`,
+/// for the same reason as the divider defaults above: the shared-defaults
+/// fixture test compares each of them against render-fixtures.json's
+/// `defaults` object BY VALUE, which it cannot do through `private`.
+let carouselDefaultShowsIndicator = true
+let carouselDefaultLoop = false
+/// Seconds. Authoring-time advice only (schema.ts's own comment: below this,
+/// dots move faster than a reader can follow) — `CarouselView` honours
+/// whatever `autoAdvanceSeconds` it is given; this is not a clamp.
+let carouselMinAutoAdvanceSeconds = 2
+
 /// Layout spacing constants for the three row-carrying node types, in
 /// points — named rather than inlined (mirrors NodeViewFactory.kt's
 /// FEATURE_LIST_ROW_SPACING_DP/TIMELINE_MARK_GAP_DP/etc; no cross-platform
@@ -638,6 +652,7 @@ struct BuilderNodeView: View {
         case .socialProof(let p): SocialProofView(props: p, ctx: ctx, cell: cell)
         case .stickyFooter(let p): StickyFooterView(props: p, ctx: ctx, cell: cell)
         case .countdown(let p): CountdownView(props: p, ctx: ctx, cell: cell)
+        case .carousel(let p): CarouselView(props: p, ctx: ctx, cell: cell)
         case .unknown(_, _, let fallback):
             if let fallback {
                 BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
@@ -1161,6 +1176,130 @@ struct CountdownView: View {
     private func stopTicking() {
         tickCancellable?.cancel()
         tickCancellable = nil
+    }
+}
+
+/// Renders `carousel`. Pages via `TabView` with `.tabViewStyle(.page)` —
+/// available since iOS 14, well under this package's iOS 16 floor, and it
+/// supplies BOTH the paging gesture and the dot indicator, so
+/// `showsIndicator` maps to `indexDisplayMode` rather than hand-drawn dots.
+/// `ScrollView.scrollTargetBehavior(.paging)` (iOS 17+) is deliberately not
+/// used — this package still ships iOS 16.
+///
+/// A real `View` (not a plain struct), same reason as `CountdownView`: it
+/// owns state — the current page and the running auto-advance
+/// subscription — that must live and die with THIS node's own position in
+/// the tree.
+///
+/// Auto-advance reuses `CountdownView`'s exact `.onAppear`/`.onDisappear` +
+/// `Timer.publish(...).autoconnect().sink` lifecycle (start on appear,
+/// cancel on disappear — nothing outlives the view). It departs from
+/// `CountdownView` in one way: there is no separately-ticked clock to read
+/// back and recompute from. Each `Timer.publish(every: autoAdvanceSeconds)`
+/// fire directly performs exactly one page step — never a decrementing
+/// counter that could drift or double-fire — and `.onChange(of:
+/// currentPage)` tears the running subscription down and stands a fresh one
+/// up on EVERY page change, whether that change came from this timer's own
+/// advance or a real user swipe. That is what makes a manual swipe restart
+/// the auto-advance wait rather than race a stale schedule (mirrors
+/// nodes.tsx's `Carousel`, whose auto-advance effect depends on
+/// `[currentPage]` for the identical reason).
+///
+/// `loop: false` reaching the last page sets `stoppedAtEnd` AND stops the
+/// subscription outright, in the same call — `currentPage` does not change
+/// on that step, so `.onChange` never fires to tear the timer down on its
+/// own, and a repeating `Timer.publish` left running would keep firing
+/// forever. That is the exact wave-C Critical (parked as NEW-3: iOS kept a
+/// `Timer` running past expiry while web stopped its interval) — this does
+/// not reopen it. `loop: true` instead wraps to page 0 and keeps ticking.
+struct CarouselView: View {
+    let props: CarouselProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    @State private var currentPage = 0
+    @State private var stoppedAtEnd = false
+    @State private var tickCancellable: AnyCancellable?
+
+    private var pageCount: Int { props.children.count }
+    private var showsIndicator: Bool { props.showsIndicator ?? carouselDefaultShowsIndicator }
+    private var loop: Bool { props.loop ?? carouselDefaultLoop }
+
+    /// Never a substituted value here — the inverse of `StickyFooterView`'s
+    /// always-opaque `background`: an absent `indicatorColor` must not even
+    /// call `.tint`, since `.tint(nil)` resets to the system default rather
+    /// than leaving whatever ambient tint the paywall already has alone.
+    private var indicatorColor: Color? {
+        props.indicatorColor.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }.map { color($0) }
+    }
+
+    var body: some View {
+        if pageCount == 0 {
+            // No pages at all cannot render — mirrors every other node
+            // type's contract: fail to `fallback`, never throw.
+            if let fallback = props.fallback {
+                BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
+            }
+        } else {
+            pagedContent
+                .onAppear(perform: scheduleTimer)
+                .onDisappear(perform: stopTicking)
+                .onChange(of: currentPage) { _ in scheduleTimer() }
+        }
+    }
+
+    @ViewBuilder
+    private var pagedContent: some View {
+        let tabs = TabView(selection: $currentPage) {
+            ForEach(Array(props.children.enumerated()), id: \.offset) { index, child in
+                BuilderNodeView(node: child, ctx: ctx, cell: cell)
+                    .tag(index)
+            }
+        }
+        // `.page` (`PageTabViewStyle`) is iOS/tvOS/watchOS only — this
+        // package's Package.swift also declares a macOS platform (so
+        // `swift test` can build+run on a Mac host); macOS keeps the
+        // default `TabView` style, which is fine, since macOS never
+        // actually renders this paywall UI in production.
+        #if os(iOS)
+        let pages = tabs.tabViewStyle(.page(indexDisplayMode: showsIndicator ? .automatic : .never))
+        #else
+        let pages = tabs
+        #endif
+        if let indicatorColor {
+            pages.tint(indicatorColor)
+        } else {
+            pages
+        }
+    }
+
+    private func scheduleTimer() {
+        tickCancellable?.cancel()
+        tickCancellable = nil
+        // Absent `autoAdvanceSeconds` means OFF, deliberately not a default
+        // interval (mirrors `CarouselProps.autoAdvanceSeconds`'s own doc
+        // comment) — and a single/empty page has nothing to advance to.
+        guard let seconds = props.autoAdvanceSeconds, seconds > 0, !stoppedAtEnd, pageCount > 1 else { return }
+        tickCancellable = Timer.publish(every: seconds, on: .main, in: .common)
+            .autoconnect()
+            .sink { _ in advance() }
+    }
+
+    private func stopTicking() {
+        tickCancellable?.cancel()
+        tickCancellable = nil
+    }
+
+    private func advance() {
+        let next = currentPage + 1
+        if next < pageCount {
+            currentPage = next
+        } else if loop {
+            currentPage = 0
+        } else {
+            stoppedAtEnd = true
+            stopTicking()
+        }
     }
 }
 

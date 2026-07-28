@@ -465,6 +465,20 @@ final class BuilderConfigModelTests: XCTestCase {
         return try XCTUnwrap(entry["config"])
     }
 
+    /// Selects an `accept` fixture entry BY NAME (never by index — a
+    /// previous wave widened render-fixtures.json and silently broke two
+    /// Kotlin tests that assumed a position), decodes it, and hands back its
+    /// root's first (only) child. Built on `acceptEntry(named:)`.
+    private func decodeNode(named name: String) throws -> BuilderNode {
+        let config = try acceptEntry(named: name)
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root else {
+            XCTFail("fixture \"\(name)\" root did not decode as .stack")
+            throw XCTSkip("unreachable")
+        }
+        return try XCTUnwrap(root.children.first, "fixture \"\(name)\" root has no children")
+    }
+
     func test_decodesFeatureListRows() throws {
         let config = try acceptEntry(named: "featureList: multi-row with a mix of included values")
         let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
@@ -579,6 +593,29 @@ final class BuilderConfigModelTests: XCTestCase {
         XCTAssertEqual(p.onExpiry, .freeze)
         XCTAssertEqual(p.labelKey, "cd.label")
         XCTAssertEqual(p.color?.light, "#111111")
+    }
+
+    // MARK: - carousel (wave D1)
+
+    func test_decodesBareCarouselFromTheSharedFixture() throws {
+        let node = try decodeNode(named: "carousel-bare")   // select by NAME, never by index
+        guard case .carousel(let p) = node else { return XCTFail("expected carousel") }
+        XCTAssertEqual(p.children.count, 2)
+        XCTAssertNil(p.showsIndicator)
+        XCTAssertNil(p.autoAdvanceSeconds)
+        XCTAssertNil(p.loop)
+        XCTAssertNil(p.indicatorColor)
+    }
+
+    func test_decodesFullCarouselFromTheSharedFixture() throws {
+        let node = try decodeNode(named: "carousel-full")
+        guard case .carousel(let p) = node else { return XCTFail("expected carousel") }
+        XCTAssertEqual(p.children.count, 2)
+        XCTAssertEqual(p.showsIndicator, false)
+        XCTAssertEqual(p.autoAdvanceSeconds, 5)
+        XCTAssertEqual(p.loop, true)
+        XCTAssertEqual(p.indicatorColor?.light, "#111111")
+        XCTAssertEqual(p.indicatorColor?.dark, "#EEEEEE")
     }
 
     /// `durationSeconds` must anchor to a PERSISTED first-show instant, not

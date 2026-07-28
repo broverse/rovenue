@@ -219,6 +219,12 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertEqual(
             Double(stickyFooterContentClearanceDefault),
             try XCTUnwrap(defaults["STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT"] as? Double))
+        XCTAssertEqual(
+            carouselDefaultShowsIndicator, try XCTUnwrap(defaults["CAROUSEL_DEFAULT_SHOWS_INDICATOR"] as? Bool))
+        XCTAssertEqual(carouselDefaultLoop, try XCTUnwrap(defaults["CAROUSEL_DEFAULT_LOOP"] as? Bool))
+        XCTAssertEqual(
+            Double(carouselMinAutoAdvanceSeconds),
+            try XCTUnwrap(defaults["CAROUSEL_MIN_AUTO_ADVANCE_SECONDS"] as? Double))
     }
 
     // MARK: - scroll container + pinned-footer layout (wave C)
