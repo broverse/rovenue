@@ -251,7 +251,25 @@ describe("render-fixtures contract", () => {
         COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX: schema.COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX,
         STICKY_FOOTER_DEFAULT_BACKGROUND: schema.STICKY_FOOTER_DEFAULT_BACKGROUND,
         STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT: schema.STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT,
+        CAROUSEL_DEFAULT_SHOWS_INDICATOR: schema.CAROUSEL_DEFAULT_SHOWS_INDICATOR,
+        CAROUSEL_DEFAULT_LOOP: schema.CAROUSEL_DEFAULT_LOOP,
+        CAROUSEL_MIN_AUTO_ADVANCE_SECONDS: schema.CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
       });
+    });
+
+    // Wave D1 — the three new keys, asserted individually and by value (not
+    // merely via the object-equality check above), per the brief's explicit
+    // instruction: this is what Task 5 (Swift) and Task 6 (Kotlin) mirror in
+    // their own by-value sync tests.
+    it("carries the three carousel defaults by value", async () => {
+      const schema = await import("./schema");
+      expect(fixture.defaults.CAROUSEL_DEFAULT_SHOWS_INDICATOR).toBe(
+        schema.CAROUSEL_DEFAULT_SHOWS_INDICATOR,
+      );
+      expect(fixture.defaults.CAROUSEL_DEFAULT_LOOP).toBe(schema.CAROUSEL_DEFAULT_LOOP);
+      expect(fixture.defaults.CAROUSEL_MIN_AUTO_ADVANCE_SECONDS).toBe(
+        schema.CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
+      );
     });
   });
 });

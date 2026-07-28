@@ -227,6 +227,12 @@ export const STICKY_FOOTER_DEFAULT_BACKGROUND = { light: "#FFFFFF", dark: "#1118
  */
 export const STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT = 96;
 
+export const CAROUSEL_DEFAULT_SHOWS_INDICATOR = true;
+export const CAROUSEL_DEFAULT_LOOP = false;
+/** Below this, dots move faster than a reader can follow. Authoring-time
+ *  advice (a `warning`), not a clamp — the renderer honours what it is given. */
+export const CAROUSEL_MIN_AUTO_ADVANCE_SECONDS = 2;
+
 export type FeatureRow = {
   labelKey: string;
   /** Registry icon name; unknown names fail open like any icon. */
@@ -306,6 +312,26 @@ export type CountdownNode = {
   visibility?: NodeVisibility;
 };
 
+export type CarouselNode = {
+  type: "carousel";
+  id: string;
+  /** Pages. Any node, not only images — the same freedom `stack` gives. */
+  children: PaywallNode[];
+  /** Absent = CAROUSEL_DEFAULT_SHOWS_INDICATOR. */
+  showsIndicator?: boolean;
+  /** Seconds between automatic advances. Absent = no auto-advance at all,
+   *  deliberately not a default interval: a paywall that starts moving on
+   *  its own without the author asking is a surprise. */
+  autoAdvanceSeconds?: number;
+  /** Absent = CAROUSEL_DEFAULT_LOOP. */
+  loop?: boolean;
+  /** Absent = inherit the ambient text colour. */
+  indicatorColor?: ThemeColor;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
 export type PaywallNode =
   | StackNode
   | TextNode
@@ -320,7 +346,8 @@ export type PaywallNode =
   | TimelineNode
   | SocialProofNode
   | StickyFooterNode
-  | CountdownNode;
+  | CountdownNode
+  | CarouselNode;
 
 /**
  * Per node-type whitelist of override-able prop keys — the node's own
@@ -343,6 +370,7 @@ export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[
   socialProof: ["rating", "starColor"],
   stickyFooter: ["background"],
   countdown: ["color"],
+  carousel: ["indicatorColor"],
 };
 
 export type BuilderConfig = {
@@ -611,6 +639,19 @@ const countdownNodeSchema: z.ZodType<CountdownNode> = z
     message: "endsAt and durationSeconds are mutually exclusive",
   });
 
+const carouselNodeSchema: z.ZodType<CarouselNode> = z.object({
+  type: z.literal("carousel"),
+  id: z.string().min(1),
+  children: z.lazy(() => z.array(lazyPaywallNodeSchema)),
+  showsIndicator: z.boolean().optional(),
+  autoAdvanceSeconds: z.number().positive().optional(),
+  loop: z.boolean().optional(),
+  indicatorColor: themeColorSchema.optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.carousel).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
 const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   stackNodeSchema,
   textNodeSchema,
@@ -626,6 +667,7 @@ const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   socialProofNodeSchema,
   stickyFooterNodeSchema,
   countdownNodeSchema,
+  carouselNodeSchema,
 ]);
 paywallNodeSchemaRef = paywallNodeSchema;
 

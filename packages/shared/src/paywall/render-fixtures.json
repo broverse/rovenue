@@ -1060,6 +1060,79 @@
           ]
         }
       }
+    },
+    {
+      "name": "carousel-bare",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "carousel",
+              "id": "car_bare",
+              "children": [
+                {
+                  "type": "spacer",
+                  "id": "car_bare_p1",
+                  "size": 8
+                },
+                {
+                  "type": "spacer",
+                  "id": "car_bare_p2",
+                  "size": 8
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "carousel-full",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "carousel",
+              "id": "car_full",
+              "showsIndicator": false,
+              "autoAdvanceSeconds": 5,
+              "loop": true,
+              "indicatorColor": {
+                "light": "#111111",
+                "dark": "#EEEEEE"
+              },
+              "children": [
+                {
+                  "type": "spacer",
+                  "id": "car_full_p1",
+                  "size": 8
+                },
+                {
+                  "type": "spacer",
+                  "id": "car_full_p2",
+                  "size": 8
+                }
+              ]
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [
@@ -1878,7 +1951,10 @@
       "light": "#FFFFFF",
       "dark": "#111827"
     },
-    "STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT": 96
+    "STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT": 96,
+    "CAROUSEL_DEFAULT_SHOWS_INDICATOR": true,
+    "CAROUSEL_DEFAULT_LOOP": false,
+    "CAROUSEL_MIN_AUTO_ADVANCE_SECONDS": 2
   },
   "trialLabel": {
     "_comment": "expectedKey = which loc key the CTA renders. selectedHasIntroPeriod mirrors PackageView.introPeriod non-empty.",

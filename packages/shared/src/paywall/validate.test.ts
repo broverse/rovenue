@@ -11,6 +11,7 @@ import {
   validateBuilderConfig,
   type BuilderIssue,
 } from "./validate";
+import { CAROUSEL_MIN_AUTO_ADVANCE_SECONDS } from "./schema";
 import type { BuilderConfig, PaywallNode, StackNode, TextNode } from "./schema";
 
 function baseConfig(overrides: Partial<BuilderConfig> = {}): BuilderConfig {
@@ -1589,5 +1590,101 @@ describe("LOCALIZED_KEYS for wave C node types", () => {
       },
     });
     expect(collectLocalizationUsages(withoutLabel.root).some((u) => u.nodeId === "cd")).toBe(false);
+  });
+});
+
+describe("wave D1: CAROUSEL_EMPTY, CAROUSEL_SINGLE_PAGE, CAROUSEL_AUTO_ADVANCE_TOO_FAST", () => {
+  const pageA: PaywallNode = { type: "spacer", id: "pageA", size: 8 };
+  const pageB: PaywallNode = { type: "spacer", id: "pageB", size: 8 };
+
+  function configWith(node: PaywallNode): BuilderConfig {
+    return baseConfig({
+      root: { type: "stack", id: "root", axis: "v", children: [node] },
+    });
+  }
+
+  it("raises CAROUSEL_EMPTY, blocking publish but not save, for a childless carousel", () => {
+    const issues = validateBuilderConfig(
+      configWith({ type: "carousel", id: "c1", children: [] }),
+      { offeringPackageIds },
+    );
+    const issue = issues.find((i) => i.code === "CAROUSEL_EMPTY");
+    expect(issue).toBeDefined();
+    expect(issue!.nodeId).toBe("c1");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(true);
+  });
+
+  it("raises CAROUSEL_AUTO_ADVANCE_TOO_FAST below the floor, without blocking save or publish", () => {
+    const node: PaywallNode = { type: "carousel", id: "c1", children: [pageA, pageB], autoAdvanceSeconds: 1 };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "CAROUSEL_AUTO_ADVANCE_TOO_FAST");
+    expect(issue).toBeDefined();
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("does NOT raise CAROUSEL_AUTO_ADVANCE_TOO_FAST exactly at the floor", () => {
+    const node: PaywallNode = {
+      type: "carousel",
+      id: "c1",
+      children: [pageA, pageB],
+      autoAdvanceSeconds: CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.some((i) => i.code === "CAROUSEL_AUTO_ADVANCE_TOO_FAST")).toBe(false);
+  });
+
+  it("raises CAROUSEL_SINGLE_PAGE for exactly one child, without blocking save or publish", () => {
+    const issues = validateBuilderConfig(
+      configWith({ type: "carousel", id: "c1", children: [pageA] }),
+      { offeringPackageIds },
+    );
+    const issue = issues.find((i) => i.code === "CAROUSEL_SINGLE_PAGE");
+    expect(issue).toBeDefined();
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("says nothing about page count for two or more children", () => {
+    const issues = validateBuilderConfig(
+      configWith({ type: "carousel", id: "c1", children: [pageA, pageB] }),
+      { offeringPackageIds },
+    );
+    expect(issues.some((i) => i.code === "CAROUSEL_EMPTY")).toBe(false);
+    expect(issues.some((i) => i.code === "CAROUSEL_SINGLE_PAGE")).toBe(false);
+  });
+
+  it("walks INTO carousel children so a nested node's issues surface", () => {
+    const nested: PaywallNode = {
+      type: "carousel",
+      id: "c1",
+      children: [{ type: "icon", id: "i1", name: "not-a-real-icon" }],
+    };
+    const issues = validateBuilderConfig(configWith(nested), { offeringPackageIds });
+    expect(issues.some((i) => i.code === "UNKNOWN_ICON_NAME")).toBe(true);
+  });
+});
+
+describe("LOCALIZED_KEYS for carousel", () => {
+  it("contributes nothing of its own — its children are walked separately", () => {
+    const config = baseConfig({
+      localizations: { en: { child_key: "Continue" } },
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "carousel",
+            id: "c1",
+            children: [{ type: "text", id: "t1", key: "child_key", role: "body" }],
+          },
+        ],
+      },
+    });
+    const usages = collectLocalizationUsages(config.root);
+    expect(usages.some((u) => u.nodeId === "c1")).toBe(false);
+    expect(usages.map((u) => u.key)).toEqual(expect.arrayContaining(["child_key"]));
   });
 });

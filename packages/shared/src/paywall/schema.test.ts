@@ -698,3 +698,45 @@ describe("wave C node types", () => {
     expect(OVERRIDABLE_PROP_KEYS.countdown).toEqual(["color"]);
   });
 });
+
+describe("wave D1: carousel node type", () => {
+  const wrap = (node: unknown) => ({
+    formatVersion: 2, defaultLocale: "en", localizations: { en: {} },
+    root: { type: "stack", id: "root", axis: "v", children: [node] },
+  });
+
+  it("round-trips a carousel with every optional prop absent", () => {
+    const node = { type: "carousel", id: "c1", children: [{ type: "spacer", id: "s1" }] };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.root.children[0]).toEqual(node);
+    }
+  });
+
+  it("rejects a carousel with no children key", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "carousel", id: "c1" })).success).toBe(false);
+  });
+
+  it("accepts a carousel with every optional prop present", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "carousel",
+      id: "c1",
+      children: [{ type: "spacer", id: "s1" }, { type: "spacer", id: "s2" }],
+      showsIndicator: false,
+      autoAdvanceSeconds: 5,
+      loop: true,
+      indicatorColor: { light: "#000000" },
+    })).success).toBe(true);
+  });
+
+  it("rejects a non-positive autoAdvanceSeconds", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "carousel", id: "c1", children: [{ type: "spacer", id: "s1" }], autoAdvanceSeconds: 0,
+    })).success).toBe(false);
+  });
+
+  it("gives carousel an OVERRIDABLE_PROP_KEYS row", () => {
+    expect(OVERRIDABLE_PROP_KEYS.carousel).toEqual(["indicatorColor"]);
+  });
+});

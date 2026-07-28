@@ -1,5 +1,6 @@
 import { isKnownIconName } from "./icon-registry";
 import {
+  CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
   FEATURE_LIST_SOFT_MAX,
   OVERRIDABLE_PROP_KEYS,
   type BuilderConfig,
@@ -70,6 +71,9 @@ export const LOCALIZED_KEYS: LocalizedKeyFns = {
   // separately, exactly as stack's are.
   stickyFooter: () => [],
   countdown: (n) => (n.labelKey ? [n.labelKey] : []),
+  // Wave D1 — a carousel has no localized text of its own; each page carries
+  // its own, and pages are walked separately, exactly as stack's children are.
+  carousel: () => [],
 };
 
 /**
@@ -131,7 +135,13 @@ export type BuilderIssue = {
     // fine (a normal mid-edit state) but cannot render, so it must not ship.
     | "COUNTDOWN_NO_DEADLINE"
     // Wave C — a countdown whose endsAt has already passed.
-    | "COUNTDOWN_DEADLINE_PAST";
+    | "COUNTDOWN_DEADLINE_PAST"
+    // Wave D1 — a carousel with no pages; cannot render at all.
+    | "CAROUSEL_EMPTY"
+    // Wave D1 — autoAdvanceSeconds below CAROUSEL_MIN_AUTO_ADVANCE_SECONDS.
+    | "CAROUSEL_AUTO_ADVANCE_TOO_FAST"
+    // Wave D1 — a carousel with exactly one page; nothing to carousel through.
+    | "CAROUSEL_SINGLE_PAGE";
   nodeId?: string;
   locale?: string;
   key?: string;
@@ -184,6 +194,12 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   MULTIPLE_STICKY_FOOTERS: "warning",
   // The author's dated promotion has already passed.
   COUNTDOWN_DEADLINE_PAST: "warning",
+  // Authoring guidance, not a broken config — the renderer honours whatever
+  // interval it is given.
+  CAROUSEL_AUTO_ADVANCE_TOO_FAST: "warning",
+  // Technically renders, just pointlessly — a single page is not a broken
+  // config, only a probably-unintended one.
+  CAROUSEL_SINGLE_PAGE: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
   // MUST still persist. Four of these are reachable from the builder UI in
@@ -203,6 +219,10 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   // Cannot render at all, so it must not ship — but it must still save,
   // because "I have not chosen the deadline yet" is a normal edit state.
   COUNTDOWN_NO_DEADLINE: "publish",
+  // Cannot render at all, so it must not ship — but a carousel with no pages
+  // yet is a normal edit state (the author adds pages next), so it must
+  // still save.
+  CAROUSEL_EMPTY: "publish",
 
   // Anything unlisted stays "save" — see issueSeverity. Only DUPLICATE_NODE_ID
   // relies on that today: tree-ops addresses nodes by id, so a duplicate makes
@@ -249,7 +269,7 @@ function walkNodes(
   insideCellTemplate = false,
 ): void {
   visit(node, insideCellTemplate);
-  if (node.type === "stack" || node.type === "stickyFooter") {
+  if (node.type === "stack" || node.type === "stickyFooter" || node.type === "carousel") {
     for (const child of node.children) walkNodes(child, visit, insideCellTemplate);
   }
   if (node.type === "packageList" && node.cellTemplate) {
@@ -288,7 +308,7 @@ function collectCommerceReach(
   );
   if (node.type === "packageList") out.packageLists.push(effective);
   if (node.type === "purchaseButton") out.purchaseButtons.push(effective);
-  if (node.type === "stack" || node.type === "stickyFooter") {
+  if (node.type === "stack" || node.type === "stickyFooter" || node.type === "carousel") {
     for (const c of node.children) collectCommerceReach(c, effective, out);
   }
   if (node.type === "packageList" && node.cellTemplate) collectCommerceReach(node.cellTemplate, effective, out);
@@ -523,6 +543,31 @@ export function validateBuilderConfig(
         code: "COUNTDOWN_DEADLINE_PAST",
         nodeId: node.id,
         message: `countdown "${node.id}" has endsAt "${node.endsAt}" which is already in the past.`,
+      });
+    }
+  }
+
+  // CAROUSEL_EMPTY / CAROUSEL_SINGLE_PAGE / CAROUSEL_AUTO_ADVANCE_TOO_FAST — wave D1.
+  for (const node of allNodes) {
+    if (node.type !== "carousel") continue;
+    if (node.children.length === 0) {
+      issues.push({
+        code: "CAROUSEL_EMPTY",
+        nodeId: node.id,
+        message: `carousel "${node.id}" has no pages, so it cannot render.`,
+      });
+    } else if (node.children.length === 1) {
+      issues.push({
+        code: "CAROUSEL_SINGLE_PAGE",
+        nodeId: node.id,
+        message: `carousel "${node.id}" has only one page; there is nothing to carousel through.`,
+      });
+    }
+    if (node.autoAdvanceSeconds !== undefined && node.autoAdvanceSeconds < CAROUSEL_MIN_AUTO_ADVANCE_SECONDS) {
+      issues.push({
+        code: "CAROUSEL_AUTO_ADVANCE_TOO_FAST",
+        nodeId: node.id,
+        message: `carousel "${node.id}" has autoAdvanceSeconds ${node.autoAdvanceSeconds}, below the ${CAROUSEL_MIN_AUTO_ADVANCE_SECONDS}s floor a reader can follow.`,
       });
     }
   }
