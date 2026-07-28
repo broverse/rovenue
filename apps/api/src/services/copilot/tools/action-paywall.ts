@@ -15,11 +15,20 @@ import type { ToolContext } from "./query-subscribers";
 // dry-run + persistence happens in the `action_paywall_editTree`
 // intent handler (`intent-handlers.ts`) once the user approves.
 //
-// `requiresRole: "DEVELOPER"` mirrors the PATCH /paywalls/:id route's
-// `assertProjectCapability(projectId, user.id, "products:write")`
-// check (`apps/api/src/routes/dashboard/paywalls.ts`) — DEVELOPER is
-// the weakest role in `CAPABILITY_ROLES["products:write"]`
-// (`apps/api/src/lib/capabilities.ts`): `["OWNER", "ADMIN", "DEVELOPER"]`.
+// PATCH /paywalls/:id gates on `assertProjectCapability(projectId,
+// user.id, "products:write")` (`apps/api/src/routes/dashboard/paywalls.ts`),
+// whose `CAPABILITY_ROLES` set is `["OWNER", "ADMIN", "DEVELOPER"]`
+// (`apps/api/src/lib/capabilities.ts`) — GROWTH excluded. But the
+// intent-execute gate (`assertProjectAccess` in `lib/project-access.ts`)
+// is RANK-based, not set-based, and `ROLE_RANK` gives GROWTH the SAME
+// rank as DEVELOPER (both 2) — so `requiresRole: "DEVELOPER"` would
+// silently admit GROWTH too, which products:write does not allow. A
+// rank gate cannot express a set that skips a same-rank role, so
+// `requiresRole: "ADMIN"` is the tightest rank that is a superset of
+// `products:write` (`{OWNER, ADMIN}` ⊆ `{OWNER, ADMIN, DEVELOPER}`) —
+// same precedent as the sibling `action_products_updatePrice`, which
+// shares this exact capability and already uses "ADMIN" for the same
+// reason.
 
 function describeSubtree(subtree: PaywallNode): string {
   const n = subtree as PaywallNode & { rows?: unknown[] };
@@ -92,7 +101,7 @@ export function actionPaywallTools(ctx: ToolContext) {
       description:
         "Propose a single structural edit to a paywall's builder-config tree — insert, replace, or remove a node, patch a node's props, or update localized strings for a locale. Returns a pending intent; the user must approve before it executes. Call query_paywall_tree first to get valid node ids.",
       inputSchema: EditTreeArgs,
-      requiresRole: "DEVELOPER",
+      requiresRole: "ADMIN",
       buildPreview: (i) => buildEditTreePreview(i.op),
     }),
   };

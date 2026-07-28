@@ -27,15 +27,11 @@
 
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
-import {
-  applyTreeOp,
-  emptyBuilderConfig,
-  paywallTreeOpSchema,
-  type BuilderConfig,
-} from "@rovenue/shared/paywall";
+import { applyTreeOp, paywallTreeOpSchema } from "@rovenue/shared/paywall";
 import { audit } from "../../lib/audit";
 import { registerIntentHandler } from "./intent-executor";
 import { assertSaveValid } from "../paywall-ai/validate-config";
+import { resolvePaywallDraftConfig } from "./tools/query-paywall";
 
 const editTreePayloadSchema = z.object({
   paywallId: z.string().min(1),
@@ -517,10 +513,11 @@ export function registerAllIntentHandlers(): void {
   // ------------------------------------------------------------------
   // action.paywall.editTree
   // DRY-RUN ONLY: applies the proposed `PaywallTreeOp` to the paywall's
-  // current draft `builderConfig` (falling back to an empty config
-  // when no draft exists yet — mirrors the dashboard builder VM's own
-  // `detail.builderConfig ?? emptyBuilderConfig(...)` fallback) and
-  // gates the RESULT through `assertSaveValid`. This handler NEVER
+  // current draft config — `resolvePaywallDraftConfig` (shared with
+  // `query_paywall_tree` in `tools/query-paywall.ts`) falls back to an
+  // empty config when no draft exists yet, mirroring the dashboard
+  // builder VM's own `detail.builderConfig ?? emptyBuilderConfig(...)`
+  // — and gates the RESULT through `assertSaveValid`. This handler NEVER
   // calls `updatePaywall` — persistence happens through the existing
   // PATCH /paywalls/:id route once the user reviews the diff in the
   // dashboard, same as every other builder edit. Returning `{ op,
@@ -542,12 +539,7 @@ export function registerAllIntentHandlers(): void {
       throw new Error(`Paywall ${paywallId} not found in project`);
     }
 
-    const currentDraft = paywall.builderConfig
-      ? (paywall.builderConfig as BuilderConfig)
-      : emptyBuilderConfig(
-          (paywall.remoteConfig as { defaultLocale?: string } | null)
-            ?.defaultLocale ?? "en",
-        );
+    const currentDraft = resolvePaywallDraftConfig(paywall);
 
     assertSaveValid(applyTreeOp(currentDraft, op));
 

@@ -139,7 +139,7 @@ describe("actionPaywallTools", () => {
     expect(Object.keys(tools)).toEqual(["action_paywall_editTree"]);
   });
 
-  it("creates a pending intent scoped to ctx, requiring DEVELOPER, with the coerced preview", async () => {
+  it("creates a pending intent scoped to ctx, requiring ADMIN, with the coerced preview", async () => {
     const tools = actionPaywallTools(CTX);
     const op: PaywallTreeOp = { kind: "remove", nodeId: "n_1" };
     const input = { paywallId: "pw_1", op };
@@ -156,14 +156,27 @@ describe("actionPaywallTools", () => {
         messageId: "msg_1",
         toolName: "action_paywall_editTree",
         payload: input,
-        requiresRole: "DEVELOPER",
+        requiresRole: "ADMIN",
         preview: buildEditTreePreview(op),
       }),
     );
     expect(result).toMatchObject({
       toolName: "action_paywall_editTree",
-      requiresRole: "DEVELOPER",
+      requiresRole: "ADMIN",
       preview: buildEditTreePreview(op),
     });
+  });
+
+  it("requires ADMIN, not DEVELOPER: products:write excludes GROWTH, which shares DEVELOPER's rank", async () => {
+    // Regression for a review finding: requiresRole is checked by RANK
+    // (assertProjectAccess/ROLE_RANK), not by capability set, and
+    // ROLE_RANK gives GROWTH the same rank as DEVELOPER (both 2) — so
+    // "DEVELOPER" would silently admit GROWTH, which products:write
+    // does not. "ADMIN" is the tightest rank that stays a subset.
+    const tools = actionPaywallTools(CTX);
+    const op: PaywallTreeOp = { kind: "remove", nodeId: "n_1" };
+    const result = await tools["action_paywall_editTree"].execute!({ paywallId: "pw_1", op }, CALL_OPTIONS);
+    expect(result).toMatchObject({ requiresRole: "ADMIN" });
+    expect((result as { requiresRole: string }).requiresRole).not.toBe("DEVELOPER");
   });
 });
