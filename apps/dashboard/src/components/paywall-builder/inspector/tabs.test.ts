@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BuilderIssue, PaywallNode } from "@rovenue/shared/paywall";
+import { isPublishBlockingIssue, type BuilderIssue, type PaywallNode } from "@rovenue/shared/paywall";
 import { NODE_TYPE_LABEL } from "../node-meta";
 import {
   INSPECTOR_TABS,
@@ -136,21 +136,43 @@ describe("tabIssues", () => {
     expect(map.size).toBe(0);
   });
 
-  // VISIBILITY_NEVER_MATCHES is the first warning-tier code mapped to a
-  // tab (added with the Visibility tab): bounds that cross make a node
-  // render nowhere, which is dead content rather than a broken config, so
-  // it must not block publish. Every other mapped code is still
-  // publish-blocking, so the dot split is exactly one tab wide today.
-  it("reports VISIBILITY_NEVER_MATCHES as a warning and every other mapped code as an error", () => {
+  // Severity is READ from the shared model, never restated here — so this
+  // asserts the two agree code by code rather than pinning a list that goes
+  // stale the next time a code is retiered. Both tiers are mapped today:
+  // VISIBILITY_NEVER_MATCHES and the three wave-D2 media codes are warnings,
+  // the rest are publish-blocking.
+  it("reports each mapped code at the severity the shared model gives it", () => {
     const everyMappedCode = INSPECTOR_TABS.flatMap((t) => [...t.issueCodes]);
-    const map = tabIssues(
-      everyMappedCode.map((code) => ({ code, nodeId: "n1", message: "" })),
-      "n1",
-    );
-    expect(map.get("visibility")?.severity).toBe("warning");
-    for (const [id, summary] of map) {
-      if (id === "visibility") continue;
-      expect(summary.severity).toBe("error");
+    for (const code of everyMappedCode) {
+      const expected = isPublishBlockingIssue({ code }) ? "error" : "warning";
+      const map = tabIssues([{ code, nodeId: "n1", message: "" }], "n1");
+      expect(map.size, `${code} maps to a tab`).toBeGreaterThan(0);
+      for (const [id, summary] of map) {
+        expect(summary.severity, `${code} on ${id}`).toBe(expected);
+      }
+    }
+  });
+
+  it("shows an error dot on a tab carrying both a warning and an error", () => {
+    // Content is the first tab to hold codes of both tiers (EMPTY_LOC_VALUE
+    // blocks publish, VIDEO_NO_POSTER does not). The dot must not be demoted
+    // by the warning, whatever order the issues arrive in.
+    for (const order of [
+      ["EMPTY_LOC_VALUE", "VIDEO_NO_POSTER"],
+      ["VIDEO_NO_POSTER", "EMPTY_LOC_VALUE"],
+    ] as const) {
+      const map = tabIssues(order.map((code) => ({ code, nodeId: "n1", message: "" })), "n1");
+      expect(map.get("content")).toEqual({ severity: "error", count: 2 });
+    }
+  });
+
+  it("gives the three wave-D2 media codes a Content dot", () => {
+    // Every one of them names a field edited on the Content tab
+    // (Autoplay/Muted, Poster URL, Speed); unmapped they were raised and
+    // never seen.
+    for (const code of ["VIDEO_AUTOPLAY_UNMUTED", "VIDEO_NO_POSTER", "LOTTIE_SPEED_OUT_OF_RANGE"] as const) {
+      const map = tabIssues([{ code, nodeId: "n1", message: "" }], "n1");
+      expect(map.get("content"), code).toEqual({ severity: "warning", count: 1 });
     }
   });
 });

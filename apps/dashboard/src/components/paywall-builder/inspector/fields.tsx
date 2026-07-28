@@ -1,4 +1,5 @@
 import { useService } from "impair";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
 import { ColorSwatchInput } from "../../funnel-builder/color-swatch-input";
@@ -303,25 +304,98 @@ export function SelectField({
   );
 }
 
+/**
+ * The smallest value a NumberField may write when it is bound to a schema
+ * field declared `z.number().positive()` — `lottie.speed` and
+ * `video.aspectRatio` today.
+ *
+ * `positive()` is exclusive-zero and so has no floor of its own, but an
+ * `<input type="number">` needs a concrete one, and without it an author who
+ * types `0` makes the WHOLE builderConfig SCHEMA_INVALID — an error that
+ * names the config, not the field they touched. Deliberately far below every
+ * advisory band the validator warns about (`LOTTIE_MIN_SPEED` is 0.1), so
+ * this floor can never pre-empt a warning the author is meant to see: typing
+ * `0` into Speed lands on a value that still raises
+ * LOTTIE_SPEED_OUT_OF_RANGE, which is the intended feedback.
+ */
+export const POSITIVE_NUMBER_FIELD_MIN = 0.01;
+
+/** The committed value as input text. Absent = an empty field, which is the
+ *  authored "not set" for every optional numeric prop. */
+function numberFieldText(value: number | undefined): string {
+  return value === undefined ? "" : String(value);
+}
+
+/**
+ * A numeric input whose `min`, when given, is enforced on what it WRITES,
+ * not merely advertised to the browser.
+ *
+ * Which is why it keeps a local draft of the text. A below-minimum entry is
+ * usually a PREFIX of a valid one — "0" on the way to "0.5" — so refusing to
+ * display it (the naive controlled-input guard) makes every value under 1
+ * untypeable, while writing it through is the schema-invalidating bug this
+ * minimum exists to stop. The draft holds such an entry on screen without
+ * committing it, and blur clamps whatever is left to the minimum, exactly as
+ * the `min` attribute promises.
+ */
 export function NumberField({
   label,
   value,
   onChange,
   className,
+  min,
 }: {
   label: string;
   value: number | undefined;
   onChange: (v: number | undefined) => void;
   className?: string;
+  /** Smallest writable value. Absent = no floor (every value commits). */
+  min?: number;
 }) {
+  const [draft, setDraft] = useState(() => numberFieldText(value));
+  // Re-sync the draft when the committed value changes from OUTSIDE this
+  // field (another node selected, an undo, an AI edit) — adjusting state
+  // during render rather than in an effect, so no frame ever shows the
+  // previous node's number.
+  const [committed, setCommitted] = useState(value);
+  if (value !== committed) {
+    setCommitted(value);
+    setDraft(numberFieldText(value));
+  }
+
+  const belowMin = (n: number): boolean => min !== undefined && n < min;
+
   return (
     <Field label={label} className={className}>
       <input
         type="number"
-        value={value ?? ""}
+        min={min}
+        value={draft}
         onChange={(e) => {
-          const v = e.currentTarget.value;
-          onChange(v === "" ? undefined : Number(v));
+          const text = e.currentTarget.value;
+          setDraft(text);
+          if (text === "") {
+            onChange(undefined);
+            return;
+          }
+          const parsed = Number(text);
+          // NaN never reaches the config: `type="number"` normally reports
+          // unparsable input as "", but a partial entry that slips through
+          // must not be written either.
+          if (Number.isNaN(parsed) || belowMin(parsed)) return;
+          onChange(parsed);
+        }}
+        onBlur={() => {
+          if (draft === "") return;
+          const parsed = Number(draft);
+          if (Number.isNaN(parsed)) {
+            setDraft(numberFieldText(value));
+            return;
+          }
+          if (!belowMin(parsed)) return;
+          // min is defined whenever belowMin is true.
+          setDraft(numberFieldText(min));
+          onChange(min);
         }}
         className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[12px] text-foreground outline-none focus:border-rv-accent-500"
       />

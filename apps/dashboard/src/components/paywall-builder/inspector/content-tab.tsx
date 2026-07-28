@@ -32,7 +32,13 @@ import {
 } from "@rovenue/shared/paywall";
 import { COUNTDOWN_DEFAULT_DURATION_SECONDS } from "../tree-ops";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
-import { LocalizedTextField, NumberField, SelectField, ThemeUrlField } from "./fields";
+import {
+  LocalizedTextField,
+  NumberField,
+  POSITIVE_NUMBER_FIELD_MIN,
+  SelectField,
+  ThemeUrlField,
+} from "./fields";
 import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
 import { RowListEditor } from "./row-list-editor";
 
@@ -457,8 +463,10 @@ function CarouselContent({ node }: { node: CarouselNode }) {
 /**
  * `aspectRatio` absent means "the source's own ratio, once known" — NOT a
  * substituted number and not zero. `NumberField` already turns an emptied
- * input into `undefined` rather than `0`, so no extra handling is needed
- * here beyond passing the raw value through. Every toggle defaults from the
+ * input into `undefined` rather than `0`, so clearing the field is how an
+ * author says "use the source's own"; `POSITIVE_NUMBER_FIELD_MIN` is what
+ * stops a typed `0` — the schema declares `aspectRatio` positive, so a zero
+ * would make the whole config SCHEMA_INVALID. Every toggle defaults from the
  * shared Task-1 constants, never a hard-coded `true`/`false`.
  */
 function VideoContent({ node }: { node: VideoNode }) {
@@ -530,17 +538,25 @@ function VideoContent({ node }: { node: VideoNode }) {
         label={t("paywalls.builder.properties.videoAspectRatio", "Aspect ratio (width ÷ height)")}
         value={node.aspectRatio}
         onChange={(v) => set({ aspectRatio: v })}
+        min={POSITIVE_NUMBER_FIELD_MIN}
       />
     </Section>
   );
 }
 
 /**
- * `speed` is intentionally left unclamped in the UI (unlike e.g.
+ * `speed` is intentionally NOT clamped to the advisory band (unlike e.g.
  * SocialProof's rating): the shared validator already raises
  * `LOTTIE_SPEED_OUT_OF_RANGE` as a warning-tier issue when it's outside
- * [`LOTTIE_MIN_SPEED`, `LOTTIE_MAX_SPEED`], so silently clamping here would
- * make that issue code unreachable from the builder.
+ * [`LOTTIE_MIN_SPEED`, `LOTTIE_MAX_SPEED`], so clamping to that band here
+ * would make the issue code unreachable from the builder.
+ *
+ * The SCHEMA floor is a different matter and is enforced: `speed` is
+ * `z.number().positive()`, so a typed `0` would not raise the advisory
+ * warning at all — it would make the whole config SCHEMA_INVALID, with an
+ * error pointing nowhere near this field. `POSITIVE_NUMBER_FIELD_MIN` is
+ * deliberately far below `LOTTIE_MIN_SPEED`, so the out-of-range warning
+ * stays reachable.
  */
 function LottieContent({ node }: { node: LottieNode }) {
   const vm = useService(PaywallBuilderViewModel);
@@ -586,6 +602,7 @@ function LottieContent({ node }: { node: LottieNode }) {
         label={t("paywalls.builder.properties.lottieSpeed", "Speed")}
         value={node.speed}
         onChange={(v) => set({ speed: v })}
+        min={POSITIVE_NUMBER_FIELD_MIN}
       />
     </Section>
   );

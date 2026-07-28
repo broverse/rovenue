@@ -88,7 +88,20 @@ export const INSPECTOR_TABS = [
       "video",
       "lottie",
     ]),
-    issueCodes: new Set<BuilderIssue["code"]>(["UNKNOWN_LOC_KEY", "EMPTY_LOC_VALUE"]),
+    // The three wave-D2 media codes are here because their offending field
+    // really is on this tab: Autoplay/Muted, Poster URL and Speed are all
+    // edited in VideoContent/LottieContent. Without the mapping the author
+    // gets no dot on the tab they would have to open to fix the issue.
+    // VIDEO_IN_CAROUSEL_NO_FALLBACK is deliberately absent, in the
+    // CELL_TEMPLATE_BAD_NODE family: its remedy is a `fallback` subtree,
+    // which no tab in this strip edits.
+    issueCodes: new Set<BuilderIssue["code"]>([
+      "UNKNOWN_LOC_KEY",
+      "EMPTY_LOC_VALUE",
+      "VIDEO_AUTOPLAY_UNMUTED",
+      "VIDEO_NO_POSTER",
+      "LOTTIE_SPEED_OUT_OF_RANGE",
+    ]),
   },
   {
     id: "binding",
