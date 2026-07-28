@@ -921,40 +921,67 @@ class NodeViewFactoryTest {
     }
 
     @Test
-    fun `an unparsable video source is decided before any player exists`() {
-        assertTrue(videoHasParsableSource(ThemePair(light = "https://x/a.mp4"), dark = false))
-        assertFalse(videoHasParsableSource(ThemePair(light = "not a url"), dark = false))
+    fun `a video with no source is decided before any player exists`() {
+        assertTrue(videoHasUsableSource(ThemePair(light = "https://x/a.mp4"), dark = false))
+        assertFalse(videoHasUsableSource(ThemePair(light = ""), dark = false))
+        assertFalse(videoHasUsableSource(ThemePair(light = "   "), dark = false))
     }
 
     @Test
     fun `a relative video source can render, matching web and iOS`() {
         // Web resolves a relative source against the hosting document and iOS's
-        // `URL(string:)` accepts a relative reference; `java.net.URL` (which
-        // this predicate used to be built on) rejects every relative string
-        // outright, which is exactly what made Android drop a carousel
-        // page/dot the other two platforms kept for the same paywall.
-        assertTrue(videoHasParsableSource(ThemePair(light = "clip.mp4"), dark = false))
-        assertTrue(videoHasParsableSource(ThemePair(light = "/assets/clip.mp4"), dark = false))
+        // `URL(string:)` accepts a relative reference, so rejecting one here
+        // would drop a node the other two draw.
+        assertTrue(videoHasUsableSource(ThemePair(light = "clip.mp4"), dark = false))
+        assertTrue(videoHasUsableSource(ThemePair(light = "/assets/clip.mp4"), dark = false))
+    }
+
+    // ---- THE THREE-PLATFORM MEDIA-SOURCE CONTRACT ------------------------
+    //
+    // The table below is the deliverable. The same five inputs with the same
+    // five answers are asserted in packages/paywall-renderer's
+    // `renderer.test.tsx` ("media source usability — the three-platform
+    // table") and in sdk-swift's `PaywallMediaSourceTests.swift`. If the three
+    // files ever disagree, the divergence this table exists to kill has come
+    // back.
+    //
+    // Note the two rows that are deliberately USABLE despite not being valid
+    // URLs. Syntax is the platform's business at LOAD time, where the failure
+    // takes the ordinary route to `fallback`. Pinning this to what URL parsers
+    // agree on is exactly what broke before: this platform's `java.net.URI`
+    // rejected `"not a url"` and `"://x"`, iOS's `URL(string:)` accepts those
+    // AND `" "`, and iOS's own answer changed between CFURL (pre-iOS 17) and
+    // the RFC-3986 parser that replaced it.
+
+    /** One row of the contract: an authored source, and whether it is usable. */
+    private data class SourceUsabilityCase(val source: String, val usable: Boolean)
+
+    private val sourceUsabilityTable = listOf(
+        SourceUsabilityCase("", usable = false),
+        SourceUsabilityCase(" ", usable = false),
+        SourceUsabilityCase("a/b.mp4", usable = true),
+        SourceUsabilityCase("not a url", usable = true),
+        SourceUsabilityCase("https://x/a.mp4", usable = true),
+    )
+
+    @Test
+    fun `the media source rule is trim then non-blank`() {
+        for ((source, usable) in sourceUsabilityTable) {
+            assertEquals(usable, mediaSourceIsUsable(source), "source=<$source>")
+        }
     }
 
     @Test
-    fun `video and lottie agree on what counts as a parsable source`() {
+    fun `video and lottie agree on the media source table, row for row`() {
         // The two media node types answer "will this draw before a player
-        // exists?" with one shared rule (mediaSourceHasParsableUrl), not two
+        // exists?" with one shared rule (mediaSourceIsUsable), not two
         // predicates that happen to agree — this pins that they still do,
-        // case by case, for both node types.
-        val blank = ThemePair(light = "   ")
-        val relative = ThemePair(light = "clip")
-        val absolute = ThemePair(light = "https://x/clip")
-
-        assertFalse(videoHasParsableSource(blank, dark = false))
-        assertFalse(lottieHasParsableSource(blank, dark = false))
-
-        assertTrue(videoHasParsableSource(relative, dark = false))
-        assertTrue(lottieHasParsableSource(relative, dark = false))
-
-        assertTrue(videoHasParsableSource(absolute, dark = false))
-        assertTrue(lottieHasParsableSource(absolute, dark = false))
+        // row by row, for both node types.
+        for ((source, usable) in sourceUsabilityTable) {
+            val pair = ThemePair(light = source)
+            assertEquals(usable, videoHasUsableSource(pair, dark = false), "video source=<$source>")
+            assertEquals(usable, lottieHasUsableSource(pair, dark = false), "lottie source=<$source>")
+        }
     }
 
     // ---- video letterboxing (I1) ----------------------------------------
@@ -1116,29 +1143,34 @@ class NodeViewFactoryTest {
         assertEquals("https://x/a.json", lottieRenderRequest(node, playing = true, dark = false).url)
     }
 
-    // ---- lottie URL parsing (I6) -----------------------------------------
+    // ---- lottie source usability (I6) ------------------------------------
     //
-    // iOS has always parsed the URL and treated an unparsable one as "cannot
-    // render"; Android used to hand the raw string — INCLUDING the "" that
-    // every freshly created lottie carries — straight to the host's player.
-    // The three now agree, and agree with how `video` already behaved.
+    // Android used to hand the raw string — INCLUDING the "" that every
+    // freshly created lottie carries — straight to the host's player. All
+    // three platforms now apply one rule, and it is the same rule `video`
+    // already applied here.
 
     @Test
     fun `a blank lottie url cannot render`() {
         // Not an edge case: `newNode("lottie")` creates `url: { light: "" }`,
         // so this is the state of every lottie the builder has just added.
-        assertFalse(lottieHasParsableSource(ThemePair(light = ""), dark = false))
-        assertFalse(lottieHasParsableSource(ThemePair(light = "   "), dark = false))
+        assertFalse(lottieHasUsableSource(ThemePair(light = ""), dark = false))
+        assertFalse(lottieHasUsableSource(ThemePair(light = "   "), dark = false))
     }
 
     @Test
-    fun `an unparsable lottie url cannot render`() {
-        assertFalse(lottieHasParsableSource(ThemePair(light = "not a url"), dark = false))
+    fun `a malformed but present lottie url still renders`() {
+        // The RELAXATION. This platform's old `java.net.URI` check rejected
+        // these, iOS accepted them, and web accepted them — an unusable
+        // string is the platform's problem at LOAD time, not a reason to
+        // withhold the node from the tree.
+        assertTrue(lottieHasUsableSource(ThemePair(light = "not a url"), dark = false))
+        assertTrue(lottieHasUsableSource(ThemePair(light = "://x"), dark = false))
     }
 
     @Test
     fun `an absolute lottie url can render`() {
-        assertTrue(lottieHasParsableSource(ThemePair(light = "https://x/a.json"), dark = false))
+        assertTrue(lottieHasUsableSource(ThemePair(light = "https://x/a.json"), dark = false))
     }
 
     @Test
@@ -1147,19 +1179,19 @@ class NodeViewFactoryTest {
         // `URL(string:)` accepts a relative reference, so rejecting one here
         // would drop a node the other two draw. Being stricter is as much a
         // divergence as being laxer.
-        assertTrue(lottieHasParsableSource(ThemePair(light = "anim.json"), dark = false))
-        assertTrue(lottieHasParsableSource(ThemePair(light = "/assets/anim.json"), dark = false))
+        assertTrue(lottieHasUsableSource(ThemePair(light = "anim.json"), dark = false))
+        assertTrue(lottieHasUsableSource(ThemePair(light = "/assets/anim.json"), dark = false))
     }
 
     @Test
-    fun `the theme half that would actually be used is the one parsed`() {
+    fun `the theme half that would actually be used is the one checked`() {
         val onlyDarkIsUsable = ThemePair(light = "", dark = "https://x/a-dark.json")
-        assertTrue(lottieHasParsableSource(onlyDarkIsUsable, dark = true))
-        assertFalse(lottieHasParsableSource(onlyDarkIsUsable, dark = false))
+        assertTrue(lottieHasUsableSource(onlyDarkIsUsable, dark = true))
+        assertFalse(lottieHasUsableSource(onlyDarkIsUsable, dark = false))
     }
 
     @Test
-    fun `a lottie with an unparsable url never reaches the registered player`() {
+    fun `a lottie with no source never reaches the registered player`() {
         var requests = 0
         registerLottieRenderer { _, _ ->
             requests++
@@ -1180,7 +1212,7 @@ class NodeViewFactoryTest {
     }
 
     @Test
-    fun `a lottie with an unparsable url draws its fallback when it has one`() {
+    fun `a lottie with no source draws its fallback when it has one`() {
         registerLottieRenderer { _, _ -> mockk<View>(relaxed = true) }
 
         val view = NodeViewFactory.build(
@@ -1190,7 +1222,7 @@ class NodeViewFactoryTest {
             cell = null,
         )
 
-        assertTrue(view != null, "an unparsable URL takes the same fallback path an unregistered player takes")
+        assertTrue(view != null, "an absent source takes the same fallback path an unregistered player takes")
     }
 
     private fun bareLottieNode() = BuilderNode.Lottie(id = "lot", url = ThemePair(light = "https://x/a.json"))

@@ -35,7 +35,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
-import java.net.URI
 import java.net.URL
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -778,18 +777,18 @@ internal fun videoPlaybackCommand(active: Boolean, autoplay: Boolean): VideoPlay
 }
 
 /**
- * Whether a `video`'s theme-resolved source parses as a URL at all — the only
- * half of "will this draw?" that is knowable BEFORE a player exists, and so
- * the only half a carousel counting its pages can act on (see
- * [NodeViewFactory.buildVideo]). Mirrors the Swift sibling's
- * `videoHasParsableSource`.
+ * Whether a `video`'s theme-resolved source is USABLE — the only half of "will
+ * this draw?" that is knowable BEFORE a player exists, and so the only half a
+ * carousel counting its pages can act on (see [NodeViewFactory.buildVideo]).
+ * Mirrors the Swift sibling's `videoHasUsableSource` and web's
+ * `videoHasUsableSource`.
  *
- * Delegates to [mediaSourceHasParsableUrl] — the same rule [lottieHasParsableSource]
+ * Delegates to [mediaSourceIsUsable] — the same rule [lottieHasUsableSource]
  * uses, because "is this playable at all?" is one question, not two answered by
  * coincidence.
  */
-internal fun videoHasParsableSource(url: ThemePair, dark: Boolean): Boolean =
-    mediaSourceHasParsableUrl(url, dark)
+internal fun videoHasUsableSource(url: ThemePair, dark: Boolean): Boolean =
+    mediaSourceIsUsable(url, dark)
 
 /**
  * The ratio a `video` should be laid out at, or `null` for "apply no ratio at
@@ -975,49 +974,80 @@ internal fun lottieViewOrNull(context: Context, request: LottieRenderRequest): V
     LottieRendererRegistry.current?.createView(context, request)
 
 /**
- * Whether a `lottie`'s theme-resolved URL is a URL at all — the second half of
+ * Whether a `lottie`'s theme-resolved source is USABLE — the second half of
  * "will this draw?", alongside "did the host register a player?", and knowable
  * at the same synchronous, pre-mount moment. Mirrors iOS's `lottieCanRender`
  * (`RovenuePaywallLottie.swift`) and the web sibling, and follows the same
- * shape `video` already uses here ([videoHasParsableSource]).
+ * shape `video` already uses here ([videoHasUsableSource]).
  *
  * THE BLANK URL IS THE DEFAULT STATE, not an edge case: `newNode("lottie")`
  * creates `url: { light: "" }`, so every freshly added lottie in the builder is
  * in exactly this state until a URL is pasted. Handing `""` to a registered
  * host player and leaving it to discover the problem is not a contract worth
- * shipping — an unparsable URL means the node cannot render, so it takes the
+ * shipping — an absent source means the node cannot render, so it takes the
  * same path an unregistered player takes: `fallback`, else nothing.
  *
- * RELATIVE URLS ARE VALID, deliberately — delegates to
- * [mediaSourceHasParsableUrl], the same rule [videoHasParsableSource] uses.
+ * RELATIVE AND EVEN MALFORMED SOURCES ARE USABLE, deliberately — delegates to
+ * [mediaSourceIsUsable], the same rule [videoHasUsableSource] uses. A player
+ * handed a string it cannot load fails at load time, which is the ordinary
+ * error path; only an ABSENT source is unrecoverable.
  */
-internal fun lottieHasParsableSource(url: ThemePair, dark: Boolean): Boolean =
-    mediaSourceHasParsableUrl(url, dark)
+internal fun lottieHasUsableSource(url: ThemePair, dark: Boolean): Boolean =
+    mediaSourceIsUsable(url, dark)
 
 /**
- * The one rule BOTH media node types answer "will this draw at all, before a
- * player even exists?" with: reject blank or whitespace-only, accept anything
- * else — INCLUDING a relative reference. Web parses a `video`/`lottie` source
- * against a base URL and iOS's `URL(string:)` accepts a relative reference
- * too, so a relative source (resolved later against the app's own asset or
- * CDN base) is legitimate, not a defect.
+ * THE RULE, identical on Android, web and iOS: a media source is USABLE when
+ * it is non-blank after trimming leading and trailing whitespace. Nothing
+ * more. There is deliberately NO syntactic URL validation here.
  *
- * That is why this is built on `java.net.URI`, not `java.net.URL`: `URL`
- * requires a scheme and REJECTS every relative string outright, which is
- * exactly the divergence that once let Android drop a carousel page/dot the
- * other two platforms kept for the same paywall. `URI` accepts a relative
- * reference natively, matching web and iOS.
+ * Why no URL parsing: validating URL *syntax* is the platform's job at LOAD
+ * time — a malformed URL simply fails to load and takes the existing error
+ * path to `fallback`. What this pre-mount check exists for is the one case a
+ * renderer cannot recover from: a source that is ABSENT, which is exactly the
+ * builder's `newNode` default (`url: { light: "" }`) and its whitespace
+ * cousins, so every freshly added media node is in this state until a URL is
+ * pasted.
  *
- * [videoHasParsableSource] and [lottieHasParsableSource] both delegate here —
- * one predicate, not two that happen to agree.
+ * Why not "whatever a URL parser says": the three platforms' parsers do not
+ * agree and never will. This function used to run `java.net.URI`, which
+ * rejects `"not a url"` and `"://x"`; iOS's `URL(string:)` accepts both, plus
+ * `" "`; the browser's WHATWG parser accepts two of the three. That left a
+ * whitespace-only source taking a phantom carousel page and dot on iOS alone.
+ * Worse, iOS's own answer is OS-version dependent (CFURL before iOS 17, an
+ * RFC-3986 parser after), so a rule pinned to parser agreement drifts on its
+ * own. A rule WE define is stable; a rule three URL parsers happen to share is
+ * not. This is a RELAXATION on Android: a present-but-malformed source now
+ * mounts and fails at load, exactly as a valid-but-404 one always did.
+ *
+ * [videoHasUsableSource] and [lottieHasUsableSource] both delegate here — one
+ * predicate, not two that happen to agree. The inputs `""`, `" "`,
+ * `"a/b.mp4"`, `"not a url"` and `"https://x/a.mp4"` are asserted against this
+ * function in `NodeViewFactoryTest.kt`, and against its two siblings in
+ * `renderer.test.tsx` and `PaywallMediaSourceTests.swift` — the same inputs
+ * with the same answers, so the agreement is pinned rather than assumed.
  */
-internal fun mediaSourceHasParsableUrl(url: ThemePair, dark: Boolean): Boolean {
-    val source = themeValue(url, dark).trim()
-    if (source.isEmpty()) return false
-    // Constructed only to see whether it throws; the host is handed the
-    // authored string unchanged.
-    return runCatching { URI(source) }.isSuccess
-}
+internal fun mediaSourceIsUsable(url: ThemePair, dark: Boolean): Boolean =
+    mediaSourceIsUsable(themeValue(url, dark))
+
+/**
+ * The rule itself, over one already theme-resolved string. Split out from the
+ * [ThemePair] overload above so the contract table can exercise the rule
+ * directly, with no theme resolution in the way.
+ *
+ * Kotlin's [String.trim] removes every character [Char.isWhitespace] accepts,
+ * which covers newlines — matching JavaScript's `String.prototype.trim` and
+ * Swift's `.whitespacesAndNewlines`, so a source containing only a newline
+ * gets the same answer on all three platforms.
+ */
+internal fun mediaSourceIsUsable(rawSource: String): Boolean =
+    rawSource.trim() != BLANK_MEDIA_SOURCE
+
+/**
+ * The one source string that is NOT usable: nothing left after trimming.
+ * Named so [mediaSourceIsUsable] reads as the rule it implements rather than
+ * as an incidental comparison against a bare literal.
+ */
+internal const val BLANK_MEDIA_SOURCE = ""
 
 private const val COUNTDOWN_NO_ANCHOR = -1L
 
@@ -1802,18 +1832,21 @@ internal object NodeViewFactory {
      * Renders `video`.
      *
      * Split the same way the Swift sibling is: this function answers the one
-     * question that IS decidable before a player exists — does the source
-     * parse as a URL? — and falls back otherwise, mirroring every other node
-     * type's "cannot draw this" contract. Everything past that point needs
-     * the `MediaPlayer`, and lives in [VideoNodeView].
+     * question that IS decidable before a player exists — is a source present
+     * at all? — and falls back otherwise, mirroring every other node type's
+     * "cannot draw this" contract. Everything past that point needs the
+     * `MediaPlayer`, and lives in [VideoNodeView].
      *
-     * KNOWN CROSS-PLATFORM GAP (shared with web and iOS, raised in the task
-     * report rather than fixed here): a load failure arrives ASYNCHRONOUSLY,
-     * so a video that fails AFTER mount cannot retract the page it already
-     * occupies in a `carousel` — the carousel counted its pages
-     * synchronously, above. A video that fails BEFORE mount (an unparsable
-     * source, checked right here) is handled correctly, because this returns
-     * `null` when there is no fallback and `mapNotNull` drops it.
+     * KNOWN CROSS-PLATFORM GAP, shared with web and iOS and now an ACCEPTED
+     * LIMIT rather than an open question: a load failure arrives
+     * ASYNCHRONOUSLY, so a video that fails AFTER mount cannot retract the
+     * page it already occupies in a `carousel` — the carousel counted its
+     * pages synchronously, above. Spec §3.3 records it, and the validator's
+     * `VIDEO_IN_CAROUSEL_NO_FALLBACK` is what warns the author. Closing it
+     * needs a page list that can shrink after mount, which would be a
+     * three-platform change, not an Android one. A video with NO source
+     * (checked right here) is handled correctly, because this returns `null`
+     * when there is no fallback and `mapNotNull` drops it.
      */
     internal fun buildVideo(
         context: Context,
@@ -1821,7 +1854,7 @@ internal object NodeViewFactory {
         ctx: PaywallRenderContext,
         cell: CellScope?,
     ): View? {
-        if (!videoHasParsableSource(node.url, ctx.dark)) {
+        if (!videoHasUsableSource(node.url, ctx.dark)) {
             return node.fallback?.let { build(context, it, ctx, cell) }
         }
         val poster = node.posterUrl?.let { pair ->
@@ -1845,19 +1878,19 @@ internal object NodeViewFactory {
 
     /**
      * Renders `lottie` by handing a [LottieRenderRequest] to whatever player
-     * the host registered. With an unparsable URL, with nothing registered, or
-     * with a registered player that declines, this draws `fallback`, else
-     * nothing — the machinery every node type already has rather than a new
-     * failure mode.
+     * the host registered. With no source, with nothing registered, or with a
+     * registered player that declines, this draws `fallback`, else nothing —
+     * the machinery every node type already has rather than a new failure
+     * mode.
      *
-     * THE URL IS CHECKED BEFORE THE REGISTRY IS CONSULTED
-     * ([lottieHasParsableSource]), so a registered player is never handed a
+     * THE SOURCE IS CHECKED BEFORE THE REGISTRY IS CONSULTED
+     * ([lottieHasUsableSource]), so a registered player is never handed a
      * blank string to fail on — the same order iOS uses, and the same question
      * [buildVideo] asks of its own source.
      *
      * Unlike [buildVideo], that decision is made HERE, synchronously, so a
      * `lottie` inside a `carousel` never costs a phantom dot: registration is
-     * process state and the URL is already in hand.
+     * process state and the source is already in hand.
      *
      * The first request is issued with [NODE_PLAYING_BEFORE_FIRST_SAMPLE]
      * because that is what the detector's own pre-sample answer is; the view
@@ -1869,7 +1902,7 @@ internal object NodeViewFactory {
         ctx: PaywallRenderContext,
         cell: CellScope?,
     ): View? {
-        if (!lottieHasParsableSource(node.url, ctx.dark)) {
+        if (!lottieHasUsableSource(node.url, ctx.dark)) {
             return node.fallback?.let { build(context, it, ctx, cell) }
         }
         val initialRequest = lottieRenderRequest(node, NODE_PLAYING_BEFORE_FIRST_SAMPLE, ctx.dark)
