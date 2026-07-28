@@ -380,9 +380,9 @@ internal val COUNTDOWN_DEFAULT_ON_EXPIRY = CountdownOnExpiry.FREEZE
 internal const val COUNTDOWN_TICK_MS = 1000L
 
 /** Pre-measurement initial value for the scrolled content's bottom
- *  clearance under a pinned `stickyFooter`, used only until the footer's
+ *  clearance beneath a pinned `stickyFooter`, used only until the footer's
  *  first real layout pass reports its height (see
- *  [installStickyFooterClearance]) — mirrors the web renderer's
+ *  [stickyFooterClearancePx]) — mirrors the web renderer's
  *  `STICKY_FOOTER_CONTENT_CLEARANCE_PX` / the Swift renderer's
  *  `stickyFooterContentClearanceDefault`. Not one of schema.ts's shared
  *  cross-platform constants (each renderer picks its own pre-measurement
@@ -492,6 +492,18 @@ internal fun countdownDeadlineMillis(node: BuilderNode.Countdown, anchorMillis: 
     return null
 }
 
+/**
+ * Whether an expired `countdown` node collapses out of the layout right
+ * now: only `onExpiry: "hide"` does, and only once [remainingSeconds] has
+ * actually reached zero ([CountdownOnExpiry.FREEZE] holds the display at
+ * `00:00`, still visible). Pure so the rule is testable, and because it is
+ * asked TWICE — once for the visibility itself and once for "is there
+ * anything left to tick for", the ticker being stopped rather than left
+ * firing once a second against a `GONE` row for the rest of the session.
+ */
+internal fun countdownHidesNow(remainingSeconds: Long, onExpiry: CountdownOnExpiry): Boolean =
+    remainingSeconds <= 0L && onExpiry == CountdownOnExpiry.HIDE
+
 /** Seconds remaining until [deadlineMillis] from [nowMillis], rounded UP —
  *  mirrors the Swift renderer's `.rounded(.up)` so the displayed second only
  *  decrements once a full second has actually elapsed, never a moment
@@ -500,7 +512,14 @@ internal fun countdownRemainingSeconds(deadlineMillis: Long, nowMillis: Long): L
     maxOf(kotlin.math.ceil((deadlineMillis - nowMillis) / 1000.0).toLong(), 0L)
 
 private const val COUNTDOWN_NO_ANCHOR = -1L
-private const val COUNTDOWN_FIRST_SHOWN_KEY_PREFIX = "rovenue.paywall.countdown.firstShownAt."
+
+/** `SharedPreferences` key prefix for a countdown's persisted "first shown
+ *  to this user" instant, one per paywall identifier. Mirrors schema.ts's
+ *  `COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX` — the Swift SDK's `UserDefaults`
+ *  key and the web's `localStorage` key are the same string, so the three
+ *  platforms agree on where a paywall's anchor lives. `internal`, not
+ *  `private`, so the shared-defaults fixture test can compare it BY VALUE. */
+internal const val COUNTDOWN_FIRST_SHOWN_KEY_PREFIX = "rovenue.paywall.countdown.firstShownAt."
 
 /** The `SharedPreferences` file name this SDK persists a countdown's
  *  first-show anchor to. Not `private`: [RovenuePaywallView] opens it by
@@ -1242,7 +1261,10 @@ internal object NodeViewFactory {
  * removed in [onDetachedFromWindow] — a handler outliving this view would
  * leak it. Past [deadlineMillis], [onExpiry] decides: [CountdownOnExpiry.
  * FREEZE] holds the display at `00:00` (still visible), [CountdownOnExpiry.
- * HIDE] collapses this row ([View.GONE]) instead.
+ * HIDE] collapses this row ([View.GONE]) instead — and stops the tick with
+ * it, since a collapsed row has nothing left to redraw and a timer still
+ * firing once a second against it is pure battery drain for the rest of the
+ * session.
  */
 private class TickingCountdownRow(
     context: Context,
@@ -1255,17 +1277,30 @@ private class TickingCountdownRow(
     }
 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Latched by [refresh] the moment `onExpiry: "hide"` collapses this
+     *  row. A deadline only ever recedes into the past, so this never
+     *  un-latches: it is what stops the tick from being re-posted (and from
+     *  being posted at all on a later re-attach) once there is nothing left
+     *  to display. */
+    private var hiddenOnExpiry = false
+
     private val tick: Runnable = object : Runnable {
         override fun run() {
             refresh()
-            handler.postDelayed(this, COUNTDOWN_TICK_MS)
+            if (!hiddenOnExpiry) handler.postDelayed(this, COUNTDOWN_TICK_MS)
         }
     }
 
     fun refresh() {
         val remaining = countdownRemainingSeconds(deadlineMillis, System.currentTimeMillis())
-        if (remaining <= 0L && onExpiry == CountdownOnExpiry.HIDE) {
+        if (countdownHidesNow(remaining, onExpiry)) {
             visibility = GONE
+            hiddenOnExpiry = true
+            // Belt and braces with the tick's own re-post guard: refresh()
+            // is also called directly (from buildCountdown), where no
+            // Runnable is on the stack to check the flag.
+            handler.removeCallbacks(tick)
             return
         }
         visibility = VISIBLE
@@ -1274,7 +1309,7 @@ private class TickingCountdownRow(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        handler.post(tick)
+        if (!hiddenOnExpiry) handler.post(tick)
     }
 
     override fun onDetachedFromWindow() {

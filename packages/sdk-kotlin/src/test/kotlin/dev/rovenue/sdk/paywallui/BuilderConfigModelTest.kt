@@ -10,6 +10,7 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -291,9 +292,16 @@ class BuilderConfigModelTest {
 
     @Test
     fun `unknown node type entries retain an Unknown node`() {
-        for (el in section("acceptLenient")) {
-            val entry = el.jsonObject
-            if (name(entry).startsWith("override with unknown when.kind")) continue
+        // Selected by name prefix, not by exclusion: `acceptLenient` also
+        // carries entries whose leniency has nothing to do with an unknown
+        // NODE (an unknown override CONDITION kind; a countdown carrying
+        // both deadline props — both have dedicated tests below), and
+        // "everything except the one I remembered" silently mis-asserts as
+        // soon as the shared fixture grows another kind of lenient entry.
+        val entries = section("acceptLenient").map { it.jsonObject }
+            .filter { name(it).startsWith("unknown node type") }
+        assertTrue(entries.isNotEmpty(), "acceptLenient carries unknown-node-type entries")
+        for (entry in entries) {
             val config = decodeBuilderConfig(configJson(entry))
             assertNotNull(config, "acceptLenient should decode: ${name(entry)}")
             assertTrue(
@@ -305,7 +313,7 @@ class BuilderConfigModelTest {
 
     @Test
     fun `unknown node retains its fallback subtree`() {
-        val entry = section("acceptLenient").first().jsonObject
+        val entry = entryWithNamePrefix("acceptLenient", "unknown node type with valid fallback")
         val config = decodeBuilderConfig(configJson(entry))!!
         val unknown = firstUnknown(config.root)
         assertNotNull(unknown, "unknown node present")
@@ -524,6 +532,54 @@ class BuilderConfigModelTest {
             themePairFrom(defaults["SOCIAL_PROOF_STAR_DEFAULT_COLOR"]!!.jsonObject),
         )
         assertEquals(SOCIAL_PROOF_MAX_RATING, defaults["SOCIAL_PROOF_MAX_RATING"]!!.jsonPrimitive.int)
+        // The four wave-C keys. The key PREFIX is the cross-platform one:
+        // this SDK's SharedPreferences key, the Swift SDK's UserDefaults key
+        // and the web's localStorage key are the same string, so a paywall's
+        // countdown anchor lives in the same named slot everywhere.
+        assertEquals(
+            COUNTDOWN_DEFAULT_ON_EXPIRY,
+            countdownOnExpiryFrom(defaults["COUNTDOWN_DEFAULT_ON_EXPIRY"]!!.jsonPrimitive.content),
+        )
+        assertEquals(COUNTDOWN_TICK_MS, defaults["COUNTDOWN_TICK_MS"]!!.jsonPrimitive.long)
+        assertEquals(
+            COUNTDOWN_FIRST_SHOWN_KEY_PREFIX,
+            defaults["COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX"]!!.jsonPrimitive.content,
+        )
+        assertEquals(
+            STICKY_FOOTER_DEFAULT_BACKGROUND,
+            themePairFrom(defaults["STICKY_FOOTER_DEFAULT_BACKGROUND"]!!.jsonObject),
+        )
+    }
+
+    private fun countdownOnExpiryFrom(raw: String): CountdownOnExpiry = when (raw) {
+        "freeze" -> CountdownOnExpiry.FREEZE
+        "hide" -> CountdownOnExpiry.HIDE
+        else -> error("unknown onExpiry in the shared fixture: $raw")
+    }
+
+    /**
+     * render-fixtures.json carries `endsAt` + `durationSeconds` TOGETHER as
+     * an `acceptLenient` entry, deliberately not a `reject`: their
+     * exclusivity is a TypeScript-only authoring `refine`, so a config
+     * carrying both reaches the platform decoders intact and the
+     * cross-platform contract is "decode it, and prefer `endsAt`".
+     *
+     * The anchor supplier fails the test if it is called at all — preferring
+     * `endsAt` is not only about the resulting instant, it is also what
+     * keeps an `endsAt` countdown off persistent storage entirely.
+     */
+    @Test
+    fun `countdown carrying both deadline props decodes and prefers endsAt`() {
+        val entry = entryWithNamePrefix("acceptLenient", "countdown carrying BOTH endsAt and durationSeconds")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val countdown = config.root.children[0] as BuilderNode.Countdown
+        assertNotNull(countdown.endsAt, "endsAt survives the decode")
+        assertNotNull(countdown.durationSeconds, "durationSeconds survives the decode too — neither is dropped")
+
+        val deadline = countdownDeadlineMillis(countdown) {
+            error("the anchor must not be read when endsAt is present")
+        }
+        assertEquals(parseIsoInstantMillis(countdown.endsAt!!), deadline)
     }
 
     private fun containsUnknown(node: BuilderNode): Boolean = when (node) {

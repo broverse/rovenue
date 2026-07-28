@@ -653,6 +653,23 @@ class NodeViewFactoryTest {
         assertNull(countdownDeadlineMillis(BuilderNode.Countdown(id = "cd")) { 0L })
     }
 
+    /**
+     * `onExpiry: "hide"` collapses an expired countdown, and the SAME
+     * predicate is what stops its ticker: a `GONE` row that keeps a
+     * `Handler` firing once a second for the rest of the session redraws
+     * nothing and costs battery. `freeze` never hides — it holds the
+     * display at `00:00`, so it keeps ticking (harmlessly, on a view that
+     * is still on screen).
+     */
+    @Test
+    fun `countdownHidesNow only for an expired hide countdown`() {
+        assertTrue(countdownHidesNow(remainingSeconds = 0, onExpiry = CountdownOnExpiry.HIDE))
+        assertTrue(countdownHidesNow(remainingSeconds = -3, onExpiry = CountdownOnExpiry.HIDE))
+        assertFalse(countdownHidesNow(remainingSeconds = 1, onExpiry = CountdownOnExpiry.HIDE))
+        assertFalse(countdownHidesNow(remainingSeconds = 0, onExpiry = CountdownOnExpiry.FREEZE))
+        assertFalse(countdownHidesNow(remainingSeconds = 0, onExpiry = COUNTDOWN_DEFAULT_ON_EXPIRY))
+    }
+
     @Test
     fun `countdownRemainingSeconds rounds up and never goes negative`() {
         assertEquals(1L, countdownRemainingSeconds(deadlineMillis = 1500, nowMillis = 1000))
