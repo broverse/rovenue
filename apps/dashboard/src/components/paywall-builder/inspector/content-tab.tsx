@@ -6,7 +6,13 @@ import {
   COUNTDOWN_DEFAULT_ON_EXPIRY,
   FEATURE_ROW_DEFAULT_INCLUDED,
   ICON_NAMES,
+  LOTTIE_DEFAULT_AUTOPLAY,
+  LOTTIE_DEFAULT_LOOP,
   SOCIAL_PROOF_MAX_RATING,
+  VIDEO_DEFAULT_AUTOPLAY,
+  VIDEO_DEFAULT_LOOP,
+  VIDEO_DEFAULT_MUTED,
+  VIDEO_DEFAULT_SHOWS_CONTROLS,
   type ButtonNode,
   type CarouselNode,
   type CountdownNode,
@@ -15,16 +21,18 @@ import {
   type FeatureRow,
   type IconNode,
   type ImageNode,
+  type LottieNode,
   type PaywallNode,
   type PurchaseButtonNode,
   type SocialProofNode,
   type TextNode,
   type TimelineNode,
   type TimelineRow,
+  type VideoNode,
 } from "@rovenue/shared/paywall";
 import { COUNTDOWN_DEFAULT_DURATION_SECONDS } from "../tree-ops";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
-import { LocalizedTextField, NumberField, SelectField } from "./fields";
+import { LocalizedTextField, NumberField, SelectField, ThemeUrlField } from "./fields";
 import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
 import { RowListEditor } from "./row-list-editor";
 
@@ -64,6 +72,10 @@ export const ContentTab = component(({ node }: { node: PaywallNode }) => {
       return <CountdownContent node={node} />;
     case "carousel":
       return <CarouselContent node={node} />;
+    case "video":
+      return <VideoContent node={node} />;
+    case "lottie":
+      return <LottieContent node={node} />;
     default:
       return null;
   }
@@ -438,6 +450,143 @@ function CarouselContent({ node }: { node: CarouselNode }) {
         />
         {t("paywalls.builder.properties.carouselShowsIndicator", "Shows indicator")}
       </label>
+    </Section>
+  );
+}
+
+/**
+ * `aspectRatio` absent means "the source's own ratio, once known" — NOT a
+ * substituted number and not zero. `NumberField` already turns an emptied
+ * input into `undefined` rather than `0`, so no extra handling is needed
+ * here beyond passing the raw value through. Every toggle defaults from the
+ * shared Task-1 constants, never a hard-coded `true`/`false`.
+ */
+function VideoContent({ node }: { node: VideoNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<VideoNode>) => vm.updateNode<VideoNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.video", "Video")} defaultOpen>
+      <Field label={t("paywalls.builder.properties.urlLight", "URL (light)")}>
+        <input
+          value={node.url.light}
+          onChange={(e) => set({ url: { ...node.url, light: e.currentTarget.value } })}
+          placeholder="https://cdn.example.com/video.mp4"
+          className={INPUT_CLASS}
+        />
+      </Field>
+      <Field className="mt-3" label={t("paywalls.builder.properties.urlDark", "URL (dark)")}>
+        <input
+          value={node.url.dark ?? ""}
+          onChange={(e) => set({ url: { ...node.url, dark: e.currentTarget.value || undefined } })}
+          placeholder="https://cdn.example.com/video-dark.mp4"
+          className={INPUT_CLASS}
+        />
+      </Field>
+      <ThemeUrlField
+        className="mt-3"
+        labelLight={t("paywalls.builder.properties.videoPosterUrlLight", "Poster URL (light)")}
+        labelDark={t("paywalls.builder.properties.videoPosterUrlDark", "Poster URL (dark)")}
+        value={node.posterUrl}
+        onChange={(v) => set({ posterUrl: v })}
+        placeholderLight="https://cdn.example.com/poster.png"
+        placeholderDark="https://cdn.example.com/poster-dark.png"
+      />
+      <label className="mt-3 flex items-center gap-1.5 text-[11px] text-foreground">
+        <input
+          type="checkbox"
+          checked={node.autoplay ?? VIDEO_DEFAULT_AUTOPLAY}
+          onChange={(e) => set({ autoplay: e.currentTarget.checked })}
+        />
+        {t("paywalls.builder.properties.videoAutoplay", "Autoplay")}
+      </label>
+      <label className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground">
+        <input
+          type="checkbox"
+          checked={node.loop ?? VIDEO_DEFAULT_LOOP}
+          onChange={(e) => set({ loop: e.currentTarget.checked })}
+        />
+        {t("paywalls.builder.properties.videoLoop", "Loop")}
+      </label>
+      <label className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground">
+        <input
+          type="checkbox"
+          checked={node.muted ?? VIDEO_DEFAULT_MUTED}
+          onChange={(e) => set({ muted: e.currentTarget.checked })}
+        />
+        {t("paywalls.builder.properties.videoMuted", "Muted")}
+      </label>
+      <label className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground">
+        <input
+          type="checkbox"
+          checked={node.showsControls ?? VIDEO_DEFAULT_SHOWS_CONTROLS}
+          onChange={(e) => set({ showsControls: e.currentTarget.checked })}
+        />
+        {t("paywalls.builder.properties.videoShowsControls", "Shows controls")}
+      </label>
+      <NumberField
+        className="mt-3"
+        label={t("paywalls.builder.properties.videoAspectRatio", "Aspect ratio (width ÷ height)")}
+        value={node.aspectRatio}
+        onChange={(v) => set({ aspectRatio: v })}
+      />
+    </Section>
+  );
+}
+
+/**
+ * `speed` is intentionally left unclamped in the UI (unlike e.g.
+ * SocialProof's rating): the shared validator already raises
+ * `LOTTIE_SPEED_OUT_OF_RANGE` as a warning-tier issue when it's outside
+ * [`LOTTIE_MIN_SPEED`, `LOTTIE_MAX_SPEED`], so silently clamping here would
+ * make that issue code unreachable from the builder.
+ */
+function LottieContent({ node }: { node: LottieNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<LottieNode>) => vm.updateNode<LottieNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.lottie", "Lottie")} defaultOpen>
+      <Field label={t("paywalls.builder.properties.urlLight", "URL (light)")}>
+        <input
+          value={node.url.light}
+          onChange={(e) => set({ url: { ...node.url, light: e.currentTarget.value } })}
+          placeholder="https://cdn.example.com/animation.json"
+          className={INPUT_CLASS}
+        />
+      </Field>
+      <Field className="mt-3" label={t("paywalls.builder.properties.urlDark", "URL (dark)")}>
+        <input
+          value={node.url.dark ?? ""}
+          onChange={(e) => set({ url: { ...node.url, dark: e.currentTarget.value || undefined } })}
+          placeholder="https://cdn.example.com/animation-dark.json"
+          className={INPUT_CLASS}
+        />
+      </Field>
+      <label className="mt-3 flex items-center gap-1.5 text-[11px] text-foreground">
+        <input
+          type="checkbox"
+          checked={node.loop ?? LOTTIE_DEFAULT_LOOP}
+          onChange={(e) => set({ loop: e.currentTarget.checked })}
+        />
+        {t("paywalls.builder.properties.lottieLoop", "Loop")}
+      </label>
+      <label className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground">
+        <input
+          type="checkbox"
+          checked={node.autoplay ?? LOTTIE_DEFAULT_AUTOPLAY}
+          onChange={(e) => set({ autoplay: e.currentTarget.checked })}
+        />
+        {t("paywalls.builder.properties.lottieAutoplay", "Autoplay")}
+      </label>
+      <NumberField
+        className="mt-3"
+        label={t("paywalls.builder.properties.lottieSpeed", "Speed")}
+        value={node.speed}
+        onChange={(v) => set({ speed: v })}
+      />
     </Section>
   );
 }

@@ -1309,7 +1309,9 @@
         "socialProof": "Social proof",
         "stickyFooter": "Sticky footer",
         "countdown": "Countdown",
-        "carousel": "Carousel"
+        "carousel": "Carousel",
+        "video": "Video",
+        "lottie": "Lottie"
       },
       "addNode": {
         "title": "Add node"
@@ -1489,7 +1491,19 @@
         "carouselAutoAdvanceSeconds": "Auto-advance (seconds)",
         "carouselLoop": "Loop",
         "carouselShowsIndicator": "Shows indicator",
-        "carouselIndicatorColor": "Indicator color"
+        "carouselIndicatorColor": "Indicator color",
+        "video": "Video",
+        "videoPosterUrlLight": "Poster URL (light)",
+        "videoPosterUrlDark": "Poster URL (dark)",
+        "videoAutoplay": "Autoplay",
+        "videoLoop": "Loop",
+        "videoMuted": "Muted",
+        "videoShowsControls": "Shows controls",
+        "videoAspectRatio": "Aspect ratio (width ÷ height)",
+        "lottie": "Lottie",
+        "lottieLoop": "Loop",
+        "lottieAutoplay": "Autoplay",
+        "lottieSpeed": "Speed"
       },
       "topbar": {
         "close": "Close builder",

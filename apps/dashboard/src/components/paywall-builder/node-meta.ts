@@ -15,11 +15,13 @@ import {
   PanelBottom,
   Timer,
   GalleryHorizontal,
+  Video,
+  FileJson,
   type LucideIcon,
 } from "lucide-react";
 
 // =============================================================
-// Static metadata for the 14 paywall node types, shared by the
+// Static metadata for the 17 paywall node types, shared by the
 // layer tree (row icon/label) and the add-node popover (menu
 // entries). Pure data + one pure helper (`nodeLocKey`) — kept
 // framework-free so it's trivially unit-testable.
@@ -41,6 +43,8 @@ export const NODE_TYPES: ReadonlyArray<PaywallNode["type"]> = [
   "stickyFooter",
   "countdown",
   "carousel",
+  "video",
+  "lottie",
 ];
 
 export const NODE_ICON: Record<PaywallNode["type"], LucideIcon> = {
@@ -59,6 +63,8 @@ export const NODE_ICON: Record<PaywallNode["type"], LucideIcon> = {
   stickyFooter: PanelBottom,
   countdown: Timer,
   carousel: GalleryHorizontal,
+  video: Video,
+  lottie: FileJson,
 };
 
 /** English fallback label per node type — mirrored by the `paywalls.builder.nodeTypes.*` i18n keys. */
@@ -78,6 +84,8 @@ export const NODE_TYPE_LABEL: Record<PaywallNode["type"], string> = {
   stickyFooter: "Sticky footer",
   countdown: "Countdown",
   carousel: "Carousel",
+  video: "Video",
+  lottie: "Lottie",
 };
 
 /**

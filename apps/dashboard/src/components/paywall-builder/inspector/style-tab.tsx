@@ -22,6 +22,13 @@ import { Field, Section, Segmented } from "./primitives";
 // =============================================================
 // Style — how a node looks. `align` is here for text (it aligns
 // glyphs); a stack's `align` is on Layout, where it aligns children.
+//
+// Wave D2 — `video`/`lottie` deliberately have no case here and no Style
+// entry in `inspector/tabs.ts`'s `appliesTo`: neither node type has a
+// style-only field (their one colour-ish knob, `posterUrl`, is content,
+// not appearance). Adding a Style tab without a case here would be the
+// wave-B defect in the other direction — an empty tab shipping instead of
+// no tab at all.
 // =============================================================
 
 export const StyleTab = component(({ node }: { node: PaywallNode }) => {

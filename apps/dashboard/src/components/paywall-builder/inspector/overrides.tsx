@@ -6,10 +6,11 @@ import type {
   OverrideCondition,
   PaywallNode,
   ThemeColor,
+  ThemeUrl,
 } from "@rovenue/shared/paywall";
 import { ICON_NAMES, OVERRIDABLE_PROP_KEYS, SOCIAL_PROOF_MAX_RATING } from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
-import { AlignField, NumberField, SelectField, ThemeColorField } from "./fields";
+import { AlignField, NumberField, SelectField, ThemeColorField, ThemeUrlField } from "./fields";
 import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
 
 /** Ratings never go negative — same floor `content-tab.tsx`'s SocialProof field clamps to. */
@@ -43,6 +44,8 @@ const OVERRIDE_PROP_LABEL: Record<string, string> = {
   rating: "Rating",
   starColor: "Star color",
   indicatorColor: "Indicator color",
+  url: "URL",
+  posterUrl: "Poster URL",
 };
 
 /**
@@ -75,7 +78,10 @@ type OverridablePropCombo =
   | "socialProof.starColor"
   | "stickyFooter.background"
   | "countdown.color"
-  | "carousel.indicatorColor";
+  | "carousel.indicatorColor"
+  | "video.url"
+  | "video.posterUrl"
+  | "lottie.url";
 
 export function OverridesSection({ node }: { node: PaywallNode }) {
   const vm = useService(PaywallBuilderViewModel);
@@ -278,6 +284,17 @@ function OverridePropField({
             { value: "secondary", label: "Secondary" },
             { value: "plain", label: "Plain" },
           ]}
+        />
+      );
+    case "video.url":
+    case "video.posterUrl":
+    case "lottie.url":
+      return (
+        <ThemeUrlField
+          labelLight={`${label} (light)`}
+          labelDark={`${label} (dark)`}
+          value={value as ThemeUrl | undefined}
+          onChange={(v) => onChange(v)}
         />
       );
     default: {

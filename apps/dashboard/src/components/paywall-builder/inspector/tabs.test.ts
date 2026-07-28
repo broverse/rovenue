@@ -79,6 +79,23 @@ describe("tabsForNode", () => {
     expect(tabsForNode("carousel")).not.toHaveLength(0);
     expect(tabsForNode("carousel").map((t) => t.id)).toEqual(["style", "content", "visibility"]);
   });
+
+  // Wave D2 — video/lottie. Same scar as carousel above: `inspector/tabs.ts`
+  // was left off a task's file list once and a node type shipped with no
+  // reachable tabs at all. video/lottie have no layout/style/binding fields
+  // (no size, no cell binding), so their tab set is Content + Visibility.
+  it("gives video a non-empty tab set", () => {
+    expect(tabsForNode("video")).not.toHaveLength(0);
+  });
+  it("gives lottie a non-empty tab set", () => {
+    expect(tabsForNode("lottie")).not.toHaveLength(0);
+  });
+
+  it("gives video and lottie the content and visibility tabs, and nothing else", () => {
+    for (const type of ["video", "lottie"] as const) {
+      expect(tabsForNode(type).map((t) => t.id), `${type} tabs`).toEqual(["content", "visibility"]);
+    }
+  });
 });
 
 describe("tabIssues", () => {

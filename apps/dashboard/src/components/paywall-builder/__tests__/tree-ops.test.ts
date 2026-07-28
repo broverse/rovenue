@@ -407,6 +407,20 @@ describe("newNode", () => {
     const node = newNode("carousel", idGen);
     expect(node).toEqual({ type: "carousel", id: node.id, children: [] });
   });
+
+  // Wave D2 — video/lottie are leaves, so they need no container wiring
+  // elsewhere in this file, but WITHOUT a `newNode` case the palette's
+  // "add video"/"add lottie" button would silently create nothing — the
+  // same defect class as the wave-B missing-inspector scar, one layer over.
+  it("creates a video node with an empty light url", () => {
+    const node = newNode("video", idGen);
+    expect(node).toEqual({ type: "video", id: node.id, url: { light: "" } });
+  });
+
+  it("creates a lottie node with an empty light url", () => {
+    const node = newNode("lottie", idGen);
+    expect(node).toEqual({ type: "lottie", id: node.id, url: { light: "" } });
+  });
 });
 
 // =============================================================

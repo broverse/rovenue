@@ -43,7 +43,7 @@ describe("nodeLocKey", () => {
 });
 
 describe("NODE_TYPES", () => {
-  it("lists exactly the 14 node types the add-node popover offers", () => {
+  it("lists exactly the 17 node types the add-node popover offers", () => {
     expect(NODE_TYPES).toEqual([
       "stack",
       "text",
@@ -60,12 +60,27 @@ describe("NODE_TYPES", () => {
       "stickyFooter",
       "countdown",
       "carousel",
+      "video",
+      "lottie",
     ]);
   });
 
   it("exposes carousel in the palette with a label and icon", () => {
     expect(NODE_TYPE_LABEL.carousel).toBeTruthy();
     expect(NODE_ICON.carousel).toBeTruthy();
+  });
+
+  // Wave D2 — the exact test text from the task brief.
+  it("exposes video and lottie in the palette", () => {
+    expect(NODE_TYPES).toContain("video");
+    expect(NODE_TYPES).toContain("lottie");
+  });
+
+  it("exposes video and lottie in the palette with a label and icon", () => {
+    expect(NODE_TYPE_LABEL.video).toBeTruthy();
+    expect(NODE_ICON.video).toBeTruthy();
+    expect(NODE_TYPE_LABEL.lottie).toBeTruthy();
+    expect(NODE_ICON.lottie).toBeTruthy();
   });
 
   it("lists divider and icon in the palette", () => {

@@ -1,6 +1,6 @@
 import { useService } from "impair";
 import { useTranslation } from "react-i18next";
-import type { NodeSize, StackNode, ThemeColor } from "@rovenue/shared/paywall";
+import type { NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
 import { ColorSwatchInput } from "../../funnel-builder/color-swatch-input";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { Field, INPUT_CLASS, Segmented } from "./primitives";
@@ -78,6 +78,76 @@ export function ThemeColorField({
         </div>
       </div>
     </Field>
+  );
+}
+
+/**
+ * A `ThemeUrl` (light/dark URL pair), rendered as two stacked text fields —
+ * the same shape as the inline light/dark pair `ImageContent` writes by hand
+ * for `image.url`, but reusable here because `video`/`lottie` need the SAME
+ * pair twice each (their own required `url`, and video's optional
+ * `posterUrl`), plus a third time in the overrides panel. Unlike
+ * `ThemeColorField` this takes independent labels for the two rows (not one
+ * wrapping label + Light/Dark sub-labels) so a caller can tell "URL" apart
+ * from "Poster URL" when both sit in the same panel.
+ *
+ * Collapses to `undefined` when both rows are emptied — correct for the
+ * OPTIONAL uses (`posterUrl`, and every use inside the overrides panel):
+ * an empty `posterUrl` means "no poster", not a `{ light: "" }` object.
+ */
+export function ThemeUrlField({
+  labelLight,
+  labelDark,
+  value,
+  onChange,
+  placeholderLight,
+  placeholderDark,
+  className,
+}: {
+  labelLight: string;
+  labelDark: string;
+  value: ThemeUrl | undefined;
+  onChange: (next: ThemeUrl | undefined) => void;
+  placeholderLight?: string;
+  placeholderDark?: string;
+  className?: string;
+}) {
+  const setLight = (v: string) => {
+    const dark = value?.dark;
+    if (!v && !dark) {
+      onChange(undefined);
+      return;
+    }
+    onChange({ light: v, dark });
+  };
+  const setDark = (v: string) => {
+    const light = value?.light ?? "";
+    if (!light && !v) {
+      onChange(undefined);
+      return;
+    }
+    onChange({ light, dark: v || undefined });
+  };
+
+  return (
+    <>
+      <Field label={labelLight} className={className}>
+        <input
+          value={value?.light ?? ""}
+          onChange={(e) => setLight(e.currentTarget.value)}
+          placeholder={placeholderLight}
+          className={INPUT_CLASS}
+        />
+      </Field>
+      <Field className="mt-3" label={labelDark}>
+        <input
+          value={value?.dark ?? ""}
+          onChange={(e) => setDark(e.currentTarget.value)}
+          placeholder={placeholderDark}
+          className={INPUT_CLASS}
+        />
+      </Field>
+    </>
   );
 }
 

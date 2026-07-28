@@ -290,6 +290,10 @@ export function newNode(type: PaywallNode["type"], idGen: () => string): Paywall
       return { type: "countdown", id, durationSeconds: COUNTDOWN_DEFAULT_DURATION_SECONDS };
     case "carousel":
       return { type: "carousel", id, children: [] };
+    case "video":
+      return { type: "video", id, url: { light: "" } };
+    case "lottie":
+      return { type: "lottie", id, url: { light: "" } };
     default: {
       const exhaustive: never = type;
       throw new Error(`Unknown node type: ${String(exhaustive)}`);

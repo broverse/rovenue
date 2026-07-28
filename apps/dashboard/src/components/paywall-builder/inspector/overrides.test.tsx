@@ -17,9 +17,11 @@ import {
   type DividerNode,
   type FeatureListNode,
   type IconNode,
+  type LottieNode,
   type SocialProofNode,
   type StickyFooterNode,
   type TimelineNode,
+  type VideoNode,
 } from "@rovenue/shared/paywall";
 
 // =============================================================
@@ -87,6 +89,31 @@ function fakeConfig(): BuilderConfig {
     children: [],
     overrides: [{ when: { kind: "introEligible" }, props: { indicatorColor: { light: "#666666" } } }],
   } as CarouselNode);
+  config.root.children.push({
+    type: "video",
+    id: "v1",
+    url: { light: "https://cdn.example.com/video.mp4" },
+    overrides: [
+      {
+        when: { kind: "introEligible" },
+        props: {
+          url: { light: "https://cdn.example.com/alt.mp4" },
+          posterUrl: { light: "https://cdn.example.com/poster.png" },
+        },
+      },
+    ],
+  } as VideoNode);
+  config.root.children.push({
+    type: "lottie",
+    id: "lt1",
+    url: { light: "https://cdn.example.com/anim.json" },
+    overrides: [
+      {
+        when: { kind: "introEligible" },
+        props: { url: { light: "https://cdn.example.com/alt-anim.json" } },
+      },
+    ],
+  } as LottieNode);
   return config;
 }
 
@@ -313,5 +340,70 @@ describe("OverridesSection — carousel override fields", () => {
     fireEvent.change(light!, { target: { value: "#777777" } });
     const node = findNode(vm.config.root, "car1") as CarouselNode;
     expect(node.overrides?.[0]?.props.indicatorColor).toEqual({ light: "#777777" });
+  });
+});
+
+// =============================================================
+// Wave D2 — video.url / video.posterUrl / lottie.url. Same defect class
+// again, this time for a `ThemeUrl` (not a `ThemeColor`): Task 1 declared
+// both keys in OVERRIDABLE_PROP_KEYS.video and the one key in
+// OVERRIDABLE_PROP_KEYS.lottie. Without a case in OverridePropField's
+// switch these fall through to the compile-time exhaustiveness check
+// instead of rendering — these pin real, interactive text inputs seeded
+// with the override's own value (a ThemeColor swatch has no analogue here,
+// so this locates inputs by their live text value rather than a shared
+// color placeholder).
+// =============================================================
+
+/** Every non-number, non-checkbox `<input>` under `container` — the shape
+ *  `ThemeUrlField` renders one of, per light/dark row. */
+function textInputsIn(container: HTMLElement): HTMLInputElement[] {
+  return Array.from(container.querySelectorAll("input")).filter(
+    (el) => el.type !== "number" && el.type !== "checkbox",
+  ) as HTMLInputElement[];
+}
+
+describe("OverridesSection — video override fields", () => {
+  it("renders real url and posterUrl inputs, not a silent no-op", async () => {
+    const { container } = await renderHarness("v1");
+    const values = textInputsIn(container).map((el) => el.value);
+    expect(values).toContain("https://cdn.example.com/alt.mp4");
+    expect(values).toContain("https://cdn.example.com/poster.png");
+  });
+
+  it("writes an edited url back onto the override's props", async () => {
+    const { vm, container } = await renderHarness("v1");
+    const urlInput = textInputsIn(container).find((el) => el.value === "https://cdn.example.com/alt.mp4")!;
+    fireEvent.change(urlInput, { target: { value: "https://cdn.example.com/new.mp4" } });
+    const node = findNode(vm.config.root, "v1") as VideoNode;
+    expect(node.overrides?.[0]?.props.url).toEqual({ light: "https://cdn.example.com/new.mp4" });
+  });
+
+  it("writes an edited posterUrl back onto the override's props", async () => {
+    const { vm, container } = await renderHarness("v1");
+    const posterInput = textInputsIn(container).find(
+      (el) => el.value === "https://cdn.example.com/poster.png",
+    )!;
+    fireEvent.change(posterInput, { target: { value: "https://cdn.example.com/new-poster.png" } });
+    const node = findNode(vm.config.root, "v1") as VideoNode;
+    expect(node.overrides?.[0]?.props.posterUrl).toEqual({ light: "https://cdn.example.com/new-poster.png" });
+  });
+});
+
+describe("OverridesSection — lottie override fields", () => {
+  it("renders a real url input, not a silent no-op", async () => {
+    const { container } = await renderHarness("lt1");
+    const values = textInputsIn(container).map((el) => el.value);
+    expect(values).toContain("https://cdn.example.com/alt-anim.json");
+  });
+
+  it("writes an edited url back onto the override's props", async () => {
+    const { vm, container } = await renderHarness("lt1");
+    const urlInput = textInputsIn(container).find(
+      (el) => el.value === "https://cdn.example.com/alt-anim.json",
+    )!;
+    fireEvent.change(urlInput, { target: { value: "https://cdn.example.com/new-anim.json" } });
+    const node = findNode(vm.config.root, "lt1") as LottieNode;
+    expect(node.overrides?.[0]?.props.url).toEqual({ light: "https://cdn.example.com/new-anim.json" });
   });
 });
