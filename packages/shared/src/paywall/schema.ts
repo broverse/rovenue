@@ -362,8 +362,12 @@ export type VideoNode = {
   muted?: boolean;
   /** Absent = VIDEO_DEFAULT_SHOWS_CONTROLS. */
   showsControls?: boolean;
-  /** Width ÷ height. Absent = the source's own ratio once known — NOT a
-   *  substituted number. */
+  /** Width ÷ height, strictly positive (enforced by `videoNodeSchema`, like
+   *  `lottie.speed`). Absent = the source's own ratio once known — NOT a
+   *  substituted number, and never zero: a non-positive ratio is meaningless
+   *  and each renderer mishandles it differently (web drops the invalid CSS,
+   *  SwiftUI applies a degenerate layout instruction, Android ignores it and
+   *  falls through to the source's own), so the schema is where it stops. */
   aspectRatio?: number;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
@@ -723,7 +727,10 @@ const videoNodeSchema: z.ZodType<VideoNode> = z.object({
   loop: z.boolean().optional(),
   muted: z.boolean().optional(),
   showsControls: z.boolean().optional(),
-  aspectRatio: z.number().optional(),
+  // `.positive()` exactly as `lottie.speed` is: a zero or negative ratio
+  // cannot reach any renderer, because the three disagree about what to do
+  // with one.
+  aspectRatio: z.number().positive().optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.video).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
   visibility: nodeVisibilitySchema.optional(),

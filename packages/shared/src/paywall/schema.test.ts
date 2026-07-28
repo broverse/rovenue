@@ -804,6 +804,24 @@ describe("wave D2: video and lottie node types", () => {
     })).success).toBe(false);
   });
 
+  it("rejects a non-positive video aspectRatio", () => {
+    // Zero and negative are both meaningless as width ÷ height, and the three
+    // renderers each mishandle them differently (dropped invalid CSS on web, a
+    // degenerate `.aspectRatio(0)` on SwiftUI, silently ignored on Android), so
+    // the value must not be able to reach any of them.
+    for (const aspectRatio of [0, -1.5]) {
+      expect(builderConfigSchema.safeParse(wrap({
+        type: "video", id: "v1", url: { light: "https://x/a.mp4" }, aspectRatio,
+      })).success).toBe(false);
+    }
+  });
+
+  it("accepts a positive video aspectRatio below 1 (a portrait clip)", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "video", id: "v1", url: { light: "https://x/a.mp4" }, aspectRatio: 0.5,
+    })).success).toBe(true);
+  });
+
   it("gives both types an OVERRIDABLE_PROP_KEYS row", () => {
     expect(OVERRIDABLE_PROP_KEYS.video).toEqual(["url", "posterUrl"]);
     expect(OVERRIDABLE_PROP_KEYS.lottie).toEqual(["url"]);

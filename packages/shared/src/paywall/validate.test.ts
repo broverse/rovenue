@@ -1771,6 +1771,120 @@ describe("wave D2: VIDEO_AUTOPLAY_UNMUTED, VIDEO_NO_POSTER, LOTTIE_SPEED_OUT_OF_
   });
 });
 
+describe("wave D2: VIDEO_IN_CAROUSEL_NO_FALLBACK", () => {
+  const VIDEO_URL = { light: "u" };
+
+  function configWithRootChildren(children: PaywallNode[]): BuilderConfig {
+    return baseConfig({ root: { type: "stack", id: "root", axis: "v", children } });
+  }
+
+  function codesFor(children: PaywallNode[]): string[] {
+    return validateBuilderConfig(configWithRootChildren(children), { offeringPackageIds }).map(
+      (i) => i.code,
+    );
+  }
+
+  it("raises it for a fallback-less video that is a direct carousel page", () => {
+    const codes = codesFor([
+      {
+        type: "carousel",
+        id: "c1",
+        children: [
+          { type: "video", id: "v1", url: VIDEO_URL },
+          { type: "text", id: "t1", key: "k", role: "body" },
+        ],
+      },
+    ]);
+    expect(codes).toContain("VIDEO_IN_CAROUSEL_NO_FALLBACK");
+  });
+
+  it("raises it for a fallback-less video nested deeper inside a page", () => {
+    // The rule is about DESCENDANCY, not about being a direct child: a video
+    // wrapped in a stack still occupies the page that stack draws.
+    const codes = codesFor([
+      {
+        type: "carousel",
+        id: "c1",
+        children: [
+          {
+            type: "stack",
+            id: "page-stack",
+            axis: "v",
+            children: [{ type: "video", id: "v1", url: VIDEO_URL }],
+          },
+        ],
+      },
+    ]);
+    expect(codes).toContain("VIDEO_IN_CAROUSEL_NO_FALLBACK");
+  });
+
+  it("does NOT raise it when the carousel video carries a fallback", () => {
+    // The fallback is the whole point of the warning: with one, the page a
+    // failed video leaves behind is filled rather than blank.
+    const codes = codesFor([
+      {
+        type: "carousel",
+        id: "c1",
+        children: [
+          {
+            type: "video",
+            id: "v1",
+            url: VIDEO_URL,
+            fallback: { type: "text", id: "t-fb", key: "k", role: "body" },
+          },
+        ],
+      },
+    ]);
+    expect(codes).not.toContain("VIDEO_IN_CAROUSEL_NO_FALLBACK");
+  });
+
+  it("does NOT raise it for a fallback-less video outside any carousel", () => {
+    // Outside a carousel a failed video costs no page and no dot, so a
+    // fallback is the author's taste rather than a defence.
+    expect(codesFor([{ type: "video", id: "v1", url: VIDEO_URL }])).not.toContain(
+      "VIDEO_IN_CAROUSEL_NO_FALLBACK",
+    );
+  });
+
+  it("does NOT raise it for a fallback-less video in the carousel's OWN fallback", () => {
+    // A carousel's fallback replaces the carousel entirely — it is never one
+    // of its pages, so nothing there can leave a phantom dot.
+    const codes = codesFor([
+      {
+        type: "carousel",
+        id: "c1",
+        children: [{ type: "text", id: "t1", key: "k", role: "body" }],
+        fallback: { type: "video", id: "v1", url: VIDEO_URL },
+      },
+    ]);
+    expect(codes).not.toContain("VIDEO_IN_CAROUSEL_NO_FALLBACK");
+  });
+
+  it("blocks neither the save nor the publish", () => {
+    expect(issueSeverity({ code: "VIDEO_IN_CAROUSEL_NO_FALLBACK" })).toBe("warning");
+    expect(isBlockingIssue({ code: "VIDEO_IN_CAROUSEL_NO_FALLBACK" })).toBe(false);
+    expect(isPublishBlockingIssue({ code: "VIDEO_IN_CAROUSEL_NO_FALLBACK" })).toBe(false);
+  });
+
+  it("names the offending video, so the builder can point at it", () => {
+    const issues = validateBuilderConfig(
+      configWithRootChildren([
+        {
+          type: "carousel",
+          id: "c1",
+          children: [
+            { type: "text", id: "t1", key: "k", role: "body" },
+            { type: "video", id: "the-video", url: VIDEO_URL },
+          ],
+        },
+      ]),
+      { offeringPackageIds },
+    );
+    const issue = issues.find((i) => i.code === "VIDEO_IN_CAROUSEL_NO_FALLBACK");
+    expect(issue?.nodeId).toBe("the-video");
+  });
+});
+
 describe("LOCALIZED_KEYS for video and lottie", () => {
   it("contribute nothing of their own", () => {
     const config = baseConfig({

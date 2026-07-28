@@ -158,7 +158,17 @@ export type BuilderIssue = {
     // Wave D2 — a lottie speed outside [LOTTIE_MIN_SPEED, LOTTIE_MAX_SPEED].
     // Authoring guidance, not a broken config — the renderer honours whatever
     // speed it is given.
-    | "LOTTIE_SPEED_OUT_OF_RANGE";
+    | "LOTTIE_SPEED_OUT_OF_RANGE"
+    // Wave D2 — a video inside a carousel with no fallback. The accepted
+    // cross-platform limitation this code exists to mitigate: a carousel
+    // decides its pages SYNCHRONOUSLY, but a video's load failure is
+    // ASYNCHRONOUS, so a source that parses and then fails after mounting
+    // keeps its page and its dot — a blank page behind a dot that promises
+    // something to swipe to. Making the page list shrink after mount was
+    // assessed on all three paging primitives and rejected as
+    // disproportionate; a `fallback` makes the blank page impossible in
+    // practice, so the author is told to carry one.
+    | "VIDEO_IN_CAROUSEL_NO_FALLBACK";
   nodeId?: string;
   locale?: string;
   key?: string;
@@ -225,6 +235,10 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   // Authoring guidance, not a broken config — the renderer honours whatever
   // speed it is given.
   LOTTIE_SPEED_OUT_OF_RANGE: "warning",
+  // Advice about an ACCEPTED limitation, not a defect in the config: the
+  // paywall renders exactly as authored unless the video fails mid-load, so
+  // this must block neither the save nor the publish.
+  VIDEO_IN_CAROUSEL_NO_FALLBACK: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
   // MUST still persist. Four of these are reachable from the builder UI in
@@ -282,25 +296,50 @@ export function isPublishBlockingIssue(issue: { code: string }): boolean {
 }
 
 /**
+ * Where a node sits, carried down the one walk below so that a rule about
+ * PLACEMENT (rather than about the node's own props) needs no second
+ * traversal of its own.
+ */
+interface NodeWalkContext {
+  /**
+   * True for the cellTemplate root and everything beneath it
+   * (children/fallback), reset to false only outside any cellTemplate — a
+   * nested cellTemplate (unusual but not forbidden) simply stays `true`.
+   */
+  insideCellTemplate: boolean;
+  /**
+   * True for every DESCENDANT of a carousel — its pages, and anything nested
+   * inside them — but NOT for the carousel node itself. A carousel's own
+   * `fallback` is excluded too: it replaces the carousel entirely, so it is
+   * never one of its pages.
+   */
+  insideCarousel: boolean;
+}
+
+const ROOT_WALK_CONTEXT: NodeWalkContext = { insideCellTemplate: false, insideCarousel: false };
+
+/**
  * Depth-first walk over every node in the tree, including `fallback` AND
- * `packageList.cellTemplate` subtrees. `insideCellTemplate` is true for the
- * cellTemplate root and everything beneath it (children/fallback), reset to
- * false only outside any cellTemplate — a nested cellTemplate (unusual but
- * not forbidden) simply stays `true`.
+ * `packageList.cellTemplate` subtrees.
  */
 function walkNodes(
   node: PaywallNode,
-  visit: (node: PaywallNode, insideCellTemplate: boolean) => void,
-  insideCellTemplate = false,
+  visit: (node: PaywallNode, ctx: NodeWalkContext) => void,
+  ctx: NodeWalkContext = ROOT_WALK_CONTEXT,
 ): void {
-  visit(node, insideCellTemplate);
+  visit(node, ctx);
+  // A carousel's CHILDREN are its pages; the carousel itself is not one.
+  const childCtx: NodeWalkContext =
+    node.type === "carousel" ? { ...ctx, insideCarousel: true } : ctx;
   if (node.type === "stack" || node.type === "stickyFooter" || node.type === "carousel") {
-    for (const child of node.children) walkNodes(child, visit, insideCellTemplate);
+    for (const child of node.children) walkNodes(child, visit, childCtx);
   }
   if (node.type === "packageList" && node.cellTemplate) {
-    walkNodes(node.cellTemplate, visit, true);
+    walkNodes(node.cellTemplate, visit, { ...ctx, insideCellTemplate: true });
   }
-  if (node.fallback) walkNodes(node.fallback, visit, insideCellTemplate);
+  // `ctx`, not `childCtx`: a node's fallback stands in for the NODE, so it
+  // inherits the node's own placement, not the placement of its children.
+  if (node.fallback) walkNodes(node.fallback, visit, ctx);
 }
 
 const ALL_PLATFORMS = ["ios", "android", "web"] as const;
@@ -420,9 +459,9 @@ export function validateBuilderConfig(
   const offeringSet = new Set(opts.offeringPackageIds);
   const now = opts.now ?? Date.now;
 
-  const nodesWithCtx: Array<{ node: PaywallNode; insideCellTemplate: boolean }> = [];
-  walkNodes(config.root, (node, insideCellTemplate) => {
-    nodesWithCtx.push({ node, insideCellTemplate });
+  const nodesWithCtx: Array<{ node: PaywallNode } & NodeWalkContext> = [];
+  walkNodes(config.root, (node, ctx) => {
+    nodesWithCtx.push({ node, ...ctx });
   });
   const allNodes: PaywallNode[] = nodesWithCtx.map((n) => n.node);
 
@@ -614,6 +653,20 @@ export function validateBuilderConfig(
         code: "VIDEO_NO_POSTER",
         nodeId: node.id,
         message: `video "${node.id}" does not autoplay and has no posterUrl, so it shows a blank frame until the viewer presses play.`,
+      });
+    }
+  }
+
+  // VIDEO_IN_CAROUSEL_NO_FALLBACK — wave D2. A rule about WHERE the node
+  // sits, so it reads the walk's own parent context (exactly as
+  // CELL_TEMPLATE_BAD_NODE below does) rather than re-walking the tree.
+  for (const { node, insideCarousel } of nodesWithCtx) {
+    if (node.type !== "video" || !insideCarousel) continue;
+    if (node.fallback === undefined) {
+      issues.push({
+        code: "VIDEO_IN_CAROUSEL_NO_FALLBACK",
+        nodeId: node.id,
+        message: `video "${node.id}" is a carousel page with no fallback — a carousel fixes its pages and dots before the video loads, so a video that fails while loading leaves a blank page behind a dot. A fallback fills it.`,
       });
     }
   }
