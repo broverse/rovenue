@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, type JSX } from "react";
-import type { PackageListNode, PaywallNode, StickyFooterNode } from "@rovenue/shared/paywall";
+import {
+  STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT,
+  type PackageListNode,
+  type PaywallNode,
+  type StickyFooterNode,
+} from "@rovenue/shared/paywall";
 import type { PaywallRendererProps, RendererOffering } from "./types";
 import { effectivePackageIds, renderNode, resolvePackageView, type RenderCtx } from "./nodes";
 import { resolveThemeColor } from "./styles";
@@ -10,8 +15,35 @@ import { resolveThemeColor } from "./styles";
  * real height — a static guess is otherwise wrong whenever the footer is
  * taller than it (a CTA plus fine print routinely is), leaving the last
  * scrolled item unreachable, the same class of bug as no scrolling at all.
+ *
+ * Imported rather than retyped: iOS and Android hand-mirror the same number
+ * as `pt`/`dp`, and `render-fixtures.json`'s `defaults` is where the three
+ * copies are compared.
  */
-const STICKY_FOOTER_CONTENT_CLEARANCE_PX = 96;
+const STICKY_FOOTER_CONTENT_CLEARANCE_PX = STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT;
+
+/**
+ * The scrolled content box lays its single child — the root stack — out as
+ * ONE grid row of `1fr`, which is what actually delivers the `minHeight:
+ * 100%` below to that stack.
+ *
+ * Grid, not flex, and that is the whole point. A flex column would size its
+ * item by flex-basis (`auto` → the stack's own content height) plus
+ * `flex-grow`, and `flex-grow` is not ours to set here: the root stack is
+ * produced by the generic `renderNode` dispatcher, which knows nothing about
+ * being at the root (`align-items: stretch` does not help — in a column
+ * container it governs the horizontal axis). So the extra viewport height
+ * would sit unused BELOW the stack, and spec §2.1's "short content still
+ * fills and distributes" would not land on the web at all. A `1fr` grid row
+ * stretches its item on the BLOCK axis by default, so the stack is handed
+ * `max(its content, the viewport minimum)` with no per-node cooperation —
+ * the same thing SwiftUI's `.frame(minHeight:)` and Android's
+ * `fillViewport` hand their root stacks.
+ *
+ * `1fr` is `minmax(auto, 1fr)`, so the row's minimum is still the content:
+ * a LONG paywall grows past the minimum and scrolls exactly as before.
+ */
+const CONTENT_FILL_GRID_TEMPLATE_ROWS = "1fr";
 
 /**
  * The footer OVERLAYS the scroll area (it is absolutely positioned over the
@@ -175,7 +207,11 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
     >
       <div data-rov-paywall-scroll="" style={{ height: "100%", overflowY: "auto" }}>
         {/* minHeight 100% is what keeps a short paywall filling the screen;
-            without it a flexible spacer collapses and the CTA rides up. */}
+            without it a flexible spacer collapses and the CTA rides up.
+            The single `1fr` grid row is what passes that minimum ON to the
+            root stack — see CONTENT_FILL_GRID_TEMPLATE_ROWS. Both halves are
+            needed: the minimum with nothing to hand it to is the same
+            no-op as no minimum at all. */}
         <div
           data-rov-paywall-content=""
           style={{
@@ -185,8 +221,8 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
             // height of blank space too tall, i.e. scrollable for nothing.
             boxSizing: "border-box",
             minHeight: "100%",
-            display: "flex",
-            flexDirection: "column",
+            display: "grid",
+            gridTemplateRows: CONTENT_FILL_GRID_TEMPLATE_ROWS,
             // Reserve clearance for the footer overlaying the bottom of the
             // scroll area, or the last scrolled item ends up underneath it
             // and unreachable — the same class of bug as no scrolling at

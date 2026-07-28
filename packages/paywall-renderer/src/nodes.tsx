@@ -449,10 +449,37 @@ function renderPurchaseButton(node: PurchaseButtonNode, ctx: RenderCtx): ReactEl
   );
 }
 
+/**
+ * An UNSIZED spacer is the flexible one: it takes whatever main-axis space is
+ * left over, which is how a paywall pushes its CTA to the bottom of the
+ * viewport (spec §2.1). This is the three-platform contract, not a web
+ * choice — SwiftUI emits a bare `Spacer()` and Android a `weight = 1f` for
+ * exactly this case, and the shared fixture's own name for it is "spacer
+ * flexible". `flex-basis` stays `auto`, which for an empty box is 0, so
+ * several unsized spacers split the leftover equally like their native
+ * counterparts.
+ */
+const FLEXIBLE_SPACER_FLEX_GROW = 1;
+/** A SIZED spacer is exactly its size on all three platforms: it neither
+ *  grows into leftover space nor shrinks when there is none. */
+const FIXED_SPACER_FLEX_GROW = 0;
+const SPACER_FLEX_SHRINK = 0;
+
 function renderSpacer(node: SpacerNode, ctx: RenderCtx): ReactElement {
   void ctx;
-  const size = node.size !== undefined ? `${node.size}px` : undefined;
-  return <div data-rov-node={node.id} style={{ width: size, height: size, flexShrink: 0 }} />;
+  const sized = node.size !== undefined;
+  const size = sized ? `${node.size}px` : undefined;
+  return (
+    <div
+      data-rov-node={node.id}
+      style={{
+        width: size,
+        height: size,
+        flexGrow: sized ? FIXED_SPACER_FLEX_GROW : FLEXIBLE_SPACER_FLEX_GROW,
+        flexShrink: SPACER_FLEX_SHRINK,
+      }}
+    />
+  );
 }
 
 function renderDivider(node: DividerNode, ctx: RenderCtx): ReactElement {

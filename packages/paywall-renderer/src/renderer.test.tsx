@@ -1205,7 +1205,7 @@ describe("featureList, timeline and socialProof nodes", () => {
 // table — do not restate the cases by hand.
 // =====================================================================
 
-const TRIAL_FIXTURE_PATH = join(
+const RENDER_FIXTURES_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../shared/src/paywall/render-fixtures.json",
 );
@@ -1218,9 +1218,11 @@ interface TrialLabelCase {
   expectedKey: string;
 }
 
-/** Read once, shared by the fixture-shape guard test and the vector loop below. */
-const RENDER_FIXTURES = JSON.parse(readFileSync(TRIAL_FIXTURE_PATH, "utf8")) as {
+/** Read once, shared by the fixture-shape guard test, the vector loop below,
+ *  and the sticky-footer clearance test's by-value comparison. */
+const RENDER_FIXTURES = JSON.parse(readFileSync(RENDER_FIXTURES_PATH, "utf8")) as {
   trialLabel: { cases: TrialLabelCase[] };
+  defaults: Record<string, unknown>;
 };
 
 const TRIAL_LOCALIZATIONS: Record<string, string> = {
@@ -1288,6 +1290,145 @@ describe("trialLabel vectors (render-fixtures contract)", () => {
       expect(button.textContent).toBe(TRIAL_LOCALIZATIONS[c.expectedKey]);
     });
   }
+});
+
+// =============================================================
+// Spec §2.1 on the web, both halves of it.
+//
+// A paywall SHORTER than the screen must still fill the viewport AND
+// DISTRIBUTE — a flexible spacer pushes, so a bottom-anchored CTA is visible
+// without scrolling — while a longer one scrolls. Putting the content in a
+// scroll container is what breaks that by default (available height becomes
+// unbounded), which is why the content box carries `minHeight: 100%`. But a
+// minimum with nothing to hand it to is the same no-op as no minimum: the
+// height has to reach the root STACK, and then a flexible spacer inside that
+// stack has to be the thing that absorbs it.
+//
+// HONEST LIMIT, stated because it decides what these tests are worth: jsdom
+// runs no layout engine. Every `offsetHeight` is 0, no percentage resolves,
+// no flex or grid distribution happens. So these pin the DECLARED style
+// contract — which here IS the whole mechanism, since nothing about viewport
+// fill is computed in JS — but they cannot prove a pixel. The pixel proof is
+// browser smoke item W-1: a short paywall, text then an unsized spacer then
+// the CTA, screenshotted in the canvas and the runner and diffed against iOS
+// and Android at the same viewport.
+// =============================================================
+describe("viewport fill and flexible spacers (spec §2.1)", () => {
+  /** text → spacer → CTA: the shape whose whole point is a bottom-anchored CTA. */
+  function cfgPushedCta(spacer: PaywallNode): BuilderConfig {
+    return baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "text", id: "body", key: "title", role: "body" },
+          spacer,
+          { type: "purchaseButton", id: "cta", labelKey: "purchase" },
+        ],
+      },
+    });
+  }
+
+  const UNSIZED_SPACER: PaywallNode = { type: "spacer", id: "sp" };
+  const SIZED_SPACER: PaywallNode = { type: "spacer", id: "sp", size: 24 };
+
+  it("hands the viewport minimum on to the root stack rather than stopping at the content box", () => {
+    const { container } = render(<PaywallRenderer config={shortConfig} {...base} />);
+    const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
+    expect(inner.style.minHeight).toBe("100%");
+    // Grid, not a flex column, and that distinction is the finding. A flex
+    // column sizes its item at flex-basis (`auto` → the stack's own content
+    // height) plus `flex-grow` — and `flex-grow` cannot be set here, because
+    // the root stack comes out of the generic node dispatcher, which knows
+    // nothing about being at the root. `align-items: stretch` does not stand
+    // in: in a column container it governs the horizontal axis. A single
+    // `1fr` row stretches its item on the block axis with no cooperation
+    // from the node renderer, so the stack receives max(content, minimum).
+    expect(inner.style.display).toBe("grid");
+    expect(inner.style.gridTemplateRows).toBe("1fr");
+  });
+
+  it("makes an UNSIZED spacer the flexible one, the way Spacer() and weight=1f are", () => {
+    const { container } = render(<PaywallRenderer config={cfgPushedCta(UNSIZED_SPACER)} {...base} />);
+    const spacer = container.querySelector('[data-rov-node="sp"]') as HTMLElement;
+    // Without this the spacer is 0 px tall and pushes nothing: the CTA sits
+    // directly under the text on the web while iOS and Android put it at the
+    // bottom of the viewport, from the same JSON.
+    expect(spacer.style.flexGrow).toBe("1");
+    // No explicit size, so nothing overrides the growth on either axis
+    // (the same node is flexible in an `h` stack too).
+    expect(spacer.style.width).toBe("");
+    expect(spacer.style.height).toBe("");
+  });
+
+  it("keeps a SIZED spacer at exactly its size, growing into nothing", () => {
+    const { container } = render(<PaywallRenderer config={cfgPushedCta(SIZED_SPACER)} {...base} />);
+    const spacer = container.querySelector('[data-rov-node="sp"]') as HTMLElement;
+    // All three platforms agree that a sized spacer is a fixed gap, never a
+    // distributor — growth is the UNSIZED case only.
+    expect(spacer.style.flexGrow).toBe("0");
+    expect(spacer.style.flexShrink).toBe("0");
+    expect(spacer.style.width).toBe("24px");
+    expect(spacer.style.height).toBe("24px");
+  });
+
+  it("keeps the whole chain intact for a short paywall with a pushed-down CTA", () => {
+    // The two halves only work together: a stack that fills the minimum with
+    // a spacer that cannot grow distributes nothing, and a growing spacer
+    // inside a stack that never received the minimum has nothing to absorb.
+    // Each hop below is one link of that chain, from the content box down to
+    // the spacer, on the exact config the finding describes.
+    const { container } = render(<PaywallRenderer config={cfgPushedCta(UNSIZED_SPACER)} {...base} />);
+    const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
+    expect(inner.style.minHeight).toBe("100%");
+    expect(inner.style.display).toBe("grid");
+    expect(inner.style.gridTemplateRows).toBe("1fr");
+
+    const rootStack = container.querySelector('[data-rov-node="root"]') as HTMLElement;
+    // The stretched grid item, and a column flex container, so the spacer's
+    // flex-grow is on the vertical axis.
+    expect(inner.firstElementChild).toBe(rootStack);
+    expect(rootStack.style.display).toBe("flex");
+    expect(rootStack.style.flexDirection).toBe("column");
+    // A definite height here would opt the stack OUT of the grid stretch.
+    expect(rootStack.style.height).toBe("");
+
+    const spacer = container.querySelector('[data-rov-node="sp"]') as HTMLElement;
+    expect(spacer.style.flexGrow).toBe("1");
+    // …and the CTA is the spacer's later sibling, i.e. the thing being pushed.
+    expect(spacer.nextElementSibling).toBe(container.querySelector('[data-rov-node="cta"]'));
+  });
+
+  it("still fills when a sticky footer is carving its clearance out of the minimum", () => {
+    // The footered path is a separate code path for the padding, but it must
+    // not lose the fill: the content box keeps its grid row, so the root
+    // stack gets viewport−clearance rather than just its own content height.
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "text", id: "body", key: "title", role: "body" },
+          { type: "spacer", id: "sp" },
+          {
+            type: "stickyFooter",
+            id: "sf",
+            children: [{ type: "purchaseButton", id: "cta", labelKey: "purchase" }],
+          },
+        ],
+      },
+    });
+    const { container } = render(<PaywallRenderer config={config} {...base} />);
+    const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
+    expect(inner.style.display).toBe("grid");
+    expect(inner.style.gridTemplateRows).toBe("1fr");
+    expect(inner.style.minHeight).toBe("100%");
+    expect(inner.style.boxSizing).toBe("border-box");
+    expect(inner.style.paddingBottom).not.toBe("");
+    expect((container.querySelector('[data-rov-node="sp"]') as HTMLElement).style.flexGrow).toBe("1");
+  });
 });
 
 describe("stickyFooter and countdown nodes", () => {
@@ -1364,6 +1505,22 @@ describe("stickyFooter and countdown nodes", () => {
     const { container } = render(<PaywallRenderer config={cfgWithFooter()} {...base} />);
     const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
     expect(inner.style.paddingBottom).not.toBe("");
+  });
+
+  it("reserves the shared pre-measurement clearance until the footer has been measured", () => {
+    // jsdom has no ResizeObserver, so this render never leaves the
+    // un-measured state — which is precisely the first frame every platform
+    // shows before it can measure. The value is hand-mirrored as `pt` in
+    // RovenuePaywallView.swift and `dp` in NodeViewFactory.kt, so it is
+    // pinned BY VALUE against render-fixtures.json's `defaults` (the same
+    // block the native sync tests compare against) rather than against a
+    // literal restated here — a literal would agree with itself forever.
+    expect(typeof ResizeObserver).toBe("undefined");
+    const expected = RENDER_FIXTURES.defaults.STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT;
+    expect(typeof expected).toBe("number");
+    const { container } = render(<PaywallRenderer config={cfgWithFooter()} {...base} />);
+    const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
+    expect(inner.style.paddingBottom).toBe(`${expected as number}px`);
   });
 
   it("overlays the footer on the scroll area instead of standing beside it", () => {
