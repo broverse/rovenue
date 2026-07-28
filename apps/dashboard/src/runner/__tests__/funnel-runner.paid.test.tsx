@@ -28,6 +28,7 @@ const outcome = vi.hoisted(
  *  wiring is observable from the consumer side and not only in the
  *  renderer package's own unit test. */
 const paywallProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+const firstShownAnchorIds = vi.hoisted(() => ({ current: [] as Array<string | null | undefined> }));
 
 vi.mock("@rovenue/paywall-renderer", () => ({
   PaywallRenderer: (props: { onPurchase: (id: string) => void }) => {
@@ -40,8 +41,13 @@ vi.mock("@rovenue/paywall-renderer", () => ({
   },
   // The real localStorage-backed helper is exercised in the renderer
   // package's own suite; here it only has to exist and return an instant,
-  // because the runner imports it by name.
-  resolvePersistedFirstShownAt: () => new Date("2027-01-01T00:00:00.000Z"),
+  // because the runner imports it by name. The argument IS recorded though —
+  // which id the runner anchors on is a decision worth pinning (see the
+  // funnel-scope test below).
+  resolvePersistedFirstShownAt: (anchorId?: string | null) => {
+    firstShownAnchorIds.current.push(anchorId);
+    return new Date("2027-01-01T00:00:00.000Z");
+  },
 }));
 
 vi.mock("../payment-step", () => ({
@@ -213,6 +219,21 @@ describe("FunnelRunner — the screen a paying buyer lands on", () => {
     render(<FunnelRunner slug="demo" />);
     await screen.findByRole("button", { name: /buy monthly/i });
     expect(paywallProps.current?.firstShownAt).toBeInstanceOf(Date);
+  });
+
+  it("anchors on a FUNNEL-SCOPED id, not on a bare paywall identifier", async () => {
+    // The storage-key PREFIX is shared with the iOS and Android SDKs by
+    // value, but what follows it is not the same kind of id: the SDKs use
+    // `paywall.paywallIdentifier`, and a funnel-hydrated paywall has none —
+    // the runner only has the funnel config's paywall key ("pw1" here). The
+    // scope keeps the two id spaces from colliding inside one origin and
+    // makes the stored key self-describing. Dropping the scope would silently
+    // put a funnel database id where an SDK paywall identifier is expected.
+    firstShownAnchorIds.current = [];
+    render(<FunnelRunner slug="demo" />);
+    await screen.findByRole("button", { name: /buy monthly/i });
+    expect(firstShownAnchorIds.current).toContain("funnel:pw1");
+    expect(firstShownAnchorIds.current).not.toContain("pw1");
   });
 
   it("shows an unavailable screen instead of checkout when charges are off", async () => {

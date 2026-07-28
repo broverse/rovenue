@@ -40,6 +40,26 @@ import { type LocaleCode } from "@rovenue/shared/i18n";
 import { isAnswered, type AnswerValue, type ContactAnswer } from "@rovenue/shared/funnel";
 import { useRunnerLocale } from "./use-runner-locale";
 
+/**
+ * Scope segment for this page's countdown "first shown" anchor key.
+ *
+ * The key is `COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX + <this scope> + <id>`, and
+ * the scope is here because the id is NOT what the SDKs put there. iOS and
+ * Android key on `paywall.paywallIdentifier`; a funnel-hydrated paywall
+ * carries no identifier at all (`HydratedFunnelPaywall` is builderConfig +
+ * offering, keyed in the config by the funnel's own paywall id), so the
+ * runner keys on that database id instead. Two different id spaces under one
+ * shared prefix: harmless while they live in different storage backends, a
+ * silent collision the day anything reads both. The scope keeps them
+ * distinct by construction and, more usefully, makes the stored key say what
+ * it is when a reader finds it in `localStorage`.
+ *
+ * Concretely: this anchor means "the first time THIS BROWSER saw this
+ * paywall in this funnel", not "the first time this subscriber saw this
+ * paywall" — which is what the SDK anchors mean. Do not assume parity.
+ */
+const FUNNEL_PAYWALL_ANCHOR_SCOPE = "funnel:";
+
 /** Maps the server-hydrated offering shape into the renderer's minimal contract. */
 function toRunnerOffering(offering: HydratedFunnelOffering | null): RendererOffering | null {
   if (!offering) return null;
@@ -397,15 +417,21 @@ export function FunnelRunner({ slug }: { slug: string }) {
           // the only renderer this stage actually ships to users.
           platform="web"
           // A `durationSeconds` countdown must count from the first time
-          // THIS buyer saw THIS paywall, not from this mount — otherwise
+          // this browser saw this paywall, not from this mount — otherwise
           // reloading the page resets the "offer ends in" clock and the
-          // deadline means nothing. Persisted in localStorage under the same
-          // key the iOS/Android SDKs use, keyed by the paywall so every
-          // countdown node on it shares one anchor. Called inline rather
-          // than memoised because it is idempotent (it only ever stamps
-          // once) and this branch sits below the component's early returns,
-          // where a hook cannot go.
-          firstShownAt={resolvePersistedFirstShownAt(builderPaywallId)}
+          // deadline means nothing. Persisted in localStorage under the
+          // shared cross-platform prefix, with a funnel-scoped suffix
+          // because a funnel paywall has no paywallIdentifier to key on —
+          // see FUNNEL_PAYWALL_ANCHOR_SCOPE for why the scope is not
+          // optional. One anchor per paywall, shared by every countdown node
+          // on it. Called inline rather than memoised because it is
+          // idempotent (it only ever stamps once) and this branch sits below
+          // the component's early returns, where a hook cannot go.
+          firstShownAt={resolvePersistedFirstShownAt(
+            builderPaywallId === undefined
+              ? undefined
+              : FUNNEL_PAYWALL_ANCHOR_SCOPE + builderPaywallId,
+          )}
           priceView={priceView}
           // The CTA opens the in-page checkout for the selected package —
           // but only when it can actually be charged. A project that

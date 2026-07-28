@@ -6,9 +6,18 @@ import { COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX } from "@rovenue/shared/paywall";
 // A `durationSeconds` countdown counts down from the instant the paywall was
 // FIRST shown to this user — persisted, so it survives a reload. iOS keeps
 // that instant in `UserDefaults` and Android in `SharedPreferences`, both
-// under `COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX + <paywall identifier>`; this is
-// the same thing over `localStorage`, same key, so the three platforms
-// anchor one paywall identically.
+// under `COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX + <anchor id>`; this is the same
+// thing over `localStorage`, same prefix and same shape.
+//
+// What the SUFFIX means is per-host, and deliberately not assumed to be the
+// same everywhere. The SDKs have a `paywall.paywallIdentifier` to hand and
+// use it. A web host that does not — the funnel runner has only the funnel
+// config's paywall key, never an identifier — passes its own id, SCOPED so
+// the two id spaces cannot land on the same key inside one origin (see
+// `FUNNEL_PAYWALL_ANCHOR_SCOPE` in `funnel-runner.tsx`). The prefix is
+// shared; the suffix is the caller's to make unambiguous. Hence the
+// parameter below is named for the anchor, not for an identifier it is not
+// guaranteed to be.
 //
 // It lives here rather than inside `PaywallRenderer` on purpose: the
 // renderer is presentational and has no storage of its own, and an AUTHORING
@@ -17,14 +26,15 @@ import { COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX } from "@rovenue/shared/paywall";
 // this and pass the result in.
 // =============================================================
 
-/** Same value on all three platforms, one anchor per paywall shared by every
- *  countdown node on it; an absent identifier collapses to the empty suffix. */
-function storageKey(paywallIdentifier: string | null | undefined): string {
-  return COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX + (paywallIdentifier ?? "");
+/** Prefix is the same value on all three platforms; the suffix identifies one
+ *  paywall, so every countdown node on it shares one anchor. An absent
+ *  anchor id collapses to the empty suffix, as the natives do. */
+function storageKey(paywallAnchorId: string | null | undefined): string {
+  return COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX + (paywallAnchorId ?? "");
 }
 
 /**
- * The persisted "first shown" instant for `paywallIdentifier`: stamps `now`
+ * The persisted "first shown" instant for `paywallAnchorId`: stamps `now`
  * and stores it on the first call, reads the stored value back on every
  * later call (this page load or any future one).
  *
@@ -34,7 +44,7 @@ function storageKey(paywallIdentifier: string | null | undefined): string {
  * existed: degraded, not broken.
  */
 export function resolvePersistedFirstShownAt(
-  paywallIdentifier: string | null | undefined,
+  paywallAnchorId: string | null | undefined,
   now: Date = new Date(),
 ): Date | undefined {
   let storage: Storage;
@@ -46,7 +56,7 @@ export function resolvePersistedFirstShownAt(
     return undefined;
   }
 
-  const key = storageKey(paywallIdentifier);
+  const key = storageKey(paywallAnchorId);
   try {
     const existing = storage.getItem(key);
     if (existing !== null) {
