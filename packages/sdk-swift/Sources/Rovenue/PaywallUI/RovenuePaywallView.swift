@@ -192,6 +192,28 @@ public struct RovenuePaywallView: View {
                             )
                     }
                 }
+                // The two halves of the time-driven-node visibility rule
+                // (NodeVisibility.swift), and the only place that can supply
+                // either: the named space every node measures itself in, and
+                // the viewport those measurements are compared against.
+                //
+                // Applied to the ScrollView-plus-overlay, which fills this
+                // GeometryReader exactly, so the space's origin IS the top-left
+                // of the visible scroll area: a node scrolled off the top
+                // reports a negative `minY`, one below the fold reports a
+                // `minY` past `proxy.size.height`. Measuring in `.global`
+                // instead would compare against the SCREEN, which is the wrong
+                // question for a paywall presented in a sheet or a split view.
+                //
+                // The overlaid sticky footer sits inside the space too, so a
+                // time-driven node in the footer measures correctly rather than
+                // resolving an unknown coordinate space.
+                //
+                // `origin: .zero` because the viewport's frame IN ITS OWN SPACE
+                // is exactly that; only the size is unknown until layout, and
+                // before then it is `.zero`, which fails open.
+                .coordinateSpace(name: paywallViewportCoordinateSpaceName)
+                .environment(\.paywallViewportFrame, CGRect(origin: .zero, size: proxy.size))
             }
         }
         .onPreferenceChange(StickyFooterHeightKey.self) { measured in
@@ -1173,6 +1195,10 @@ struct CountdownView: View {
 
     @State private var now = Date()
     @State private var tickCancellable: AnyCancellable?
+    /// Last state reported by `.nodeVisibility` — starts at the fail-open
+    /// `unknown`, so a countdown ticks from the moment it appears rather than
+    /// waiting for a first measurement.
+    @State private var visibility = NodeVisibilityState.unknown
 
     var body: some View {
         if let deadline {
@@ -1186,8 +1212,17 @@ struct CountdownView: View {
                 EmptyView()
             } else {
                 countdownBody(remainingSeconds: max(remainingSeconds, 0))
-                    .onAppear(perform: startTicking)
+                    .onAppear(perform: syncTicking)
                     .onDisappear(perform: stopTicking)
+                    // Spec §5 rule 1, both halves at once: scrolled out of the
+                    // paywall's viewport or the app sent to the background, the
+                    // clock stops; back on screen and in front, it resumes.
+                    // `CarouselView` uses the identical two lines — that is the
+                    // point of the shared modifier.
+                    .nodeVisibility { state in
+                        visibility = state
+                        syncTicking()
+                    }
             }
         } else if let fallback = props.fallback {
             BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
@@ -1208,8 +1243,19 @@ struct CountdownView: View {
         .foregroundColor(props.color.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }.map { color($0) })
     }
 
-    private func startTicking() {
+    /// Starts or stops the clock to match the current visibility verdict.
+    /// Idempotent in both directions — it is called on appear and on every
+    /// visibility report, and an already-running clock must not be restarted
+    /// (a fresh `Timer.publish` would reset the sub-second phase on every
+    /// scroll frame).
+    private func syncTicking() {
+        guard countdownShouldTick(visibility: visibility) else { return stopTicking() }
         guard tickCancellable == nil else { return }
+        // Re-read the clock BEFORE subscribing: while paused, `now` froze at
+        // the last tick, so the first frame after resuming would otherwise
+        // show a stale remaining time for up to one whole tick — the visible
+        // form of "the countdown lost time while you were away".
+        now = Date()
         tickCancellable = Timer.publish(
             every: Double(countdownTickMs) / countdownMillisecondsPerSecond, on: .main, in: .common)
             .autoconnect()
@@ -1220,6 +1266,21 @@ struct CountdownView: View {
         tickCancellable?.cancel()
         tickCancellable = nil
     }
+}
+
+/// Whether a `countdown`'s clock should be ticking right now — the whole
+/// rule, which for this node type is exactly the shared one: on screen and
+/// the app in front. A pure free function rather than a method on
+/// `CountdownView` for the same reason as `nextCarouselPage`: a SwiftUI
+/// `body` is not inspectable in this package, so the run/pause decision is
+/// only testable if it lives outside the view. `CountdownView.syncTicking`
+/// calls THIS function, so the tests exercise the same rule the view does.
+///
+/// The countdown deliberately keeps counting down against wall-clock time
+/// while paused — the deadline does not move because the reader scrolled
+/// away. What pauses is the redraw, not the deadline.
+func countdownShouldTick(visibility: NodeVisibilityState) -> Bool {
+    isNodeRunning(visibility)
 }
 
 /// The single page-step rule the carousel's auto-advance obeys, kept a pure
@@ -1243,6 +1304,31 @@ func nextCarouselPage(current: Int, pageCount: Int, loop: Bool) -> Int {
     let next = current + 1
     if next < pageCount { return next }
     return loop ? carouselFirstPageIndex : current
+}
+
+/// Whether a `carousel`'s auto-advance timer should be running right now:
+/// the shared visibility rule (on screen AND the app in front — see
+/// NodeVisibility.swift) ADDED TO this node's own preconditions, never
+/// substituted for them.
+///
+/// - absent `autoAdvanceSeconds` means OFF, deliberately not a default
+///   interval (mirrors `CarouselProps.autoAdvanceSeconds`'s own doc comment),
+///   and a non-positive one is the same instruction;
+/// - `stoppedAtEnd` is the `loop: false` latch `advance()` sets on the last
+///   page. It is consulted here and set nowhere in the pause path, which is
+///   what makes the latch survive a pause/resume cycle: pausing is not
+///   reaching the end;
+/// - a single (or empty) page has nothing to advance to.
+///
+/// Pure and free-standing for the same reason as `nextCarouselPage`:
+/// `CarouselView.scheduleTimer` calls THIS function, so a test exercises the
+/// rule the view actually obeys rather than a restatement of it.
+func carouselShouldAutoAdvance(
+    visibility: NodeVisibilityState, autoAdvanceSeconds: Double?, pageCount: Int, stoppedAtEnd: Bool
+) -> Bool {
+    guard isNodeRunning(visibility) else { return false }
+    guard let seconds = autoAdvanceSeconds, seconds > 0 else { return false }
+    return !stoppedAtEnd && pageCount > 1
 }
 
 /// The pages a `carousel` actually renders: its children that draw SOMETHING,
@@ -1339,9 +1425,13 @@ private func fallbackRendersContent(
 ///
 /// Auto-advance reuses `CountdownView`'s exact `.onAppear`/`.onDisappear` +
 /// `Timer.publish(...).autoconnect().sink` lifecycle (start on appear,
-/// cancel on disappear — nothing outlives the view), plus a `scenePhase`
-/// watch this node adds on top so backgrounding the app genuinely pauses it
-/// (see the `.onChange(of: scenePhase)` comment). It departs from
+/// cancel on disappear — nothing outlives the view), plus the SHARED
+/// `.nodeVisibility` modifier (NodeVisibility.swift) that `CountdownView`
+/// also uses: scrolled out of the paywall's viewport, or the app sent to the
+/// background, and the auto-advance stops. That replaced this view's own
+/// bespoke `scenePhase` watch — the backgrounding half was all it covered,
+/// and the scrolled-away half (previously deferred as smoke item S10) now
+/// comes with it. It departs from
 /// `CountdownView` in one way: there is no separately-ticked clock to read
 /// back and recompute from. Each `Timer.publish(every: autoAdvanceSeconds)`
 /// fire directly performs exactly one page step — never a decrementing
@@ -1365,11 +1455,13 @@ struct CarouselView: View {
     let ctx: PaywallRenderContext
     let cell: CellScope?
 
-    @Environment(\.scenePhase) private var scenePhase
-
     @State private var currentPage = carouselFirstPageIndex
     @State private var stoppedAtEnd = false
     @State private var tickCancellable: AnyCancellable?
+    /// Last state reported by `.nodeVisibility` — starts at the fail-open
+    /// `unknown`, so a carousel auto-advances from the moment it appears
+    /// rather than waiting for a first measurement.
+    @State private var visibility = NodeVisibilityState.unknown
 
     /// The renderable pages — see `renderableCarouselPages`. Internal rather
     /// than `private` for the same reason `BuilderNodeView.isVisible` is: it
@@ -1423,34 +1515,26 @@ struct CarouselView: View {
                 .onAppear(perform: scheduleTimer)
                 .onDisappear(perform: stopTicking)
                 .onChange(of: currentPage) { _ in scheduleTimer() }
-                .onChange(of: scenePhase) { phase in
-                    // Spec §5 rule 1, "off-screen means paused", the
-                    // BACKGROUNDING half: a carousel that advanced while the
-                    // app was away would change the page the user comes back
-                    // to. `.onDisappear` does not cover this — it fires on
-                    // view-tree removal, not on the app leaving the front.
-                    // Web pauses on `visibilitychange`; Android on a
-                    // ProcessLifecycleOwner observer; this is the iOS half.
-                    //
-                    // Deliberately reacting only to a CHANGE of scenePhase,
-                    // never gating the initial `scheduleTimer()` on it: a
-                    // host that never publishes a scene phase (a SwiftUI
-                    // view hosted from UIKit without one) would otherwise
-                    // read a stale non-active value and disable auto-advance
-                    // outright. Reacting to changes degrades to today's
-                    // behaviour there instead.
-                    //
-                    // Resuming goes through `scheduleTimer`, so the
-                    // `stoppedAtEnd` latch still holds: a non-looping
-                    // carousel that already finished does not restart on
-                    // foreground.
-                    //
-                    // The OTHER half of §5 rule 1 — a carousel scrolled out
-                    // of view while still mounted — stays open on both
-                    // natives (neither has an IntersectionObserver
-                    // equivalent) and is deferred to the media-lifecycle
-                    // wave. Smoke item S10.
-                    if phase == .active { scheduleTimer() } else { stopTicking() }
+                // Spec §5 rule 1, "off-screen means paused", BOTH halves: a
+                // carousel that advanced while the app was away — or while
+                // scrolled past — would change the page the reader comes back
+                // to. `.onDisappear` covers neither; it fires on view-tree
+                // removal, not on the app leaving the front and not on the
+                // node leaving the viewport. Web pauses on an
+                // IntersectionObserver plus `visibilitychange`, Android on a
+                // view-attachment observer plus ProcessLifecycleOwner; the
+                // shared `.nodeVisibility` modifier is the iOS pair.
+                //
+                // Both directions go through `scheduleTimer`, which reads
+                // `stoppedAtEnd`, so the `loop: false` stop latch survives a
+                // pause/resume cycle in the only way that matters: pausing
+                // never SETS it (only `advance()` does, on the real last
+                // page), and resuming still respects it. A carousel paused
+                // mid-run keeps advancing when it comes back; one that
+                // genuinely finished stays finished.
+                .nodeVisibility { state in
+                    visibility = state
+                    scheduleTimer()
                 }
         }
     }
@@ -1489,10 +1573,16 @@ struct CarouselView: View {
     private func scheduleTimer() {
         tickCancellable?.cancel()
         tickCancellable = nil
-        // Absent `autoAdvanceSeconds` means OFF, deliberately not a default
-        // interval (mirrors `CarouselProps.autoAdvanceSeconds`'s own doc
-        // comment) — and a single/empty page has nothing to advance to.
-        guard let seconds = props.autoAdvanceSeconds, seconds > 0, !stoppedAtEnd, pageCount > 1 else { return }
+        // The whole decision lives in the pure `carouselShouldAutoAdvance`;
+        // the second `let seconds` is only the unwrap that predicate already
+        // required, restated so `Timer.publish` has a value (it re-reads the
+        // same `props.autoAdvanceSeconds` in the same call, so the two cannot
+        // disagree).
+        guard carouselShouldAutoAdvance(
+                visibility: visibility, autoAdvanceSeconds: props.autoAdvanceSeconds,
+                pageCount: pageCount, stoppedAtEnd: stoppedAtEnd),
+              let seconds = props.autoAdvanceSeconds
+        else { return }
         tickCancellable = Timer.publish(every: seconds, on: .main, in: .common)
             .autoconnect()
             .sink { _ in advance() }

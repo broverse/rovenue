@@ -286,9 +286,26 @@ final class PaywallRenderSupportTests: XCTestCase {
     /// minimum taller than the viewport by the footer's height.
     func test_body_measuresTheScrollViewportItselfForTheViewportMinimum() throws {
         let description = bodyTypeDescription(json: Self.minimalPaywallJson)
-        XCTAssertTrue(
-            description.contains("GeometryReader<ModifiedContent<ScrollView<"),
-            "expected the GeometryReader to wrap the ScrollView directly (its size IS the viewport), got: \(description)"
+        // Nothing but MODIFIERS may sit between the GeometryReader and the
+        // ScrollView. Previously spelled as a literal
+        // `GeometryReader<ModifiedContent<ScrollView<` substring, which the
+        // wave-D2 visibility wiring broke without breaking the invariant — the
+        // ScrollView now also carries `.coordinateSpace` and `.environment`,
+        // so it is two `ModifiedContent` layers deeper. What the assertion is
+        // FOR is unchanged and still fails on the real regression: an
+        // intervening LAYOUT container (a VStack, a second GeometryReader,
+        // anything that also contained the footer) would make the measured
+        // size something other than the scroll viewport.
+        let insideGeometryReader = description
+            .components(separatedBy: "GeometryReader<").dropFirst().first ?? ""
+        let betweenGeometryReaderAndScrollView = insideGeometryReader
+            .components(separatedBy: "ScrollView<").first ?? insideGeometryReader
+        XCTAssertTrue(description.contains("GeometryReader<"), "no GeometryReader at all: \(description)")
+        XCTAssertEqual(
+            betweenGeometryReaderAndScrollView.replacingOccurrences(of: "ModifiedContent<", with: ""),
+            "",
+            "expected only modifiers between the GeometryReader and the ScrollView "
+                + "(its size IS the viewport), got: \(description)"
         )
         XCTAssertTrue(
             description.contains("_FlexFrameLayout"),
@@ -695,6 +712,132 @@ final class PaywallRenderSupportTests: XCTestCase {
         let dark = try XCTUnwrap(try carousel(pages, indicatorColor: pair, dark: true).indicatorRGBA)
         XCTAssertEqual(dark.red, 0.0, accuracy: colorComponentAccuracy)
         XCTAssertEqual(dark.blue, 1.0, accuracy: colorComponentAccuracy)
+    }
+
+    // MARK: - node visibility: one rule for every time-driven node (D2)
+    //
+    // SwiftUI has no `IntersectionObserver`, so the on-screen question is
+    // answered by comparing a node's frame in the paywall's named viewport
+    // coordinate space against that viewport's own frame. The DECISION is a
+    // pure function and is pinned here; the PLUMBING that feeds it real rects
+    // (the `GeometryReader` background, the named coordinate space, the
+    // `scenePhase` watch) is not observable from a unit test in this package
+    // and stays a device-smoke item. Nothing below pretends otherwise: these
+    // never prove SwiftUI hands the modifier a real frame, only what the rule
+    // decides once it has one.
+
+    func test_nodeFullyInsideTheViewportIsOnScreen() {
+        XCTAssertTrue(isNodeOnScreen(
+            nodeFrame: CGRect(x: 0, y: 100, width: 300, height: 200),
+            viewportFrame: CGRect(x: 0, y: 0, width: 300, height: 600)))
+    }
+
+    func test_nodeScrolledFullyAboveTheViewportIsOffScreen() {
+        XCTAssertFalse(isNodeOnScreen(
+            nodeFrame: CGRect(x: 0, y: -300, width: 300, height: 200),
+            viewportFrame: CGRect(x: 0, y: 0, width: 300, height: 600)))
+    }
+
+    func test_partiallyVisibleNodeCountsAsOnScreen() {
+        XCTAssertTrue(isNodeOnScreen(
+            nodeFrame: CGRect(x: 0, y: 550, width: 300, height: 200),
+            viewportFrame: CGRect(x: 0, y: 0, width: 300, height: 600)))
+    }
+
+    func test_aZeroSizedViewportFailsOpen() {
+        XCTAssertTrue(isNodeOnScreen(
+            nodeFrame: CGRect(x: 0, y: 0, width: 300, height: 200),
+            viewportFrame: .zero))
+    }
+
+    /// The mirror of the scrolled-above case: a node still below the fold has
+    /// not been reached yet and must not be running either.
+    func test_nodeScrolledFullyBelowTheViewportIsOffScreen() {
+        XCTAssertFalse(isNodeOnScreen(
+            nodeFrame: CGRect(x: 0, y: 700, width: 300, height: 200),
+            viewportFrame: testViewportFrame))
+    }
+
+    /// A node that has not laid out yet (`.zero` frame) inside a REAL viewport
+    /// fails open for the same reason the zero viewport does — "we cannot tell
+    /// yet" must never read as "off screen", or every timer stops at launch.
+    func test_anUnlaidOutNodeFailsOpen() {
+        XCTAssertTrue(isNodeOnScreen(nodeFrame: .zero, viewportFrame: testViewportFrame))
+    }
+
+    /// The second half of the rule: on screen AND the app in front. Both
+    /// consumers go through `isNodeRunning`, so backgrounding pauses them.
+    func test_appInTheBackgroundStopsAnOnScreenNode() {
+        XCTAssertTrue(isNodeRunning(onScreenState()))
+        XCTAssertFalse(isNodeRunning(onScreenState(appIsForeground: false)))
+    }
+
+    /// `countdown`'s pause behaviour, through the SAME function
+    /// `CountdownView.syncTicking` consults. Scrolled out of the viewport or
+    /// with the app away, the clock must not be ticking.
+    func test_countdownDoesNotTickWhileOffScreenOrInTheBackground() {
+        XCTAssertTrue(countdownShouldTick(visibility: onScreenState()))
+        XCTAssertFalse(countdownShouldTick(visibility: offScreenState()))
+        XCTAssertFalse(countdownShouldTick(visibility: onScreenState(appIsForeground: false)))
+    }
+
+    /// `carousel`'s pause behaviour, through the SAME function
+    /// `CarouselView.scheduleTimer` consults.
+    func test_carouselDoesNotAutoAdvanceWhileOffScreenOrInTheBackground() {
+        XCTAssertTrue(autoAdvanceDecision(visibility: onScreenState()))
+        XCTAssertFalse(autoAdvanceDecision(visibility: offScreenState()))
+        XCTAssertFalse(autoAdvanceDecision(visibility: onScreenState(appIsForeground: false)))
+    }
+
+    /// Pausing is NOT reaching the last page. A `loop: false` carousel that
+    /// was scrolled away mid-run keeps advancing when it comes back; only the
+    /// latch that `advance()` sets on the real last page stops it for good.
+    func test_carouselStopLatchSurvivesAPauseResumeCycle() {
+        // Running, then paused off screen, then back — the latch was never
+        // set, so the resumed carousel must schedule again.
+        XCTAssertTrue(autoAdvanceDecision(visibility: onScreenState()))
+        XCTAssertFalse(autoAdvanceDecision(visibility: offScreenState()))
+        XCTAssertTrue(autoAdvanceDecision(visibility: onScreenState()))
+        // ...and a carousel that genuinely finished stays stopped across the
+        // same cycle, so the resume path cannot be "always reschedule".
+        XCTAssertFalse(autoAdvanceDecision(visibility: onScreenState(), stoppedAtEnd: true))
+    }
+
+    /// The visibility rule is added to the auto-advance preconditions, never
+    /// substituted for them: no interval, a non-positive interval, or a single
+    /// page still means no timer even with the node fully on screen.
+    func test_carouselAutoAdvanceStillHonoursItsOwnPreconditions() {
+        XCTAssertFalse(autoAdvanceDecision(visibility: onScreenState(), autoAdvanceSeconds: nil))
+        XCTAssertFalse(autoAdvanceDecision(visibility: onScreenState(), autoAdvanceSeconds: 0))
+        XCTAssertFalse(autoAdvanceDecision(visibility: onScreenState(), pageCount: 1))
+    }
+
+    /// A 300x600 stand-in for the paywall's scroll viewport, the same rect the
+    /// brief's cases use.
+    private var testViewportFrame: CGRect { CGRect(x: 0, y: 0, width: 300, height: 600) }
+
+    private func onScreenState(appIsForeground: Bool = true) -> NodeVisibilityState {
+        NodeVisibilityState(
+            nodeFrame: CGRect(x: 0, y: 100, width: 300, height: 200),
+            viewportFrame: testViewportFrame, appIsForeground: appIsForeground)
+    }
+
+    private func offScreenState(appIsForeground: Bool = true) -> NodeVisibilityState {
+        NodeVisibilityState(
+            nodeFrame: CGRect(x: 0, y: -300, width: 300, height: 200),
+            viewportFrame: testViewportFrame, appIsForeground: appIsForeground)
+    }
+
+    /// Defaults that keep every carousel case above about the ONE variable it
+    /// names: a two-page carousel with a real interval and no stop latch is
+    /// the shape that would be running if nothing paused it.
+    private func autoAdvanceDecision(
+        visibility: NodeVisibilityState, autoAdvanceSeconds: Double? = 3, pageCount: Int = 2,
+        stoppedAtEnd: Bool = false
+    ) -> Bool {
+        carouselShouldAutoAdvance(
+            visibility: visibility, autoAdvanceSeconds: autoAdvanceSeconds, pageCount: pageCount,
+            stoppedAtEnd: stoppedAtEnd)
     }
 }
 
