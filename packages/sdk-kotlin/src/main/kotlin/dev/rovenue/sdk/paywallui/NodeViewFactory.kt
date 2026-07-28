@@ -783,9 +783,13 @@ internal fun videoPlaybackCommand(active: Boolean, autoplay: Boolean): VideoPlay
  * the only half a carousel counting its pages can act on (see
  * [NodeViewFactory.buildVideo]). Mirrors the Swift sibling's
  * `videoHasParsableSource`.
+ *
+ * Delegates to [mediaSourceHasParsableUrl] — the same rule [lottieHasParsableSource]
+ * uses, because "is this playable at all?" is one question, not two answered by
+ * coincidence.
  */
 internal fun videoHasParsableSource(url: ThemePair, dark: Boolean): Boolean =
-    runCatching { URL(themeValue(url, dark)) }.isSuccess
+    mediaSourceHasParsableUrl(url, dark)
 
 /**
  * The ratio a `video` should be laid out at, or `null` for "apply no ratio at
@@ -984,17 +988,33 @@ internal fun lottieViewOrNull(context: Context, request: LottieRenderRequest): V
  * shipping — an unparsable URL means the node cannot render, so it takes the
  * same path an unregistered player takes: `fallback`, else nothing.
  *
- * RELATIVE URLS ARE VALID, deliberately. Web parses against a base so
- * `"anim.json"` resolves against the hosting document, and iOS's
- * `URL(string:)` accepts a relative reference too; `java.net.URI` accepts one
- * natively, which is why this uses `URI` rather than the `java.net.URL` the
- * video sibling uses (that one rejects every relative string). Being stricter
- * than the other two would drop a node they both draw.
+ * RELATIVE URLS ARE VALID, deliberately — delegates to
+ * [mediaSourceHasParsableUrl], the same rule [videoHasParsableSource] uses.
  */
-internal fun lottieHasParsableSource(url: ThemePair, dark: Boolean): Boolean {
+internal fun lottieHasParsableSource(url: ThemePair, dark: Boolean): Boolean =
+    mediaSourceHasParsableUrl(url, dark)
+
+/**
+ * The one rule BOTH media node types answer "will this draw at all, before a
+ * player even exists?" with: reject blank or whitespace-only, accept anything
+ * else — INCLUDING a relative reference. Web parses a `video`/`lottie` source
+ * against a base URL and iOS's `URL(string:)` accepts a relative reference
+ * too, so a relative source (resolved later against the app's own asset or
+ * CDN base) is legitimate, not a defect.
+ *
+ * That is why this is built on `java.net.URI`, not `java.net.URL`: `URL`
+ * requires a scheme and REJECTS every relative string outright, which is
+ * exactly the divergence that once let Android drop a carousel page/dot the
+ * other two platforms kept for the same paywall. `URI` accepts a relative
+ * reference natively, matching web and iOS.
+ *
+ * [videoHasParsableSource] and [lottieHasParsableSource] both delegate here —
+ * one predicate, not two that happen to agree.
+ */
+internal fun mediaSourceHasParsableUrl(url: ThemePair, dark: Boolean): Boolean {
     val source = themeValue(url, dark).trim()
     if (source.isEmpty()) return false
-    // Constructed only to see whether it throws; the host player is handed the
+    // Constructed only to see whether it throws; the host is handed the
     // authored string unchanged.
     return runCatching { URI(source) }.isSuccess
 }

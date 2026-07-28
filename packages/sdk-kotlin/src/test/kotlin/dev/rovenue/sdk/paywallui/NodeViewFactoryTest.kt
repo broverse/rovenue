@@ -926,6 +926,37 @@ class NodeViewFactoryTest {
         assertFalse(videoHasParsableSource(ThemePair(light = "not a url"), dark = false))
     }
 
+    @Test
+    fun `a relative video source can render, matching web and iOS`() {
+        // Web resolves a relative source against the hosting document and iOS's
+        // `URL(string:)` accepts a relative reference; `java.net.URL` (which
+        // this predicate used to be built on) rejects every relative string
+        // outright, which is exactly what made Android drop a carousel
+        // page/dot the other two platforms kept for the same paywall.
+        assertTrue(videoHasParsableSource(ThemePair(light = "clip.mp4"), dark = false))
+        assertTrue(videoHasParsableSource(ThemePair(light = "/assets/clip.mp4"), dark = false))
+    }
+
+    @Test
+    fun `video and lottie agree on what counts as a parsable source`() {
+        // The two media node types answer "will this draw before a player
+        // exists?" with one shared rule (mediaSourceHasParsableUrl), not two
+        // predicates that happen to agree — this pins that they still do,
+        // case by case, for both node types.
+        val blank = ThemePair(light = "   ")
+        val relative = ThemePair(light = "clip")
+        val absolute = ThemePair(light = "https://x/clip")
+
+        assertFalse(videoHasParsableSource(blank, dark = false))
+        assertFalse(lottieHasParsableSource(blank, dark = false))
+
+        assertTrue(videoHasParsableSource(relative, dark = false))
+        assertTrue(lottieHasParsableSource(relative, dark = false))
+
+        assertTrue(videoHasParsableSource(absolute, dark = false))
+        assertTrue(lottieHasParsableSource(absolute, dark = false))
+    }
+
     // ---- video letterboxing (I1) ----------------------------------------
     //
     // The box is measured at the AUTHORED ratio (videoEffectiveAspectRatio,
