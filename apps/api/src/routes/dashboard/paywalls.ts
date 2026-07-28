@@ -23,6 +23,12 @@ import {
 } from "@rovenue/shared/paywall";
 import { placementRowsSchema, type PlacementRow } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
+import {
+  AppStoreLookupError,
+  buildImportTree,
+  fetchAppStoreListing,
+  parseAppStoreUrl,
+} from "../../services/paywall-ai/app-store-import";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { audit, extractRequestContext } from "../../lib/audit";
@@ -329,6 +335,49 @@ export const paywallsDashboardRoute = new Hono()
     const rows = await drizzle.paywallRepo.listPaywalls(drizzle.db, projectId);
     return c.json(ok({ paywalls: rows }));
   })
+  // ===========================================================
+  // App Store listing import (P8 §6.14). Builds and RETURNS a
+  // draft tree — creates nothing, writes nothing: the dashboard
+  // applies the config client-side through the builder VM (the
+  // autosave race rules out server-side builderConfig writes,
+  // spec §2). Read-gated like the list endpoint above: the
+  // caller only receives derived data.
+  // ===========================================================
+  .post(
+    "/from-app-store",
+    validate("json", z.object({ url: z.string().min(1) })),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+      const { url } = c.req.valid("json");
+      const parsedUrl = parseAppStoreUrl(url);
+      if (!parsedUrl) {
+        throw new HTTPException(400, { message: "Not an App Store listing URL" });
+      }
+
+      let listing;
+      try {
+        listing = await fetchAppStoreListing(parsedUrl);
+      } catch (err) {
+        if (err instanceof AppStoreLookupError) {
+          throw new HTTPException(422, { message: err.code });
+        }
+        throw err;
+      }
+
+      // Paywall drafts default their locale to "en" until the author picks
+      // one (remoteConfig.defaultLocale) — the import seeds the same way.
+      const config = buildImportTree(listing, "en");
+      return c.json(
+        ok({ config, metadata: { name: listing.name, iconUrl: listing.iconUrl } }),
+      );
+    },
+  )
   // ===========================================================
   // Bundled fallback file export (spec D1) — every ACTIVE placement,
   // resolved anonymously (attributes = {}, no locale — the honest
