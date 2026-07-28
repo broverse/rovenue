@@ -69,6 +69,7 @@ class PaywallMappingTest {
         offering: dev.rovenue.sdk.generated.CoreOffering? = null,
         presentedContext: CorePresentedContext? = corePresentedContext(),
         servedFromFallback: Boolean = false,
+        revision: String? = null,
     ) = CorePaywall(
         placementIdentifier = "plc_1",
         placementRevision = 3L,
@@ -81,6 +82,7 @@ class PaywallMappingTest {
         offering = offering,
         presentedContext = presentedContext,
         servedFromFallback = servedFromFallback,
+        revision = revision,
     )
 
     @Test

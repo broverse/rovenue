@@ -602,6 +602,44 @@ class Rovenue private constructor(
         }
     }
 
+    /** Fetch an on-device preview of an unpublished paywall draft by its
+     *  short-lived preview [token] (minted by the dashboard, redeemed once
+     *  per fetch — see the preview-session core/API work). Unlike
+     *  [getPaywall], this never resolves a real placement: the returned
+     *  [Paywall] carries `placementIdentifier == ""` / `placementRevision ==
+     *  0` sentinels and `presentedContext == null` (no attribution exists
+     *  for a draft), and a [Paywall.revision] stamp the caller can compare
+     *  across polls (see [dev.rovenue.sdk.paywallui.previewPollDecision]) to
+     *  detect a newer save. An expired/unknown token propagates as a thrown
+     *  [RovenueException], not a `null` return — unlike an unmatched
+     *  placement, an invalid preview token is an error condition, not
+     *  "nothing to show". Resilient like [getPaywall]/[getOfferings]: if the
+     *  offering's live price query fails, the paywall is still returned with
+     *  null price fields. */
+    @Throws(RovenueException::class)
+    suspend fun getPaywallPreview(token: String, locale: String? = null): Paywall? {
+        try {
+            val ffi = dispatcher.run { core.getPaywallPreview(token, locale) }
+            val coreOffering = ffi?.offering
+            val offering = if (coreOffering != null) {
+                val wrapped = CoreOfferings(current = null, offerings = listOf(coreOffering))
+                val context = appContext
+                val hydrated = if (context != null) {
+                    runCatching { hydrateOfferings(wrapped, PlayBillingStore(context)) }
+                        .getOrElse { hydrateOfferings(wrapped, NoPriceStore) }
+                } else {
+                    hydrateOfferings(wrapped, NoPriceStore)
+                }
+                hydrated.all[coreOffering.identifier]
+            } else {
+                null
+            }
+            return buildPaywallResult(ffi, offering)
+        } catch (e: Throwable) {
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
+        }
+    }
+
     /** Report that [paywall] was actually shown to the subscriber. Builds a
      *  `paywall_view` event (sourced from [Paywall.presentedContext]) and
      *  enqueues it via [enqueuePaywallEvent] — the core's durable,

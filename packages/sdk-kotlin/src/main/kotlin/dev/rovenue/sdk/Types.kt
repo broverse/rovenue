@@ -171,6 +171,16 @@ data class Paywall(
      *  [dev.rovenue.sdk.Rovenue.setFallbackPlacements]. `false` otherwise.
      *  Defaulted so existing positional/named constructions keep compiling. */
     val servedFromFallback: Boolean = false,
+    /** Opaque revision stamp — changes whenever the paywall's draft config
+     *  is saved. `null` for every non-preview paywall (a resolved placement
+     *  carries no such stamp); populated only via
+     *  [dev.rovenue.sdk.Rovenue.getPaywallPreview], where
+     *  [dev.rovenue.sdk.paywallui.RovenuePaywallPreviewView]'s poll loop
+     *  compares it across fetches (see
+     *  [dev.rovenue.sdk.paywallui.previewPollDecision]) to decide whether to
+     *  re-bind. Defaulted so existing positional/named constructions keep
+     *  compiling. */
+    val revision: String? = null,
 )
 
 /** The outcome of a successful, validated purchase. */
