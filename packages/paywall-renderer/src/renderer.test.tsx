@@ -2730,6 +2730,81 @@ describe("video and lottie nodes", () => {
     expect(container.textContent).toContain("no lottie");
   });
 
+  /** What `newNode("lottie")` creates, exactly as UNCONFIGURED_VIDEO_URL is
+   *  what `newNode("video")` creates. */
+  const UNCONFIGURED_LOTTIE_URL = { light: "" };
+
+  it("never hands a registered lottie renderer an unparsable url — it falls back instead", () => {
+    // The three-platform rule, settled: an unparsable lottie url means the
+    // node CANNOT RENDER, so it takes the same route an unregistered player
+    // takes. A host player must not be handed "" and left to discover the
+    // problem, and `video` has always answered this question here.
+    const seen: unknown[] = [];
+    registerLottieRenderer((props) => {
+      seen.push(props);
+      return <span data-rov-lottie-stub="">animation</span>;
+    });
+    try {
+      const bare = renderPaywall(lottieNode({ url: UNCONFIGURED_LOTTIE_URL }));
+      expect(bare.container.querySelector("[data-rov-lottie-stub]")).toBeNull();
+      expect(bare.container.textContent).toBe("");
+
+      const withFallback = renderPaywall(
+        lottieNode({ url: UNCONFIGURED_LOTTIE_URL, fallback: textNode("no lottie") }),
+      );
+      expect(withFallback.container.textContent).toContain("no lottie");
+
+      // The host's player was never invoked at all — asking "can this draw?"
+      // must not cause the host's side effect of building an animation.
+      expect(seen).toHaveLength(0);
+    } finally {
+      registerLottieRenderer(null);
+    }
+  });
+
+  it("gives a lottie with an unparsable url no carousel page and no dot", () => {
+    // Same rule as C1/C2 above, now reached by the URL half rather than the
+    // registration half: a registered player does not make an unusable node
+    // drawable, so it must not buy a dot either.
+    registerLottieRenderer(() => <span data-rov-lottie-stub="">animation</span>);
+    try {
+      const { container } = renderPaywall(
+        carouselOf(
+          textNode("realPageOne"),
+          { type: "lottie", id: "blank-lottie", url: UNCONFIGURED_LOTTIE_URL },
+          textNode("realPageTwo"),
+        ),
+      );
+      expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(2);
+      expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(2);
+      expect(container.textContent).toContain("realPageOne");
+      expect(container.textContent).toContain("realPageTwo");
+    } finally {
+      registerLottieRenderer(null);
+    }
+  });
+
+  it("still hands the host a RELATIVE lottie url unchanged", () => {
+    // The guard asks "is this a url at all?", it does not demand an absolute
+    // one and it does not rewrite what it was given: a relative source is
+    // legitimate on web, and the host player receives the authored string.
+    const seen: string[] = [];
+    registerLottieRenderer((props) => {
+      seen.push(props.url);
+      return <span data-rov-lottie-stub="">animation</span>;
+    });
+    try {
+      renderPaywall(lottieNode({ url: { light: "anim/a.json" } }));
+      // Every call, not just the first: the host is re-invoked as the node
+      // re-renders (see `Lottie`'s doc comment), and the url it is handed must
+      // be the authored string every time.
+      expect(seen.length).toBeGreaterThan(0);
+      expect(new Set(seen)).toEqual(new Set(["anim/a.json"]));
+    } finally {
+      registerLottieRenderer(null);
+    }
+  });
+
   it("renders nothing for a blank-source video outside a carousel, and its fallback when it has one", () => {
     // The same pre-mount answer, seen without the carousel: no `<video>`
     // element is ever created for a source that cannot parse, so the browser

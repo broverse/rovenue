@@ -1111,17 +1111,39 @@ export function videoPlaybackCommand(visible: boolean, autoplay: boolean): Video
 }
 
 /**
- * The base a RELATIVE `video` source is parsed against, and nothing else: it
- * is never fetched and never reaches the element, which always receives the
- * authored string unchanged. A relative source (`"clip.mp4"`) is legitimate
- * on web — the browser resolves it against the hosting document — so "is this
- * a URL at all?" cannot be answered by `new URL(src)` alone, which rejects
- * every relative string. Parsing against a fixed, deliberately unroutable
- * base answers exactly the question asked without depending on `document`,
- * which is absent under SSR. `.invalid` is the reserved never-resolvable TLD
- * (RFC 2606), so this can never accidentally address a real host.
+ * The base a RELATIVE media source is parsed against, and nothing else: it
+ * is never fetched and never reaches the element or the host's player, both
+ * of which always receive the authored string unchanged. A relative source
+ * (`"clip.mp4"`) is legitimate on web — the browser resolves it against the
+ * hosting document — so "is this a URL at all?" cannot be answered by
+ * `new URL(src)` alone, which rejects every relative string. Parsing against
+ * a fixed, deliberately unroutable base answers exactly the question asked
+ * without depending on `document`, which is absent under SSR. `.invalid` is
+ * the reserved never-resolvable TLD (RFC 2606), so this can never
+ * accidentally address a real host.
  */
-const VIDEO_SOURCE_PARSE_BASE_URL = "https://source-probe.rovenue.invalid/";
+const MEDIA_SOURCE_PARSE_BASE_URL = "https://source-probe.rovenue.invalid/";
+
+/**
+ * Whether a theme-resolved media source is a URL at all — the one question
+ * both media node types ask, so they cannot answer it differently. A blank
+ * (or whitespace-only) source is the case that matters most and it is not
+ * exotic: `newNode("video")` and `newNode("lottie")` both create
+ * `url: { light: "" }`, so every freshly added media node in the builder is
+ * in exactly this state until a URL is pasted.
+ */
+function hasParsableSource(rawSource: string): boolean {
+  const source = rawSource.trim();
+  if (source === "") return false;
+  try {
+    // Constructed only to see whether it throws; the parsed result is
+    // discarded, since the consumer is handed the authored string.
+    new URL(source, MEDIA_SOURCE_PARSE_BASE_URL);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Whether a `video`'s theme-resolved source is a URL at all — the only half
@@ -1131,26 +1153,14 @@ const VIDEO_SOURCE_PARSE_BASE_URL = "https://source-probe.rovenue.invalid/";
  * consumed by `nodeRendersContent`) and Android's (`NodeViewFactory.kt`,
  * consumed by `buildVideo`), asked at the same pre-mount moment on all three.
  *
- * The BLANK source is the case that matters most, and it is not exotic:
- * `newNode("video")` creates `url: { light: "" }`, so every freshly added
- * video in the builder is in exactly this state until a URL is pasted. Left
- * unguarded, `<video src="">` re-requests the hosting document itself.
+ * Left unguarded, `<video src="">` re-requests the hosting document itself.
  *
  * What this deliberately does NOT cover: a source that parses and then fails
  * during load. That answer is asynchronous on every platform and arrives long
  * after the page list was built — see `Video`'s own doc comment.
  */
 function videoHasParsableSource(node: VideoNode, ctx: RenderCtx): boolean {
-  const source = resolveThemeUrl(node.url, ctx.colorScheme).trim();
-  if (source === "") return false;
-  try {
-    // Constructed only to see whether it throws; the parsed result is
-    // discarded, since the element is handed the authored string.
-    new URL(source, VIDEO_SOURCE_PARSE_BASE_URL);
-    return true;
-  } catch {
-    return false;
-  }
+  return hasParsableSource(resolveThemeUrl(node.url, ctx.colorScheme));
 }
 
 /**
@@ -1261,30 +1271,32 @@ export function registerLottieRenderer(render: LottieRenderer | null): void {
  * host's player — asking is not allowed to cause the host's side effect of
  * building one.
  *
- * Unlike a video's load failure this is fully decidable up front, because
- * registration is process state already in hand, which is why `renderNode`
- * consults it BEFORE mounting `Lottie` and an unregistered lottie inside a
- * carousel costs no page and no phantom dot. Mirrors iOS's `lottieCanRender`
- * (`RovenuePaywallLottie.swift`) and the registration half of Android's
- * `buildLottie` (`NodeViewFactory.kt`).
+ * Unlike a video's load failure this is fully decidable up front — both
+ * halves of it are: registration is process state already in hand, and the
+ * URL is in hand too. That is why `renderNode` consults this BEFORE mounting
+ * `Lottie`, so an undrawable lottie inside a carousel costs no page and no
+ * phantom dot. Mirrors iOS's `lottieCanRender`
+ * (`RovenuePaywallLottie.swift`), which asks the same two questions.
  *
- * Registration is the only question asked here. Whether the node's URL
- * parses is NOT: web hands the authored string to the host player as-is (as
- * Android does), a documented divergence from iOS that this predicate
- * deliberately does not settle on its own.
+ * The URL half was a three-platform divergence and is now decided: a lottie
+ * whose source does not parse CANNOT RENDER, and takes the same route an
+ * unregistered one takes — `fallback`, else nothing. A registered host player
+ * must never be handed `""` (the state `newNode("lottie")` creates) and left
+ * to discover the problem itself, and `video` already answers exactly this
+ * question, in exactly this place, on all three platforms.
  */
-function lottieCanRender(): boolean {
-  return lottieRenderer !== null;
+function lottieCanRender(node: LottieNode, ctx: RenderCtx): boolean {
+  return lottieRenderer !== null && hasParsableSource(resolveThemeUrl(node.url, ctx.colorScheme));
 }
 
 /**
- * With no renderer registered, this node renders `fallback` else nothing —
- * the existing machinery every node type already has, not a new failure
- * mode. That answer is reached before this component ever mounts
- * (`lottieCanRender`, consulted in `renderNode`); the guard repeated below
- * is what narrows the module-level `lottieRenderer` to non-null for the call
- * that follows, and keeps the component correct if it is ever mounted
- * directly.
+ * With no renderer registered — or a URL that does not parse — this node
+ * renders `fallback` else nothing: the existing machinery every node type
+ * already has, not a new failure mode. That answer is reached before this
+ * component ever mounts (`lottieCanRender`, consulted in `renderNode`); the
+ * guard repeated below is what narrows the module-level `lottieRenderer` to
+ * non-null for the call that follows, and keeps the component correct if it
+ * is ever mounted directly.
  *
  * `playing` rides the same `useNodeVisible` signal `Video` and `Carousel`
  * use, so a host player that honours it pauses off-screen for free.
@@ -1292,8 +1304,9 @@ function lottieCanRender(): boolean {
 function Lottie({ node, ctx }: { node: LottieNode; ctx: RenderCtx }): ReactElement | null {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const visible = useNodeVisible(element);
+  const source = resolveThemeUrl(node.url, ctx.colorScheme);
 
-  if (lottieRenderer === null) return renderFallbackOrNull(node, ctx);
+  if (lottieRenderer === null || !hasParsableSource(source)) return renderFallbackOrNull(node, ctx);
 
   // Called in the render pass rather than from an effect, deliberately. The
   // props include `playing`, which IS the visibility signal, and the
@@ -1306,7 +1319,9 @@ function Lottie({ node, ctx }: { node: LottieNode; ctx: RenderCtx }): ReactEleme
   // own reconciliation, not a call count, decides whether the player is
   // actually rebuilt.
   const rendered = lottieRenderer({
-    url: resolveThemeUrl(node.url, ctx.colorScheme),
+    // The AUTHORED string, never the probe's parse of it — `hasParsableSource`
+    // only answers a question, it does not rewrite the source.
+    url: source,
     loop: node.loop ?? LOTTIE_DEFAULT_LOOP,
     autoplay: node.autoplay ?? LOTTIE_DEFAULT_AUTOPLAY,
     speed: node.speed ?? LOTTIE_DEFAULT_SPEED,
@@ -1394,15 +1409,17 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
       // `buildVideo`/`buildLottie`).
       //
       // What is asked is only the half that is knowable synchronously: does
-      // the video's source parse, and is a lottie player registered. A video
-      // whose source parses and then fails DURING LOAD is asynchronous on
-      // every platform and is an accepted limitation, not an oversight — see
-      // `Video`'s doc comment.
+      // the source parse (asked of BOTH media types, the same way), and is a
+      // lottie player registered. A video whose source parses and then fails
+      // DURING LOAD is asynchronous on every platform and is an accepted
+      // limitation, not an oversight — see `Video`'s doc comment, and the
+      // validator's VIDEO_IN_CAROUSEL_NO_FALLBACK, which is what warns the
+      // author about it.
       case "video":
         if (!videoHasParsableSource(resolved, ctx)) return renderFallbackOrNull(resolved, ctx);
         return <Video node={resolved} ctx={ctx} />;
       case "lottie":
-        if (!lottieCanRender()) return renderFallbackOrNull(resolved, ctx);
+        if (!lottieCanRender(resolved, ctx)) return renderFallbackOrNull(resolved, ctx);
         return <Lottie node={resolved} ctx={ctx} />;
       default:
         return renderFallbackOrNull(resolved, ctx);
