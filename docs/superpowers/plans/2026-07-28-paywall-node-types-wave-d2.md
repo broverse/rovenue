@@ -596,7 +596,19 @@ git commit -m "feat(sdk-swift): play video, and delegate lottie to a registered 
 - Test: `packages/sdk-kotlin/src/test/kotlin/dev/rovenue/sdk/paywallui/NodeVisibilityTest.kt`
 
 **Interfaces:**
-- Produces: `internal fun isNodeOnScreen(visibleRect: Rect?, viewWidth: Int, viewHeight: Int): Boolean` (pure), and an internal helper that wires it to `ViewTreeObserver.OnScrollChangedListener` plus the existing `ProcessLifecycleOwner` signal.
+- Produces: a pure on-screen predicate plus an internal helper wiring it to `ViewTreeObserver.OnScrollChangedListener` and the existing `ProcessLifecycleOwner` signal.
+
+> **Amended after implementation.** This originally specified
+> `isNodeOnScreen(visibleRect: Rect?, viewWidth: Int, viewHeight: Int)`, taking an Android
+> `Rect`. That signature made the predicate **untestable**: under this module's mockable
+> `android.jar`, `Rect(0, 0, 300, 200)` constructs with every field at `0` and `isEmpty()`
+> returns `false` — the opposite of the truth for an all-zero rect. The on-screen branch was
+> therefore unreachable from any JVM test and passed only because the stub's default happened
+> to agree, which mutation checking cannot detect (test and code lean on the same default
+> rather than disagreeing). The predicate now takes plain integers the JVM can produce, with a
+> thin adapter reading a real `Rect` at the call site. Proof the change bought something: the
+> `return true` mutation, which previously passed the entire suite, now fails five tests.
+> **Probe a stubbed type before writing a test that depends on it behaving like the real one.**
 
 Keep this module's split: pure logic in JVM-testable helpers, view construction smoke-tested. **Do not add Robolectric** — it was removed because the JUnit5-platform test tasks could never discover its JUnit4-style tests.
 
@@ -604,17 +616,15 @@ Keep this module's split: pure logic in JVM-testable helpers, view construction 
 
 - [ ] **Step 1: Write the failing tests**
 
-```kotlin
-@Test fun `a fully visible view is on screen`() {
-    assertTrue(isNodeOnScreen(Rect(0, 0, 300, 200), viewWidth = 300, viewHeight = 200))
-}
+The test bodies below are written against the ORIGINAL `Rect`-taking signature and did not
+survive implementation — see the amendment above. Two of them (`a fully visible view is on
+screen`, `a partially visible view counts as on screen`) could not actually exercise what they
+claimed and were replaced once the predicate took plain integers. They are kept here only to
+show what was tried; write the equivalents against the integer signature.
 
+```kotlin
 @Test fun `a view with no visible rect is off screen`() {
     assertFalse(isNodeOnScreen(null, viewWidth = 300, viewHeight = 200))
-}
-
-@Test fun `a partially visible view counts as on screen`() {
-    assertTrue(isNodeOnScreen(Rect(0, 0, 300, 40), viewWidth = 300, viewHeight = 200))
 }
 
 @Test fun `an unmeasured view fails open`() {
