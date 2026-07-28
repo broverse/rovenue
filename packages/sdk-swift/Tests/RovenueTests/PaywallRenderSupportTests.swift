@@ -851,14 +851,29 @@ final class PaywallRenderSupportTests: XCTestCase {
         VideoProps(id: "v1", url: ThemePair(light: "https://x/a.mp4", dark: nil))
     }
 
-    /// A parsable source counts as a carousel page BEFORE anything is loaded,
+    /// A present source counts as a carousel page BEFORE anything is loaded,
     /// because AVFoundation answers "did it load?" asynchronously — that is
     /// the honest limit, stated. See the `.video` arm of `nodeRendersContent`.
-    func test_aVideoWithAnUnparsableSourceIsNotACarouselPage() throws {
+    ///
+    /// The blank-source rows here are the same rule
+    /// `PaywallMediaSourceTests.swift` pins input-for-input against web and
+    /// Android; this test is the carousel CONSEQUENCE of it. `" "` is the row
+    /// that used to diverge: `URL(string: " ")` is non-nil, so the old check
+    /// gave a whitespace-only source a page and a phantom dot on iOS alone.
+    func test_aVideoWithNoUsableSourceIsNotACarouselPage() throws {
         let ctx = try makeCtx(appVersion: nil)
         XCTAssertTrue(nodeRendersContent(.video(bareVideoProps), ctx: ctx, cell: nil))
-        let unparsable = VideoProps(id: "v1", url: ThemePair(light: "", dark: nil))
-        XCTAssertFalse(nodeRendersContent(.video(unparsable), ctx: ctx, cell: nil))
+        for blank in ["", " "] {
+            let unusable = VideoProps(id: "v1", url: ThemePair(light: blank, dark: nil))
+            XCTAssertFalse(
+                nodeRendersContent(.video(unusable), ctx: ctx, cell: nil),
+                "\(String(reflecting: blank)) must buy no page")
+        }
+        // And the relaxed half: a source that is present but not a valid URL
+        // keeps its page. Whether it loads is AVFoundation's answer, given
+        // asynchronously and routed to `fallback` — not this predicate's.
+        let notAUrl = VideoProps(id: "v1", url: ThemePair(light: "not a url", dark: nil))
+        XCTAssertTrue(nodeRendersContent(.video(notAUrl), ctx: ctx, cell: nil))
     }
 
     /// `video`'s playback rule, through the SAME function

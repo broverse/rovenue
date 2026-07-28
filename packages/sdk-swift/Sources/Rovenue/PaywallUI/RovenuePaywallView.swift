@@ -1400,16 +1400,17 @@ func nodeRendersContent(_ node: BuilderNode, ctx: PaywallRenderContext, cell: Ce
             || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
     case .video(let p):
         // KNOWN AND DELIBERATE PARTIAL ANSWER. Only the SYNCHRONOUS half of
-        // "will this video draw?" is decidable here: an unparsable source
-        // URL. Whether the clip itself loads is answered asynchronously by
-        // AVFoundation, long after this predicate ran and after the carousel
-        // fixed its page and dot counts — so a video that fails AFTER mount
-        // still leaves the blank page plus phantom dot wave D1's rule exists
-        // to prevent. The web renderer has the identical gap for the
-        // identical reason (see `Video`'s doc comment in nodes.tsx); closing
-        // it needs a page list that can shrink after mount, which is a
-        // cross-platform change, not an iOS one.
-        return videoHasParsableSource(p, dark: ctx.dark)
+        // "will this video draw?" is decidable here: whether a source is
+        // present at all. Whether the clip itself loads is answered
+        // asynchronously by AVFoundation, long after this predicate ran and
+        // after the carousel fixed its page and dot counts — so a video that
+        // fails AFTER mount still leaves the blank page plus phantom dot wave
+        // D1's rule exists to prevent. The web renderer has the identical gap
+        // for the identical reason (see `Video`'s doc comment in nodes.tsx);
+        // closing it needs a page list that can shrink after mount, which is a
+        // cross-platform change, not an iOS one. Spec §3.3 records it, and the
+        // validator's VIDEO_IN_CAROUSEL_NO_FALLBACK warns the author.
+        return videoHasUsableSource(p, dark: ctx.dark)
             || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
     case .lottie(let p):
         // Fully decidable, unlike `video` above: whether a host player is
@@ -1660,22 +1661,26 @@ enum VideoPlaybackCommand: Equatable {
 /// third copy.
 ///
 /// `autoplay` is the author's standing instruction and is honoured: a node
-/// that said `autoplay: false` is never STARTED by scrolling into view. Note
-/// this is stricter than the web renderer, whose play/pause effect currently
-/// calls `play()` on visibility regardless of the `autoplay` attribute —
-/// raised in the task report rather than mirrored, since mirroring it would
-/// leave `autoplay` decoded and never read on this platform.
+/// that said `autoplay: false` is never STARTED by scrolling into view, though
+/// it is still PAUSED by scrolling away. All three renderers honour it — web's
+/// play/pause effect used to call `play()` on visibility regardless of the
+/// attribute, and that was fixed in 1533eb80, so this is no longer stricter
+/// than any sibling.
 func videoPlaybackCommand(visibility: NodeVisibilityState, autoplay: Bool) -> VideoPlaybackCommand {
     guard isNodeRunning(visibility) else { return .pause }
     return autoplay ? .play : .leaveAlone
 }
 
-/// Whether a `video`'s theme-resolved source URL parses at all — the only half
-/// of "will this draw?" that is knowable before the player exists. See the
+/// Whether a `video`'s theme-resolved source is USABLE — the only half of
+/// "will this draw?" that is knowable before the player exists. See the
 /// `.video` arm of `nodeRendersContent` for what this deliberately does not
 /// cover.
-func videoHasParsableSource(_ props: VideoProps, dark: Bool) -> Bool {
-    URL(string: themeValue(props.url, dark: dark)) != nil
+///
+/// The rule itself is `mediaSourceIsUsable` (RovenuePaywallMediaSource.swift),
+/// shared with `lottieCanRender` here and with web and Android — it is not
+/// spelled out again here, on purpose.
+func videoHasUsableSource(_ props: VideoProps, dark: Bool) -> Bool {
+    mediaSourceIsUsable(themeValue(props.url, dark: dark))
 }
 
 /// Owns the ONE `AVPlayer` behind a `video` node, plus the two asynchronous
@@ -1759,18 +1764,27 @@ final class VideoPlaybackController: ObservableObject {
 /// Renders `video`.
 ///
 /// Split in two: this outer view answers the one question that IS decidable
-/// before a player exists — does the source URL parse? — and falls back
-/// otherwise, mirroring every other node type's "cannot draw this" contract.
-/// Everything past that point needs the player, and lives in
-/// `VideoPlayerNodeView`, whose `@StateObject` must be initialised with a real
-/// URL.
+/// before a player exists — is a source present? — and falls back otherwise,
+/// mirroring every other node type's "cannot draw this" contract. Everything
+/// past that point needs the player, and lives in `VideoPlayerNodeView`, whose
+/// `@StateObject` must be initialised with a real URL.
+///
+/// The two guards below answer two DIFFERENT questions and both are needed.
+/// `videoHasUsableSource` is the shared cross-platform rule, and it MUST be
+/// asked here as well as in `nodeRendersContent` — otherwise a source like
+/// `" "`, which the rule rejects but `URL(string:)` happily accepts, would
+/// build a player outside a carousel while being dropped inside one. The
+/// `URL(string:)` that follows is only this platform's construction step; a
+/// source that survives the rule and still cannot become a `URL` falls back,
+/// which is the ordinary load-failure path.
 struct VideoNodeView: View {
     let props: VideoProps
     let ctx: PaywallRenderContext
     let cell: CellScope?
 
     var body: some View {
-        if let url = URL(string: themeValue(props.url, dark: ctx.dark)) {
+        if videoHasUsableSource(props, dark: ctx.dark),
+           let url = URL(string: themeValue(props.url, dark: ctx.dark)) {
             VideoPlayerNodeView(props: props, ctx: ctx, cell: cell, url: url)
         } else if let fallback = props.fallback {
             BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)

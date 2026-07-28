@@ -26,9 +26,10 @@ import SwiftUI
 /// defaults were substituted, and which theme half of `url` won — rather than
 /// merely that some request arrived.
 public struct LottieRenderRequest: Equatable, Sendable {
-    /// The resolved, theme-picked animation URL. A `lottie` node whose URL
-    /// does not parse produces no request at all (and so falls back), rather
-    /// than handing the host a string it cannot use.
+    /// The resolved, theme-picked animation URL. A `lottie` node with no
+    /// source, or one this platform cannot turn into a `URL`, produces no
+    /// request at all (and so falls back), rather than handing the host
+    /// something it cannot use.
     public let url: URL
     public let loop: Bool
     public let autoplay: Bool
@@ -69,14 +70,26 @@ public func registerLottieRenderer(_ render: LottieRenderer?) {
     LottieRendererRegistry.current = render
 }
 
-/// The resolved request for `props`, or `nil` when the node's URL does not
-/// parse. Pure, and separate from `lottieContentView` below, so the DEFAULT
+/// The resolved request for `props`, or `nil` when there is nothing to ask the
+/// host for. Pure, and separate from `lottieContentView` below, so the DEFAULT
 /// RESOLUTION (`loop`/`autoplay`/`speed` falling back to the mirrored
 /// schema.ts constants, and which theme half of `url` wins) is testable
 /// without registering anything — a SwiftUI view's body is not inspectable in
 /// this package, so a rule that lived only inside the view would be untestable.
+///
+/// Two guards, and they answer two DIFFERENT questions. The first is the
+/// shared cross-platform rule (`mediaSourceIsUsable`): an absent source means
+/// this node was never configured, and that is decided identically on all
+/// three platforms. The second is this platform's own LOAD-time concern — a
+/// `LottieRenderRequest` carries a `URL`, so a source that survives the rule
+/// and still cannot be turned into one produces no request, and the node takes
+/// the ordinary `fallback`-else-nothing path exactly as a video whose clip
+/// fails to load does. That second guard is NOT the pre-mount rule and must
+/// never be copied into `lottieCanRender` — doing so is what made this
+/// platform's answer depend on `URL(string:)`.
 func lottieRenderRequest(props: LottieProps, playing: Bool, dark: Bool = false) -> LottieRenderRequest? {
-    guard let url = URL(string: themeValue(props.url, dark: dark)) else { return nil }
+    let source = themeValue(props.url, dark: dark)
+    guard mediaSourceIsUsable(source), let url = URL(string: source) else { return nil }
     return LottieRenderRequest(
         url: url,
         loop: props.loop ?? lottieDefaultLoop,
@@ -86,7 +99,7 @@ func lottieRenderRequest(props: LottieProps, playing: Bool, dark: Bool = false) 
 }
 
 /// What a `lottie` node draws right now, or `nil` when it draws nothing — no
-/// registered player, or an unparsable URL. `nil` is what routes the node onto
+/// registered player, or no usable source. `nil` is what routes the node onto
 /// the ordinary `fallback`-else-nothing path in `LottieView`; this function
 /// deliberately does not know about `fallback` itself, so the one place that
 /// decides "fall back" stays the one place every other node type uses.
@@ -103,9 +116,14 @@ func lottieContentView(props: LottieProps, playing: Bool, dark: Bool = false) ->
 /// Asked ahead of mounting by `nodeRendersContent` (a carousel decides its
 /// pages before its children exist), which is exactly why it must not go
 /// through `lottieContentView`: building a view is the host's side effect, and
-/// a predicate must not cause one. Unlike a video's load failure, this is
-/// decidable synchronously — registration is process state and the URL is in
-/// hand — so an unregistered lottie inside a carousel costs no phantom dot.
+/// a predicate must not cause one. Unlike a video's load failure, both halves
+/// are decidable synchronously — registration is process state and the source
+/// is in hand — so an unregistered or unconfigured lottie inside a carousel
+/// costs no phantom dot.
+///
+/// The source half is `mediaSourceIsUsable`, the SAME rule `video` asks
+/// (`videoHasUsableSource`) and the same one web and Android ask. It is not
+/// spelled out here, on purpose.
 func lottieCanRender(_ props: LottieProps, dark: Bool) -> Bool {
-    LottieRendererRegistry.current != nil && URL(string: themeValue(props.url, dark: dark)) != nil
+    LottieRendererRegistry.current != nil && mediaSourceIsUsable(themeValue(props.url, dark: dark))
 }

@@ -71,14 +71,37 @@ final class PaywallLottieTests: XCTestCase {
         XCTAssertFalse(request.playing)
     }
 
-    /// A URL the platform cannot parse produces no request at all, so the node
-    /// takes the same `fallback`-else-nothing path as an unregistered player —
-    /// never a request carrying a string the host cannot use.
-    func test_anUnparsableLottieUrlProducesNoRequest() {
+    /// A source the shared rule rejects produces no request at all, so the
+    /// node takes the same `fallback`-else-nothing path as an unregistered
+    /// player — never a request the host cannot use. `" "` is the row that
+    /// used to diverge: `URL(string: " ")` is non-nil, so before the rule was
+    /// shared this platform built a request for it.
+    ///
+    /// The answers themselves are pinned input-for-input against web and
+    /// Android in `PaywallMediaSourceTests.swift`.
+    func test_aLottieWithNoUsableSourceProducesNoRequest() {
         registerLottieRenderer { _ in AnyView(EmptyView()) }
-        let props = LottieProps(id: "l1", url: ThemePair(light: "", dark: nil))
-        XCTAssertNil(lottieRenderRequest(props: props, playing: true))
-        XCTAssertNil(lottieContentView(props: props, playing: true))
+        for blank in ["", " "] {
+            let props = LottieProps(id: "l1", url: ThemePair(light: blank, dark: nil))
+            XCTAssertNil(lottieRenderRequest(props: props, playing: true), blank)
+            XCTAssertNil(lottieContentView(props: props, playing: true), blank)
+        }
+    }
+
+    /// The relaxed half, and the reason this file no longer asks a URL parser
+    /// anything: a source that is present but not a valid URL is USABLE. It
+    /// reaches the host, which fails to load it and takes the ordinary error
+    /// path — exactly as a video's clip does.
+    func test_aPresentButMalformedLottieSourceStillReachesTheHost() throws {
+        var received: LottieRenderRequest?
+        registerLottieRenderer { request in
+            received = request
+            return AnyView(EmptyView())
+        }
+        let props = LottieProps(id: "l1", url: ThemePair(light: "not a url", dark: nil))
+        XCTAssertTrue(lottieCanRender(props, dark: false))
+        _ = lottieContentView(props: props, playing: true)
+        XCTAssertEqual(try XCTUnwrap(received).url, URL(string: "not a url"))
     }
 
     /// `playing` rides the SHARED visibility signal (NodeVisibility.swift)
