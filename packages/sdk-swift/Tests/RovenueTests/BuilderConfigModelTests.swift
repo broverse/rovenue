@@ -722,6 +722,107 @@ final class BuilderConfigModelTests: XCTestCase {
 
     /// Both authored spellings parse: plain `Z`-suffixed UTC (what the
     /// builder writes) and a stray fractional-seconds value.
+    // MARK: - video / lottie (Wave D2)
+    //
+    // Every entry is selected BY NAME through `decodeNode(named:)` — never by
+    // index. A previous wave widened render-fixtures.json and silently broke
+    // two Kotlin tests that assumed a position.
+
+    func test_decodesBareVideoFromTheSharedFixture() throws {
+        let node = try decodeNode(named: "video-bare")
+        guard case .video(let p) = node else { return XCTFail("expected video") }
+        XCTAssertNil(p.autoplay)
+        XCTAssertNil(p.posterUrl)
+    }
+
+    /// The bare node's absences are the interesting half: `nil` is what makes
+    /// the mirrored defaults apply, and an `aspectRatio` of `nil` specifically
+    /// means NO ratio is applied at all rather than a substituted number.
+    func test_bareVideoLeavesEveryOptionalAbsent() throws {
+        let node = try decodeNode(named: "video-bare")
+        guard case .video(let p) = node else { return XCTFail("expected video") }
+        XCTAssertEqual(p.url.light, "https://x/a.mp4")
+        XCTAssertNil(p.url.dark)
+        XCTAssertNil(p.loop)
+        XCTAssertNil(p.muted)
+        XCTAssertNil(p.showsControls)
+        XCTAssertNil(p.aspectRatio)
+    }
+
+    func test_decodesFullVideoFromTheSharedFixture() throws {
+        let node = try decodeNode(named: "video-full")
+        guard case .video(let p) = node else { return XCTFail("expected video") }
+        XCTAssertEqual(p.url.dark, "https://x/a-dark.mp4")
+        XCTAssertEqual(p.posterUrl?.light, "https://x/poster.png")
+        XCTAssertEqual(p.posterUrl?.dark, "https://x/poster-dark.png")
+        // Each of these is the NON-default value, so a decoder that dropped
+        // the field and let the default stand would fail here.
+        XCTAssertEqual(p.autoplay, false)
+        XCTAssertEqual(p.loop, false)
+        XCTAssertEqual(p.muted, false)
+        XCTAssertEqual(p.showsControls, true)
+        XCTAssertEqual(p.aspectRatio, 1.777)
+    }
+
+    func test_decodesBareLottieFromTheSharedFixture() throws {
+        let node = try decodeNode(named: "lottie-bare")
+        guard case .lottie(let p) = node else { return XCTFail("expected lottie") }
+        XCTAssertEqual(p.url.light, "https://x/a.json")
+        XCTAssertNil(p.loop)
+        XCTAssertNil(p.autoplay)
+        XCTAssertNil(p.speed)
+    }
+
+    func test_decodesFullLottieFromTheSharedFixture() throws {
+        let node = try decodeNode(named: "lottie-full")
+        guard case .lottie(let p) = node else { return XCTFail("expected lottie") }
+        XCTAssertEqual(p.url.dark, "https://x/a-dark.json")
+        XCTAssertEqual(p.loop, false)
+        XCTAssertEqual(p.autoplay, false)
+        XCTAssertEqual(p.speed, 2)
+    }
+
+    /// Both media types whitelist their SOURCE (schema.ts's
+    /// `OVERRIDABLE_PROP_KEYS.video` / `.lottie`), so an active override swaps
+    /// the clip rather than a colour — and a key outside that whitelist still
+    /// fails the whole config decode, exactly as it does for every other type.
+    func test_videoAndLottieOverridesSwapTheSource() throws {
+        let video = try firstChild(#"""
+        {"type":"video","id":"v1","url":{"light":"https://x/a.mp4"},
+         "overrides":[{"when":{"kind":"introEligible"},
+                       "props":{"url":{"light":"https://x/trial.mp4"},
+                                "posterUrl":{"light":"https://x/trial.png"}}}]}
+        """#)
+        guard case .video(let vp) = video else { return XCTFail("expected video") }
+        let eligible = OverrideActiveConditions(introEligible: true, selected: false)
+        XCTAssertEqual(applyOverrides(vp, active: eligible).url.light, "https://x/trial.mp4")
+        XCTAssertEqual(applyOverrides(vp, active: eligible).posterUrl?.light, "https://x/trial.png")
+        // Inactive: the authored source is what survives.
+        let ineligible = OverrideActiveConditions(introEligible: false, selected: false)
+        XCTAssertEqual(applyOverrides(vp, active: ineligible).url.light, "https://x/a.mp4")
+        XCTAssertNil(applyOverrides(vp, active: ineligible).posterUrl)
+
+        let lottie = try firstChild(#"""
+        {"type":"lottie","id":"l1","url":{"light":"https://x/a.json"},
+         "overrides":[{"when":{"kind":"selected"},"props":{"url":{"light":"https://x/sel.json"}}}]}
+        """#)
+        guard case .lottie(let lp) = lottie else { return XCTFail("expected lottie") }
+        let selected = OverrideActiveConditions(introEligible: false, selected: true)
+        XCTAssertEqual(applyOverrides(lp, active: selected).url.light, "https://x/sel.json")
+    }
+
+    func test_aNonWhitelistedMediaOverridePropFailsTheWholeConfig() {
+        let json = """
+        {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
+         "root":{"type":"stack","id":"root","axis":"v","children":[
+           {"type":"lottie","id":"l1","url":{"light":"https://x/a.json"},
+            "overrides":[{"when":{"kind":"selected"},"props":{"speed":3}}]}]}}
+        """
+        XCTAssertNil(
+            decodeBuilderConfig(json),
+            "`speed` is not in OVERRIDABLE_PROP_KEYS.lottie, so the whole config must fail")
+    }
+
     func test_countdownDeadline_parsesBothIsoSpellings() throws {
         let defaults = try scratchDefaults("RovenueTests.countdownDeadline.iso")
         let plain = countdownDeadline(

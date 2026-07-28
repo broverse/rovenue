@@ -238,6 +238,12 @@ enum OverridablePropKeys {
     static let stickyFooter: Set<String> = ["background"]
     static let countdown: Set<String> = ["color"]
     static let carousel: Set<String> = ["indicatorColor"]
+    /// Both media types whitelist their SOURCE rather than a colour: swapping
+    /// the clip (or its poster) is the whole point of an
+    /// `introEligible`/`selected` override on a video, and schema.ts's
+    /// `OVERRIDABLE_PROP_KEYS` says exactly this.
+    static let video: Set<String> = ["url", "posterUrl"]
+    static let lottie: Set<String> = ["url"]
 }
 
 /// A `CodingKey` that accepts ANY string, used to enumerate every key
@@ -515,6 +521,40 @@ public struct CarouselOverrideProps: Decodable, Equatable, Sendable {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.carousel)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         indicatorColor = try container.decodeIfPresent(ThemePair.self, forKey: .indicatorColor)
+    }
+}
+
+public struct VideoOverrideProps: Decodable, Equatable, Sendable {
+    public let url: ThemePair?
+    public let posterUrl: ThemePair?
+
+    public init(url: ThemePair? = nil, posterUrl: ThemePair? = nil) {
+        self.url = url; self.posterUrl = posterUrl
+    }
+
+    private enum CodingKeys: String, CodingKey { case url, posterUrl }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.video)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        url = try container.decodeIfPresent(ThemePair.self, forKey: .url)
+        posterUrl = try container.decodeIfPresent(ThemePair.self, forKey: .posterUrl)
+    }
+}
+
+public struct LottieOverrideProps: Decodable, Equatable, Sendable {
+    public let url: ThemePair?
+
+    public init(url: ThemePair? = nil) {
+        self.url = url
+    }
+
+    private enum CodingKeys: String, CodingKey { case url }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.lottie)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        url = try container.decodeIfPresent(ThemePair.self, forKey: .url)
     }
 }
 
@@ -1121,6 +1161,126 @@ public struct CarouselProps: Decodable {
     }
 }
 
+/// Defaults mirroring packages/shared/src/paywall/schema.ts's
+/// `VIDEO_DEFAULT_AUTOPLAY` / `VIDEO_DEFAULT_LOOP` / `VIDEO_DEFAULT_MUTED` /
+/// `VIDEO_DEFAULT_SHOWS_CONTROLS` / `LOTTIE_DEFAULT_LOOP` /
+/// `LOTTIE_DEFAULT_AUTOPLAY` / `LOTTIE_DEFAULT_SPEED` / `LOTTIE_MIN_SPEED` /
+/// `LOTTIE_MAX_SPEED`. Kept in sync with schema.ts BY HAND — there is no
+/// codegen step sharing constants across the three platforms; what catches
+/// drift is `PaywallRenderSupportTests`' by-value comparison against
+/// render-fixtures.json's generated `defaults` object, which is also why none
+/// of these may be `private` (Swift's `private` is file-scoped and even
+/// `@testable import` cannot cross it). Same rule and same reason as the
+/// divider/carousel/countdown default blocks in RovenuePaywallView.swift.
+let videoDefaultAutoplay = true
+let videoDefaultLoop = true
+/// Autoplay with sound is refused outright by browsers, so muted is the only
+/// default under which autoplay works on all three platforms — iOS honours it
+/// for parity, not because AVFoundation forces it.
+let videoDefaultMuted = true
+let videoDefaultShowsControls = false
+let lottieDefaultLoop = true
+let lottieDefaultAutoplay = true
+let lottieDefaultSpeed = 1.0
+/// Authoring-time advice, NOT a clamp: outside this range playback reads as
+/// broken rather than stylised, and the dashboard raises a `warning`. The
+/// renderer honours whatever `speed` it is handed, exactly as
+/// `carouselMinAutoAdvanceSeconds` is advice rather than a floor.
+let lottieMinSpeed = 0.1
+let lottieMaxSpeed = 4.0
+
+public struct VideoProps: Decodable {
+    public let id: String
+    /// Theme-paired source URL, same shape as `ImageProps.url`.
+    public let url: ThemePair
+    /// Still frame shown until the first video frame is ready. Absent = no
+    /// poster at all.
+    public let posterUrl: ThemePair?
+    /// Absent = `videoDefaultAutoplay`.
+    public let autoplay: Bool?
+    /// Absent = `videoDefaultLoop`.
+    public let loop: Bool?
+    /// Absent = `videoDefaultMuted`.
+    public let muted: Bool?
+    /// Absent = `videoDefaultShowsControls`.
+    public let showsControls: Bool?
+    /// Width ÷ height. Absent = NO ratio is applied at all and the source's
+    /// own dimensions govern — deliberately not a substituted number, and the
+    /// web renderer says the same thing by emitting `aspectRatio: undefined`.
+    public let aspectRatio: Double?
+    public let overrides: [NodeOverride<VideoOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, url: ThemePair, posterUrl: ThemePair? = nil, autoplay: Bool? = nil,
+                loop: Bool? = nil, muted: Bool? = nil, showsControls: Bool? = nil,
+                aspectRatio: Double? = nil, overrides: [NodeOverride<VideoOverrideProps>]? = nil,
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.url = url; self.posterUrl = posterUrl; self.autoplay = autoplay
+        self.loop = loop; self.muted = muted; self.showsControls = showsControls
+        self.aspectRatio = aspectRatio
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, url, posterUrl, autoplay, loop, muted, showsControls, aspectRatio, overrides, visibility, fallback
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        url = try container.decode(ThemePair.self, forKey: .url)
+        posterUrl = try container.decodeIfPresent(ThemePair.self, forKey: .posterUrl)
+        autoplay = try container.decodeIfPresent(Bool.self, forKey: .autoplay)
+        loop = try container.decodeIfPresent(Bool.self, forKey: .loop)
+        muted = try container.decodeIfPresent(Bool.self, forKey: .muted)
+        showsControls = try container.decodeIfPresent(Bool.self, forKey: .showsControls)
+        aspectRatio = try container.decodeIfPresent(Double.self, forKey: .aspectRatio)
+        overrides = try container.decodeIfPresent([NodeOverride<VideoOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
+public struct LottieProps: Decodable {
+    public let id: String
+    /// Theme-paired animation-JSON URL.
+    public let url: ThemePair
+    /// Absent = `lottieDefaultLoop`.
+    public let loop: Bool?
+    /// Absent = `lottieDefaultAutoplay`.
+    public let autoplay: Bool?
+    /// Absent = `lottieDefaultSpeed`. Never clamped here — see
+    /// `lottieMinSpeed`/`lottieMaxSpeed`.
+    public let speed: Double?
+    public let overrides: [NodeOverride<LottieOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, url: ThemePair, loop: Bool? = nil, autoplay: Bool? = nil,
+                speed: Double? = nil, overrides: [NodeOverride<LottieOverrideProps>]? = nil,
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.url = url; self.loop = loop; self.autoplay = autoplay; self.speed = speed
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, url, loop, autoplay, speed, overrides, visibility, fallback
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        url = try container.decode(ThemePair.self, forKey: .url)
+        loop = try container.decodeIfPresent(Bool.self, forKey: .loop)
+        autoplay = try container.decodeIfPresent(Bool.self, forKey: .autoplay)
+        speed = try container.decodeIfPresent(Double.self, forKey: .speed)
+        overrides = try container.decodeIfPresent([NodeOverride<LottieOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
 /// Registry name -> SF Symbol. Unknown names return nil and render nothing:
 /// leniency is deliberate so a newer paywall does not break an older app.
 func sfSymbolName(for name: String) -> String? {
@@ -1166,6 +1326,8 @@ public enum BuilderNode: Decodable {
     case stickyFooter(StickyFooterProps)
     case countdown(CountdownProps)
     case carousel(CarouselProps)
+    case video(VideoProps)
+    case lottie(LottieProps)
     case unknown(id: String, visibility: Visibility?, fallback: BuilderNodeBox?)
 
     private enum TypeKey: String, CodingKey { case type }
@@ -1190,6 +1352,8 @@ public enum BuilderNode: Decodable {
         case "stickyFooter": self = .stickyFooter(try StickyFooterProps(from: decoder))
         case "countdown": self = .countdown(try CountdownProps(from: decoder))
         case "carousel": self = .carousel(try CarouselProps(from: decoder))
+        case "video": self = .video(try VideoProps(from: decoder))
+        case "lottie": self = .lottie(try LottieProps(from: decoder))
         default:
             let container = try decoder.container(keyedBy: UnknownKeys.self)
             let id = try container.decode(String.self, forKey: .id)
@@ -1222,6 +1386,8 @@ public enum BuilderNode: Decodable {
         case .stickyFooter(let p): return p.id
         case .countdown(let p): return p.id
         case .carousel(let p): return p.id
+        case .video(let p): return p.id
+        case .lottie(let p): return p.id
         case .unknown(let id, _, _): return id
         }
     }
@@ -1248,6 +1414,8 @@ public enum BuilderNode: Decodable {
         case .stickyFooter(let p): return p.visibility
         case .countdown(let p): return p.visibility
         case .carousel(let p): return p.visibility
+        case .video(let p): return p.visibility
+        case .lottie(let p): return p.visibility
         case .unknown(_, let v, _): return v
         }
     }

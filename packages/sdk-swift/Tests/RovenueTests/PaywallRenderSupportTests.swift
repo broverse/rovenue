@@ -233,6 +233,31 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertEqual(
             Double(carouselMinAutoAdvanceSeconds),
             try XCTUnwrap(defaults["CAROUSEL_MIN_AUTO_ADVANCE_SECONDS"] as? Double))
+        // Wave D2's media defaults, all nine, by value — mutation-checked in
+        // the task report by flipping `videoDefaultMuted`.
+        XCTAssertEqual(videoDefaultAutoplay, try XCTUnwrap(defaults["VIDEO_DEFAULT_AUTOPLAY"] as? Bool))
+        XCTAssertEqual(videoDefaultLoop, try XCTUnwrap(defaults["VIDEO_DEFAULT_LOOP"] as? Bool))
+        XCTAssertEqual(videoDefaultMuted, try XCTUnwrap(defaults["VIDEO_DEFAULT_MUTED"] as? Bool))
+        XCTAssertEqual(
+            videoDefaultShowsControls, try XCTUnwrap(defaults["VIDEO_DEFAULT_SHOWS_CONTROLS"] as? Bool))
+        XCTAssertEqual(lottieDefaultLoop, try XCTUnwrap(defaults["LOTTIE_DEFAULT_LOOP"] as? Bool))
+        XCTAssertEqual(lottieDefaultAutoplay, try XCTUnwrap(defaults["LOTTIE_DEFAULT_AUTOPLAY"] as? Bool))
+        XCTAssertEqual(lottieDefaultSpeed, try XCTUnwrap(defaults["LOTTIE_DEFAULT_SPEED"] as? Double))
+        XCTAssertEqual(lottieMinSpeed, try XCTUnwrap(defaults["LOTTIE_MIN_SPEED"] as? Double))
+        XCTAssertEqual(lottieMaxSpeed, try XCTUnwrap(defaults["LOTTIE_MAX_SPEED"] as? Double))
+    }
+
+    /// The brief's own spelling of the sync test, kept verbatim alongside the
+    /// exhaustive one above so the two named constants it pins cannot be
+    /// quietly dropped from the big test.
+    func test_nativeMediaDefaultsMatchTheSharedFixtureByValue() throws {
+        let defaults = try fixtureDefaults()
+        XCTAssertEqual(videoDefaultMuted, defaults["VIDEO_DEFAULT_MUTED"] as? Bool)
+        XCTAssertEqual(lottieDefaultSpeed, defaults["LOTTIE_DEFAULT_SPEED"] as? Double)
+    }
+
+    private func fixtureDefaults() throws -> [String: Any] {
+        try XCTUnwrap(RenderFixtures.load()["defaults"] as? [String: Any])
     }
 
     // MARK: - scroll container + pinned-footer layout (wave C)
@@ -810,6 +835,47 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertFalse(autoAdvanceDecision(visibility: onScreenState(), autoAdvanceSeconds: nil))
         XCTAssertFalse(autoAdvanceDecision(visibility: onScreenState(), autoAdvanceSeconds: 0))
         XCTAssertFalse(autoAdvanceDecision(visibility: onScreenState(), pageCount: 1))
+    }
+
+    // MARK: - video (wave D2)
+    //
+    // The `lottie` half of this wave lives in PaywallLottieTests.swift, not
+    // here: a host's registered renderer returns a SwiftUI `AnyView`, so that
+    // file must `import SwiftUI` — and SwiftUI ships its own `Visibility`,
+    // which would make this file's `carouselPage(_:visibility:)` helper
+    // ambiguous. The module is itself named `Rovenue` and so is a class inside
+    // it, so `Rovenue.Visibility` does not resolve either; separate files is
+    // the only clean disambiguation.
+
+    private var bareVideoProps: VideoProps {
+        VideoProps(id: "v1", url: ThemePair(light: "https://x/a.mp4", dark: nil))
+    }
+
+    /// A parsable source counts as a carousel page BEFORE anything is loaded,
+    /// because AVFoundation answers "did it load?" asynchronously — that is
+    /// the honest limit, stated. See the `.video` arm of `nodeRendersContent`.
+    func test_aVideoWithAnUnparsableSourceIsNotACarouselPage() throws {
+        let ctx = try makeCtx(appVersion: nil)
+        XCTAssertTrue(nodeRendersContent(.video(bareVideoProps), ctx: ctx, cell: nil))
+        let unparsable = VideoProps(id: "v1", url: ThemePair(light: "", dark: nil))
+        XCTAssertFalse(nodeRendersContent(.video(unparsable), ctx: ctx, cell: nil))
+    }
+
+    /// `video`'s playback rule, through the SAME function
+    /// `VideoPlayerNodeView` drives its `AVPlayer` with.
+    func test_aVideoPausesOffScreenAndInTheBackground() {
+        XCTAssertEqual(videoPlaybackCommand(visibility: onScreenState(), autoplay: true), .play)
+        XCTAssertEqual(videoPlaybackCommand(visibility: offScreenState(), autoplay: true), .pause)
+        XCTAssertEqual(
+            videoPlaybackCommand(visibility: onScreenState(appIsForeground: false), autoplay: true), .pause)
+    }
+
+    /// `autoplay: false` is never STARTED by scrolling into view — but it is
+    /// still PAUSED by scrolling away, which is what makes the audible half of
+    /// "off-screen means paused" hold for a clip the reader started by hand.
+    func test_aNonAutoplayVideoIsLeftAloneOnScreenButStillPausedOffIt() {
+        XCTAssertEqual(videoPlaybackCommand(visibility: onScreenState(), autoplay: false), .leaveAlone)
+        XCTAssertEqual(videoPlaybackCommand(visibility: offScreenState(), autoplay: false), .pause)
     }
 
     /// A 300x600 stand-in for the paywall's scroll viewport, the same rect the

@@ -233,6 +233,39 @@ public func applyOverrides(_ props: CarouselProps, active: OverrideActiveConditi
     return result
 }
 
+/// Unlike every other node type here, what an active override swaps is the
+/// node's SOURCE, not a colour or a label — `OVERRIDABLE_PROP_KEYS.video`
+/// whitelists `url` and `posterUrl`. `url` is non-optional on the node but
+/// optional on the patch, so the `??` keeps the authored source whenever the
+/// patch omits it, exactly like every other field here.
+public func applyOverrides(_ props: VideoProps, active: OverrideActiveConditions) -> VideoProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = VideoProps(
+            id: result.id, url: patch.url ?? result.url,
+            posterUrl: patch.posterUrl ?? result.posterUrl,
+            autoplay: result.autoplay, loop: result.loop, muted: result.muted,
+            showsControls: result.showsControls, aspectRatio: result.aspectRatio,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
+public func applyOverrides(_ props: LottieProps, active: OverrideActiveConditions) -> LottieProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = LottieProps(
+            id: result.id, url: patch.url ?? result.url,
+            loop: result.loop, autoplay: result.autoplay, speed: result.speed,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
 /// Dispatches to the node's own `applyOverrides` overload and re-wraps the
 /// result in the same `BuilderNode` case. `.unknown` nodes carry no
 /// overrides field at all and pass through unchanged.
@@ -253,6 +286,8 @@ public func applyOverrides(_ node: BuilderNode, active: OverrideActiveConditions
     case .stickyFooter(let p): return .stickyFooter(applyOverrides(p, active: active))
     case .countdown(let p): return .countdown(applyOverrides(p, active: active))
     case .carousel(let p): return .carousel(applyOverrides(p, active: active))
+    case .video(let p): return .video(applyOverrides(p, active: active))
+    case .lottie(let p): return .lottie(applyOverrides(p, active: active))
     case .unknown: return node
     }
 }

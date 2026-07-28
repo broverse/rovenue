@@ -8,6 +8,8 @@
 //  without a handler; the renderer NEVER opens URLs itself.
 //
 
+import AVFoundation
+import AVKit
 import Combine
 import Foundation
 import SwiftUI
@@ -718,6 +720,8 @@ struct BuilderNodeView: View {
         case .stickyFooter(let p): StickyFooterView(props: p, ctx: ctx, cell: cell)
         case .countdown(let p): CountdownView(props: p, ctx: ctx, cell: cell)
         case .carousel(let p): CarouselView(props: p, ctx: ctx, cell: cell)
+        case .video(let p): VideoNodeView(props: p, ctx: ctx, cell: cell)
+        case .lottie(let p): LottieNodeView(props: p, ctx: ctx, cell: cell)
         case .unknown(_, _, let fallback):
             if let fallback {
                 BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
@@ -1394,6 +1398,25 @@ func nodeRendersContent(_ node: BuilderNode, ctx: PaywallRenderContext, cell: Ce
     case .carousel(let p):
         return !renderableCarouselPages(p.children, ctx: ctx, cell: cell).isEmpty
             || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
+    case .video(let p):
+        // KNOWN AND DELIBERATE PARTIAL ANSWER. Only the SYNCHRONOUS half of
+        // "will this video draw?" is decidable here: an unparsable source
+        // URL. Whether the clip itself loads is answered asynchronously by
+        // AVFoundation, long after this predicate ran and after the carousel
+        // fixed its page and dot counts — so a video that fails AFTER mount
+        // still leaves the blank page plus phantom dot wave D1's rule exists
+        // to prevent. The web renderer has the identical gap for the
+        // identical reason (see `Video`'s doc comment in nodes.tsx); closing
+        // it needs a page list that can shrink after mount, which is a
+        // cross-platform change, not an iOS one.
+        return videoHasParsableSource(p, dark: ctx.dark)
+            || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
+    case .lottie(let p):
+        // Fully decidable, unlike `video` above: whether a host player is
+        // registered is process state already in hand, so an unregistered
+        // lottie costs no phantom dot.
+        return lottieCanRender(p, dark: ctx.dark)
+            || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
     case .unknown(_, _, let fallback):
         return fallbackRendersContent(fallback, ctx: ctx, cell: cell)
     default:
@@ -1605,6 +1628,320 @@ struct CarouselView: View {
             stopTicking()
         } else {
             currentPage = next
+        }
+    }
+}
+
+// MARK: - video / lottie (wave D2)
+
+/// What to do with a `video`'s player right now.
+///
+/// Three states, not two, and the third is the point: `leaveAlone` is what
+/// keeps a NON-autoplay video the reader started by hand from being re-paused
+/// by every scroll frame. Pausing is unconditional the moment the node stops
+/// running (off screen, or the app sent to the background) — that is the
+/// wave's rule, and it must hold for a clip the reader started as much as for
+/// one that started itself, because the audible half of "off-screen means
+/// paused" is what a reader actually notices.
+enum VideoPlaybackCommand: Equatable {
+    case play
+    case pause
+    case leaveAlone
+}
+
+/// The single playback rule a `video` obeys, a pure free function for exactly
+/// the reason `countdownShouldTick` and `nextCarouselPage` are: a SwiftUI
+/// `body` is not inspectable in this package, so a rule that lived inside the
+/// view could not be tested. `VideoPlaybackController` is driven by THIS
+/// function, so the tests exercise the rule the view obeys.
+///
+/// `visibility` is the SHARED signal (NodeVisibility.swift) that `countdown`
+/// and `carousel` already consume — this wave adds a third consumer, not a
+/// third copy.
+///
+/// `autoplay` is the author's standing instruction and is honoured: a node
+/// that said `autoplay: false` is never STARTED by scrolling into view. Note
+/// this is stricter than the web renderer, whose play/pause effect currently
+/// calls `play()` on visibility regardless of the `autoplay` attribute —
+/// raised in the task report rather than mirrored, since mirroring it would
+/// leave `autoplay` decoded and never read on this platform.
+func videoPlaybackCommand(visibility: NodeVisibilityState, autoplay: Bool) -> VideoPlaybackCommand {
+    guard isNodeRunning(visibility) else { return .pause }
+    return autoplay ? .play : .leaveAlone
+}
+
+/// Whether a `video`'s theme-resolved source URL parses at all — the only half
+/// of "will this draw?" that is knowable before the player exists. See the
+/// `.video` arm of `nodeRendersContent` for what this deliberately does not
+/// cover.
+func videoHasParsableSource(_ props: VideoProps, dark: Bool) -> Bool {
+    URL(string: themeValue(props.url, dark: dark)) != nil
+}
+
+/// Owns the ONE `AVPlayer` behind a `video` node, plus the two asynchronous
+/// facts SwiftUI needs from it: whether the item failed to load, and whether
+/// it is ready to show a frame (which is what retires the poster).
+///
+/// A class, held by `@StateObject`, precisely so pausing and resuming go
+/// through `pause()`/`play()` on a player that OUTLIVES a body re-evaluation.
+/// Rebuilding the player instead would restart playback from zero on every
+/// scroll — a different and worse behaviour than "resume where it left off",
+/// and the reason the web sibling drives its own `<video>` element rather than
+/// remounting it.
+final class VideoPlaybackController: ObservableObject {
+    /// The item failed to load. Flips the node onto the ordinary
+    /// `fallback`-else-nothing path, the same one every other node type uses
+    /// when it cannot draw.
+    @Published private(set) var failed = false
+    /// The first frame is available, so a poster is no longer covering an
+    /// empty rectangle.
+    @Published private(set) var readyToPlay = false
+
+    let player: AVPlayer
+
+    private let loop: Bool
+    /// The last command applied, so the loop restart below cannot resurrect a
+    /// clip that was paused for being off screen: reaching the end while
+    /// paused must leave it paused.
+    private var shouldBePlaying = false
+    private var cancellables = Set<AnyCancellable>()
+
+    init(url: URL, loop: Bool, muted: Bool) {
+        self.loop = loop
+        let item = AVPlayerItem(url: url)
+        player = AVPlayer(playerItem: item)
+        player.isMuted = muted
+        // Looping is done by hand on the end notification rather than with an
+        // `AVPlayerLooper`, which needs an `AVQueuePlayer` and a second item —
+        // more machinery than a paywall clip warrants, and it would take the
+        // restart out of reach of the `shouldBePlaying` guard.
+        player.actionAtItemEnd = .pause
+
+        item.publisher(for: \.status)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                switch status {
+                case .failed: self?.failed = true
+                case .readyToPlay: self?.readyToPlay = true
+                default: break
+                }
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: item)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.handleReachedEnd() }
+            .store(in: &cancellables)
+    }
+
+    /// Applies the verdict from `videoPlaybackCommand`. Idempotent in every
+    /// direction — it is called on appear and on every visibility report.
+    func apply(_ command: VideoPlaybackCommand) {
+        switch command {
+        case .play:
+            shouldBePlaying = true
+            player.play()
+        case .pause:
+            shouldBePlaying = false
+            player.pause()
+        case .leaveAlone:
+            break
+        }
+    }
+
+    private func handleReachedEnd() {
+        guard loop, shouldBePlaying else { return }
+        player.seek(to: .zero)
+        player.play()
+    }
+}
+
+/// Renders `video`.
+///
+/// Split in two: this outer view answers the one question that IS decidable
+/// before a player exists — does the source URL parse? — and falls back
+/// otherwise, mirroring every other node type's "cannot draw this" contract.
+/// Everything past that point needs the player, and lives in
+/// `VideoPlayerNodeView`, whose `@StateObject` must be initialised with a real
+/// URL.
+struct VideoNodeView: View {
+    let props: VideoProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    var body: some View {
+        if let url = URL(string: themeValue(props.url, dark: ctx.dark)) {
+            VideoPlayerNodeView(props: props, ctx: ctx, cell: cell, url: url)
+        } else if let fallback = props.fallback {
+            BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
+        }
+    }
+}
+
+struct VideoPlayerNodeView: View {
+    let props: VideoProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    @StateObject private var controller: VideoPlaybackController
+    /// Last state reported by `.nodeVisibility` — starts at the fail-open
+    /// `unknown`, so an autoplaying video starts the moment it appears rather
+    /// than waiting for a first measurement.
+    @State private var visibility = NodeVisibilityState.unknown
+
+    init(props: VideoProps, ctx: PaywallRenderContext, cell: CellScope?, url: URL) {
+        self.props = props
+        self.ctx = ctx
+        self.cell = cell
+        _controller = StateObject(wrappedValue: VideoPlaybackController(
+            url: url,
+            loop: props.loop ?? videoDefaultLoop,
+            muted: props.muted ?? videoDefaultMuted))
+    }
+
+    private var autoplay: Bool { props.autoplay ?? videoDefaultAutoplay }
+    private var showsControls: Bool { props.showsControls ?? videoDefaultShowsControls }
+
+    var body: some View {
+        if controller.failed {
+            // Same contract as every other node type, and the reason it is
+            // spelled here rather than pre-mount: this fact arrives
+            // asynchronously (see `nodeRendersContent`'s `.video` arm).
+            if let fallback = props.fallback {
+                BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
+            }
+        } else {
+            ratioedSurface
+                .onDisappear { controller.apply(.pause) }
+                // Spec §5 rule 1, both halves, through the SAME modifier
+                // `CountdownView` and `CarouselView` use. Pause/resume goes
+                // through the player's own methods — the view is never
+                // rebuilt to stop it, which would restart the clip from zero.
+                .nodeVisibility { state in
+                    visibility = state
+                    controller.apply(videoPlaybackCommand(visibility: state, autoplay: autoplay))
+                }
+        }
+    }
+
+    /// An ABSENT `aspectRatio` applies no ratio modifier at all, so the
+    /// source's own dimensions govern — never a substituted number, and never
+    /// `.aspectRatio(nil, contentMode:)`, which is a different instruction
+    /// (fit to the child's ideal ratio) rather than "no instruction".
+    @ViewBuilder
+    private var ratioedSurface: some View {
+        if let ratio = props.aspectRatio {
+            surface.aspectRatio(CGFloat(ratio), contentMode: .fit)
+        } else {
+            surface
+        }
+    }
+
+    @ViewBuilder
+    private var surface: some View {
+        ZStack {
+            playerSurface
+            // The poster covers the player only until the first frame is
+            // available, which is what `poster` means on the web element too.
+            if let posterUrl = props.posterUrl, !controller.readyToPlay,
+               let url = URL(string: themeValue(posterUrl, dark: ctx.dark)) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    Color.clear
+                }
+            }
+        }
+    }
+
+    /// `showsControls: false` (the shared default) needs a surface with NO
+    /// transport controls, which is `AVPlayerLayer` — AVFoundation, not AVKit.
+    /// The `true` branch is the one place AVKit is used, because Apple's
+    /// transport controls have no other public entry point; it is a system
+    /// framework, so this adds no dependency.
+    ///
+    /// macOS takes the AVKit branch unconditionally: `UIViewRepresentable` is
+    /// iOS-only, and this package declares a macOS platform purely so
+    /// `swift test` can build and run on a Mac host — macOS never renders this
+    /// paywall UI in production (the same caveat `CarouselView` states about
+    /// `PageTabViewStyle`).
+    @ViewBuilder
+    private var playerSurface: some View {
+        #if os(iOS)
+        if showsControls {
+            VideoPlayer(player: controller.player)
+        } else {
+            PlayerLayerView(player: controller.player)
+        }
+        #else
+        VideoPlayer(player: controller.player)
+        #endif
+    }
+}
+
+#if os(iOS)
+/// A bare `AVPlayerLayer` surface: video, no controls, no chrome.
+struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerLayerHostView {
+        let view = PlayerLayerHostView()
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = playerLayerVideoGravity
+        return view
+    }
+
+    func updateUIView(_ view: PlayerLayerHostView, context: Context) {
+        // Re-assigned rather than assumed: a body re-evaluation may hand over
+        // a different controller's player (a rebuilt node), and an
+        // `AVPlayerLayer` still pointing at the old one would freeze.
+        if view.playerLayer.player !== player {
+            view.playerLayer.player = player
+        }
+    }
+}
+
+/// Letterbox rather than crop: a paywall clip is authored content, and
+/// silently cutting its edges off is worse than showing bars. Matches the
+/// web element's default `object-fit: contain`.
+private let playerLayerVideoGravity = AVLayerVideoGravity.resizeAspect
+
+/// A `UIView` whose backing layer IS the `AVPlayerLayer`, so the layer resizes
+/// with the view for free — the alternative (a sublayer) needs manual frame
+/// bookkeeping in `layoutSubviews`.
+final class PlayerLayerHostView: UIView {
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+
+    var playerLayer: AVPlayerLayer {
+        // Safe by construction: `layerClass` above guarantees the type.
+        guard let layer = layer as? AVPlayerLayer else { return AVPlayerLayer() }
+        return layer
+    }
+}
+#endif
+
+/// Renders `lottie` by handing a `LottieRenderRequest` to whatever player the
+/// host registered (see RovenuePaywallLottie.swift). With nothing registered —
+/// or an unparsable URL — this draws `fallback`, else nothing, which is the
+/// machinery every node type already has rather than a new failure mode.
+///
+/// `playing` rides the SAME visibility signal as `countdown`, `carousel` and
+/// `video`, so a host player that honours it pauses off screen for free. This
+/// view does not (and cannot) pause the host's player itself.
+struct LottieNodeView: View {
+    let props: LottieProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    @State private var visibility = NodeVisibilityState.unknown
+
+    var body: some View {
+        if let content = lottieContentView(
+            props: props, playing: isNodeRunning(visibility), dark: ctx.dark) {
+            content
+                .nodeVisibility { state in visibility = state }
+        } else if let fallback = props.fallback {
+            BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
         }
     }
 }
