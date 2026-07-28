@@ -124,45 +124,74 @@ class ImageCacheTest {
         assertTrue(IMAGE_CACHE_MAX_BYTES > BYTES_PER_MIB, "a sub-megabyte bitmap cache would be pointless")
     }
 
-    // ---- sampleSizeFor --------------------------------------------------
+    // ---- sampleSizeForWidth ---------------------------------------------
+    //
+    // These were two-dimension cases against the previous
+    // sampleSizeFor(sourceW, sourceH, targetW, targetH). That signature is
+    // gone, and deliberately so: a paywall `image` is MATCH_PARENT wide by
+    // WRAP_CONTENT tall with adjustViewBounds, so its measured HEIGHT comes
+    // from the decoded drawable — a decode that waited for it waited on its
+    // own output and no image ever loaded. Each case below is carried over
+    // as the width-only question it was really asking; the source height
+    // that used to be an argument is stated in the comments instead,
+    // precisely to show it cannot change any answer.
 
     @Test
-    fun `sampleSizeFor halves until the source fits the target`() {
-        assertEquals(1, sampleSizeFor(100, 100, 100, 100))
-        assertEquals(2, sampleSizeFor(200, 200, 100, 100))
-        // NOTE: the task brief asserted 4 here, but the algorithm it also
-        // specifies (matching the "largest power of two that still covers
-        // the target" doc comment on sampleSizeFor) computes 8: 800/8=100
-        // still covers the 100 target, and 800/16=50 does not. 4 would
-        // leave the image 2x oversized versus the documented intent.
-        // Verified by hand and by executing this assertion against the
-        // as-specified implementation before changing it.
-        assertEquals(8, sampleSizeFor(800, 800, 100, 100))
+    fun `sampleSizeForWidth halves until the source fits the target width`() {
+        assertEquals(1, sampleSizeForWidth(sourceWidth = 100, targetWidth = 100))
+        assertEquals(2, sampleSizeForWidth(sourceWidth = 200, targetWidth = 100))
+        // "Largest power of two that still covers the target": 800/8 = 100
+        // still covers the 100 target and 800/16 = 50 does not, so 8 — not
+        // 4, which would leave the image 2x oversized versus the documented
+        // intent.
+        assertEquals(8, sampleSizeForWidth(sourceWidth = 800, targetWidth = 100))
     }
 
     @Test
-    fun `sampleSizeFor never returns less than one for a zero target`() {
-        assertEquals(1, sampleSizeFor(800, 800, 0, 0))
+    fun `sampleSizeForWidth returns full quality for an unknown target, never a blurry guess`() {
+        // A view that has not been measured reports 0. Guessing a sample
+        // size there would ship a permanently blurry image, so the answer is
+        // full size and the caller's job is to not decode until it knows.
+        assertEquals(IMAGE_SAMPLE_SIZE_FULL, sampleSizeForWidth(sourceWidth = 800, targetWidth = 0))
+        assertEquals(IMAGE_SAMPLE_SIZE_FULL, sampleSizeForWidth(sourceWidth = 800, targetWidth = -1))
+        assertEquals(
+            IMAGE_SAMPLE_SIZE_FULL,
+            sampleSizeForWidth(sourceWidth = 800, targetWidth = UNMEASURED_VIEW_DIMENSION_PX),
+        )
     }
 
     @Test
-    fun `sampleSizeFor downsamples a real hero into a real slot`() {
-        // The §2 claim, at the sizes it was written about: a 2000px-wide
-        // hero landing in a phone-width, ~300px-tall slot. 2000/4 = 500 >=
-        // 300 wide and 1200/4 = 300 >= 300 tall; the next step (8) would
-        // give 150px of height for a 300px slot, so 4 is the answer.
-        assertEquals(4, sampleSizeFor(2000, 1200, 300, 300))
-        // And a 1080x1920 page into a 1080-wide phone slot is already the
-        // right size — never blur an image that fits.
-        assertEquals(1, sampleSizeFor(1080, 1920, 1080, 1920))
+    fun `sampleSizeForWidth downsamples a real hero into a real slot`() {
+        // The §2 claim at the sizes it was written about: a 2000x1200 hero
+        // landing in a ~300px-wide slot. 2000/4 = 500 >= 300; the next step
+        // (8) gives 250 for a 300px slot, so 4.
+        assertEquals(4, sampleSizeForWidth(sourceWidth = 2000, targetWidth = 300))
+        // A 1080x1920 carousel page into a 1080-wide phone slot is already
+        // the right size — never blur an image that fits.
+        assertEquals(IMAGE_SAMPLE_SIZE_FULL, sampleSizeForWidth(sourceWidth = 1080, targetWidth = 1080))
     }
 
     @Test
-    fun `sampleSizeFor lets the short axis govern an asymmetric target`() {
-        // Both axes must still cover, so a wide-but-short target cannot
-        // downsample past what the width needs.
-        assertEquals(1, sampleSizeFor(2000, 100, 100, 100))
-        assertEquals(2, sampleSizeFor(400, 400, 200, 100))
+    fun `sampleSizeForWidth never downsamples a source narrower than its slot`() {
+        // Was "the short axis governs an asymmetric target". The asymmetry
+        // it guarded against is now structurally impossible, but the rule it
+        // protected is not: a source that is already smaller than the slot
+        // must be decoded whole. Both of these have a source HEIGHT the old
+        // signature would have sampled on (100 tall into a 100 slot, 400
+        // tall into a 300 slot); width alone must still refuse to shrink.
+        assertEquals(IMAGE_SAMPLE_SIZE_FULL, sampleSizeForWidth(sourceWidth = 100, targetWidth = 300))
+        assertEquals(IMAGE_SAMPLE_SIZE_FULL, sampleSizeForWidth(sourceWidth = 2000, targetWidth = 1200))
+    }
+
+    @Test
+    fun `sampleSizeForWidth answers a WRAP_CONTENT slot, whose height is unknowable before the decode`() {
+        // The regression case, stated at this level: buildImage's ImageView
+        // is MATCH_PARENT wide and WRAP_CONTENT tall, so at decode time the
+        // ONLY thing known about the slot is its width. That must be enough
+        // to produce a real sample size — if it were not, downsampling could
+        // never happen for the common case (`height` is optional in the
+        // shared schema).
+        assertEquals(4, sampleSizeForWidth(sourceWidth = 1600, targetWidth = 400))
     }
 
     private companion object {

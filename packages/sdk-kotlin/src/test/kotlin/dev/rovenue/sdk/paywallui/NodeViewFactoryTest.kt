@@ -22,6 +22,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.mockkConstructor
 import io.mockk.mockkStatic
+import io.mockk.slot
 import io.mockk.unmockkConstructor
 import io.mockk.unmockkStatic
 import io.mockk.verify
@@ -742,6 +743,95 @@ class NodeViewFactoryTest {
         assertEquals(CAROUSEL_UNMEASURED_HEIGHT_PX, tallestPageHeight(listOf(-5)))
     }
 
+    // ---- the width the max-of-pages pass measures at ---------------------
+    //
+    // The pass used MeasureSpec.getSize(widthMeasureSpec) directly, which is
+    // the carousel's OUTER width: pages were measured wider than the box
+    // they lay out in, so text wrapped at the wrong point and the tallest
+    // height came out short by however much padding was ignored. And under
+    // an UNSPECIFIED parent getSize() is 0, so EXACTLY-0 measured every page
+    // as zero-wide and the carousel collapsed entirely.
+
+    @Test
+    fun `a carousel page is measured inside the carousel's padding, not at its outer width`() {
+        assertEquals(
+            CAROUSEL_OUTER_WIDTH_PX - CAROUSEL_HORIZONTAL_PADDING_PX,
+            carouselPageMeasureWidth(CAROUSEL_OUTER_WIDTH_PX, CAROUSEL_HORIZONTAL_PADDING_PX),
+        )
+        assertEquals(
+            CAROUSEL_OUTER_WIDTH_PX,
+            carouselPageMeasureWidth(CAROUSEL_OUTER_WIDTH_PX, NO_PADDING_PX),
+        )
+    }
+
+    @Test
+    fun `padding wider than the carousel measures at zero, never at a negative width`() {
+        assertEquals(
+            CAROUSEL_UNMEASURED_WIDTH_PX,
+            carouselPageMeasureWidth(CAROUSEL_HORIZONTAL_PADDING_PX, CAROUSEL_OUTER_WIDTH_PX),
+        )
+    }
+
+    @Test
+    fun `a carousel page is measured EXACTLY only when the carousel actually has a width`() {
+        assertEquals(
+            View.MeasureSpec.EXACTLY,
+            carouselPageMeasureMode(View.MeasureSpec.EXACTLY, CAROUSEL_OUTER_WIDTH_PX),
+        )
+        assertEquals(
+            View.MeasureSpec.EXACTLY,
+            carouselPageMeasureMode(View.MeasureSpec.AT_MOST, CAROUSEL_OUTER_WIDTH_PX),
+        )
+    }
+
+    @Test
+    fun `an UNSPECIFIED parent or a zero width lets the page state its own width`() {
+        // EXACTLY 0 here is what collapsed the whole carousel: every page
+        // measures zero-wide, so every page reports zero height.
+        assertEquals(
+            View.MeasureSpec.UNSPECIFIED,
+            carouselPageMeasureMode(View.MeasureSpec.UNSPECIFIED, CAROUSEL_UNMEASURED_WIDTH_PX),
+        )
+        assertEquals(
+            View.MeasureSpec.UNSPECIFIED,
+            carouselPageMeasureMode(View.MeasureSpec.UNSPECIFIED, CAROUSEL_OUTER_WIDTH_PX),
+        )
+        assertEquals(
+            View.MeasureSpec.UNSPECIFIED,
+            carouselPageMeasureMode(View.MeasureSpec.EXACTLY, CAROUSEL_UNMEASURED_WIDTH_PX),
+        )
+    }
+
+    /**
+     * Closes the indirection gap the two `carouselPageLayoutSize()` tests
+     * above leave open: they pin what the helper RETURNS, but nothing
+     * asserted the adapter that builds real page holders actually calls it —
+     * a holder built with an inline `WRAP_CONTENT` would have passed both.
+     *
+     * `ViewGroup.LayoutParams` cannot be inspected here (the stub
+     * `android.jar` constructor has no body, so a constructed LayoutParams
+     * reports 0/0 — see [carouselPageLayoutSize]'s own doc), so the
+     * assertion is on the CALL: the file facade's top-level functions are
+     * mocked, the adapter is asked for a real holder, and the helper must
+     * have been consulted.
+     */
+    @Test
+    fun `the page adapter builds every holder from carouselPageLayoutSize, not its own literals`() {
+        mockkStatic(NODE_VIEW_FACTORY_FILE_CLASS)
+        try {
+            every { carouselPageLayoutSize() } returns
+                CarouselPageSize(MATCH_PARENT_LAYOUT_DIMENSION, MATCH_PARENT_LAYOUT_DIMENSION)
+            val parent = mockk<ViewGroup>(relaxed = true)
+            every { parent.context } returns mockContext()
+
+            CarouselPageAdapter(pages = emptyList()).onCreateViewHolder(parent, ADAPTER_DEFAULT_VIEW_TYPE)
+
+            verify(exactly = 1) { carouselPageLayoutSize() }
+        } finally {
+            unmockkStatic(NODE_VIEW_FACTORY_FILE_CLASS)
+        }
+    }
+
     // ---- carousel dot colour (I9) ---------------------------------------
     //
     // resolvedInkTintColorInt is already pinned above; what was NOT pinned
@@ -793,40 +883,150 @@ class NodeViewFactoryTest {
     //
     // buildImage calls loadImageInto one statement after constructing the
     // ImageView, so on a first render the view has never been measured and
-    // sampleSizeFor (correctly) answers a zero target with "full size".
-    // Decoding there meant downsampling never happened at all. These pin
-    // that the fetch waits for a layout pass exactly when it has to, and
-    // does not when it does not. The scope is cancelled up front so the
-    // measured case cannot start a real network fetch from a unit test —
-    // the assertion is about WHEN the work is scheduled, not about the
-    // fetch itself.
+    // sampleSizeForWidth (correctly) answers a zero target with "full
+    // size". Decoding there meant downsampling never happened at all, so
+    // the decode is deferred until the slot has a measured WIDTH.
+    //
+    // WHY THESE ASSERT THE DECODE AND NOT JUST THE LISTENER: the tests this
+    // section replaces pinned only WHEN a ViewTreeObserver listener gets
+    // registered, and assumed a slot eventually reports a size. Production
+    // waited on width AND height; an image with no authored `height` is
+    // WRAP_CONTENT tall with adjustViewBounds, so with no drawable yet it
+    // measures 0 tall forever and the wait could never end. Those tests
+    // stayed green while no image ever loaded on a device. Every test below
+    // therefore drives the captured listener with real geometry and asserts
+    // the DECODE ITSELF is reached — loadImageInto takes its decode step as
+    // a parameter for exactly this reason, and a recorder is passed in place
+    // of the network fetch.
 
     private fun cancelledScope() = CoroutineScope(Job()).also { it.cancel() }
 
-    @Test
-    fun `loadImageInto defers the decode until the target view has a measured size`() {
+    /** A measured [ImageView] test double plus its (mocked) observer, wired
+     *  so the layout and attach-state listeners `loadImageInto` registers
+     *  can be captured and driven by hand. */
+    private class ImageSlotFixture {
         val observer = mockk<ViewTreeObserver>(relaxed = true)
         val imageView = mockk<ImageView>(relaxed = true)
-        every { imageView.width } returns UNMEASURED_VIEW_DIMENSION_PX
-        every { imageView.height } returns UNMEASURED_VIEW_DIMENSION_PX
-        every { imageView.viewTreeObserver } returns observer
+        val layoutListener = slot<ViewTreeObserver.OnGlobalLayoutListener>()
+        val attachListener = slot<View.OnAttachStateChangeListener>()
+        val decodedWidths = mutableListOf<Int>()
 
-        loadImageInto(imageView, "https://example.test/rovenue-unmeasured.png", cancelledScope())
+        init {
+            every { imageView.viewTreeObserver } returns observer
+            every { observer.isAlive } returns true
+            every { observer.addOnGlobalLayoutListener(capture(layoutListener)) } just Runs
+            every { imageView.addOnAttachStateChangeListener(capture(attachListener)) } just Runs
+            measure(UNMEASURED_VIEW_DIMENSION_PX, UNMEASURED_VIEW_DIMENSION_PX)
+        }
 
-        verify(exactly = 1) { observer.addOnGlobalLayoutListener(any()) }
+        fun measure(width: Int, height: Int) {
+            every { imageView.width } returns width
+            every { imageView.height } returns height
+        }
+
+        /** Records the target width instead of fetching, so a unit test can
+         *  assert the deferred work completed without any network. */
+        fun recorder() = ImageDecodeRequest { _, _, _, targetWidth -> decodedWidths += targetWidth }
+    }
+
+    /**
+     * THE REGRESSION TEST. Simulates the geometry `buildImage` actually
+     * produces for an `image` with no authored height — MATCH_PARENT width
+     * resolves on the first layout pass, WRAP_CONTENT height stays 0 because
+     * the drawable that would give it a height is the very thing being
+     * decoded — and asserts the decode still happens.
+     *
+     * Restore the `&& imageView.height > 0` half of the wait and this fails:
+     * decodedWidths stays empty forever, which is what shipped.
+     */
+    @Test
+    fun `loadImageInto decodes once the WIDTH is measured, while the height is still zero`() {
+        val slot = ImageSlotFixture()
+        val scope = CoroutineScope(Job())
+
+        loadImageInto(slot.imageView, "https://example.test/rovenue-wrap-content.png", scope, slot.recorder())
+
+        // Pass 1: the parent has not laid out yet, so nothing is measured.
+        slot.layoutListener.captured.onGlobalLayout()
+        assertTrue(slot.decodedWidths.isEmpty(), "an unmeasured slot must not fix a sample size")
+
+        // Pass 2: the real WRAP_CONTENT-height case.
+        slot.measure(width = MEASURED_SLOT_PX, height = UNMEASURED_VIEW_DIMENSION_PX)
+        slot.layoutListener.captured.onGlobalLayout()
+
+        assertEquals(
+            listOf(MEASURED_SLOT_PX),
+            slot.decodedWidths,
+            "a zero height must not hold the decode: the decode is what produces the height",
+        )
     }
 
     @Test
-    fun `loadImageInto does not wait for a layout pass when the view is already measured`() {
-        val observer = mockk<ViewTreeObserver>(relaxed = true)
-        val imageView = mockk<ImageView>(relaxed = true)
-        every { imageView.width } returns MEASURED_SLOT_PX
-        every { imageView.height } returns MEASURED_SLOT_PX
-        every { imageView.viewTreeObserver } returns observer
+    fun `a completed deferred load unregisters its listeners -- render() runs on every package tap`() {
+        val slot = ImageSlotFixture()
+        loadImageInto(slot.imageView, "https://example.test/rovenue-unregister.png", CoroutineScope(Job()), slot.recorder())
 
-        loadImageInto(imageView, "https://example.test/rovenue-measured.png", cancelledScope())
+        slot.measure(width = MEASURED_SLOT_PX, height = UNMEASURED_VIEW_DIMENSION_PX)
+        slot.layoutListener.captured.onGlobalLayout()
 
-        verify(exactly = 0) { observer.addOnGlobalLayoutListener(any()) }
+        verify(exactly = 1) { slot.observer.removeOnGlobalLayoutListener(slot.layoutListener.captured) }
+        verify(exactly = 1) { slot.imageView.removeOnAttachStateChangeListener(slot.attachListener.captured) }
+    }
+
+    /**
+     * The leak half: an attached view's `getViewTreeObserver()` is the
+     * WINDOW's observer, shared by the whole hierarchy, so a listener left
+     * on it outlives the ImageView that registered it — once more per
+     * package tap, since render() rebuilds the tree every time.
+     */
+    @Test
+    fun `a never-measured deferred load unregisters when its view leaves the window`() {
+        val slot = ImageSlotFixture()
+        loadImageInto(slot.imageView, "https://example.test/rovenue-detached.png", CoroutineScope(Job()), slot.recorder())
+
+        // Never measured — a GONE or zero-width slot — then discarded.
+        slot.layoutListener.captured.onGlobalLayout()
+        verify(exactly = 0) { slot.observer.removeOnGlobalLayoutListener(any()) }
+
+        slot.attachListener.captured.onViewDetachedFromWindow(slot.imageView)
+
+        verify(exactly = 1) { slot.observer.removeOnGlobalLayoutListener(slot.layoutListener.captured) }
+        assertTrue(slot.decodedWidths.isEmpty(), "a detached view has nothing to decode into")
+    }
+
+    @Test
+    fun `a deferred load unregisters instead of decoding once its scope is cancelled`() {
+        val slot = ImageSlotFixture()
+        loadImageInto(slot.imageView, "https://example.test/rovenue-cancelled.png", cancelledScope(), slot.recorder())
+
+        slot.measure(width = MEASURED_SLOT_PX, height = MEASURED_SLOT_PX)
+        slot.layoutListener.captured.onGlobalLayout()
+
+        verify(exactly = 1) { slot.observer.removeOnGlobalLayoutListener(slot.layoutListener.captured) }
+        assertTrue(slot.decodedWidths.isEmpty(), "RovenuePaywallView cancels the scope on detach")
+    }
+
+    @Test
+    fun `loadImageInto does not wait for a layout pass when the width is already measured`() {
+        val slot = ImageSlotFixture()
+        // Height deliberately left at 0: it is not, and must never become, a
+        // precondition of the decode.
+        slot.measure(width = MEASURED_SLOT_PX, height = UNMEASURED_VIEW_DIMENSION_PX)
+
+        loadImageInto(slot.imageView, "https://example.test/rovenue-measured.png", CoroutineScope(Job()), slot.recorder())
+
+        verify(exactly = 0) { slot.observer.addOnGlobalLayoutListener(any()) }
+        assertEquals(listOf(MEASURED_SLOT_PX), slot.decodedWidths)
+    }
+
+    @Test
+    fun `loadImageInto defers the decode while the width is unmeasured`() {
+        val slot = ImageSlotFixture()
+
+        loadImageInto(slot.imageView, "https://example.test/rovenue-unmeasured.png", CoroutineScope(Job()), slot.recorder())
+
+        verify(exactly = 1) { slot.observer.addOnGlobalLayoutListener(any()) }
+        assertTrue(slot.decodedWidths.isEmpty(), "decoding at 0 width samples at full size — the bug this defers around")
     }
 
     /**
@@ -1052,5 +1252,20 @@ class NodeViewFactoryTest {
         /** A plausible measured image slot, in px — any positive size works;
          *  the branch under test is "measured at all vs not". */
         const val MEASURED_SLOT_PX = 300
+
+        /** A plausible measured carousel width and a plausible horizontal
+         *  padding, in px. Any positive pair works; what is under test is
+         *  that one is subtracted from the other. */
+        const val CAROUSEL_OUTER_WIDTH_PX = 1080
+        const val CAROUSEL_HORIZONTAL_PADDING_PX = 48
+        const val NO_PADDING_PX = 0
+
+        /** The JVM class Kotlin compiles NodeViewFactory.kt's top-level
+         *  functions into — what `mockkStatic` needs to intercept them. */
+        const val NODE_VIEW_FACTORY_FILE_CLASS = "dev.rovenue.sdk.paywallui.NodeViewFactoryKt"
+
+        /** `RecyclerView.Adapter.getItemViewType`'s default: the carousel
+         *  adapter has a single page type. */
+        const val ADAPTER_DEFAULT_VIEW_TYPE = 0
     }
 }

@@ -619,6 +619,43 @@ internal fun tallestPageHeight(measuredPageHeights: List<Int>): Int =
     measuredPageHeights.maxOrNull()?.coerceAtLeast(CAROUSEL_UNMEASURED_HEIGHT_PX)
         ?: CAROUSEL_UNMEASURED_HEIGHT_PX
 
+/** Width a carousel page has to lay out in when the carousel itself has no
+ *  width to give it, and the floor [carouselPageMeasureWidth] reports. */
+internal const val CAROUSEL_UNMEASURED_WIDTH_PX = 0
+
+/**
+ * The width `CarouselPagerView.onMeasure` measures each page at: the
+ * carousel's own width-spec size LESS its horizontal padding.
+ *
+ * Subtracting the padding is the whole point. `MeasureSpec.getSize` reports
+ * the carousel's outer width; measuring a page at that width means every
+ * page is measured wider than the box it will actually be laid out in, so
+ * wrapping text wraps at the wrong point and the tallest-page height comes
+ * out SHORT — which crops the carousel exactly as much as the padding it
+ * ignored. Clamped at [CAROUSEL_UNMEASURED_WIDTH_PX] because padding wider
+ * than the carousel would otherwise ask for a negative measurement.
+ */
+internal fun carouselPageMeasureWidth(specWidth: Int, horizontalPadding: Int): Int =
+    (specWidth - horizontalPadding).coerceAtLeast(CAROUSEL_UNMEASURED_WIDTH_PX)
+
+/**
+ * The `MeasureSpec` MODE each carousel page is measured with.
+ *
+ * `EXACTLY` at the computed width is right whenever the carousel HAS a
+ * width. It is wrong under an `UNSPECIFIED` parent (a `HorizontalScrollView`
+ * ancestor, or a `ScrollView`'s own unbounded pass), where
+ * `MeasureSpec.getSize` reports 0: `EXACTLY 0` measures every page as
+ * zero-wide, so every page reports zero height and the carousel collapses.
+ * `UNSPECIFIED` instead lets each page report the width it wants, which is
+ * the only meaningful answer when nobody has said how wide it may be.
+ */
+internal fun carouselPageMeasureMode(parentWidthMode: Int, pageWidth: Int): Int =
+    if (parentWidthMode == View.MeasureSpec.UNSPECIFIED || pageWidth <= CAROUSEL_UNMEASURED_WIDTH_PX) {
+        View.MeasureSpec.UNSPECIFIED
+    } else {
+        View.MeasureSpec.EXACTLY
+    }
+
 /** Fully-opaque alpha on Android's 0..255 channel scale. */
 private const val OPAQUE_ALPHA_255 = 255
 
@@ -1643,7 +1680,14 @@ private class CarouselPagerView(
      *  These measurements are transient — `RecyclerView` re-measures each
      *  page it lays out with its own exact specs. */
     private fun measurePagesForHeight(widthMeasureSpec: Int): List<Int> {
-        val pageWidthSpec = MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY)
+        val pageWidth = carouselPageMeasureWidth(
+            specWidth = MeasureSpec.getSize(widthMeasureSpec),
+            horizontalPadding = paddingLeft + paddingRight,
+        )
+        val pageWidthSpec = MeasureSpec.makeMeasureSpec(
+            pageWidth,
+            carouselPageMeasureMode(MeasureSpec.getMode(widthMeasureSpec), pageWidth),
+        )
         val pageHeightSpec =
             MeasureSpec.makeMeasureSpec(CAROUSEL_UNMEASURED_HEIGHT_PX, MeasureSpec.UNSPECIFIED)
         return pageViews.map { page ->
@@ -1674,15 +1718,38 @@ private class CarouselPagerView(
         // onPageSelected (registered in init) reschedules the next tick.
     }
 
+    /**
+     * The process-wide lifecycle [appForegroundObserver] observes, or `null`
+     * if this app does not have one.
+     *
+     * `ProcessLifecycleOwner.get()` THROWS when `androidx.startup`'s
+     * `ProcessLifecycleInitializer` never ran — a host app is free to strip
+     * it out of the manifest (`tools:node="remove"`), and apps that manage
+     * their own App Startup do exactly that. That throw would land in
+     * [onAttachedToWindow]: the same place the ViewPager2 `MATCH_PARENT`
+     * crash used to land, taking the host app down as the paywall appears.
+     * A paywall must never crash a host app over an OPTIONAL nicety, and
+     * pausing auto-advance while backgrounded is exactly that — so this
+     * fails soft. The cost of `null` is a carousel that keeps advancing in
+     * the background, the pre-fix behaviour, not a broken paywall.
+     *
+     * Resolved once and reused, so detach removes the observer from the very
+     * lifecycle attach added it to.
+     */
+    private val processLifecycle: Lifecycle? = runCatching { ProcessLifecycleOwner.get().lifecycle }.getOrNull()
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         // Deliberately no scheduleNextTick() here — see
         // appForegroundObserver's doc for why the schedule starts there.
-        ProcessLifecycleOwner.get().lifecycle.addObserver(appForegroundObserver)
+        // With no process lifecycle the observer never replays ON_START, so
+        // start the schedule directly; otherwise a carousel in an app
+        // without androidx.startup would simply never auto-advance.
+        if (processLifecycle == null) scheduleNextTick() else processLifecycle.addObserver(appForegroundObserver)
     }
 
     override fun onDetachedFromWindow() {
-        ProcessLifecycleOwner.get().lifecycle.removeObserver(appForegroundObserver)
+        processLifecycle?.removeObserver(appForegroundObserver)
         handler.removeCallbacks(tick)
         super.onDetachedFromWindow()
     }
@@ -1699,7 +1766,7 @@ private const val MILLIS_PER_SECOND = 1000.0
  * have one parent; `ViewPager2`/`RecyclerView` re-binding an existing holder
  * without this would crash on "specified child already has a parent").
  */
-private class CarouselPageAdapter(private val pages: List<View>) :
+internal class CarouselPageAdapter(private val pages: List<View>) :
     RecyclerView.Adapter<CarouselPageAdapter.Holder>() {
 
     class Holder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
@@ -1797,18 +1864,26 @@ private const val IMAGE_BYTES_OFFSET = 0
  * common case (image already fetched) must cost nothing more than a map
  * lookup, not a dispatcher hop.
  *
- * On a MISS the decode is DEFERRED until [imageView] has a real measured
- * size. `buildImage` calls this one statement after constructing the
- * `ImageView`, so on a first render the view has never been through a
- * layout pass and its `width`/`height` are both 0 — which
- * [sampleSizeFor] (correctly, by design) answers with
- * [IMAGE_SAMPLE_SIZE_FULL]. Decoding at that moment therefore meant
+ * On a MISS the decode is DEFERRED until [imageView] has a measured WIDTH.
+ * `buildImage` calls this one statement after constructing the `ImageView`,
+ * so on a first render the view has never been through a layout pass and its
+ * width is 0 — which [sampleSizeForWidth] (correctly, by design) answers
+ * with [IMAGE_SAMPLE_SIZE_FULL]. Decoding at that moment therefore meant
  * downsampling NEVER happened: every image was decoded at full size, no
  * matter how small the slot it was going into. Waiting for one layout pass
  * is what makes the downsampling real. This uses the same
  * `ViewTreeObserver.OnGlobalLayoutListener` pattern as
  * `RovenuePaywallView`'s sticky-footer clearance, which has the identical
- * "needs a measured height, does not have one yet" shape.
+ * "needs a measured size, does not have one yet" shape.
+ *
+ * WIDTH ONLY — this is the whole correctness story, see
+ * [sampleSizeForWidth]'s doc. Waiting on the HEIGHT too deadlocked every
+ * image without an authored `height`: `buildImage` lays an `image` out
+ * `MATCH_PARENT` wide by `WRAP_CONTENT` tall with `adjustViewBounds`, and a
+ * `WRAP_CONTENT` `ImageView` with no drawable yet measures 0 tall forever —
+ * the wait's precondition was the very thing the decode it was waiting for
+ * would have produced. Width arrives from the parent's layout with no
+ * drawable involved, so width is the only dimension this may wait on.
  *
  * Reading the size on the main thread before launching also fixes a
  * `View`-field read from `Dispatchers.IO`.
@@ -1819,25 +1894,79 @@ private const val IMAGE_BYTES_OFFSET = 0
  * cost the synchronous cache-hit path above (a freshly rebuilt view has no
  * size yet, so it could not look itself up until after layout), and a
  * paywall shows a given image in a given slot.
+ *
+ * [decode] exists as a parameter ONLY so a JVM test can substitute a
+ * recorder and assert the deferred work is actually REACHED. The test this
+ * fix replaces asserted only that a listener gets registered, which stayed
+ * green while production never completed the wait; production always passes
+ * the default.
  */
-internal fun loadImageInto(imageView: ImageView, url: String, scope: CoroutineScope) {
+internal fun loadImageInto(
+    imageView: ImageView,
+    url: String,
+    scope: CoroutineScope,
+    decode: ImageDecodeRequest = ImageDecodeRequest(::fetchAndDecodeInto),
+) {
     val cached = imageCache.get(url)
     if (cached != null) {
         imageView.setImageBitmap(cached)
         return
     }
-    if (imageView.width > UNMEASURED_VIEW_DIMENSION_PX && imageView.height > UNMEASURED_VIEW_DIMENSION_PX) {
-        fetchAndDecodeInto(imageView, url, scope, imageView.width, imageView.height)
+    if (imageView.width > UNMEASURED_VIEW_DIMENSION_PX) {
+        decode(imageView, url, scope, imageView.width)
         return
     }
-    val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
+    awaitMeasuredWidthThenDecode(imageView, url, scope, decode)
+}
+
+/**
+ * The deferred half of [loadImageInto]: waits for one layout pass to give
+ * [imageView] a width, then decodes.
+ *
+ * Every exit unregisters. `RovenuePaywallView` rebuilds its whole view tree
+ * on every state change (a package tap is a rebuild), and an ATTACHED view's
+ * `getViewTreeObserver()` is the WINDOW's observer, shared by the entire
+ * hierarchy and outliving any single `ImageView` — so a listener left
+ * registered both leaks the discarded view and re-runs on every future
+ * layout pass, once more per tap, for the life of the window. The three ways
+ * out are therefore all handled: the width arrives (decode), the view leaves
+ * the window (nothing left to decode into), or the scope is cancelled
+ * (`RovenuePaywallView` cancelled it on detach; the decode could not
+ * complete anyway).
+ */
+private fun awaitMeasuredWidthThenDecode(
+    imageView: ImageView,
+    url: String,
+    scope: CoroutineScope,
+    decode: ImageDecodeRequest,
+) {
+    var layoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+    var attachListener: View.OnAttachStateChangeListener? = null
+
+    // Idempotent: each exit path calls it, and nulling the fields means a
+    // second call (detach racing a successful decode) is a no-op.
+    fun unregister() {
+        layoutListener?.let { listener ->
+            imageView.viewTreeObserver.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(listener)
+        }
+        attachListener?.let { listener -> imageView.removeOnAttachStateChangeListener(listener) }
+        layoutListener = null
+        attachListener = null
+    }
+
+    layoutListener = object : ViewTreeObserver.OnGlobalLayoutListener {
         override fun onGlobalLayout() {
+            if (!scope.isActive) {
+                unregister()
+                return
+            }
             val targetWidth = imageView.width
-            val targetHeight = imageView.height
             // Still unmeasured (e.g. GONE, or a parent not laid out yet):
-            // stay registered and try again on the next layout pass.
-            if (targetWidth <= UNMEASURED_VIEW_DIMENSION_PX || targetHeight <= UNMEASURED_VIEW_DIMENSION_PX) return
-            imageView.viewTreeObserver.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(this)
+            // stay registered and try again on the next layout pass. This
+            // is the ONE path that deliberately does not unregister — and
+            // it is bounded by the detach listener below.
+            if (targetWidth <= UNMEASURED_VIEW_DIMENSION_PX) return
+            unregister()
             // Re-check: another view may have fetched the same URL during
             // the wait.
             val nowCached = imageCache.get(url)
@@ -1845,22 +1974,37 @@ internal fun loadImageInto(imageView: ImageView, url: String, scope: CoroutineSc
                 imageView.setImageBitmap(nowCached)
                 return
             }
-            fetchAndDecodeInto(imageView, url, scope, targetWidth, targetHeight)
+            decode(imageView, url, scope, targetWidth)
         }
     }
-    imageView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    attachListener = object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(view: View) = Unit
+        override fun onViewDetachedFromWindow(view: View) = unregister()
+    }
+
+    imageView.addOnAttachStateChangeListener(attachListener)
+    imageView.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
 }
 
-/** Downloads [url] and decodes it downsampled to [targetWidth] x
- *  [targetHeight], caches it, and applies it to [imageView] on the main
- *  thread. Both targets are already-measured pixel sizes read on the main
- *  thread by [loadImageInto] — never `View` fields read from here. */
-private fun fetchAndDecodeInto(
+/**
+ * The deferred decode [loadImageInto] performs once its target has a
+ * measured width. A named type rather than a bare lambda so the argument
+ * order (and the fact that there is exactly ONE target dimension) is stated
+ * once; [fetchAndDecodeInto] is the only production implementation.
+ */
+internal fun interface ImageDecodeRequest {
+    operator fun invoke(imageView: ImageView, url: String, scope: CoroutineScope, targetWidth: Int)
+}
+
+/** Downloads [url] and decodes it downsampled to [targetWidth], caches it,
+ *  and applies it to [imageView] on the main thread. [targetWidth] is an
+ *  already-measured pixel size read on the main thread by [loadImageInto] —
+ *  never a `View` field read from here. */
+internal fun fetchAndDecodeInto(
     imageView: ImageView,
     url: String,
     scope: CoroutineScope,
     targetWidth: Int,
-    targetHeight: Int,
 ) {
     scope.launch(Dispatchers.IO) {
         val bitmap = runCatching {
@@ -1873,11 +2017,9 @@ private fun fetchAndDecodeInto(
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, IMAGE_BYTES_OFFSET, bytes.size, bounds)
             val options = BitmapFactory.Options().apply {
-                inSampleSize = sampleSizeFor(
+                inSampleSize = sampleSizeForWidth(
                     sourceWidth = bounds.outWidth,
-                    sourceHeight = bounds.outHeight,
                     targetWidth = targetWidth,
-                    targetHeight = targetHeight,
                 )
             }
             BitmapFactory.decodeByteArray(bytes, IMAGE_BYTES_OFFSET, bytes.size, options)

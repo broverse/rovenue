@@ -92,37 +92,49 @@ internal class BitmapLruCache<V>(
     }
 }
 
-/** The [sampleSizeFor] result meaning "decode at full size". */
+/** The [sampleSizeForWidth] result meaning "decode at full size". */
 internal const val IMAGE_SAMPLE_SIZE_FULL = 1
 
-/** [sampleSizeFor] halves resolution one power of two at a time. */
+/** [sampleSizeForWidth] halves resolution one power of two at a time. */
 private const val IMAGE_SAMPLE_SIZE_STEP = 2
 
 /** Width/height below which a view is treated as not yet measured. */
 internal const val UNMEASURED_VIEW_DIMENSION_PX = 0
 
 /**
- * The `BitmapFactory.Options.inSampleSize` for decoding a [sourceWidth] x
- * [sourceHeight] image into a [targetWidth] x [targetHeight] slot: the
- * largest power of two that still covers the target. Decoding a 2000 px
- * hero at full size into a 300 px slot is the waste this removes.
+ * The `BitmapFactory.Options.inSampleSize` for decoding a [sourceWidth]-wide
+ * image into a [targetWidth]-wide slot: the largest power of two that still
+ * covers the target width. Decoding a 2000 px hero at full size into a
+ * 300 px slot is the waste this removes.
  *
- * A zero or unknown target (a view not yet measured) yields
+ * WIDTH ONLY, DELIBERATELY — and this is a correctness constraint, not a
+ * simplification. The previous two-dimension form needed a measured target
+ * HEIGHT, and a paywall `image` is laid out `MATCH_PARENT` wide by
+ * `WRAP_CONTENT` tall with `adjustViewBounds` (see `buildImage`): its height
+ * comes FROM the decoded drawable's aspect ratio. Asking for it before the
+ * decode is asking the decode for its own precondition — the deadlock this
+ * function's signature now makes unrepresentable. Width is the dimension
+ * that arrives without a drawable (`MATCH_PARENT` resolves as soon as the
+ * parent lays out), so width is the only dimension the decode may depend on.
+ *
+ * Sampling by width alone can only ever decode MORE pixels than a
+ * both-axes rule would (a taller-than-needed bitmap is never blurry, just
+ * slightly larger), and for the `adjustViewBounds` case — where the source's
+ * own aspect ratio supplies the height — it is exactly the right answer. The
+ * memory saving the cache/downsample work was for is delivered either way:
+ * halving width halves height too, so one sample step is still a 4x drop.
+ *
+ * A zero or unknown target width (a view not yet measured) yields
  * [IMAGE_SAMPLE_SIZE_FULL] — full quality — because guessing small would
  * ship a blurry image permanently. Callers must therefore not decode until
- * the target view has a real measured size; see `loadImageInto`, which
- * defers the whole fetch until then precisely so this branch is not the one
- * that always runs.
+ * the target view has a measured width; see `loadImageInto`, which defers
+ * the fetch until then precisely so this branch is not the one that always
+ * runs.
  */
-internal fun sampleSizeFor(sourceWidth: Int, sourceHeight: Int, targetWidth: Int, targetHeight: Int): Int {
-    if (targetWidth <= UNMEASURED_VIEW_DIMENSION_PX || targetHeight <= UNMEASURED_VIEW_DIMENSION_PX) {
-        return IMAGE_SAMPLE_SIZE_FULL
-    }
+internal fun sampleSizeForWidth(sourceWidth: Int, targetWidth: Int): Int {
+    if (targetWidth <= UNMEASURED_VIEW_DIMENSION_PX) return IMAGE_SAMPLE_SIZE_FULL
     var sample = IMAGE_SAMPLE_SIZE_FULL
-    while (
-        sourceWidth / (sample * IMAGE_SAMPLE_SIZE_STEP) >= targetWidth &&
-        sourceHeight / (sample * IMAGE_SAMPLE_SIZE_STEP) >= targetHeight
-    ) {
+    while (sourceWidth / (sample * IMAGE_SAMPLE_SIZE_STEP) >= targetWidth) {
         sample *= IMAGE_SAMPLE_SIZE_STEP
     }
     return sample
