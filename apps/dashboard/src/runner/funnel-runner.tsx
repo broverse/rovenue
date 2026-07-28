@@ -16,7 +16,11 @@
 // =============================================================
 
 import { useEffect, useMemo, useState } from "react";
-import { PaywallRenderer, type RendererOffering } from "@rovenue/paywall-renderer";
+import {
+  PaywallRenderer,
+  resolvePersistedFirstShownAt,
+  type RendererOffering,
+} from "@rovenue/paywall-renderer";
 import type { BuilderConfig, PackageView } from "@rovenue/shared/paywall";
 import { stripeMinorUnitExponent } from "@rovenue/shared";
 import { PagePreview } from "../components/funnel-builder/page-preview";
@@ -396,6 +400,16 @@ export function FunnelRunner({ slug }: { slug: string }) {
           // open here — an author unticking "Web" would see no effect on
           // the only renderer this stage actually ships to users.
           platform="web"
+          // A `durationSeconds` countdown must count from the first time
+          // THIS buyer saw THIS paywall, not from this mount — otherwise
+          // reloading the page resets the "offer ends in" clock and the
+          // deadline means nothing. Persisted in localStorage under the same
+          // key the iOS/Android SDKs use, keyed by the paywall so every
+          // countdown node on it shares one anchor. Called inline rather
+          // than memoised because it is idempotent (it only ever stamps
+          // once) and this branch sits below the component's early returns,
+          // where a hook cannot go.
+          firstShownAt={resolvePersistedFirstShownAt(builderPaywallId)}
           priceView={priceView}
           // The CTA opens the in-page checkout for the selected package —
           // but only when it can actually be charged. A project that

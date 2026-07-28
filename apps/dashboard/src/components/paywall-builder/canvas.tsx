@@ -197,9 +197,26 @@ export const Canvas = component(() => {
   // element; each DeviceFrame is a distinct parent, so React mounts an
   // independent renderer instance per frame.
   const renderPaywall = (
-    <div onClick={handleClick} className="min-h-full">
+    // `h-full`, not `min-h-full`: the renderer root is `height: 100%`, and a
+    // percentage height resolves to `auto` against an auto-height ancestor.
+    // With `min-h-full` (min-height:100%, height:auto) the whole scroll model
+    // went inert in the canvas — no viewport fill, no scroller, and a
+    // "pinned" footer floating under the content mid-frame instead of at the
+    // bottom of the device. The DeviceFrame's content area is absolutely
+    // positioned with top+bottom, so it IS a definite height to resolve
+    // against; this wrapper is the one link that broke the chain.
+    <div onClick={handleClick} className="h-full">
       <PaywallRenderer
         key={rendererKey}
+        // No `firstShownAt` on purpose. This is an AUTHORING preview: a
+        // persisted "first shown" anchor (what the funnel runner passes, and
+        // what the SDKs read from UserDefaults/SharedPreferences) would be
+        // stamped the first time an author opened the paywall and never
+        // move, so every later editing session would show a `durationSeconds`
+        // countdown already expired — frozen at 00:00, or invisible under
+        // `onExpiry: "hide"`. Anchoring to mount instead means the author
+        // sees the countdown their buyer sees on FIRST open, which is the
+        // frame worth previewing.
         config={vm.config}
         offering={offering}
         locale={vm.editLocale}

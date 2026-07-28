@@ -24,12 +24,24 @@ const outcome = vi.hoisted(
   () => ({ current: null as unknown }) as { current: FunnelPaymentOutcome },
 );
 
+/** Captures what the runner hands the renderer, so the countdown anchor
+ *  wiring is observable from the consumer side and not only in the
+ *  renderer package's own unit test. */
+const paywallProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+
 vi.mock("@rovenue/paywall-renderer", () => ({
-  PaywallRenderer: ({ onPurchase }: { onPurchase: (id: string) => void }) => (
-    <button type="button" onClick={() => onPurchase("monthly")}>
-      Buy monthly
-    </button>
-  ),
+  PaywallRenderer: (props: { onPurchase: (id: string) => void }) => {
+    paywallProps.current = props as unknown as Record<string, unknown>;
+    return (
+      <button type="button" onClick={() => props.onPurchase("monthly")}>
+        Buy monthly
+      </button>
+    );
+  },
+  // The real localStorage-backed helper is exercised in the renderer
+  // package's own suite; here it only has to exist and return an instant,
+  // because the runner imports it by name.
+  resolvePersistedFirstShownAt: () => new Date("2027-01-01T00:00:00.000Z"),
 }));
 
 vi.mock("../payment-step", () => ({
@@ -193,6 +205,14 @@ describe("FunnelRunner — the screen a paying buyer lands on", () => {
     const heading = screen.getByRole("heading", { name: "You're all set" });
     expect(heading.className).not.toMatch(/\btext-foreground\b/);
     expect(heading.className).toMatch(/\btext-zinc-900\b/);
+  });
+
+  it("hands the paywall a persisted first-shown anchor for durationSeconds countdowns", async () => {
+    // Without this the anchor defaults to mount time, so a "offer ends in"
+    // countdown restarts on every reload — a timer, not a deadline.
+    render(<FunnelRunner slug="demo" />);
+    await screen.findByRole("button", { name: /buy monthly/i });
+    expect(paywallProps.current?.firstShownAt).toBeInstanceOf(Date);
   });
 
   it("shows an unavailable screen instead of checkout when charges are off", async () => {

@@ -32,6 +32,9 @@ vi.mock("@rovenue/paywall-renderer", () => ({
       Buy monthly
     </button>
   ),
+  // The runner imports this by name to anchor `durationSeconds` countdowns;
+  // the real localStorage-backed helper is covered in the renderer package.
+  resolvePersistedFirstShownAt: () => new Date("2027-01-01T00:00:00.000Z"),
 }));
 
 import { FunnelRunner } from "../funnel-runner";
