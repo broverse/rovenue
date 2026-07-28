@@ -13,6 +13,7 @@ import {
   Receipt,
   Settings as SettingsIcon,
   Sparkles,
+  Type,
   UserCog,
 } from "lucide-react";
 import { cn } from "../../../../../lib/cn";
@@ -69,6 +70,14 @@ const ALL_TABS = [
     icon: UserCog,
     to: "/projects/$projectId/settings/members" as const,
     match: (id: string) => id.endsWith("/settings/members"),
+    billingOnly: false,
+  },
+  {
+    id: "fonts",
+    labelKey: "settings.tabs.fonts",
+    icon: Type,
+    to: "/projects/$projectId/settings/fonts" as const,
+    match: (id: string) => id.endsWith("/settings/fonts"),
     billingOnly: false,
   },
   {

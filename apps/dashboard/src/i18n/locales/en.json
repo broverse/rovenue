@@ -582,7 +582,63 @@
       "paymentMethods": "Payment methods",
       "invoices": "Invoices",
       "members": "Members",
-      "auditLogs": "Audit log"
+      "auditLogs": "Audit log",
+      "fonts": "Fonts"
+    },
+    "fonts": {
+      "title": "Fonts",
+      "subtitle": "Upload custom font files for paywalls. Faces are shared across every paywall in this project.",
+      "faceCount": "{{count}} / {{max}} faces used",
+      "empty": {
+        "title": "No fonts yet",
+        "description": "Upload an OTF, TTF, or WOFF2 file to make it available to every paywall in this project."
+      },
+      "family": {
+        "facesCount_one": "{{count}} face",
+        "facesCount_other": "{{count}} faces",
+        "delete": "Delete"
+      },
+      "delete": {
+        "title": "Delete {{name}}?",
+        "description": "Any paywall using {{name}} will fall back to the system font. This can't be undone.",
+        "confirm": "Delete font",
+        "failedTitle": "Couldn't delete the font",
+        "errors": {
+          "generic": "Could not delete the font. Please try again."
+        }
+      },
+      "upload": {
+        "trigger": "Upload font",
+        "title": "Upload a font face",
+        "subtitle": "One weight/style combination per upload. Re-uploading the same combination replaces it.",
+        "family": {
+          "label": "Family",
+          "new": "New family"
+        },
+        "familyName": {
+          "label": "Family name",
+          "placeholder": "e.g. Brand Sans"
+        },
+        "weight": {
+          "label": "Weight"
+        },
+        "style": {
+          "label": "Style"
+        },
+        "file": {
+          "label": "Font file",
+          "hint": "OTF, TTF, or WOFF2."
+        },
+        "submit": "Upload",
+        "submitting": "Uploading…",
+        "errors": {
+          "formatUnsupported": "This file isn't a supported font format (OTF, TTF, or WOFF2).",
+          "fileTooLarge": "This font file is too large.",
+          "quotaExceeded": "This project has reached its {{max}}-face limit.",
+          "familyNotFound": "That font family no longer exists.",
+          "generic": "Could not upload the font. Please try again."
+        }
+      }
     }
   },
   "notifications": {
