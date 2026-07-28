@@ -25,6 +25,17 @@ import type {
 // offering when it actually changed.
 // =============================================================
 
+/** Response shape of the P9 on-device preview mint endpoint (§6.16). The
+ * plaintext `token` appears exactly once, here — only its hash is ever
+ * persisted server-side. */
+export interface PreviewSessionDto {
+  sessionId: string;
+  token: string;
+  expiresAt: string;
+  previewUrl: string;
+  qrPayload: string;
+}
+
 export interface PaywallBuilderDetailDto {
   id: string;
   projectId: string;
@@ -220,6 +231,35 @@ export class PaywallBuilderApi {
     return unwrap<DashboardPaywallDiffResponse>(
       rpc.dashboard.projects[":projectId"].paywalls[":id"].diff.$get(
         { param: { projectId, id: paywallId } },
+        { init: { signal } },
+      ),
+    );
+  }
+
+  /** Mints a short-lived on-device preview session (P9 §6.16). */
+  async createPreviewSession(
+    projectId: string,
+    paywallId: string,
+    signal?: AbortSignal,
+  ): Promise<PreviewSessionDto> {
+    return unwrap<PreviewSessionDto>(
+      rpc.dashboard.projects[":projectId"].paywalls[":id"]["preview-sessions"].$post(
+        { param: { projectId, id: paywallId } },
+        { init: { signal } },
+      ),
+    );
+  }
+
+  /** Revokes a preview session before its natural expiry. */
+  async revokePreviewSession(
+    projectId: string,
+    paywallId: string,
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<{ revoked: boolean }> {
+    return unwrap<{ revoked: boolean }>(
+      rpc.dashboard.projects[":projectId"].paywalls[":id"]["preview-sessions"][":sid"].$delete(
+        { param: { projectId, id: paywallId, sid: sessionId } },
         { init: { signal } },
       ),
     );

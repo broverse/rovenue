@@ -1708,6 +1708,27 @@
         "revert": "Revert draft to this version",
         "diff": "Diff draft vs published",
         "discard": "Discard draft changes"
+      },
+      "devicePreview": {
+        "openButton": "Preview on a device",
+        "title": "Preview on a device",
+        "subtitle": "Scan the QR code with the Rovenue app to preview this draft live on a physical device.",
+        "close": "Close",
+        "minting": "Starting preview session…",
+        "mintFailed": "Could not start a preview session. Try again.",
+        "qrAlt": "QR code linking to this preview session",
+        "tokenLabel": "Token",
+        "urlLabel": "Preview URL",
+        "copy": "Copy",
+        "copied": "Copied",
+        "expiresIn": "Expires in {{time}}",
+        "expired": "This preview session has expired.",
+        "tabSwift": "Swift",
+        "tabKotlin": "Kotlin",
+        "tabReactNative": "React Native",
+        "reactNativeComingSoon": "React Native preview support is coming soon.",
+        "endSession": "End session",
+        "activeHint": "Edits made while this session is open save within a couple of seconds so the device stays in sync."
       }
     }
   },

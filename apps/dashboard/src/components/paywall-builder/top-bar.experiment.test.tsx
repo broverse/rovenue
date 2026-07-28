@@ -71,6 +71,7 @@ vi.mock("./validation-drawer", () => ({ ValidationDrawer: () => null }));
 vi.mock("./diff-modal", () => ({ DiffModal: () => null }));
 vi.mock("./localization-modal", () => ({ LocalizationModal: () => null }));
 vi.mock("./start-modal", () => ({ StartModal: () => null }));
+vi.mock("./device-preview-modal", () => ({ DevicePreviewModal: () => null }));
 
 vi.mock("../../lib/hooks/useExperiments", () => ({
   useExperiments: vi.fn(),
@@ -181,6 +182,7 @@ async function renderTopBar(detailOverrides: Partial<PaywallBuilderDetailDto> = 
         onOpenLocalization={vi.fn()}
         onOpenStart={vi.fn()}
         onOpenExperiment={onOpenExperiment}
+        onOpenDevicePreview={vi.fn()}
       />
     </ServiceProvider>,
   );
@@ -254,6 +256,45 @@ describe("TopBar — experiment launch button", () => {
     fireEvent.click(button);
 
     expect(onOpenExperiment).not.toHaveBeenCalled();
+  });
+});
+
+describe("TopBar — device preview button", () => {
+  it("calls onOpenDevicePreview when the Smartphone button is clicked", async () => {
+    vi.spyOn(PaywallBuilderApi.prototype, "get").mockResolvedValue(fakeDetail());
+    const onOpenDevicePreview = vi.fn();
+
+    let vm!: PaywallBuilderViewModel;
+    function Probe() {
+      vm = useService(PaywallBuilderViewModel);
+      return null;
+    }
+
+    render(
+      <ServiceProvider
+        provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
+        props={{ projectId: "p_1", paywallId: "pw_a" }}
+      >
+        <Probe />
+        <TopBar
+          projectId="p_1"
+          onOpenValidation={vi.fn()}
+          onOpenDiff={vi.fn()}
+          onOpenLocalization={vi.fn()}
+          onOpenStart={vi.fn()}
+          onOpenExperiment={vi.fn()}
+          onOpenDevicePreview={onOpenDevicePreview}
+        />
+      </ServiceProvider>,
+    );
+
+    await act(async () => {
+      await vm.load(() => {});
+    });
+
+    fireEvent.click(screen.getByTitle("Preview on a device"));
+
+    expect(onOpenDevicePreview).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -69,6 +69,16 @@ const FLUSH_BARRIER_TIMEOUT_MS = 15000;
  * (the flush itself resolves to a DTO or `undefined`, never this symbol). */
 const FLUSH_BARRIER_TIMED_OUT = Symbol("paywall-builder-flush-barrier-timed-out");
 
+/**
+ * How long an edit waits, while a P9 on-device preview session is active
+ * (`previewSessionActive`), before it is flushed to the server. The device
+ * polls the persisted draft to render the live preview, so the ordinary
+ * 30s autosave throttle (`autosave` below) would leave it looking stale
+ * for far too long — this debounce ONLY applies while a preview session is
+ * open; the 30s throttle is untouched for the ordinary (inactive) case.
+ */
+const PREVIEW_FLUSH_DEBOUNCE_MS = 2000;
+
 export interface PaywallBuilderProps {
   projectId: string;
   paywallId: string;
@@ -153,6 +163,18 @@ export class PaywallBuilderViewModel {
 
   toggleColorScheme() {
     this.colorScheme = this.colorScheme === "light" ? "dark" : "light";
+  }
+
+  /**
+   * True while a P9 on-device preview session (DevicePreviewModal) is open.
+   * Drives `previewFastFlush` below — a physical device is polling the
+   * persisted draft, so edits made while a session is active get flushed
+   * much sooner than the ordinary 30s autosave throttle.
+   */
+  @state previewSessionActive = false;
+
+  setPreviewSessionActive(v: boolean) {
+    this.previewSessionActive = v;
   }
 
   // Canvas preview: which `introEligible` override branch the whole
@@ -802,6 +824,24 @@ export class PaywallBuilderViewModel {
     } finally {
       if (this.saveController === controller) this.saveController = null;
     }
+  }
+
+  /**
+   * While `previewSessionActive` is true, collapses a burst of edits into a
+   * single `saveNow()` flush `PREVIEW_FLUSH_DEBOUNCE_MS` after the last one
+   * — same dirty-path hook as `autosave` (`void this.config` is the
+   * tracked read), just debounced instead of throttled, and gated on the
+   * preview flag so the ordinary (inactive) case is entirely unaffected:
+   * this method still runs on every config change then, but the guard
+   * below no-ops it before it ever reaches `saveNow`.
+   */
+  @trigger.debounce(PREVIEW_FLUSH_DEBOUNCE_MS)
+  async previewFastFlush() {
+    void this.config; // tracked read — debounce re-runs on every config mutation
+    if (!this.previewSessionActive) return;
+    if (!this.paywall || this.isLoading) return;
+    if (!this.isDirty) return;
+    await this.saveNow();
   }
 
   /**

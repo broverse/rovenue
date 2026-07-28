@@ -13,6 +13,7 @@ import {
   LayoutTemplate,
   Moon,
   Plus,
+  Smartphone,
   Sun,
   Table2,
   Trash2,
@@ -31,6 +32,7 @@ type Props = {
   onOpenLocalization: () => void;
   onOpenStart: () => void;
   onOpenExperiment: () => void;
+  onOpenDevicePreview: () => void;
 };
 
 export const TopBar = component(({
@@ -40,6 +42,7 @@ export const TopBar = component(({
   onOpenLocalization,
   onOpenStart,
   onOpenExperiment,
+  onOpenDevicePreview,
 }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
@@ -117,6 +120,15 @@ export const TopBar = component(({
           className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
         >
           {vm.colorScheme === "light" ? <Sun size={13} /> : <Moon size={13} />}
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenDevicePreview}
+          title={t("paywalls.builder.devicePreview.openButton", "Preview on a device")}
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
+        >
+          <Smartphone size={13} />
         </button>
 
         <button

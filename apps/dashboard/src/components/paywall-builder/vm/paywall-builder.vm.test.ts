@@ -849,6 +849,53 @@ describe("PaywallBuilderViewModel", () => {
       expect(patchBuilderConfig).not.toHaveBeenCalled();
     });
   });
+
+  // ----- P9 on-device preview: active-preview fast flush -----
+  // A physical device polls the persisted draft while a preview session is
+  // open, so an edit made during that window should land far sooner than
+  // the ordinary 30s autosave throttle (`PREVIEW_FLUSH_DEBOUNCE_MS`, 2000ms
+  // — hardcoded here rather than imported, matching this file's existing
+  // convention for FLUSH_BARRIER_TIMEOUT_MS/the 30s throttle above).
+  describe("previewSessionActive fast flush", () => {
+    it("previewSessionActive defaults false and toggles via setPreviewSessionActive", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+      await vm.load(() => {});
+
+      expect(vm.previewSessionActive).toBe(false);
+      vm.setPreviewSessionActive(true);
+      expect(vm.previewSessionActive).toBe(true);
+    });
+
+    it("with previewSessionActive true, an edit triggers a debounced saveNow within PREVIEW_FLUSH_DEBOUNCE_MS", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const patchBuilderConfig = vi.fn().mockResolvedValue(fakeDetail());
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      vm.setPreviewSessionActive(true);
+      vm.updateNode("t1", { role: "body" });
+      expect(patchBuilderConfig).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(patchBuilderConfig).toHaveBeenCalledTimes(1);
+      expect(vm.isDirty).toBe(false);
+    });
+
+    it("with previewSessionActive false, an edit does not trigger an early flush (30s throttle unaffected)", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const patchBuilderConfig = vi.fn().mockResolvedValue(fakeDetail());
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      vm.updateNode("t1", { role: "body" });
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(patchBuilderConfig).not.toHaveBeenCalled();
+      expect(vm.isDirty).toBe(true);
+    });
+  });
 });
 
 describe("reopen after an unmount flush", () => {

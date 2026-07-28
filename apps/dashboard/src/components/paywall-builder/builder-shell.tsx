@@ -11,6 +11,7 @@ import { DiffModal } from "./diff-modal";
 import { LocalizationModal } from "./localization-modal";
 import { StartModal } from "./start-modal";
 import { ExperimentPopover } from "./experiment-popover";
+import { DevicePreviewModal } from "./device-preview-modal";
 import { shouldAutoOpenStart } from "./start-model";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { useRovi } from "../../lib/hooks/useRovi";
@@ -35,6 +36,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
   const [showLocalization, setShowLocalization] = useState(false);
   const [showStart, setShowStart] = useState(false);
   const [showExperiment, setShowExperiment] = useState(false);
+  const [showDevicePreview, setShowDevicePreview] = useState(false);
   /** Auto-open is decided exactly once, at the first render after the paywall loads. */
   const startDecided = useRef(false);
   useEffect(() => {
@@ -127,6 +129,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         onOpenLocalization={() => setShowLocalization(true)}
         onOpenStart={() => setShowStart(true)}
         onOpenExperiment={() => setShowExperiment(true)}
+        onOpenDevicePreview={() => setShowDevicePreview(true)}
       />
       <main className="flex flex-1 overflow-hidden">
         <LayerTree />
@@ -153,6 +156,9 @@ export const BuilderShell = component(({ projectId }: Props) => {
       {showLocalization && <LocalizationModal onClose={() => setShowLocalization(false)} />}
       {showStart && <StartModal onClose={() => setShowStart(false)} />}
       {showExperiment && <ExperimentPopover onClose={() => setShowExperiment(false)} />}
+      {showDevicePreview && (
+        <DevicePreviewModal onClose={() => setShowDevicePreview(false)} />
+      )}
     </div>
   );
 });
