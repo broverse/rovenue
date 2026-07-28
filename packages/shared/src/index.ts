@@ -24,6 +24,10 @@ export const ERROR_CODE = {
   APPLE_OFFER_SIGNING_UNAVAILABLE: "apple_offer_signing_unavailable",
   APPLE_OFFER_SIGNING_FAILED: "apple_offer_signing_failed",
   GENERATION_INVALID: "GENERATION_INVALID",
+  // P9 on-device preview (§6.17): missing, expired, revoked, and garbage
+  // preview tokens must be indistinguishable — this single code covers
+  // all of them, always behind a generic 404 message (no oracle).
+  PREVIEW_SESSION_INVALID: "PREVIEW_SESSION_INVALID",
 } as const;
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];
 

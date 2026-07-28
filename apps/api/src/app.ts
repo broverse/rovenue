@@ -16,6 +16,7 @@ import {
   webhooksRoute,
 } from "./routes";
 import { configStreamRoute } from "./routes/v1/config-stream";
+import { paywallPreviewRoute } from "./routes/v1/paywall-preview";
 import { publicInvitationsRoute } from "./routes/public/invitations";
 import { publicUnsubscribeRoute } from "./routes/public/unsubscribe";
 import { publicFunnelsRoute } from "./routes/public/funnels";
@@ -115,6 +116,7 @@ export function createApp() {
     .route("/webhooks", webhooksRoute)
     .route("/v1", v1Route)
     .route("/", configStreamRoute)
+    .route("/", paywallPreviewRoute)
     .route("/invitations", publicInvitationsRoute)
     .route("/unsubscribe", publicUnsubscribeRoute)
     .route("/public", publicFunnelsRoute)
