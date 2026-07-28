@@ -3,8 +3,12 @@ package dev.rovenue.sdk.paywallui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -15,6 +19,8 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import dev.rovenue.sdk.Offering
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -380,6 +386,32 @@ internal val COUNTDOWN_DEFAULT_ON_EXPIRY = CountdownOnExpiry.FREEZE
  *  `COUNTDOWN_TICK_MS` (identical on all three platforms). */
 internal const val COUNTDOWN_TICK_MS = 1000L
 
+// Defaults mirroring packages/shared/src/paywall/schema.ts's
+// CAROUSEL_DEFAULT_SHOWS_INDICATOR / CAROUSEL_DEFAULT_LOOP /
+// CAROUSEL_MIN_AUTO_ADVANCE_SECONDS. Keep in sync with schema.ts by hand;
+// there is no codegen step sharing these across platforms. NOT `private`
+// for the same reason as the divider/countdown defaults above — a test
+// compares them against render-fixtures.json's generated `defaults` object
+// by value.
+internal const val CAROUSEL_DEFAULT_SHOWS_INDICATOR = true
+internal const val CAROUSEL_DEFAULT_LOOP = false
+
+/** Seconds. Authoring-time advice only (schema.ts's own comment: below this,
+ *  dots move faster than a reader can follow) — the renderer honours
+ *  whatever `autoAdvanceSeconds` it is given; this is NOT a clamp. */
+internal const val CAROUSEL_MIN_AUTO_ADVANCE_SECONDS = 2
+
+// Hand-drawn dot-indicator constants, in dp/alpha — ViewPager2 supplies no
+// built-in page indicator, so these are drawn by CarouselDotsRow. No
+// cross-platform pixel-parity contract exists for these (same footing as
+// FEATURE_LIST_ROW_SPACING_DP et al.), but they still get names rather than
+// being inlined.
+private const val CAROUSEL_DOT_SIZE_DP = 6.0
+private const val CAROUSEL_DOT_GAP_DP = 6.0
+private const val CAROUSEL_DOT_ACTIVE_ALPHA = 1.0f
+private const val CAROUSEL_DOT_INACTIVE_ALPHA = 0.3f
+private const val CAROUSEL_DOTS_TOP_MARGIN_DP = 8.0
+
 /** Pre-measurement initial value for the scrolled content's bottom
  *  clearance beneath a pinned `stickyFooter`, used only until the footer's
  *  first real layout pass reports its height (see
@@ -511,6 +543,34 @@ internal fun countdownHidesNow(remainingSeconds: Long, onExpiry: CountdownOnExpi
  *  early. Never negative. */
 internal fun countdownRemainingSeconds(deadlineMillis: Long, nowMillis: Long): Long =
     maxOf(kotlin.math.ceil((deadlineMillis - nowMillis) / 1000.0).toLong(), 0L)
+
+// ---------------------------------------------------------------
+// Pure: carousel
+// ---------------------------------------------------------------
+
+/**
+ * The page index one auto-advance tick (or a manual "advance") moves to:
+ * [current] + 1, EXCEPT that reaching the end wraps to page 0 only when
+ * [loop] is true. With `loop = false`, reaching the last page returns
+ * [current] UNCHANGED — that is the signal callers use to stop the
+ * auto-advance timer for good (spec §5): a stopped carousel never rewinds.
+ * `pageCount <= 0` is defensive (never reached in practice — a childless
+ * carousel renders its `fallback` instead, see `buildCarousel`) and returns
+ * [current] unchanged rather than dividing by/indexing into nothing. This is
+ * the one piece of substantive new logic wave-D1 adds to this renderer, kept
+ * pure specifically so the loop rule is unit-testable without any Android
+ * runtime — mirrors the Swift renderer's `CarouselView.advance()` / the web
+ * renderer's carousel auto-advance effect.
+ */
+internal fun nextCarouselPage(current: Int, pageCount: Int, loop: Boolean): Int {
+    if (pageCount <= 0) return current
+    val next = current + 1
+    return when {
+        next < pageCount -> next
+        loop -> 0
+        else -> current
+    }
+}
 
 private const val COUNTDOWN_NO_ANCHOR = -1L
 
@@ -664,6 +724,7 @@ internal object NodeViewFactory {
             is BuilderNode.SocialProof -> buildSocialProof(context, resolved, ctx, cell)
             is BuilderNode.StickyFooter -> buildStickyFooter(context, resolved, ctx, cell)
             is BuilderNode.Countdown -> buildCountdown(context, resolved, ctx, cell)
+            is BuilderNode.Carousel -> buildCarousel(context, resolved, ctx, cell)
             is BuilderNode.Unknown -> resolved.fallback?.let { build(context, it, ctx, cell) }
         }
     }
@@ -1252,6 +1313,46 @@ internal object NodeViewFactory {
         row.refresh()
         return row
     }
+
+    /**
+     * Renders `carousel`. Each child renders through the ORDINARY [build]
+     * dispatch (a page is any node, not only images — the same freedom
+     * `stack` gives), then gets handed to a [CarouselPagerView], which owns
+     * `ViewPager2` + the hand-drawn dots + the auto-advance `Handler` —
+     * mirrors [buildStickyFooter]/[buildCountdown]'s split of "resolve this
+     * node's own fields here, delegate the stateful/ticking part to a
+     * dedicated View subclass".
+     *
+     * A carousel with no children (or whose every child renders nothing —
+     * e.g. all hidden by `visibility`) cannot page anywhere, so it falls to
+     * [BuilderNode.Carousel.fallback] else nothing, exactly like every other
+     * node type's undecidable case.
+     */
+    internal fun buildCarousel(
+        context: Context,
+        node: BuilderNode.Carousel,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View? {
+        val pageViews = node.children.mapNotNull { child -> build(context, child, ctx, cell) }
+        if (pageViews.isEmpty()) return node.fallback?.let { build(context, it, ctx, cell) }
+
+        val showsIndicator = node.showsIndicator ?: CAROUSEL_DEFAULT_SHOWS_INDICATOR
+        val loop = node.loop ?: CAROUSEL_DEFAULT_LOOP
+        // Absent `indicatorColor` inherits the ambient text ink — the same
+        // "inherit" resolution buildSocialProof/buildFeatureList/buildTimeline
+        // already use for an uncoloured icon tint (see
+        // resolvedInkTintColorInt's own doc): a hand-drawn dot has no
+        // automatic colour inheritance the way an uncoloured TextView does,
+        // so "no override" must still resolve to a CONCRETE paint colour.
+        // Deliberately resolved here (not read back off which branch ran) —
+        // the wave-B scar on this exact platform was a resolved-colour bug
+        // (the substituted value lived in a vendored drawable asset), not a
+        // branch bug.
+        val dotColorInt = resolvedInkTintColorInt(node.indicatorColor, ctx.dark)
+
+        return CarouselPagerView(context, pageViews, showsIndicator, loop, node.autoAdvanceSeconds, dotColorInt)
+    }
 }
 
 /**
@@ -1316,6 +1417,188 @@ private class TickingCountdownRow(
     override fun onDetachedFromWindow() {
         handler.removeCallbacks(tick)
         super.onDetachedFromWindow()
+    }
+}
+
+/**
+ * The `carousel` node's own top-level view: a vertical `LinearLayout` of a
+ * `ViewPager2` (paging) plus an optional hand-drawn [CarouselDotsRow]
+ * (indicator) below it, driving its own auto-advance [Handler] — posted from
+ * its OWN [onAttachedToWindow] and removed in [onDetachedFromWindow], the
+ * same discipline [TickingCountdownRow] applies to its tick, so a rebuild
+ * (this view detaching) never leaves a stray callback running against a view
+ * nothing points at any more.
+ *
+ * Auto-advance ticks by POSTING ONE STEP AT A TIME (`handler.postDelayed`
+ * scheduled fresh after every page change), never a repeating ticker —
+ * [ViewPager2.OnPageChangeCallback.onPageSelected] fires for BOTH a
+ * timer-driven [advance] and a real user swipe, and reschedules from there
+ * either way. That is what makes a manual swipe restart the auto-advance
+ * wait rather than race a stale schedule (spec §5) — there is only one
+ * rescheduling call site, not two paths that could disagree.
+ *
+ * `loop = false` reaching the last page latches [stoppedAtEnd] instead of
+ * moving `currentItem` — since `currentItem` does not change on that step,
+ * `onPageSelected` never fires to reschedule on its own, so the timer stops
+ * for good rather than one dangling `postDelayed` firing once more. Mirrors
+ * `TickingCountdownRow.hiddenOnExpiry` (a latch that never un-latches) and
+ * the Swift renderer's `CarouselView.stoppedAtEnd`.
+ */
+private class CarouselPagerView(
+    context: Context,
+    pageViews: List<View>,
+    showsIndicator: Boolean,
+    private val loop: Boolean,
+    private val autoAdvanceSeconds: Double?,
+    dotColorInt: Int,
+) : LinearLayout(context) {
+    private val pageCount = pageViews.size
+    private val handler = Handler(Looper.getMainLooper())
+
+    private val viewPager = ViewPager2(context).apply {
+        adapter = CarouselPageAdapter(pageViews)
+    }
+
+    // A single dot is nothing to indicate, so it is skipped even when
+    // `showsIndicator` resolves true.
+    private val dotsRow: CarouselDotsRow? =
+        if (showsIndicator && pageCount > 1) CarouselDotsRow(context, pageCount, dotColorInt) else null
+
+    /** Latched permanently the moment a `loop: false` carousel reaches its
+     *  last page — see this class's own doc comment. Never un-latches: a
+     *  deadline only ever recedes, the same invariant
+     *  [TickingCountdownRow.hiddenOnExpiry] relies on. */
+    private var stoppedAtEnd = false
+
+    private val tick = Runnable { advance() }
+
+    init {
+        orientation = VERTICAL
+        addView(viewPager, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        dotsRow?.let { row ->
+            addView(
+                row,
+                LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    topMargin = dp(context, CAROUSEL_DOTS_TOP_MARGIN_DP)
+                },
+            )
+        }
+        viewPager.registerOnPageChangeCallback(
+            object : ViewPager2.OnPageChangeCallback() {
+                override fun onPageSelected(position: Int) {
+                    dotsRow?.setActivePage(position)
+                    scheduleNextTick()
+                }
+            },
+        )
+    }
+
+    private fun scheduleNextTick() {
+        handler.removeCallbacks(tick)
+        val seconds = autoAdvanceSeconds
+        // Absent `autoAdvanceSeconds` means OFF, deliberately not a default
+        // interval (mirrors BuilderNode.Carousel.autoAdvanceSeconds's own
+        // doc) — and a single page (or none) has nothing to advance to.
+        if (seconds == null || seconds <= 0.0 || stoppedAtEnd || pageCount <= 1) return
+        handler.postDelayed(tick, (seconds * MILLIS_PER_SECOND).toLong())
+    }
+
+    private fun advance() {
+        val current = viewPager.currentItem
+        val next = nextCarouselPage(current, pageCount, loop)
+        if (next == current) {
+            // loop=false at the last page: stop for good, never rewind.
+            stoppedAtEnd = true
+            return
+        }
+        viewPager.currentItem = next
+        // onPageSelected (registered in init) reschedules the next tick.
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        scheduleNextTick()
+    }
+
+    override fun onDetachedFromWindow() {
+        handler.removeCallbacks(tick)
+        super.onDetachedFromWindow()
+    }
+}
+
+private const val MILLIS_PER_SECOND = 1000.0
+
+/**
+ * The `RecyclerView.Adapter` a `carousel`'s `ViewPager2` pages through. Each
+ * page was already built by the ordinary [NodeViewFactory.build] dispatch
+ * (see [NodeViewFactory.buildCarousel]) — this adapter's only job is
+ * attaching the right pre-built [View] into a recycled holder's container,
+ * detaching it from wherever it last lived first (a [View] can only ever
+ * have one parent; `ViewPager2`/`RecyclerView` re-binding an existing holder
+ * without this would crash on "specified child already has a parent").
+ */
+private class CarouselPageAdapter(private val pages: List<View>) :
+    RecyclerView.Adapter<CarouselPageAdapter.Holder>() {
+
+    class Holder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
+        Holder(
+            FrameLayout(parent.context).apply {
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            },
+        )
+
+    override fun getItemCount(): Int = pages.size
+
+    override fun onBindViewHolder(holder: Holder, position: Int) {
+        val page = pages[position]
+        (page.parent as? ViewGroup)?.removeView(page)
+        holder.container.removeAllViews()
+        holder.container.addView(page)
+    }
+}
+
+/**
+ * Hand-drawn page-indicator dots for `carousel` — `ViewPager2` supplies
+ * paging but no built-in indicator. One dot per page; the active page's dot
+ * draws at [CAROUSEL_DOT_ACTIVE_ALPHA], every other at
+ * [CAROUSEL_DOT_INACTIVE_ALPHA], both over the SAME resolved [colorInt] (see
+ * [NodeViewFactory.buildCarousel]'s doc comment for why an absent
+ * `indicatorColor` still resolves to a concrete paint colour here, unlike an
+ * ordinary uncoloured TextView).
+ */
+private class CarouselDotsRow(
+    context: Context,
+    private val pageCount: Int,
+    private val colorInt: Int,
+) : View(context) {
+    private var activePage = 0
+    private val dotDiameterPx = dp(context, CAROUSEL_DOT_SIZE_DP)
+    private val dotGapPx = dp(context, CAROUSEL_DOT_GAP_DP)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    fun setActivePage(page: Int) {
+        activePage = page
+        invalidate()
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = pageCount * dotDiameterPx + (pageCount - 1).coerceAtLeast(0) * dotGapPx
+        setMeasuredDimension(width, dotDiameterPx)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val radius = dotDiameterPx / 2f
+        for (index in 0 until pageCount) {
+            val cx = index * (dotDiameterPx + dotGapPx) + radius
+            paint.color = colorInt
+            val alphaFraction = if (index == activePage) CAROUSEL_DOT_ACTIVE_ALPHA else CAROUSEL_DOT_INACTIVE_ALPHA
+            paint.alpha = (alphaFraction * 255).roundToInt()
+            canvas.drawCircle(cx.toFloat(), radius, radius, paint)
+        }
     }
 }
 

@@ -677,6 +677,26 @@ class NodeViewFactoryTest {
         assertEquals(0L, countdownRemainingSeconds(deadlineMillis = 500, nowMillis = 1000))
     }
 
+    // ---- nextCarouselPage ----------------------------------------------
+
+    @Test
+    fun `the next page index wraps only when loop is true`() {
+        assertEquals(0, nextCarouselPage(current = 2, pageCount = 3, loop = true))
+        assertEquals(2, nextCarouselPage(current = 2, pageCount = 3, loop = false))
+    }
+
+    @Test
+    fun `nextCarouselPage simply advances when not yet at the last page`() {
+        assertEquals(1, nextCarouselPage(current = 0, pageCount = 3, loop = false))
+        assertEquals(1, nextCarouselPage(current = 0, pageCount = 3, loop = true))
+    }
+
+    @Test
+    fun `nextCarouselPage is a defensive no-op with a non-positive pageCount`() {
+        assertEquals(0, nextCarouselPage(current = 0, pageCount = 0, loop = true))
+        assertEquals(5, nextCarouselPage(current = 5, pageCount = -1, loop = false))
+    }
+
     /**
      * Minimal in-memory [android.content.SharedPreferences] test double —
      * only `getLong`/`edit().putLong(...).apply()` are ever exercised by

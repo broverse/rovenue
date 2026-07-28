@@ -58,6 +58,14 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("com.android.billingclient:billing:9.1.0")
     implementation("androidx.lifecycle:lifecycle-process:2.6.2")
+    // `carousel` node paging (wave D1). Our minSdk is 24 against this
+    // library's floor of 14 -- deliberate: the alternative is a
+    // HorizontalScrollView with hand-written snapping, page tracking, dot
+    // synchronisation and auto-advance, four mechanisms this repo would
+    // then own and debug on devices. ViewPager2 has no built-in page
+    // indicator, so the dots are hand-drawn (see NodeViewFactory.kt's
+    // CarouselDotsRow).
+    implementation("androidx.viewpager2:viewpager2:1.1.0")
 
     // Host-JVM unit tests run JNA on the desktop, which needs the regular
     // jar's bundled libjnidispatch.jnilib — the @aar artifact strips it

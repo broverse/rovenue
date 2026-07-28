@@ -98,6 +98,41 @@ class BuilderConfigModelTest {
         assertEquals("not-real", (unknown as BuilderNode.Icon).name)
     }
 
+    // ---- carousel node --------------------------------------------------
+
+    /** The named `accept` fixture's root's first child, decoded. Select fixture
+     *  entries BY NAME, never by index -- a previous wave widened this file and
+     *  silently broke two Kotlin tests in this module that assumed a position. */
+    private fun decodeFixtureNode(entryName: String): BuilderNode {
+        val entry = entryNamed("accept", entryName)
+        val config = decodeBuilderConfig(configJson(entry))!!
+        return config.root.children.first()
+    }
+
+    private fun fixtureDefaults(): JsonObject = fixture["defaults"]!!.jsonObject
+
+    @Test
+    fun `decodes the bare carousel from the shared fixture`() {
+        val node = decodeFixtureNode("carousel-bare")
+        assertTrue(node is BuilderNode.Carousel)
+        assertEquals(2, (node as BuilderNode.Carousel).children.size)
+        assertNull(node.showsIndicator)
+        assertNull(node.autoAdvanceSeconds)
+        assertNull(node.loop)
+        assertNull(node.indicatorColor)
+    }
+
+    @Test
+    fun `decodes the full carousel from the shared fixture`() {
+        val node = decodeFixtureNode("carousel-full") as BuilderNode.Carousel
+        assertEquals(2, node.children.size)
+        assertEquals(false, node.showsIndicator)
+        assertEquals(5.0, node.autoAdvanceSeconds)
+        assertEquals(true, node.loop)
+        assertEquals("#111111", node.indicatorColor?.light)
+        assertEquals("#EEEEEE", node.indicatorColor?.dark)
+    }
+
     @Test
     fun everyRegistryIconHasADrawable() {
         val registry = java.io.File("../shared/src/paywall/icon-registry.json")
@@ -515,7 +550,7 @@ class BuilderConfigModelTest {
      */
     @Test
     fun `native defaults match the shared fixture by value`() {
-        val defaults = fixture["defaults"]!!.jsonObject
+        val defaults = fixtureDefaults()
         assertEquals(DIVIDER_DEFAULT_THICKNESS_DP, defaults["DIVIDER_DEFAULT_THICKNESS"]!!.jsonPrimitive.double)
         assertEquals(DIVIDER_DEFAULT_INSET_DP, defaults["DIVIDER_DEFAULT_INSET"]!!.jsonPrimitive.double)
         assertEquals(DIVIDER_DEFAULT_COLOR, themePairFrom(defaults["DIVIDER_DEFAULT_COLOR"]!!.jsonObject))
@@ -552,6 +587,16 @@ class BuilderConfigModelTest {
         assertEquals(
             STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT_DP,
             defaults["STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT"]!!.jsonPrimitive.double,
+        )
+        // The three wave-D1 keys.
+        assertEquals(
+            CAROUSEL_DEFAULT_SHOWS_INDICATOR,
+            defaults["CAROUSEL_DEFAULT_SHOWS_INDICATOR"]!!.jsonPrimitive.content.toBoolean(),
+        )
+        assertEquals(CAROUSEL_DEFAULT_LOOP, defaults["CAROUSEL_DEFAULT_LOOP"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(
+            CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
+            defaults["CAROUSEL_MIN_AUTO_ADVANCE_SECONDS"]!!.jsonPrimitive.int,
         )
     }
 

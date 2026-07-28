@@ -120,6 +120,7 @@ private object OverridablePropKeys {
     val socialProof: Set<String> = setOf("rating", "starColor")
     val stickyFooter: Set<String> = setOf("background")
     val countdown: Set<String> = setOf("color")
+    val carousel: Set<String> = setOf("indicatorColor")
 }
 
 /** A single conditional prop swap: `{ when: { kind }, props }`. [T] is the
@@ -167,6 +168,8 @@ data class SocialProofOverrideProps(val rating: Double? = null, val starColor: T
 data class StickyFooterOverrideProps(val background: ThemePair? = null)
 
 data class CountdownOverrideProps(val color: ThemePair? = null)
+
+data class CarouselOverrideProps(val indicatorColor: ThemePair? = null)
 
 // =============================================================
 // Feature-list / timeline row shapes (Wave B) — Kotlin mirror of the shared
@@ -358,6 +361,27 @@ sealed class BuilderNode {
          *  value. */
         val color: ThemePair? = null,
         val overrides: List<NodeOverride<CountdownOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class Carousel(
+        override val id: String,
+        /** Pages. Any node, not only images — the same freedom `stack`
+         *  gives. */
+        val children: List<BuilderNode>,
+        /** Absent = CAROUSEL_DEFAULT_SHOWS_INDICATOR (NodeViewFactory.kt). */
+        val showsIndicator: Boolean? = null,
+        /** Seconds between automatic advances. Absent = no auto-advance at
+         *  all, deliberately not a default interval: a paywall that starts
+         *  moving on its own without the author asking is a surprise. */
+        val autoAdvanceSeconds: Double? = null,
+        /** Absent = CAROUSEL_DEFAULT_LOOP (NodeViewFactory.kt). */
+        val loop: Boolean? = null,
+        /** Absent = inherit the ambient text colour, never a substituted
+         *  value. */
+        val indicatorColor: ThemePair? = null,
+        val overrides: List<NodeOverride<CarouselOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
@@ -613,6 +637,19 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             visibility = visibility,
             fallback = fallback,
         )
+        "carousel" -> BuilderNode.Carousel(
+            id = id,
+            children = (obj["children"] as? JsonArray
+                ?: throw BuilderDecodeException("carousel.children must be an array"))
+                .map { parseNode(it as? JsonObject ?: throw BuilderDecodeException("child must be an object")) },
+            showsIndicator = obj.optionalBoolean("showsIndicator"),
+            autoAdvanceSeconds = obj.optionalDouble("autoAdvanceSeconds"),
+            loop = obj.optionalBoolean("loop"),
+            indicatorColor = obj["indicatorColor"]?.letObject(::parseThemePair),
+            overrides = obj.parseOverrideList(::parseCarouselOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
         else -> BuilderNode.Unknown(id = id, visibility = visibility, fallback = fallback)
@@ -769,6 +806,11 @@ private fun parseStickyFooterOverrideProps(props: JsonObject): StickyFooterOverr
 private fun parseCountdownOverrideProps(props: JsonObject): CountdownOverrideProps {
     validateOverridePropKeys(props, OverridablePropKeys.countdown)
     return CountdownOverrideProps(color = props["color"]?.letObject(::parseThemePair))
+}
+
+private fun parseCarouselOverrideProps(props: JsonObject): CarouselOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.carousel)
+    return CarouselOverrideProps(indicatorColor = props["indicatorColor"]?.letObject(::parseThemePair))
 }
 
 // ----- feature-list / timeline rows -----
