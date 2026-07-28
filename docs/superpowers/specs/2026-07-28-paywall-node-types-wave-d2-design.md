@@ -129,7 +129,28 @@ What is done instead, and why the residue is small:
 3. The remainder is recorded here rather than left in three code comments, per binding rule 9: a
    behaviour not written in the spec gets invented three times.
 
-### 3.4 `ThemeUrl` is introduced here
+### 3.4 What "usable source" means, defined rather than discovered
+
+**A media source is usable when it is non-blank after trimming leading and trailing whitespace.
+Nothing more.** No renderer validates URL *syntax* before mounting.
+
+This is stated because the first attempt left it unstated, and the three renderers were told to
+"parse the URL" — which is not a stable cross-platform predicate. Probed directly: iOS's
+`URL(string:)` accepts `" "`, `"not a url"` and `"://x"`; Android's URI-based rule rejects all
+three; web accepted two of them. A whitespace-only source therefore left a phantom carousel page and
+dot **on iOS only** — exactly the defect the pre-mount check exists to prevent. iOS's answer is also
+version-dependent (CFURL before iOS 17, an RFC-3986 parser after), so the agreement would have
+drifted again on its own.
+
+Validating syntax is the platform's job at load time: a malformed URL fails to load and takes the
+existing error path to `fallback`. What the pre-mount check is for is the case no renderer can
+recover from — an *absent* source, which is precisely the builder's `newNode` default
+(`url: { light: "" }`) and its whitespace cousins.
+
+The general lesson, and the reason this sits in the spec rather than in three comments: **a rule we
+define is stable; a rule three third-party parsers happen to share is not.**
+
+### 3.5 `ThemeUrl` is introduced here
 
 `image` today inlines its light/dark URL pair as `{ light: string; dark?: string }` with no name.
 `video` and `lottie` need the same shape, and three anonymous copies of one type is how spellings
