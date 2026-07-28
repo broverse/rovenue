@@ -95,3 +95,4 @@ export * as virtualCurrencyRepo from "./repositories/virtual-currencies";
 export * as productCurrencyGrantRepo from "./repositories/product-currency-grants";
 export * as warehouseQueryRunRepo from "./repositories/warehouse-query-runs";
 export * as stripeConnectionRepo from "./repositories/project-stripe-connections";
+export * as fontRepo from "./repositories/fonts";

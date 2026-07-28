@@ -4,6 +4,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   date,
   decimal,
   index,
@@ -2948,3 +2949,67 @@ export const warehouseQueryRuns = pgTable(
     ),
   ],
 );
+
+// =============================================================
+// paywall fonts (font_families / font_faces)
+// =============================================================
+//
+// A project uploads custom font files for paywall rendering; a
+// `fontFamily` groups the named font (e.g. "Brand Sans") and each
+// `fontFace` is one weight/style/format variant of it. There is no
+// asset storage in this repo and a mounted volume would break under
+// `API_REPLICAS`, so face bytes live directly in Postgres as `bytea`.
+// `byteSize` is denormalised at write time so the metadata-only list
+// query (`listFamiliesWithFaces`) never has to touch the blob column
+// to report a size. Deleting a family a paywall references is
+// allowed (design spec §4.1) — `softDeleteFamily` sets `deletedAt`,
+// and every read filters it out, so a deleted font stops being served
+// without a blocking check on delete.
+
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
+
+export const fontFamilies = pgTable("font_families", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  projectId: text("projectId")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  deletedAt: timestamp("deletedAt", { withTimezone: true }),
+});
+
+export type FontFamily = typeof fontFamilies.$inferSelect;
+export type NewFontFamily = typeof fontFamilies.$inferInsert;
+
+export const fontFaces = pgTable(
+  "font_faces",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    familyId: text("familyId")
+      .notNull()
+      .references(() => fontFamilies.id, { onDelete: "cascade" }),
+    weight: integer("weight").notNull(),
+    style: text("style").notNull(),
+    format: text("format").notNull(),
+    bytes: bytea("bytes").notNull(),
+    byteSize: integer("byteSize").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    faceKey: uniqueIndex("font_faces_family_weight_style_key").on(
+      t.familyId,
+      t.weight,
+      t.style,
+    ),
+  }),
+);
+
+export type FontFace = typeof fontFaces.$inferSelect;
+export type NewFontFace = typeof fontFaces.$inferInsert;

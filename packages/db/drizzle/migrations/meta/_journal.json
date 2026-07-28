@@ -680,6 +680,13 @@
       "when": 1784680713600,
       "tag": "0096_paywall_preview_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1785269745601,
+      "tag": "0097_paywall_fonts",
+      "breakpoints": true
     }
   ]
 }
