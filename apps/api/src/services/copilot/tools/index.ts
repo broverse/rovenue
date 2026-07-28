@@ -12,6 +12,21 @@ import { actionAudiencesTools } from "./action-audiences";
 import { actionFeatureFlagsTools } from "./action-feature-flags";
 import { actionExperimentsTools } from "./action-experiments";
 import { uiTools } from "./ui";
+import { queryPaywallTools } from "./query-paywall";
+import { actionPaywallTools } from "./action-paywall";
+
+// The paywall builder tools are only useful — and only safe to spend tokens
+// advertising — while the user is actually looking at a paywall's builder
+// canvas, so they're gated on `ctx.route` rather than always loaded like
+// every other domain's tools. `:paywallId` is opaque here on purpose (any
+// non-slash segment); the tools themselves re-scope by `ctx.projectId` and
+// re-validate the `paywallId` argument, so a route match alone grants no
+// access.
+export const BUILDER_ROUTE_RE = /\/paywalls\/[^/]+\/builder/;
+
+function isBuilderRoute(route: string | undefined): boolean {
+  return typeof route === "string" && BUILDER_ROUTE_RE.test(route);
+}
 
 export function loadTools(ctx: ToolContext) {
   return {
@@ -29,6 +44,9 @@ export function loadTools(ctx: ToolContext) {
     ...actionFeatureFlagsTools(ctx),
     ...actionExperimentsTools(ctx),
     ...uiTools(ctx),
+    ...(isBuilderRoute(ctx.route)
+      ? { ...queryPaywallTools(ctx), ...actionPaywallTools(ctx) }
+      : {}),
   };
 }
 
@@ -58,6 +76,11 @@ const STATIC_NAMES = [
   "ui_navigate",
   "ui_filter",
   "ui_openSubscriber",
+  // Paywall builder tools — this list pins the full tool-NAME universe, not
+  // what `loadTools()` actually returns for a given ctx: these two are only
+  // present when `ctx.route` matches `BUILDER_ROUTE_RE` above.
+  "query_paywall_tree",
+  "action_paywall_editTree",
 ] as const;
 
 export function listToolNames(): string[] {

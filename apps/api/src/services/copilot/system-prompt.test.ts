@@ -33,4 +33,37 @@ describe("buildSystemPrompt", () => {
     expect(out).toContain("Current dashboard page: /x");
     expect(out).toContain("Locale: tr");
   });
+
+  describe("paywall builder context block", () => {
+    const BASE = { role: "ADMIN", projectName: "Acme", projectId: "prj_1", locale: "en" };
+
+    it("is included when route matches the builder canvas AND focusedEntityId is set", () => {
+      const out = buildSystemPrompt({
+        ...BASE,
+        route: "/projects/prj_1/paywalls/pw_1/builder",
+        focusedEntityId: "pw_1",
+      });
+      expect(out).toContain("PAYWALL BUILDER CONTEXT");
+      expect(out).toContain("pw_1");
+      expect(out).toContain("query_paywall_tree");
+      expect(out).toContain("action_paywall_editTree");
+    });
+
+    it("is omitted when route matches but focusedEntityId is absent", () => {
+      const out = buildSystemPrompt({
+        ...BASE,
+        route: "/projects/prj_1/paywalls/pw_1/builder",
+      });
+      expect(out).not.toContain("PAYWALL BUILDER CONTEXT");
+    });
+
+    it("is omitted when focusedEntityId is set but route does not match the builder canvas", () => {
+      const out = buildSystemPrompt({
+        ...BASE,
+        route: "/projects/prj_1/paywalls/pw_1",
+        focusedEntityId: "pw_1",
+      });
+      expect(out).not.toContain("PAYWALL BUILDER CONTEXT");
+    });
+  });
 });

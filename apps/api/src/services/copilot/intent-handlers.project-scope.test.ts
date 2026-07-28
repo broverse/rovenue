@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { BuilderConfig, PaywallTreeOp } from "@rovenue/shared/paywall";
+import { GeneratedConfigError } from "../paywall-ai/validate-config";
 
 // =============================================================
 // Intent handlers — cross-project mutation guards (unit)
@@ -33,6 +35,10 @@ const { drizzleMock } = vi.hoisted(() => {
     experimentRepo: {
       findByIdInProject: vi.fn(),
       updateExperiment: vi.fn(async () => ({ id: "exp_1" })),
+    },
+    paywallRepo: {
+      findPaywallById: vi.fn(),
+      updatePaywall: vi.fn(async () => ({ id: "pw_1" })),
     },
   };
   return { drizzleMock };
@@ -164,5 +170,125 @@ describe("intent handlers — cross-project mutation guards", () => {
       }),
     ).rejects.toThrow(/not found in project/);
     expect(drizzleMock.accessRepo.createAccess).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// action.paywall.editTree — dry-run, no-write handler (Task 3)
+// =============================================================
+//
+// `paywallRepo.findPaywallById` is already scoped to (projectId, id) at
+// the repo layer (unlike e.g. `subscriberRepo.findSubscriberById`), so
+// the handler's IDOR guard is "call it with ctx.projectId and treat a
+// miss as not-found" — same outcome as the other handlers' manual
+// project-id check, enforced one layer down instead.
+
+const BASE_PAYWALL_CONFIG: BuilderConfig = {
+  formatVersion: 2,
+  defaultLocale: "en",
+  localizations: { en: { title_key: "Go Pro", cta_key: "Continue" } },
+  root: {
+    type: "stack",
+    id: "root",
+    axis: "v",
+    children: [
+      { type: "text", id: "title", key: "title_key", role: "title" },
+      {
+        type: "packageList",
+        id: "packages",
+        packageIds: ["pkg_monthly"],
+        cellLayout: "row",
+      },
+      { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+    ],
+  },
+};
+
+function selfProjectPaywall(builderConfig: BuilderConfig | null = BASE_PAYWALL_CONFIG) {
+  return {
+    id: "pw_1",
+    projectId: "prj_self",
+    builderConfig,
+    remoteConfig: { defaultLocale: "en" },
+  };
+}
+
+describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no writes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetIntentHandlersForTests();
+    registerAllIntentHandlers();
+  });
+
+  test("rejects a paywall from another project (scoped finder misses) and never touches applyTreeOp's result", async () => {
+    drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(null);
+
+    await expect(
+      run("action_paywall_editTree", {
+        paywallId: "pw_other",
+        op: { kind: "remove", nodeId: "purchase" } satisfies PaywallTreeOp,
+      }),
+    ).rejects.toThrow(/not found in project/);
+    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+  });
+
+  test.each<[string, PaywallTreeOp]>([
+    [
+      "insert",
+      { kind: "insert", parentId: "root", index: 0, subtree: { type: "spacer", id: "new_spacer", size: 4 } },
+    ],
+    [
+      "replace",
+      { kind: "replace", nodeId: "purchase", subtree: { type: "purchaseButton", id: "purchase", labelKey: "cta_key" } },
+    ],
+    ["remove", { kind: "remove", nodeId: "packages" }],
+    ["updateProps", { kind: "updateProps", nodeId: "title", patch: { role: "subtitle" } }],
+    ["setLocalizations", { kind: "setLocalizations", locale: "en", entries: { title_key: "Go Premium" } }],
+  ])("accepts a valid %s op for the owning project, returns { op, paywallId }, never writes", async (_kind, op) => {
+    drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(selfProjectPaywall());
+
+    const result = await run("action_paywall_editTree", { paywallId: "pw_1", op });
+
+    expect(result).toEqual({ op, paywallId: "pw_1" });
+    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+  });
+
+  test("falls back to an empty draft (remoteConfig.defaultLocale) when builderConfig is null", async () => {
+    drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(selfProjectPaywall(null));
+    const op: PaywallTreeOp = {
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp_1", size: 4 },
+    };
+
+    const result = await run("action_paywall_editTree", { paywallId: "pw_1", op });
+
+    expect(result).toEqual({ op, paywallId: "pw_1" });
+    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+  });
+
+  test("rejects an insert that would introduce a duplicate node id via GeneratedConfigError, never writes", async () => {
+    drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(selfProjectPaywall());
+    const op: PaywallTreeOp = {
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      // "title" already exists in BASE_PAYWALL_CONFIG — save-tier DUPLICATE_NODE_ID.
+      subtree: { type: "text", id: "title", key: "title_key", role: "title" },
+    };
+
+    await expect(
+      run("action_paywall_editTree", { paywallId: "pw_1", op }),
+    ).rejects.toThrow(GeneratedConfigError);
+    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+  });
+
+  test("propagates a TreeOpError for a structurally invalid op (target not found), never writes", async () => {
+    drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(selfProjectPaywall());
+    const op: PaywallTreeOp = { kind: "remove", nodeId: "does_not_exist" };
+
+    await expect(run("action_paywall_editTree", { paywallId: "pw_1", op })).rejects.toThrow();
+    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
   });
 });

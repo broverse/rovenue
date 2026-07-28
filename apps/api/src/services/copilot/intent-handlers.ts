@@ -22,10 +22,25 @@
 //   action.featureFlags.updateRules → dashboardFeatureFlagRepo.updateFeatureFlag
 //   action.experiments.start     → experimentRepo.updateExperiment (status→"RUNNING")
 //   action.experiments.stop      → experimentRepo.updateExperiment (status→"COMPLETED")
+//   action.paywall.editTree      → DRY-RUN ONLY (applyTreeOp + assertSaveValid);
+//                                   no repo write — see the handler below.
 
+import { z } from "zod";
 import { drizzle } from "@rovenue/db";
+import {
+  applyTreeOp,
+  emptyBuilderConfig,
+  paywallTreeOpSchema,
+  type BuilderConfig,
+} from "@rovenue/shared/paywall";
 import { audit } from "../../lib/audit";
 import { registerIntentHandler } from "./intent-executor";
+import { assertSaveValid } from "../paywall-ai/validate-config";
+
+const editTreePayloadSchema = z.object({
+  paywallId: z.string().min(1),
+  op: paywallTreeOpSchema,
+});
 
 export function registerAllIntentHandlers(): void {
   // ------------------------------------------------------------------
@@ -497,5 +512,45 @@ export function registerAllIntentHandlers(): void {
 
       return result;
     });
+  });
+
+  // ------------------------------------------------------------------
+  // action.paywall.editTree
+  // DRY-RUN ONLY: applies the proposed `PaywallTreeOp` to the paywall's
+  // current draft `builderConfig` (falling back to an empty config
+  // when no draft exists yet — mirrors the dashboard builder VM's own
+  // `detail.builderConfig ?? emptyBuilderConfig(...)` fallback) and
+  // gates the RESULT through `assertSaveValid`. This handler NEVER
+  // calls `updatePaywall` — persistence happens through the existing
+  // PATCH /paywalls/:id route once the user reviews the diff in the
+  // dashboard, same as every other builder edit. Returning `{ op,
+  // paywallId }` on success tells the caller the op is valid to apply;
+  // it is not itself the applied config.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_paywall_editTree", async (ctx, payload) => {
+    const { paywallId, op } = editTreePayloadSchema.parse(payload);
+
+    // Cross-project guard: the payload's paywallId is stored verbatim
+    // from the AI tool call, so re-scope it to ctx.projectId here (same
+    // IDOR precedent as every handler above).
+    const paywall = await drizzle.paywallRepo.findPaywallById(
+      drizzle.db,
+      ctx.projectId,
+      paywallId,
+    );
+    if (!paywall) {
+      throw new Error(`Paywall ${paywallId} not found in project`);
+    }
+
+    const currentDraft = paywall.builderConfig
+      ? (paywall.builderConfig as BuilderConfig)
+      : emptyBuilderConfig(
+          (paywall.remoteConfig as { defaultLocale?: string } | null)
+            ?.defaultLocale ?? "en",
+        );
+
+    assertSaveValid(applyTreeOp(currentDraft, op));
+
+    return { op, paywallId };
   });
 }

@@ -9,6 +9,14 @@ export interface ToolContext {
   role: string;
   threadId: string;
   messageId: string;
+  /**
+   * The dashboard route the chat request was sent from (`context.route` in
+   * the chat body — see `chat.ts`). Route-gated tool sets (e.g. the paywall
+   * builder tools in `tools/index.ts`) key off this instead of a dedicated
+   * feature flag, so a tool is only offered to the model while the user is
+   * actually looking at the surface it edits.
+   */
+  route?: string;
 }
 
 const SearchArgs = z.object({

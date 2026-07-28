@@ -246,6 +246,7 @@ export const copilotChatRoute = new Hono()
       role: membership.role,
       threadId,
       messageId: assistantMsg.id,
+      route: context.route,
     });
 
     // ------------------------------------------------------------------
@@ -278,6 +279,7 @@ export const copilotChatRoute = new Hono()
         projectName: project!.name,
         projectId,
         route: context.route,
+        focusedEntityId: context.focusedEntityId,
         locale: c.req.header("accept-language")?.slice(0, 2) ?? "en",
       }),
       messages: modelMessages,

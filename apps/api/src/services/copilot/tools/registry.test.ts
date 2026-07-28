@@ -60,6 +60,12 @@ describe("loadTools", () => {
     }
   });
 
+  it("pins the paywall builder tool names in the STATIC_NAMES universe (route-gated at runtime — see below)", () => {
+    const names = listToolNames();
+    expect(names).toContain("query_paywall_tree");
+    expect(names).toContain("action_paywall_editTree");
+  });
+
   it("never includes excluded domains", () => {
     const names = listToolNames();
     for (const banned of [
@@ -74,5 +80,33 @@ describe("loadTools", () => {
     ]) {
       for (const n of names) expect(n).not.toContain(banned);
     }
+  });
+
+  describe("paywall builder tools are route-gated", () => {
+    const BASE_CTX = {
+      projectId: "prj_1",
+      userId: "u_1",
+      role: "ADMIN",
+      threadId: "th_1",
+      messageId: "msg_1",
+    };
+
+    it("includes query_paywall_tree and action_paywall_editTree when route is a paywall builder canvas", () => {
+      const tools = loadTools({ ...BASE_CTX, route: "/projects/prj_1/paywalls/pw_1/builder" });
+      expect(tools["query_paywall_tree"]).toBeDefined();
+      expect(tools["action_paywall_editTree"]).toBeDefined();
+    });
+
+    it("omits both paywall tools when route is absent", () => {
+      const tools = loadTools(BASE_CTX);
+      expect(tools["query_paywall_tree"]).toBeUndefined();
+      expect(tools["action_paywall_editTree"]).toBeUndefined();
+    });
+
+    it("omits both paywall tools when route doesn't match the builder canvas", () => {
+      const tools = loadTools({ ...BASE_CTX, route: "/projects/prj_1/paywalls/pw_1" });
+      expect(tools["query_paywall_tree"]).toBeUndefined();
+      expect(tools["action_paywall_editTree"]).toBeUndefined();
+    });
   });
 });
