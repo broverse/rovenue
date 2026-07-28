@@ -35,6 +35,7 @@ import {
   generatePaywallConfig,
 } from "../../services/paywall-ai/generate";
 import { RoviConfigError } from "../../services/copilot/providers";
+import { generateClaimToken, hashToken } from "../../services/funnel/token";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { audit, extractRequestContext } from "../../lib/audit";
@@ -219,6 +220,19 @@ function prepareBuilderConfigPatch(
 const versionLabelBodySchema = z.object({
   label: z.string().trim().min(1).max(120).nullable(),
 });
+
+// -------------------------------------------------------------
+// P9 on-device preview — mint token lifetime (§6.16).
+// -------------------------------------------------------------
+
+/** How long a minted preview token stays redeemable before it must be
+ * re-minted. Kept short — a preview session grants draft (unpublished)
+ * access outside the dashboard. */
+const PREVIEW_SESSION_TTL_MINUTES = 60;
+
+/** Unit conversion for the TTL above — kept as a named constant rather
+ * than an inline `60_000` per the project's no-magic-values convention. */
+const MS_PER_MINUTE = 60_000;
 
 // -------------------------------------------------------------
 // AI start tab — one-shot paywall generation (P8 AI-FAB, Task 4).
@@ -1180,6 +1194,104 @@ export const paywallsDashboardRoute = new Hono()
         entries,
       }),
     );
+  })
+  // -----------------------------------------------------------
+  // P9 — on-device paywall preview mint/revoke (§6.16). A dashboard user
+  // mints a short-lived token that a physical device redeems (via
+  // GET /v1/preview/paywalls/:token, Task 3) to fetch this paywall's DRAFT
+  // builderConfig rather than the published snapshot /v1/placements
+  // normally serves. Gated on products:write (not the read-only
+  // CUSTOMER_SUPPORT role above): minting hands draft access to a device
+  // outside the dashboard, the same trust level as a builder write. Only
+  // the token's hash is ever persisted (Task 1's previewSessionRepo) — the
+  // plaintext appears exactly once, in this response, and must never be
+  // logged.
+  // -----------------------------------------------------------
+  .post("/:id/preview-sessions", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "products:write");
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+
+    const token = generateClaimToken();
+    const expiresAt = new Date(Date.now() + PREVIEW_SESSION_TTL_MINUTES * MS_PER_MINUTE);
+
+    const session = await drizzle.db.transaction(async (tx) => {
+      const created = await drizzle.previewSessionRepo.createPreviewSession(tx, {
+        projectId,
+        paywallId: id,
+        tokenHash: hashToken(token),
+        createdBy: user.id,
+        expiresAt,
+      });
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "create",
+          resource: "paywall_preview_session",
+          resourceId: created.id,
+          after: { paywallId: id, expiresAt: expiresAt.toISOString() },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+      return created;
+    });
+
+    const previewUrl = `${new URL(c.req.url).origin}/v1/preview/paywalls/${token}`;
+    return c.json(
+      ok({
+        sessionId: session.id,
+        token,
+        expiresAt: expiresAt.toISOString(),
+        previewUrl,
+        qrPayload: previewUrl,
+      }),
+    );
+  })
+  .delete("/:id/preview-sessions/:sid", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    const sid = c.req.param("sid");
+    if (!projectId || !id || !sid) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "products:write");
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+
+    await drizzle.db.transaction(async (tx) => {
+      const revoked = await drizzle.previewSessionRepo.revokePreviewSession(tx, projectId, sid);
+      if (!revoked) {
+        throw new HTTPException(404, { message: "Preview session not found" });
+      }
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "delete",
+          resource: "paywall_preview_session",
+          resourceId: sid,
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+    });
+
+    return c.json(ok({ revoked: true }));
   })
   .delete("/:id", async (c) => {
     const projectId = c.req.param("projectId");

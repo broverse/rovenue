@@ -145,6 +145,7 @@ export type AuditResource =
   | "billing_subscription"
   | "funnel"
   | "paywall"
+  | "paywall_preview_session"
   | "placement"
   | "custom_domain"
   | "integration_connection"
