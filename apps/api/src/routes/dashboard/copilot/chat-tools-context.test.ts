@@ -8,10 +8,11 @@ import { Hono } from "hono";
 // Task 3 (P8 AI-FAB, §6.15) added route-gated paywall tools to
 // `loadTools`, which only fire when `ToolContext.route` is set. This
 // pins that `chat.ts` actually threads the request's `context.route`
-// (and `context.focusedEntityId`) through — everything else in the
-// route (auth, quota, provider resolution, persistence, streaming) is
-// mocked out so this stays a fast unit test, not a DB-backed
-// integration test (see `copilot-chat.integration.test.ts` for that).
+// (and `context.paywallId`/`context.focusedEntityId` — Task 5's
+// review-fix, §6.15) through — everything else in the route (auth,
+// quota, provider resolution, persistence, streaming) is mocked out so
+// this stays a fast unit test, not a DB-backed integration test (see
+// `copilot-chat.integration.test.ts` for that).
 // =============================================================
 
 const { drizzleMock, loadToolsMock, buildSystemPromptMock, streamTextMock } = vi.hoisted(() => {
@@ -123,26 +124,51 @@ describe("copilotChatRoute — context threading", () => {
     );
   });
 
-  it("threads context.focusedEntityId into buildSystemPrompt alongside route", async () => {
+  it("threads context.paywallId and context.focusedEntityId into buildSystemPrompt alongside route", async () => {
     const app = buildApp();
     await app.request("/projects/prj_1/copilot/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         message: "insert a timeline node",
-        context: { route: "/projects/prj_1/paywalls/pw_1/builder", focusedEntityId: "pw_1" },
+        context: {
+          route: "/projects/prj_1/paywalls/pw_1/builder",
+          paywallId: "pw_1",
+          focusedEntityId: "node_42",
+        },
       }),
     });
 
     expect(buildSystemPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         route: "/projects/prj_1/paywalls/pw_1/builder",
-        focusedEntityId: "pw_1",
+        paywallId: "pw_1",
+        focusedEntityId: "node_42",
       }),
     );
   });
 
-  it("passes route through as undefined-safe when focusedEntityId is absent (non-builder route)", async () => {
+  it("threads context.paywallId alone (no selection) into buildSystemPrompt", async () => {
+    const app = buildApp();
+    await app.request("/projects/prj_1/copilot/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "insert a timeline node",
+        context: { route: "/projects/prj_1/paywalls/pw_1/builder", paywallId: "pw_1" },
+      }),
+    });
+
+    expect(buildSystemPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "/projects/prj_1/paywalls/pw_1/builder",
+        paywallId: "pw_1",
+        focusedEntityId: undefined,
+      }),
+    );
+  });
+
+  it("passes route through as undefined-safe when paywallId/focusedEntityId are absent (non-builder route)", async () => {
     const app = buildApp();
     await app.request("/projects/prj_1/copilot/chat", {
       method: "POST",
@@ -157,7 +183,11 @@ describe("copilotChatRoute — context threading", () => {
       expect.objectContaining({ route: "/projects/prj_1/subscribers" }),
     );
     expect(buildSystemPromptMock).toHaveBeenCalledWith(
-      expect.objectContaining({ route: "/projects/prj_1/subscribers", focusedEntityId: undefined }),
+      expect.objectContaining({
+        route: "/projects/prj_1/subscribers",
+        paywallId: undefined,
+        focusedEntityId: undefined,
+      }),
     );
   });
 });

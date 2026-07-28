@@ -99,17 +99,22 @@ export class PaywallBuilderViewModel {
    * (spec §2, §3.3). Set by `applyExternalTreeOp`/`applyExternalConfig`
    * right before they overwrite `config`; consumed by `revertAiChange`.
    * Cleared by the next MANUAL edit (`clearAiSnapshotOnManualEdit`, called
-   * from the node-CRUD methods below) so "Revert" can't resurrect a config
-   * the author has since edited by hand, and by `revertAiChange` itself
-   * (one-shot — reverting twice would silently no-op the second time).
+   * from the node-CRUD methods AND the locale-op methods below — a locale
+   * edit is exactly as "manual" as a tree edit, and skipping it would let
+   * Revert resurrect a config from BEFORE a locale rename/delete the
+   * author made on purpose in between) so "Revert" can't resurrect a
+   * config the author has since edited by hand, and by `revertAiChange`
+   * itself (one-shot — reverting twice would silently no-op the second
+   * time).
    */
   @state configBeforeAiApply: BuilderConfig | null = null;
 
   /** Drops any pending AI-revert snapshot. Called at the top of every
-   *  hand-drawn tree mutation (see `addNode`/`removeNode`/`moveNode`/
-   *  `updateNode`) — anything routed through `applyExternalTreeOp`/
-   *  `applyExternalConfig` must NOT call this, or it would erase the very
-   *  snapshot it just set. */
+   *  hand-drawn tree mutation (`addNode`/`removeNode`/`moveNode`/
+   *  `updateNode`), `applyPreset`, and every locale-op method
+   *  (`setLocaleText`/`addLocale`/`removeLocale`/`setDefaultLocale`) —
+   *  anything routed through `applyExternalTreeOp`/`applyExternalConfig`
+   *  must NOT call this, or it would erase the very snapshot it just set. */
   private clearAiSnapshotOnManualEdit() {
     if (this.configBeforeAiApply !== null) this.configBeforeAiApply = null;
   }
@@ -515,6 +520,7 @@ export class PaywallBuilderViewModel {
 
   // ----- Localization text -----
   setLocaleText(key: string, locale: string, value: string) {
+    this.clearAiSnapshotOnManualEdit();
     if (!this.locales.includes(locale)) return;
     const localizations = {
       ...this.config.localizations,
@@ -530,6 +536,7 @@ export class PaywallBuilderViewModel {
   }
 
   addLocale(rawCode: string) {
+    this.clearAiSnapshotOnManualEdit();
     const code = rawCode.trim().toLowerCase();
     if (!code || code in this.config.localizations) return;
     const localizations = { ...this.config.localizations, [code]: {} };
@@ -544,6 +551,7 @@ export class PaywallBuilderViewModel {
    * reassigns to whichever locale key sorts first among the survivors.
    */
   removeLocale(code: string) {
+    this.clearAiSnapshotOnManualEdit();
     const keys = Object.keys(this.config.localizations);
     if (keys.length <= 1 || !keys.includes(code)) return;
 
@@ -559,6 +567,7 @@ export class PaywallBuilderViewModel {
   }
 
   setDefaultLocale(code: string) {
+    this.clearAiSnapshotOnManualEdit();
     if (!(code in this.config.localizations)) return;
     this.config = { ...this.config, defaultLocale: code };
     this.defaultLocale = code;

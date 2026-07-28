@@ -60,11 +60,16 @@ export const BuilderShell = component(({ projectId }: Props) => {
   // Rovi → builder bridge (spec §3.3): only the builder route registers a
   // patch listener, so `ApprovalCard`'s execute handler can forward an
   // approved `action_paywall_editTree` op while a builder is mounted, and
-  // falls back to its "open the builder" state otherwise. Unregisters on
-  // unmount (route change / paywall switch) so a stale VM never receives
-  // a patch meant for whichever builder is open next.
+  // falls back to its "open the builder" state otherwise. Registered under
+  // THIS builder's own `paywallId` — `dispatchPaywallPatch` refuses an op
+  // whose `paywallId` doesn't match, so a stale approval from a different
+  // paywall (approved before navigating here, or approved while THIS
+  // builder has since navigated away) can never land on the wrong tree:
+  // every paywall's root node id is literally `"root"`, so an unscoped
+  // "insert under root" would otherwise apply silently cross-paywall.
+  // Unregisters on unmount (route change / paywall switch).
   useEffect(() => {
-    return registerPaywallPatchListener((op) => {
+    return registerPaywallPatchListener(vm.paywallId, (op) => {
       try {
         vm.applyExternalTreeOp(op);
         return true;
@@ -72,13 +77,14 @@ export const BuilderShell = component(({ projectId }: Props) => {
         return false;
       }
     });
-  }, [registerPaywallPatchListener, vm]);
+  }, [registerPaywallPatchListener, vm, vm.paywallId]);
 
   // Tells Rovi which paywall is open and which node the author has
-  // selected (spec §3.1) — `useRoviChat` forwards `focusedEntityId` to the
-  // backend so the system prompt can ground a proposed edit against the
-  // exact node in view. Reset to empty on unmount so leaving the builder
-  // doesn't leak paywall context into chats on other pages.
+  // selected (spec §3.1) — `useRoviChat` forwards both `paywallId` and
+  // `focusedEntityId` to the backend: `paywallId` drives the paywall-context
+  // block itself, `focusedEntityId` (the selected node) is mentioned as an
+  // extra sentence inside it. Reset to empty on unmount so leaving the
+  // builder doesn't leak paywall context into chats on other pages.
   useEffect(() => {
     setChatContext({
       paywallId: vm.paywallId || undefined,

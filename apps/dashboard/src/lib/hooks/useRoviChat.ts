@@ -40,12 +40,17 @@ export function useRoviChat(args: {
   const location = useLocation();
   const pathname = location.pathname;
   const { threadId } = args;
-  // `focusedEntityId` is the paywall-builder's selected node id (set via
-  // `RoviProvider.setChatContext`, see builder-shell.tsx) — undefined
-  // everywhere else. The backend only reads it on the builder route
-  // (`BUILDER_ROUTE_RE` in system-prompt.ts), so it's harmless elsewhere.
+  // `paywallId` (the OPEN paywall) and `focusedEntityId` (the selected NODE
+  // within it — set via `RoviProvider.setChatContext`, see builder-shell.tsx)
+  // are two DIFFERENT things and must not collapse into one field: the
+  // backend's paywall-context block is keyed on `paywallId` (present
+  // whenever a builder is open, selection or not) and mentions
+  // `focusedEntityId` as an extra sentence only when there IS a selection
+  // (see `system-prompt.ts`'s `paywallBlock`). Both are undefined outside
+  // the builder route; the backend only reads either on the builder route
+  // (`BUILDER_ROUTE_RE`), so they're harmless elsewhere.
   const { chatContext } = useRovi();
-  const focusedEntityId = chatContext.focusedEntityId;
+  const { paywallId, focusedEntityId } = chatContext;
 
   const transport = useMemo(() => {
     if (!projectId) return undefined;
@@ -54,10 +59,10 @@ export function useRoviChat(args: {
       credentials: "include",
       body: () => ({
         threadId: threadId ?? "",
-        context: { route: pathname, focusedEntityId },
+        context: { route: pathname, paywallId, focusedEntityId },
       }),
     });
-  }, [projectId, threadId, pathname, focusedEntityId]);
+  }, [projectId, threadId, pathname, paywallId, focusedEntityId]);
 
   // `useChat` itself requires a hook call on every render — we can't
   // early-return before it. When there's no projectId in scope (e.g. the

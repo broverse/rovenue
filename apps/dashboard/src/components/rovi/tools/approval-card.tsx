@@ -59,7 +59,11 @@ export function ApprovalCard({ intent }: { intent: IntentPayload }) {
       setDecision("approved");
       if (intent.toolName === EDIT_TREE_TOOL_NAME && isEditTreeResult(result)) {
         setPendingOp(result);
-        setOpApplied(dispatchPaywallPatch(result.op));
+        // Scoped to THIS op's own paywallId — never the currently-open
+        // route/thread — so a builder mounted for a DIFFERENT paywall
+        // (navigated to after this intent was proposed) refuses it instead
+        // of silently applying it to the wrong tree.
+        setOpApplied(dispatchPaywallPatch(result.op, result.paywallId));
       }
     } catch (e) {
       setError((e as Error).message);
@@ -69,7 +73,7 @@ export function ApprovalCard({ intent }: { intent: IntentPayload }) {
 
   function reapply() {
     if (!pendingOp) return;
-    setOpApplied(dispatchPaywallPatch(pendingOp.op));
+    setOpApplied(dispatchPaywallPatch(pendingOp.op, pendingOp.paywallId));
   }
 
   async function cancel() {
@@ -133,7 +137,7 @@ export function ApprovalCard({ intent }: { intent: IntentPayload }) {
       ) : decision === "approved" && pendingOp && !opApplied ? (
         <div className="mt-3 flex items-center justify-between gap-2">
           <p className="text-[11px] text-rv-mute-600">
-            Open the paywall builder to apply this change.
+            Open this paywall's builder to apply this change.
           </p>
           <button
             type="button"

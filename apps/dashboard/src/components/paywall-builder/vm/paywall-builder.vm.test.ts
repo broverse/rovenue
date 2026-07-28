@@ -1379,4 +1379,79 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
 
     expect(vm.configBeforeAiApply).toBeNull();
   });
+
+  // Review-fix (IMPORTANT 1): a locale edit is exactly as "manual" as a
+  // tree edit — without clearing the snapshot here, Revert after
+  // AI-apply -> setLocaleText would restore a config from BEFORE the
+  // locale rename the author made ON PURPOSE in between, silently
+  // discarding it. Pins the closure this finding described.
+  it("setLocaleText clears a pending AI snapshot (an AI-apply -> setLocaleText sequence makes Revert impossible)", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp8", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.setLocaleText("t1_key", "en", "Updated by hand");
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("addLocale clears a pending AI snapshot", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp9", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.addLocale("tr");
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("removeLocale clears a pending AI snapshot", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.addLocale("tr");
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp10", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.removeLocale("tr");
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("setDefaultLocale clears a pending AI snapshot", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.addLocale("tr");
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp11", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.setDefaultLocale("tr");
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
 });

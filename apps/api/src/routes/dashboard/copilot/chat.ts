@@ -69,6 +69,11 @@ const chatBody = z
     trigger: z.string().optional(),
     context: z.object({
       route: z.string(),
+      /** The open paywall's id, when `route` is the builder canvas — drives
+       *  `buildSystemPrompt`'s paywall-context block (see system-prompt.ts). */
+      paywallId: z.string().optional(),
+      /** The selected NODE id within that paywall, if any. NEVER a
+       *  substitute for `paywallId` — a node id is never a valid paywallId. */
       focusedEntityId: z.string().optional(),
     }),
   })
@@ -279,6 +284,7 @@ export const copilotChatRoute = new Hono()
         projectName: project!.name,
         projectId,
         route: context.route,
+        paywallId: context.paywallId,
         focusedEntityId: context.focusedEntityId,
         locale: c.req.header("accept-language")?.slice(0, 2) ?? "en",
       }),

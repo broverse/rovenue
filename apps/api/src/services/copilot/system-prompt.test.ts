@@ -37,31 +37,47 @@ describe("buildSystemPrompt", () => {
   describe("paywall builder context block", () => {
     const BASE = { role: "ADMIN", projectName: "Acme", projectId: "prj_1", locale: "en" };
 
-    it("is included when route matches the builder canvas AND focusedEntityId is set", () => {
+    it("is included when route matches the builder canvas AND paywallId is set, with NO selection", () => {
       const out = buildSystemPrompt({
         ...BASE,
         route: "/projects/prj_1/paywalls/pw_1/builder",
-        focusedEntityId: "pw_1",
+        paywallId: "pw_1",
       });
       expect(out).toContain("PAYWALL BUILDER CONTEXT");
-      expect(out).toContain("pw_1");
+      expect(out).toContain("The user has paywall pw_1 open");
       expect(out).toContain("query_paywall_tree");
       expect(out).toContain("action_paywall_editTree");
+      // No selection made — the extra sentence must not appear at all.
+      expect(out).not.toContain("selection is node");
     });
 
-    it("is omitted when route matches but focusedEntityId is absent", () => {
+    it("includes BOTH the paywall line and a separate selection sentence when focusedEntityId (a NODE id) is also set", () => {
       const out = buildSystemPrompt({
         ...BASE,
         route: "/projects/prj_1/paywalls/pw_1/builder",
+        paywallId: "pw_1",
+        focusedEntityId: "node_42",
+      });
+      expect(out).toContain("The user has paywall pw_1 open");
+      expect(out).toContain("The user's selection is node node_42.");
+      // The node id must never appear as if IT were the paywall id.
+      expect(out).not.toContain("paywall node_42");
+    });
+
+    it("is omitted when route matches but paywallId is absent (even if focusedEntityId is set)", () => {
+      const out = buildSystemPrompt({
+        ...BASE,
+        route: "/projects/prj_1/paywalls/pw_1/builder",
+        focusedEntityId: "node_42",
       });
       expect(out).not.toContain("PAYWALL BUILDER CONTEXT");
     });
 
-    it("is omitted when focusedEntityId is set but route does not match the builder canvas", () => {
+    it("is omitted when paywallId is set but route does not match the builder canvas", () => {
       const out = buildSystemPrompt({
         ...BASE,
         route: "/projects/prj_1/paywalls/pw_1",
-        focusedEntityId: "pw_1",
+        paywallId: "pw_1",
       });
       expect(out).not.toContain("PAYWALL BUILDER CONTEXT");
     });

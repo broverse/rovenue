@@ -158,7 +158,7 @@ describe("builder-shell — chatContext", () => {
 });
 
 describe("builder-shell — VM patch listener registration", () => {
-  it("registers a listener while mounted and unregisters it on unmount", async () => {
+  it("registers a listener under its OWN paywallId while mounted and unregisters it on unmount", async () => {
     const { getVm, getRovi, unmountBuilder } = await renderBridge();
     const vm = getVm();
 
@@ -171,7 +171,7 @@ describe("builder-shell — VM patch listener registration", () => {
 
     let applied = false;
     act(() => {
-      applied = getRovi().dispatchPaywallPatch(op);
+      applied = getRovi().dispatchPaywallPatch(op, "pw_a");
     });
     expect(applied).toBe(true);
     expect(vm.config.root.children.some((c) => c.id === "sp_bridge")).toBe(true);
@@ -182,14 +182,41 @@ describe("builder-shell — VM patch listener registration", () => {
 
     let appliedAfterUnmount = true;
     act(() => {
-      appliedAfterUnmount = getRovi().dispatchPaywallPatch({
-        kind: "insert",
-        parentId: "root",
-        index: 0,
-        subtree: { type: "spacer", id: "sp_after_unmount", size: 8 },
-      });
+      appliedAfterUnmount = getRovi().dispatchPaywallPatch(
+        {
+          kind: "insert",
+          parentId: "root",
+          index: 0,
+          subtree: { type: "spacer", id: "sp_after_unmount", size: 8 },
+        },
+        "pw_a",
+      );
     });
     expect(appliedAfterUnmount).toBe(false);
+  });
+
+  it("refuses a patch addressed to a DIFFERENT paywallId than the one this builder has open", async () => {
+    // Cross-paywall guard (spec §3.3): every paywall's root id is
+    // literally "root", so an unscoped op would look valid here too.
+    const { getVm, getRovi } = await renderBridge();
+    const vm = getVm();
+    const before = JSON.stringify(vm.config);
+
+    let applied = true;
+    act(() => {
+      applied = getRovi().dispatchPaywallPatch(
+        {
+          kind: "insert",
+          parentId: "root",
+          index: 0,
+          subtree: { type: "spacer", id: "sp_other_paywall", size: 8 },
+        },
+        "pw_other",
+      );
+    });
+
+    expect(applied).toBe(false);
+    expect(JSON.stringify(vm.config)).toBe(before);
   });
 
   it("a failed op (bad target) is swallowed into a `false` return, not thrown at the caller", async () => {
@@ -197,7 +224,7 @@ describe("builder-shell — VM patch listener registration", () => {
 
     let applied = true;
     act(() => {
-      applied = getRovi().dispatchPaywallPatch({ kind: "remove", nodeId: "does-not-exist" });
+      applied = getRovi().dispatchPaywallPatch({ kind: "remove", nodeId: "does-not-exist" }, "pw_a");
     });
     expect(applied).toBe(false);
   });
