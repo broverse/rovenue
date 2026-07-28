@@ -20,9 +20,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import dev.rovenue.sdk.Offering
@@ -1482,6 +1479,13 @@ internal object NodeViewFactory {
  * it, since a collapsed row has nothing left to redraw and a timer still
  * firing once a second against it is pure battery drain for the rest of the
  * session.
+ *
+ * On top of that, the tick obeys the renderer-wide rule every time-driven
+ * node obeys — [NodeVisibilityDetector]: it runs only while this row is on
+ * screen and the app is in front. [onDetachedFromWindow] cannot see either of
+ * those (a row scrolled out of the viewport is still attached, and so is one
+ * in a backgrounded app), which is why the detector exists alongside the
+ * handler teardown rather than instead of it.
  */
 private class TickingCountdownRow(
     context: Context,
@@ -1505,8 +1509,18 @@ private class TickingCountdownRow(
     private val tick: Runnable = object : Runnable {
         override fun run() {
             refresh()
-            if (!hiddenOnExpiry) handler.postDelayed(this, COUNTDOWN_TICK_MS)
+            if (countdownTickShouldRun(visibilityDetector.isActive, hiddenOnExpiry)) {
+                handler.postDelayed(this, COUNTDOWN_TICK_MS)
+            }
         }
+    }
+
+    /** Started and stopped by [onAttachedToWindow]/[onDetachedFromWindow];
+     *  flips the tick on and off in between as this row scrolls in and out of
+     *  the viewport or the app leaves the foreground. */
+    private val visibilityDetector = NodeVisibilityDetector(this) { active ->
+        handler.removeCallbacks(tick)
+        if (countdownTickShouldRun(active, hiddenOnExpiry)) handler.post(tick)
     }
 
     fun refresh() {
@@ -1526,10 +1540,14 @@ private class TickingCountdownRow(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (!hiddenOnExpiry) handler.post(tick)
+        // Deliberately no direct post: start() takes its first sample
+        // synchronously and posts the tick through the callback above if this
+        // row is actually visible. Attaching off-screen must not start a timer.
+        visibilityDetector.start()
     }
 
     override fun onDetachedFromWindow() {
+        visibilityDetector.stop()
         handler.removeCallbacks(tick)
         super.onDetachedFromWindow()
     }
@@ -1588,30 +1606,28 @@ private class CarouselPagerView(
     private val tick = Runnable { advance() }
 
     /**
-     * Spec §5 rule 1 — "off-screen means paused" — for the case
-     * [onDetachedFromWindow] cannot see: the app going to the background.
+     * Spec §5 rule 1 — "off-screen means paused" — for the two cases
+     * [onDetachedFromWindow] cannot see: this carousel scrolling out of the
+     * viewport while still attached, and the app going to the background.
      *
      * A backgrounded app's main looper keeps delivering messages, so a bare
      * `postDelayed` chain keeps advancing pages while the user is somewhere
      * else entirely, and CHANGES THE PAGE THEY COME BACK TO. (iOS gets this
-     * for free from run-loop suspension; Android does not.) The web
-     * renderer already pauses on `visibilitychange`; this is its Android
-     * equivalent, using the process-wide foreground signal from
-     * `androidx.lifecycle:lifecycle-process`.
+     * for free from run-loop suspension; Android does not.) The same is true
+     * of a carousel scrolled far below the fold. The web renderer pauses on
+     * `IntersectionObserver` + `visibilitychange`; this is the Android
+     * equivalent, and it is the SHARED [NodeVisibilityDetector] rather than
+     * anything carousel-specific — the countdown row uses the same one.
      *
      * The auto-advance schedule is started ONLY from here, never directly
-     * from [onAttachedToWindow]: adding an observer to a `LifecycleRegistry`
-     * immediately replays the owner's current state, so attaching while the
-     * app is foregrounded gets its `ON_START` through this observer — and
-     * attaching while the app is backgrounded correctly gets nothing at all,
-     * which a direct call in [onAttachedToWindow] would have defeated.
+     * from [onAttachedToWindow]: [NodeVisibilityDetector.start] takes its
+     * first sample synchronously, so attaching while visible and foregrounded
+     * schedules through this callback, and attaching off-screen or
+     * backgrounded correctly schedules nothing — which a direct call in
+     * [onAttachedToWindow] would have defeated.
      */
-    private val appForegroundObserver = LifecycleEventObserver { _, event ->
-        when (event) {
-            Lifecycle.Event.ON_START -> scheduleNextTick()
-            Lifecycle.Event.ON_STOP -> handler.removeCallbacks(tick)
-            else -> Unit
-        }
+    private val visibilityDetector = NodeVisibilityDetector(this) { active ->
+        if (active) scheduleNextTick() else handler.removeCallbacks(tick)
     }
 
     init {
@@ -1696,14 +1712,22 @@ private class CarouselPagerView(
         }
     }
 
+    /**
+     * The single rescheduling call site. Every reason NOT to schedule —
+     * paused, latched at the end, no positive interval, nothing to advance to
+     * — lives in [carouselAutoAdvanceDelayMillis], where it is unit-testable;
+     * this reads the detector's current answer rather than keeping a second
+     * copy of the visibility state.
+     */
     private fun scheduleNextTick() {
         handler.removeCallbacks(tick)
-        val seconds = autoAdvanceSeconds
-        // Absent `autoAdvanceSeconds` means OFF, deliberately not a default
-        // interval (mirrors BuilderNode.Carousel.autoAdvanceSeconds's own
-        // doc) — and a single page (or none) has nothing to advance to.
-        if (seconds == null || seconds <= 0.0 || stoppedAtEnd || pageCount <= 1) return
-        handler.postDelayed(tick, (seconds * MILLIS_PER_SECOND).toLong())
+        val delayMillis = carouselAutoAdvanceDelayMillis(
+            active = visibilityDetector.isActive,
+            stoppedAtEnd = stoppedAtEnd,
+            autoAdvanceSeconds = autoAdvanceSeconds,
+            pageCount = pageCount,
+        ) ?: return
+        handler.postDelayed(tick, delayMillis)
     }
 
     private fun advance() {
@@ -1718,44 +1742,21 @@ private class CarouselPagerView(
         // onPageSelected (registered in init) reschedules the next tick.
     }
 
-    /**
-     * The process-wide lifecycle [appForegroundObserver] observes, or `null`
-     * if this app does not have one.
-     *
-     * `ProcessLifecycleOwner.get()` THROWS when `androidx.startup`'s
-     * `ProcessLifecycleInitializer` never ran — a host app is free to strip
-     * it out of the manifest (`tools:node="remove"`), and apps that manage
-     * their own App Startup do exactly that. That throw would land in
-     * [onAttachedToWindow]: the same place the ViewPager2 `MATCH_PARENT`
-     * crash used to land, taking the host app down as the paywall appears.
-     * A paywall must never crash a host app over an OPTIONAL nicety, and
-     * pausing auto-advance while backgrounded is exactly that — so this
-     * fails soft. The cost of `null` is a carousel that keeps advancing in
-     * the background, the pre-fix behaviour, not a broken paywall.
-     *
-     * Resolved once and reused, so detach removes the observer from the very
-     * lifecycle attach added it to.
-     */
-    private val processLifecycle: Lifecycle? = runCatching { ProcessLifecycleOwner.get().lifecycle }.getOrNull()
-
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        // Deliberately no scheduleNextTick() here — see
-        // appForegroundObserver's doc for why the schedule starts there.
-        // With no process lifecycle the observer never replays ON_START, so
-        // start the schedule directly; otherwise a carousel in an app
-        // without androidx.startup would simply never auto-advance.
-        if (processLifecycle == null) scheduleNextTick() else processLifecycle.addObserver(appForegroundObserver)
+        // Deliberately no scheduleNextTick() here — see [visibilityDetector]'s doc for
+        // why the schedule starts from the detector callback instead. The
+        // fail-soft handling of an app with no ProcessLifecycleOwner (and of a
+        // node with no measurable size yet) lives in NodeVisibilityDetector.
+        visibilityDetector.start()
     }
 
     override fun onDetachedFromWindow() {
-        processLifecycle?.removeObserver(appForegroundObserver)
+        visibilityDetector.stop()
         handler.removeCallbacks(tick)
         super.onDetachedFromWindow()
     }
 }
-
-private const val MILLIS_PER_SECOND = 1000.0
 
 /**
  * The `RecyclerView.Adapter` a `carousel`'s `ViewPager2` pages through. Each
