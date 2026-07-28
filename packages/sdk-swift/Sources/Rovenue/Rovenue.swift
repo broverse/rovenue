@@ -716,14 +716,9 @@ public final class Rovenue: @unchecked Sendable {
     /// token is an error condition, not "nothing to show".
     @available(iOS 15.0, macOS 12.0, *)
     public func getPaywallPreview(token: String, locale: String? = nil) async throws -> Paywall? {
-        let ffi: CorePaywall?
-        do {
-            ffi = try await dispatcher.run { [core] in
-                do { return try core.getPaywallPreview(token: token, locale: locale) }
-                catch let err as RovenueErrorFfi { throw mapError(err) }
-            }
-        } catch {
-            throw error
+        let ffi: CorePaywall? = try await dispatcher.run { [core] in
+            do { return try core.getPaywallPreview(token: token, locale: locale) }
+            catch let err as RovenueErrorFfi { throw mapError(err) }
         }
         guard let ffi else { return nil }
         let offering: Offering? = if let o = ffi.offering { await hydrateOffering(o) } else { nil }
