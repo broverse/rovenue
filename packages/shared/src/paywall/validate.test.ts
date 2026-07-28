@@ -1453,6 +1453,30 @@ describe("wave C: STICKY_FOOTER_NOT_AT_ROOT and MULTIPLE_STICKY_FOOTERS", () => 
     expect(issue).toBeDefined();
     expect(isBlockingIssue(issue!)).toBe(false);
     expect(isPublishBlockingIssue(issue!)).toBe(false);
+    // The message must describe what actually happens, not only what is
+    // "expected" — the author needs to know WHICH footer they will see.
+    expect(issue!.message).toContain("last");
+  });
+
+  // The pinning rule is "a direct child of root, last among several wins",
+  // NOT "the last child of root". A single footer placed above a sibling is
+  // still pinned by all three renderers, so the validator deliberately says
+  // nothing about it — see the rule comment in validate.ts.
+  it("says nothing for a single root-level stickyFooter that is not the last child", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "stickyFooter", id: "sf", children: [{ type: "spacer", id: "s1", size: 8 }] },
+          { type: "spacer", id: "s2", size: 8 },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.some((i) => i.code === "STICKY_FOOTER_NOT_AT_ROOT")).toBe(false);
+    expect(issues.some((i) => i.code === "MULTIPLE_STICKY_FOOTERS")).toBe(false);
   });
 });
 

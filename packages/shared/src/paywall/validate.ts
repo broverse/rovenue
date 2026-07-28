@@ -478,6 +478,17 @@ export function validateBuilderConfig(
   }
 
   // STICKY_FOOTER_NOT_AT_ROOT / MULTIPLE_STICKY_FOOTERS — wave C.
+  //
+  // The pinning rule, authoritative for all three renderers: a stickyFooter
+  // is pinned when it is a DIRECT child of the root, whatever its position
+  // among its siblings; among several such footers, the LAST one wins and
+  // the earlier ones fall through to the ordinary dispatcher and render
+  // inline. Position among siblings deliberately does not matter for a
+  // single footer — an author who drops a footer above a text node still
+  // means "pin this", and a pinned bar's own position is the bottom of the
+  // screen either way. So the only shape this warns about is a footer that
+  // is NOT a direct root child (nested inside a stack, a cellTemplate, a
+  // fallback subtree), which really does render inline.
   const stickyFooterNodes = allNodes.filter((n) => n.type === "stickyFooter");
   for (const node of stickyFooterNodes) {
     if (!rootChildIds.has(node.id)) {
@@ -491,7 +502,9 @@ export function validateBuilderConfig(
   if (stickyFooterNodes.length > 1) {
     issues.push({
       code: "MULTIPLE_STICKY_FOOTERS",
-      message: `${stickyFooterNodes.length} stickyFooter nodes found; only one pinned footer is expected per paywall.`,
+      // Says what actually happens, not merely what is "expected": the
+      // author needs to know WHICH one they will see pinned.
+      message: `${stickyFooterNodes.length} stickyFooter nodes found; only the last one that is a direct child of the root is pinned — the others render inline.`,
     });
   }
 

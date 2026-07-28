@@ -190,6 +190,20 @@ export const SOCIAL_PROOF_MAX_RATING = 5;
 export const COUNTDOWN_DEFAULT_ON_EXPIRY = "freeze" as const;
 /** Tick interval, identical on all three platforms. */
 export const COUNTDOWN_TICK_MS = 1000;
+/**
+ * Storage-key prefix for a `durationSeconds` countdown's persisted
+ * "first shown to this user" anchor. The full key is this prefix plus the
+ * paywall identifier (an absent identifier collapsing to the empty suffix),
+ * so ONE anchor is shared by every countdown node on the same paywall.
+ *
+ * Cross-platform by value, not by import: iOS writes it into `UserDefaults`
+ * (`RovenuePaywallView.swift`), Android into `SharedPreferences`
+ * (`NodeViewFactory.kt`), the web into `localStorage`
+ * (`@rovenue/paywall-renderer`'s `resolvePersistedFirstShownAt`). Both
+ * native copies are hand-mirrored string literals — keep them in sync with
+ * this one, or the same paywall anchors differently per platform.
+ */
+export const COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX = "rovenue.paywall.countdown.firstShownAt.";
 export const STICKY_FOOTER_DEFAULT_BACKGROUND = { light: "#FFFFFF", dark: "#111827" } as const;
 
 export type FeatureRow = {
