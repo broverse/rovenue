@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, renderHook } from "@testing-library/react";
 import {
   COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX,
   COUNTDOWN_TICK_MS,
@@ -15,6 +15,7 @@ import { resolvePersistedFirstShownAt } from "./first-shown";
 import { PaywallRenderer } from "./renderer";
 import { CAROUSEL_DOT_ACTIVE_OPACITY, CAROUSEL_DOT_INACTIVE_OPACITY } from "./styles";
 import type { RendererOffering } from "./types";
+import { useNodeVisible } from "./visibility";
 
 const offering: RendererOffering = {
   identifier: "default",
@@ -2228,6 +2229,37 @@ describe("carousel node", () => {
     ]);
   });
 
+  it("keeps advancing after a hide/show cycle when loop is false — a pause is not the end", () => {
+    // The stop-latch and the pause are two different things, and folding them
+    // together is the easy mistake: a `loop: false` carousel that was hidden
+    // on page 1 must still walk to the last page when the tab comes back.
+    vi.useFakeTimers();
+    let hidden = false;
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => (hidden ? "hidden" : "visible"),
+    });
+    try {
+      const { container } = renderPaywall(carouselWith(pageA, pageB, pageC, { autoAdvanceSeconds: 2, loop: false }));
+      act(() => vi.advanceTimersByTime(2_000)); // -> page 1, mid-run
+      expect(dotOpacities(container)[1]).toBe(String(CAROUSEL_DOT_ACTIVE_OPACITY));
+
+      hidden = true;
+      act(() => fireEvent(document, new Event("visibilitychange")));
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(dotOpacities(container)[1]).toBe(String(CAROUSEL_DOT_ACTIVE_OPACITY));
+
+      hidden = false;
+      act(() => fireEvent(document, new Event("visibilitychange")));
+      act(() => vi.advanceTimersByTime(2_000)); // -> page 2, so it did not latch
+      expect(dotOpacities(container)[2]).toBe(String(CAROUSEL_DOT_ACTIVE_OPACITY));
+    } finally {
+      delete (document as unknown as Record<string, unknown>).visibilityState;
+      if (original) Object.defineProperty(Document.prototype, "visibilityState", original);
+    }
+  });
+
   it("restarts the auto-advance wait when the user scrolls by hand, instead of racing it", () => {
     vi.useFakeTimers();
     const { container } = renderPaywall(carouselWith(pageA, pageB, pageC, { autoAdvanceSeconds: 2 }));
@@ -2314,5 +2346,25 @@ describe("resolvePersistedFirstShownAt", () => {
     localStorage.setItem(`${COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX}pw_1`, "whenever");
     const resolved = resolvePersistedFirstShownAt("pw_1", FIRST_OPEN);
     expect(resolved?.getTime()).toBe(FIRST_OPEN.getTime());
+  });
+});
+
+describe("useNodeVisible", () => {
+  afterEach(() => {
+    // The test below pins `visibilityState` as an OWN property of `document`
+    // (the shape `renderHook` needs to observe a change mid-test); dropping it
+    // hands the prototype getter — jsdom's real "visible" — back to whatever
+    // runs next.
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  it("reports not-visible once the document hides", () => {
+    const { result } = renderHook(() => useNodeVisible(document.createElement("div")));
+    expect(result.current).toBe(true);            // fail open, no observer in jsdom
+    act(() => {
+      Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(result.current).toBe(false);
   });
 });

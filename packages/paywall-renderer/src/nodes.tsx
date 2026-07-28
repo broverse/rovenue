@@ -59,6 +59,7 @@ import {
   stackContainerStyle,
   Z_OVERLAY_CHILD_STYLE,
 } from "./styles";
+import { useNodeVisible } from "./visibility";
 
 // Registry web names -> the imported components. Built from the registry so
 // a name added there without a component here is a visible undefined rather
@@ -771,16 +772,6 @@ function countdownHasDeadline(node: CountdownNode): boolean {
   return countdownDeadlineMs(node, COUNTDOWN_ANCHOR_PROBE_MS) !== null;
 }
 
-/** True when the countdown may keep a live interval: only while the
- * document is visible. A hidden tab's `setInterval` is throttled to roughly
- * one call a minute anyway, so leaving it running buys nothing and costs a
- * wakeup — and, because the display is computed from the clock rather than
- * from tick count, the value is correct the instant the tab comes back. */
-function isDocumentVisible(): boolean {
-  if (typeof document === "undefined") return true;
-  return document.visibilityState !== "hidden";
-}
-
 /**
  * A real component (not a plain render function like its siblings above) —
  * it owns hook state that must live and die with THIS node's own position in
@@ -807,11 +798,13 @@ function Countdown({ node, ctx }: { node: CountdownNode; ctx: RenderCtx }): Reac
   const [injectedClockOffsetMs] = useState(() => ctx.now.getTime() - Date.now());
   // Repaint trigger only — never read. The value below comes from the clock.
   const [, requestRepaint] = useState(0);
-  const [onScreen, setOnScreen] = useState(true);
-  const [documentVisible, setDocumentVisible] = useState(isDocumentVisible);
-  // Callback ref rather than useRef: the observer effect must re-run when the
-  // element actually appears, and a ref object's mutation does not re-run it.
+  // Callback ref rather than useRef: the observer effect inside `useNodeVisible`
+  // must re-run when the element actually appears, and a ref object's mutation
+  // does not re-run it.
   const [element, setElement] = useState<HTMLDivElement | null>(null);
+  // Both halves of the spec §5 stop-off-screen rule — hidden tab AND scrolled
+  // out of view — in the one hook every time-driven node shares.
+  const visible = useNodeVisible(element);
 
   const deadline = useCountdownDeadline(node, ctx);
   const remainingMs = deadline === null ? null : deadline - (Date.now() + injectedClockOffsetMs);
@@ -819,7 +812,7 @@ function Countdown({ node, ctx }: { node: CountdownNode; ctx: RenderCtx }): Reac
   // 00:00 for good and `hide` has removed the node. Keeping the interval
   // alive past that is a wakeup a second, forever.
   const expired = remainingMs !== null && remainingMs <= 0;
-  const ticking = deadline !== null && !expired && onScreen && documentVisible;
+  const ticking = deadline !== null && !expired && visible;
 
   useEffect(() => {
     if (!ticking) return;
@@ -829,27 +822,6 @@ function Countdown({ node, ctx }: { node: CountdownNode; ctx: RenderCtx }): Reac
     // stop-off-screen rule: false tears the interval down, true builds a new
     // one — so it resumes without a remount.
   }, [ticking]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const onVisibilityChange = () => setDocumentVisible(isDocumentVisible());
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, []);
-
-  // A visible tab is not the same as a visible paywall: the node can be
-  // scrolled out of the scroller, or sit on a funnel step behind an overlay.
-  // Absent `IntersectionObserver` (jsdom, very old engines) the countdown
-  // stays on-screen — fail open, never a stopped clock.
-  useEffect(() => {
-    if (element === null || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => {
-      const entry = entries[entries.length - 1];
-      if (entry) setOnScreen(entry.isIntersecting);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [element]);
 
   // Unreachable in practice — `renderNode` runs `countdownHasDeadline` before
   // it ever mounts this component, and the two share `countdownDeadlineMs`'s
@@ -921,8 +893,9 @@ function carouselPages(node: CarouselNode, ctx: RenderCtx): ReactElement[] {
  * dots from `track.scrollLeft`.
  *
  * Auto-advance is wired through the exact same stop/resume lifecycle as
- * `Countdown` (spec §5, reused rather than reinvented): a `visibilitychange`
- * listener plus an `IntersectionObserver`, both halves. `ticking` folds in
+ * `Countdown` (spec §5, reused rather than reinvented) — literally the same
+ * code, `useNodeVisible`: a `visibilitychange` listener plus an
+ * `IntersectionObserver`, both halves. `ticking` folds in
  * `stoppedAtEnd`, which is what makes a `loop: false` carousel stop
  * PERMANENTLY on the last page rather than idling and re-checking forever —
  * once true it never flips back. `loop: true` instead wraps to page 0 and
@@ -969,17 +942,22 @@ function Carousel({ node, ctx, pages }: { node: CarouselNode; ctx: RenderCtx; pa
   const autoAdvanceMs = node.autoAdvanceSeconds !== undefined ? node.autoAdvanceSeconds * COUNTDOWN_MS_PER_SECOND : null;
 
   const [currentPage, setCurrentPage] = useState(0);
-  const [onScreen, setOnScreen] = useState(true);
-  const [documentVisible, setDocumentVisible] = useState(isDocumentVisible);
   const [stoppedAtEnd, setStoppedAtEnd] = useState(false);
-  // Callback refs, not useRef: the IntersectionObserver effect must re-run
-  // when the wrapper actually appears, and the scroll effect needs the real
-  // track element to set `scrollLeft` on — a ref object's mutation does not
-  // re-run either effect (same reasoning as `Countdown`'s `element`).
+  // Callback refs, not useRef: the observer effect inside `useNodeVisible`
+  // must re-run when the wrapper actually appears, and the scroll effect needs
+  // the real track element to set `scrollLeft` on — a ref object's mutation
+  // does not re-run either effect (same reasoning as `Countdown`'s `element`).
   const [track, setTrack] = useState<HTMLDivElement | null>(null);
   const [element, setElement] = useState<HTMLDivElement | null>(null);
 
-  const ticking = autoAdvanceMs !== null && !stoppedAtEnd && onScreen && documentVisible && pageCount > 1;
+  // The same hook the countdown uses, so a carousel scrolled out of view stops
+  // advancing instead of paging on into nothing. `visible` is a PAUSE, never a
+  // stop: it gates `ticking` without touching `stoppedAtEnd`, so a carousel
+  // hidden mid-run resumes exactly where it left off — reaching the last page
+  // is the only thing that latches.
+  const visible = useNodeVisible(element);
+
+  const ticking = autoAdvanceMs !== null && !stoppedAtEnd && visible && pageCount > 1;
 
   useEffect(() => {
     if (!ticking || track === null) return;
@@ -1014,27 +992,6 @@ function Carousel({ node, ctx, pages }: { node: CarouselNode; ctx: RenderCtx; pa
     }, autoAdvanceMs!);
     return () => clearInterval(id);
   }, [ticking, autoAdvanceMs, loop, pageCount, track, currentPage]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const onVisibilityChange = () => setDocumentVisible(isDocumentVisible());
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, []);
-
-  // A visible tab is not the same as a visible carousel: the node can be
-  // scrolled out of the scroller, or sit on a funnel step behind an overlay.
-  // Absent `IntersectionObserver` (jsdom, very old engines) it stays
-  // on-screen — fail open, never a stalled carousel.
-  useEffect(() => {
-    if (element === null || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => {
-      const entry = entries[entries.length - 1];
-      if (entry) setOnScreen(entry.isIntersecting);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [element]);
 
   const handleScroll = () => {
     if (track === null) return;
