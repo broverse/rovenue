@@ -46,6 +46,20 @@ vi.mock("../../../src/lib/capabilities", async (importOriginal) => ({
     assertProjectCapability(...args),
 }));
 
+// Task 4 (list/delete): a bare membership gate, deliberately distinct
+// from `assertProjectCapability` above — the list/delete routes only
+// require the caller to belong to the project named in the URL, not
+// the `fonts:write` capability the upload route requires. Mocked to
+// always resolve (i.e. "the caller is a legitimate member of whatever
+// project the URL names") so that the cross-project delete test below
+// exercises the thing it's meant to: family-vs-URL-project scoping via
+// `findLiveFamilyForProject`, not membership itself.
+const assertProjectAccess = vi.hoisted(() => vi.fn());
+vi.mock("../../../src/lib/project-access", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  assertProjectAccess: (...args: unknown[]) => assertProjectAccess(...args),
+}));
+
 const auditMock = vi.hoisted(() => vi.fn());
 vi.mock("../../../src/lib/audit", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -56,6 +70,8 @@ const countFacesForProject = vi.hoisted(() => vi.fn());
 const createFamily = vi.hoisted(() => vi.fn());
 const upsertFace = vi.hoisted(() => vi.fn());
 const findLiveFamilyForProject = vi.hoisted(() => vi.fn());
+const listFamiliesWithFaces = vi.hoisted(() => vi.fn());
+const softDeleteFamily = vi.hoisted(() => vi.fn());
 const transaction = vi.hoisted(() => vi.fn());
 // Controllable result set for the one remaining inline `select` query
 // (the existing-face lookup). Reset to "no existing face" by default
@@ -84,6 +100,8 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         createFamily,
         upsertFace,
         findLiveFamilyForProject,
+        listFamiliesWithFaces,
+        softDeleteFamily,
       },
       db: { ...actual.drizzle.db, transaction, select },
     },
@@ -138,6 +156,18 @@ async function uploadFont(input: UploadFontInput) {
   });
 }
 
+function listFonts(projectId = "p1") {
+  return app().request(`/dashboard/projects/${projectId}/fonts`);
+}
+
+function deleteFamily(familyId: string, opts?: { asProject?: string }) {
+  const projectId = opts?.asProject ?? "p1";
+  return app().request(
+    `/dashboard/projects/${projectId}/fonts/${familyId}`,
+    { method: "DELETE" },
+  );
+}
+
 let faceIdCounter = 0;
 
 beforeEach(() => {
@@ -145,8 +175,13 @@ beforeEach(() => {
   assertProjectCapability
     .mockReset()
     .mockResolvedValue({ id: "m1", role: "OWNER" });
+  assertProjectAccess
+    .mockReset()
+    .mockResolvedValue({ id: "m1", role: "OWNER" });
   auditMock.mockReset().mockResolvedValue(undefined);
   countFacesForProject.mockReset().mockResolvedValue(0);
+  listFamiliesWithFaces.mockReset().mockResolvedValue([]);
+  softDeleteFamily.mockReset().mockResolvedValue(undefined);
   createFamily.mockReset().mockImplementation(
     async (_db: unknown, input: { projectId: string; name: string }) => ({
       id: "family1",
@@ -371,5 +406,140 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("FONT_QUOTA_EXCEEDED");
     expect(upsertFace).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// GET /dashboard/projects/:projectId/fonts
+// DELETE /dashboard/projects/:projectId/fonts/:familyId
+// (paywall fonts wave E1, Task 4)
+// =============================================================
+//
+// Same idiom as the POST suite above: `drizzle.fontRepo.*` and
+// `assertProjectAccess` are mocked at module level, so these tests pin
+// the ROUTE's reaction (status code, error code, which repo calls
+// happen), not the repository queries themselves. `findLiveFamilyForProject`
+// and `listFamiliesWithFaces` each already have real-Postgres coverage
+// of their own predicates in
+// packages/db/src/drizzle/repositories/fonts.integration.test.ts.
+
+describe("GET /dashboard/projects/:projectId/fonts", () => {
+  it("lists families with face metadata; the response never carries a bytes field", async () => {
+    // NOTE on what this can and cannot prove: the route does a
+    // straight pass-through of whatever `listFamiliesWithFaces`
+    // returns — it does not itself strip anything. The guarantee that
+    // the repo query never SELECTs the `bytes` column is real and is
+    // pinned against a live database in
+    // fonts.integration.test.ts ("listFamiliesWithFaces does not
+    // select the bytes column"). Because this mock, by construction,
+    // never contains a `bytes` field, `not.toHaveProperty("bytes")`
+    // below cannot by itself catch a regression that reintroduced
+    // bytes into the repo's result — it documents the same invariant
+    // at the response boundary. What this test DOES genuinely pin is
+    // the route's shape-mapping: that `families[0].name` and
+    // `families[0].faces[0]` surface, untouched, under `{ data: [...] }`.
+    listFamiliesWithFaces.mockResolvedValue([
+      {
+        id: "family1",
+        projectId: "p1",
+        name: "Brand",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+        faces: [
+          { id: "face1", weight: 400, style: "normal", format: "otf", byteSize: 16 },
+        ],
+      },
+    ]);
+
+    const res = await listFonts();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ name: string; faces: Array<Record<string, unknown>> }>;
+    };
+    expect(body.data[0].name).toBe("Brand");
+    expect(body.data[0].faces[0]).not.toHaveProperty("bytes");
+    expect(listFamiliesWithFaces).toHaveBeenCalledWith(
+      expect.anything(),
+      "p1",
+    );
+  });
+});
+
+describe("DELETE /dashboard/projects/:projectId/fonts/:familyId", () => {
+  // -----------------------------------------------------------
+  // spec §4.1: deleting a family a paywall references is allowed on
+  // purpose — there is deliberately no "font is in use" guard.
+  //
+  // Ambiguity note (see task-4-report.md for the full writeup): the
+  // brief's own test for this is literally
+  // `await createPaywallReferencing(familyId)` — but nothing in the
+  // codebase today lets a paywall's component tree hold a font family
+  // id (that field arrives in wave E2's font picker), so there is no
+  // real reference to construct, and this file's mocked-@rovenue/db
+  // setup has no paywall-repo wiring to fabricate one against either.
+  // What IS genuinely constructible is the nearest true precondition:
+  // a family that has actually been uploaded (via the real POST route
+  // above, not a hand-built fixture). This test proves deletion
+  // succeeds and the family leaves the list. It does NOT prove
+  // "deletion is allowed while a paywall references the font" — that
+  // claim has no mechanism to exercise yet and needs a real test once
+  // E2 wires the field, not a faked one here.
+  // -----------------------------------------------------------
+  it("deletes an uploaded family; it disappears from the list afterward", async () => {
+    const uploadRes = await uploadFont({
+      bytes: otfBytes(),
+      familyName: "Brand",
+      weight: 400,
+      style: "normal",
+    });
+    expect(uploadRes.status).toBe(200);
+    const uploadBody = (await uploadRes.json()) as {
+      data: { familyId: string };
+    };
+    const familyId = uploadBody.data.familyId;
+
+    findLiveFamilyForProject.mockResolvedValue({ id: familyId });
+
+    const delRes = await deleteFamily(familyId);
+    expect(delRes.status).toBe(200);
+    expect(softDeleteFamily).toHaveBeenCalledWith(expect.anything(), familyId);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "font.deleted",
+        resource: "font_family",
+        resourceId: familyId,
+      }),
+      expect.anything(),
+    );
+
+    // Simulate the post-delete state: listFamiliesWithFaces now
+    // excludes the soft-deleted family (pinned for real against
+    // Postgres in fonts.integration.test.ts).
+    listFamiliesWithFaces.mockResolvedValue([]);
+    const listBody = (await (await listFonts()).json()) as {
+      data: unknown[];
+    };
+    expect(listBody.data).toHaveLength(0);
+  });
+
+  it("returns 404 FONT_FAMILY_NOT_FOUND, not 403, for a familyId outside the caller's project", async () => {
+    // The caller genuinely has access to the project named in the URL
+    // (assertProjectAccess resolves — see the module-level mock note
+    // above); the familyId they supply simply belongs to a different
+    // project and so is invisible under this project's scope. A 403
+    // here would leak that the id exists somewhere; 404 does not.
+    findLiveFamilyForProject.mockResolvedValue(null);
+
+    const res = await deleteFamily("foreign-family", {
+      asProject: "other-project",
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("FONT_FAMILY_NOT_FOUND");
+    expect(softDeleteFamily).not.toHaveBeenCalled();
+    expect(findLiveFamilyForProject).toHaveBeenCalledWith(expect.anything(), {
+      projectId: "other-project",
+      familyId: "foreign-family",
+    });
   });
 });

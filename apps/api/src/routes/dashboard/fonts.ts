@@ -12,6 +12,7 @@ import {
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectCapability } from "../../lib/capabilities";
+import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { fail, ok } from "../../lib/response";
 import { validate } from "../../lib/validate";
@@ -68,6 +69,8 @@ const FONT_WEIGHT_MIN = 100;
 const FONT_WEIGHT_MAX = 900;
 const FONT_STYLES = ["normal", "italic"] as const;
 const FONT_FILE_TOO_LARGE_MESSAGE = `File exceeds the ${FONT_FACE_MAX_BYTES}-byte limit`;
+const FONT_FAMILY_NOT_FOUND_MESSAGE =
+  "familyId does not reference an active font family in this project";
 
 const uploadFormSchema = z
   .object({
@@ -252,4 +255,74 @@ export const fontsRoute = new Hono()
         }),
       );
     },
-  );
+  )
+  // ----- GET /dashboard/projects/:projectId/fonts -----
+  //
+  // Read-only, so this only needs `assertProjectAccess` (any project
+  // member), not the `fonts:write` capability the upload route above
+  // requires. `listFamiliesWithFaces` never selects the `bytes` column
+  // (see packages/db/src/drizzle/repositories/fonts.ts) — this route
+  // is a straight pass-through of that repo shape, no re-shaping.
+  .get("/", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id);
+
+    const families = await drizzle.fontRepo.listFamiliesWithFaces(
+      drizzle.db,
+      projectId,
+    );
+
+    return c.json(ok(families));
+  })
+  // ----- DELETE /dashboard/projects/:projectId/fonts/:familyId -----
+  //
+  // Deleting a family a paywall still references is allowed on purpose
+  // (design spec §4.1) — there is deliberately no "font is in use"
+  // guard here. `findLiveFamilyForProject` scopes the lookup to THIS
+  // project, so a familyId belonging to another project (or already
+  // soft-deleted) resolves to the same 404 a nonexistent id would —
+  // never a 403, which would confirm to a caller who cannot have it
+  // that the id exists somewhere. Soft-delete + the audit entry share
+  // the caller's transaction so a rollback undoes both together.
+  .delete("/:familyId", async (c) => {
+    const projectId = c.req.param("projectId");
+    const familyId = c.req.param("familyId");
+    if (!projectId || !familyId) {
+      throw new HTTPException(400, { message: "Missing projectId or familyId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id);
+
+    const family = await drizzle.fontRepo.findLiveFamilyForProject(
+      drizzle.db,
+      { projectId, familyId },
+    );
+    if (!family) {
+      return c.json(
+        fail(ERROR_CODE.FONT_FAMILY_NOT_FOUND, FONT_FAMILY_NOT_FOUND_MESSAGE),
+        404,
+      );
+    }
+
+    await drizzle.db.transaction(async (tx) => {
+      await drizzle.fontRepo.softDeleteFamily(tx, familyId);
+
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "font.deleted",
+          resource: "font_family",
+          resourceId: familyId,
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+    });
+
+    return c.json(ok({ deleted: true }));
+  });

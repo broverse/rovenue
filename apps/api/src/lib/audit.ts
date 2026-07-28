@@ -129,7 +129,8 @@ export type AuditAction =
   | "virtual_currency.renamed"
   | "virtual_currency.archived"
   // --- paywall fonts ---
-  | "font.uploaded";
+  | "font.uploaded"
+  | "font.deleted";
 
 export type AuditResource =
   | "audience"
@@ -154,7 +155,8 @@ export type AuditResource =
   | "refund_shield_response"
   | "transaction"
   | "virtual_currency"
-  | "font_face";
+  | "font_face"
+  | "font_family";
 
 export interface AuditEntry {
   projectId: string;
