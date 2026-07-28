@@ -23,6 +23,7 @@ export const ERROR_CODE = {
   APP_NOT_FOUND: "APP_NOT_FOUND",
   APPLE_OFFER_SIGNING_UNAVAILABLE: "apple_offer_signing_unavailable",
   APPLE_OFFER_SIGNING_FAILED: "apple_offer_signing_failed",
+  GENERATION_INVALID: "GENERATION_INVALID",
 } as const;
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];
 

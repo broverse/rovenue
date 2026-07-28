@@ -23,12 +23,18 @@ import {
 } from "@rovenue/shared/paywall";
 import { placementRowsSchema, type PlacementRow } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
+import { roviQuotaGuard } from "../../middleware/rovi-quota-guard";
 import {
   AppStoreLookupError,
   buildImportTree,
   fetchAppStoreListing,
   parseAppStoreUrl,
 } from "../../services/paywall-ai/app-store-import";
+import {
+  GenerationInvalidError,
+  generatePaywallConfig,
+} from "../../services/paywall-ai/generate";
+import { RoviConfigError } from "../../services/copilot/providers";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { audit, extractRequestContext } from "../../lib/audit";
@@ -213,6 +219,27 @@ function prepareBuilderConfigPatch(
 const versionLabelBodySchema = z.object({
   label: z.string().trim().min(1).max(120).nullable(),
 });
+
+// -------------------------------------------------------------
+// AI start tab — one-shot paywall generation (P8 AI-FAB, Task 4).
+// -------------------------------------------------------------
+
+const generateBodySchema = z.object({
+  prompt: z.string().trim().min(1).max(4000),
+});
+
+const DEFAULT_GENERATION_LOCALE = "en";
+
+/** The paywall's own draft locale when set, else DEFAULT_GENERATION_LOCALE —
+ *  `remoteConfig` is a loose jsonb column at the DB layer, so this reads it
+ *  defensively rather than trusting the shape. */
+function paywallDefaultLocale(remoteConfig: unknown): string {
+  if (remoteConfig && typeof remoteConfig === "object" && "defaultLocale" in remoteConfig) {
+    const locale = (remoteConfig as { defaultLocale?: unknown }).defaultLocale;
+    if (typeof locale === "string" && locale.length > 0) return locale;
+  }
+  return DEFAULT_GENERATION_LOCALE;
+}
 
 // -------------------------------------------------------------
 // §6.19 — atomic builder A/B launch
@@ -498,6 +525,54 @@ export const paywallsDashboardRoute = new Hono()
     }
     return c.json(ok({ paywall: row }));
   })
+  // ===========================================================
+  // AI start tab — one-shot paywall generation (P8 AI-FAB, Task 4).
+  // Read-gated like GET /:id above: generation writes nothing — the
+  // dashboard applies the returned config client-side through the
+  // builder VM, same as /from-app-store. `roviQuotaGuard()` is
+  // composed per-route (not `.use("*", ...)` like copilot/chat.ts —
+  // every other paywalls route is unrelated to Rovi usage).
+  // ===========================================================
+  .post(
+    "/:id/paywall-generate",
+    roviQuotaGuard(),
+    validate("json", generateBodySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      const id = c.req.param("id");
+      if (!projectId || !id) {
+        throw new HTTPException(400, { message: "Missing identifier" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+      const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+      if (!paywall) {
+        throw new HTTPException(404, { message: "Paywall not found" });
+      }
+
+      const { prompt } = c.req.valid("json");
+
+      try {
+        const config = await generatePaywallConfig({
+          projectId,
+          prompt,
+          defaultLocale: paywallDefaultLocale(paywall.remoteConfig),
+        });
+        return c.json(ok({ config }));
+      } catch (err) {
+        if (err instanceof RoviConfigError) {
+          // Same envelope shape the copilot chat route uses for this code
+          // (see copilot/chat.ts) — a typed code, not a generic HTTPException.
+          return c.json(fail("ROVI_NOT_CONFIGURED", err.message), 412);
+        }
+        if (err instanceof GenerationInvalidError) {
+          return c.json(fail("GENERATION_INVALID", err.message), 422);
+        }
+        throw err;
+      }
+    },
+  )
   .patch("/:id", validate("json", updateBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     const id = c.req.param("id");
