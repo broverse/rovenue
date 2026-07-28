@@ -73,10 +73,14 @@ const createPreviewSession = vi.hoisted(() =>
   }),
 );
 
+// Mirrors the real repo's `isNull(revokedAt)` guard (T2-guard): an
+// already-revoked row no longer matches, so a double-DELETE returns null
+// the second time — the route then 404s instead of 200-ing (and
+// re-auditing) a revoke that already happened.
 const revokePreviewSession = vi.hoisted(() =>
   vi.fn(async (_dbOrTx: any, projectId: string, sessionId: string) => {
     const row = state.sessions[sessionId];
-    if (!row || row.projectId !== projectId) return null;
+    if (!row || row.projectId !== projectId || row.revokedAt != null) return null;
     row.revokedAt = new Date();
     return row;
   }),
@@ -172,6 +176,17 @@ describe("POST /paywalls/:id/preview-sessions", () => {
     expect(assertProjectCapability).toHaveBeenCalledWith("p1", "u1", "products:write");
   });
 
+  it("respects X-Forwarded-Proto for the previewUrl scheme behind a TLS-terminating proxy", async () => {
+    const res = await app().request("/dashboard/projects/p1/paywalls/pwA/preview-sessions", {
+      method: "POST",
+      headers: { "x-forwarded-proto": "https" },
+    });
+
+    const json = await res.json();
+    expect(json.data.previewUrl).toBe(`https://localhost/v1/preview/paywalls/${json.data.token}`);
+    expect(json.data.qrPayload).toBe(json.data.previewUrl);
+  });
+
   it("404s for a paywall belonging to another project", async () => {
     seedPaywall({ id: "pwOther", projectId: OTHER_PROJECT_ID });
 
@@ -258,6 +273,31 @@ describe("DELETE /paywalls/:id/preview-sessions/:sid", () => {
 
     expect(res.status).toBe(404);
     expect(revokePreviewSession).not.toHaveBeenCalled();
+  });
+
+  it("T2-guard: a second DELETE of the same session 404s instead of 200-ing (and re-auditing) twice", async () => {
+    const seeded = await createPreviewSession(null, {
+      projectId: "p1",
+      paywallId: "pwA",
+      tokenHash: "deadbeef",
+      createdBy: "u1",
+      expiresAt: new Date(),
+    });
+
+    const first = await app().request(
+      `/dashboard/projects/p1/paywalls/pwA/preview-sessions/${seeded.id}`,
+      { method: "DELETE" },
+    );
+    expect(first.status).toBe(200);
+    auditMock.mockClear();
+
+    const second = await app().request(
+      `/dashboard/projects/p1/paywalls/pwA/preview-sessions/${seeded.id}`,
+      { method: "DELETE" },
+    );
+
+    expect(second.status).toBe(404);
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("audits the revoke under the paywall_preview_session resource", async () => {

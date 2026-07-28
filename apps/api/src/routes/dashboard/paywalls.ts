@@ -234,6 +234,25 @@ const PREVIEW_SESSION_TTL_MINUTES = 60;
  * than an inline `60_000` per the project's no-magic-values convention. */
 const MS_PER_MINUTE = 60_000;
 
+/**
+ * Origin to build the preview URL against. `new URL(c.req.url).origin`
+ * alone reflects the scheme the API process itself was reached on — behind
+ * a TLS-terminating proxy (Caddy in front of the API container) that's
+ * always plain `http://`, so a naive origin would hand a physical device an
+ * `http://` preview URL despite the public edge being `https://`. Trust the
+ * proxy's `X-Forwarded-Proto` for the scheme when present (Caddy always
+ * sets it), keep the request's own host (proxies forward `Host` verbatim),
+ * and fall back to the request URL's origin untouched when there's no
+ * forwarded-proto header at all (bare `docker compose up`, local dev, unit
+ * tests hitting the Hono app directly).
+ */
+function requestOrigin(c: { req: { url: string; header(name: string): string | undefined } }): string {
+  const url = new URL(c.req.url);
+  const forwardedProto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim();
+  if (forwardedProto) url.protocol = `${forwardedProto}:`;
+  return url.origin;
+}
+
 // -------------------------------------------------------------
 // AI start tab — one-shot paywall generation (P8 AI-FAB, Task 4).
 // -------------------------------------------------------------
@@ -1247,7 +1266,7 @@ export const paywallsDashboardRoute = new Hono()
       return created;
     });
 
-    const previewUrl = `${new URL(c.req.url).origin}/v1/preview/paywalls/${token}`;
+    const previewUrl = `${requestOrigin(c)}/v1/preview/paywalls/${token}`;
     return c.json(
       ok({
         sessionId: session.id,
