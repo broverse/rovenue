@@ -604,6 +604,103 @@ final class BuilderConfigModelTests: XCTestCase {
         let firstAgain = countdownFirstShownAt(paywallIdentifier: "pw_1", defaults: defaults)
         XCTAssertEqual(firstAgain, first)
     }
+
+    // MARK: - countdownDeadline (the endsAt/durationSeconds contract)
+
+    /// A scratch `UserDefaults` suite, cleared before and after the calling
+    /// test, so a persisted anchor never leaks between tests or into the
+    /// machine's real defaults.
+    private func scratchDefaults(_ suiteName: String) throws -> UserDefaults {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suiteName) }
+        return defaults
+    }
+
+    /// render-fixtures.json carries a countdown with BOTH `endsAt` and
+    /// `durationSeconds` as an `acceptLenient` entry, not a `reject` one: the
+    /// exclusivity is a TypeScript-only authoring `refine`, so the config
+    /// reaches the platform decoders intact and the contract is that
+    /// `endsAt` WINS. Asserted through the real fixture, not a hand-built
+    /// node, so the entry and this expectation cannot drift apart.
+    func test_countdownDeadline_prefersEndsAtWhenBothAreSomehowPresent() throws {
+        let entries = try XCTUnwrap(fixtures["acceptLenient"] as? [[String: Any]])
+        let entry = try XCTUnwrap(entries.first {
+            ($0["name"] as? String)?.hasPrefix("countdown carrying BOTH endsAt and durationSeconds") == true
+        })
+        let config = try XCTUnwrap(entry["config"])
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root, case .countdown(let props) = root.children[0] else {
+            return XCTFail("expected root.children[0] to be .countdown")
+        }
+        XCTAssertEqual(props.endsAt, "2027-06-01T12:00:00.000Z")
+        XCTAssertEqual(props.durationSeconds, 600)
+
+        let defaults = try scratchDefaults("RovenueTests.countdownDeadline.both")
+        let deadline = try XCTUnwrap(
+            countdownDeadline(props: props, paywallIdentifier: "pw_1", defaults: defaults))
+        let expected = try XCTUnwrap(ISO8601DateFormatter.rovenueTestFractional.date(from: "2027-06-01T12:00:00.000Z"))
+        XCTAssertEqual(deadline, expected, "endsAt must win over durationSeconds")
+        // The durationSeconds branch was never taken, so it never stamped an
+        // anchor — the strongest available signal that `endsAt` short-circuited.
+        XCTAssertNil(
+            defaults.object(forKey: countdownFirstShownKeyPrefix + "pw_1"),
+            "preferring endsAt must not touch the persisted first-shown anchor")
+    }
+
+    func test_countdownDeadline_anchorsDurationSecondsToThePersistedFirstShow() throws {
+        let defaults = try scratchDefaults("RovenueTests.countdownDeadline.duration")
+        let props = CountdownProps(id: "cd", durationSeconds: 900)
+        let anchor = countdownFirstShownAt(paywallIdentifier: "pw_1", defaults: defaults)
+        let deadline = try XCTUnwrap(
+            countdownDeadline(props: props, paywallIdentifier: "pw_1", defaults: defaults))
+        XCTAssertEqual(deadline.timeIntervalSince(anchor), 900, accuracy: 0.001)
+    }
+
+    /// An unparsable `endsAt` yields no deadline, which routes the node to
+    /// `fallback` else nothing — never a garbage display, and never a silent
+    /// fall-through to `durationSeconds` (the web renderer's
+    /// `useCountdownDeadline` returns null in exactly the same shape).
+    func test_countdownDeadline_isNilForAnUnparsableEndsAt() throws {
+        let defaults = try scratchDefaults("RovenueTests.countdownDeadline.unparsable")
+        XCTAssertNil(countdownDeadline(
+            props: CountdownProps(id: "cd", endsAt: "not a date"),
+            paywallIdentifier: "pw_1", defaults: defaults))
+        XCTAssertNil(countdownDeadline(
+            props: CountdownProps(id: "cd", endsAt: "not a date", durationSeconds: 900),
+            paywallIdentifier: "pw_1", defaults: defaults),
+            "an unparsable endsAt must not fall through to durationSeconds")
+    }
+
+    func test_countdownDeadline_isNilWhenTheNodeCarriesNeitherDeadline() throws {
+        let defaults = try scratchDefaults("RovenueTests.countdownDeadline.none")
+        XCTAssertNil(countdownDeadline(
+            props: CountdownProps(id: "cd"), paywallIdentifier: "pw_1", defaults: defaults))
+    }
+
+    /// Both authored spellings parse: plain `Z`-suffixed UTC (what the
+    /// builder writes) and a stray fractional-seconds value.
+    func test_countdownDeadline_parsesBothIsoSpellings() throws {
+        let defaults = try scratchDefaults("RovenueTests.countdownDeadline.iso")
+        let plain = countdownDeadline(
+            props: CountdownProps(id: "cd", endsAt: "2027-01-01T00:00:00Z"),
+            paywallIdentifier: nil, defaults: defaults)
+        let fractional = countdownDeadline(
+            props: CountdownProps(id: "cd", endsAt: "2027-01-01T00:00:00.000Z"),
+            paywallIdentifier: nil, defaults: defaults)
+        XCTAssertNotNil(plain)
+        XCTAssertEqual(plain, fractional)
+    }
+}
+
+private extension ISO8601DateFormatter {
+    /// Parses the fractional-seconds spelling render-fixtures.json uses for
+    /// `endsAt`; the default `ISO8601DateFormatter` refuses it.
+    static let rovenueTestFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 }
 
 /// Builds a `PackageView?` from a fixture's `pkg` field, which is either a
