@@ -9,6 +9,7 @@ import { ValidationDrawer } from "./validation-drawer";
 import { DiffModal } from "./diff-modal";
 import { LocalizationModal } from "./localization-modal";
 import { StartModal } from "./start-modal";
+import { ExperimentPopover } from "./experiment-popover";
 import { shouldAutoOpenStart } from "./start-model";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 
@@ -23,6 +24,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
   const [showDiff, setShowDiff] = useState(false);
   const [showLocalization, setShowLocalization] = useState(false);
   const [showStart, setShowStart] = useState(false);
+  const [showExperiment, setShowExperiment] = useState(false);
   /** Auto-open is decided exactly once, at the first render after the paywall loads. */
   const startDecided = useRef(false);
   useEffect(() => {
@@ -75,6 +77,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         onOpenDiff={() => setShowDiff(true)}
         onOpenLocalization={() => setShowLocalization(true)}
         onOpenStart={() => setShowStart(true)}
+        onOpenExperiment={() => setShowExperiment(true)}
       />
       <main className="flex flex-1 overflow-hidden">
         <LayerTree />
@@ -85,6 +88,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
       {showDiff && <DiffModal onClose={() => setShowDiff(false)} />}
       {showLocalization && <LocalizationModal onClose={() => setShowLocalization(false)} />}
       {showStart && <StartModal onClose={() => setShowStart(false)} />}
+      {showExperiment && <ExperimentPopover onClose={() => setShowExperiment(false)} />}
     </div>
   );
 });

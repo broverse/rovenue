@@ -1522,7 +1522,58 @@
         "autosaveSaved": "saved",
         "previewEligible": "Eligible",
         "previewIneligible": "Ineligible",
-        "previewEligibleHint": "Preview as intro-offer eligible / ineligible"
+        "previewEligibleHint": "Preview as intro-offer eligible / ineligible",
+        "experimentHint": "A/B test this paywall",
+        "experimentBlocked": "Publish this paywall before starting an A/B test"
+      },
+      "experiment": {
+        "title": "A/B test this paywall",
+        "close": "Close",
+        "kind": {
+          "label": "Test type",
+          "paywall": "Paywall",
+          "element": "Element",
+          "elementComingSoon": "Coming soon"
+        },
+        "name": {
+          "label": "Name"
+        },
+        "variantB": {
+          "label": "Variant B",
+          "duplicate": "Duplicate this paywall",
+          "existing": "Use an existing paywall",
+          "existingPaywallPlaceholder": "Select a paywall…",
+          "unpublishedSuffix": "(unpublished)"
+        },
+        "audience": {
+          "label": "Audience",
+          "everyoneWillBeCreated": "Everyone (will be created)",
+          "everyoneDefault": "Everyone (default)"
+        },
+        "placement": {
+          "label": "Placement",
+          "none": "Not attached to any placement — the experiment won't serve until a placement targets it.",
+          "noneLink": "Go to placements",
+          "rowLabel": "{{identifier}} · row {{row}}",
+          "splitCaption": "50/50 split — adjust weights later on the experiment page"
+        },
+        "create": {
+          "button": "Create experiment",
+          "error": "Couldn't create the experiment. Try again.",
+          "openBuilder": "Open variant B in the builder"
+        },
+        "status": {
+          "draft": "Draft",
+          "running": "Running",
+          "paused": "Paused",
+          "completed": "Completed",
+          "checklistAPublished": "Variant A is published",
+          "checklistBPublished": "Variant B is published",
+          "checklistPlacement": "Attached to a placement",
+          "start": "Start experiment",
+          "viewLink": "View experiment",
+          "darkPlacementWarning": "This experiment completed without a winner and a placement row still targets it — that row won't serve until you repoint it."
+        }
       },
       "locales": {
         "title": "Locales",

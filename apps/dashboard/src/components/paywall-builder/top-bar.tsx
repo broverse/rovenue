@@ -7,6 +7,7 @@ import {
   BadgeX,
   ChevronDown,
   CloudUpload,
+  FlaskConical,
   GitBranch,
   Languages,
   LayoutTemplate,
@@ -29,6 +30,7 @@ type Props = {
   onOpenDiff: () => void;
   onOpenLocalization: () => void;
   onOpenStart: () => void;
+  onOpenExperiment: () => void;
 };
 
 export const TopBar = component(({
@@ -37,6 +39,7 @@ export const TopBar = component(({
   onOpenDiff,
   onOpenLocalization,
   onOpenStart,
+  onOpenExperiment,
 }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
@@ -134,6 +137,28 @@ export const TopBar = component(({
           {vm.previewEligible
             ? t("paywalls.builder.topbar.previewEligible", "Eligible")
             : t("paywalls.builder.topbar.previewIneligible", "Ineligible")}
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenExperiment}
+          disabled={vm.paywall?.publishedVersionId == null}
+          title={
+            vm.paywall?.publishedVersionId != null
+              ? t("paywalls.builder.topbar.experimentHint", "A/B test this paywall")
+              : t(
+                  "paywalls.builder.topbar.experimentBlocked",
+                  "Publish this paywall before starting an A/B test",
+                )
+          }
+          className={cn(
+            "flex h-7 w-7 items-center justify-center rounded-md border transition",
+            vm.paywall?.publishedVersionId != null
+              ? "cursor-pointer border-rv-divider bg-rv-c2 text-rv-mute-600 hover:bg-rv-c3 hover:text-foreground"
+              : "cursor-not-allowed border-rv-divider bg-rv-c2 text-rv-mute-500 opacity-60",
+          )}
+        >
+          <FlaskConical size={13} />
         </button>
 
         {vm.errorIssues.length > 0 ? (
