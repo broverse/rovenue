@@ -249,9 +249,10 @@ the store product and runs the SDK's normal purchase + server-validation
 flow; you only receive the completed/failed callbacks. Purchase attribution
 (`presentedContext`) is attached automatically, as everywhere else.
 
-React Native renders builder paywalls with its own component —
-`RovenuePaywallView` from `@rovenue/react-native-sdk` — built on RN
-primitives with the same semantics as every other renderer:
+React Native uses the same component name — `RovenuePaywallView` from
+`@rovenue/react-native-sdk` — but it is **not a fourth renderer**. It is an
+Expo view that hosts the native SwiftUI / Android View above, so an RN
+paywall is drawn by exactly the same code an iOS or Android app runs:
 
 ```tsx
 import { RovenuePaywallView, getPaywall } from '@rovenue/react-native-sdk';
@@ -272,10 +273,263 @@ const paywall = await getPaywall('onboarding_end', 'en');
 <Callout type="info">
 Purchases run through the SDK's normal `purchase(pkg)` flow with real
 store pricing feeding `{{price}}` variables, and the view auto-tracks its
-impression — same as the Swift and Kotlin renderers. An optional native
-presentation bridge (hosting the SwiftUI/Android views for pixel parity)
-may come later; it is no longer required to show builder paywalls in RN.
+impression — same as the Swift and Kotlin renderers. Because rendering
+happens natively, anything you register *into* a renderer (see
+[Lottie animations](#lottie-animations)) is registered in your app's own
+native entry points, not from JavaScript.
 </Callout>
+
+## Lottie animations
+
+A builder paywall can contain a **`lottie`** node. The Rovenue SDKs ship
+**no Lottie runtime** — not `lottie-ios`, not `com.airbnb.android:lottie`,
+not `lottie-web`. Bundling one would force every app that never uses a
+Lottie node to carry it. Instead your app registers whichever player it
+already ships, once, and the renderer hands that player one request per
+`lottie` node.
+
+With no player registered a `lottie` node draws its **`fallback`** node if
+the author gave it one, and otherwise nothing — the same "cannot draw this"
+path every other node type already takes, not a crash and not a blank
+paywall.
+
+### The request contract
+
+Every platform hands the host the same five values:
+
+| Field | Meaning |
+|---|---|
+| `url` | The theme-resolved animation source (the light or dark URL, picked for the active color scheme). |
+| `loop` | Author's loop setting. Absent in the config = `true`. |
+| `autoplay` | Author's standing instruction from the builder. Absent = `true`. |
+| `speed` | Playback rate multiplier. Absent = `1`. |
+| `playing` | The SDK's moment-to-moment verdict: this node is on screen **and** the app is in the foreground. |
+
+Two things are worth reading twice before you write the host renderer:
+
+- **`playing` is not `autoplay`.** `autoplay` is authored once in the
+  dashboard and never changes for the life of the paywall. `playing` comes
+  from the same shared visibility signal that `video`, `carousel` and
+  `countdown` use, and it flips as the paywall scrolls or the app goes to
+  the background. A correct host renderer honours both: it must not start on
+  its own when `autoplay` is `false`, and it must pause when `playing` goes
+  `false`. Every snippet below derives one boolean from the pair for exactly
+  this reason.
+- **Registration is process-level and happens once**, at startup, well
+  before any paywall is presented. It is not per-view configuration and
+  there is no per-paywall override. Passing `nil` / `null` unregisters.
+
+One deliberate asymmetry: `url` is a `URL` on iOS and a `String` on Android
+and web. That is not an oversight — it is what each platform's Lottie
+library actually takes (`lottie-ios` wants a `URL`, `lottie-android`'s
+`setAnimationFromUrl` wants a `String`). On iOS a source that cannot be
+turned into a `URL` produces no request at all, so the node takes the
+ordinary fallback path.
+
+<Callout type="warn">
+The registry is global process state, so it **leaks across tests**. Any test
+that registers a renderer must unregister it (pass `nil` / `null`) in its
+teardown.
+</Callout>
+
+### Register a player
+
+<Tabs items={['Swift', 'Kotlin', 'React Native', 'Web']}>
+<Tab value="Swift">
+
+```swift
+import Rovenue
+import SwiftUI
+import Lottie   // your app's own dependency — Rovenue does not ship it
+
+@main
+struct MyApp: App {
+    init() {
+        // Process-level, once, before any paywall is presented.
+        registerLottieRenderer { request in
+            // ── Rovenue side: exact. ──────────────────────────────────
+            // request.url      URL     theme-resolved source
+            // request.loop     Bool
+            // request.autoplay Bool    author's standing instruction
+            // request.speed    Double
+            // request.playing  Bool    on screen AND app in front
+            let shouldPlay = request.autoplay && request.playing
+
+            // ── Host side: your player. Adapt these calls to the
+            //    version of lottie-ios you actually ship. ─────────────
+            return AnyView(
+                LottieView { try await LottieAnimation.loadedFrom(url: request.url) }
+                    .looping(request.loop)
+                    .animationSpeed(request.speed)
+                    .paused(!shouldPlay)
+            )
+        }
+    }
+
+    var body: some Scene { WindowGroup { ContentView() } }
+}
+```
+
+The signature you are conforming to is:
+
+```swift
+public struct LottieRenderRequest: Equatable, Sendable {
+    public let url: URL
+    public let loop: Bool
+    public let autoplay: Bool
+    public let speed: Double
+    public let playing: Bool
+}
+
+public typealias LottieRenderer = (LottieRenderRequest) -> AnyView
+public func registerLottieRenderer(_ render: LottieRenderer?)
+```
+
+Returning `AnyView(EmptyView())` is a legitimate "draw nothing right now".
+
+</Tab>
+<Tab value="Kotlin">
+
+```kotlin
+import android.app.Application
+import com.airbnb.lottie.LottieAnimationView   // your app's own dependency
+import com.airbnb.lottie.LottieDrawable
+import dev.rovenue.sdk.paywallui.registerLottieRenderer
+
+class MyApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+
+        // Process-level, once, before any paywall is presented.
+        registerLottieRenderer { context, request ->
+            // ── Rovenue side: exact. ──────────────────────────────────
+            // request.url      String   theme-resolved source
+            // request.loop     Boolean
+            // request.autoplay Boolean  author's standing instruction
+            // request.speed    Double
+            // request.playing  Boolean  on screen AND app in front
+            val shouldPlay = request.autoplay && request.playing
+
+            // ── Host side: your player. Adapt these calls to the
+            //    version of lottie-android you actually ship. ─────────
+            LottieAnimationView(context).apply {
+                setAnimationFromUrl(request.url)
+                repeatCount = if (request.loop) LottieDrawable.INFINITE else 0
+                speed = request.speed.toFloat()
+                if (shouldPlay) playAnimation() else pauseAnimation()
+            }
+        }
+    }
+}
+```
+
+The interface you are conforming to is:
+
+```kotlin
+package dev.rovenue.sdk.paywallui
+
+data class LottieRenderRequest(
+    val url: String,
+    val loop: Boolean,
+    val autoplay: Boolean,
+    val speed: Double,
+    val playing: Boolean,
+)
+
+fun interface LottieRenderer {
+    fun createView(context: Context, request: LottieRenderRequest): View?
+}
+
+fun registerLottieRenderer(render: LottieRenderer?)
+```
+
+Returning `null` is a legitimate "I cannot draw this", and routes the node
+onto the fallback path.
+
+</Tab>
+<Tab value="React Native">
+
+<Callout type="warn">
+There is no JavaScript API for this, and that is structural rather than an
+omission. A Lottie renderer is a **native view factory** — it returns a
+SwiftUI `AnyView` or an Android `View` — and a view factory cannot be sent
+across the JS bridge. Since `RovenuePaywallView` in React Native is an Expo
+view hosting the native paywall, you register the player in your app's own
+**native entry points**, exactly as the Swift and Kotlin tabs show.
+</Callout>
+
+Add the registration to the two native entry points of your React Native
+app. There is **no `@rovenue/react-native-sdk` code change and no extra
+package** involved — you are calling the native SDK that is already linked
+into your app:
+
+- **iOS** — `ios/<YourApp>/AppDelegate.swift`, inside
+  `application(_:didFinishLaunchingWithOptions:)`, before
+  `super.application(...)` returns. Paste the body of the **Swift** tab's
+  `registerLottieRenderer { ... }` call there, and `import Rovenue`.
+- **Android** — `android/app/src/main/java/.../MainApplication.kt`, inside
+  `onCreate()`, after `super.onCreate()`. Paste the body of the **Kotlin**
+  tab's `registerLottieRenderer { ... }` call there, and import from
+  `dev.rovenue.sdk.paywallui`.
+
+Because registration is process-level, doing it at launch covers every
+paywall the app later presents from JavaScript — you do not re-register when
+mounting `RovenuePaywallView`.
+
+You also add the Lottie library itself per platform, as your own dependency
+(`lottie-ios` via CocoaPods/SPM, `com.airbnb.android:lottie` in
+`android/app/build.gradle`). A JS-side package such as `lottie-react-native`
+does not help here: the paywall is not drawn by React, so a React component
+cannot render into it. `lottie-react-native` does bring the two native
+libraries in transitively, so if you already depend on it you can register
+against those directly from the native entry points above.
+
+<Callout type="info">
+Expo managed projects need the native projects in hand to edit these files —
+run `npx expo prebuild` (or keep them checked in), or wrap the two edits in
+a config plugin so they survive a clean prebuild.
+</Callout>
+
+Until you register a player, a `lottie` node in an RN app renders its
+`fallback` (or nothing). Nothing breaks; the animation is simply absent —
+so a paywall that must degrade gracefully on RN should always be authored
+with a `fallback` image.
+
+</Tab>
+<Tab value="Web">
+
+```tsx
+import { registerLottieRenderer } from '@rovenue/paywall-renderer';
+
+// Module scope / app bootstrap — once, before any paywall mounts.
+registerLottieRenderer(({ url, loop, autoplay, speed, playing }) => {
+  // Rovenue side: exact. `url` is a string here.
+  const shouldPlay = autoplay && playing;
+
+  // Host side: your player (lottie-react, @lottiefiles/dotlottie-react,
+  // …). Adapt to the library and version you ship.
+  return (
+    <Lottie path={url} loop={loop} speed={speed} play={shouldPlay} />
+  );
+});
+```
+
+The type you are conforming to is:
+
+```ts
+export type LottieRenderer = (props: {
+  url: string;
+  loop: boolean;
+  autoplay: boolean;
+  speed: number;
+  playing: boolean;
+}) => ReactElement | null;
+
+export function registerLottieRenderer(render: LottieRenderer | null): void;
+```
+
+</Tab>
+</Tabs>
 
 ## Offline fallback file
 
