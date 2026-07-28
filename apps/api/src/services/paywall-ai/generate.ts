@@ -1,7 +1,7 @@
-import { generateObject } from "ai";
-import type { LanguageModel } from "ai";
+import { generateObject, NoObjectGeneratedError } from "ai";
+import type { LanguageModel, LanguageModelUsage } from "ai";
 import { z } from "zod";
-import { drizzle } from "@rovenue/db";
+import { drizzle, currentYearMonth } from "@rovenue/db";
 import { decrypt } from "@rovenue/shared/crypto";
 import type { RoviProvider } from "@rovenue/shared";
 import type { BuilderConfig, PaywallNode, TimelineRow } from "@rovenue/shared/paywall";
@@ -274,6 +274,41 @@ function appendIssuesToPrompt(originalPrompt: string, issues: string[]): string 
   return `${originalPrompt}\n\nThe previous attempt failed validation with these issues: ${issues.join("; ")}. Fix them and try again — keep every string within the requested limits.`;
 }
 
+// -------------------------------------------------------------
+// Quota accounting — mirrors copilot/chat.ts's bumpUsage calls exactly
+// (same repo, same currentYearMonth() bucketing). `roviQuotaGuard()` only
+// READS `copilot_usage_monthly`; nothing else on this path writes to it, so
+// every attempt that actually reaches the model MUST bump it or the guard
+// gates on a counter that never moves. `messages` is bumped ONCE per
+// `generatePaywallConfig` call (one user prompt = one "message", same as
+// chat.ts bumping once per incoming chat request) regardless of how the
+// call ultimately resolves — retried, GENERATION_INVALID, or success — the
+// LLM was already paid for by the time this function returns or throws.
+// `inputTokens`/`outputTokens` are bumped once per `generateObject` call
+// (i.e. per attempt), since each attempt is its own billed model call.
+// -------------------------------------------------------------
+
+async function bumpMessageUsage(projectId: string): Promise<void> {
+  await drizzle.copilotUsageRepo.bumpUsage(drizzle.db, {
+    projectId,
+    yearMonth: currentYearMonth(),
+    messages: 1,
+  });
+}
+
+async function bumpTokenUsage(
+  projectId: string,
+  usage: LanguageModelUsage | undefined,
+): Promise<void> {
+  if (!usage) return;
+  await drizzle.copilotUsageRepo.bumpUsage(drizzle.db, {
+    projectId,
+    yearMonth: currentYearMonth(),
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+  });
+}
+
 /**
  * One-shot paywall generation for the AI start tab. Resolves the project's
  * provider (BYOK-first, see `resolveProviderForProject`), calls
@@ -281,7 +316,10 @@ function appendIssuesToPrompt(originalPrompt: string, issues: string[]): string 
  * real builder nodes, and gates it through `assertSaveValid`. Retries the
  * whole generateObject→assemble→validate cycle ONCE (`GENERATION_MAX_RETRIES`)
  * with the validator's issues appended to the prompt; a second failure
- * throws `GenerationInvalidError`.
+ * throws `GenerationInvalidError`. A model response that doesn't even
+ * conform to the compact schema (`NoObjectGeneratedError`) skips the retry
+ * loop entirely and maps straight to `GenerationInvalidError` — there is no
+ * object to assemble/validate/retry against.
  */
 export async function generatePaywallConfig(
   input: { projectId: string; prompt: string; defaultLocale: string },
@@ -294,16 +332,31 @@ export async function generatePaywallConfig(
   });
   const model = (deps.modelFactory ?? modelFactory)(resolved);
 
+  // The model is about to be called at least once — the quota guard's
+  // counter must move now, not only on a clean success.
+  await bumpMessageUsage(input.projectId);
+
   let prompt = input.prompt;
   let lastIssues: string[] = [];
 
   for (let attempt = 0; attempt <= GENERATION_MAX_RETRIES; attempt++) {
-    const { object } = await generateObject({
-      model,
-      schema: compactGenerationSchema,
-      system: SYSTEM_PROMPT,
-      prompt,
-    });
+    let object: CompactGeneration;
+    try {
+      const result = await generateObject({
+        model,
+        schema: compactGenerationSchema,
+        system: SYSTEM_PROMPT,
+        prompt,
+      });
+      object = result.object;
+      await bumpTokenUsage(input.projectId, result.usage);
+    } catch (err) {
+      if (NoObjectGeneratedError.isInstance(err)) {
+        await bumpTokenUsage(input.projectId, err.usage);
+        throw new GenerationInvalidError(["MODEL_OUTPUT_SCHEMA_INVALID"]);
+      }
+      throw err;
+    }
 
     const assembled = assembleGeneratedConfig(object, input.defaultLocale);
     try {

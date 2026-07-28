@@ -15,6 +15,7 @@ import type { PaywallNode } from "@rovenue/shared/paywall";
 // organically save-invalid assembled tree.
 // =============================================================
 
+const bumpUsageMock = vi.hoisted(() => vi.fn(async (_input: Record<string, unknown>) => undefined));
 vi.mock("@rovenue/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rovenue/db")>();
   return {
@@ -24,6 +25,12 @@ vi.mock("@rovenue/db", async (importOriginal) => {
       copilotCredentialRepo: {
         ...actual.drizzle.copilotCredentialRepo,
         getCredentials: vi.fn(async () => null),
+      },
+      copilotUsageRepo: {
+        ...actual.drizzle.copilotUsageRepo,
+        // Only the `input` arg is asserted on below — the `db` handle is
+        // irrelevant to what generate.ts bumps.
+        bumpUsage: (_db: unknown, input: Record<string, unknown>) => bumpUsageMock(input),
       },
     },
   };
@@ -47,16 +54,20 @@ vi.mock("../copilot/providers", async (importOriginal) => {
   };
 });
 
+import { NoObjectGeneratedError } from "ai";
 import {
   generatePaywallConfig,
   GenerationInvalidError,
   GENERATION_MAX_RETRIES,
+  GENERATION_MAX_TIMELINE_STEPS,
   GENERATION_RATING_MIN,
   GENERATION_RATING_MAX,
+  GENERATION_TEXT_MAX_CHARS,
 } from "./generate";
 import { GeneratedConfigError } from "./validate-config";
 import { RoviConfigError } from "../copilot/providers";
 import type { ResolvedProvider } from "../copilot/providers";
+import { currentYearMonth } from "@rovenue/db";
 
 const STUB_RESOLVED_PROVIDER: ResolvedProvider = {
   source: "env",
@@ -65,9 +76,18 @@ const STUB_RESOLVED_PROVIDER: ResolvedProvider = {
   apiKey: "mock-key",
 };
 
+const STUB_USAGE = {
+  inputTokens: 10,
+  inputTokenDetails: { noCacheTokens: 10, cacheReadTokens: 0, cacheWriteTokens: undefined },
+  outputTokens: 5,
+  outputTokenDetails: { textTokens: 5, reasoningTokens: undefined },
+  totalTokens: 15,
+};
+
 beforeEach(() => {
   assertSaveValidMock.mockReset().mockImplementation((config: unknown) => config);
   resolveProviderForProjectMock.mockReset().mockResolvedValue(STUB_RESOLVED_PROVIDER);
+  bumpUsageMock.mockReset().mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -235,6 +255,57 @@ describe("generatePaywallConfig — assembler section-kind mapping", () => {
     expect(textSections).toHaveLength(3);
   });
 
+  it("clamps a timeline section to GENERATION_MAX_TIMELINE_STEPS steps", async () => {
+    const gen = {
+      title: "Go Pro",
+      ctaLabel: "Continue",
+      sections: [
+        {
+          kind: "timeline" as const,
+          steps: Array.from({ length: 6 }, (_, i) => ({ label: `Step ${i}` })),
+        },
+      ],
+    };
+    const model = mockModel(() => objectGenerateResult(gen));
+    const config = await generatePaywallConfig(
+      { projectId: "p1", prompt: "x", defaultLocale: "en" },
+      { modelFactory: () => model },
+    );
+    const timeline = config.root.children.find((c) => c.type === "timeline") as {
+      rows: Array<{ labelKey: string }>;
+    };
+    expect(timeline.rows).toHaveLength(GENERATION_MAX_TIMELINE_STEPS);
+    const table = config.localizations.en!;
+    expect(timeline.rows.map((r) => table[r.labelKey])).toEqual([
+      "Step 0",
+      "Step 1",
+      "Step 2",
+      "Step 3",
+    ]);
+  });
+
+  it("clamps an over-long text section body to GENERATION_TEXT_MAX_CHARS", async () => {
+    const longBody = "x".repeat(GENERATION_TEXT_MAX_CHARS + 50);
+    const gen = {
+      title: "Go Pro",
+      ctaLabel: "Continue",
+      sections: [{ kind: "text" as const, body: longBody }],
+    };
+    const model = mockModel(() => objectGenerateResult(gen));
+    const config = await generatePaywallConfig(
+      { projectId: "p1", prompt: "x", defaultLocale: "en" },
+      { modelFactory: () => model },
+    );
+    const textSection = config.root.children.find(
+      (c) => c.type === "text" && c.role === "body",
+    ) as { key: string };
+    const table = config.localizations.en!;
+    const clamped = table[textSection.key]!;
+    expect(clamped).toHaveLength(GENERATION_TEXT_MAX_CHARS);
+    // Simple slice(0, N) semantics — a hard character cut, not a word-boundary trim.
+    expect(clamped).toBe(longBody.slice(0, GENERATION_TEXT_MAX_CHARS));
+  });
+
   it("always appends the packageList + purchaseButton commerce skeleton, with the CTA/trial labels wired", async () => {
     const model = mockModel(() => objectGenerateResult(FULL_COMPACT_GENERATION));
     const config = await generatePaywallConfig(
@@ -342,5 +413,90 @@ describe("generatePaywallConfig — provider resolution", () => {
       ),
     ).rejects.toBeInstanceOf(RoviConfigError);
     expect(modelFactory).not.toHaveBeenCalled();
+    // No model call was ever made — nothing was spent, so the quota
+    // guard's counter must not move either.
+    expect(bumpUsageMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("generatePaywallConfig — quota usage accounting", () => {
+  const yearMonth = currentYearMonth();
+
+  it("bumps messages:1 once and input/output tokens once on the happy path", async () => {
+    const doGenerate = vi.fn(() => objectGenerateResult(FULL_COMPACT_GENERATION));
+    const model = mockModel(doGenerate);
+
+    await generatePaywallConfig(
+      { projectId: "p1", prompt: "make me a paywall", defaultLocale: "en" },
+      { modelFactory: () => model },
+    );
+
+    expect(bumpUsageMock).toHaveBeenCalledWith({
+      projectId: "p1",
+      yearMonth,
+      messages: 1,
+    });
+    expect(bumpUsageMock).toHaveBeenCalledWith({
+      projectId: "p1",
+      yearMonth,
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+    // One messages bump + one token bump for the single (successful) attempt.
+    expect(bumpUsageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bumps messages:1 exactly once and tokens per attempt on the GENERATION_INVALID path — money was spent either way", async () => {
+    assertSaveValidMock.mockImplementation(() => {
+      throw new GeneratedConfigError(["DUPLICATE_NODE_ID"]);
+    });
+    const doGenerate = vi.fn(() => objectGenerateResult(FULL_COMPACT_GENERATION));
+    const model = mockModel(doGenerate);
+
+    await expect(
+      generatePaywallConfig(
+        { projectId: "p1", prompt: "make me a paywall", defaultLocale: "en" },
+        { modelFactory: () => model },
+      ),
+    ).rejects.toBeInstanceOf(GenerationInvalidError);
+
+    const messageBumps = bumpUsageMock.mock.calls.filter(([arg]) => (arg as { messages?: number }).messages);
+    expect(messageBumps).toHaveLength(1);
+    const tokenBumps = bumpUsageMock.mock.calls.filter(([arg]) => "inputTokens" in (arg as object));
+    // GENERATION_MAX_RETRIES + 1 attempts, each its own billed model call.
+    expect(tokenBumps).toHaveLength(GENERATION_MAX_RETRIES + 1);
+    expect(tokenBumps.every(([arg]) => (arg as { inputTokens: number }).inputTokens === 10)).toBe(true);
+  });
+
+  it("maps a NoObjectGeneratedError (model output fails the compact schema) straight to GenerationInvalidError, no retry, tokens still bumped", async () => {
+    const doGenerate = vi.fn(() => {
+      throw new NoObjectGeneratedError({
+        message: "model did not return valid JSON",
+        response: { id: "resp_1", timestamp: new Date(0), modelId: "mock" },
+        usage: STUB_USAGE,
+        finishReason: "stop",
+      });
+    });
+    const model = mockModel(doGenerate);
+
+    try {
+      await generatePaywallConfig(
+        { projectId: "p1", prompt: "make me a paywall", defaultLocale: "en" },
+        { modelFactory: () => model },
+      );
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GenerationInvalidError);
+      expect((err as GenerationInvalidError).issues).toContain("MODEL_OUTPUT_SCHEMA_INVALID");
+    }
+
+    expect(doGenerate).toHaveBeenCalledTimes(1); // no retry against a non-conforming response
+    expect(bumpUsageMock).toHaveBeenCalledWith({ projectId: "p1", yearMonth, messages: 1 });
+    expect(bumpUsageMock).toHaveBeenCalledWith({
+      projectId: "p1",
+      yearMonth,
+      inputTokens: STUB_USAGE.inputTokens,
+      outputTokens: STUB_USAGE.outputTokens,
+    });
   });
 });
