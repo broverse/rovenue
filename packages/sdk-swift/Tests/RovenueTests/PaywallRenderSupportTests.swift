@@ -216,6 +216,9 @@ final class PaywallRenderSupportTests: XCTestCase {
             try XCTUnwrap(defaults["COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX"] as? String),
             "the persisted anchor key must be byte-identical across web/iOS/Android")
         XCTAssertEqual(stickyFooterDefaultBackground, try themePair("STICKY_FOOTER_DEFAULT_BACKGROUND"))
+        XCTAssertEqual(
+            Double(stickyFooterContentClearanceDefault),
+            try XCTUnwrap(defaults["STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT"] as? Double))
     }
 
     // MARK: - scroll container + pinned-footer layout (wave C)

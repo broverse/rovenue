@@ -344,7 +344,7 @@ private let countdownMillisecondsPerSecond = 1000.0
 /// clearance under a pinned `stickyFooter`, used only until the footer's
 /// first real layout pass reports its height via `StickyFooterHeightKey` —
 /// mirrors renderer.tsx's `STICKY_FOOTER_CONTENT_CLEARANCE_PX`.
-private let stickyFooterContentClearanceDefault: CGFloat = 96
+let stickyFooterContentClearanceDefault: CGFloat = 96
 
 /// Layout spacing constants for the three row-carrying node types, in
 /// points — named rather than inlined (mirrors NodeViewFactory.kt's
