@@ -13,6 +13,17 @@ import { FONT_FACE_MAX_BYTES, FONT_FACES_MAX_PER_PROJECT } from "@rovenue/shared
 // the REAL implementation/values from @rovenue/shared: the point of
 // the fourth test is that real magic-byte sniffing overrides the
 // filename, so it must not be stubbed.
+//
+// `drizzle.db.select` is mocked too (fix round 1): the route now runs
+// two inline `.select().from(table).where(...).limit(1)` queries (the
+// familyId ownership/liveness check, and the existing-face lookup
+// that backs the quota-skip-on-update fix) that would otherwise hit
+// the real DB. The mock below dispatches on which table object was
+// passed to `.from(...)` and returns whatever rows the current test
+// configured via `selectFamiliesResult` / `selectFacesResult` — it
+// does not re-verify the WHERE clause itself (that the query actually
+// filters by projectId/deletedAt is Drizzle query-builder correctness,
+// not route logic; see Task 1's real-Postgres coverage for that).
 // =============================================================
 
 const assertProjectCapability = vi.hoisted(() => vi.fn());
@@ -41,8 +52,31 @@ const countFacesForProject = vi.hoisted(() => vi.fn());
 const createFamily = vi.hoisted(() => vi.fn());
 const upsertFace = vi.hoisted(() => vi.fn());
 const transaction = vi.hoisted(() => vi.fn());
+// Controllable result sets for the two inline `select` queries. Reset
+// to a "found" default in beforeEach; individual tests override to
+// simulate "not found" (foreign project / soft-deleted family) or "no
+// existing face at this weight/style" (a genuinely new face).
+const selectFamiliesResult = vi.hoisted(() => ({
+  rows: [] as Array<{ id: string }>,
+}));
+const selectFacesResult = vi.hoisted(() => ({
+  rows: [] as Array<{ id: string }>,
+}));
+
 vi.mock("@rovenue/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rovenue/db")>();
+  const select = () => ({
+    from: (table: unknown) => ({
+      where: () => ({
+        limit: () =>
+          Promise.resolve(
+            table === actual.drizzle.schema.fontFamilies
+              ? selectFamiliesResult.rows
+              : selectFacesResult.rows,
+          ),
+      }),
+    }),
+  });
   return {
     ...actual,
     drizzle: {
@@ -53,7 +87,7 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         createFamily,
         upsertFace,
       },
-      db: { ...actual.drizzle.db, transaction },
+      db: { ...actual.drizzle.db, transaction, select },
     },
   };
 });
@@ -151,6 +185,11 @@ beforeEach(() => {
     .mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) =>
       cb({}),
     );
+  // Default: a familyId, if one is supplied, resolves to a live family
+  // with no existing face at the requested weight/style. Tests that
+  // need the other branches override these explicitly.
+  selectFamiliesResult.rows = [{ id: "family-existing" }];
+  selectFacesResult.rows = [];
 });
 
 describe("POST /dashboard/projects/:projectId/fonts", () => {
@@ -194,6 +233,26 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
     expect(createFamily).not.toHaveBeenCalled();
   });
 
+  it("rejects a grossly oversized body at the transport layer, before the handler runs", async () => {
+    // fix round 1, review item 3: a body many times over the cap must
+    // be bounced by hono/body-limit before parseBody buffers it and
+    // before the route handler (and its own file.size check) ever
+    // runs. assertProjectCapability not being called is what proves
+    // the rejection happened at the body-limit gate, not inside the
+    // handler.
+    const bytes = new Uint8Array(FONT_FACE_MAX_BYTES * 5);
+    bytes.set([0x4f, 0x54, 0x54, 0x4f]);
+    const res = await uploadFont({
+      bytes,
+      familyName: "Brand",
+      weight: 400,
+      style: "normal",
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("FONT_FILE_TOO_LARGE");
+    expect(assertProjectCapability).not.toHaveBeenCalled();
+  });
+
   it("stores the detected format, ignoring the filename", async () => {
     const res = await uploadFont({
       bytes: otfBytes(),
@@ -209,5 +268,103 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
       expect.anything(),
       expect.objectContaining({ format: "otf" }),
     );
+  });
+
+  // -----------------------------------------------------------
+  // familyId branch (fix round 1, review item 2): previously zero
+  // coverage. Both "not found" causes the ownership+liveness query
+  // ANDs together (foreign project, soft-deleted family) collapse to
+  // the same empty-result branch by construction, so both tests below
+  // configure the mock identically — they exist to pin the observable
+  // route behaviour (404 FONT_FAMILY_NOT_FOUND, upsertFace never
+  // called) for each real-world precondition the check exists to
+  // cover, not to re-verify the WHERE clause's SQL.
+  // -----------------------------------------------------------
+
+  it("404s with FONT_FAMILY_NOT_FOUND when familyId belongs to another project", async () => {
+    selectFamiliesResult.rows = [];
+    const res = await uploadFont({
+      bytes: otfBytes(),
+      familyId: "foreign-family",
+      weight: 400,
+      style: "normal",
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("FONT_FAMILY_NOT_FOUND");
+    expect(upsertFace).not.toHaveBeenCalled();
+  });
+
+  it("404s with FONT_FAMILY_NOT_FOUND when familyId's family is soft-deleted", async () => {
+    selectFamiliesResult.rows = [];
+    const res = await uploadFont({
+      bytes: otfBytes(),
+      familyId: "deleted-family",
+      weight: 400,
+      style: "normal",
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("FONT_FAMILY_NOT_FOUND");
+    expect(upsertFace).not.toHaveBeenCalled();
+  });
+
+  it("attaches a face to an existing, owned, live family via familyId", async () => {
+    selectFamiliesResult.rows = [{ id: "family-existing" }];
+    selectFacesResult.rows = [];
+    const res = await uploadFont({
+      bytes: otfBytes(),
+      familyId: "family-existing",
+      weight: 700,
+      style: "italic",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { familyId: string } };
+    expect(body.data.familyId).toBe("family-existing");
+    expect(createFamily).not.toHaveBeenCalled();
+    expect(upsertFace).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        familyId: "family-existing",
+        weight: 700,
+        style: "italic",
+      }),
+    );
+  });
+
+  // -----------------------------------------------------------
+  // Quota-skip-on-update (fix round 1, review item 4 / human ruling):
+  // upsertFace REPLACES an existing (familyId, weight, style) rather
+  // than inserting, so it must not be blocked by the face cap.
+  // -----------------------------------------------------------
+
+  it("allows re-uploading an existing (familyId, weight, style) even at the face cap", async () => {
+    countFacesForProject.mockResolvedValue(FONT_FACES_MAX_PER_PROJECT);
+    selectFamiliesResult.rows = [{ id: "family-existing" }];
+    selectFacesResult.rows = [{ id: "face-existing" }];
+    const res = await uploadFont({
+      bytes: otfBytes(),
+      familyId: "family-existing",
+      weight: 400,
+      style: "normal",
+    });
+    expect(res.status).toBe(200);
+    // The quota query must be skipped entirely, not merely tolerated —
+    // it's mocked to report "at cap" specifically to prove this isn't
+    // an accidental pass from an unset default.
+    expect(countFacesForProject).not.toHaveBeenCalled();
+  });
+
+  it("still rejects a genuinely new (weight, style) at the face cap", async () => {
+    countFacesForProject.mockResolvedValue(FONT_FACES_MAX_PER_PROJECT);
+    selectFamiliesResult.rows = [{ id: "family-existing" }];
+    selectFacesResult.rows = [];
+    const res = await uploadFont({
+      bytes: otfBytes(),
+      familyId: "family-existing",
+      weight: 900,
+      style: "italic",
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("FONT_QUOTA_EXCEEDED");
+    expect(upsertFace).not.toHaveBeenCalled();
   });
 });
