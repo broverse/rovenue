@@ -105,8 +105,6 @@ nothing. A poster, when given, shows during loading and after a failure. This is
 draws nothing is dropped" rule D1 settled, and inside a `carousel` it means a dead video does not
 leave a phantom dot.
 
----
-
 ### 3.3 `ThemeUrl` is introduced here
 
 `image` today inlines its light/dark URL pair as `{ light: string; dark?: string }` with no name.
