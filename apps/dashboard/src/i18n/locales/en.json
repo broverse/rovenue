@@ -1675,6 +1675,7 @@
         "appStoreNotFound": "No app found for that App Store link.",
         "appStoreLookupFailed": "App Store lookup failed — try again.",
         "appStoreBadUrl": "That doesn't look like an App Store listing URL.",
+        "importFailed": "Import failed — try again.",
         "importNodeCount_one": "{{count}} node in the draft",
         "importNodeCount_other": "{{count}} nodes in the draft",
         "applyAction": "Apply",
@@ -1683,6 +1684,7 @@
         "generateAction": "Generate",
         "generating": "Generating…",
         "generateFailed": "Couldn't generate a paywall — try rephrasing.",
+        "generateQuota": "Rovi's monthly quota is used up — try again next month or raise the limit.",
         "generatedTitle": "Draft ready",
         "presets": {
           "hero": {

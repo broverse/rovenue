@@ -187,6 +187,35 @@ describe("From App Store tab", () => {
     });
     expect(screen.getByText(/no app found/i)).toBeInTheDocument();
   });
+
+  it("renders the bad-URL copy for a 400 VALIDATION_ERROR", async () => {
+    appStorePost.mockResolvedValue(
+      jsonResponse({ error: { code: "VALIDATION_ERROR", message: "" } }, 400),
+    );
+    const { container } = await renderModal();
+    fireEvent.click(screen.getByText("From App Store"));
+    fireEvent.change(container.querySelector('input[type="url"]')!, {
+      target: { value: "https://not-an-app-store-link.example" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Import"));
+    });
+    expect(screen.getByText(/doesn't look like an App Store listing URL/i)).toBeInTheDocument();
+  });
+
+  it("renders the generic import-failed copy for a non-typed (500) failure", async () => {
+    appStorePost.mockResolvedValue(jsonResponse({}, 500));
+    const { container } = await renderModal();
+    fireEvent.click(screen.getByText("From App Store"));
+    fireEvent.change(container.querySelector('input[type="url"]')!, {
+      target: { value: "https://apps.apple.com/tr/app/x/id123" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Import"));
+    });
+    expect(screen.getByText(/import failed — try again/i)).toBeInTheDocument();
+    expect(screen.queryByText(/doesn't look like an App Store listing URL/i)).not.toBeInTheDocument();
+  });
 });
 
 describe("AI assist tab", () => {
@@ -231,5 +260,19 @@ describe("AI assist tab", () => {
       fireEvent.click(screen.getByText("Generate"));
     });
     expect(screen.getByText(/couldn't generate/i)).toBeInTheDocument();
+  });
+
+  it("renders the dedicated quota message for ROVI_QUOTA_EXCEEDED, not the rephrase copy", async () => {
+    generatePost.mockResolvedValue(
+      jsonResponse({ error: { code: "ROVI_QUOTA_EXCEEDED", message: "" } }, 429),
+    );
+    const { container } = await renderModal();
+    fireEvent.click(screen.getByText("AI assist"));
+    fireEvent.change(container.querySelector("textarea")!, { target: { value: "make a paywall" } });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Generate"));
+    });
+    expect(screen.getByText(/monthly quota is used up/i)).toBeInTheDocument();
+    expect(screen.queryByText(/try rephrasing/i)).not.toBeInTheDocument();
   });
 });

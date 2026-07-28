@@ -1269,6 +1269,34 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
 
     expect(JSON.stringify(vm.config)).toBe(beforeJson);
     expect(vm.configBeforeAiApply).toBeNull();
+    // Locale state must be re-derived from the RESTORED (single-locale
+    // "en") config, not left describing the "fr" config the apply had
+    // just replaced it with — otherwise the locale picker hides "en" and
+    // a stale editLocale="fr" could go on writing a table that doesn't
+    // belong to the restored config.
+    expect(vm.locales).toEqual(["en"]);
+    expect(vm.defaultLocale).toBe("en");
+    expect(vm.editLocale).toBe("en");
+  });
+
+  it("applyExternalTreeOp with a setLocalizations op for a brand-new locale updates vm.locales", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    expect(vm.locales).toEqual(["en"]);
+
+    vm.applyExternalTreeOp({
+      kind: "setLocalizations",
+      locale: "fr",
+      entries: { t1_key: "Bonjour" },
+    });
+
+    expect(vm.config.localizations.fr).toEqual({ t1_key: "Bonjour" });
+    expect(vm.locales).toEqual(["en", "fr"]);
+    // Neither the default locale nor the author's current edit locale
+    // change just because a new table was introduced.
+    expect(vm.defaultLocale).toBe("en");
+    expect(vm.editLocale).toBe("en");
   });
 
   it("revertAiChange is a one-shot no-op once there is nothing left to revert", async () => {

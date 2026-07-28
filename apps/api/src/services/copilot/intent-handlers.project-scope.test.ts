@@ -291,4 +291,25 @@ describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no w
     await expect(run("action_paywall_editTree", { paywallId: "pw_1", op })).rejects.toThrow();
     expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
   });
+
+  test("rejects an insert whose subtree carries a javascript: button action.url via GeneratedConfigError, never writes", async () => {
+    drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(selfProjectPaywall());
+    const op: PaywallTreeOp = {
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: {
+        type: "button",
+        id: "hostile_btn",
+        labelKey: "cta_key",
+        style: "primary",
+        action: { kind: "url", url: "javascript:alert(1)" },
+      },
+    };
+
+    await expect(
+      run("action_paywall_editTree", { paywallId: "pw_1", op }),
+    ).rejects.toThrow(GeneratedConfigError);
+    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+  });
 });

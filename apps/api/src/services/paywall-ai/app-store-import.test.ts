@@ -8,6 +8,7 @@ import {
   parseAppStoreUrl,
   type AppStoreListing,
 } from "./app-store-import";
+import { GeneratedConfigError } from "./validate-config";
 
 // =============================================================
 // App Store import (P8 §6.14): URL parsing, iTunes lookup mapping,
@@ -171,5 +172,15 @@ describe("buildImportTree", () => {
     // buildImportTree already calls assertSaveValid internally; reaching here
     // without a throw IS the assertion, but pin the contract explicitly too:
     expect(() => buildImportTree(listing(), "en")).not.toThrow();
+  });
+
+  it("rejects a hostile javascript: iconUrl via assertSaveValid's URL-scheme gate", () => {
+    // Nothing in this module itself validates the listing's URLs — the
+    // iTunes lookup response is untrusted the same way a user-supplied
+    // string would be. The gate lives in assertSaveValid, which
+    // buildImportTree already funnels its result through.
+    expect(() => buildImportTree(listing({ iconUrl: "javascript:alert(1)" }), "en")).toThrow(
+      GeneratedConfigError,
+    );
   });
 });

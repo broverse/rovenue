@@ -92,6 +92,85 @@ describe("assertSaveValid", () => {
     }
   });
 
+  it("throws GeneratedConfigError with INVALID_URL_SCHEME for a javascript: image url.light", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "image", id: "img", url: { light: "javascript:alert(1)" } },
+        ],
+      },
+    });
+    try {
+      assertSaveValid(config);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GeneratedConfigError);
+      expect((err as GeneratedConfigError).issues).toContain("INVALID_URL_SCHEME");
+    }
+  });
+
+  it("passes an image node with valid http(s) url.light/url.dark", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "image",
+            id: "img",
+            url: { light: "https://example.com/a.png", dark: "http://example.com/b.png" },
+          },
+        ],
+      },
+    });
+    expect(() => assertSaveValid(config)).not.toThrow();
+  });
+
+  it("throws GeneratedConfigError with INVALID_URL_SCHEME for a javascript: button action.url", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "button",
+            id: "btn",
+            labelKey: "cta_key",
+            style: "primary",
+            action: { kind: "url", url: "javascript:alert(1)" },
+          },
+        ],
+      },
+    });
+    try {
+      assertSaveValid(config);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GeneratedConfigError);
+      expect((err as GeneratedConfigError).issues).toContain("INVALID_URL_SCHEME");
+    }
+  });
+
+  it("does not check button actions of kind close/restore for a URL scheme", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "button", id: "btn1", labelKey: "cta_key", style: "primary", action: { kind: "close" } },
+          { type: "button", id: "btn2", labelKey: "cta_key", style: "secondary", action: { kind: "restore" } },
+        ],
+      },
+    });
+    expect(() => assertSaveValid(config)).not.toThrow();
+  });
+
   it("throws GeneratedConfigError for a subtree with an unknown node type", () => {
     const config = baseConfig({
       root: {

@@ -588,6 +588,24 @@ export class PaywallBuilderViewModel {
 
   // ----- AI FAB / import / generate apply-revert (spec §2, §3.3) -----
   /**
+   * Re-derives `locales`/`defaultLocale`/`editLocale` from the CURRENT
+   * `config.localizations` — the same derivation `syncFromDetail`/
+   * `applyPreset` use. Must run after any wholesale replacement of
+   * `config` (`applyExternalConfig`, `applyExternalTreeOp` — a
+   * `setLocalizations` op can introduce a brand-new locale table —, and
+   * `revertAiChange`), or these three fields keep describing whichever
+   * config was current before the swap: the locale picker would hide a
+   * locale the restored/new config actually has, and a stale `editLocale`
+   * could go on writing a locale table that no longer belongs to the
+   * loaded config on the next autosave.
+   */
+  private syncLocalesFromConfig() {
+    this.locales = Object.keys(this.config.localizations);
+    this.defaultLocale = this.config.defaultLocale;
+    if (!this.locales.includes(this.editLocale)) this.editLocale = this.defaultLocale;
+  }
+
+  /**
    * Applies a single `PaywallTreeOp` (an approved `action_paywall_editTree`
    * result, forwarded through `RoviProvider.dispatchPaywallPatch`) via the
    * SAME `applyTreeOp` the server dry-runs against — one implementation,
@@ -606,6 +624,10 @@ export class PaywallBuilderViewModel {
     const nextConfig = applyTreeOp(this.config, op);
     this.configBeforeAiApply = this.config;
     this.config = nextConfig;
+    // A `setLocalizations` op can create a locale that didn't exist a
+    // moment ago (`applyTreeOp` creates the table if absent) — re-derive
+    // so the locale picker/editLocale reflect it immediately.
+    this.syncLocalesFromConfig();
     this.selectedNodeId = null;
   }
 
@@ -619,9 +641,7 @@ export class PaywallBuilderViewModel {
   applyExternalConfig(config: BuilderConfig) {
     this.configBeforeAiApply = this.config;
     this.config = config;
-    this.locales = Object.keys(config.localizations);
-    this.defaultLocale = config.defaultLocale;
-    if (!this.locales.includes(this.editLocale)) this.editLocale = this.defaultLocale;
+    this.syncLocalesFromConfig();
     this.selectedNodeId = null;
   }
 
@@ -629,11 +649,15 @@ export class PaywallBuilderViewModel {
    *  `applyExternalConfig`. No-op once there's nothing to revert to
    *  (already reverted, or superseded by a manual edit). One-shot: clears
    *  the snapshot itself, so a second click can't "revert" back onto the
-   *  same already-restored config. */
+   *  same already-restored config. Re-derives locale state from the
+   *  RESTORED config — mirrors `applyExternalConfig`/`applyExternalTreeOp`,
+   *  since a revert is exactly as much a wholesale config swap as the
+   *  apply it undoes. */
   revertAiChange() {
     if (this.configBeforeAiApply === null) return;
     this.config = this.configBeforeAiApply;
     this.configBeforeAiApply = null;
+    this.syncLocalesFromConfig();
     this.selectedNodeId = null;
   }
 

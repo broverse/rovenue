@@ -24,7 +24,7 @@ import type { ToolContext } from "./query-subscribers";
 // rank as DEVELOPER (both 2) — so `requiresRole: "DEVELOPER"` would
 // silently admit GROWTH too, which products:write does not allow. A
 // rank gate cannot express a set that skips a same-rank role, so
-// `requiresRole: "ADMIN"` is the tightest rank that is a superset of
+// `requiresRole: "ADMIN"` is the tightest rank that is a subset of
 // `products:write` (`{OWNER, ADMIN}` ⊆ `{OWNER, ADMIN, DEVELOPER}`) —
 // same precedent as the sibling `action_products_updatePrice`, which
 // shares this exact capability and already uses "ADMIN" for the same

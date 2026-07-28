@@ -195,9 +195,11 @@ export const StartModal = component(({ onClose }: Props) => {
       ? t("paywalls.builder.start.appStoreNotFound", "No app found for that App Store link.")
       : importError === "APP_STORE_LOOKUP_FAILED"
         ? t("paywalls.builder.start.appStoreLookupFailed", "App Store lookup failed — try again.")
-        : importError
+        : importError === "VALIDATION_ERROR"
           ? t("paywalls.builder.start.appStoreBadUrl", "That doesn't look like an App Store listing URL.")
-          : null;
+          : importError
+            ? t("paywalls.builder.start.importFailed", "Import failed — try again.")
+            : null;
 
   const confirmCopy =
     otherLocalesLost > 0
@@ -376,7 +378,12 @@ export const StartModal = component(({ onClose }: Props) => {
                 </button>
                 {generateError && generateError !== "ROVI_NOT_CONFIGURED" && (
                   <span className="text-[12px] text-rv-danger">
-                    {t("paywalls.builder.start.generateFailed", "Couldn't generate a paywall — try rephrasing.")}
+                    {generateError === "ROVI_QUOTA_EXCEEDED"
+                      ? t(
+                          "paywalls.builder.start.generateQuota",
+                          "Rovi's monthly quota is used up — try again next month or raise the limit.",
+                        )
+                      : t("paywalls.builder.start.generateFailed", "Couldn't generate a paywall — try rephrasing.")}
                   </span>
                 )}
               </div>
