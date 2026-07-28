@@ -98,3 +98,55 @@ export const Z_OVERLAY_CHILD_STYLE: CSSProperties = {
   gridColumn: "1 / 1",
   gridRow: "1 / 1",
 };
+
+// =============================================================
+// Carousel (spec §3, wave D1). Paging is CSS scroll-snap, never JS
+// scroll maths — the track opts into native snapping and each page
+// opts into a snap stop; the browser owns the animation, the
+// renderer only owns which page is "current" for the dots.
+// =============================================================
+
+/** Each page occupies the WHOLE track width — one page visible at a time,
+ *  matching `TabView`'s one-page-per-screen on iOS and `ViewPager2` on
+ *  Android (spec §3.1). */
+export const CAROUSEL_PAGE_FLEX_BASIS = "100%";
+/** `x mandatory`: paging always settles on a snap point after a drag or a
+ *  programmatic scroll, on the horizontal axis only. */
+export const CAROUSEL_TRACK_SCROLL_SNAP_TYPE = "x mandatory";
+/** Each page is its own snap stop, centered in the track. */
+export const CAROUSEL_PAGE_SCROLL_SNAP_ALIGN = "center";
+
+/** Filled-circle diameter for a single page dot. */
+export const CAROUSEL_DOT_SIZE_PX = 8;
+/** Gap between adjacent dots in the indicator row. */
+export const CAROUSEL_DOT_GAP_PX = 8;
+/** A perfect circle, independent of `CAROUSEL_DOT_SIZE_PX`. */
+export const CAROUSEL_DOT_BORDER_RADIUS = "50%";
+/** Full opacity for the dot marking the current page. */
+export const CAROUSEL_DOT_ACTIVE_OPACITY = 1;
+/** Dimmed opacity for every other dot — visibly present, clearly not current. */
+export const CAROUSEL_DOT_INACTIVE_OPACITY = 0.3;
+
+/**
+ * A page dot's own style. `color` is passed straight through — `undefined`
+ * when `indicatorColor` is absent, EXACTLY like `renderIcon`'s uncoloured
+ * case: no substituted default is ever computed here, so the dot's fill
+ * (`currentColor`) resolves through ordinary CSS inheritance to whatever
+ * ink is ambient at this point in the tree. That is a deliberate departure
+ * from `Countdown`'s own uncoloured case (which DOES substitute a default)
+ * — spec §3.2 calls out a real regression this rule already caused once
+ * (wave B's Kotlin drew from a stale vendored asset instead of truly
+ * inheriting), so the resolved colour is what a test must check, not the
+ * mere absence of an inline instruction in this function's own branch.
+ */
+export function carouselDotStyle(active: boolean, color: string | undefined): CSSProperties {
+  return {
+    width: `${CAROUSEL_DOT_SIZE_PX}px`,
+    height: `${CAROUSEL_DOT_SIZE_PX}px`,
+    borderRadius: CAROUSEL_DOT_BORDER_RADIUS,
+    flexShrink: 0,
+    backgroundColor: "currentColor",
+    color,
+    opacity: active ? CAROUSEL_DOT_ACTIVE_OPACITY : CAROUSEL_DOT_INACTIVE_OPACITY,
+  };
+}

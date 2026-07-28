@@ -10,9 +10,10 @@ import {
   iconRegistry,
   SOCIAL_PROOF_MAX_RATING,
 } from "@rovenue/shared/paywall";
-import type { BuilderConfig, OverrideCondition, PackageView, PaywallNode } from "@rovenue/shared/paywall";
+import type { BuilderConfig, CarouselNode, OverrideCondition, PackageView, PaywallNode } from "@rovenue/shared/paywall";
 import { resolvePersistedFirstShownAt } from "./first-shown";
 import { PaywallRenderer } from "./renderer";
+import { CAROUSEL_DOT_ACTIVE_OPACITY, CAROUSEL_DOT_INACTIVE_OPACITY } from "./styles";
 import type { RendererOffering } from "./types";
 
 const offering: RendererOffering = {
@@ -1950,6 +1951,231 @@ describe("stickyFooter and countdown nodes", () => {
       expect(countdownText(second.container)).toContain("03:00");
       localStorage.clear();
     });
+  });
+});
+
+describe("carousel node", () => {
+  function textNode(key: string): PaywallNode {
+    return { type: "text", id: key, key, role: "body" };
+  }
+
+  const pageA = textNode("pageA");
+  const pageB = textNode("pageB");
+  const pageC = textNode("pageC");
+
+  /** Every text key referenced anywhere under `node` (pages, fallback),
+   *  mapped to itself — this is what makes `textNode("nope")` actually
+   *  render the literal string "nope" rather than an empty/missing
+   *  localization. */
+  function collectTextKeys(node: PaywallNode | undefined, into: Record<string, string>): void {
+    if (!node) return;
+    if (node.type === "text") into[node.key] = node.key;
+    if ("children" in node && Array.isArray(node.children)) {
+      for (const child of node.children) collectTextKeys(child, into);
+    }
+    collectTextKeys(node.fallback, into);
+  }
+
+  type CarouselOptions = Partial<Omit<CarouselNode, "type" | "id">>;
+
+  /**
+   * Builds a single-carousel paywall from either `(...pages)` or
+   * `(...pages, options)` — the last arg is treated as `options` when it
+   * has no `type` field, since every real page (a `PaywallNode`) has one.
+   * `options.children`, when given, REPLACES the page list entirely (this
+   * is how the "empty carousel" case is expressed: `carouselWith({
+   * children: [], fallback: textNode("nope") })`).
+   */
+  function carouselWith(...args: Array<PaywallNode | CarouselOptions>): BuilderConfig {
+    const rest = [...args];
+    const last = rest[rest.length - 1];
+    const hasOptions = rest.length > 0 && typeof last === "object" && last !== null && !("type" in last);
+    const options = (hasOptions ? rest.pop() : {}) as CarouselOptions;
+    const pages = rest as PaywallNode[];
+    const node: CarouselNode = {
+      type: "carousel",
+      id: "carousel-1",
+      children: pages,
+      ...options,
+    };
+    const localizations: Record<string, string> = {};
+    for (const page of node.children) collectTextKeys(page, localizations);
+    collectTextKeys(node.fallback, localizations);
+    return {
+      formatVersion: 2,
+      defaultLocale: "en",
+      localizations: { en: localizations },
+      background: { light: "#ffffff", dark: "#000000" },
+      root: { type: "stack", id: "root", axis: "v", children: [node] },
+    };
+  }
+
+  function renderPaywall(config: BuilderConfig) {
+    return render(
+      <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={vi.fn()} />,
+    );
+  }
+
+  function trackScrollLeft(container: HTMLElement): number {
+    return (container.querySelector("[data-rov-carousel-track]") as HTMLElement).scrollLeft;
+  }
+
+  function dotOpacities(container: HTMLElement): string[] {
+    return Array.from(container.querySelectorAll("[data-rov-carousel-dot]")).map(
+      (dot) => (dot as HTMLElement).style.opacity,
+    );
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders each child once", () => {
+    const { container } = renderPaywall(carouselWith(pageA, pageB, pageC));
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(3);
+  });
+
+  it("draws one dot per page when showsIndicator is absent", () => {
+    const { container } = renderPaywall(carouselWith(pageA, pageB));
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(2);
+  });
+
+  it("draws no dots when showsIndicator is false", () => {
+    const { container } = renderPaywall(carouselWith(pageA, pageB, { showsIndicator: false }));
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(0);
+  });
+
+  it("declares mandatory x snapping on the track", () => {
+    const { container } = renderPaywall(carouselWith(pageA, pageB));
+    const track = container.querySelector("[data-rov-carousel-track]") as HTMLElement;
+    expect(track.style.scrollSnapType).toBe("x mandatory");
+  });
+
+  it("renders fallback for an empty carousel", () => {
+    const { container } = renderPaywall(carouselWith({ children: [], fallback: textNode("nope") }));
+    expect(container.textContent).toContain("nope");
+  });
+
+  it("does not crash on a single-page carousel and still draws its one dot", () => {
+    const { container } = renderPaywall(carouselWith(pageA));
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(1);
+  });
+
+  it("stops the auto-advance interval when the document hides", () => {
+    vi.useFakeTimers();
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    try {
+      const { container } = renderPaywall(carouselWith(pageA, pageB, { autoAdvanceSeconds: 3 }));
+      fireEvent(document, new Event("visibilitychange"));
+      const before = trackScrollLeft(container);
+      vi.advanceTimersByTime(10_000);
+      expect(trackScrollLeft(container)).toBe(before);
+    } finally {
+      delete (document as unknown as Record<string, unknown>).visibilityState;
+      if (original) Object.defineProperty(Document.prototype, "visibilityState", original);
+    }
+  });
+
+  it("parks the tick while off-screen and resumes when it returns, per the countdown lifecycle", () => {
+    const observers: StubIntersectionObserver[] = [];
+    class StubIntersectionObserver {
+      #callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.#callback = callback;
+        observers.push(this);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      emit(isIntersecting: boolean) {
+        this.#callback([{ isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", StubIntersectionObserver);
+    vi.useFakeTimers();
+    try {
+      const { container } = renderPaywall(carouselWith(pageA, pageB, pageC, { autoAdvanceSeconds: 2 }));
+      const observer = observers[0]!;
+
+      act(() => observer.emit(false));
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(dotOpacities(container)[0]).toBe(String(CAROUSEL_DOT_ACTIVE_OPACITY));
+
+      act(() => observer.emit(true));
+      act(() => vi.advanceTimersByTime(2_000));
+      expect(dotOpacities(container)[1]).toBe(String(CAROUSEL_DOT_ACTIVE_OPACITY));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("wraps to the first page when loop is true", () => {
+    vi.useFakeTimers();
+    const { container } = renderPaywall(carouselWith(pageA, pageB, pageC, { autoAdvanceSeconds: 2, loop: true }));
+    act(() => vi.advanceTimersByTime(2_000)); // -> page 1
+    act(() => vi.advanceTimersByTime(2_000)); // -> page 2 (last)
+    act(() => vi.advanceTimersByTime(2_000)); // -> wraps to page 0
+    expect(dotOpacities(container)).toEqual([
+      String(CAROUSEL_DOT_ACTIVE_OPACITY),
+      String(CAROUSEL_DOT_INACTIVE_OPACITY),
+      String(CAROUSEL_DOT_INACTIVE_OPACITY),
+    ]);
+  });
+
+  it("stops permanently on the last page when loop is false, without rewinding", () => {
+    vi.useFakeTimers();
+    const { container } = renderPaywall(carouselWith(pageA, pageB, pageC, { autoAdvanceSeconds: 2, loop: false }));
+    act(() => vi.advanceTimersByTime(2_000)); // -> page 1
+    act(() => vi.advanceTimersByTime(2_000)); // -> page 2 (last)
+    act(() => vi.advanceTimersByTime(10_000)); // would wrap or crash if mishandled
+    expect(dotOpacities(container)).toEqual([
+      String(CAROUSEL_DOT_INACTIVE_OPACITY),
+      String(CAROUSEL_DOT_INACTIVE_OPACITY),
+      String(CAROUSEL_DOT_ACTIVE_OPACITY),
+    ]);
+  });
+
+  it("restarts the auto-advance wait when the user scrolls by hand, instead of racing it", () => {
+    vi.useFakeTimers();
+    const { container } = renderPaywall(carouselWith(pageA, pageB, pageC, { autoAdvanceSeconds: 2 }));
+    const track = container.querySelector("[data-rov-carousel-track]") as HTMLElement;
+
+    // Just short of the first scheduled tick, the user swipes to page 1 by hand.
+    act(() => vi.advanceTimersByTime(1_900));
+    act(() => fireEvent.scroll(track, { target: { scrollLeft: 1 } }));
+    expect(dotOpacities(container)[1]).toBe(String(CAROUSEL_DOT_ACTIVE_OPACITY));
+
+    // The OLD schedule would have fired ~100ms after the swipe. It must not:
+    // the wait restarted, so page 1 is still current a moment later.
+    act(() => vi.advanceTimersByTime(200));
+    expect(dotOpacities(container)[1]).toBe(String(CAROUSEL_DOT_ACTIVE_OPACITY));
+
+    // A full interval after the swipe, the restarted timer fires.
+    act(() => vi.advanceTimersByTime(1_800));
+    expect(dotOpacities(container)[2]).toBe(String(CAROUSEL_DOT_ACTIVE_OPACITY));
+  });
+
+  it("resolves an explicit indicatorColor onto every dot", () => {
+    const { container } = renderPaywall(
+      carouselWith(pageA, pageB, { indicatorColor: { light: "#ff0000", dark: "#00ff00" } }),
+    );
+    const dots = container.querySelectorAll("[data-rov-carousel-dot]");
+    for (const dot of Array.from(dots)) {
+      expect((dot as HTMLElement).style.color).toBe("rgb(255, 0, 0)");
+    }
+  });
+
+  it("emits no colour override on a dot when indicatorColor is absent", () => {
+    // The resolved-value caution (spec §3.2): this only proves no INSTRUCTION
+    // was emitted for this element, which is as far as jsdom (no real CSS
+    // cascade/paint) can go — see the report for what remains unverified.
+    const { container } = renderPaywall(carouselWith(pageA, pageB));
+    const dots = container.querySelectorAll("[data-rov-carousel-dot]");
+    for (const dot of Array.from(dots)) {
+      expect((dot as HTMLElement).style.color).toBe("");
+    }
   });
 });
 

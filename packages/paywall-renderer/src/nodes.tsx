@@ -11,6 +11,8 @@ import {
   resolveCtaLabelKey,
   resolveVariables,
   ICON_DEFAULT_SIZE,
+  CAROUSEL_DEFAULT_LOOP,
+  CAROUSEL_DEFAULT_SHOWS_INDICATOR,
   COUNTDOWN_DEFAULT_ON_EXPIRY,
   COUNTDOWN_TICK_MS,
   DIVIDER_DEFAULT_COLOR,
@@ -26,6 +28,7 @@ import {
   TIMELINE_ROW_DEFAULT_ICON,
   type BuilderConfig,
   type ButtonNode,
+  type CarouselNode,
   type CountdownNode,
   type DividerNode,
   type FeatureListNode,
@@ -45,6 +48,11 @@ import {
 } from "@rovenue/shared/paywall";
 import type { RendererOffering } from "./types";
 import {
+  CAROUSEL_DOT_GAP_PX,
+  CAROUSEL_PAGE_FLEX_BASIS,
+  CAROUSEL_PAGE_SCROLL_SNAP_ALIGN,
+  CAROUSEL_TRACK_SCROLL_SNAP_TYPE,
+  carouselDotStyle,
   resolveTextColor,
   resolveThemeColor,
   resolveThemeUrl,
@@ -834,6 +842,172 @@ function Countdown({ node, ctx }: { node: CountdownNode; ctx: RenderCtx }): Reac
   );
 }
 
+/**
+ * The page nearest the track's current scroll position, clamped to
+ * `[0, pageCount - 1]`. Used both to highlight the active dot and, on
+ * auto-advance, to know which page comes next — the scroll position (or,
+ * absent real layout, the last position this component itself set) is the
+ * one source of truth; nothing here keeps a separate running count of
+ * elapsed ticks. `clientWidth` is 0 in jsdom (no layout engine), so the `|| 1`
+ * fallback exists for tests, not production — in a real browser `clientWidth`
+ * is always the track's real rendered width.
+ */
+function pageFromScrollLeft(track: HTMLElement, pageCount: number): number {
+  const pageWidth = track.clientWidth || 1;
+  const raw = Math.round(track.scrollLeft / pageWidth);
+  return Math.min(Math.max(raw, 0), Math.max(pageCount - 1, 0));
+}
+
+/**
+ * A carousel's pages, paged with CSS scroll-snap (spec §3.1) — the track
+ * opts into `scroll-snap-type: x mandatory`, each page into
+ * `scroll-snap-align: center`, and the BROWSER owns the animation; this
+ * component never computes a scroll offset by hand except to programmatic-
+ * scroll on auto-advance, and to read back "which page is current" for the
+ * dots from `track.scrollLeft`.
+ *
+ * Auto-advance is wired through the exact same stop/resume lifecycle as
+ * `Countdown` (spec §5, reused rather than reinvented): a `visibilitychange`
+ * listener plus an `IntersectionObserver`, both halves. `ticking` folds in
+ * `stoppedAtEnd`, which is what makes a `loop: false` carousel stop
+ * PERMANENTLY on the last page rather than idling and re-checking forever —
+ * once true it never flips back. `loop: true` instead wraps to page 0 and
+ * keeps ticking.
+ *
+ * The effect depends on `currentPage`, which is what implements "a user
+ * swipe restarts the interval rather than racing it" for free: `onScroll`
+ * (fired by a real drag, or by this component's own programmatic advance)
+ * updates `currentPage`, tearing the running `setInterval` down and standing
+ * up a fresh one — so the NEXT auto-advance is always a full interval away
+ * from whichever scroll — human or automatic — happened most recently, never
+ * from some earlier schedule the swipe didn't know about. Rule 4 (spec §5):
+ * the tick is a repaint trigger that reads `currentPage` fresh from state
+ * and computes exactly one step from it, never a count of its own that could
+ * drift or double-fire.
+ */
+function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactElement | null {
+  const pageCount = node.children.length;
+  const showsIndicator = node.showsIndicator ?? CAROUSEL_DEFAULT_SHOWS_INDICATOR;
+  const loop = node.loop ?? CAROUSEL_DEFAULT_LOOP;
+  // Absent `autoAdvanceSeconds` means OFF, deliberately not a default
+  // interval — a paywall that starts moving on its own without the author
+  // asking is a surprise (spec §4).
+  const autoAdvanceMs = node.autoAdvanceSeconds !== undefined ? node.autoAdvanceSeconds * COUNTDOWN_MS_PER_SECOND : null;
+
+  const [currentPage, setCurrentPage] = useState(0);
+  const [onScreen, setOnScreen] = useState(true);
+  const [documentVisible, setDocumentVisible] = useState(isDocumentVisible);
+  const [stoppedAtEnd, setStoppedAtEnd] = useState(false);
+  // Callback refs, not useRef: the IntersectionObserver effect must re-run
+  // when the wrapper actually appears, and the scroll effect needs the real
+  // track element to set `scrollLeft` on — a ref object's mutation does not
+  // re-run either effect (same reasoning as `Countdown`'s `element`).
+  const [track, setTrack] = useState<HTMLDivElement | null>(null);
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+
+  const ticking = autoAdvanceMs !== null && !stoppedAtEnd && onScreen && documentVisible && pageCount > 1;
+
+  useEffect(() => {
+    if (!ticking || track === null) return;
+    const id = setInterval(() => {
+      const next = currentPage + 1;
+      if (next < pageCount) {
+        track.scrollLeft = next * (track.clientWidth || 1);
+        setCurrentPage(next);
+      } else if (loop) {
+        track.scrollLeft = 0;
+        setCurrentPage(0);
+      } else {
+        // Reaching the end with loop off: stop for good. Not a rewind, not
+        // a continued re-check against a clamped index — `stoppedAtEnd`
+        // flips `ticking` false and stays false.
+        setStoppedAtEnd(true);
+      }
+    }, autoAdvanceMs!);
+    return () => clearInterval(id);
+  }, [ticking, autoAdvanceMs, loop, pageCount, track, currentPage]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibilityChange = () => setDocumentVisible(isDocumentVisible());
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  // A visible tab is not the same as a visible carousel: the node can be
+  // scrolled out of the scroller, or sit on a funnel step behind an overlay.
+  // Absent `IntersectionObserver` (jsdom, very old engines) it stays
+  // on-screen — fail open, never a stalled carousel.
+  useEffect(() => {
+    if (element === null || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry) setOnScreen(entry.isIntersecting);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+
+  // A carousel with no pages at all cannot render — `CAROUSEL_EMPTY` flags
+  // this at publish time, but the renderer's own contract is the same as
+  // every other node type: fail to `fallback`, never throw. Placed after
+  // every hook above so the hook call order never depends on `pageCount`.
+  if (pageCount === 0) return renderFallbackOrNull(node, ctx);
+
+  const handleScroll = () => {
+    if (track === null) return;
+    setCurrentPage(pageFromScrollLeft(track, pageCount));
+  };
+
+  // Never a substituted value here — see `carouselDotStyle`'s own doc
+  // comment for why this departs from `Countdown`'s uncoloured case.
+  const indicatorColor = resolveThemeColor(node.indicatorColor, ctx.colorScheme);
+
+  return (
+    <div ref={setElement} data-rov-node={node.id} style={{ display: "flex", flexDirection: "column" }}>
+      <div
+        ref={setTrack}
+        data-rov-carousel-track=""
+        onScroll={handleScroll}
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          overflowX: "auto",
+          scrollSnapType: CAROUSEL_TRACK_SCROLL_SNAP_TYPE,
+        }}
+      >
+        {node.children.map((child, index) => (
+          <div
+            key={index}
+            data-rov-carousel-page=""
+            style={{ flex: `0 0 ${CAROUSEL_PAGE_FLEX_BASIS}`, scrollSnapAlign: CAROUSEL_PAGE_SCROLL_SNAP_ALIGN }}
+          >
+            {renderNode(child, ctx)}
+          </div>
+        ))}
+      </div>
+      {showsIndicator ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            justifyContent: "center",
+            gap: `${CAROUSEL_DOT_GAP_PX}px`,
+          }}
+        >
+          {node.children.map((_, index) => (
+            <span
+              key={index}
+              data-rov-carousel-dot=""
+              style={carouselDotStyle(index === currentPage, indicatorColor)}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Recursive dispatcher: known node type -> its component; unknown type or a thrown error -> `fallback` if present, else nothing. Never throws.
  *
  * Every node passes through `applyOverrides` here, BEFORE any style/text
@@ -888,6 +1062,8 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         return renderStickyFooter(resolved, ctx);
       case "countdown":
         return <Countdown node={resolved} ctx={ctx} />;
+      case "carousel":
+        return <Carousel node={resolved} ctx={ctx} />;
       default:
         return renderFallbackOrNull(resolved, ctx);
     }
