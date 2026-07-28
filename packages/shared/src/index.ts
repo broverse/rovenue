@@ -28,6 +28,16 @@ export const ERROR_CODE = {
   // preview tokens must be indistinguishable — this single code covers
   // all of them, always behind a generic 404 message (no oracle).
   PREVIEW_SESSION_INVALID: "PREVIEW_SESSION_INVALID",
+  // Paywall fonts wave E1 (upload, design spec §3): magic-byte format
+  // rejection, the hard per-face size cap, and the per-project face-count
+  // cap are three distinct, machine-readable rejections a dashboard client
+  // needs to tell apart. FONT_FAMILY_NOT_FOUND covers a client-supplied
+  // familyId that does not resolve to a live family owned by the project
+  // (missing, foreign, or soft-deleted) — see Task 1 review finding #2.
+  FONT_FORMAT_UNSUPPORTED: "FONT_FORMAT_UNSUPPORTED",
+  FONT_FILE_TOO_LARGE: "FONT_FILE_TOO_LARGE",
+  FONT_QUOTA_EXCEEDED: "FONT_QUOTA_EXCEEDED",
+  FONT_FAMILY_NOT_FOUND: "FONT_FAMILY_NOT_FOUND",
 } as const;
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];
 
