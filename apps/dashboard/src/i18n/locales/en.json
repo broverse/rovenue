@@ -1728,7 +1728,8 @@
         "tabReactNative": "React Native",
         "reactNativeComingSoon": "React Native preview support is coming soon.",
         "endSession": "End session",
-        "activeHint": "Edits made while this session is open save within a couple of seconds so the device stays in sync."
+        "activeHint": "Edits made while this session is active save within a couple of seconds so the device stays in sync.",
+        "dismissHint": "Closing this window keeps the session running in the background."
       }
     }
   },

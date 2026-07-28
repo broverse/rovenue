@@ -28,6 +28,7 @@ import {
 import {
   PaywallBuilderApi,
   type PaywallBuilderDetailDto,
+  type PreviewSessionDto,
 } from "../../../lib/services/paywall-builder-api";
 import { ApiError } from "../../../lib/api";
 import * as treeOps from "../tree-ops";
@@ -166,15 +167,59 @@ export class PaywallBuilderViewModel {
   }
 
   /**
-   * True while a P9 on-device preview session (DevicePreviewModal) is open.
-   * Drives `previewFastFlush` below — a physical device is polling the
-   * persisted draft, so edits made while a session is active get flushed
-   * much sooner than the ordinary 30s autosave throttle.
+   * True while a P9 on-device preview session is LIVE — i.e. a session has
+   * been minted and not yet explicitly ended, regardless of whether
+   * `DevicePreviewModal` itself is currently mounted. Drives
+   * `previewFastFlush` below — a physical device is polling the persisted
+   * draft, so edits made while a session is active get flushed much sooner
+   * than the ordinary 30s autosave throttle.
+   *
+   * Deliberately NOT tied to the modal's mount lifecycle: dismissing the
+   * modal (backdrop click / header X) must leave a live session running —
+   * only an explicit "End session" click clears this (see `previewSession`
+   * below, and `DevicePreviewModal.handleEndSession`). Tying this to
+   * mount/unmount would make the hot-reload loop this flag exists for
+   * unreachable, since the modal is a full-screen blocking overlay and the
+   * author cannot edit the canvas while it is open.
    */
   @state previewSessionActive = false;
 
   setPreviewSessionActive(v: boolean) {
     this.previewSessionActive = v;
+  }
+
+  /**
+   * The currently-live P9 preview session (mint response), hoisted here —
+   * rather than kept as local state inside `DevicePreviewModal` — so it
+   * survives the modal unmounting on dismiss. Reopening the modal while
+   * this still names an unexpired session must reuse it rather than mint a
+   * second token (a device already polling the first token would otherwise
+   * be silently orphaned). Cleared only by `setPreviewSessionActive(false)`'s
+   * sibling call in `handleEndSession` — never by dismiss.
+   */
+  @state previewSession: PreviewSessionDto | null = null;
+
+  setPreviewSession(session: PreviewSessionDto | null) {
+    this.previewSession = session;
+  }
+
+  /**
+   * The live session for reopening the modal, or `null` if there is none or
+   * the one on file has since expired (server TTL is authoritative for
+   * redemption; this is just the client's own "should I mint again?" check,
+   * using the same wall clock the countdown UI already trusts).
+   *
+   * A plain method, deliberately NOT `@derived`: a derived getter memoizes
+   * on its TRACKED reads, and `Date.now()` isn't one — evaluating this once
+   * and reusing that answer later would go on reporting "still live" long
+   * after the session actually expired. Calling it fresh each time (from
+   * `DevicePreviewModal`'s mount effect) is what makes the expiry check
+   * correct.
+   */
+  livePreviewSession(): PreviewSessionDto | null {
+    const s = this.previewSession;
+    if (!s) return null;
+    return new Date(s.expiresAt).getTime() > Date.now() ? s : null;
   }
 
   // Canvas preview: which `introEligible` override branch the whole

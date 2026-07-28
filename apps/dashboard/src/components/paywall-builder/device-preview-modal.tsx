@@ -54,31 +54,49 @@ function formatCountdown(remainingMs: number): string {
  * P9 on-device paywall preview (§6.16). Mints a short-lived preview session
  * on open (draft access for a physical device, via Task 2's mint endpoint),
  * renders it as a scannable QR + copyable token/URL, and lets the author
- * end the session early. While this modal is open the VM's
+ * end the session early. While a session is live the VM's
  * `previewSessionActive` flag is true, which makes edits flush to the
  * server on a short debounce instead of the ordinary 30s autosave throttle
  * (see `PaywallBuilderViewModel.previewFastFlush`) — the whole point of a
  * live device preview is that edits show up on it quickly.
+ *
+ * Dismissing this modal (backdrop click / header X) does NOT end the
+ * session — it just closes the overlay so the author can go on editing
+ * while the device keeps polling. Only the explicit "End session" button
+ * revokes it. The live session is hoisted onto the VM
+ * (`previewSession`/`previewSessionActive`) rather than kept as component
+ * state, precisely so it survives this unmount: reopening the modal while
+ * a live, unexpired session still exists reuses it (no second mint, same
+ * QR/token) via `vm.livePreviewSession()`.
  */
 export const DevicePreviewModal = component(({ onClose }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const api = useService(PaywallBuilderApi);
   const { t } = useTranslation();
 
-  const [session, setSession] = useState<PreviewSessionDto | null>(null);
+  const [session, setSession] = useState<PreviewSessionDto | null>(() => vm.livePreviewSession());
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [mintError, setMintError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [activeTab, setActiveTab] = useState<SnippetTab>("swift");
 
-  // Mint exactly once, on open.
+  // Reuse a still-live session (minted before a previous dismiss of this
+  // same modal) rather than minting a second one; mint only when there is
+  // none, or the one on file has expired since.
   useEffect(() => {
+    const live = vm.livePreviewSession();
+    if (live) {
+      setSession(live);
+      vm.setPreviewSessionActive(true);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
         const created = await api.createPreviewSession(vm.projectId, vm.paywallId);
         if (cancelled) return;
         setSession(created);
+        vm.setPreviewSession(created);
         vm.setPreviewSessionActive(true);
       } catch (err) {
         if (cancelled) return;
@@ -125,15 +143,27 @@ export const DevicePreviewModal = component(({ onClose }: Props) => {
   const remainingMs = session ? new Date(session.expiresAt).getTime() - now : 0;
   const expired = session != null && remainingMs <= 0;
 
+  /** Closes the overlay WITHOUT revoking — the session (and
+   * `previewSessionActive`) stays live so edits keep fast-flushing while the
+   * device keeps polling. Reopening the modal picks the same session back
+   * up via `vm.livePreviewSession()`. */
+  function handleDismiss() {
+    onClose();
+  }
+
+  /** Explicitly ends the session: revokes it server-side, clears it off the
+   * VM, and drops `previewSessionActive` back to false so edits return to
+   * the ordinary 30s autosave throttle. The only path that revokes. */
   async function handleEndSession() {
     if (session) {
       try {
         await api.revokePreviewSession(vm.projectId, vm.paywallId, session.sessionId);
       } catch {
         // Best-effort: the session will expire on its own regardless, and
-        // the author closing the modal is what matters locally.
+        // the author ending it is what matters locally.
       }
     }
+    vm.setPreviewSession(null);
     vm.setPreviewSessionActive(false);
     onClose();
   }
@@ -141,7 +171,7 @@ export const DevicePreviewModal = component(({ onClose }: Props) => {
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6"
-      onClick={() => void handleEndSession()}
+      onClick={handleDismiss}
     >
       <div
         className="flex max-h-[88vh] w-[min(560px,94vw)] flex-col rounded-xl border border-rv-divider-strong bg-rv-c1 shadow-[0_30px_80px_rgba(0,0,0,0.6)]"
@@ -162,7 +192,7 @@ export const DevicePreviewModal = component(({ onClose }: Props) => {
           </div>
           <button
             type="button"
-            onClick={() => void handleEndSession()}
+            onClick={handleDismiss}
             title={t("paywalls.builder.devicePreview.close", "Close")}
             className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-rv-mute-600 transition hover:bg-rv-c2 hover:text-foreground"
           >
@@ -285,18 +315,24 @@ export const DevicePreviewModal = component(({ onClose }: Props) => {
               <p className="text-[11px] text-rv-mute-500">
                 {t(
                   "paywalls.builder.devicePreview.activeHint",
-                  "Edits made while this session is open save within a couple of seconds so the device stays in sync.",
+                  "Edits made while this session is active save within a couple of seconds so the device stays in sync.",
                 )}
               </p>
             </div>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-rv-divider px-5 py-3">
+        <div className="flex items-center justify-between gap-3 border-t border-rv-divider px-5 py-3">
+          <p className="text-[11px] text-rv-mute-500">
+            {t(
+              "paywalls.builder.devicePreview.dismissHint",
+              "Closing this window keeps the session running in the background.",
+            )}
+          </p>
           <button
             type="button"
             onClick={() => void handleEndSession()}
-            className="inline-flex h-8 cursor-pointer items-center rounded-md border border-rv-divider bg-rv-c2 px-3 text-[12px] text-foreground transition hover:bg-rv-c3"
+            className="inline-flex h-8 flex-shrink-0 cursor-pointer items-center rounded-md border border-rv-divider bg-rv-c2 px-3 text-[12px] text-foreground transition hover:bg-rv-c3"
           >
             {t("paywalls.builder.devicePreview.endSession", "End session")}
           </button>
