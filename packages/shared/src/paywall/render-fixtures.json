@@ -1877,7 +1877,8 @@
     "STICKY_FOOTER_DEFAULT_BACKGROUND": {
       "light": "#FFFFFF",
       "dark": "#111827"
-    }
+    },
+    "STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT": 96
   },
   "trialLabel": {
     "_comment": "expectedKey = which loc key the CTA renders. selectedHasIntroPeriod mirrors PackageView.introPeriod non-empty.",

@@ -117,8 +117,27 @@ describe("render-fixtures contract", () => {
     });
   });
 
-  describe("resolveText vectors (against accept[0])", () => {
-    const config = fixture.accept[0]!.config as BuilderConfig;
+  // Selected BY NAME, never by index. The native decoders already do this
+  // (`entries.first { name.hasPrefix(...) }` in Swift, `entryWithNamePrefix`
+  // in Kotlin) after an index-based access silently repointed two Kotlin
+  // tests at a different config when the fixture was widened. New entries
+  // have only ever been appended so far, but a future PREPEND would repoint
+  // this vector table exactly as silently — and every `resolveText`
+  // expectation below is written against the multi-locale config's
+  // `localizations`, not against whichever config happens to be first.
+  const RESOLVE_TEXT_CONFIG_NAME_PREFIX = "canonical every-node";
+
+  describe(`resolveText vectors (against "${RESOLVE_TEXT_CONFIG_NAME_PREFIX}…")`, () => {
+    const entry = fixture.accept.find((c) => c.name.startsWith(RESOLVE_TEXT_CONFIG_NAME_PREFIX));
+    // Renaming or dropping that entry fails the file loudly at collection
+    // time, which is the point: the alternative is vectors quietly running
+    // against a config that never carried the keys they assert.
+    if (!entry) {
+      throw new Error(
+        `render-fixtures.json has no accept entry named "${RESOLVE_TEXT_CONFIG_NAME_PREFIX}…"`,
+      );
+    }
+    const config = entry.config as BuilderConfig;
     for (const v of fixture.resolveText) {
       it(`${v.locale}/${v.key} → ${JSON.stringify(v.expected)}`, () => {
         expect(resolveText(config, v.locale, v.key)).toBe(v.expected);
@@ -208,10 +227,11 @@ describe("render-fixtures contract", () => {
     });
   });
 
-  // The eight (ten-value) cross-platform defaults Swift/Kotlin hand-mirror.
-  // This only pins the TS side carries the right values through to the
-  // fixture — see BuilderConfigModelTests.swift / NodeViewFactoryTest.kt for
-  // the native mutation-checked comparisons against THIS object by value.
+  // The cross-platform defaults Swift/Kotlin hand-mirror (no count stated
+  // here on purpose — the list grows, and a stale number reads as a missing
+  // entry). This only pins that the TS side carries the right values through
+  // to the fixture — see BuilderConfigModelTests.swift / NodeViewFactoryTest.kt
+  // for the native mutation-checked comparisons against THIS object by value.
   describe("defaults", () => {
     it("matches schema.ts's exported constants", async () => {
       const schema = await import("./schema");
@@ -230,6 +250,7 @@ describe("render-fixtures contract", () => {
         COUNTDOWN_TICK_MS: schema.COUNTDOWN_TICK_MS,
         COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX: schema.COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX,
         STICKY_FOOTER_DEFAULT_BACKGROUND: schema.STICKY_FOOTER_DEFAULT_BACKGROUND,
+        STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT: schema.STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT,
       });
     });
   });

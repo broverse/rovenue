@@ -205,6 +205,27 @@ export const COUNTDOWN_TICK_MS = 1000;
  */
 export const COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX = "rovenue.paywall.countdown.firstShownAt.";
 export const STICKY_FOOTER_DEFAULT_BACKGROUND = { light: "#FFFFFF", dark: "#111827" } as const;
+/**
+ * Bottom clearance the scrolled content reserves for a pinned sticky footer
+ * BEFORE the footer's real height has been measured — a pre-measurement
+ * placeholder, never the final value: every renderer measures the footer and
+ * replaces this the moment it can (web `ResizeObserver`, SwiftUI
+ * `GeometryReader` overlay preference, Android the footer's laid-out height).
+ *
+ * A static guess is wrong the instant the footer is taller than it (a CTA
+ * plus fine print routinely is), leaving the last scrolled item unreachable —
+ * the same class of bug as no scrolling at all. So it exists only to keep
+ * the very first frame from being obviously wrong, and the three platforms
+ * agree on it purely so that first frame looks identical.
+ *
+ * Cross-platform by value, not by import, exactly like
+ * COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX: `px` on the web (imported from here by
+ * `@rovenue/paywall-renderer`), `pt` in `RovenuePaywallView.swift`, `dp` in
+ * `NodeViewFactory.kt`. Both native copies are hand-mirrored literals — this
+ * constant is mirrored into `render-fixtures.json`'s `defaults` so the
+ * native by-value sync tests can catch drift.
+ */
+export const STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT = 96;
 
 export type FeatureRow = {
   labelKey: string;
