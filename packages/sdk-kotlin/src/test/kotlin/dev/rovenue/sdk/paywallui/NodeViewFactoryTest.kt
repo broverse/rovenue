@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -24,6 +25,9 @@ import io.mockk.mockkStatic
 import io.mockk.unmockkConstructor
 import io.mockk.unmockkStatic
 import io.mockk.verify
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -697,6 +701,134 @@ class NodeViewFactoryTest {
         assertEquals(5, nextCarouselPage(current = 5, pageCount = -1, loop = false))
     }
 
+    // ---- carousel page layout params (C1) -------------------------------
+    //
+    // ViewPager2's enforceChildFillListener throws
+    // IllegalStateException("Pages must fill the whole ViewPager2 (use
+    // match_parent)") from onChildViewAttachedToWindow unless BOTH
+    // dimensions of an attaching page are MATCH_PARENT. That listener is
+    // library code we cannot run here (no Robolectric, and this module
+    // compiles against the stub android.jar), so instead of attaching a
+    // real ViewPager2 these pin the exact integers that listener compares
+    // against. The raw -1 is deliberate: it is what the library checks, so
+    // this fails if the value is ever swapped for WRAP_CONTENT (-2) again.
+
+    @Test
+    fun `a carousel page fills the pager in BOTH dimensions -- ViewPager2 throws otherwise`() {
+        val size = carouselPageLayoutSize()
+        assertEquals(MATCH_PARENT_LAYOUT_DIMENSION, size.width, "page width must be MATCH_PARENT")
+        assertEquals(MATCH_PARENT_LAYOUT_DIMENSION, size.height, "page height must be MATCH_PARENT")
+    }
+
+    @Test
+    fun `a carousel page is never WRAP_CONTENT in either dimension`() {
+        val size = carouselPageLayoutSize()
+        assertTrue(size.width != WRAP_CONTENT_LAYOUT_DIMENSION, "WRAP_CONTENT width crashes ViewPager2")
+        assertTrue(size.height != WRAP_CONTENT_LAYOUT_DIMENSION, "WRAP_CONTENT height crashes ViewPager2")
+    }
+
+    // ---- carousel height model (C1, second half) ------------------------
+
+    @Test
+    fun `the pager takes the height of its TALLEST page, not the first or the sum`() {
+        assertEquals(300, tallestPageHeight(listOf(100, 300, 200)))
+        assertEquals(300, tallestPageHeight(listOf(300, 100, 200)))
+    }
+
+    @Test
+    fun `an unmeasured or empty page set reports the unmeasured height, never a negative`() {
+        assertEquals(CAROUSEL_UNMEASURED_HEIGHT_PX, tallestPageHeight(emptyList()))
+        assertEquals(CAROUSEL_UNMEASURED_HEIGHT_PX, tallestPageHeight(listOf(0, 0)))
+        assertEquals(CAROUSEL_UNMEASURED_HEIGHT_PX, tallestPageHeight(listOf(-5)))
+    }
+
+    // ---- carousel dot colour (I9) ---------------------------------------
+    //
+    // resolvedInkTintColorInt is already pinned above; what was NOT pinned
+    // is that a carousel's OWN indicatorColor field is what reaches the
+    // paint. The wave-B scar on this platform was a correct branch feeding
+    // a wrong value downstream, so these assert the resolved value starting
+    // from a real BuilderNode.Carousel — the same object buildCarousel
+    // hands to carouselDotSpec, which is now the single place any dot
+    // colour is decided.
+
+    private fun carouselNode(indicatorColor: ThemePair? = null) = BuilderNode.Carousel(
+        id = "c",
+        children = listOf(BuilderNode.Text(id = "p1", key = "a", role = TextRole.BODY)),
+        indicatorColor = indicatorColor,
+    )
+
+    @Test
+    fun `an uncoloured carousel dot paints the resolved ink, not white and not transparent`() {
+        val light = carouselDotSpec(carouselNode(), dark = false)
+        assertEquals(parseHexColor("#0F172A")!!.toColorInt(), light.colorInt)
+        assertTrue(light.colorInt != WHITE_COLOR_INT, "must not fall back to white")
+        assertTrue(light.colorInt != TRANSPARENT_COLOR_INT, "must not fall back to no colour at all")
+    }
+
+    @Test
+    fun `an uncoloured carousel dot uses the dark ink in dark mode`() {
+        assertEquals(
+            parseHexColor("#F8FAFC")!!.toColorInt(),
+            carouselDotSpec(carouselNode(), dark = true).colorInt,
+        )
+    }
+
+    @Test
+    fun `the carousel's own indicatorColor reaches the dot paint, per theme`() {
+        val node = carouselNode(ThemePair(light = "#112233", dark = "#445566"))
+        assertEquals(parseHexColor("#112233")!!.toColorInt(), carouselDotSpec(node, dark = false).colorInt)
+        assertEquals(parseHexColor("#445566")!!.toColorInt(), carouselDotSpec(node, dark = true).colorInt)
+    }
+
+    @Test
+    fun `the active dot is opaque and the inactive one is visibly dimmer, on Android's 0-255 scale`() {
+        val spec = carouselDotSpec(carouselNode(), dark = false)
+        assertEquals(OPAQUE_ALPHA_CHANNEL, spec.activeAlpha255)
+        assertTrue(spec.inactiveAlpha255 < spec.activeAlpha255, "the inactive dot must read as inactive")
+        assertTrue(spec.inactiveAlpha255 > TRANSPARENT_ALPHA_CHANNEL, "an invisible dot indicates nothing")
+    }
+
+    // ---- deferred image decode (I6) -------------------------------------
+    //
+    // buildImage calls loadImageInto one statement after constructing the
+    // ImageView, so on a first render the view has never been measured and
+    // sampleSizeFor (correctly) answers a zero target with "full size".
+    // Decoding there meant downsampling never happened at all. These pin
+    // that the fetch waits for a layout pass exactly when it has to, and
+    // does not when it does not. The scope is cancelled up front so the
+    // measured case cannot start a real network fetch from a unit test —
+    // the assertion is about WHEN the work is scheduled, not about the
+    // fetch itself.
+
+    private fun cancelledScope() = CoroutineScope(Job()).also { it.cancel() }
+
+    @Test
+    fun `loadImageInto defers the decode until the target view has a measured size`() {
+        val observer = mockk<ViewTreeObserver>(relaxed = true)
+        val imageView = mockk<ImageView>(relaxed = true)
+        every { imageView.width } returns UNMEASURED_VIEW_DIMENSION_PX
+        every { imageView.height } returns UNMEASURED_VIEW_DIMENSION_PX
+        every { imageView.viewTreeObserver } returns observer
+
+        loadImageInto(imageView, "https://example.test/rovenue-unmeasured.png", cancelledScope())
+
+        verify(exactly = 1) { observer.addOnGlobalLayoutListener(any()) }
+    }
+
+    @Test
+    fun `loadImageInto does not wait for a layout pass when the view is already measured`() {
+        val observer = mockk<ViewTreeObserver>(relaxed = true)
+        val imageView = mockk<ImageView>(relaxed = true)
+        every { imageView.width } returns MEASURED_SLOT_PX
+        every { imageView.height } returns MEASURED_SLOT_PX
+        every { imageView.viewTreeObserver } returns observer
+
+        loadImageInto(imageView, "https://example.test/rovenue-measured.png", cancelledScope())
+
+        verify(exactly = 0) { observer.addOnGlobalLayoutListener(any()) }
+    }
+
     /**
      * Minimal in-memory [android.content.SharedPreferences] test double —
      * only `getLong`/`edit().putLong(...).apply()` are ever exercised by
@@ -899,5 +1031,26 @@ class NodeViewFactoryTest {
         mockImageViewConstruction()
         NodeViewFactory.build(mockContext(), iconNode(), renderContext(), cell = null)
         verify(atLeast = 1) { anyConstructed<ImageView>().setImageTintList(any<ColorStateList>()) }
+    }
+
+    private companion object {
+        /** `ViewGroup.LayoutParams.MATCH_PARENT`, spelled out as the literal
+         *  integer `ViewPager2.enforceChildFillListener` actually compares
+         *  against — asserting against the platform symbol would pass even
+         *  if the platform symbol itself were the thing that changed. */
+        const val MATCH_PARENT_LAYOUT_DIMENSION = -1
+
+        /** `ViewGroup.LayoutParams.WRAP_CONTENT` — the value that made every
+         *  carousel throw on first attach. */
+        const val WRAP_CONTENT_LAYOUT_DIMENSION = -2
+
+        const val OPAQUE_ALPHA_CHANNEL = 255
+        const val TRANSPARENT_ALPHA_CHANNEL = 0
+        const val WHITE_COLOR_INT = 0xFFFFFFFF.toInt()
+        const val TRANSPARENT_COLOR_INT = 0
+
+        /** A plausible measured image slot, in px — any positive size works;
+         *  the branch under test is "measured at all vs not". */
+        const val MEASURED_SLOT_PX = 300
     }
 }

@@ -14,11 +14,15 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.ViewTreeObserver
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import dev.rovenue.sdk.Offering
@@ -571,6 +575,85 @@ internal fun nextCarouselPage(current: Int, pageCount: Int, loop: Boolean): Int 
         else -> current
     }
 }
+
+/** The width/height a `carousel` page container must carry. Plain ints, not
+ *  a `ViewGroup.LayoutParams`, deliberately — see [carouselPageLayoutSize]. */
+internal data class CarouselPageSize(val width: Int, val height: Int)
+
+/**
+ * The layout params EVERY `carousel` page container must be built with.
+ *
+ * `ViewPager2` registers `enforceChildFillListener()` on its internal
+ * `RecyclerView`; that listener reads each attaching child's layout params
+ * and throws
+ * `IllegalStateException("Pages must fill the whole ViewPager2 (use match_parent)")`
+ * unless BOTH dimensions are `MATCH_PARENT`. This is a hard library
+ * invariant, not a style preference: a page holder built with anything else
+ * (this one was `WRAP_CONTENT` in height) crashes the paywall the instant
+ * the carousel attaches to a window.
+ *
+ * Hoisted out of [CarouselPageAdapter.onCreateViewHolder] as a pure function
+ * so a JVM test can pin both dimensions without an Android runtime. It
+ * returns plain ints rather than a constructed `ViewGroup.LayoutParams`
+ * because this module compiles against the stub `android.jar` with
+ * `isReturnDefaultValues = true` — a `LayoutParams` built in a unit test
+ * reports 0/0, since the stub constructor has no body to store the
+ * arguments.
+ */
+internal fun carouselPageLayoutSize(): CarouselPageSize =
+    CarouselPageSize(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+
+/** Height a carousel page measures to before it has been measured at all,
+ *  and the floor [tallestPageHeight] reports. */
+internal const val CAROUSEL_UNMEASURED_HEIGHT_PX = 0
+
+/**
+ * The height a `carousel`'s `ViewPager2` is given: the tallest of its
+ * pages' measured heights (see `CarouselPagerView.onMeasure` for why the
+ * carousel has to compute this itself).
+ *
+ * Pure so the rule — MAX of the pages, never the first page's height and
+ * never their sum — is pinned without an Android runtime.
+ */
+internal fun tallestPageHeight(measuredPageHeights: List<Int>): Int =
+    measuredPageHeights.maxOrNull()?.coerceAtLeast(CAROUSEL_UNMEASURED_HEIGHT_PX)
+        ?: CAROUSEL_UNMEASURED_HEIGHT_PX
+
+/** Fully-opaque alpha on Android's 0..255 channel scale. */
+private const val OPAQUE_ALPHA_255 = 255
+
+/** Everything `CarouselDotsRow` needs to paint one dot: the resolved paint
+ *  colour plus the two alphas, already on Android's 0..255 channel scale. */
+internal data class CarouselDotSpec(
+    val colorInt: Int,
+    val activeAlpha255: Int,
+    val inactiveAlpha255: Int,
+)
+
+/**
+ * How a `carousel`'s hand-drawn indicator dots paint, resolved from the
+ * node itself.
+ *
+ * An absent `indicatorColor` inherits the ambient text ink — the same
+ * "inherit" resolution an uncoloured icon tint uses (see
+ * [resolvedInkTintColorInt]'s own doc). A hand-drawn dot has no automatic
+ * colour inheritance the way an uncoloured `TextView` does, so "no
+ * override" must still resolve to a CONCRETE paint colour.
+ *
+ * This takes the whole [BuilderNode.Carousel] rather than a pre-resolved
+ * colour on purpose: the wave-B scar on this exact platform was a *correct
+ * branch feeding a wrong value downstream*, so the thing worth pinning is
+ * "the node's own `indicatorColor` field ends up as the paint colour", not
+ * "some resolution function returns the right answer". `buildCarousel`
+ * therefore does no colour arithmetic of its own — it calls this and hands
+ * the result straight to the row that paints it.
+ */
+internal fun carouselDotSpec(node: BuilderNode.Carousel, dark: Boolean): CarouselDotSpec =
+    CarouselDotSpec(
+        colorInt = resolvedInkTintColorInt(node.indicatorColor, dark),
+        activeAlpha255 = (CAROUSEL_DOT_ACTIVE_ALPHA * OPAQUE_ALPHA_255).roundToInt(),
+        inactiveAlpha255 = (CAROUSEL_DOT_INACTIVE_ALPHA * OPAQUE_ALPHA_255).roundToInt(),
+    )
 
 private const val COUNTDOWN_NO_ANCHOR = -1L
 
@@ -1339,19 +1422,14 @@ internal object NodeViewFactory {
 
         val showsIndicator = node.showsIndicator ?: CAROUSEL_DEFAULT_SHOWS_INDICATOR
         val loop = node.loop ?: CAROUSEL_DEFAULT_LOOP
-        // Absent `indicatorColor` inherits the ambient text ink — the same
-        // "inherit" resolution buildSocialProof/buildFeatureList/buildTimeline
-        // already use for an uncoloured icon tint (see
-        // resolvedInkTintColorInt's own doc): a hand-drawn dot has no
-        // automatic colour inheritance the way an uncoloured TextView does,
-        // so "no override" must still resolve to a CONCRETE paint colour.
-        // Deliberately resolved here (not read back off which branch ran) —
-        // the wave-B scar on this exact platform was a resolved-colour bug
-        // (the substituted value lived in a vendored drawable asset), not a
-        // branch bug.
-        val dotColorInt = resolvedInkTintColorInt(node.indicatorColor, ctx.dark)
+        // All of the dot-painting decisions (including how an absent
+        // `indicatorColor` resolves) live in the pure carouselDotSpec, which
+        // is pinned by value in NodeViewFactoryTest. This call site is
+        // deliberately arithmetic-free so there is nothing here left to get
+        // wrong between the node and the paint.
+        val dotSpec = carouselDotSpec(node, ctx.dark)
 
-        return CarouselPagerView(context, pageViews, showsIndicator, loop, node.autoAdvanceSeconds, dotColorInt)
+        return CarouselPagerView(context, pageViews, showsIndicator, loop, node.autoAdvanceSeconds, dotSpec)
     }
 }
 
@@ -1446,11 +1524,11 @@ private class TickingCountdownRow(
  */
 private class CarouselPagerView(
     context: Context,
-    pageViews: List<View>,
+    private val pageViews: List<View>,
     showsIndicator: Boolean,
     private val loop: Boolean,
     private val autoAdvanceSeconds: Double?,
-    dotColorInt: Int,
+    dotSpec: CarouselDotSpec,
 ) : LinearLayout(context) {
     private val pageCount = pageViews.size
     private val handler = Handler(Looper.getMainLooper())
@@ -1462,7 +1540,7 @@ private class CarouselPagerView(
     // A single dot is nothing to indicate, so it is skipped even when
     // `showsIndicator` resolves true.
     private val dotsRow: CarouselDotsRow? =
-        if (showsIndicator && pageCount > 1) CarouselDotsRow(context, pageCount, dotColorInt) else null
+        if (showsIndicator && pageCount > 1) CarouselDotsRow(context, pageCount, dotSpec) else null
 
     /** Latched permanently the moment a `loop: false` carousel reaches its
      *  last page — see this class's own doc comment. Never un-latches: a
@@ -1472,9 +1550,41 @@ private class CarouselPagerView(
 
     private val tick = Runnable { advance() }
 
+    /**
+     * Spec §5 rule 1 — "off-screen means paused" — for the case
+     * [onDetachedFromWindow] cannot see: the app going to the background.
+     *
+     * A backgrounded app's main looper keeps delivering messages, so a bare
+     * `postDelayed` chain keeps advancing pages while the user is somewhere
+     * else entirely, and CHANGES THE PAGE THEY COME BACK TO. (iOS gets this
+     * for free from run-loop suspension; Android does not.) The web
+     * renderer already pauses on `visibilitychange`; this is its Android
+     * equivalent, using the process-wide foreground signal from
+     * `androidx.lifecycle:lifecycle-process`.
+     *
+     * The auto-advance schedule is started ONLY from here, never directly
+     * from [onAttachedToWindow]: adding an observer to a `LifecycleRegistry`
+     * immediately replays the owner's current state, so attaching while the
+     * app is foregrounded gets its `ON_START` through this observer — and
+     * attaching while the app is backgrounded correctly gets nothing at all,
+     * which a direct call in [onAttachedToWindow] would have defeated.
+     */
+    private val appForegroundObserver = LifecycleEventObserver { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_START -> scheduleNextTick()
+            Lifecycle.Event.ON_STOP -> handler.removeCallbacks(tick)
+            else -> Unit
+        }
+    }
+
     init {
         orientation = VERTICAL
-        addView(viewPager, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        // Height starts at "not measured yet" and is filled in by onMeasure
+        // below, which is the only thing that ever sets it. A WRAP_CONTENT
+        // ViewPager2 measures to zero (its pages are required to be
+        // MATCH_PARENT, so there is nothing for it to wrap), and the
+        // carousel would simply not appear.
+        addView(viewPager, LayoutParams(LayoutParams.MATCH_PARENT, CAROUSEL_UNMEASURED_HEIGHT_PX))
         dotsRow?.let { row ->
             addView(
                 row,
@@ -1492,6 +1602,54 @@ private class CarouselPagerView(
                 }
             },
         )
+    }
+
+    /**
+     * Gives the `ViewPager2` an explicit height equal to its tallest page,
+     * then measures normally.
+     *
+     * WHY THIS EXISTS — do not "simplify" it back to `WRAP_CONTENT`.
+     * `ViewPager2` requires every page to be `MATCH_PARENT` x `MATCH_PARENT`
+     * (see [carouselPageLayoutSize]: it throws otherwise), which makes a
+     * `WRAP_CONTENT` pager circular — the pages size to the pager, the pager
+     * has nothing to size to, and the whole carousel collapses to zero
+     * height. `ViewPager2` does NOT size itself to its tallest page, and it
+     * is `final`, so its `onMeasure` cannot be overridden to make it.
+     *
+     * The one view in the chain we DO own is this `LinearLayout`, so it does
+     * the max-of-pages pass itself: measure every page at the carousel's own
+     * width with an unbounded height, take the tallest, hand that to the
+     * pager. Chosen over an explicit authored height because `carousel` has
+     * no height prop in the shared schema and pages are arbitrary nodes —
+     * a fixed height would clip or pad every carousel that is not exactly
+     * that tall. The cost is measuring off-screen pages too; a carousel is a
+     * handful of pages, and it means paging between them never resizes.
+     *
+     * The height is written into the EXISTING `LayoutParams` instance rather
+     * than assigned as a new one: assigning `layoutParams` calls
+     * `requestLayout()`, and calling that from inside a measure pass is how
+     * measure loops are born. `super.onMeasure` re-measures children after
+     * this, so it picks the new height up.
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val tallest = tallestPageHeight(measurePagesForHeight(widthMeasureSpec))
+        val params = viewPager.layoutParams
+        if (tallest > CAROUSEL_UNMEASURED_HEIGHT_PX && params.height != tallest) params.height = tallest
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    /** Measures every page at the carousel's own width with an unbounded
+     *  height and returns the measured heights, for [tallestPageHeight].
+     *  These measurements are transient — `RecyclerView` re-measures each
+     *  page it lays out with its own exact specs. */
+    private fun measurePagesForHeight(widthMeasureSpec: Int): List<Int> {
+        val pageWidthSpec = MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY)
+        val pageHeightSpec =
+            MeasureSpec.makeMeasureSpec(CAROUSEL_UNMEASURED_HEIGHT_PX, MeasureSpec.UNSPECIFIED)
+        return pageViews.map { page ->
+            page.measure(pageWidthSpec, pageHeightSpec)
+            page.measuredHeight
+        }
     }
 
     private fun scheduleNextTick() {
@@ -1518,10 +1676,13 @@ private class CarouselPagerView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        scheduleNextTick()
+        // Deliberately no scheduleNextTick() here — see
+        // appForegroundObserver's doc for why the schedule starts there.
+        ProcessLifecycleOwner.get().lifecycle.addObserver(appForegroundObserver)
     }
 
     override fun onDetachedFromWindow() {
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(appForegroundObserver)
         handler.removeCallbacks(tick)
         super.onDetachedFromWindow()
     }
@@ -1543,12 +1704,17 @@ private class CarouselPageAdapter(private val pages: List<View>) :
 
     class Holder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
-        Holder(
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+        // MATCH_PARENT in BOTH dimensions is a ViewPager2 requirement, not a
+        // preference — see carouselPageLayoutSize, which is where the
+        // dimensions live and where they are pinned by a test.
+        val size = carouselPageLayoutSize()
+        return Holder(
             FrameLayout(parent.context).apply {
-                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                layoutParams = ViewGroup.LayoutParams(size.width, size.height)
             },
         )
+    }
 
     override fun getItemCount(): Int = pages.size
 
@@ -1563,16 +1729,17 @@ private class CarouselPageAdapter(private val pages: List<View>) :
 /**
  * Hand-drawn page-indicator dots for `carousel` — `ViewPager2` supplies
  * paging but no built-in indicator. One dot per page; the active page's dot
- * draws at [CAROUSEL_DOT_ACTIVE_ALPHA], every other at
- * [CAROUSEL_DOT_INACTIVE_ALPHA], both over the SAME resolved [colorInt] (see
- * [NodeViewFactory.buildCarousel]'s doc comment for why an absent
- * `indicatorColor` still resolves to a concrete paint colour here, unlike an
- * ordinary uncoloured TextView).
+ * draws at [CarouselDotSpec.activeAlpha255], every other at
+ * [CarouselDotSpec.inactiveAlpha255], both over the SAME
+ * [CarouselDotSpec.colorInt]. This class makes no colour decisions of its
+ * own — [carouselDotSpec] made all of them, and is where they are tested
+ * (including why an absent `indicatorColor` still resolves to a concrete
+ * paint colour here, unlike an ordinary uncoloured TextView).
  */
 private class CarouselDotsRow(
     context: Context,
     private val pageCount: Int,
-    private val colorInt: Int,
+    private val spec: CarouselDotSpec,
 ) : View(context) {
     private var activePage = 0
     private val dotDiameterPx = dp(context, CAROUSEL_DOT_SIZE_DP)
@@ -1594,9 +1761,8 @@ private class CarouselDotsRow(
         val radius = dotDiameterPx / 2f
         for (index in 0 until pageCount) {
             val cx = index * (dotDiameterPx + dotGapPx) + radius
-            paint.color = colorInt
-            val alphaFraction = if (index == activePage) CAROUSEL_DOT_ACTIVE_ALPHA else CAROUSEL_DOT_INACTIVE_ALPHA
-            paint.alpha = (alphaFraction * 255).roundToInt()
+            paint.color = spec.colorInt
+            paint.alpha = if (index == activePage) spec.activeAlpha255 else spec.inactiveAlpha255
             canvas.drawCircle(cx.toFloat(), radius, radius, paint)
         }
     }
@@ -1613,7 +1779,11 @@ private const val IMAGE_LOAD_READ_TIMEOUT_MS = 10_000
  * same URL is decoded by a freshly-constructed [ImageView] on every
  * package tap — this is what turns that rebuild back into a map lookup.
  */
-private val imageCache = BitmapLruCache<Bitmap>()
+private val imageCache = BitmapLruCache<Bitmap>(sizeOf = { bitmap -> bitmap.allocationByteCount.toLong() })
+
+/** Byte-array offset every [BitmapFactory.decodeByteArray] call here starts
+ *  from: the whole downloaded body is the image. */
+private const val IMAGE_BYTES_OFFSET = 0
 
 /**
  * Minimal, dependency-free image loader (HttpURLConnection + BitmapFactory
@@ -1626,6 +1796,29 @@ private val imageCache = BitmapLruCache<Bitmap>()
  * all: the caller is a full-tree rebuild on every state change, so the
  * common case (image already fetched) must cost nothing more than a map
  * lookup, not a dispatcher hop.
+ *
+ * On a MISS the decode is DEFERRED until [imageView] has a real measured
+ * size. `buildImage` calls this one statement after constructing the
+ * `ImageView`, so on a first render the view has never been through a
+ * layout pass and its `width`/`height` are both 0 — which
+ * [sampleSizeFor] (correctly, by design) answers with
+ * [IMAGE_SAMPLE_SIZE_FULL]. Decoding at that moment therefore meant
+ * downsampling NEVER happened: every image was decoded at full size, no
+ * matter how small the slot it was going into. Waiting for one layout pass
+ * is what makes the downsampling real. This uses the same
+ * `ViewTreeObserver.OnGlobalLayoutListener` pattern as
+ * `RovenuePaywallView`'s sticky-footer clearance, which has the identical
+ * "needs a measured height, does not have one yet" shape.
+ *
+ * Reading the size on the main thread before launching also fixes a
+ * `View`-field read from `Dispatchers.IO`.
+ *
+ * Accepted trade-off: the cache key stays the URL alone, so the first slot
+ * to be measured fixes the decoded size for every later slot showing the
+ * same URL. Keying by URL + target size would be more precise but would
+ * cost the synchronous cache-hit path above (a freshly rebuilt view has no
+ * size yet, so it could not look itself up until after layout), and a
+ * paywall shows a given image in a given slot.
  */
 internal fun loadImageInto(imageView: ImageView, url: String, scope: CoroutineScope) {
     val cached = imageCache.get(url)
@@ -1633,6 +1826,42 @@ internal fun loadImageInto(imageView: ImageView, url: String, scope: CoroutineSc
         imageView.setImageBitmap(cached)
         return
     }
+    if (imageView.width > UNMEASURED_VIEW_DIMENSION_PX && imageView.height > UNMEASURED_VIEW_DIMENSION_PX) {
+        fetchAndDecodeInto(imageView, url, scope, imageView.width, imageView.height)
+        return
+    }
+    val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
+        override fun onGlobalLayout() {
+            val targetWidth = imageView.width
+            val targetHeight = imageView.height
+            // Still unmeasured (e.g. GONE, or a parent not laid out yet):
+            // stay registered and try again on the next layout pass.
+            if (targetWidth <= UNMEASURED_VIEW_DIMENSION_PX || targetHeight <= UNMEASURED_VIEW_DIMENSION_PX) return
+            imageView.viewTreeObserver.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(this)
+            // Re-check: another view may have fetched the same URL during
+            // the wait.
+            val nowCached = imageCache.get(url)
+            if (nowCached != null) {
+                imageView.setImageBitmap(nowCached)
+                return
+            }
+            fetchAndDecodeInto(imageView, url, scope, targetWidth, targetHeight)
+        }
+    }
+    imageView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+}
+
+/** Downloads [url] and decodes it downsampled to [targetWidth] x
+ *  [targetHeight], caches it, and applies it to [imageView] on the main
+ *  thread. Both targets are already-measured pixel sizes read on the main
+ *  thread by [loadImageInto] — never `View` fields read from here. */
+private fun fetchAndDecodeInto(
+    imageView: ImageView,
+    url: String,
+    scope: CoroutineScope,
+    targetWidth: Int,
+    targetHeight: Int,
+) {
     scope.launch(Dispatchers.IO) {
         val bitmap = runCatching {
             val connection = URL(url).openConnection() as HttpURLConnection
@@ -1642,16 +1871,16 @@ internal fun loadImageInto(imageView: ImageView, url: String, scope: CoroutineSc
             connection.connect()
             val bytes = connection.inputStream.use { it.readBytes() }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            BitmapFactory.decodeByteArray(bytes, IMAGE_BYTES_OFFSET, bytes.size, bounds)
             val options = BitmapFactory.Options().apply {
                 inSampleSize = sampleSizeFor(
                     sourceWidth = bounds.outWidth,
                     sourceHeight = bounds.outHeight,
-                    targetWidth = imageView.width,
-                    targetHeight = imageView.height,
+                    targetWidth = targetWidth,
+                    targetHeight = targetHeight,
                 )
             }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            BitmapFactory.decodeByteArray(bytes, IMAGE_BYTES_OFFSET, bytes.size, options)
         }.getOrNull()
         if (bitmap != null) {
             imageCache.put(url, bitmap)
