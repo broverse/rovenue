@@ -148,6 +148,37 @@ impl PlacementsClient {
         }
     }
 
+    /// Fetch `GET /v1/preview/paywalls/{token}` (+`?locale=`) — the P9
+    /// on-device preview of a paywall DRAFT, identified by an opaque
+    /// short-lived preview token (never a placement identifier). Unlike
+    /// `get_paywall`:
+    /// - the response is a bare paywall (`ApiEnvelope<PaywallWire>`), not a
+    ///   placement envelope (`ApiEnvelope<PlacementsResponse>`);
+    /// - nothing is written to the disk cache — a draft is ephemeral, so
+    ///   caching it would go stale silently with no invalidation path;
+    /// - the bundled fallback file is never consulted;
+    /// - no `subscriber_id` is sent — a preview session has no subscriber
+    ///   identity and no experiment bucketing to key off of.
+    ///
+    /// A 404 (expired/invalid preview session, `PREVIEW_SESSION_INVALID`)
+    /// propagates as an `Err` via the normal `get_json` status mapping —
+    /// this never resolves to `Ok(None)` the way an unmatched placement
+    /// does for `get_paywall`.
+    pub fn get_paywall_preview(
+        &self,
+        token: &str,
+        locale: Option<&str>,
+    ) -> RovenueResult<Option<CorePaywall>> {
+        let path = match locale {
+            Some(l) if !l.is_empty() => format!("/v1/preview/paywalls/{token}?locale={l}"),
+            _ => format!("/v1/preview/paywalls/{token}"),
+        };
+        let req = HttpRequest::new(&path);
+        let resp = self.http.get_json::<ApiEnvelope<PaywallWire>>(req)?;
+        let body = resp.body.ok_or(RovenueError::Internal())?;
+        Ok(Some(build_preview_paywall(body.data)))
+    }
+
     fn fallback_raw(&self, identifier: &str) -> Option<String> {
         self.fallback
             .lock()
@@ -290,5 +321,35 @@ fn build_paywall(
         offering: paywall.offering.map(map_offering),
         presented_context,
         served_from_fallback,
+        revision: None,
+    }
+}
+
+/// Build a `CorePaywall` from a P9 on-device preview fetch — the response is
+/// a bare paywall (no `placement`/`experiment` envelope), so there is no
+/// placement identity, attribution snapshot, or fallback path to stamp:
+/// `placement_identifier` is empty, `placement_revision` is `0`,
+/// `presented_context` is always `None`, and `served_from_fallback` is
+/// always `false`. `revision` carries the draft's ISO timestamp verbatim
+/// (`None` when an old/lenient server omits it).
+fn build_preview_paywall(paywall: PaywallWire) -> CorePaywall {
+    let (remote_config_json, remote_config_locale) = match paywall.remote_config {
+        Some(rc) => (Some(rc.data.to_string()), Some(rc.locale)),
+        None => (None, None),
+    };
+
+    CorePaywall {
+        placement_identifier: String::new(),
+        placement_revision: 0,
+        paywall_identifier: Some(paywall.identifier),
+        paywall_name: Some(paywall.name),
+        config_format_version: paywall.config_format_version,
+        remote_config_json,
+        remote_config_locale,
+        builder_config_json: paywall.builder_config.map(|v| v.to_string()),
+        offering: paywall.offering.map(map_offering),
+        presented_context: None,
+        served_from_fallback: false,
+        revision: paywall.revision,
     }
 }

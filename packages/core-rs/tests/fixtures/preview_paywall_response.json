@@ -1,0 +1,17 @@
+{ "data": {
+  "id": "pw_draft_1",
+  "identifier": "onboarding_draft",
+  "name": "Draft",
+  "configFormatVersion": 2,
+  "remoteConfig": { "locale": "en", "data": { "title": "Go Pro (draft)" } },
+  "builderConfig": {
+    "formatVersion": 2,
+    "defaultLocale": "en",
+    "localizations": { "en": { "t": "Go Pro (draft)" } },
+    "root": { "type": "stack", "id": "root", "axis": "v", "children": [
+      { "type": "text", "id": "t1", "key": "t", "role": "title" }
+    ] }
+  },
+  "offering": null,
+  "revision": "2026-07-28T12:00:00.000Z"
+} }

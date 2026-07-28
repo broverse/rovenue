@@ -144,6 +144,9 @@ dictionary CorePaywall {
     // true only when resolved from the in-memory bundled-fallback-file map
     // (network AND disk cache both missed) — false everywhere else.
     boolean served_from_fallback;
+    // Draft revision timestamp (ISO string) — only ever populated by
+    // get_paywall_preview (P9 on-device preview); null for get_paywall.
+    string? revision;
 };
 
 enum SessionEventKind {
@@ -224,6 +227,14 @@ interface RovenueCore {
 
     [Throws=RovenueErrorFfi]
     CorePaywall? get_paywall(string placement_id, string? locale);
+
+    // P9 on-device preview: fetch a paywall DRAFT by its opaque, short-lived
+    // preview token (never a placement identifier). Never cached, never
+    // served from the bundled fallback file — a draft is ephemeral. Throws
+    // on a 404 (expired/invalid preview session); does not otherwise stamp
+    // presented_context (no placement/experiment context applies).
+    [Throws=RovenueErrorFfi]
+    CorePaywall? get_paywall_preview(string token, string? locale);
 
     // Parse a spec D1 bundled fallback-placements file (once) into memory so
     // get_paywall can serve placements offline when both network and disk

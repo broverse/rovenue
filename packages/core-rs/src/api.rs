@@ -1115,6 +1115,47 @@ impl RovenueCore {
         result
     }
 
+    /// P9 on-device preview: resolve `GET /v1/preview/paywalls/{token}?locale=`
+    /// into the draft paywall the caller should render. Unlike `get_paywall`,
+    /// this never caches, never consults the bundled fallback file, and
+    /// never stamps `presented_context` (a preview has no placement or
+    /// experiment context) — see `PlacementsClient::get_paywall_preview`.
+    /// An expired/invalid preview token surfaces as an `Err` (404
+    /// `PREVIEW_SESSION_INVALID`), never `Ok(None)`.
+    pub fn get_paywall_preview(
+        &self,
+        token: String,
+        locale: Option<String>,
+    ) -> RovenueResult<Option<CorePaywall>> {
+        self.log_op(
+            LogLevel::Info,
+            "get_paywall_preview",
+            "get_paywall_preview",
+            &[],
+        );
+        let result = self
+            .placements
+            .get_paywall_preview(&token, locale.as_deref());
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "get_paywall_preview ok",
+                "get_paywall_preview",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "get_paywall_preview failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "get_paywall_preview",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
+    }
+
     /// Parse a spec D1 bundled fallback-placements file (once, replacing any
     /// previously-loaded set) so `get_paywall` can serve placements offline
     /// when both network and disk cache miss. Returns the count of entries

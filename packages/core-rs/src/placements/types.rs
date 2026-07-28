@@ -48,6 +48,13 @@ pub struct PaywallWire {
     #[serde(rename = "builderConfig", default)]
     pub builder_config: Option<serde_json::Value>,
     pub offering: Option<OfferingWire>,
+    /// Draft revision timestamp (ISO string) — populated only by the P9
+    /// on-device preview endpoint (`GET /v1/preview/paywalls/:token`), which
+    /// serializes it alongside the regular paywall fields at the top level.
+    /// `default` so the normal `/v1/placements/:identifier` response (which
+    /// never sends this field) and older servers still decode.
+    #[serde(rename = "revision", default)]
+    pub revision: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -115,4 +122,9 @@ pub struct CorePaywall {
     /// see `PlacementsClient::get_paywall`. `false` for every other
     /// resolution path (live network, disk cache).
     pub served_from_fallback: bool,
+    /// Draft revision timestamp (ISO string), carried verbatim from
+    /// `PaywallWire.revision`. Only ever populated by
+    /// `PlacementsClient::get_paywall_preview` (P9 on-device preview);
+    /// `None` for every `get_paywall` result.
+    pub revision: Option<String>,
 }
