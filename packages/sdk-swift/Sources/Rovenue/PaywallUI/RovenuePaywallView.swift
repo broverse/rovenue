@@ -362,6 +362,19 @@ let carouselMinAutoAdvanceSeconds = 2
 /// The index a looping carousel wraps back to, and the page it opens on.
 private let carouselFirstPageIndex = 0
 
+/// The ink a paywall element falls back to when it carries no colour of its
+/// own AND the platform gives it no usable inheritance — byte-identical to
+/// NodeViewFactory.kt's `TEXT_INK_DEFAULT_COLOR` and styles.ts's
+/// `DEFAULT_INK`, which is what makes the three renderers agree on the
+/// RESOLVED colour rather than merely on which branch runs.
+///
+/// Deliberately narrow in scope on this platform: ordinary uncoloured `Text`
+/// must NOT use it, because SwiftUI already inherits the ambient label colour
+/// and substituting here would override a host that legitimately set one. The
+/// carousel's dot indicator is the exception this exists for — see
+/// `CarouselView.indicatorRGBA`.
+let textInkDefaultColor = ThemePair(light: "#0F172A", dark: "#F8FAFC")
+
 /// Layout spacing constants for the three row-carrying node types, in
 /// points — named rather than inlined (mirrors NodeViewFactory.kt's
 /// FEATURE_LIST_ROW_SPACING_DP/TIMELINE_MARK_GAP_DP/etc; no cross-platform
@@ -559,15 +572,43 @@ private let countdownIsoFormatterWithFractionalSeconds: ISO8601DateFormatter = {
 func countdownDeadline(
     props: CountdownProps, paywallIdentifier: String?, defaults: UserDefaults = .standard
 ) -> Date? {
+    countdownDeadline(props: props) {
+        countdownFirstShownAt(paywallIdentifier: paywallIdentifier, defaults: defaults)
+    }
+}
+
+/// The anchor-agnostic core of `countdownDeadline`. `anchor` is a closure, not
+/// a `Date`, so the persisted first-shown instant is read (and, on a cold
+/// start, STAMPED) only on the branch that actually needs it — the `endsAt`
+/// and neither-field branches must stay side-effect-free, which is what lets
+/// `countdownHasDeadline` reuse this same switch instead of restating its null
+/// branches.
+func countdownDeadline(props: CountdownProps, anchor: () -> Date) -> Date? {
     if let endsAt = props.endsAt {
         return countdownIsoFormatter.date(from: endsAt)
             ?? countdownIsoFormatterWithFractionalSeconds.date(from: endsAt)
     }
     if let durationSeconds = props.durationSeconds {
-        let anchor = countdownFirstShownAt(paywallIdentifier: paywallIdentifier, defaults: defaults)
-        return anchor.addingTimeInterval(durationSeconds)
+        return anchor().addingTimeInterval(durationSeconds)
     }
     return nil
+}
+
+/// Any anchor at all answers "is there a deadline?": `countdownDeadline`
+/// returns nil on the `endsAt`-unparsable and neither-field branches, both of
+/// which never call the anchor, and non-nil on the `durationSeconds` branch for
+/// EVERY anchor. The epoch is used to make that independence explicit rather
+/// than smuggling in a plausible-looking clock read that would suggest the
+/// answer depends on it — and to keep this probe off `UserDefaults`.
+private let countdownAnchorProbe = Date(timeIntervalSince1970: 0)
+
+/// Whether this countdown can resolve a deadline at all — the anchor-free
+/// question a carousel has to answer to know whether this page draws anything
+/// (a deadline-less countdown with no `fallback` draws nothing). Mirrors
+/// nodes.tsx's `countdownHasDeadline` and Android's `buildCountdown` returning
+/// null.
+func countdownHasDeadline(_ props: CountdownProps) -> Bool {
+    countdownDeadline(props: props, anchor: { countdownAnchorProbe }) != nil
 }
 
 struct BuilderNodeView: View {
@@ -1204,29 +1245,84 @@ func nextCarouselPage(current: Int, pageCount: Int, loop: Bool) -> Int {
     return loop ? carouselFirstPageIndex : current
 }
 
-/// The pages a `carousel` actually renders: its children that pass their OWN
-/// `visibility` gate, in order.
+/// The pages a `carousel` actually renders: its children that draw SOMETHING,
+/// in order.
 ///
-/// A page the gate rejects is DROPPED — not rendered as a blank page, and
+/// A page that draws nothing is DROPPED — not rendered as a blank page, and
 /// (because every count downstream derives from this list) with no dot of its
-/// own either. This is the cross-platform contract settled in the wave-D1
-/// trio review: Android already behaved this way and the web renderer was
-/// changed to match. The behaviour iOS shipped before — an empty tab plus a
-/// phantom dot — is indefensible from the reader's side: they swipe onto an
-/// empty screen, and the dots misreport how much content exists. Do not
-/// "restore" it.
+/// own either. This is the cross-platform contract settled in the wave-D1 trio
+/// review: Android already behaved this way and web and iOS were changed to
+/// match. A blank page plus a phantom dot is indefensible from the reader's
+/// side — they swipe onto an empty screen, and the dots misreport how much
+/// content exists — and that lie is identical whether the page was hidden by a
+/// `visibility` rule or simply had nothing to draw. Do not narrow this back to
+/// the `visibility` half.
 ///
-/// When EVERY page is hidden this returns empty, which lands on exactly the
-/// same branch as an authored-empty carousel: render `fallback`, else
-/// nothing.
+/// When EVERY page draws nothing this returns empty, which lands on exactly the
+/// same branch as an authored-empty carousel: render `fallback`, else nothing.
 ///
 /// Pure and free-standing for the same reason as `nextCarouselPage`: it is
 /// the decision `CarouselView.body` branches on, and the only part of that
 /// branch a test without a SwiftUI runtime can reach.
-func visibleCarouselPages(_ children: [BuilderNode], appVersion: String?) -> [BuilderNode] {
-    children.filter {
-        isNodeVisible($0.visibility, platform: paywallVisibilityPlatform, appVersion: appVersion)
+func renderableCarouselPages(
+    _ children: [BuilderNode], ctx: PaywallRenderContext, cell: CellScope?
+) -> [BuilderNode] {
+    children.filter { nodeRendersContent($0, ctx: ctx, cell: cell) }
+}
+
+/// Whether `node` draws anything at all in this context.
+///
+/// SwiftUI gives no equivalent of web's "did `renderNode` return null?" — a
+/// `View` cannot be asked whether its `body` produced content without a
+/// view-testing dependency this package does not carry — so the question is
+/// answered ahead of construction, by restating each renderer's own
+/// draws-nothing condition ONCE, here. Every case below mirrors the exact
+/// branch in `BuilderNodeView.resolvedContent` (or the sub-view it dispatches
+/// to) that yields no content:
+///
+/// - hidden by its own `visibility` gate (the same gate `body` applies first);
+/// - an `icon` whose name has no SF Symbol on this build;
+/// - a `button` `ActionButtonView` suppresses (a restore with no handler);
+/// - a `countdown` that can resolve no deadline, with no `fallback` that draws;
+/// - a nested `carousel` with no renderable pages and no `fallback` that draws;
+/// - an `unknown` node type with no `fallback` that draws.
+///
+/// Everything else draws something. Overrides are applied first, exactly as
+/// `resolvedContent` does, because `icon.name` is overridable — the predicate
+/// must judge the node the renderer will actually see.
+func nodeRendersContent(_ node: BuilderNode, ctx: PaywallRenderContext, cell: CellScope?) -> Bool {
+    guard isNodeVisible(node.visibility, platform: paywallVisibilityPlatform, appVersion: ctx.appVersion)
+    else { return false }
+    let active = activeOverrideConditions(
+        cellPackageId: cell?.packageId, selectedPackageId: ctx.selectedPackageId, offering: ctx.offering)
+    switch applyOverrides(node, active: active) {
+    case .icon(let p):
+        return sfSymbolName(for: p.name) != nil
+    case .button(let p):
+        // No `fallback` arm: `ActionButtonView` renders nothing (not the
+        // fallback) for a suppressed action, and this predicate must describe
+        // what iOS actually draws, not what it arguably should.
+        return actionButtonVisible(p.action, hasRestoreHandler: ctx.onRestore != nil)
+    case .countdown(let p):
+        return countdownHasDeadline(p) || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
+    case .carousel(let p):
+        return !renderableCarouselPages(p.children, ctx: ctx, cell: cell).isEmpty
+            || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
+    case .unknown(_, _, let fallback):
+        return fallbackRendersContent(fallback, ctx: ctx, cell: cell)
+    default:
+        return true
     }
+}
+
+/// A `fallback`'s own verdict: nothing to fall back to, or a fallback that
+/// itself draws nothing, both mean this node draws nothing. Recursive, since a
+/// fallback is an ordinary node and may be another empty carousel.
+private func fallbackRendersContent(
+    _ fallback: BuilderNodeBox?, ctx: PaywallRenderContext, cell: CellScope?
+) -> Bool {
+    guard let fallback else { return false }
+    return nodeRendersContent(fallback.node, ctx: ctx, cell: cell)
 }
 
 /// Renders `carousel`. Pages via `TabView` with `.tabViewStyle(.page)` —
@@ -1275,39 +1371,50 @@ struct CarouselView: View {
     @State private var stoppedAtEnd = false
     @State private var tickCancellable: AnyCancellable?
 
-    /// The renderable pages — see `visibleCarouselPages`. Internal rather
+    /// The renderable pages — see `renderableCarouselPages`. Internal rather
     /// than `private` for the same reason `BuilderNodeView.isVisible` is: it
     /// is the value `body` branches on and the one part of that branch a
     /// test can reach.
-    var pages: [BuilderNode] { visibleCarouselPages(props.children, appVersion: ctx.appVersion) }
+    var pages: [BuilderNode] { renderableCarouselPages(props.children, ctx: ctx, cell: cell) }
     private var pageCount: Int { pages.count }
     private var showsIndicator: Bool { props.showsIndicator ?? carouselDefaultShowsIndicator }
     private var loop: Bool { props.loop ?? carouselDefaultLoop }
 
-    /// Never a substituted value here — the inverse of `StickyFooterView`'s
-    /// always-opaque `background`: an absent `indicatorColor` must not even
-    /// call `.tint`, since `.tint(nil)` resets to the system default rather
-    /// than leaving whatever ambient tint the paywall already has alone.
+    /// A substituted value, like `StickyFooterView`'s always-opaque
+    /// `background` and unlike ordinary text: an absent `indicatorColor`
+    /// resolves to `textInkDefaultColor` rather than to "apply no tint at
+    /// all". Leaving `.tint` off does NOT make the dots inherit the paywall's
+    /// ink the way an uncoloured `Text` does — `PageTabViewStyle` draws its own
+    /// white-ish system dots, which on a light paywall are all but invisible.
+    /// That is the same reason Android tints its dots with the resolved ink
+    /// instead of leaving them unpainted, and web substitutes the identical
+    /// value through `resolveTextColor`; all three now agree at the resolved
+    /// colour, not merely on which branch runs.
+    ///
+    /// An explicit-but-unparsable colour lands on the ink too (the `??`),
+    /// matching Android's `resolvedInkTintColorInt` — a garbage hex is a
+    /// decode failure, not an instruction to go back to invisible dots.
     ///
     /// Split out of `indicatorColor` at the RGBA stage so a test can pin the
-    /// resolved value — which theme half won, and that it is the authored
-    /// colour rather than a placeholder — by component. What no unit test in
-    /// this package can pin is the step after it: that `.tint(_:)` actually
+    /// resolved value — which theme half won, and that it is the real ink
+    /// rather than a placeholder — by component. What no unit test in this
+    /// package can pin is the step after it: that `.tint(_:)` actually
     /// recolours `PageTabViewStyle`'s dots, which are a `UIPageControl`
     /// underneath. That is device smoke item S7, deliberately left as smoke
     /// rather than covered by a test that would pass either way.
     var indicatorRGBA: RGBAColor? {
         props.indicatorColor.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
+            ?? parseHexColor(themeValue(textInkDefaultColor, dark: ctx.dark))
     }
 
     private var indicatorColor: Color? { indicatorRGBA.map { color($0) } }
 
     var body: some View {
         if pageCount == 0 {
-            // No RENDERABLE pages — either authored empty, or every child
-            // dropped by its own `visibility` gate (see
-            // `visibleCarouselPages`) — cannot render. Mirrors every other
-            // node type's contract: fail to `fallback`, never throw.
+            // No RENDERABLE pages — authored empty, or every child dropped
+            // because it draws nothing (see `renderableCarouselPages`) —
+            // cannot render. Mirrors every other node type's contract: fail
+            // to `fallback`, never throw.
             if let fallback = props.fallback {
                 BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
             }
@@ -1351,10 +1458,10 @@ struct CarouselView: View {
     @ViewBuilder
     private var pagedContent: some View {
         let tabs = TabView(selection: $currentPage) {
-            // `pages`, NOT `props.children`: a page hidden by its own
-            // `visibility` gate is dropped outright, so it gets neither a tab
-            // nor a dot (the dots are `TabView`'s own, derived from the tab
-            // count). See `visibleCarouselPages`.
+            // `pages`, NOT `props.children`: a page that draws nothing is
+            // dropped outright, so it gets neither a tab nor a dot (the dots
+            // are `TabView`'s own, derived from the tab count). See
+            // `renderableCarouselPages`.
             ForEach(Array(pages.enumerated()), id: \.offset) { index, child in
                 BuilderNodeView(node: child, ctx: ctx, cell: cell)
                     .tag(index)

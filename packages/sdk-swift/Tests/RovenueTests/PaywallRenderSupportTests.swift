@@ -89,17 +89,25 @@ final class PaywallRenderSupportTests: XCTestCase {
     // renders the whole view, because both have a testable entry point at
     // that level; Swift does not.
 
-    private func makeCtx(appVersion: String?, dark: Bool = false) throws -> PaywallRenderContext {
+    /// `onRestore`, `offering` and `selectedPackageId` are defaulted to the
+    /// empty shape every older test here relies on, and are settable because
+    /// the carousel's drop rule reads all three: a restore button with no
+    /// handler draws nothing, and the two package fields are what decide
+    /// whether a node's overrides are active.
+    private func makeCtx(
+        appVersion: String?, dark: Bool = false, onRestore: (() -> Void)? = nil,
+        offering: Offering? = nil, selectedPackageId: String? = nil
+    ) throws -> PaywallRenderContext {
         let json = """
         {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
          "root":{"type":"stack","id":"root","axis":"v","children":[]}}
         """
         let config = try JSONDecoder().decode(BuilderConfigModel.self, from: Data(json.utf8))
         return PaywallRenderContext(
-            config: config, locale: "en", dark: dark, offering: nil,
-            selectedPackageId: nil, isPurchasing: false,
+            config: config, locale: "en", dark: dark, offering: offering,
+            selectedPackageId: selectedPackageId, isPurchasing: false,
             select: { _ in }, purchase: {},
-            onClose: nil, onRestore: nil, onUrl: nil,
+            onClose: nil, onRestore: onRestore, onUrl: nil,
             appVersion: appVersion, paywallIdentifier: nil
         )
     }
@@ -452,11 +460,13 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertEqual(nextCarouselPage(current: 4, pageCount: 0, loop: false), 4)
     }
 
-    // MARK: - carousel pages: a page hidden by `visibility` is dropped (C3)
+    // MARK: - carousel pages: a page that draws nothing is dropped (C3)
     //
-    // The cross-platform contract settled in the wave-D1 trio review: a
-    // hidden page is dropped, so it gets neither a blank page nor a dot, and
-    // an all-hidden carousel collapses to the `fallback` branch. These read
+    // The cross-platform contract settled in the wave-D1 trio review: a page
+    // that renders nothing is dropped, so it gets neither a blank page nor a
+    // dot, and a carousel left with no pages collapses to the `fallback`
+    // branch. "Renders nothing" is the BROAD rule Android already had — being
+    // hidden by `visibility` is only one of its cases. These read
     // `CarouselView.pages` off a REAL view, which is the value `body`
     // iterates and counts.
     //
@@ -515,6 +525,99 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertEqual(nodeIds(view.pages), ["p1", "p2"])
     }
 
+    /// The four ways a page can draw nothing WITHOUT being hidden by a
+    /// `visibility` rule — the half of the empty-page rule iOS was missing and
+    /// Android already had. Each is a page whose renderer legitimately
+    /// produces no content: an undecodable node type with nowhere to fall back
+    /// to, an icon name that maps to no SF Symbol, a countdown carrying
+    /// neither `endsAt` nor `durationSeconds`, and a nested carousel with no
+    /// pages of its own.
+    private var emptyCarouselPages: [BuilderNode] {
+        [
+            .unknown(id: "unknownPage", visibility: nil, fallback: nil),
+            .icon(IconProps(id: "unknownIconPage", name: "definitely-not-a-registry-icon")),
+            .countdown(CountdownProps(id: "deadlinelessPage")),
+            .carousel(CarouselProps(id: "nestedEmptyPage", children: [])),
+        ]
+    }
+
+    func test_carousel_dropsEveryPageThatDrawsNothingEvenWhenVisible() throws {
+        let view = try carousel([carouselPage("p1")] + emptyCarouselPages + [carouselPage("p2")])
+        // The two real pages survive, in order, and nothing stands in for the
+        // four that draw nothing — each of those used to be a blank swipeable
+        // page with a dot of its own.
+        XCTAssertEqual(nodeIds(view.pages), ["p1", "p2"])
+    }
+
+    func test_carousel_everyPageDrawingNothingLeavesNoRenderablePages() throws {
+        // Same branch an authored-empty carousel takes: `fallback`, else
+        // nothing — never four blank pages with four dots.
+        XCTAssertTrue(try carousel(emptyCarouselPages).pages.isEmpty)
+    }
+
+    /// A page kept because its own `fallback` draws is the other half of the
+    /// rule: "renders nothing" means nothing at all, not "the primary content
+    /// was undecidable". Without this, the drop could be over-eager in exactly
+    /// the direction that loses authored content.
+    func test_carousel_keepsAnUndecidablePageWhoseFallbackDraws() throws {
+        let deadlineless = BuilderNode.countdown(
+            CountdownProps(id: "cd", fallback: BuilderNodeBox(node: carouselPage("cdFallback"))))
+        let unknown = BuilderNode.unknown(
+            id: "u", visibility: nil, fallback: BuilderNodeBox(node: carouselPage("uFallback")))
+        let view = try carousel([deadlineless, unknown])
+        XCTAssertEqual(view.pages.count, 2)
+    }
+
+    /// A restore button is dropped when there is no handler to route it to —
+    /// `ActionButtonView` renders nothing in that case, so the page is empty.
+    /// `makeCtx` builds a context with `onRestore: nil`, which is the whole
+    /// point: the same node is kept as a page the moment a handler exists, so
+    /// this cannot pass by ignoring the context.
+    func test_carousel_dropsARestoreButtonPageWithNoHandler() throws {
+        let restore = BuilderNode.button(
+            ButtonProps(id: "b1", labelKey: "k", style: .primary, action: .restore))
+        XCTAssertTrue(try carousel([restore]).pages.isEmpty)
+
+        let withHandler = try makeCtx(appVersion: nil, onRestore: {})
+        XCTAssertEqual(renderableCarouselPages([restore], ctx: withHandler, cell: nil).count, 1)
+    }
+
+    /// An icon page's `name` is overridable, so the drop rule has to judge the
+    /// node AFTER overrides. Both directions, same node: with the override
+    /// INACTIVE the unknown authored name stands and the page is dropped; with
+    /// it ACTIVE the override's real symbol name wins and the page is kept. A
+    /// predicate that ignored overrides would drop it in both, so neither half
+    /// can pass on its own.
+    func test_carousel_judgesAnIconPageAfterItsOverridesApply() throws {
+        let overridden = BuilderNode.icon(
+            IconProps(
+                id: "ic", name: "definitely-not-a-registry-icon",
+                overrides: [NodeOverride(when: .introEligible, props: IconOverrideProps(name: "star"))]))
+
+        // No offering in the default ctx, so `introEligible` is false.
+        XCTAssertTrue(try carousel([overridden]).pages.isEmpty)
+
+        let eligibleCtx = try makeCtx(
+            appVersion: nil, offering: introEligibleOffering(packageId: "pkg"), selectedPackageId: "pkg")
+        XCTAssertEqual(renderableCarouselPages([overridden], ctx: eligibleCtx, cell: nil).count, 1)
+    }
+
+    /// An offering whose single package is intro-eligible — the only way to
+    /// make an `introEligible` override active, since that condition is
+    /// derived from the selected package's product, never set directly.
+    private func introEligibleOffering(packageId: String) -> Offering {
+        let product = StoreProduct(
+            id: "product", type: .subscription, productCategory: .subscription, displayName: "unused",
+            description: nil, priceString: nil, price: nil, currencyCode: nil, subscriptionPeriod: nil,
+            subscriptionGroupIdentifier: nil, isFamilyShareable: false, introPrice: nil, discounts: [],
+            isEligibleForIntroOffer: true, subscriptionOptions: nil, defaultOption: nil, pricePerWeek: nil,
+            pricePerMonth: nil, pricePerYear: nil, pricePerWeekString: nil, pricePerMonthString: nil,
+            pricePerYearString: nil, rawStoreProduct: nil)
+        return Offering(
+            identifier: "default", isDefault: true,
+            packages: [Package(identifier: packageId, packageType: .custom, product: product)])
+    }
+
     // MARK: - carousel indicator colour
     //
     // Pins the resolved value that feeds `.tint(_:)` — which theme half won,
@@ -527,11 +630,54 @@ final class PaywallRenderSupportTests: XCTestCase {
     // smoke item S7. No test here asserts it, because such a test would pass
     // whether the dots recolour or not.
 
-    func test_carousel_absentIndicatorColorResolvesToNothingSoNoTintIsApplied() throws {
-        // Deliberately nil, not a substituted default: `.tint(nil)` would
-        // reset to the system tint rather than leave the paywall's ambient
-        // tint alone, so `body` must not call `.tint` at all.
-        XCTAssertNil(try carousel([carouselPage("p1")]).indicatorRGBA)
+    /// An absent `indicatorColor` resolves to the paywall's ambient ink, NOT
+    /// to "no tint" — this test previously pinned the opposite, which is the
+    /// divergence being closed: leaving `.tint` off lets `PageTabViewStyle`
+    /// draw its own white-ish dots, near-invisible on a light paywall, while
+    /// web and Android both substituted a concrete ink. Pinned by component
+    /// per theme, and against `textInkDefaultColor`'s own halves, so it is the
+    /// SAME ink the other two resolve (#0F172A light / #F8FAFC dark) rather
+    /// than merely "something non-nil".
+    func test_carousel_absentIndicatorColorResolvesToTheAmbientInk() throws {
+        let light = try XCTUnwrap(try carousel([carouselPage("p1")]).indicatorRGBA)
+        let expectedLight = try XCTUnwrap(parseHexColor(textInkDefaultColor.light))
+        XCTAssertEqual(light.red, expectedLight.red, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(light.green, expectedLight.green, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(light.blue, expectedLight.blue, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(light.alpha, 1.0, accuracy: colorComponentAccuracy)
+
+        let dark = try XCTUnwrap(try carousel([carouselPage("p1")], dark: true).indicatorRGBA)
+        let expectedDark = try XCTUnwrap(parseHexColor(try XCTUnwrap(textInkDefaultColor.dark)))
+        XCTAssertEqual(dark.red, expectedDark.red, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(dark.green, expectedDark.green, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(dark.blue, expectedDark.blue, accuracy: colorComponentAccuracy)
+
+        // ...and the two halves are genuinely different inks, so a resolver
+        // that ignored `dark` and returned the light half twice fails here.
+        XCTAssertNotEqual(light.red, dark.red, accuracy: colorComponentAccuracy)
+    }
+
+    /// The concrete cross-platform value, pinned once against the literal the
+    /// other two renderers carry (NodeViewFactory.kt's TEXT_INK_DEFAULT_COLOR,
+    /// styles.ts's DEFAULT_INK). The test above pins the carousel's resolution
+    /// against this constant; this pins the constant itself, so drifting it
+    /// away from the other platforms fails here rather than silently agreeing
+    /// with itself.
+    func test_textInkDefaultColor_matchesTheOtherTwoRenderersInk() {
+        XCTAssertEqual(textInkDefaultColor.light, "#0F172A")
+        XCTAssertEqual(textInkDefaultColor.dark, "#F8FAFC")
+    }
+
+    /// An unparsable explicit colour is a decode failure, not an instruction
+    /// to go back to invisible dots — it lands on the ink, as Android's
+    /// `resolvedInkTintColorInt` does.
+    func test_carousel_unparsableIndicatorColorFallsBackToTheInk() throws {
+        let garbage = ThemePair(light: "not-a-hex-colour", dark: "also-not")
+        let resolved = try XCTUnwrap(try carousel([carouselPage("p1")], indicatorColor: garbage).indicatorRGBA)
+        let expected = try XCTUnwrap(parseHexColor(textInkDefaultColor.light))
+        XCTAssertEqual(resolved.red, expected.red, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(resolved.green, expected.green, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(resolved.blue, expected.blue, accuracy: colorComponentAccuracy)
     }
 
     func test_carousel_indicatorColorResolvesThePerThemeHalfByValue() throws {
