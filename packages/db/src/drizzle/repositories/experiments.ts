@@ -110,6 +110,28 @@ export async function findByIdInProject(
   return rows[0] ?? null;
 }
 
+/**
+ * Project-scoped lookup by the backend-assigned `key`. Used as the
+ * SELECT-precheck before inserting a new experiment: a caller running
+ * inside a transaction can't retry after a unique-violation (the
+ * violation aborts the tx), so it checks for a collision first and
+ * only inserts once it has a key it believes is free. The
+ * (projectId, key) unique index remains the backstop for the
+ * astronomically-unlikely race between the precheck and the insert.
+ */
+export async function findExperimentByKey(
+  db: Db,
+  projectId: string,
+  key: string,
+): Promise<Pick<Experiment, "id"> | null> {
+  const rows = await db
+    .select({ id: experiments.id })
+    .from(experiments)
+    .where(and(eq(experiments.projectId, projectId), eq(experiments.key, key)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function findFirstExperimentByAudience(
   db: Db,
   audienceId: string,

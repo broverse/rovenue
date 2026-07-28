@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { audiences, type Audience } from "../schema";
 
@@ -61,6 +61,30 @@ export async function findByIds(
     .select()
     .from(audiences)
     .where(and(eq(audiences.projectId, projectId), inArray(audiences.id, ids)));
+}
+
+/**
+ * Audiences whose `rules` is the empty object — i.e. they match every
+ * subscriber, the same semantics as `isDefault` but not flagged as
+ * the project's default. Used by findOrCreateEveryoneAudience to find
+ * a reusable "matches everyone" audience before creating a new one.
+ * `rules` is jsonb; `@>` both ways would work for deep-equality too,
+ * but every project's rules value here is `{}` so plain `=` suffices.
+ */
+export async function findMatchAllAudiences(
+  db: Db,
+  projectId: string,
+): Promise<Audience[]> {
+  return db
+    .select()
+    .from(audiences)
+    .where(
+      and(
+        eq(audiences.projectId, projectId),
+        sql`${audiences.rules} = '{}'::jsonb`,
+      ),
+    )
+    .orderBy(asc(audiences.name));
 }
 
 export async function findAudienceInProject(

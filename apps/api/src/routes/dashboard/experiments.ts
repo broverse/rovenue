@@ -19,6 +19,10 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { ok } from "../../lib/response";
+import {
+  assertPaywallVariantsValid,
+  createExperimentValidated,
+} from "../../services/experiment-create";
 import { invalidateExperimentCache } from "../../services/experiment-engine";
 import { computeExperimentResults } from "../../services/experiment-results";
 import { invalidateFlagCache } from "../../services/flag-engine";
@@ -35,51 +39,6 @@ import { invalidateFlagCache } from "../../services/flag-engine";
  * error; those must surface immediately.
  */
 const EXPERIMENT_KEY_UNIQUE = "experiments_projectId_key_key";
-
-/**
- * PAYWALL experiments reference paywalls by id rather than carrying an
- * inline config: every variant's `value` must be `{ paywallId }` and
- * that id must belong to the project. Enforced on both create and
- * DRAFT-update (variant `value` is immutable once RUNNING, so there is
- * nothing to re-check on the RUNNING weight-only update path).
- */
-async function assertPaywallVariantsValid(
-  projectId: string,
-  type: ExperimentType,
-  variants: ReadonlyArray<{ value?: unknown }>,
-): Promise<void> {
-  if (type !== "PAYWALL") return;
-
-  const paywallIds: string[] = [];
-  for (const variant of variants) {
-    const value = variant.value as { paywallId?: unknown } | null | undefined;
-    if (
-      typeof value !== "object" ||
-      value === null ||
-      typeof value.paywallId !== "string" ||
-      value.paywallId.length === 0
-    ) {
-      throw new HTTPException(400, {
-        message: "PAYWALL experiment variants must carry value: { paywallId }",
-      });
-    }
-    paywallIds.push(value.paywallId);
-  }
-
-  const uniqueIds = [...new Set(paywallIds)];
-  const found = await drizzle.paywallRepo.findPaywallsByIds(
-    drizzle.db,
-    projectId,
-    uniqueIds,
-  );
-  const foundIds = new Set(found.map((p) => p.id));
-  const missing = uniqueIds.filter((id) => !foundIds.has(id));
-  if (missing.length > 0) {
-    throw new HTTPException(400, {
-      message: `Unknown paywallId(s) in PAYWALL experiment variants: ${missing.join(", ")}`,
-    });
-  }
-}
 
 function inferPromotedFlagType(
   experimentType: ExperimentType,
@@ -166,67 +125,23 @@ export const experimentsRoute = new Hono()
   .post("/", validate("json", createExperimentBodySchema), async (c) => {
     const body = c.req.valid("json");
 
-    // The key is backend-assigned below; validate the variant weight sum
-    // + id-uniqueness via the shared schema with a throwaway placeholder
-    // (the refinements never inspect the key itself).
-    variantsAndTypeSchema.parse({
-      type: body.type,
-      key: "_",
-      variants: body.variants,
-    });
-
     const user = c.get("user");
     await assertProjectCapability(body.projectId, user.id, "experiments:write");
 
-    const audience = await drizzle.audienceRepo.findAudienceInProject(
-      drizzle.db,
-      body.projectId,
-      body.audienceId,
-    );
-    if (!audience) {
-      throw new HTTPException(400, {
-        message: "audienceId does not belong to this project",
-      });
-    }
-
-    await assertPaywallVariantsValid(
-      body.projectId,
-      body.type as ExperimentType,
-      body.variants,
-    );
-
-    // Backend-assigned, immutable key. Retry on the (projectId, key)
-    // unique index in the astronomically-unlikely event of a cuid2 clash.
-    let experiment;
-    for (let attempt = 0; ; attempt += 1) {
-      const key = drizzle.experimentRepo.generateExperimentKey();
-      try {
-        experiment = await drizzle.experimentRepo.createExperiment(
-          drizzle.db,
-          {
-            projectId: body.projectId,
-            name: body.name,
-            description: body.description,
-            type: body.type as ExperimentType,
-            key,
-            audienceId: body.audienceId,
-            status: ExperimentStatus.DRAFT,
-            variants: body.variants,
-            metrics: body.metrics,
-            mutualExclusionGroup: body.mutualExclusionGroup,
-          },
-        );
-        break;
-      } catch (err) {
-        // Drizzle wraps the driver error, so the code and the constraint
-        // are one level down `.cause` — read at the top level this never
-        // matched and the loop could never actually retry.
-        if (isUniqueViolationOf(err, EXPERIMENT_KEY_UNIQUE) && attempt < 4) {
-          continue;
-        }
-        throw err;
-      }
-    }
+    // Validation (shared schema + audience membership + paywall
+    // variants), server-assigned key, and the insert itself all live
+    // in createExperimentValidated — see apps/api/src/services/
+    // experiment-create.ts for the precheck-then-insert key strategy.
+    const experiment = await createExperimentValidated(drizzle.db, {
+      projectId: body.projectId,
+      name: body.name,
+      description: body.description,
+      type: body.type as ExperimentType,
+      audienceId: body.audienceId,
+      variants: body.variants,
+      metrics: body.metrics,
+      mutualExclusionGroup: body.mutualExclusionGroup,
+    });
 
     await invalidateExperimentCache(body.projectId);
     await audit({
@@ -361,7 +276,12 @@ export const experimentsRoute = new Hono()
 
       if (body.variants) {
         const finalType = (body.type ?? existing.type) as ExperimentType;
-        await assertPaywallVariantsValid(existing.projectId, finalType, body.variants);
+        await assertPaywallVariantsValid(
+          drizzle.db,
+          existing.projectId,
+          finalType,
+          body.variants,
+        );
       }
 
       updates = {
