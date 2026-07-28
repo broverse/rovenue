@@ -2622,7 +2622,126 @@ describe("video and lottie nodes", () => {
       return null;
     });
     renderPaywall(lottieNode({ url: { light: "a.json" } }));
-    expect(seen[0]).toMatchObject({ url: "a.json", loop: true, autoplay: true, speed: 1 });
+    // `playing` is included here as well as in its own test below: it is the
+    // fifth field of the cross-platform contract, and a `toMatchObject` that
+    // silently omits it is how a renderer could ship never sending it at all.
+    // True before any intersection sample — the same fail-open answer every
+    // platform gives (`useNodeVisible` starts on-screen).
+    expect(seen[0]).toMatchObject({ url: "a.json", loop: true, autoplay: true, speed: 1, playing: true });
     registerLottieRenderer(null);
+  });
+
+  it("flips `playing` on the registered lottie renderer as the node leaves and re-enters the viewport", () => {
+    // The prop this wave exists for. The host player owns pausing; the
+    // renderer's whole job is to tell it, moment to moment, whether the node
+    // is on screen — so an assertion on the value RE-DELIVERED after a
+    // visibility change is the only thing that proves the wiring.
+    const observers: Array<{ emit(isIntersecting: boolean): void }> = [];
+    class StubIntersectionObserver {
+      #callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.#callback = callback;
+        observers.push(this);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      emit(isIntersecting: boolean) {
+        this.#callback([{ isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", StubIntersectionObserver);
+    const playingSeen: boolean[] = [];
+    // Returns a real element, not null: the wrapper `<div>` (and with it the
+    // observed element) only mounts when the host draws something.
+    registerLottieRenderer((props) => {
+      playingSeen.push(props.playing);
+      return <span data-rov-lottie-stub="">animation</span>;
+    });
+    try {
+      const { container } = renderPaywall(lottieNode({ url: { light: "a.json" } }));
+      expect(container.querySelector("[data-rov-lottie-stub]")).not.toBeNull();
+      const observer = observers[0]!;
+      const latestPlaying = () => playingSeen[playingSeen.length - 1];
+
+      // Fail open before any sample has arrived.
+      expect(latestPlaying()).toBe(true);
+
+      act(() => observer.emit(false));
+      expect(latestPlaying()).toBe(false);
+
+      act(() => observer.emit(true));
+      expect(latestPlaying()).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  /** The state `newNode("video")` creates in the builder — a video dragged in
+   *  and previewed before a URL is pasted. Not an exotic input: it is the
+   *  default one, which is why the pre-mount source check matters at all. */
+  const UNCONFIGURED_VIDEO_URL = { light: "" };
+
+  function carouselOf(...children: PaywallNode[]): BuilderConfig {
+    return configFor({ type: "carousel", id: "carousel-1", children });
+  }
+
+  it("gives an undrawable video and an undrawable lottie no carousel page and no dot (C1/C2)", () => {
+    // Wave D1's rule, which web was breaking on both media node types: a page
+    // that draws nothing is DROPPED, because a dot is a promise that there is
+    // something to swipe to. Neither of these two can draw, and both facts are
+    // knowable synchronously — the video's source is blank, and no host Lottie
+    // player is registered (the `afterEach` above guarantees that).
+    registerLottieRenderer(null);
+    const { container } = renderPaywall(
+      carouselOf(
+        textNode("realPageOne"),
+        { type: "video", id: "blank-video", url: UNCONFIGURED_VIDEO_URL },
+        { type: "lottie", id: "unplayable-lottie", url: { light: "a.json" } },
+        textNode("realPageTwo"),
+      ),
+    );
+    // Four authored pages, two of which draw nothing.
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(2);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(2);
+    // The survivors are the two real ones — a count alone would pass even if
+    // the wrong pair survived.
+    expect(container.textContent).toContain("realPageOne");
+    expect(container.textContent).toContain("realPageTwo");
+    // And nothing was mounted for the two that were dropped.
+    expect(container.querySelector("video")).toBeNull();
+  });
+
+  it("keeps the page when an undrawable video or lottie carries a fallback", () => {
+    // The guard routes through the ordinary `fallback`-else-nothing path, it
+    // does not drop unconditionally: a fallback DRAWS, so the page is real
+    // and the dot is honest.
+    registerLottieRenderer(null);
+    const { container } = renderPaywall(
+      carouselOf(
+        textNode("realPage"),
+        { type: "video", id: "blank-video", url: UNCONFIGURED_VIDEO_URL, fallback: textNode("no video") },
+        { type: "lottie", id: "unplayable-lottie", url: { light: "a.json" }, fallback: textNode("no lottie") },
+      ),
+    );
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(3);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(3);
+    expect(container.textContent).toContain("no video");
+    expect(container.textContent).toContain("no lottie");
+  });
+
+  it("renders nothing for a blank-source video outside a carousel, and its fallback when it has one", () => {
+    // The same pre-mount answer, seen without the carousel: no `<video>`
+    // element is ever created for a source that cannot parse, so the browser
+    // never re-requests the hosting document as if it were media.
+    const bare = renderPaywall(videoNode({ url: UNCONFIGURED_VIDEO_URL }));
+    expect(bare.container.querySelector("video")).toBeNull();
+    expect(bare.container.textContent).toBe("");
+
+    const withFallback = renderPaywall(
+      videoNode({ url: UNCONFIGURED_VIDEO_URL, fallback: textNode("no video") }),
+    );
+    expect(withFallback.container.querySelector("video")).toBeNull();
+    expect(withFallback.container.textContent).toContain("no video");
   });
 });

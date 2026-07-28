@@ -1111,23 +1111,76 @@ export function videoPlaybackCommand(visible: boolean, autoplay: boolean): Video
 }
 
 /**
+ * The base a RELATIVE `video` source is parsed against, and nothing else: it
+ * is never fetched and never reaches the element, which always receives the
+ * authored string unchanged. A relative source (`"clip.mp4"`) is legitimate
+ * on web — the browser resolves it against the hosting document — so "is this
+ * a URL at all?" cannot be answered by `new URL(src)` alone, which rejects
+ * every relative string. Parsing against a fixed, deliberately unroutable
+ * base answers exactly the question asked without depending on `document`,
+ * which is absent under SSR. `.invalid` is the reserved never-resolvable TLD
+ * (RFC 2606), so this can never accidentally address a real host.
+ */
+const VIDEO_SOURCE_PARSE_BASE_URL = "https://source-probe.rovenue.invalid/";
+
+/**
+ * Whether a `video`'s theme-resolved source is a URL at all — the only half
+ * of "will this draw?" that is knowable BEFORE the browser tries to load it,
+ * and therefore the only half a carousel fixing its page and dot counts can
+ * act on. Mirrors iOS's `videoHasParsableSource` (`RovenuePaywallView.swift`,
+ * consumed by `nodeRendersContent`) and Android's (`NodeViewFactory.kt`,
+ * consumed by `buildVideo`), asked at the same pre-mount moment on all three.
+ *
+ * The BLANK source is the case that matters most, and it is not exotic:
+ * `newNode("video")` creates `url: { light: "" }`, so every freshly added
+ * video in the builder is in exactly this state until a URL is pasted. Left
+ * unguarded, `<video src="">` re-requests the hosting document itself.
+ *
+ * What this deliberately does NOT cover: a source that parses and then fails
+ * during load. That answer is asynchronous on every platform and arrives long
+ * after the page list was built — see `Video`'s own doc comment.
+ */
+function videoHasParsableSource(node: VideoNode, ctx: RenderCtx): boolean {
+  const source = resolveThemeUrl(node.url, ctx.colorScheme).trim();
+  if (source === "") return false;
+  try {
+    // Constructed only to see whether it throws; the parsed result is
+    // discarded, since the element is handed the authored string.
+    new URL(source, VIDEO_SOURCE_PARSE_BASE_URL);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A video plays or pauses via ITS OWN ELEMENT (`play()`/`pause()`), never by
  * remounting — a remount restarts playback from zero, a different and worse
  * behaviour than "resume where it left off", and it would diverge from both
  * the SwiftUI and Android-Views renderers that follow this one. `useNodeVisible`
  * is the exact same on/off-screen signal `Countdown` and `Carousel` already
  * consume (document visible AND intersecting the viewport) — this is the
- * third and intentionally last copy of "when is this on screen" logic; the
- * signal itself lives in one place (`visibility.ts`).
+ * third CONSUMER of that one shared signal, not a third copy of it: the
+ * logic itself exists once, in `visibility.ts`, and every node type that
+ * needs it calls the same hook.
  *
- * Unlike `Countdown`/`Carousel`, whether this node draws anything is NOT
- * decidable before mount: a countdown with no deadline or an empty carousel
- * both know that synchronously, but whether a video's source will fail is
- * only known once the browser tries to load it (`onerror`, asynchronous).
- * So this component always mounts, and answers "did it fail?" from state
- * instead of from `renderNode`'s pre-mount branch — `errored` flips the
- * render from the `<video>` element to `fallback`/null, following the exact
- * same "fail to fallback, else nothing" contract as every other node type.
+ * Whether this node draws anything splits into two halves, and only one of
+ * them reaches this component. The PRE-MOUNT half — does the source parse at
+ * all? — is `videoHasParsableSource` above, answered by `renderNode` before
+ * this component exists, because a carousel counts its pages from what
+ * `renderNode` returns and a component that mounts its hooks and then draws
+ * nothing is still a page to its parent. The POST-MOUNT half — a source that
+ * parses and then fails to load — is only knowable once the browser tries
+ * (`onerror`, asynchronous), so it is answered from state here: `errored`
+ * flips the render from the `<video>` element to `fallback`/null, the same
+ * "fail to fallback, else nothing" contract every other node type follows.
+ *
+ * That second half is an ACCEPTED cross-platform limitation, identical on
+ * iOS (`nodeRendersContent`'s `.video` arm says so explicitly) and Android:
+ * a video that fails after mount does not shrink its carousel's page or dot
+ * count. Closing it needs a page list that can shrink after mount on three
+ * different paging primitives; the guard meanwhile is the author's
+ * `fallback`.
  */
 function Video({ node, ctx }: { node: VideoNode; ctx: RenderCtx }): ReactElement | null {
   // Callback ref, not useRef: same reasoning as `Countdown`'s `element` — the
@@ -1204,11 +1257,37 @@ export function registerLottieRenderer(render: LottieRenderer | null): void {
 }
 
 /**
+ * Whether a `lottie` node can draw anything at all, WITHOUT invoking the
+ * host's player — asking is not allowed to cause the host's side effect of
+ * building one.
+ *
+ * Unlike a video's load failure this is fully decidable up front, because
+ * registration is process state already in hand, which is why `renderNode`
+ * consults it BEFORE mounting `Lottie` and an unregistered lottie inside a
+ * carousel costs no page and no phantom dot. Mirrors iOS's `lottieCanRender`
+ * (`RovenuePaywallLottie.swift`) and the registration half of Android's
+ * `buildLottie` (`NodeViewFactory.kt`).
+ *
+ * Registration is the only question asked here. Whether the node's URL
+ * parses is NOT: web hands the authored string to the host player as-is (as
+ * Android does), a documented divergence from iOS that this predicate
+ * deliberately does not settle on its own.
+ */
+function lottieCanRender(): boolean {
+  return lottieRenderer !== null;
+}
+
+/**
  * With no renderer registered, this node renders `fallback` else nothing —
  * the existing machinery every node type already has, not a new failure
- * mode. `playing` rides the same `useNodeVisible` signal `Video` and
- * `Carousel` use, so a host player that honours it pauses off-screen for
- * free.
+ * mode. That answer is reached before this component ever mounts
+ * (`lottieCanRender`, consulted in `renderNode`); the guard repeated below
+ * is what narrows the module-level `lottieRenderer` to non-null for the call
+ * that follows, and keeps the component correct if it is ever mounted
+ * directly.
+ *
+ * `playing` rides the same `useNodeVisible` signal `Video` and `Carousel`
+ * use, so a host player that honours it pauses off-screen for free.
  */
 function Lottie({ node, ctx }: { node: LottieNode; ctx: RenderCtx }): ReactElement | null {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
@@ -1216,6 +1295,16 @@ function Lottie({ node, ctx }: { node: LottieNode; ctx: RenderCtx }): ReactEleme
 
   if (lottieRenderer === null) return renderFallbackOrNull(node, ctx);
 
+  // Called in the render pass rather than from an effect, deliberately. The
+  // props include `playing`, which IS the visibility signal, and the
+  // `rendered === null` answer below decides `fallback` — moving the call
+  // into an effect would push that decision after mount (weakening the
+  // pre-mount guarantee `lottieCanRender` exists for) and would need a state
+  // round-trip and an extra commit to get the element back on screen. Unlike
+  // Android's `LottieNodeView`, whose host builds a real `View` per call,
+  // the web host returns a React element — an inert descriptor — so React's
+  // own reconciliation, not a call count, decides whether the player is
+  // actually rebuilt.
   const rendered = lottieRenderer({
     url: resolveThemeUrl(node.url, ctx.colorScheme),
     loop: node.loop ?? LOTTIE_DEFAULT_LOOP,
@@ -1284,11 +1373,11 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         return renderSocialProof(resolved, ctx);
       case "stickyFooter":
         return renderStickyFooter(resolved, ctx);
-      // Both of the stateful node types answer "do I draw anything?" HERE,
-      // before their component exists, so that a null answer becomes
-      // `renderNode` returning null — the one signal a parent carousel reads
-      // to decide a page exists. A component that mounts its hooks and then
-      // returns null is, to its parent, still a page.
+      // Every stateful node type answers "do I draw anything?" HERE, before
+      // its component exists, so that a null answer becomes `renderNode`
+      // returning null — the one signal a parent carousel reads to decide a
+      // page exists. A component that mounts its hooks and then returns null
+      // is, to its parent, still a page.
       case "countdown":
         if (!countdownHasDeadline(resolved)) return renderFallbackOrNull(resolved, ctx);
         return <Countdown node={resolved} ctx={ctx} />;
@@ -1297,13 +1386,23 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         if (pages.length === 0) return renderFallbackOrNull(resolved, ctx);
         return <Carousel node={resolved} ctx={ctx} pages={pages} />;
       }
-      // Unlike the two cases above, neither of these can decide "do I draw
-      // anything?" before mounting: a video's source failing and a lottie
-      // renderer being unregistered are both discoverable only inside the
-      // component (see `Video`/`Lottie`'s own doc comments).
+      // The two media nodes answer the same question HERE too, for the same
+      // reason — a carousel fixes its page and dot counts from what this
+      // function returns, and a component that mounts and then draws nothing
+      // is still a page to its parent. Both natives ask exactly these two
+      // questions at exactly this moment (iOS `nodeRendersContent`, Android
+      // `buildVideo`/`buildLottie`).
+      //
+      // What is asked is only the half that is knowable synchronously: does
+      // the video's source parse, and is a lottie player registered. A video
+      // whose source parses and then fails DURING LOAD is asynchronous on
+      // every platform and is an accepted limitation, not an oversight — see
+      // `Video`'s doc comment.
       case "video":
+        if (!videoHasParsableSource(resolved, ctx)) return renderFallbackOrNull(resolved, ctx);
         return <Video node={resolved} ctx={ctx} />;
       case "lottie":
+        if (!lottieCanRender()) return renderFallbackOrNull(resolved, ctx);
         return <Lottie node={resolved} ctx={ctx} />;
       default:
         return renderFallbackOrNull(resolved, ctx);
