@@ -18,6 +18,7 @@ import type {
 import { useExperiments, useStartExperiment } from "../../lib/hooks/useExperiments";
 import { useProjectPaywalls } from "../../lib/hooks/useProjectPaywalls";
 import { useProjectPlacements } from "../../lib/hooks/useProjectPlacements";
+import { useAudiences } from "../../lib/hooks/useProjectAdmin";
 
 // =============================================================
 // ExperimentPopover — atomic paywall A/B launch (§3.1). Mounting idiom
@@ -26,13 +27,17 @@ import { useProjectPlacements } from "../../lib/hooks/useProjectPlacements";
 // hand back a fake detail DTO. Two extra layers on top of that idiom:
 //
 //   1. useExperiments/useStartExperiment/useProjectPaywalls/
-//      useProjectPlacements are vi.mock'd wholesale (no network shape to
-//      fake — just return canned react-query-shaped results).
-//   2. The popover's two file-local hooks (useAudiences, the launch
-//      mutation) are NOT mockable that way — they're private to
-//      experiment-popover.tsx — so instead `rpc`/`unwrap` from lib/api are
-//      mocked at the transport layer and the hooks run for real inside a
-//      real QueryClientProvider.
+//      useProjectPlacements/useAudiences are vi.mock'd wholesale (no
+//      network shape to fake — just return canned react-query-shaped
+//      results). useAudiences is the SAME hook useProjectAdmin.ts exports
+//      (experiments/new.tsx, audiences/index.tsx, placement-editor.tsx
+//      already use it) — the popover must not fragment that cache with a
+//      file-local duplicate, so its mock path is that shared module too.
+//   2. The launch mutation IS file-local (no shared endpoint to reuse —
+//      see the comment in experiment-popover.tsx) and isn't mockable that
+//      way, so `rpc`/`unwrap` from lib/api are mocked at the transport
+//      layer and the mutation runs for real inside a real
+//      QueryClientProvider.
 // =============================================================
 
 // `Link` needs a live TanStack Router context this harness doesn't set up
@@ -79,14 +84,15 @@ vi.mock("../../lib/hooks/useProjectPaywalls", () => ({
 vi.mock("../../lib/hooks/useProjectPlacements", () => ({
   useProjectPlacements: vi.fn(),
 }));
+vi.mock("../../lib/hooks/useProjectAdmin", () => ({
+  useAudiences: vi.fn(),
+}));
 
-const audiencesGet = vi.hoisted(() => vi.fn());
 const launchPost = vi.hoisted(() => vi.fn());
 
 vi.mock("../../lib/api", () => ({
   rpc: {
     dashboard: {
-      audiences: { $get: audiencesGet },
       projects: {
         ":projectId": {
           paywalls: {
@@ -103,6 +109,7 @@ const mockedUseExperiments = vi.mocked(useExperiments);
 const mockedUseStartExperiment = vi.mocked(useStartExperiment);
 const mockedUseProjectPaywalls = vi.mocked(useProjectPaywalls);
 const mockedUseProjectPlacements = vi.mocked(useProjectPlacements);
+const mockedUseAudiences = vi.mocked(useAudiences);
 
 function experimentsResult(data: ExperimentListItem[]) {
   return { data, isLoading: false, error: null } as unknown as ReturnType<typeof useExperiments>;
@@ -126,6 +133,10 @@ function placementsResult(rows: DashboardPlacementRow[]) {
 
 function startExperimentResult(mutate: (id: string) => void, isPending = false) {
   return { mutate, isPending } as unknown as ReturnType<typeof useStartExperiment>;
+}
+
+function audiencesResult(rows: AudienceRow[]) {
+  return { data: rows, isLoading: false, error: null } as unknown as ReturnType<typeof useAudiences>;
 }
 
 function fakeDetail(overrides: Partial<PaywallBuilderDetailDto> = {}): PaywallBuilderDetailDto {
@@ -259,7 +270,7 @@ beforeEach(() => {
   mockedUseStartExperiment.mockReturnValue(startExperimentResult(vi.fn()));
   mockedUseProjectPaywalls.mockReturnValue(paywallsResult([]));
   mockedUseProjectPlacements.mockReturnValue(placementsResult([]));
-  audiencesGet.mockResolvedValue({ audiences: [fakeAudience()] });
+  mockedUseAudiences.mockReturnValue(audiencesResult([fakeAudience()]));
   launchPost.mockResolvedValue({
     experiment: fakeExperiment(),
     createdPaywallId: "pw_b",
@@ -298,11 +309,9 @@ describe("ExperimentPopover — create posts the exact launch payload", () => {
 
     await renderPopover();
 
-    // The single candidate row is auto-preselected — wait for the
-    // audiences query (real react-query) to resolve before asserting.
-    await waitFor(() => {
-      expect(screen.getByText(/Everyone \(default\)/)).toBeInTheDocument();
-    });
+    // The single candidate row is auto-preselected, and the default
+    // audience is already selected via the mocked useAudiences.
+    expect(screen.getByText(/Everyone \(default\)/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /create experiment/i }));
 
@@ -340,6 +349,24 @@ describe("ExperimentPopover — status-panel branch", () => {
 
     expect(screen.getByText("Main paywall A/B")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /start experiment/i })).toBeDisabled();
+  });
+
+  it("renders a formatted status label, not the raw uppercase enum", async () => {
+    mockedUseExperiments.mockReturnValue(
+      experimentsResult([fakeExperiment({ status: "RUNNING" })]),
+    );
+    mockedUseProjectPlacements.mockReturnValue(
+      placementsResult([
+        fakePlacementRow({
+          rows: [{ audienceId: null, target: { type: "experiment", experimentId: "exp_1" } }],
+        }),
+      ]),
+    );
+
+    await renderPopover();
+
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.queryByText("RUNNING")).not.toBeInTheDocument();
   });
 
   it("enables Start once every prerequisite passes, and Start posts the experiment id", async () => {

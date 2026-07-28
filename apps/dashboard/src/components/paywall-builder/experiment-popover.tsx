@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import { Link } from "@tanstack/react-router";
 import { AlertCircle, ArrowUpRight, FlaskConical, X } from "lucide-react";
 import type {
   AudienceRow,
-  AudiencesListResponse,
   DashboardExperimentStatus,
   ExperimentListItem,
 } from "@rovenue/shared";
@@ -20,6 +19,7 @@ import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { useExperiments, useStartExperiment } from "../../lib/hooks/useExperiments";
 import { useProjectPaywalls } from "../../lib/hooks/useProjectPaywalls";
 import { useProjectPlacements } from "../../lib/hooks/useProjectPlacements";
+import { useAudiences } from "../../lib/hooks/useProjectAdmin";
 
 type Props = { onClose: () => void };
 
@@ -61,25 +61,15 @@ interface PlacementCandidate {
 }
 
 // =============================================================
-// File-local data hooks — no `usePlacements`/`useAudiences` hook exists yet
-// project-wide (grepped `src/lib/hooks` first per the brief); mirrors the
-// bare useQuery-wrapping-rpc idiom of useOfferingResolvedPrices.ts. The
-// launch mutation has no home in useExperiments.ts either: that file's
-// `useCreateExperiment` posts to the generic `/dashboard/experiments`
-// endpoint, not this paywall-scoped atomic-launch one.
+// File-local data hook — no `usePlacements` hook exists yet project-wide
+// (grepped `src/lib/hooks` first per the brief) and `useAudiences` already
+// does (useProjectAdmin.ts, imported above — a file-local duplicate would
+// have fragmented the query-cache key audience mutations invalidate).
+// This launch mutation has no home in useExperiments.ts either: that
+// file's `useCreateExperiment` posts to the generic `/dashboard/experiments`
+// endpoint, not this paywall-scoped atomic-launch one. Mirrors the bare
+// useQuery-wrapping-rpc idiom of useOfferingResolvedPrices.ts.
 // =============================================================
-
-function useAudiences(projectId: string) {
-  return useQuery({
-    queryKey: ["audiences", "list", projectId],
-    enabled: Boolean(projectId),
-    queryFn: () =>
-      unwrap<AudiencesListResponse>(
-        rpc.dashboard.audiences.$get({ query: { projectId } }),
-      ),
-    select: (res) => res.audiences,
-  });
-}
 
 function useLaunchExperiment(projectId: string, paywallId: string) {
   const qc = useQueryClient();
@@ -122,6 +112,25 @@ function matchesPaywall(experiment: ExperimentListItem, paywallId: string): bool
     const value = v.value as { paywallId?: string } | null | undefined;
     return value?.paywallId === paywallId;
   });
+}
+
+/** Static per-status t() calls — never build the key with the status value
+ * itself, so Task 5's grep audit for `t("paywalls.builder.experiment.…"`
+ * literals finds every one of these. */
+function statusLabel(
+  status: DashboardExperimentStatus,
+  t: (key: string, fallback: string) => string,
+): string {
+  switch (status) {
+    case "DRAFT":
+      return t("paywalls.builder.experiment.status.draft", "Draft");
+    case "RUNNING":
+      return t("paywalls.builder.experiment.status.running", "Running");
+    case "PAUSED":
+      return t("paywalls.builder.experiment.status.paused", "Paused");
+    case "COMPLETED":
+      return t("paywalls.builder.experiment.status.completed", "Completed");
+  }
 }
 
 /**
@@ -298,10 +307,7 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                       {activeExperiment.name}
                     </span>
                     <Chip tone={STATUS_CHIP_TONE[activeExperiment.status]}>
-                      {t(
-                        `paywalls.builder.experiment.status.${activeExperiment.status.toLowerCase()}`,
-                        activeExperiment.status,
-                      )}
+                      {statusLabel(activeExperiment.status, t)}
                     </Chip>
                   </div>
 
@@ -376,7 +382,7 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                     <div className="flex items-center gap-2 font-medium text-foreground">
                       {completedDarkExperiment.name}
                       <Chip tone="default">
-                        {t("paywalls.builder.experiment.status.completed", "COMPLETED")}
+                        {statusLabel(completedDarkExperiment.status, t)}
                       </Chip>
                     </div>
                     <p className="mt-0.5">
