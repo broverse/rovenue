@@ -133,6 +133,63 @@ class BuilderConfigModelTest {
         assertEquals("#EEEEEE", node.indicatorColor?.dark)
     }
 
+    // ---- video / lottie nodes (wave D2) -----------------------------------
+    // Selected BY NAME through `decodeFixtureNode`, never by index — see its
+    // doc for the position-assumption breakage that rule exists to prevent.
+
+    @Test
+    fun `decodes the bare video from the shared fixture`() {
+        val node = decodeFixtureNode("video-bare")
+        assertTrue(node is BuilderNode.Video)
+        // Every optional stays NULL rather than being pre-resolved at decode
+        // time: which default a bare field takes is the RENDERER's decision
+        // (VIDEO_DEFAULT_*), and baking it in here would make the absent and
+        // the explicitly-authored cases indistinguishable downstream.
+        assertNull((node as BuilderNode.Video).autoplay)
+        assertEquals("https://x/a.mp4", node.url.light)
+        assertNull(node.url.dark)
+        assertNull(node.posterUrl)
+        assertNull(node.loop)
+        assertNull(node.muted)
+        assertNull(node.showsControls)
+        assertNull(node.aspectRatio)
+    }
+
+    @Test
+    fun `decodes the full video from the shared fixture`() {
+        val node = decodeFixtureNode("video-full") as BuilderNode.Video
+        assertEquals("https://x/a.mp4", node.url.light)
+        assertEquals("https://x/a-dark.mp4", node.url.dark)
+        assertEquals("https://x/poster.png", node.posterUrl?.light)
+        assertEquals("https://x/poster-dark.png", node.posterUrl?.dark)
+        assertEquals(false, node.autoplay)
+        assertEquals(false, node.loop)
+        assertEquals(false, node.muted)
+        assertEquals(true, node.showsControls)
+        assertEquals(1.777, node.aspectRatio)
+    }
+
+    @Test
+    fun `decodes the bare lottie from the shared fixture`() {
+        val node = decodeFixtureNode("lottie-bare")
+        assertTrue(node is BuilderNode.Lottie)
+        assertEquals("https://x/a.json", (node as BuilderNode.Lottie).url.light)
+        assertNull(node.url.dark)
+        assertNull(node.loop)
+        assertNull(node.autoplay)
+        assertNull(node.speed)
+    }
+
+    @Test
+    fun `decodes the full lottie from the shared fixture`() {
+        val node = decodeFixtureNode("lottie-full") as BuilderNode.Lottie
+        assertEquals("https://x/a.json", node.url.light)
+        assertEquals("https://x/a-dark.json", node.url.dark)
+        assertEquals(false, node.loop)
+        assertEquals(false, node.autoplay)
+        assertEquals(2.0, node.speed)
+    }
+
     @Test
     fun everyRegistryIconHasADrawable() {
         val registry = java.io.File("../shared/src/paywall/icon-registry.json")
@@ -598,6 +655,22 @@ class BuilderConfigModelTest {
             CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
             defaults["CAROUSEL_MIN_AUTO_ADVANCE_SECONDS"]!!.jsonPrimitive.int,
         )
+        // The nine wave-D2 keys. Same by-value discipline: these are the
+        // renderer's hand-mirrored copies of schema.ts, and this comparison
+        // is the only thing standing between a shared-side edit and Android
+        // quietly playing a clip with sound the author muted.
+        assertEquals(VIDEO_DEFAULT_AUTOPLAY, defaults["VIDEO_DEFAULT_AUTOPLAY"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(VIDEO_DEFAULT_LOOP, defaults["VIDEO_DEFAULT_LOOP"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(VIDEO_DEFAULT_MUTED, defaults["VIDEO_DEFAULT_MUTED"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(
+            VIDEO_DEFAULT_SHOWS_CONTROLS,
+            defaults["VIDEO_DEFAULT_SHOWS_CONTROLS"]!!.jsonPrimitive.content.toBoolean(),
+        )
+        assertEquals(LOTTIE_DEFAULT_LOOP, defaults["LOTTIE_DEFAULT_LOOP"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(LOTTIE_DEFAULT_AUTOPLAY, defaults["LOTTIE_DEFAULT_AUTOPLAY"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(LOTTIE_DEFAULT_SPEED, defaults["LOTTIE_DEFAULT_SPEED"]!!.jsonPrimitive.double)
+        assertEquals(LOTTIE_MIN_SPEED, defaults["LOTTIE_MIN_SPEED"]!!.jsonPrimitive.double)
+        assertEquals(LOTTIE_MAX_SPEED, defaults["LOTTIE_MAX_SPEED"]!!.jsonPrimitive.double)
     }
 
     private fun countdownOnExpiryFrom(raw: String): CountdownOnExpiry = when (raw) {

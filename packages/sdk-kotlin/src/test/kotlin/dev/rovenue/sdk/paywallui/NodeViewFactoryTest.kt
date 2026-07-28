@@ -35,6 +35,7 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -832,6 +833,170 @@ class NodeViewFactoryTest {
         }
     }
 
+    // ---- video / lottie (wave D2) ---------------------------------------
+    //
+    // WHAT IS NOT HERE, and cannot be: whether the `MediaPlayer` actually
+    // starts, whether it pauses when the node scrolls off screen, and whether
+    // audio genuinely stops. All three are device-only — this module's stub
+    // android.jar (`isReturnDefaultValues = true`) makes `MediaPlayer`,
+    // `TextureView` and `Surface` inert, so a test asserting "it played"
+    // would be asserting the stub's default, not the renderer. What IS pinned
+    // is the RULE those calls obey (`videoPlaybackCommand`), the ratio
+    // arithmetic, and the whole lottie registration/default-resolution path,
+    // none of which touch a stubbed Android type.
+
+    @AfterEach
+    fun clearLottieRegistration() {
+        // Registration is PROCESS-LEVEL state. Without this, a test that
+        // registers a player leaks it into every test that runs after it —
+        // including `a lottie node with no registered renderer...`, which
+        // would then pass or fail on ordering.
+        registerLottieRenderer(null)
+    }
+
+    @Test
+    fun `an off-screen video pauses whatever the author asked for`() {
+        assertEquals(VideoPlaybackCommand.PAUSE, videoPlaybackCommand(active = false, autoplay = true))
+        assertEquals(VideoPlaybackCommand.PAUSE, videoPlaybackCommand(active = false, autoplay = false))
+    }
+
+    @Test
+    fun `an on-screen autoplay video plays`() {
+        assertEquals(VideoPlaybackCommand.PLAY, videoPlaybackCommand(active = true, autoplay = true))
+    }
+
+    @Test
+    fun `an on-screen video with autoplay false is left alone, not started`() {
+        // The whole reason the command has three states. A two-state boolean
+        // would collapse this onto PLAY and start a clip the author said
+        // must not start itself.
+        assertEquals(VideoPlaybackCommand.LEAVE_ALONE, videoPlaybackCommand(active = true, autoplay = false))
+    }
+
+    @Test
+    fun `an absent aspectRatio applies no ratio until the source reports its own`() {
+        assertNull(
+            videoEffectiveAspectRatio(
+                authored = null,
+                sourceWidthPx = UNREPORTED_VIDEO_DIMENSION_PX,
+                sourceHeightPx = UNREPORTED_VIDEO_DIMENSION_PX,
+            ),
+            "no authored ratio and no source dimensions must substitute NO number",
+        )
+        assertEquals(
+            SOURCE_VIDEO_WIDTH_PX.toDouble() / SOURCE_VIDEO_HEIGHT_PX.toDouble(),
+            videoEffectiveAspectRatio(
+                authored = null,
+                sourceWidthPx = SOURCE_VIDEO_WIDTH_PX,
+                sourceHeightPx = SOURCE_VIDEO_HEIGHT_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `an authored aspectRatio wins over the source's own dimensions`() {
+        assertEquals(
+            AUTHORED_ASPECT_RATIO,
+            videoEffectiveAspectRatio(
+                authored = AUTHORED_ASPECT_RATIO,
+                sourceWidthPx = SOURCE_VIDEO_WIDTH_PX,
+                sourceHeightPx = SOURCE_VIDEO_HEIGHT_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `aspect ratio is width over height, not height over width`() {
+        // Inverting this is the classic version of this bug and would still
+        // produce a plausible-looking box, so the assertion pins the
+        // direction rather than merely "some height came back". The ratio
+        // divides the width EXACTLY, so the expected value is a literal
+        // rather than the implementation's own arithmetic restated (which
+        // would pass however the division were written).
+        assertEquals(
+            EXACTLY_DIVIDED_HEIGHT_PX,
+            videoHeightForAspectRatio(SOURCE_VIDEO_WIDTH_PX, EXACTLY_DIVIDING_ASPECT_RATIO),
+        )
+        assertTrue(videoHeightForAspectRatio(MEASURED_SLOT_PX, AUTHORED_ASPECT_RATIO) < MEASURED_SLOT_PX)
+    }
+
+    @Test
+    fun `an unparsable video source is decided before any player exists`() {
+        assertTrue(videoHasParsableSource(ThemePair(light = "https://x/a.mp4"), dark = false))
+        assertFalse(videoHasParsableSource(ThemePair(light = "not a url"), dark = false))
+    }
+
+    @Test
+    fun `a lottie node with no registered renderer has no view to build`() {
+        registerLottieRenderer(null)
+        assertNull(lottieViewOrNull(context = mockContext(), request = bareLottieRequest()))
+    }
+
+    @Test
+    fun `a registered lottie renderer receives the resolved defaults`() {
+        var captured: LottieRenderRequest? = null
+        val hostView = mockk<View>(relaxed = true)
+        registerLottieRenderer { _, request ->
+            captured = request
+            hostView
+        }
+
+        val view = lottieViewOrNull(mockContext(), lottieRenderRequest(bareLottieNode(), playing = true, dark = false))
+
+        assertSame(hostView, view)
+        // Literal expected values, not the constants themselves — comparing a
+        // constant against itself would pass no matter what it held. The
+        // constants are separately pinned against schema.ts by the by-value
+        // sync test in BuilderConfigModelTest.
+        assertEquals(
+            LottieRenderRequest(
+                url = "https://x/a.json",
+                loop = true,
+                autoplay = true,
+                speed = 1.0,
+                playing = true,
+            ),
+            captured,
+        )
+    }
+
+    @Test
+    fun `an authored lottie's own values are handed over unclamped`() {
+        var captured: LottieRenderRequest? = null
+        registerLottieRenderer { _, request ->
+            captured = request
+            mockk<View>(relaxed = true)
+        }
+        // Above LOTTIE_MAX_SPEED on purpose: the shared range is authoring-
+        // time ADVICE (a validator warning), not a clamp, so the renderer
+        // must pass it through unchanged on every platform.
+        val node = bareLottieNode().copy(loop = false, autoplay = false, speed = OVER_ADVISED_LOTTIE_SPEED)
+
+        lottieViewOrNull(mockContext(), lottieRenderRequest(node, playing = false, dark = false))
+
+        assertEquals(
+            LottieRenderRequest(
+                url = "https://x/a.json",
+                loop = false,
+                autoplay = false,
+                speed = OVER_ADVISED_LOTTIE_SPEED,
+                playing = false,
+            ),
+            captured,
+        )
+    }
+
+    @Test
+    fun `a lottie's dark url wins in dark mode`() {
+        val node = bareLottieNode().copy(url = ThemePair(light = "https://x/a.json", dark = "https://x/a-dark.json"))
+        assertEquals("https://x/a-dark.json", lottieRenderRequest(node, playing = true, dark = true).url)
+        assertEquals("https://x/a.json", lottieRenderRequest(node, playing = true, dark = false).url)
+    }
+
+    private fun bareLottieNode() = BuilderNode.Lottie(id = "lot", url = ThemePair(light = "https://x/a.json"))
+
+    private fun bareLottieRequest() = lottieRenderRequest(bareLottieNode(), playing = true, dark = false)
+
     // ---- carousel dot colour (I9) ---------------------------------------
     //
     // resolvedInkTintColorInt is already pinned above; what was NOT pinned
@@ -1267,5 +1432,27 @@ class NodeViewFactoryTest {
         /** `RecyclerView.Adapter.getItemViewType`'s default: the carousel
          *  adapter has a single page type. */
         const val ADAPTER_DEFAULT_VIEW_TYPE = 0
+
+        /** What `MediaPlayer` reports for a video's natural size before it
+         *  has parsed the media — the "no dimensions yet" case. */
+        const val UNREPORTED_VIDEO_DIMENSION_PX = 0
+
+        /** A plausible reported source size. Deliberately NOT 16:9, so a test
+         *  cannot pass by accidentally matching the authored ratio below. */
+        const val SOURCE_VIDEO_WIDTH_PX = 640
+        const val SOURCE_VIDEO_HEIGHT_PX = 480
+
+        /** The fixture's own authored ratio (`video-full`), wider than tall
+         *  so an inverted width/height division is visible. */
+        const val AUTHORED_ASPECT_RATIO = 1.777
+
+        /** A ratio that divides [SOURCE_VIDEO_WIDTH_PX] exactly, so the
+         *  expected height is a literal and rounding plays no part. */
+        const val EXACTLY_DIVIDING_ASPECT_RATIO = 2.0
+        const val EXACTLY_DIVIDED_HEIGHT_PX = 320
+
+        /** Above `LOTTIE_MAX_SPEED` on purpose — the shared range is advice,
+         *  not a clamp. */
+        const val OVER_ADVISED_LOTTIE_SPEED = 9.0
     }
 }

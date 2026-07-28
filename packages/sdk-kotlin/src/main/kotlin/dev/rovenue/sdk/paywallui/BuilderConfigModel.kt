@@ -121,6 +121,8 @@ private object OverridablePropKeys {
     val stickyFooter: Set<String> = setOf("background")
     val countdown: Set<String> = setOf("color")
     val carousel: Set<String> = setOf("indicatorColor")
+    val video: Set<String> = setOf("url", "posterUrl")
+    val lottie: Set<String> = setOf("url")
 }
 
 /** A single conditional prop swap: `{ when: { kind }, props }`. [T] is the
@@ -170,6 +172,17 @@ data class StickyFooterOverrideProps(val background: ThemePair? = null)
 data class CountdownOverrideProps(val color: ThemePair? = null)
 
 data class CarouselOverrideProps(val indicatorColor: ThemePair? = null)
+
+/** `video`'s two overridable props — the SOURCES, not the playback flags:
+ *  swapping which clip an intro-eligible reader sees is an authoring
+ *  decision, whereas swapping `autoplay`/`muted` mid-render would fight the
+ *  playback rule the node is already obeying. Mirrors
+ *  `OVERRIDABLE_PROP_KEYS.video` in schema.ts. */
+data class VideoOverrideProps(val url: ThemePair? = null, val posterUrl: ThemePair? = null)
+
+/** `lottie`'s single overridable prop — same reasoning as
+ *  [VideoOverrideProps]: the animation source, not `loop`/`autoplay`/`speed`. */
+data class LottieOverrideProps(val url: ThemePair? = null)
 
 // =============================================================
 // Feature-list / timeline row shapes (Wave B) — Kotlin mirror of the shared
@@ -382,6 +395,51 @@ sealed class BuilderNode {
          *  value. */
         val indicatorColor: ThemePair? = null,
         val overrides: List<NodeOverride<CarouselOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class Video(
+        override val id: String,
+        /** The clip. Theme-picked exactly like an `image`'s. */
+        val url: ThemePair,
+        /** Shown until the player renders its first frame. Absent = nothing
+         *  covers the player, so an autoplaying clip simply starts. */
+        val posterUrl: ThemePair? = null,
+        /** Absent = VIDEO_DEFAULT_AUTOPLAY (NodeViewFactory.kt). `false` is
+         *  HONOURED: scrolling into view never starts a clip the author said
+         *  should not start itself (see `videoPlaybackCommand`). */
+        val autoplay: Boolean? = null,
+        /** Absent = VIDEO_DEFAULT_LOOP (NodeViewFactory.kt). */
+        val loop: Boolean? = null,
+        /** Absent = VIDEO_DEFAULT_MUTED (NodeViewFactory.kt). */
+        val muted: Boolean? = null,
+        /** Absent = VIDEO_DEFAULT_SHOWS_CONTROLS (NodeViewFactory.kt). */
+        val showsControls: Boolean? = null,
+        /** Width / height. Absent = NO ratio is applied at all and the
+         *  source's own dimensions govern once known — never a substituted
+         *  number (see `videoEffectiveAspectRatio`). */
+        val aspectRatio: Double? = null,
+        val overrides: List<NodeOverride<VideoOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    data class Lottie(
+        override val id: String,
+        /** The animation document. Theme-picked exactly like a `video`'s. */
+        val url: ThemePair,
+        /** Absent = LOTTIE_DEFAULT_LOOP (NodeViewFactory.kt). */
+        val loop: Boolean? = null,
+        /** Absent = LOTTIE_DEFAULT_AUTOPLAY (NodeViewFactory.kt). */
+        val autoplay: Boolean? = null,
+        /** Playback rate multiplier. Absent = LOTTIE_DEFAULT_SPEED
+         *  (NodeViewFactory.kt). Values outside
+         *  LOTTIE_MIN_SPEED..LOTTIE_MAX_SPEED are authoring-time ADVICE in
+         *  the shared validator, not a clamp — whatever is authored is
+         *  handed to the host's player unchanged. */
+        val speed: Double? = null,
+        val overrides: List<NodeOverride<LottieOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
@@ -650,6 +708,31 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             visibility = visibility,
             fallback = fallback,
         )
+        "video" -> BuilderNode.Video(
+            id = id,
+            url = obj["url"]?.letObject(::parseThemePair)
+                ?: throw BuilderDecodeException("video.url required"),
+            posterUrl = obj["posterUrl"]?.letObject(::parseThemePair),
+            autoplay = obj.optionalBoolean("autoplay"),
+            loop = obj.optionalBoolean("loop"),
+            muted = obj.optionalBoolean("muted"),
+            showsControls = obj.optionalBoolean("showsControls"),
+            aspectRatio = obj.optionalDouble("aspectRatio"),
+            overrides = obj.parseOverrideList(::parseVideoOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
+        "lottie" -> BuilderNode.Lottie(
+            id = id,
+            url = obj["url"]?.letObject(::parseThemePair)
+                ?: throw BuilderDecodeException("lottie.url required"),
+            loop = obj.optionalBoolean("loop"),
+            autoplay = obj.optionalBoolean("autoplay"),
+            speed = obj.optionalDouble("speed"),
+            overrides = obj.parseOverrideList(::parseLottieOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
         else -> BuilderNode.Unknown(id = id, visibility = visibility, fallback = fallback)
@@ -811,6 +894,19 @@ private fun parseCountdownOverrideProps(props: JsonObject): CountdownOverridePro
 private fun parseCarouselOverrideProps(props: JsonObject): CarouselOverrideProps {
     validateOverridePropKeys(props, OverridablePropKeys.carousel)
     return CarouselOverrideProps(indicatorColor = props["indicatorColor"]?.letObject(::parseThemePair))
+}
+
+private fun parseVideoOverrideProps(props: JsonObject): VideoOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.video)
+    return VideoOverrideProps(
+        url = props["url"]?.letObject(::parseThemePair),
+        posterUrl = props["posterUrl"]?.letObject(::parseThemePair),
+    )
+}
+
+private fun parseLottieOverrideProps(props: JsonObject): LottieOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.lottie)
+    return LottieOverrideProps(url = props["url"]?.letObject(::parseThemePair))
 }
 
 // ----- feature-list / timeline rows -----

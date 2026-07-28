@@ -204,6 +204,29 @@ fun applyOverrides(node: BuilderNode.Carousel, active: OverrideActiveConditions)
     return result
 }
 
+fun applyOverrides(node: BuilderNode.Video, active: OverrideActiveConditions): BuilderNode.Video {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(
+            url = patch.url ?: result.url,
+            posterUrl = patch.posterUrl ?: result.posterUrl,
+        )
+    }
+    return result
+}
+
+fun applyOverrides(node: BuilderNode.Lottie, active: OverrideActiveConditions): BuilderNode.Lottie {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(url = patch.url ?: result.url)
+    }
+    return result
+}
+
 /** Dispatches to the node's own `applyOverrides` overload. `.Unknown` nodes
  *  carry no overrides field at all and pass through unchanged. */
 fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): BuilderNode = when (node) {
@@ -222,6 +245,8 @@ fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): Builder
     is BuilderNode.StickyFooter -> applyOverrides(node, active)
     is BuilderNode.Countdown -> applyOverrides(node, active)
     is BuilderNode.Carousel -> applyOverrides(node, active)
+    is BuilderNode.Video -> applyOverrides(node, active)
+    is BuilderNode.Lottie -> applyOverrides(node, active)
     is BuilderNode.Unknown -> node
 }
 

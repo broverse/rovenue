@@ -5,12 +5,16 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.SurfaceTexture
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.Surface
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -19,6 +23,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.MediaController
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
@@ -402,6 +407,49 @@ internal const val CAROUSEL_DEFAULT_LOOP = false
  *  whatever `autoAdvanceSeconds` it is given; this is NOT a clamp. */
 internal const val CAROUSEL_MIN_AUTO_ADVANCE_SECONDS = 2
 
+// Defaults mirroring packages/shared/src/paywall/schema.ts's
+// VIDEO_DEFAULT_* / LOTTIE_DEFAULT_* / LOTTIE_MIN_SPEED / LOTTIE_MAX_SPEED
+// (wave D2). Keep in sync with schema.ts BY HAND; there is no codegen step
+// sharing these across platforms. NOT `private` for the same reason as the
+// divider/countdown/carousel defaults above — a test compares them against
+// render-fixtures.json's generated `defaults` object by value, which is the
+// only thing that catches schema.ts moving without this file following.
+internal const val VIDEO_DEFAULT_AUTOPLAY = true
+internal const val VIDEO_DEFAULT_LOOP = true
+
+/** Muted is the default because it is the only one under which autoplay
+ *  works on all three platforms (browsers refuse to autoplay with sound). */
+internal const val VIDEO_DEFAULT_MUTED = true
+internal const val VIDEO_DEFAULT_SHOWS_CONTROLS = false
+
+internal const val LOTTIE_DEFAULT_LOOP = true
+internal const val LOTTIE_DEFAULT_AUTOPLAY = true
+internal const val LOTTIE_DEFAULT_SPEED = 1.0
+
+/** Authoring-time advice only (schema.ts's own comment: outside this range
+ *  playback reads as broken rather than stylised) — like
+ *  [CAROUSEL_MIN_AUTO_ADVANCE_SECONDS] this is NOT a clamp, and the renderer
+ *  hands the host player whatever `speed` it was given. Mirrored here purely
+ *  so the by-value sync test covers every key schema.ts exports. */
+internal const val LOTTIE_MIN_SPEED = 0.1
+internal const val LOTTIE_MAX_SPEED = 4.0
+
+/** Both volume channels at silence — what `muted: true` means to a
+ *  `MediaPlayer`, which has no mute flag of its own. */
+private const val MUTED_VOLUME = 0f
+
+/** A `video`/`lottie` node's `playing` verdict before the shared visibility
+ *  detector has taken its first sample. FAIL OPEN, the same direction (and
+ *  for the same reason) as [NodeVisibilityDetector.isActive]'s initial value
+ *  and `isNodeOnScreen`'s unmeasured branch: a node that starts paused and is
+ *  never told otherwise is worse than one that starts and is told to stop. */
+private const val NODE_PLAYING_BEFORE_FIRST_SAMPLE = true
+
+/** `MediaPlayer` reports a video's natural size as 0 x 0 until the media is
+ *  parsed (and for audio-only sources, forever) — the sentinel
+ *  [videoEffectiveAspectRatio] reads as "no source dimensions yet". */
+private const val VIDEO_SOURCE_DIMENSION_UNKNOWN_PX = 0
+
 // Hand-drawn dot-indicator constants, in dp/alpha — ViewPager2 supplies no
 // built-in page indicator, so these are drawn by CarouselDotsRow. No
 // cross-platform pixel-parity contract exists for these (same footing as
@@ -689,6 +737,172 @@ internal fun carouselDotSpec(node: BuilderNode.Carousel, dark: Boolean): Carouse
         inactiveAlpha255 = (CAROUSEL_DOT_INACTIVE_ALPHA * OPAQUE_ALPHA_255).roundToInt(),
     )
 
+// ---------------------------------------------------------------
+// Pure: video / lottie (wave D2)
+// ---------------------------------------------------------------
+
+/**
+ * What to do with a `video`'s player right now.
+ *
+ * THREE states, not two, and the third is the point: [LEAVE_ALONE] is what
+ * keeps a NON-autoplay clip the reader started by hand from being restarted
+ * by every scroll frame that reports it visible. Pausing, by contrast, is
+ * unconditional the moment the node stops running — that half of the rule
+ * holds for a clip the reader started as much as for one that started itself,
+ * because the audible half of "off-screen means paused" is what a reader
+ * actually notices. A boolean cannot express this, which is why neither the
+ * web (`VIDEO_PLAYBACK_COMMAND` in nodes.tsx) nor the iOS sibling
+ * (`VideoPlaybackCommand` in RovenuePaywallView.swift) uses one.
+ */
+internal enum class VideoPlaybackCommand { PLAY, PAUSE, LEAVE_ALONE }
+
+/**
+ * The single playback rule a `video` obeys, a pure free function for exactly
+ * the reason [carouselAutoAdvanceDelayMillis] and [countdownTickShouldRun]
+ * are: the rule is testable here, while the `MediaPlayer` it drives is not.
+ *
+ * [active] is the SHARED verdict from [NodeVisibilityDetector] — the very one
+ * `countdown` and `carousel` already consume, so this wave adds a third
+ * consumer rather than a third copy of "when is this node on screen".
+ *
+ * [autoplay] is the author's standing instruction and is HONOURED on all
+ * three platforms: a node that said `autoplay: false` is never STARTED by
+ * scrolling into view.
+ */
+internal fun videoPlaybackCommand(active: Boolean, autoplay: Boolean): VideoPlaybackCommand = when {
+    !active -> VideoPlaybackCommand.PAUSE
+    autoplay -> VideoPlaybackCommand.PLAY
+    else -> VideoPlaybackCommand.LEAVE_ALONE
+}
+
+/**
+ * Whether a `video`'s theme-resolved source parses as a URL at all — the only
+ * half of "will this draw?" that is knowable BEFORE a player exists, and so
+ * the only half a carousel counting its pages can act on (see
+ * [NodeViewFactory.buildVideo]). Mirrors the Swift sibling's
+ * `videoHasParsableSource`.
+ */
+internal fun videoHasParsableSource(url: ThemePair, dark: Boolean): Boolean =
+    runCatching { URL(themeValue(url, dark)) }.isSuccess
+
+/**
+ * The ratio a `video` should be laid out at, or `null` for "apply no ratio at
+ * all".
+ *
+ * An ABSENT [authored] ratio does NOT substitute a number — it defers to the
+ * source's own dimensions, which `MediaPlayer` only reports once it has
+ * parsed the media ([VIDEO_SOURCE_DIMENSION_UNKNOWN_PX] until then). Until
+ * both are known there is genuinely no ratio to apply, and the node measures
+ * like any other unmeasured view rather than being forced into a guess. Same
+ * contract as the Swift sibling's `ratioedSurface` (no `.aspectRatio`
+ * modifier at all) and the web sibling's `videoStyle` (no `aspect-ratio`
+ * property at all).
+ */
+internal fun videoEffectiveAspectRatio(
+    authored: Double?,
+    sourceWidthPx: Int,
+    sourceHeightPx: Int,
+): Double? {
+    if (authored != null && authored > 0.0) return authored
+    if (sourceWidthPx <= VIDEO_SOURCE_DIMENSION_UNKNOWN_PX ||
+        sourceHeightPx <= VIDEO_SOURCE_DIMENSION_UNKNOWN_PX
+    ) {
+        return null
+    }
+    return sourceWidthPx.toDouble() / sourceHeightPx.toDouble()
+}
+
+/** The height, in px, that [widthPx] implies at [aspectRatio] (width ÷
+ *  height). Split out from the measure pass so the arithmetic is pinned by a
+ *  unit test rather than only by looking at a device. */
+internal fun videoHeightForAspectRatio(widthPx: Int, aspectRatio: Double): Int =
+    (widthPx / aspectRatio).roundToInt()
+
+/**
+ * Everything a host's Lottie player needs for one `lottie` node.
+ *
+ * These FIVE fields are the cross-platform contract, byte-for-byte the props
+ * of packages/paywall-renderer's `LottieRenderer` and the fields of the Swift
+ * SDK's `LottieRenderRequest`. [playing] rides the SHARED visibility signal
+ * (NodeVisibility.kt) that `countdown`, `carousel` and `video` all consume,
+ * so a host player that honours it pauses off screen for free.
+ *
+ * A `data class` so a test can pin the RESOLVED request by value — which
+ * defaults were substituted, and which theme half of `url` won — rather than
+ * merely that some request arrived.
+ */
+data class LottieRenderRequest(
+    val url: String,
+    val loop: Boolean,
+    val autoplay: Boolean,
+    val speed: Double,
+    /** The moment-to-moment "on screen AND app in front" verdict, NOT the
+     *  same question as [autoplay] (the author's standing instruction). */
+    val playing: Boolean,
+)
+
+/**
+ * A host's Lottie player: one request in, one `View` out. Returning `null` is
+ * a legitimate "I cannot draw this", and routes the node onto the ordinary
+ * `fallback`-else-nothing path.
+ *
+ * This SDK ships NO Lottie runtime of its own — no `com.airbnb.android:lottie`
+ * in build.gradle.kts, and this wave adds none. The host app registers
+ * whichever player it already ships, once, at startup.
+ */
+fun interface LottieRenderer {
+    fun createView(context: Context, request: LottieRenderRequest): View?
+}
+
+/**
+ * PROCESS-LEVEL state, deliberately: the host registers its player once, well
+ * before any paywall is presented, so this is not per-view configuration.
+ *
+ * Which also means it LEAKS ACROSS TESTS — every test that registers a
+ * renderer must reset it (`registerLottieRenderer(null)`) in a teardown, the
+ * same warning the web and Swift siblings carry on their own registries.
+ */
+private object LottieRendererRegistry {
+    var current: LottieRenderer? = null
+}
+
+/** Register (or, with `null`, unregister) the host's Lottie player. */
+fun registerLottieRenderer(render: LottieRenderer?) {
+    LottieRendererRegistry.current = render
+}
+
+/**
+ * The resolved request for [node]. Pure, and separate from [lottieViewOrNull]
+ * below, so the DEFAULT RESOLUTION (`loop`/`autoplay`/`speed` falling back to
+ * the mirrored schema.ts constants, and which theme half of `url` wins) is
+ * testable without registering anything.
+ */
+internal fun lottieRenderRequest(
+    node: BuilderNode.Lottie,
+    playing: Boolean,
+    dark: Boolean,
+): LottieRenderRequest = LottieRenderRequest(
+    url = themeValue(node.url, dark),
+    loop = node.loop ?: LOTTIE_DEFAULT_LOOP,
+    autoplay = node.autoplay ?: LOTTIE_DEFAULT_AUTOPLAY,
+    speed = node.speed ?: LOTTIE_DEFAULT_SPEED,
+    playing = playing,
+)
+
+/**
+ * What a `lottie` node draws right now, or `null` when it draws nothing —
+ * nothing registered, or a registered player that declined. `null` is what
+ * routes the node onto the ordinary `fallback`-else-nothing path in
+ * [NodeViewFactory.buildLottie]; this function deliberately does not know
+ * about `fallback` itself, so the one place that decides "fall back" stays
+ * the one place every other node type uses.
+ *
+ * Decidable SYNCHRONOUSLY (registration is process state and the request is
+ * already in hand), unlike a video's load failure — see [buildLottie].
+ */
+internal fun lottieViewOrNull(context: Context, request: LottieRenderRequest): View? =
+    LottieRendererRegistry.current?.createView(context, request)
+
 private const val COUNTDOWN_NO_ANCHOR = -1L
 
 /** `SharedPreferences` key prefix for a countdown's persisted "first shown
@@ -842,6 +1056,8 @@ internal object NodeViewFactory {
             is BuilderNode.StickyFooter -> buildStickyFooter(context, resolved, ctx, cell)
             is BuilderNode.Countdown -> buildCountdown(context, resolved, ctx, cell)
             is BuilderNode.Carousel -> buildCarousel(context, resolved, ctx, cell)
+            is BuilderNode.Video -> buildVideo(context, resolved, ctx, cell)
+            is BuilderNode.Lottie -> buildLottie(context, resolved, ctx, cell)
             is BuilderNode.Unknown -> resolved.fallback?.let { build(context, it, ctx, cell) }
         }
     }
@@ -1465,6 +1681,77 @@ internal object NodeViewFactory {
 
         return CarouselPagerView(context, pageViews, showsIndicator, loop, node.autoAdvanceSeconds, dotSpec)
     }
+
+    /**
+     * Renders `video`.
+     *
+     * Split the same way the Swift sibling is: this function answers the one
+     * question that IS decidable before a player exists — does the source
+     * parse as a URL? — and falls back otherwise, mirroring every other node
+     * type's "cannot draw this" contract. Everything past that point needs
+     * the `MediaPlayer`, and lives in [VideoNodeView].
+     *
+     * KNOWN CROSS-PLATFORM GAP (shared with web and iOS, raised in the task
+     * report rather than fixed here): a load failure arrives ASYNCHRONOUSLY,
+     * so a video that fails AFTER mount cannot retract the page it already
+     * occupies in a `carousel` — the carousel counted its pages
+     * synchronously, above. A video that fails BEFORE mount (an unparsable
+     * source, checked right here) is handled correctly, because this returns
+     * `null` when there is no fallback and `mapNotNull` drops it.
+     */
+    internal fun buildVideo(
+        context: Context,
+        node: BuilderNode.Video,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View? {
+        if (!videoHasParsableSource(node.url, ctx.dark)) {
+            return node.fallback?.let { build(context, it, ctx, cell) }
+        }
+        val poster = node.posterUrl?.let { pair ->
+            ImageView(context).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+            }.also { view -> ctx.loadImage(view, themeValue(pair, ctx.dark)) }
+        }
+        return VideoNodeView(
+            context = context,
+            sourceUrl = themeValue(node.url, ctx.dark),
+            autoplay = node.autoplay ?: VIDEO_DEFAULT_AUTOPLAY,
+            loop = node.loop ?: VIDEO_DEFAULT_LOOP,
+            muted = node.muted ?: VIDEO_DEFAULT_MUTED,
+            showsControls = node.showsControls ?: VIDEO_DEFAULT_SHOWS_CONTROLS,
+            authoredAspectRatio = node.aspectRatio,
+            poster = poster,
+            buildFallback = { node.fallback?.let { build(context, it, ctx, cell) } },
+        )
+    }
+
+    /**
+     * Renders `lottie` by handing a [LottieRenderRequest] to whatever player
+     * the host registered. With nothing registered — or a registered player
+     * that declines — this draws `fallback`, else nothing, which is the
+     * machinery every node type already has rather than a new failure mode.
+     *
+     * Unlike [buildVideo], that decision is made HERE, synchronously, so a
+     * `lottie` inside a `carousel` never costs a phantom dot: registration is
+     * process state and the URL is already in hand.
+     *
+     * The first request is issued with [NODE_PLAYING_BEFORE_FIRST_SAMPLE]
+     * because that is what the detector's own pre-sample answer is; the view
+     * re-issues it whenever the verdict actually flips.
+     */
+    internal fun buildLottie(
+        context: Context,
+        node: BuilderNode.Lottie,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View? {
+        val initialRequest = lottieRenderRequest(node, NODE_PLAYING_BEFORE_FIRST_SAMPLE, ctx.dark)
+        val initialContent = lottieViewOrNull(context, initialRequest)
+            ?: return node.fallback?.let { build(context, it, ctx, cell) }
+        return LottieNodeView(context, node, ctx.dark, initialContent)
+    }
 }
 
 /**
@@ -1833,6 +2120,406 @@ private class CarouselDotsRow(
             paint.alpha = if (index == activePage) spec.activeAlpha255 else spec.inactiveAlpha255
             canvas.drawCircle(cx.toFloat(), radius, radius, paint)
         }
+    }
+}
+
+/**
+ * The `video` node's own top-level view: a [TextureView] driven by a plain
+ * framework [MediaPlayer], with an optional poster laid over it until the
+ * first frame is rendered.
+ *
+ * `MediaPlayer` ON A `TextureView`, deliberately — no ExoPlayer, no new
+ * dependency for an SDK that customers embed. `TextureView` rather than
+ * `SurfaceView` because a paywall clip is composited inside a scrolling,
+ * possibly rounded/animated layout, which is exactly the case a `SurfaceView`
+ * (its own window, punched through the hierarchy) draws wrong.
+ *
+ * PAUSE AND RESUME GO THROUGH THE PLAYER, never through rebuilding this view:
+ * a rebuild restarts playback from zero, which is a different and worse
+ * behaviour than "resume where it left off", and it is what both sibling
+ * renderers deliberately avoid (web drives its own `<video>` element, iOS
+ * holds the `AVPlayer` in a `@StateObject`). The verdict comes from the
+ * SHARED [NodeVisibilityDetector] — the same one `countdown` and `carousel`
+ * consume — through the pure [videoPlaybackCommand], whose third state is
+ * what stops a `autoplay: false` clip from being started by a scroll.
+ *
+ * EVERYTHING ACQUIRED IS RELEASED IN [onDetachedFromWindow]. `render()` runs
+ * on every package tap, so this view is built and thrown away repeatedly; a
+ * `MediaPlayer` left holding a codec (and, on some devices, the audio focus)
+ * is worse than a leaked listener, and this renderer has shipped a
+ * listener-retention defect once already. Release is idempotent — the surface
+ * being destroyed and the view being detached can happen in either order.
+ *
+ * DEVICE-ONLY: whether the player actually starts, pauses when the node
+ * scrolls away, and genuinely stops making sound is NOT observable under this
+ * module's stub `android.jar` (`MediaPlayer` there is inert). The RULE it
+ * obeys is pinned by unit tests on [videoPlaybackCommand]; the plumbing is a
+ * device smoke item.
+ */
+private class VideoNodeView(
+    context: Context,
+    private val sourceUrl: String,
+    private val autoplay: Boolean,
+    private val loop: Boolean,
+    private val muted: Boolean,
+    private val showsControls: Boolean,
+    private val authoredAspectRatio: Double?,
+    poster: ImageView?,
+    private val buildFallback: () -> View?,
+) : FrameLayout(context) {
+
+    private val textureView = TextureView(context)
+    private var posterView: ImageView? = poster
+
+    private var player: MediaPlayer? = null
+    private var playerSurface: Surface? = null
+
+    /** `MediaPlayer.start()`/`pause()` are only legal once the player has
+     *  prepared, so the verdict is remembered and applied on preparation
+     *  instead of being dropped. */
+    private var prepared = false
+
+    /** The last non-[VideoPlaybackCommand.LEAVE_ALONE] verdict. Also what
+     *  keeps a loop restart from resurrecting a clip that was paused for
+     *  being off screen. */
+    private var shouldBePlaying = false
+
+    /** The source failed to load. Latched: a failed clip does not retry, it
+     *  hands over to `fallback` (else nothing) like every other node type. */
+    private var failed = false
+
+    private var sourceWidthPx = VIDEO_SOURCE_DIMENSION_UNKNOWN_PX
+    private var sourceHeightPx = VIDEO_SOURCE_DIMENSION_UNKNOWN_PX
+
+    /** Only built when the node asked for controls — `MediaController` opens
+     *  its own window, which is not something to hold for the default case. */
+    private var mediaController: MediaController? = null
+
+    private val visibilityDetector = NodeVisibilityDetector(this) { active ->
+        applyPlaybackCommand(videoPlaybackCommand(active, autoplay))
+    }
+
+    private val surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+        override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
+            openPlayer(Surface(texture))
+        }
+
+        override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) = Unit
+
+        /** `true` = we are done with the texture and the system may release
+         *  it, which is only safe once the player has let go of the surface
+         *  built from it. */
+        override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
+            releasePlayer()
+            return true
+        }
+
+        override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+    }
+
+    init {
+        addView(textureView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        posterView?.let { addView(it, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)) }
+        textureView.surfaceTextureListener = surfaceTextureListener
+        if (showsControls) {
+            // Tapping the surface is the only affordance the framework gives
+            // for revealing transport controls (this is what `VideoView` does
+            // too) — `MediaController` hides itself again on a timeout.
+            setOnClickListener { mediaController?.show() }
+        }
+    }
+
+    /**
+     * An ABSENT authored ratio applies NO ratio until the source's own
+     * dimensions are known, at which point they govern — never a substituted
+     * number. With no ratio at all this measures like any other view, which
+     * for a bare `TextureView` means zero height until
+     * [MediaPlayer.OnVideoSizeChangedListener] fires and requests a re-layout.
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val ratio = if (failed) {
+            null
+        } else {
+            videoEffectiveAspectRatio(authoredAspectRatio, sourceWidthPx, sourceHeightPx)
+        }
+        if (ratio == null) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            return
+        }
+        val widthPx = MeasureSpec.getSize(widthMeasureSpec)
+        super.onMeasure(
+            MeasureSpec.makeMeasureSpec(widthPx, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(videoHeightForAspectRatio(widthPx, ratio), MeasureSpec.EXACTLY),
+        )
+    }
+
+    private fun openPlayer(surface: Surface) {
+        if (failed) {
+            surface.release()
+            return
+        }
+        // Defensive: a surface arriving while one is already open would
+        // otherwise strand the previous player holding a codec.
+        releasePlayer()
+        playerSurface = surface
+        val mp = MediaPlayer()
+        player = mp
+        try {
+            mp.setSurface(surface)
+            mp.isLooping = loop
+            if (muted) mp.setVolume(MUTED_VOLUME, MUTED_VOLUME)
+            mp.setOnPreparedListener {
+                prepared = true
+                attachControllerIfRequested(mp)
+                // Re-apply the verdict the detector already published while
+                // the player was still preparing, rather than dropping it.
+                if (shouldBePlaying) startPlayer(mp)
+            }
+            mp.setOnVideoSizeChangedListener { _, width, height ->
+                sourceWidthPx = width
+                sourceHeightPx = height
+                // Only matters when no ratio was authored, but requesting a
+                // layout unconditionally keeps the branch out of a callback.
+                requestLayout()
+            }
+            mp.setOnInfoListener { _, what, _ ->
+                // The Android equivalent of iOS's `readyToPlay` retiring the
+                // poster: the first frame is genuinely on screen now, so
+                // anything covering it is hiding real content.
+                if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) retirePoster()
+                false
+            }
+            mp.setOnErrorListener { _, _, _ ->
+                showFallback()
+                // `true` = handled; without it the framework also invokes the
+                // completion listener, i.e. reports the failure twice.
+                true
+            }
+            mp.setDataSource(sourceUrl)
+            mp.prepareAsync()
+        } catch (_: Exception) {
+            // setDataSource/prepareAsync throw for an unreachable or
+            // unsupported source. Same destination as the async error path —
+            // `fallback` else nothing — so a paywall never shows a dead
+            // rectangle where a clip should be.
+            showFallback()
+        }
+    }
+
+    private fun startPlayer(mp: MediaPlayer) {
+        if (!prepared || mp.isPlaying) return
+        runCatching { mp.start() }
+    }
+
+    private fun applyPlaybackCommand(command: VideoPlaybackCommand) {
+        when (command) {
+            VideoPlaybackCommand.PLAY -> {
+                shouldBePlaying = true
+                player?.let { startPlayer(it) }
+            }
+
+            VideoPlaybackCommand.PAUSE -> {
+                shouldBePlaying = false
+                // `pause()` is only legal from a started/paused state, which
+                // `isPlaying` is the cheapest way to establish.
+                player?.takeIf { prepared && it.isPlaying }?.let { mp -> runCatching { mp.pause() } }
+            }
+
+            // Deliberately a no-op: a non-autoplay clip the reader has not
+            // started (or has deliberately paused) must not be resumed by
+            // visibility alone — see [videoPlaybackCommand].
+            VideoPlaybackCommand.LEAVE_ALONE -> Unit
+        }
+    }
+
+    private fun attachControllerIfRequested(mp: MediaPlayer) {
+        if (!showsControls || mediaController != null) return
+        val controller = MediaController(context)
+        controller.setMediaPlayer(MediaPlayerControlAdapter(mp) { prepared })
+        controller.setAnchorView(this)
+        controller.isEnabled = true
+        mediaController = controller
+    }
+
+    private fun retirePoster() {
+        posterView?.let { view ->
+            removeView(view)
+            posterView = null
+        }
+    }
+
+    /**
+     * The failure path, shared by the synchronous throw and the asynchronous
+     * error callback: hand over to `fallback` if the node has one, else draw
+     * nothing. Exactly the contract every other node type uses when it cannot
+     * draw — not a new failure mode.
+     */
+    private fun showFallback() {
+        if (failed) return
+        failed = true
+        releasePlayer()
+        removeAllViews()
+        posterView = null
+        buildFallback()?.let { view ->
+            addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
+        requestLayout()
+    }
+
+    /** Idempotent, and called from BOTH the surface-destroyed callback and
+     *  [onDetachedFromWindow] because either can come first. */
+    private fun releasePlayer() {
+        prepared = false
+        player?.let { mp ->
+            // `reset()` before `release()` so a player mid-prepare stops
+            // calling back into a view that is on its way out.
+            runCatching { mp.reset() }
+            runCatching { mp.release() }
+        }
+        player = null
+        playerSurface?.release()
+        playerSurface = null
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // Deliberately no direct start(): the detector takes its first sample
+        // synchronously and publishes through the callback above, so
+        // attaching off-screen or backgrounded correctly starts nothing.
+        visibilityDetector.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        visibilityDetector.stop()
+        // The controller owns a WindowManager window anchored to this view;
+        // leaving it showing leaks that window for the life of the activity.
+        // The anchor itself needs no clearing — it IS this view, which is on
+        // its way out, and `setAnchorView(null)` rebuilds the controller's
+        // child views as a side effect on some API levels for no gain here.
+        mediaController?.hide()
+        mediaController = null
+        // Dropping the listener first stops a late surface callback from
+        // re-opening a player on a view nothing points at any more.
+        textureView.surfaceTextureListener = null
+        releasePlayer()
+        super.onDetachedFromWindow()
+    }
+}
+
+/**
+ * Bridges the framework's [MediaController] onto a bare [MediaPlayer].
+ * `VideoView` has an equivalent adapter internally; this SDK does not use
+ * `VideoView` (it is `SurfaceView`-backed — see [VideoNodeView]), so the
+ * adapter is spelled out here.
+ *
+ * [isPrepared] is read through a lambda rather than copied, because
+ * `MediaController` polls these methods on its own schedule and a stale copy
+ * would let it call into a player that has since been reset.
+ */
+private class MediaPlayerControlAdapter(
+    private val player: MediaPlayer,
+    private val isPrepared: () -> Boolean,
+) : MediaController.MediaPlayerControl {
+    override fun start() {
+        if (isPrepared()) runCatching { player.start() }
+    }
+
+    override fun pause() {
+        if (isPrepared()) runCatching { player.pause() }
+    }
+
+    override fun getDuration(): Int =
+        if (isPrepared()) runCatching { player.duration }.getOrDefault(MEDIA_POSITION_UNKNOWN_MS) else MEDIA_POSITION_UNKNOWN_MS
+
+    override fun getCurrentPosition(): Int =
+        if (isPrepared()) {
+            runCatching { player.currentPosition }.getOrDefault(MEDIA_POSITION_UNKNOWN_MS)
+        } else {
+            MEDIA_POSITION_UNKNOWN_MS
+        }
+
+    override fun seekTo(pos: Int) {
+        if (isPrepared()) runCatching { player.seekTo(pos) }
+    }
+
+    override fun isPlaying(): Boolean = isPrepared() && runCatching { player.isPlaying }.getOrDefault(false)
+
+    /** No progressive-download progress is tracked for a paywall clip, and
+     *  `MediaController` reads this only to paint the secondary bar. */
+    override fun getBufferPercentage(): Int = NO_BUFFER_PROGRESS_PERCENT
+
+    override fun canPause(): Boolean = true
+
+    override fun canSeekBackward(): Boolean = true
+
+    override fun canSeekForward(): Boolean = true
+
+    override fun getAudioSessionId(): Int =
+        runCatching { player.audioSessionId }.getOrDefault(NO_AUDIO_SESSION_ID)
+}
+
+/** `MediaController`'s own "I don't know" for a duration/position, in ms. */
+private const val MEDIA_POSITION_UNKNOWN_MS = 0
+
+/** Nothing buffered-ahead is reported; see [MediaPlayerControlAdapter]. */
+private const val NO_BUFFER_PROGRESS_PERCENT = 0
+
+/** `AudioManager.AUDIO_SESSION_ID_GENERATE`'s "none" counterpart — 0 is the
+ *  framework's own value for "no session". */
+private const val NO_AUDIO_SESSION_ID = 0
+
+/**
+ * The `lottie` node's own top-level view: a container holding whatever the
+ * host's registered [LottieRenderer] handed back.
+ *
+ * This SDK ships no Lottie runtime, so it cannot pause the host's animation
+ * itself. What it CAN do is keep [LottieRenderRequest.playing] honest, and
+ * that field rides the same [NodeVisibilityDetector] verdict `countdown`,
+ * `carousel` and `video` consume — so a host player that honours it pauses
+ * off screen for free.
+ *
+ * The request is RE-ISSUED (and the returned view swapped in) only when the
+ * verdict actually FLIPS, which mirrors both siblings: web re-renders the
+ * host component with the new prop, SwiftUI re-evaluates the body. The
+ * detector de-duplicates, so this cannot fire per scrolled frame — which
+ * matters here more than anywhere else, since a host that builds a fresh
+ * animation view per call restarts the animation each time.
+ */
+private class LottieNodeView(
+    context: Context,
+    private val node: BuilderNode.Lottie,
+    private val dark: Boolean,
+    initialContent: View,
+) : FrameLayout(context) {
+
+    private var lastPlaying: Boolean = NODE_PLAYING_BEFORE_FIRST_SAMPLE
+
+    private val visibilityDetector = NodeVisibilityDetector(this) { active -> reissue(active) }
+
+    init {
+        addView(initialContent, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    }
+
+    private fun reissue(playing: Boolean) {
+        if (playing == lastPlaying) return
+        // A host that declines on a later call keeps whatever it last drew:
+        // the fallback decision belongs to `buildLottie`, made once, and
+        // swapping content for nothing mid-scroll would be a worse outcome
+        // than a still animation.
+        val content = lottieViewOrNull(context, lottieRenderRequest(node, playing, dark)) ?: return
+        lastPlaying = playing
+        removeAllViews()
+        addView(content, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        visibilityDetector.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        visibilityDetector.stop()
+        super.onDetachedFromWindow()
     }
 }
 
