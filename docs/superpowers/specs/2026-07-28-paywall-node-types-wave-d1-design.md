@@ -107,7 +107,27 @@ and Android still drew the wrong colour, because the substituted value had moved
 drawable asset. The dots are drawn shapes, so the same trap is available here: verify at the
 **resolved colour**, not at the branch.
 
-### 3.3 Auto-advance is a timer, with all that implies
+**Amended during implementation.** "The absence of a colour instruction" turned out not to be
+expressible on every platform, and pretending otherwise produced a real defect. A hand-drawn dot has
+no ambient inheritance the way an uncoloured label does, so on Android — and, it emerged, on web,
+whose `currentColor` resolved against the *host document* rather than the paywall — "inherit" must
+resolve to a **concrete** ink: the same value the paywall's own text resolves to. All three platforms
+now substitute that value deliberately. The rule is therefore **"inherit the paywall's text ink,
+resolved"**, not "emit nothing", and it is verified at the resolved colour on each platform.
+
+### 3.3 Pages that draw nothing are dropped
+
+A page is dropped — **no page and no dot** — when it produces no rendered content. That covers a page
+hidden by its `visibility` rule, and equally one that simply has nothing to draw: an unknown node type
+with no `fallback`, a restore button with no handler, an unknown icon name, a countdown with no
+deadline, a nested empty carousel. When dropping leaves no pages at all, the carousel renders its own
+`fallback`, else nothing.
+
+The reason to state this once, here, is that it was left unstated during implementation and the three
+renderers filled the gap three different ways — two of them keeping a blank page plus a dot that lied
+to the reader about how much content existed. A dot is a promise that there is something to swipe to.
+
+### 3.4 Auto-advance is a timer, with all that implies
 
 `autoAdvanceSeconds` is absent by default, and absent means off. When present it must obey the same
 lifecycle contract wave C established for `countdown`:
