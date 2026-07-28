@@ -448,3 +448,135 @@ describe("ExperimentPopover — no-placement warning branch", () => {
     );
   });
 });
+
+describe("ExperimentPopover — status panel results link", () => {
+  it("renders a View results link next to View experiment, both pointing at the experiment detail route", async () => {
+    mockedUseExperiments.mockReturnValue(experimentsResult([fakeExperiment({ status: "RUNNING" })]));
+    mockedUseProjectPlacements.mockReturnValue(
+      placementsResult([
+        fakePlacementRow({
+          rows: [{ audienceId: null, target: { type: "experiment", experimentId: "exp_1" } }],
+        }),
+      ]),
+    );
+
+    await renderPopover();
+
+    expect(screen.getByRole("link", { name: /view experiment/i })).toHaveAttribute(
+      "href",
+      "/projects/p_1/experiments/exp_1",
+    );
+    expect(screen.getByRole("link", { name: /view results/i })).toHaveAttribute(
+      "href",
+      "/projects/p_1/experiments/exp_1",
+    );
+  });
+});
+
+describe("ExperimentPopover — completed-dark-placement branch", () => {
+  it("shows the winnerless copy when a COMPLETED experiment with no winner is still targeted by a placement row", async () => {
+    mockedUseExperiments.mockReturnValue(
+      experimentsResult([fakeExperiment({ status: "COMPLETED", winnerVariantId: null })]),
+    );
+    mockedUseProjectPlacements.mockReturnValue(
+      placementsResult([
+        fakePlacementRow({
+          rows: [{ audienceId: null, target: { type: "experiment", experimentId: "exp_1" } }],
+        }),
+      ]),
+    );
+
+    await renderPopover();
+
+    expect(
+      screen.getByText(/this experiment completed without a winner/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/still targets a completed experiment/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the winner-present copy when a COMPLETED experiment with a winner is still targeted by a placement row", async () => {
+    mockedUseExperiments.mockReturnValue(
+      experimentsResult([fakeExperiment({ status: "COMPLETED", winnerVariantId: "a" })]),
+    );
+    mockedUseProjectPlacements.mockReturnValue(
+      placementsResult([
+        fakePlacementRow({
+          rows: [{ audienceId: null, target: { type: "experiment", experimentId: "exp_1" } }],
+        }),
+      ]),
+    );
+
+    await renderPopover();
+
+    expect(
+      screen.getByText(/still targets a completed experiment/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/this experiment completed without a winner/i),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("ExperimentPopover — multi-candidate placement selection", () => {
+  const threeCandidateRows = [
+    { audienceId: null, target: { type: "paywall" as const, paywallId: "pw_a" } },
+    { audienceId: null, target: { type: "paywall" as const, paywallId: "pw_a" } },
+    { audienceId: null, target: { type: "paywall" as const, paywallId: "pw_a" } },
+  ];
+
+  it("preselects nothing and posts without a placement key until one is explicitly picked", async () => {
+    mockedUseProjectPlacements.mockReturnValue(
+      placementsResult([
+        fakePlacementRow({ id: "plc_1", identifier: "onboarding", rows: threeCandidateRows }),
+      ]),
+    );
+
+    await renderPopover();
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(3);
+    for (const cb of checkboxes) {
+      expect(cb).not.toBeChecked();
+    }
+    // Display label is 1-based ordinal ("row 1", "row 2", "row 3") even
+    // though the underlying candidates are 0-indexed.
+    expect(screen.getByText("onboarding · row 1")).toBeInTheDocument();
+    expect(screen.getByText("onboarding · row 2")).toBeInTheDocument();
+    expect(screen.getByText("onboarding · row 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /create experiment/i }));
+
+    await waitFor(() => {
+      expect(launchPost).toHaveBeenCalledTimes(1);
+    });
+    const [{ json }] = launchPost.mock.calls[0];
+    expect(json).not.toHaveProperty("placement");
+  });
+
+  it("posts the picked {placementId, rowIndex} (still 0-based) once a candidate is checked", async () => {
+    mockedUseProjectPlacements.mockReturnValue(
+      placementsResult([
+        fakePlacementRow({ id: "plc_1", identifier: "onboarding", rows: threeCandidateRows }),
+      ]),
+    );
+
+    await renderPopover();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "onboarding · row 2" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /create experiment/i }));
+
+    await waitFor(() => {
+      expect(launchPost).toHaveBeenCalledTimes(1);
+    });
+    expect(launchPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        json: expect.objectContaining({
+          placement: { placementId: "plc_1", rowIndex: 1 },
+        }),
+      }),
+    );
+  });
+});

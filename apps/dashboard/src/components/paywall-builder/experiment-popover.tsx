@@ -213,6 +213,13 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
         ) ?? null
       : null;
 
+  // A COMPLETED experiment that's still targeted by a placement row is
+  // usually winnerless (stop-with-winner normally repoints rows away from
+  // it), but two real winner-carrying paths exist: experiments stopped
+  // before this repoint feature shipped, and a stop whose winner variant
+  // had no resolvable paywallId. Distinguish explicitly rather than assume.
+  const completedDarkExperimentWinnerless = completedDarkExperiment?.winnerVariantId == null;
+
   const activeExperiment = justCreated?.experiment ?? liveActiveExperiment;
   const showStatusPanel = Boolean(activeExperiment) || Boolean(completedDarkExperiment);
 
@@ -357,6 +364,18 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                       {t("paywalls.builder.experiment.status.viewLink", "View experiment")}
                       <ArrowUpRight size={12} />
                     </Link>
+                    {/* Results render inline on the same experiment detail
+                        route (no dedicated results tab/hash in the router
+                        tree — see experiment-detail-panel.tsx), so this
+                        points at the same destination as "View experiment". */}
+                    <Link
+                      to="/projects/$projectId/experiments/$experimentId"
+                      params={{ projectId, experimentId: activeExperiment.id }}
+                      className="inline-flex h-8 items-center gap-1 rounded-md border border-rv-divider bg-rv-c2 px-3 text-[12px] text-foreground transition hover:bg-rv-c3"
+                    >
+                      {t("paywalls.builder.experiment.status.viewResultsLink", "View results")}
+                      <ArrowUpRight size={12} />
+                    </Link>
                   </div>
 
                   {startExperiment.isError && (
@@ -395,10 +414,15 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                       </Chip>
                     </div>
                     <p className="mt-0.5">
-                      {t(
-                        "paywalls.builder.experiment.status.darkPlacementWarning",
-                        "This experiment completed without a winner and a placement row still targets it — that row won't serve until you repoint it.",
-                      )}
+                      {completedDarkExperimentWinnerless
+                        ? t(
+                            "paywalls.builder.experiment.status.darkPlacementWarning",
+                            "This experiment completed without a winner and a placement row still targets it — that row won't serve until you repoint it.",
+                          )
+                        : t(
+                            "paywalls.builder.experiment.status.darkPlacementWarningWithWinner",
+                            "This placement still targets a completed experiment — point it at a paywall to resume serving.",
+                          )}
                     </p>
                     <Link
                       to="/projects/$projectId/experiments/$experimentId"
@@ -585,11 +609,13 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                             selectedPlacement?.rowIndex === c.rowIndex
                           }
                           onChange={() => setPlacementSel(c)}
-                          ariaLabel={`${c.placementIdentifier} · row ${c.rowIndex}`}
+                          ariaLabel={`${c.placementIdentifier} · row ${c.rowIndex + 1}`}
                         />
                         {t("paywalls.builder.experiment.placement.rowLabel", {
                           identifier: c.placementIdentifier,
-                          row: c.rowIndex,
+                          // Display is 1-based ordinal ("row 1" for index 0);
+                          // the posted { placementId, rowIndex } stays 0-based.
+                          row: c.rowIndex + 1,
                           defaultValue: "{{identifier}} · row {{row}}",
                         })}
                       </label>
