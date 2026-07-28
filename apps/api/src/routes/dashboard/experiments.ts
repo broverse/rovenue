@@ -20,28 +20,15 @@ import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
-import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { ok } from "../../lib/response";
 import {
   assertPaywallVariantsValid,
   createExperimentValidated,
+  generateFreeExperimentKey,
 } from "../../services/experiment-create";
 import { invalidateExperimentCache } from "../../services/experiment-engine";
 import { computeExperimentResults } from "../../services/experiment-results";
 import { invalidateFlagCache } from "../../services/flag-engine";
-
-/**
- * The unique index behind the backend-assigned experiment key —
- * `CREATE UNIQUE INDEX "experiments_projectId_key_key" ON "experiments"
- * ("projectId","key")`, migration 0000_flippant_ezekiel.sql.
- *
- * The retry loops below regenerate the key and try again, which only
- * helps for a collision on THIS index. Any other unique violation the
- * insert could raise would still be there on the next attempt, so
- * retrying it would just burn the attempt budget and report the wrong
- * error; those must surface immediately.
- */
-const EXPERIMENT_KEY_UNIQUE = "experiments_projectId_key_key";
 
 function inferPromotedFlagType(
   experimentType: ExperimentType,
@@ -748,35 +735,25 @@ export const experimentsRoute = new Hono()
     const user = c.get("user");
     await assertProjectCapability(source.projectId, user.id, "experiments:write");
 
-    let duplicated;
-    for (let attempt = 0; ; attempt += 1) {
-      const key = drizzle.experimentRepo.generateExperimentKey();
-      try {
-        duplicated = await drizzle.experimentRepo.createExperiment(
-          drizzle.db,
-          {
-            projectId: source.projectId,
-            name: `${source.name} (copy)`,
-            description: source.description,
-            type: source.type,
-            key,
-            audienceId: source.audienceId,
-            status: ExperimentStatus.DRAFT,
-            variants: source.variants,
-            metrics: source.metrics,
-            mutualExclusionGroup: source.mutualExclusionGroup,
-          },
-        );
-        break;
-      } catch (err) {
-        // Same wrapper, same consequence as on create: without the
-        // cause-walk a genuine key clash 500s instead of regenerating.
-        if (isUniqueViolationOf(err, EXPERIMENT_KEY_UNIQUE) && attempt < 4) {
-          continue;
-        }
-        throw err;
-      }
-    }
+    // Key strategy: see generateFreeExperimentKey — same generate →
+    // SELECT-precheck helper createExperimentValidated uses, so the
+    // duplicate route no longer needs its own insert-then-catch loop.
+    const key = await generateFreeExperimentKey(drizzle.db, source.projectId);
+    const duplicated = await drizzle.experimentRepo.createExperiment(
+      drizzle.db,
+      {
+        projectId: source.projectId,
+        name: `${source.name} (copy)`,
+        description: source.description,
+        type: source.type,
+        key,
+        audienceId: source.audienceId,
+        status: ExperimentStatus.DRAFT,
+        variants: source.variants,
+        metrics: source.metrics,
+        mutualExclusionGroup: source.mutualExclusionGroup,
+      },
+    );
 
     await invalidateExperimentCache(source.projectId);
     await audit({

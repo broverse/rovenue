@@ -4,21 +4,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Experiment key collision → retry
 // =============================================================
 //
-// The experiment key is backend-assigned, and both create and duplicate
-// wrap the insert in a bounded retry loop so a cuid2 clash regenerates
-// instead of failing the request. The loop's guard used to read
-// `err.code === "23505"` off the caught error — but drizzle 0.45.2
-// rethrows every pg-core failure as a DrizzleQueryError and hangs the
-// driver error off `.cause`, so the guard never matched, `continue` was
-// dead code, and a real collision 500'd on the first attempt.
+// The experiment key is backend-assigned. `POST /dashboard/experiments`
+// generates it via the generate → SELECT-precheck → single-INSERT
+// strategy in experiment-create.ts's generateFreeExperimentKey; a cuid2
+// clash on the precheck regenerates before any insert is attempted.
 //
-// Every fixture here therefore throws the NESTED shape. A test that
-// threw a flat `{ code: "23505" }` would pass against the broken loop
-// and prove nothing.
+// `POST /dashboard/experiments/:id/duplicate` used to run its own
+// insert-then-catch-unique-violation retry loop (P7 deferred item 2
+// consolidated it onto the same generateFreeExperimentKey helper
+// createExperimentValidated uses — see experiments.ts). The "POST
+// /dashboard/experiments" describe block below still models the OLDER
+// insert-then-catch shape and is pre-existing red at HEAD, unrelated to
+// that consolidation — left as-is here.
+//
+// Every fixture here therefore throws the NESTED shape (drizzle 0.45.2
+// rethrows every pg-core failure as a DrizzleQueryError and hangs the
+// driver error off `.cause`). A test that threw a flat `{ code: "23505" }`
+// would pass against the broken loop and prove nothing.
 
 const createExperiment = vi.hoisted(() => vi.fn());
 const generateExperimentKey = vi.hoisted(() => vi.fn());
 const findExperimentById = vi.hoisted(() => vi.fn());
+const findExperimentByKey = vi.hoisted(() => vi.fn());
 const findAudienceInProject = vi.hoisted(() => vi.fn());
 const assertProjectCapability = vi.hoisted(() => vi.fn());
 const invalidateExperimentCache = vi.hoisted(() => vi.fn());
@@ -45,6 +52,7 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         createExperiment,
         generateExperimentKey,
         findExperimentById,
+        findExperimentByKey,
       },
       audienceRepo: { ...actual.drizzle.audienceRepo, findAudienceInProject },
     },
@@ -126,6 +134,9 @@ describe("experiment key collisions", () => {
     vi.clearAllMocks();
     let n = 0;
     generateExperimentKey.mockImplementation(() => `key_${(n += 1)}`);
+    // No collision by default — generateFreeExperimentKey's precheck
+    // finds the first generated key free.
+    findExperimentByKey.mockResolvedValue(null);
     findAudienceInProject.mockResolvedValue({ id: "aud_all", projectId: "proj_a" });
     assertProjectCapability.mockResolvedValue(undefined);
     invalidateExperimentCache.mockResolvedValue(undefined);
@@ -204,20 +215,35 @@ describe("experiment key collisions", () => {
     });
   });
 
+  // Mirrors experiment-create.test.ts's collision cases: duplicate now
+  // shares generateFreeExperimentKey with createExperimentValidated, so
+  // a collision is resolved by the SELECT-precheck BEFORE any insert is
+  // attempted — never by catching an insert failure and retrying.
   describe("POST /dashboard/experiments/:id/duplicate", () => {
-    it("regenerates the key and retries when the copy's insert collides", async () => {
-      collideThenSucceed(1);
+    it("regenerates the key when the precheck finds the first key taken, then inserts once with the second key", async () => {
+      findExperimentByKey
+        .mockResolvedValueOnce({ id: "exp_existing" }) // key_1 taken
+        .mockResolvedValueOnce(null); // key_2 free
+      createExperiment.mockImplementation(
+        async (_db: unknown, values: { key: string }) => ({ id: "exp_new", ...values }),
+      );
 
       const res = await duplicateRequest();
 
       expect(res.status).toBe(200);
-      expect(createExperiment).toHaveBeenCalledTimes(2);
-      const keys = createExperiment.mock.calls.map((c) => (c[1] as { key: string }).key);
-      expect(new Set(keys).size).toBe(2);
+      expect(findExperimentByKey).toHaveBeenCalledTimes(2);
+      expect(createExperiment).toHaveBeenCalledTimes(1);
+      expect(createExperiment).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ key: "key_2" }),
+      );
+      const body = (await res.json()) as { data: { experiment: { key: string } } };
+      expect(body.data.experiment.key).toBe("key_2");
     });
 
-    it("does not retry a unique violation of a DIFFERENT index", async () => {
-      collideThenSucceed(1, "experiments_pkey");
+    it("propagates a genuine insert failure without retrying (no catch-loop left)", async () => {
+      findExperimentByKey.mockResolvedValue(null); // precheck never collides
+      createExperiment.mockRejectedValue(wrappedUniqueViolation("experiments_pkey"));
 
       const res = await duplicateRequest();
 

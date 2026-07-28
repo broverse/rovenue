@@ -5,6 +5,7 @@ import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import { placementRowsSchema, type PlacementRows } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
+import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
@@ -169,6 +170,15 @@ export const placementsDashboardRoute = new Hono()
       ...(body.isActive !== undefined && { isActive: body.isActive }),
     });
     purgeProjectCatalogCache(projectId);
+    await audit({
+      projectId,
+      userId: user.id,
+      action: "create",
+      resource: "placement",
+      resourceId: row.id,
+      after: { identifier: row.identifier, rows: row.rows },
+      ...extractRequestContext(c),
+    });
     return c.json(ok({ placement: row }));
   })
   .get("/:id", async (c) => {
@@ -262,6 +272,16 @@ export const placementsDashboardRoute = new Hono()
       throw new HTTPException(404, { message: "Placement not found" });
     }
     purgeProjectCatalogCache(projectId);
+    await audit({
+      projectId,
+      userId: user.id,
+      action: "update",
+      resource: "placement",
+      resourceId: id,
+      before: { identifier: existingPlacement.identifier, rows: existingPlacement.rows },
+      after: { identifier: row.identifier, rows: row.rows },
+      ...extractRequestContext(c),
+    });
     return c.json(ok({ placement: row }));
   })
   .delete("/:id", async (c) => {
@@ -273,6 +293,15 @@ export const placementsDashboardRoute = new Hono()
     const user = c.get("user");
     await assertProjectCapability(projectId, user.id, "products:write");
 
+    const existingPlacement = await drizzle.placementRepo.findPlacementById(
+      drizzle.db,
+      projectId,
+      id,
+    );
+    if (!existingPlacement) {
+      throw new HTTPException(404, { message: "Placement not found" });
+    }
+
     const removed = await drizzle.placementRepo.deletePlacement(
       drizzle.db,
       projectId,
@@ -282,5 +311,14 @@ export const placementsDashboardRoute = new Hono()
       throw new HTTPException(404, { message: "Placement not found" });
     }
     purgeProjectCatalogCache(projectId);
+    await audit({
+      projectId,
+      userId: user.id,
+      action: "delete",
+      resource: "placement",
+      resourceId: id,
+      before: { identifier: existingPlacement.identifier, rows: existingPlacement.rows },
+      ...extractRequestContext(c),
+    });
     return c.json(ok({ deleted: true }));
   });

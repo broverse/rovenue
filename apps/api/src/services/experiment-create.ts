@@ -86,16 +86,39 @@ export async function assertPaywallVariantsValid(
 }
 
 /**
+ * Generates a free experiment key for a project: generate → SELECT-precheck,
+ * up to EXPERIMENT_KEY_MAX_ATTEMPTS. This works inside a caller's transaction
+ * where an insert-then-catch-unique-violation retry loop cannot — a unique
+ * violation aborts the enclosing tx, so there is nothing left to retry into.
+ * The (projectId, key) unique index stays in place as the backstop for the
+ * astronomically-unlikely race between the precheck SELECT and the INSERT
+ * the caller performs with the returned key.
+ */
+export async function generateFreeExperimentKey(
+  db: DbOrTx,
+  projectId: string,
+): Promise<string> {
+  for (let attempt = 0; attempt < EXPERIMENT_KEY_MAX_ATTEMPTS; attempt += 1) {
+    const key = drizzle.experimentRepo.generateExperimentKey();
+    const existing = await drizzle.experimentRepo.findExperimentByKey(
+      db,
+      projectId,
+      key,
+    );
+    if (existing) continue;
+    return key;
+  }
+
+  throw new Error(
+    `Failed to generate a unique experiment key after ${EXPERIMENT_KEY_MAX_ATTEMPTS} attempts`,
+  );
+}
+
+/**
  * Validates (shared schema + audience membership + paywall variants)
  * and inserts a new experiment as DRAFT with a server-assigned key.
  *
- * Key strategy: generate → SELECT-precheck → single INSERT, up to
- * EXPERIMENT_KEY_MAX_ATTEMPTS. This works inside a caller's transaction
- * where an insert-then-catch-unique-violation retry loop cannot — a
- * unique violation aborts the enclosing tx, so there is nothing left
- * to retry into. The (projectId, key) unique index stays in place as
- * the backstop for the astronomically-unlikely race between the
- * precheck SELECT and the INSERT.
+ * Key strategy: see generateFreeExperimentKey.
  */
 export async function createExperimentValidated(
   db: DbOrTx,
@@ -123,32 +146,20 @@ export async function createExperimentValidated(
 
   await assertPaywallVariantsValid(db, input.projectId, input.type, input.variants);
 
-  for (let attempt = 0; attempt < EXPERIMENT_KEY_MAX_ATTEMPTS; attempt += 1) {
-    const key = drizzle.experimentRepo.generateExperimentKey();
-    const existing = await drizzle.experimentRepo.findExperimentByKey(
-      db,
-      input.projectId,
-      key,
-    );
-    if (existing) continue;
+  const key = await generateFreeExperimentKey(db, input.projectId);
 
-    return drizzle.experimentRepo.createExperiment(db, {
-      projectId: input.projectId,
-      name: input.name,
-      description: input.description,
-      type: input.type,
-      key,
-      audienceId: input.audienceId,
-      status: ExperimentStatus.DRAFT,
-      variants: input.variants,
-      metrics: input.metrics,
-      mutualExclusionGroup: input.mutualExclusionGroup,
-    });
-  }
-
-  throw new Error(
-    `Failed to generate a unique experiment key after ${EXPERIMENT_KEY_MAX_ATTEMPTS} attempts`,
-  );
+  return drizzle.experimentRepo.createExperiment(db, {
+    projectId: input.projectId,
+    name: input.name,
+    description: input.description,
+    type: input.type,
+    key,
+    audienceId: input.audienceId,
+    status: ExperimentStatus.DRAFT,
+    variants: input.variants,
+    metrics: input.metrics,
+    mutualExclusionGroup: input.mutualExclusionGroup,
+  });
 }
 
 /**
