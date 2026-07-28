@@ -1074,6 +1074,43 @@ function Carousel({ node, ctx, pages }: { node: CarouselNode; ctx: RenderCtx; pa
 }
 
 /**
+ * What `Video`'s visibility effect should do to the element right now.
+ *
+ * Three states, not two, and the third (`LEAVE_ALONE`) is the point: it is
+ * what keeps a NON-autoplay video the reader started by hand (or deliberately
+ * paused) from being started or re-paused by every visibility report. Pausing
+ * on going off-screen is unconditional regardless of `autoplay` — that half
+ * of the rule holds for a clip the reader started as much as for one that
+ * started itself. Named states rather than a boolean so a call site cannot
+ * collapse "should I resume" and "should I leave it" into the same branch by
+ * accident. Mirrors iOS's `VideoPlaybackCommand` (`RovenuePaywallView.swift`)
+ * exactly — this wave brings web's contract in line with it.
+ */
+const VIDEO_PLAYBACK_COMMAND = {
+  PLAY: "play",
+  PAUSE: "pause",
+  LEAVE_ALONE: "leaveAlone",
+} as const;
+type VideoPlaybackCommand = (typeof VIDEO_PLAYBACK_COMMAND)[keyof typeof VIDEO_PLAYBACK_COMMAND];
+
+/**
+ * The single playback rule a `video` obeys, a pure free function so it can be
+ * unit-tested without mounting a `<video>` element or stubbing
+ * `IntersectionObserver` — the same reason iOS's sibling rule
+ * (`videoPlaybackCommand` in `RovenuePaywallView.swift`) is a pure function
+ * rather than logic inlined in the view's effect.
+ *
+ * `autoplay` is the author's standing instruction and is honoured: a node
+ * that said `autoplay: false` is never STARTED by scrolling into view — only
+ * a reader-initiated `play()` (via `showsControls`) starts it, and once
+ * playing it still obeys the unconditional off-screen pause below.
+ */
+export function videoPlaybackCommand(visible: boolean, autoplay: boolean): VideoPlaybackCommand {
+  if (!visible) return VIDEO_PLAYBACK_COMMAND.PAUSE;
+  return autoplay ? VIDEO_PLAYBACK_COMMAND.PLAY : VIDEO_PLAYBACK_COMMAND.LEAVE_ALONE;
+}
+
+/**
  * A video plays or pauses via ITS OWN ELEMENT (`play()`/`pause()`), never by
  * remounting — a remount restarts playback from zero, a different and worse
  * behaviour than "resume where it left off", and it would diverge from both
@@ -1099,10 +1136,12 @@ function Video({ node, ctx }: { node: VideoNode; ctx: RenderCtx }): ReactElement
   const [element, setElement] = useState<HTMLVideoElement | null>(null);
   const [errored, setErrored] = useState(false);
   const visible = useNodeVisible(element);
+  const autoplay = node.autoplay ?? VIDEO_DEFAULT_AUTOPLAY;
 
   useEffect(() => {
     if (element === null) return;
-    if (visible) {
+    const command = videoPlaybackCommand(visible, autoplay);
+    if (command === VIDEO_PLAYBACK_COMMAND.PLAY) {
       // play() returns a promise that can reject (autoplay blocked, source
       // not ready yet); swallowed deliberately — there is no fallback UI for
       // "autoplay was refused" distinct from the element just sitting there
@@ -1112,10 +1151,13 @@ function Video({ node, ctx }: { node: VideoNode; ctx: RenderCtx }): ReactElement
       // guard rather than an unconditional `.catch`.
       const playResult = element.play();
       if (playResult && typeof playResult.catch === "function") playResult.catch(() => {});
-    } else {
+    } else if (command === VIDEO_PLAYBACK_COMMAND.PAUSE) {
       element.pause();
     }
-  }, [visible, element]);
+    // command === LEAVE_ALONE: deliberately a no-op. A non-autoplay video the
+    // reader hasn't started (or has deliberately paused) must not be resumed
+    // by visibility alone — see `videoPlaybackCommand`'s doc comment.
+  }, [visible, element, autoplay]);
 
   if (errored) return renderFallbackOrNull(node, ctx);
 
@@ -1125,7 +1167,7 @@ function Video({ node, ctx }: { node: VideoNode; ctx: RenderCtx }): ReactElement
       data-rov-node={node.id}
       src={resolveThemeUrl(node.url, ctx.colorScheme)}
       poster={node.posterUrl !== undefined ? resolveThemeUrl(node.posterUrl, ctx.colorScheme) : undefined}
-      autoPlay={node.autoplay ?? VIDEO_DEFAULT_AUTOPLAY}
+      autoPlay={autoplay}
       loop={node.loop ?? VIDEO_DEFAULT_LOOP}
       muted={node.muted ?? VIDEO_DEFAULT_MUTED}
       controls={node.showsControls ?? VIDEO_DEFAULT_SHOWS_CONTROLS}

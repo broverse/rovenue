@@ -4,6 +4,7 @@ export {
   renderNode,
   resolvePackageView,
   registerLottieRenderer,
+  videoPlaybackCommand,
   type LottieRenderer,
   type RenderCtx,
 } from "./nodes";

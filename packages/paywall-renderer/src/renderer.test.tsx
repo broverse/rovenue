@@ -20,7 +20,7 @@ import type {
   VideoNode,
 } from "@rovenue/shared/paywall";
 import { resolvePersistedFirstShownAt } from "./first-shown";
-import { registerLottieRenderer } from "./index";
+import { registerLottieRenderer, videoPlaybackCommand } from "./index";
 import { PaywallRenderer } from "./renderer";
 import { CAROUSEL_DOT_ACTIVE_OPACITY, CAROUSEL_DOT_INACTIVE_OPACITY } from "./styles";
 import type { RendererOffering } from "./types";
@@ -2505,6 +2505,101 @@ describe("video and lottie nodes", () => {
       // Still paused exactly as many times as it was told to go off-screen —
       // coming back on-screen must not pause it again.
       expect(pauseSpy.mock.calls.length).toBe(pauseCallsBeforeReturn);
+    } finally {
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  describe("videoPlaybackCommand", () => {
+    // The pure rule `Video`'s visibility effect obeys. Covered directly (no
+    // DOM, no IntersectionObserver stub needed) so the three-state contract
+    // itself is pinned independent of how the effect wires it up.
+    it("commands pause when off-screen, regardless of autoplay", () => {
+      expect(videoPlaybackCommand(false, true)).toBe("pause");
+      expect(videoPlaybackCommand(false, false)).toBe("pause");
+    });
+
+    it("commands play when visible and autoplay is true", () => {
+      expect(videoPlaybackCommand(true, true)).toBe("play");
+    });
+
+    it("commands leaveAlone when visible and autoplay is false — visibility must never start a video the author opted out of", () => {
+      expect(videoPlaybackCommand(true, false)).toBe("leaveAlone");
+    });
+  });
+
+  it("does not call play() on an autoplay:false video becoming visible, but still pauses it when it later goes off-screen", () => {
+    // This is the regression test: the old effect called `element.play()`
+    // unconditionally on visibility, ignoring `autoplay` entirely. Restoring
+    // that unconditional call must fail the `playSpy` assertion below (see
+    // this task's MUTATION-CHECK).
+    const observers: Array<{ emit(isIntersecting: boolean): void }> = [];
+    class StubIntersectionObserver {
+      #callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.#callback = callback;
+        observers.push(this);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      emit(isIntersecting: boolean) {
+        this.#callback([{ isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", StubIntersectionObserver);
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    try {
+      renderPaywall(videoNode({ url: { light: "u.mp4" }, autoplay: false }));
+      const observer = observers[0]!;
+
+      // Becoming visible must not start a video the author said should not
+      // autoplay — only a reader-initiated play (via `showsControls`) may.
+      act(() => observer.emit(true));
+      expect(playSpy).not.toHaveBeenCalled();
+
+      // jsdom never actually plays media, so this suite cannot observe real
+      // playback either way — only that `pause()` was (or wasn't) called.
+      // Going off-screen must pause unconditionally even so, which is the
+      // "leave alone while visible, but always pause off-screen" half of the
+      // rule: a clip the reader started by hand still must not keep "playing"
+      // off screen.
+      act(() => observer.emit(false));
+      expect(pauseSpy).toHaveBeenCalled();
+    } finally {
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("calls play() on an autoplay:true video becoming visible", () => {
+    const observers: Array<{ emit(isIntersecting: boolean): void }> = [];
+    class StubIntersectionObserver {
+      #callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.#callback = callback;
+        observers.push(this);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      emit(isIntersecting: boolean) {
+        this.#callback([{ isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", StubIntersectionObserver);
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    try {
+      renderPaywall(videoNode({ url: { light: "u.mp4" }, autoplay: true }));
+      const observer = observers[0]!;
+
+      act(() => observer.emit(true));
+      expect(playSpy).toHaveBeenCalled();
     } finally {
       playSpy.mockRestore();
       pauseSpy.mockRestore();
