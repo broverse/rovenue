@@ -52,7 +52,8 @@ final class PaywallMappingTests: XCTestCase {
         includePresentedContext: Bool = true,
         variantId: String? = "var_a",
         experimentKey: String? = "exp_1",
-        servedFromFallback: Bool = false
+        servedFromFallback: Bool = false,
+        revision: String? = nil
     ) -> CorePaywall {
         CorePaywall(
             placementIdentifier: "plc_1",
@@ -67,7 +68,8 @@ final class PaywallMappingTests: XCTestCase {
             presentedContext: includePresentedContext
                 ? makeCorePresentedContext(variantId: variantId, experimentKey: experimentKey)
                 : nil,
-            servedFromFallback: servedFromFallback
+            servedFromFallback: servedFromFallback,
+            revision: revision
         )
     }
 
@@ -132,6 +134,16 @@ final class PaywallMappingTests: XCTestCase {
     func test_mapPaywall_servedFromFallbackPassedThroughVerbatim() {
         let paywall = mapPaywall(makeCorePaywall(servedFromFallback: true), offering: nil)
         XCTAssertTrue(paywall.servedFromFallback)
+    }
+
+    func test_mapPaywall_revisionDefaultsNil() {
+        let paywall = mapPaywall(makeCorePaywall(), offering: nil)
+        XCTAssertNil(paywall.revision)
+    }
+
+    func test_mapPaywall_revisionPassedThroughVerbatim() {
+        let paywall = mapPaywall(makeCorePaywall(revision: "2026-07-28T12:00:00.000Z"), offering: nil)
+        XCTAssertEqual(paywall.revision, "2026-07-28T12:00:00.000Z")
     }
 
     // ------------------------------------------------------------------

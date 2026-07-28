@@ -703,6 +703,33 @@ public final class Rovenue: @unchecked Sendable {
         return mapPaywall(ffi, offering: offering)
     }
 
+    /// Fetch an on-device preview of an unpublished paywall draft by its
+    /// short-lived preview `token` (minted by the dashboard, redeemed once
+    /// per fetch — see the preview-session core/API work). Unlike
+    /// `getPaywall`, this never resolves a real placement: the returned
+    /// `Paywall` carries `placementIdentifier == ""` / `placementRevision
+    /// == 0` sentinels and `presentedContext == nil` (no attribution
+    /// exists for a draft), and a `revision` stamp the caller can compare
+    /// across polls (see `previewPollDecision`) to detect a newer save. A
+    /// 404/expired session propagates as a thrown `RovenueError`, not a
+    /// `nil` return — unlike an unmatched placement, an invalid preview
+    /// token is an error condition, not "nothing to show".
+    @available(iOS 15.0, macOS 12.0, *)
+    public func getPaywallPreview(token: String, locale: String? = nil) async throws -> Paywall? {
+        let ffi: CorePaywall?
+        do {
+            ffi = try await dispatcher.run { [core] in
+                do { return try core.getPaywallPreview(token: token, locale: locale) }
+                catch let err as RovenueErrorFfi { throw mapError(err) }
+            }
+        } catch {
+            throw error
+        }
+        guard let ffi else { return nil }
+        let offering: Offering? = if let o = ffi.offering { await hydrateOffering(o) } else { nil }
+        return mapPaywall(ffi, offering: offering)
+    }
+
     /// Report that `paywall` was actually shown to the subscriber. Builds a
     /// `paywall_view` event (sourced from `paywall.presentedContext`) and
     /// enqueues it via `track(envelopeJson:)` — the same at-least-once

@@ -284,6 +284,12 @@ public struct Paywall {
     /// see `Rovenue.setFallbackPlacements`. `false` otherwise. Defaulted so
     /// existing positional/named constructions keep compiling.
     public let servedFromFallback: Bool
+    /// Opaque revision stamp — changes whenever the paywall's draft config
+    /// is saved. `nil` for every non-preview paywall (a resolved placement
+    /// carries no such stamp); populated only via `getPaywallPreview`,
+    /// where `RovenuePaywallPreviewView`'s poll loop compares it across
+    /// fetches to decide whether to re-bind.
+    public let revision: String?
 
     public init(
         placementIdentifier: String,
@@ -296,7 +302,8 @@ public struct Paywall {
         builderConfigJson: String? = nil,
         offering: Offering?,
         presentedContext: PresentedContext?,
-        servedFromFallback: Bool = false
+        servedFromFallback: Bool = false,
+        revision: String? = nil
     ) {
         self.placementIdentifier = placementIdentifier
         self.placementRevision = placementRevision
@@ -309,6 +316,7 @@ public struct Paywall {
         self.offering = offering
         self.presentedContext = presentedContext
         self.servedFromFallback = servedFromFallback
+        self.revision = revision
     }
 }
 
