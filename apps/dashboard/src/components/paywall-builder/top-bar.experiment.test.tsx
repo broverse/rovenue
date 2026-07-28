@@ -9,6 +9,7 @@ import { TopBar } from "./top-bar";
 import { BuilderShell } from "./builder-shell";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../lib/services/paywall-builder-api";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
+import { RoviProvider } from "../rovi/rovi-provider";
 import { emptyBuilderConfig } from "@rovenue/shared/paywall";
 import { useExperiments, useStartExperiment } from "../../lib/hooks/useExperiments";
 import { useProjectPaywalls } from "../../lib/hooks/useProjectPaywalls";
@@ -204,13 +205,18 @@ async function renderShell(detailOverrides: Partial<PaywallBuilderDetailDto> = {
 
   const utils = render(
     <QueryClientProvider client={qc}>
-      <ServiceProvider
-        provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
-        props={{ projectId: "p_1", paywallId: "pw_a" }}
-      >
-        <Probe />
-        <BuilderShell projectId="p_1" />
-      </ServiceProvider>
+      {/* BuilderShell now mounts the AI FAB (Task 5, §6.15) and calls
+          useRovi() unconditionally — it must render inside a RoviProvider,
+          same as it does in the real app (see the $projectId route layout). */}
+      <RoviProvider>
+        <ServiceProvider
+          provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
+          props={{ projectId: "p_1", paywallId: "pw_a" }}
+        >
+          <Probe />
+          <BuilderShell projectId="p_1" />
+        </ServiceProvider>
+      </RoviProvider>
     </QueryClientProvider>,
   );
 

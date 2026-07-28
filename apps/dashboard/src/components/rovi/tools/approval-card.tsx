@@ -1,5 +1,7 @@
 import { useState } from "react";
+import type { PaywallTreeOp } from "@rovenue/shared/paywall";
 import { useRoviIntents } from "../../../lib/hooks/useRoviIntents";
+import { useRovi } from "../../../lib/hooks/useRovi";
 
 // Shape the backend emits when an `action.*` tool fires. The chat
 // stream surfaces this as the tool part's `output`; we render it as
@@ -20,22 +22,54 @@ type IntentPayload = {
   expiresAt: string;
 };
 
+/** The `action_paywall_editTree` intent handler's execute result (spec
+ *  §3.3) — it never writes; the op is returned for the CLIENT to apply. */
+type EditTreeResult = { op: PaywallTreeOp; paywallId: string };
+
+const EDIT_TREE_TOOL_NAME = "action_paywall_editTree";
+
+function isEditTreeResult(v: unknown): v is EditTreeResult {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "op" in v &&
+    "paywallId" in v &&
+    typeof (v as { paywallId: unknown }).paywallId === "string"
+  );
+}
+
 export function ApprovalCard({ intent }: { intent: IntentPayload }) {
   const { execute, reject } = useRoviIntents();
+  const { dispatchPaywallPatch } = useRovi();
   const [decision, setDecision] = useState<
     "none" | "approved" | "rejected" | "failed"
   >("none");
   const [error, setError] = useState<string | null>(null);
+  // Only ever populated for `action_paywall_editTree` — the op the
+  // backend returned, kept around so "Re-apply" can retry it once a
+  // builder is mounted to receive it (spec §3.3: "the intent is already
+  // executed; the card keeps it re-appliable for the session").
+  const [pendingOp, setPendingOp] = useState<EditTreeResult | null>(null);
+  const [opApplied, setOpApplied] = useState(false);
 
   async function approve() {
     setError(null);
     try {
-      await execute.mutateAsync(intent.intentId);
+      const result = await execute.mutateAsync(intent.intentId);
       setDecision("approved");
+      if (intent.toolName === EDIT_TREE_TOOL_NAME && isEditTreeResult(result)) {
+        setPendingOp(result);
+        setOpApplied(dispatchPaywallPatch(result.op));
+      }
     } catch (e) {
       setError((e as Error).message);
       setDecision("failed");
     }
+  }
+
+  function reapply() {
+    if (!pendingOp) return;
+    setOpApplied(dispatchPaywallPatch(pendingOp.op));
   }
 
   async function cancel() {
@@ -96,9 +130,23 @@ export function ApprovalCard({ intent }: { intent: IntentPayload }) {
             {execute.isPending ? "Running…" : "Approve & Run"}
           </button>
         </div>
+      ) : decision === "approved" && pendingOp && !opApplied ? (
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <p className="text-[11px] text-rv-mute-600">
+            Open the paywall builder to apply this change.
+          </p>
+          <button
+            type="button"
+            onClick={reapply}
+            className="h-7 shrink-0 rounded-md border border-rv-divider px-2.5 text-[11px] text-rv-mute-700 transition hover:bg-rv-c4 hover:text-foreground"
+          >
+            Re-apply
+          </button>
+        </div>
       ) : (
         <p className="mt-3 text-[11px] text-rv-mute-600">
-          {decision === "approved" && "Approved and executed."}
+          {decision === "approved" &&
+            (pendingOp ? "Applied to the builder." : "Approved and executed.")}
           {decision === "rejected" && "Cancelled."}
           {decision === "failed" && (error ?? "Execution failed.")}
         </p>

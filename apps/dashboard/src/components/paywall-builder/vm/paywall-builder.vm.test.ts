@@ -9,12 +9,14 @@ import { findNode } from "../tree-ops";
 import {
   MAX_BUILDER_DEPTH,
   MAX_BUILDER_NODES,
+  TreeOpError,
   emptyBuilderConfig,
   measureNodeTree,
   type BuilderConfig,
   type FeatureListNode,
   type PackageListNode,
   type PaywallNode,
+  type PaywallTreeOp,
   type StackNode,
   type TextNode,
   type TimelineNode,
@@ -1182,5 +1184,199 @@ describe("inspector tab", () => {
     await vm.load(() => {});
 
     expect(vm.inspectorTab).toBeNull();
+  });
+});
+
+// =============================================================
+// AI FAB apply/revert (P8 §2, §3.3) — `applyExternalTreeOp`/
+// `applyExternalConfig` are the client-side landing spot for an approved
+// `action_paywall_editTree` op (via the RoviProvider bridge, see
+// ai-bridge.test.tsx) or an imported/generated tree. `configBeforeAiApply`
+// is a ONE-SHOT pre-apply snapshot: `revertAiChange` consumes it, and any
+// manual tree edit invalidates it before it's ever used.
+// =============================================================
+describe("AI apply/revert (configBeforeAiApply)", () => {
+  it("applyExternalTreeOp applies the op, snapshots the pre-apply config, and revertAiChange restores it byte-equal", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.selectNode("t1");
+
+    const before = vm.config;
+    const beforeJson = JSON.stringify(before);
+
+    const op: PaywallTreeOp = {
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp1", size: 16 },
+    };
+    vm.applyExternalTreeOp(op);
+
+    expect(vm.config.root.children.some((c) => c.id === "sp1")).toBe(true);
+    expect(vm.configBeforeAiApply).not.toBeNull();
+    expect(JSON.stringify(vm.configBeforeAiApply)).toBe(beforeJson);
+    // Deselects rather than trying to resolve the touched node — an
+    // insert/replace/remove isn't always "select the one thing that changed".
+    expect(vm.selectedNodeId).toBeNull();
+
+    vm.revertAiChange();
+
+    expect(JSON.stringify(vm.config)).toBe(beforeJson);
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("applyExternalTreeOp propagates TreeOpError and leaves config/snapshot untouched on an invalid op", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const before = vm.config;
+
+    const badOp: PaywallTreeOp = { kind: "remove", nodeId: "does-not-exist" };
+
+    expect(() => vm.applyExternalTreeOp(badOp)).toThrow(TreeOpError);
+    expect(vm.config).toBe(before);
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("applyExternalConfig wholesale-assigns config, snapshots the previous one, and resets locale state (applyPreset semantics)", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.selectNode("t1");
+    const before = vm.config;
+    const beforeJson = JSON.stringify(before);
+
+    const generated: BuilderConfig = emptyBuilderConfig("fr");
+    generated.root.children.push({ type: "text", id: "g1", key: "g1_key", role: "title" });
+    generated.localizations.fr!.g1_key = "Bonjour";
+
+    vm.applyExternalConfig(generated);
+
+    // Not `.toBe(generated)`: `@state config` is backed by a Vue `ref`,
+    // which auto-wraps an assigned object in a reactive proxy — `vm.config`
+    // is never `===` the plain object you assigned, on this VM or any
+    // other `@state` field. Structural equality is the only meaningful
+    // check (matches this file's existing `before`/`beforeJson` idiom).
+    expect(JSON.stringify(vm.config)).toBe(JSON.stringify(generated));
+    expect(vm.locales).toEqual(["fr"]);
+    expect(vm.defaultLocale).toBe("fr");
+    expect(vm.editLocale).toBe("fr"); // "en" no longer exists in the new locale set
+    expect(vm.selectedNodeId).toBeNull();
+    expect(JSON.stringify(vm.configBeforeAiApply)).toBe(beforeJson);
+
+    vm.revertAiChange();
+
+    expect(JSON.stringify(vm.config)).toBe(beforeJson);
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("revertAiChange is a one-shot no-op once there is nothing left to revert", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    vm.revertAiChange(); // nothing pending — no-op, no throw
+    expect(vm.configBeforeAiApply).toBeNull();
+
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp2", size: 8 },
+    });
+    vm.revertAiChange();
+    const afterFirstRevert = vm.config;
+
+    vm.revertAiChange(); // second click: nothing left to revert to
+    expect(vm.config).toBe(afterFirstRevert);
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("updateNode clears a pending AI snapshot", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp3", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.updateNode("t1", { role: "subtitle" });
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("addNode clears a pending AI snapshot", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp4", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.addNode("spacer", "root");
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("moveNode clears a pending AI snapshot", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const extraId = vm.addNode("spacer", "root")!;
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp5", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.moveNode(extraId, -1);
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("removeNode clears a pending AI snapshot", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const extraId = vm.addNode("spacer", "root")!;
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp6", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.removeNode(extraId);
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("applyPreset also clears a pending AI snapshot", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp7", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.applyPreset("hero");
+
+    expect(vm.configBeforeAiApply).toBeNull();
   });
 });

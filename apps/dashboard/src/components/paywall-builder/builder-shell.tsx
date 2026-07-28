@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
+import { Sparkles } from "lucide-react";
 import { TopBar } from "./top-bar";
 import { LayerTree } from "./layer-tree";
 import { Canvas } from "./canvas";
@@ -12,6 +13,7 @@ import { StartModal } from "./start-modal";
 import { ExperimentPopover } from "./experiment-popover";
 import { shouldAutoOpenStart } from "./start-model";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
+import { useRovi } from "../../lib/hooks/useRovi";
 
 type Props = {
   projectId: string;
@@ -20,6 +22,14 @@ type Props = {
 export const BuilderShell = component(({ projectId }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
+  // Destructured rather than kept as `const rovi = useRovi()`: `setOpen`,
+  // `setChatContext` and `registerPaywallPatchListener` are individually
+  // stable (RoviProvider wraps each in a bare `useCallback`), but the
+  // CONTEXT VALUE OBJECT they come back inside of is re-created on every
+  // `chatContext`/`open` change. Depending on that whole object below
+  // would re-run the chatContext effect every time it itself just wrote
+  // to `chatContext` — an infinite update loop.
+  const { open: roviOpen, setOpen: setRoviOpen, setChatContext, registerPaywallPatchListener } = useRovi();
   const [showValidation, setShowValidation] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
   const [showLocalization, setShowLocalization] = useState(false);
@@ -46,6 +56,39 @@ export const BuilderShell = component(({ projectId }: Props) => {
   // during unload, so the decision is handed to the person instead. That
   // prompt already exists — PaywallBuilderViewModel.guardUnload registers
   // the `beforeunload` handler. Do not add a second one here.
+
+  // Rovi → builder bridge (spec §3.3): only the builder route registers a
+  // patch listener, so `ApprovalCard`'s execute handler can forward an
+  // approved `action_paywall_editTree` op while a builder is mounted, and
+  // falls back to its "open the builder" state otherwise. Unregisters on
+  // unmount (route change / paywall switch) so a stale VM never receives
+  // a patch meant for whichever builder is open next.
+  useEffect(() => {
+    return registerPaywallPatchListener((op) => {
+      try {
+        vm.applyExternalTreeOp(op);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }, [registerPaywallPatchListener, vm]);
+
+  // Tells Rovi which paywall is open and which node the author has
+  // selected (spec §3.1) — `useRoviChat` forwards `focusedEntityId` to the
+  // backend so the system prompt can ground a proposed edit against the
+  // exact node in view. Reset to empty on unmount so leaving the builder
+  // doesn't leak paywall context into chats on other pages.
+  useEffect(() => {
+    setChatContext({
+      paywallId: vm.paywallId || undefined,
+      focusedEntityId: vm.selectedNodeId ?? undefined,
+    });
+  }, [setChatContext, vm.paywallId, vm.selectedNodeId]);
+
+  useEffect(() => {
+    return () => setChatContext({});
+  }, [setChatContext]);
 
   if (vm.isLoading) {
     return (
@@ -84,6 +127,21 @@ export const BuilderShell = component(({ projectId }: Props) => {
         <Canvas />
         <PropertiesPanel />
       </main>
+      {/* AI FAB (spec §3.1) — the topbar Rovi button is covered by this
+          overlay's own inset-0, so this is the builder's only visible
+          opener short of ⌘/Ctrl+.; hidden while the panel is already open
+          so it doesn't float over the open drawer. */}
+      {!roviOpen && (
+        <button
+          type="button"
+          onClick={() => setRoviOpen(true)}
+          aria-label={t("paywalls.builder.ai.fabLabel", "Ask Rovi")}
+          title={t("paywalls.builder.ai.fabLabel", "Ask Rovi")}
+          className="fixed bottom-6 right-6 z-[55] flex size-12 items-center justify-center rounded-full bg-rv-accent-500 text-white shadow-[0_12px_28px_rgba(0,0,0,0.45)] transition hover:bg-rv-accent-600"
+        >
+          <Sparkles size={20} />
+        </button>
+      )}
       {showValidation && <ValidationDrawer onClose={() => setShowValidation(false)} />}
       {showDiff && <DiffModal onClose={() => setShowDiff(false)} />}
       {showLocalization && <LocalizationModal onClose={() => setShowLocalization(false)} />}

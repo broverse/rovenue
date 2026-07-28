@@ -9,6 +9,7 @@ import type {
   OverrideCondition,
   PackageListNode,
   PaywallNode,
+  PaywallTreeOp,
 } from "@rovenue/shared/paywall";
 import type {
   DashboardPaywallDiffResponse,
@@ -17,6 +18,7 @@ import type {
 import {
   MAX_BUILDER_DEPTH,
   MAX_BUILDER_NODES,
+  applyTreeOp,
   emptyBuilderConfig,
   isPublishBlockingIssue,
   localizedKeysOf,
@@ -91,6 +93,26 @@ export class PaywallBuilderViewModel {
 
   @state config: BuilderConfig = emptyBuilderConfig();
   @state selectedNodeId: string | null = null;
+
+  /**
+   * One-shot pre-apply snapshot for the AI FAB / import / generate paths
+   * (spec §2, §3.3). Set by `applyExternalTreeOp`/`applyExternalConfig`
+   * right before they overwrite `config`; consumed by `revertAiChange`.
+   * Cleared by the next MANUAL edit (`clearAiSnapshotOnManualEdit`, called
+   * from the node-CRUD methods below) so "Revert" can't resurrect a config
+   * the author has since edited by hand, and by `revertAiChange` itself
+   * (one-shot — reverting twice would silently no-op the second time).
+   */
+  @state configBeforeAiApply: BuilderConfig | null = null;
+
+  /** Drops any pending AI-revert snapshot. Called at the top of every
+   *  hand-drawn tree mutation (see `addNode`/`removeNode`/`moveNode`/
+   *  `updateNode`) — anything routed through `applyExternalTreeOp`/
+   *  `applyExternalConfig` must NOT call this, or it would erase the very
+   *  snapshot it just set. */
+  private clearAiSnapshotOnManualEdit() {
+    if (this.configBeforeAiApply !== null) this.configBeforeAiApply = null;
+  }
 
   /** Which inspector tab the author last chose. Read through `inspectorTab`,
    * never directly: it may name a tab the currently-selected node has not
@@ -347,6 +369,7 @@ export class PaywallBuilderViewModel {
    * 400 permanently — the failure mode the save-gate phase existed to remove.
    */
   addNode(type: PaywallNode["type"], parentId: string, index?: number): string | null {
+    this.clearAiSnapshotOnManualEdit();
     const node = treeOps.newNode(type, () => createId().slice(0, 8));
     const nextRoot = treeOps.insertNode(this.config.root, parentId, node, index);
     const bounds = measureNodeTree({ root: nextRoot });
@@ -388,15 +411,18 @@ export class PaywallBuilderViewModel {
   }
 
   removeNode(id: string) {
+    this.clearAiSnapshotOnManualEdit();
     this.config = { ...this.config, root: treeOps.removeNode(this.config.root, id) };
     if (this.selectedNodeId === id) this.selectedNodeId = null;
   }
 
   moveNode(id: string, dir: 1 | -1) {
+    this.clearAiSnapshotOnManualEdit();
     this.config = { ...this.config, root: treeOps.moveNode(this.config.root, id, dir) };
   }
 
   updateNode<T extends PaywallNode>(id: string, patch: Partial<T>) {
+    this.clearAiSnapshotOnManualEdit();
     this.config = { ...this.config, root: treeOps.updateNode<T>(this.config.root, id, patch) };
   }
 
@@ -542,11 +568,63 @@ export class PaywallBuilderViewModel {
   applyPreset(id: PresetId) {
     const preset = PRESETS.find((p) => p.id === id);
     if (!preset) return;
+    this.clearAiSnapshotOnManualEdit();
     const config = preset.build(this.defaultLocale || "en");
     this.config = config;
     this.locales = Object.keys(config.localizations);
     this.defaultLocale = config.defaultLocale;
     if (!this.locales.includes(this.editLocale)) this.editLocale = this.defaultLocale;
+    this.selectedNodeId = null;
+  }
+
+  // ----- AI FAB / import / generate apply-revert (spec §2, §3.3) -----
+  /**
+   * Applies a single `PaywallTreeOp` (an approved `action_paywall_editTree`
+   * result, forwarded through `RoviProvider.dispatchPaywallPatch`) via the
+   * SAME `applyTreeOp` the server dry-runs against — one implementation,
+   * both sides. Snapshots the pre-apply config first so `revertAiChange`
+   * can undo it; the snapshot is only set once `applyTreeOp` has already
+   * succeeded, so a thrown `TreeOpError` (bad target/index) leaves
+   * `config`/`configBeforeAiApply` untouched and propagates to the caller
+   * (the bridge listener), which reports the failure back through its
+   * boolean return.
+   *
+   * Deselects rather than selecting the touched node: an insert/replace/
+   * remove can touch a node the properties panel has no story for yet
+   * mid-op, and the canvas highlighting the new subtree is enough context.
+   */
+  applyExternalTreeOp(op: PaywallTreeOp) {
+    const nextConfig = applyTreeOp(this.config, op);
+    this.configBeforeAiApply = this.config;
+    this.config = nextConfig;
+    this.selectedNodeId = null;
+  }
+
+  /**
+   * Wholesale-replaces `config` (an App Store import or one-shot AI
+   * generation result) — same shape as `applyPreset` below, including the
+   * locale reset, so an imported/generated tree with a different locale
+   * set than the current draft doesn't leave `locales`/`defaultLocale`
+   * pointing at tables that no longer exist.
+   */
+  applyExternalConfig(config: BuilderConfig) {
+    this.configBeforeAiApply = this.config;
+    this.config = config;
+    this.locales = Object.keys(config.localizations);
+    this.defaultLocale = config.defaultLocale;
+    if (!this.locales.includes(this.editLocale)) this.editLocale = this.defaultLocale;
+    this.selectedNodeId = null;
+  }
+
+  /** Restores the pre-apply snapshot taken by `applyExternalTreeOp`/
+   *  `applyExternalConfig`. No-op once there's nothing to revert to
+   *  (already reverted, or superseded by a manual edit). One-shot: clears
+   *  the snapshot itself, so a second click can't "revert" back onto the
+   *  same already-restored config. */
+  revertAiChange() {
+    if (this.configBeforeAiApply === null) return;
+    this.config = this.configBeforeAiApply;
+    this.configBeforeAiApply = null;
     this.selectedNodeId = null;
   }
 

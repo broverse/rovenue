@@ -3,6 +3,7 @@ import { DefaultChatTransport } from "ai";
 import { useLocation, useParams } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { API_BASE_URL } from "../api";
+import { useRovi } from "./useRovi";
 
 // Helpers shape returned by `useChat` (so callers don't need to import
 // from `@ai-sdk/react` themselves). Note: we intentionally do NOT
@@ -39,6 +40,12 @@ export function useRoviChat(args: {
   const location = useLocation();
   const pathname = location.pathname;
   const { threadId } = args;
+  // `focusedEntityId` is the paywall-builder's selected node id (set via
+  // `RoviProvider.setChatContext`, see builder-shell.tsx) — undefined
+  // everywhere else. The backend only reads it on the builder route
+  // (`BUILDER_ROUTE_RE` in system-prompt.ts), so it's harmless elsewhere.
+  const { chatContext } = useRovi();
+  const focusedEntityId = chatContext.focusedEntityId;
 
   const transport = useMemo(() => {
     if (!projectId) return undefined;
@@ -47,10 +54,10 @@ export function useRoviChat(args: {
       credentials: "include",
       body: () => ({
         threadId: threadId ?? "",
-        context: { route: pathname },
+        context: { route: pathname, focusedEntityId },
       }),
     });
-  }, [projectId, threadId, pathname]);
+  }, [projectId, threadId, pathname, focusedEntityId]);
 
   // `useChat` itself requires a hook call on every render — we can't
   // early-return before it. When there's no projectId in scope (e.g. the

@@ -1294,6 +1294,9 @@
     "builder": {
       "loading": "loading paywall…",
       "loadFailed": "Failed to load paywall.",
+      "ai": {
+        "fabLabel": "Ask Rovi"
+      },
       "nodeTypes": {
         "stack": "Stack",
         "text": "Text",
