@@ -549,6 +549,10 @@ class BuilderConfigModelTest {
             STICKY_FOOTER_DEFAULT_BACKGROUND,
             themePairFrom(defaults["STICKY_FOOTER_DEFAULT_BACKGROUND"]!!.jsonObject),
         )
+        assertEquals(
+            STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT_DP,
+            defaults["STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT"]!!.jsonPrimitive.double,
+        )
     }
 
     private fun countdownOnExpiryFrom(raw: String): CountdownOnExpiry = when (raw) {
