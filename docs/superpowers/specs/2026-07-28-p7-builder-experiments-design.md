@@ -46,7 +46,7 @@ Response `{ data: { experiment, createdPaywallId: string | null } }`. Any step f
 
 ### 3.2 The "Everyone" audience
 
-`findOrCreateEveryoneAudience(tx, projectId)`: the match-all representation is **`rules = {}`** — `audiences.rules` defaults to `'{}'::jsonb` (schema.ts:1207) and `matchesAudience` returns `true` for a non-object or empty-object rule set (packages/shared/src/experiments/targeting.ts:91-92, sift-based). Match = the project's audiences whose `rules` deep-equals `{}`, preferring one named `Everyone`, else the first; none → insert `{ name: "Everyone", rules: {} }`. Idempotent under the same tx isolation as siblings (accept the same benign race the funnel-parity `nextVersionNo` decision accepted; a duplicate "Everyone" is harmless and mergeable by hand). Name string is a named constant.
+`findOrCreateEveryoneAudience(tx, projectId)`: the match-all representation is **`rules = {}`** — `audiences.rules` defaults to `'{}'::jsonb` (schema.ts:1207) and `matchesAudience` returns `true` for a non-object or empty-object rule set (packages/shared/src/experiments/targeting.ts:91-92, sift-based). Preference order (discovered at plan time: audiences already carry an `isDefault` flag with `findDefaultAudience(db, projectId)` in the repo): 1. the project's `isDefault` audience; 2. an audience whose `rules` deep-equals `{}`, preferring one named `Everyone`; 3. insert `{ name: "Everyone", rules: {} }` (without claiming `isDefault`). Idempotent under the same tx isolation as siblings (accept the same benign race the funnel-parity `nextVersionNo` decision accepted; a duplicate "Everyone" is harmless and mergeable by hand). Name string is a named constant.
 
 ### 3.3 Stop-with-winner repoints the placement (the one existing-behaviour change)
 
