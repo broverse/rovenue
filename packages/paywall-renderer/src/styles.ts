@@ -111,6 +111,19 @@ export const Z_OVERLAY_CHILD_STYLE: CSSProperties = {
 export const VIDEO_WIDTH_CSS = "100%";
 
 /**
+ * Fit the whole frame inside the slot, letterboxing rather than cropping, so
+ * a configured `aspectRatio` that disagrees with the source's intrinsic one
+ * never cuts content off. This is also the UA default for `<video>` — but
+ * DECLARED, not inherited: a host stylesheet with a broad
+ * `video { object-fit: cover }` (or a `* { object-fit: ... }` reset) would
+ * otherwise silently flip web to cropping and break the three-platform
+ * agreement with iOS's `.resizeAspect` / `.scaledToFit` and Android's
+ * `RESIZE_MODE_FIT`. An inline element style outranks any host rule short of
+ * `!important`, and this is asserted in the renderer tests.
+ */
+export const VIDEO_OBJECT_FIT_CSS = "contain";
+
+/**
  * Style for the `<video>` element. `aspectRatio` is passed through ONLY when
  * the node configures one — an absent `aspectRatio` must set no CSS ratio at
  * all, letting the source's own intrinsic dimensions govern (spec §6.1: never
@@ -120,6 +133,7 @@ export function videoStyle(aspectRatio: number | undefined): CSSProperties {
   return {
     display: "block",
     width: VIDEO_WIDTH_CSS,
+    objectFit: VIDEO_OBJECT_FIT_CSS,
     aspectRatio: aspectRatio !== undefined ? String(aspectRatio) : undefined,
   };
 }

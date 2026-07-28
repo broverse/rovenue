@@ -22,7 +22,11 @@ import type {
 import { resolvePersistedFirstShownAt } from "./first-shown";
 import { registerLottieRenderer, videoPlaybackCommand } from "./index";
 import { PaywallRenderer } from "./renderer";
-import { CAROUSEL_DOT_ACTIVE_OPACITY, CAROUSEL_DOT_INACTIVE_OPACITY } from "./styles";
+import {
+  CAROUSEL_DOT_ACTIVE_OPACITY,
+  CAROUSEL_DOT_INACTIVE_OPACITY,
+  VIDEO_OBJECT_FIT_CSS,
+} from "./styles";
 import type { RendererOffering } from "./types";
 import { useNodeVisible } from "./visibility";
 
@@ -2734,9 +2738,9 @@ describe("video and lottie nodes", () => {
    *  what `newNode("video")` creates. */
   const UNCONFIGURED_LOTTIE_URL = { light: "" };
 
-  it("never hands a registered lottie renderer an unparsable url — it falls back instead", () => {
-    // The three-platform rule, settled: an unparsable lottie url means the
-    // node CANNOT RENDER, so it takes the same route an unregistered player
+  it("never hands a registered lottie renderer a blank url — it falls back instead", () => {
+    // The three-platform rule, settled: a blank lottie url means the node
+    // CANNOT RENDER, so it takes the same route an unregistered player
     // takes. A host player must not be handed "" and left to discover the
     // problem, and `video` has always answered this question here.
     const seen: unknown[] = [];
@@ -2762,8 +2766,8 @@ describe("video and lottie nodes", () => {
     }
   });
 
-  it("gives a lottie with an unparsable url no carousel page and no dot", () => {
-    // Same rule as C1/C2 above, now reached by the URL half rather than the
+  it("gives a lottie with a blank url no carousel page and no dot", () => {
+    // Same rule as C1/C2 above, now reached by the SOURCE half rather than the
     // registration half: a registered player does not make an unusable node
     // drawable, so it must not buy a dot either.
     registerLottieRenderer(() => <span data-rov-lottie-stub="">animation</span>);
@@ -2785,7 +2789,7 @@ describe("video and lottie nodes", () => {
   });
 
   it("still hands the host a RELATIVE lottie url unchanged", () => {
-    // The guard asks "is this a url at all?", it does not demand an absolute
+    // The guard asks "is a source present?", it does not demand an absolute
     // one and it does not rewrite what it was given: a relative source is
     // legitimate on web, and the host player receives the authored string.
     const seen: string[] = [];
@@ -2807,8 +2811,8 @@ describe("video and lottie nodes", () => {
 
   it("renders nothing for a blank-source video outside a carousel, and its fallback when it has one", () => {
     // The same pre-mount answer, seen without the carousel: no `<video>`
-    // element is ever created for a source that cannot parse, so the browser
-    // never re-requests the hosting document as if it were media.
+    // element is ever created for an absent source, so the browser never
+    // re-requests the hosting document as if it were media.
     const bare = renderPaywall(videoNode({ url: UNCONFIGURED_VIDEO_URL }));
     expect(bare.container.querySelector("video")).toBeNull();
     expect(bare.container.textContent).toBe("");
@@ -2818,5 +2822,99 @@ describe("video and lottie nodes", () => {
     );
     expect(withFallback.container.querySelector("video")).toBeNull();
     expect(withFallback.container.textContent).toContain("no video");
+  });
+
+  describe("media source usability — the three-platform table", () => {
+    // THE CONTRACT. These exact inputs and these exact answers are asserted,
+    // input for input, in `RovenuePaywallMediaSourceTests.swift` (iOS) and
+    // `NodeViewFactoryTest.kt` (Android). If the three files ever disagree,
+    // the divergence this table exists to kill has come back.
+    //
+    // The rule: a media source is USABLE when it is non-blank after trimming
+    // leading and trailing whitespace. Nothing more. Note the two entries that
+    // are deliberately USABLE despite not being valid URLs — syntax is the
+    // platform's business at LOAD time, where the failure takes the ordinary
+    // asynchronous route to `fallback`. Pinning this to what URL parsers agree
+    // on is what broke before: `URL(string:)` accepts `" "` and `"://x"`,
+    // Android's `Uri` rule rejected `"not a url"`, and iOS's own answer
+    // changed with the OS version.
+    const SOURCE_USABILITY_TABLE: ReadonlyArray<{ source: string; usable: boolean }> = [
+      { source: "", usable: false },
+      { source: " ", usable: false },
+      { source: "a/b.mp4", usable: true },
+      { source: "not a url", usable: true },
+      { source: "https://x/a.mp4", usable: true },
+    ];
+
+    for (const { source, usable } of SOURCE_USABILITY_TABLE) {
+      it(`treats ${JSON.stringify(source)} as ${usable ? "usable" : "unusable"} for video and lottie alike`, () => {
+        // VIDEO: usable means the element is mounted with the AUTHORED string.
+        const video = renderPaywall(videoNode({ url: { light: source } }));
+        const element = video.container.querySelector("video");
+        if (usable) {
+          expect(element).not.toBeNull();
+          expect(element!.getAttribute("src")).toBe(source);
+        } else {
+          expect(element).toBeNull();
+        }
+
+        // LOTTIE: usable means the host player is invoked, with the authored
+        // string. Same predicate, same answer — one helper serves both.
+        const seen: string[] = [];
+        registerLottieRenderer((props) => {
+          seen.push(props.url);
+          return <span data-rov-lottie-stub="">animation</span>;
+        });
+        try {
+          const lottie = renderPaywall(lottieNode({ url: { light: source } }));
+          if (usable) {
+            expect(lottie.container.querySelector("[data-rov-lottie-stub]")).not.toBeNull();
+            expect(new Set(seen)).toEqual(new Set([source]));
+          } else {
+            expect(lottie.container.querySelector("[data-rov-lottie-stub]")).toBeNull();
+            expect(seen).toHaveLength(0);
+          }
+        } finally {
+          registerLottieRenderer(null);
+        }
+      });
+    }
+
+    it("drops exactly the unusable rows from a carousel's pages and dots", () => {
+      // The table's whole point: an unusable source must cost no page and no
+      // phantom dot, and a usable one must keep its own. Asserted in one
+      // carousel so the counts are read off the same render.
+      registerLottieRenderer(() => <span data-rov-lottie-stub="">animation</span>);
+      try {
+        const { container } = renderPaywall(
+          carouselOf(
+            ...SOURCE_USABILITY_TABLE.map(
+              ({ source }, index): PaywallNode => ({
+                type: "video",
+                id: `video-${index}`,
+                url: { light: source },
+              }),
+            ),
+          ),
+        );
+        const usableCount = SOURCE_USABILITY_TABLE.filter((row) => row.usable).length;
+        expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(usableCount);
+        expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(usableCount);
+      } finally {
+        registerLottieRenderer(null);
+      }
+    });
+  });
+
+  it("declares letterboxing on the video element rather than inheriting the UA default", () => {
+    // Web's `object-fit: contain` matches iOS's `.resizeAspect` and Android's
+    // RESIZE_MODE_FIT. It is the UA default too, but a host stylesheet could
+    // silently flip it to `cover` and break that agreement without any test
+    // noticing — so it is declared inline (which outranks host rules) and
+    // asserted here.
+    const { container } = renderPaywall(videoNode({ url: { light: "u.mp4" } }));
+    const el = container.querySelector("video") as HTMLVideoElement;
+    expect(el.style.objectFit).toBe(VIDEO_OBJECT_FIT_CSS);
+    expect(VIDEO_OBJECT_FIT_CSS).toBe("contain");
   });
 });
