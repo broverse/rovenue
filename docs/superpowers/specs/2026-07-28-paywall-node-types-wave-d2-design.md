@@ -105,7 +105,31 @@ nothing. A poster, when given, shows during loading and after a failure. This is
 draws nothing is dropped" rule D1 settled, and inside a `carousel` it means a dead video does not
 leave a phantom dot.
 
-### 3.3 `ThemeUrl` is introduced here
+### 3.3 A post-mount load failure inside a carousel — an accepted limitation
+
+A `carousel` decides its pages **synchronously**, from the node tree, before anything mounts. A
+video's failure is **asynchronous**: the source can parse, the page can mount, and only then does the
+load fail. So a video that fails *after* mounting keeps its carousel page and its dot — exactly the
+blank page plus phantom dot wave D1's rule exists to prevent.
+
+All three platforms share this, in the same shape, and it was assessed rather than patched. Making
+pages reactive to child emptiness means feeding an asynchronous input into a decision that is
+currently pure, across three different paging primitives — CSS scroll-snap plus `scrollLeft`,
+SwiftUI `TabView` selection, and a `ViewPager2` adapter. A mid-scroll adapter mutation on Android is
+the category of bug no unit test reproduces, and the cure would be more dangerous than the disease.
+
+What is done instead, and why the residue is small:
+
+1. Every renderer answers **"will this node draw?" before mount**, so an unconfigured or unusable
+   node never takes a page at all. That shrinks the gap from *every* misconfigured node to *a video
+   whose source parses and then fails during load*.
+2. `VIDEO_IN_CAROUSEL_NO_FALLBACK` (a `warning`) tells the author to give a carousel's video a
+   `fallback`. With one present the page is never blank — it shows the fallback — so the defect
+   becomes unreachable in any paywall that heeds the warning.
+3. The remainder is recorded here rather than left in three code comments, per binding rule 9: a
+   behaviour not written in the spec gets invented three times.
+
+### 3.4 `ThemeUrl` is introduced here
 
 `image` today inlines its light/dark URL pair as `{ light: string; dark?: string }` with no name.
 `video` and `lottie` need the same shape, and three anonymous copies of one type is how spellings
