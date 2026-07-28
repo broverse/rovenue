@@ -12,7 +12,14 @@ interface Deps {
   getToken?: typeof getGoogleAccessToken;
 }
 
-async function gpGet(url: string, token: string, fetchImpl: typeof fetch): Promise<any> {
+/**
+ * Bare GET + bearer-auth + non-2xx-to-StoreApiError helper shared by every
+ * Google Play Developer API caller. Returns `unknown` deliberately — the
+ * androidpublisher v3 responses differ per endpoint, so callers narrow the
+ * result via their own small structural interface rather than this helper
+ * asserting a shape it doesn't own.
+ */
+export async function gpGet(url: string, token: string, fetchImpl: typeof fetch): Promise<unknown> {
   const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     let detail = res.statusText;
@@ -25,6 +32,20 @@ async function gpGet(url: string, token: string, fetchImpl: typeof fetch): Promi
     throw new StoreApiError(`Google Play API error (${res.status}): ${detail}`, res.status);
   }
   return res.json();
+}
+
+interface GoogleSubscriptionsPage {
+  subscriptions?: Array<{ productId?: string; listings?: Array<{ title?: string }> }>;
+  nextPageToken?: string;
+}
+
+interface GoogleInAppProductsPage {
+  inappproduct?: Array<{
+    sku?: string;
+    defaultLanguage?: string;
+    listings?: Record<string, { title?: string }>;
+  }>;
+  tokenPagination?: { nextPageToken?: string };
 }
 
 export async function listGooglePlayCatalog(
@@ -40,7 +61,7 @@ export async function listGooglePlayCatalog(
   // Subscriptions (monetization v3).
   let subUrl: string | undefined = `${BASE}/${pkg}/subscriptions?pageSize=100`;
   while (subUrl) {
-    const page = await gpGet(subUrl, token, fetchImpl);
+    const page = (await gpGet(subUrl, token, fetchImpl)) as GoogleSubscriptionsPage;
     for (const sub of page.subscriptions ?? []) {
       if (!sub.productId) continue;
       items.push({
@@ -57,7 +78,7 @@ export async function listGooglePlayCatalog(
   // Managed (one-time) products.
   let prodUrl: string | undefined = `${BASE}/${pkg}/inappproducts?maxResults=100`;
   while (prodUrl) {
-    const page = await gpGet(prodUrl, token, fetchImpl);
+    const page = (await gpGet(prodUrl, token, fetchImpl)) as GoogleInAppProductsPage;
     for (const p of page.inappproduct ?? []) {
       if (!p.sku) continue;
       const lang = p.defaultLanguage as string | undefined;

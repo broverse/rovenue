@@ -8,7 +8,11 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { ok } from "../../lib/response";
-import { resolveOfferingPrices } from "../../services/offering-price-resolver";
+import {
+  resolveOfferingPrices,
+  purgeResolvedPriceCache,
+} from "../../services/offering-price-resolver";
+import { logger } from "../../lib/logger";
 import type {
   DashboardOfferingRow,
   DashboardOfferingsListResponse,
@@ -18,6 +22,18 @@ import type {
 // =============================================================
 // Dashboard: Offerings CRUD (renamed from product-groups)
 // =============================================================
+
+const log = logger.child("dashboard-offerings");
+
+/** Fire-and-forget resolved-price cache bust; never blocks or fails the mutation response. */
+function purgeResolvedPriceCacheSafe(projectId: string): void {
+  purgeResolvedPriceCache(projectId).catch((err) => {
+    log.warn("resolved-price cache purge failed", {
+      projectId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
 
 const PACKAGE_ID_RE =
   /^(\$rov_(weekly|monthly|annual|lifetime)|[a-z0-9][a-z0-9_-]*)$/;
@@ -183,6 +199,7 @@ export const offeringsDashboardRoute = new Hono()
       metadata: body.metadata ?? {},
     });
     purgeProjectCatalogCache(projectId);
+    purgeResolvedPriceCacheSafe(projectId);
     return c.json(ok({ offering: toWire(row) }));
   })
   .get("/:id/resolved", async (c) => {
@@ -275,6 +292,7 @@ export const offeringsDashboardRoute = new Hono()
       throw new HTTPException(404, { message: "Offering not found" });
     }
     purgeProjectCatalogCache(projectId);
+    purgeResolvedPriceCacheSafe(projectId);
     return c.json(ok({ offering: toWire(row) }));
   })
   .delete("/:id", async (c) => {
@@ -295,5 +313,6 @@ export const offeringsDashboardRoute = new Hono()
       throw new HTTPException(404, { message: "Offering not found" });
     }
     purgeProjectCatalogCache(projectId);
+    purgeResolvedPriceCacheSafe(projectId);
     return c.json(ok({ deleted: true }));
   });

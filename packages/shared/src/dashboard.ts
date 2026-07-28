@@ -1755,6 +1755,17 @@ export interface ResolvedPackageInfo {
 export interface OfferingResolvedPrices {
   offeringId: string;
   packages: ResolvedPackageInfo[];
+  /**
+   * The OLDEST `fetchedAt` among the store price payloads this response
+   * drew on (Apple/Google, each independently Redis-cached for
+   * `RESOLVED_PRICE_CACHE_TTL_SECONDS`): a fresh live fetch stamps "now",
+   * a cache hit reuses the timestamp the cached payload was fetched at.
+   * Read it as "no store price in this response is older than this" —
+   * NOT "this response was generated at this time". Stripe prices are
+   * resolved through their own internal cache and don't contribute (no
+   * fetchedAt is exposed for them), so a Stripe-only offering's value
+   * falls back to the response-generation time.
+   */
   fetchedAt: string;
 }
 

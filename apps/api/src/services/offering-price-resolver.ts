@@ -66,6 +66,35 @@ function cacheKey(store: "apple" | "google", projectId: string, offeringId: stri
   return `paywall:resolved:${store}:${projectId}:${offeringId}`;
 }
 
+/** Redis SCAN page size for `purgeResolvedPriceCache` — non-blocking on a busy instance, unlike KEYS. */
+const CACHE_PURGE_SCAN_COUNT = 200;
+
+/**
+ * Deletes every cached resolved-price entry for a project (both stores,
+ * every offering) so the next `resolveOfferingPrices` call re-fetches
+ * live prices instead of serving a now-stale mapping. Catalog mutations
+ * (product/offering create-update-delete) call this fire-and-forget —
+ * same convention as `purgeProjectCatalogCache` in `../lib/edge-cache`.
+ * SCAN (never KEYS) so a large keyspace never blocks Redis.
+ */
+export async function purgeResolvedPriceCache(projectId: string): Promise<void> {
+  const pattern = `paywall:resolved:*:${projectId}:*`;
+  let cursor = "0";
+  do {
+    const [nextCursor, keys] = await redis.scan(
+      cursor,
+      "MATCH",
+      pattern,
+      "COUNT",
+      CACHE_PURGE_SCAN_COUNT,
+    );
+    cursor = nextCursor;
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } while (cursor !== "0");
+}
+
 function toOkEntry(price: {
   period: string | null;
   amountMinor: number;
@@ -115,15 +144,45 @@ function isSubscription(row: PackageRow): boolean {
   return row.type === SUBSCRIPTION_PRODUCT_TYPE;
 }
 
+/** Redis cache payload shape: a wrapped price map plus the timestamp it was fetched at. */
+interface CachedPricePayload<T> {
+  fetchedAt: string;
+  entries: Record<string, T>;
+}
+
+/**
+ * Narrows a parsed cache read to the current wrapped shape. A cached value
+ * written before the fetchedAt wrapper existed (bare `Record<string, T>`)
+ * fails this check and is treated as a cache miss — the cheapest correct
+ * migration given the 15-minute TTL backstop.
+ */
+function isCachedPricePayload(raw: unknown): raw is CachedPricePayload<unknown> {
+  if (typeof raw !== "object" || raw === null) return false;
+  const candidate = raw as { fetchedAt?: unknown; entries?: unknown };
+  return typeof candidate.fetchedAt === "string" && typeof candidate.entries === "object" && candidate.entries !== null;
+}
+
+interface StoreEntriesResult {
+  entries: Map<string, ResolvedStoreEntry>;
+  /**
+   * ISO timestamp the underlying price data was fetched at: "now" for a
+   * fresh live fetch, or the stored payload's fetchedAt on a cache hit.
+   * Null when no live lookup happened for this store (no eligible
+   * packages, nothing mapped, credentials missing, or the lookup errored)
+   * — such a store contributes nothing to the offering-level fetchedAt.
+   */
+  fetchedAt: string | null;
+}
+
 async function resolveAppleEntries(
   projectId: string,
   offeringId: string,
   rows: PackageRow[],
   o: Overrides,
-): Promise<Map<string, ResolvedStoreEntry>> {
+): Promise<StoreEntriesResult> {
   const entries = new Map<string, ResolvedStoreEntry>();
   const eligible = rows.filter((r) => r.storeIds.apple);
-  if (eligible.length === 0) return entries;
+  if (eligible.length === 0) return { entries, fetchedAt: null };
 
   const mapped: PackageRow[] = [];
   for (const row of eligible) {
@@ -133,14 +192,14 @@ async function resolveAppleEntries(
       entries.set(row.packageIdentifier, { status: "no_mapping" });
     }
   }
-  if (mapped.length === 0) return entries;
+  if (mapped.length === 0) return { entries, fetchedAt: null };
 
   try {
     const loadApple = o.loadApple ?? loadAppleCredentials;
     const creds: AppleCredentials | null = await loadApple(projectId);
     if (!creds || !creds.keyId || !creds.issuerId || !creds.privateKey) {
       for (const row of mapped) entries.set(row.packageIdentifier, { status: "not_configured" });
-      return entries;
+      return { entries, fetchedAt: null };
     }
 
     const config: AppStoreConnectConfig = {
@@ -152,29 +211,37 @@ async function resolveAppleEntries(
     };
 
     const key = cacheKey("apple", projectId, offeringId);
-    let priceMap: Map<string, AppleSubscriptionPrice>;
+    let priceMap: Map<string, AppleSubscriptionPrice> | undefined;
+    let fetchedAt: string | null = null;
 
     const cached = await redis.get(key);
     if (cached) {
-      priceMap = new Map(
-        Object.entries(JSON.parse(cached) as Record<string, AppleSubscriptionPrice>),
-      );
-    } else {
+      const parsed: unknown = JSON.parse(cached);
+      if (isCachedPricePayload(parsed)) {
+        priceMap = new Map(
+          Object.entries(parsed.entries as Record<string, AppleSubscriptionPrice>),
+        );
+        fetchedAt = parsed.fetchedAt;
+      }
+    }
+    if (!priceMap) {
       const list = o.listAppStorePrices ?? listAppStoreSubscriptionPrices;
       const wantedIds = mapped.map((row) => row.storeIds.apple!);
       priceMap = await list(config, wantedIds);
-      await redis.set(
-        key,
-        JSON.stringify(Object.fromEntries(priceMap)),
-        "EX",
-        RESOLVED_PRICE_CACHE_TTL_SECONDS,
-      );
+      fetchedAt = new Date().toISOString();
+      const payload: CachedPricePayload<AppleSubscriptionPrice> = {
+        fetchedAt,
+        entries: Object.fromEntries(priceMap),
+      };
+      await redis.set(key, JSON.stringify(payload), "EX", RESOLVED_PRICE_CACHE_TTL_SECONDS);
     }
 
     for (const row of mapped) {
       const price = priceMap.get(row.storeIds.apple!);
       entries.set(row.packageIdentifier, price ? toOkEntry(price) : { status: "error" });
     }
+
+    return { entries, fetchedAt };
   } catch (err) {
     log.warn("apple price resolution failed; isolating from other stores", {
       projectId,
@@ -182,9 +249,8 @@ async function resolveAppleEntries(
       err: err instanceof Error ? err.message : String(err),
     });
     for (const row of mapped) entries.set(row.packageIdentifier, { status: "error" });
+    return { entries, fetchedAt: null };
   }
-
-  return entries;
 }
 
 async function resolveGoogleEntries(
@@ -192,10 +258,10 @@ async function resolveGoogleEntries(
   offeringId: string,
   rows: PackageRow[],
   o: Overrides,
-): Promise<Map<string, ResolvedStoreEntry>> {
+): Promise<StoreEntriesResult> {
   const entries = new Map<string, ResolvedStoreEntry>();
   const eligible = rows.filter((r) => r.storeIds.google);
-  if (eligible.length === 0) return entries;
+  if (eligible.length === 0) return { entries, fetchedAt: null };
 
   const mapped: PackageRow[] = [];
   for (const row of eligible) {
@@ -205,23 +271,29 @@ async function resolveGoogleEntries(
       entries.set(row.packageIdentifier, { status: "no_mapping" });
     }
   }
-  if (mapped.length === 0) return entries;
+  if (mapped.length === 0) return { entries, fetchedAt: null };
 
   try {
     const loadGoogle = o.loadGoogle ?? loadGoogleCredentials;
     const creds: GoogleCredentials | null = await loadGoogle(projectId);
     if (!creds) {
       for (const row of mapped) entries.set(row.packageIdentifier, { status: "not_configured" });
-      return entries;
+      return { entries, fetchedAt: null };
     }
 
     const key = cacheKey("google", projectId, offeringId);
-    let priceMap: Map<string, GooglePlanPrice>;
+    let priceMap: Map<string, GooglePlanPrice> | undefined;
+    let fetchedAt: string | null = null;
 
     const cached = await redis.get(key);
     if (cached) {
-      priceMap = new Map(Object.entries(JSON.parse(cached) as Record<string, GooglePlanPrice>));
-    } else {
+      const parsed: unknown = JSON.parse(cached);
+      if (isCachedPricePayload(parsed)) {
+        priceMap = new Map(Object.entries(parsed.entries as Record<string, GooglePlanPrice>));
+        fetchedAt = parsed.fetchedAt;
+      }
+    }
+    if (!priceMap) {
       const list = o.listGooglePlayPrices ?? listGooglePlaySubscriptionPrices;
       const wanted = mapped.map((row) => ({
         productId: row.storeIds.google!,
@@ -232,12 +304,12 @@ async function resolveGoogleEntries(
         serviceAccount: creds.serviceAccount,
         wanted,
       });
-      await redis.set(
-        key,
-        JSON.stringify(Object.fromEntries(priceMap)),
-        "EX",
-        RESOLVED_PRICE_CACHE_TTL_SECONDS,
-      );
+      fetchedAt = new Date().toISOString();
+      const payload: CachedPricePayload<GooglePlanPrice> = {
+        fetchedAt,
+        entries: Object.fromEntries(priceMap),
+      };
+      await redis.set(key, JSON.stringify(payload), "EX", RESOLVED_PRICE_CACHE_TTL_SECONDS);
     }
 
     for (const row of mapped) {
@@ -245,6 +317,8 @@ async function resolveGoogleEntries(
       const price = priceMap.get(mapKey);
       entries.set(row.packageIdentifier, price ? toOkEntry(price) : { status: "error" });
     }
+
+    return { entries, fetchedAt };
   } catch (err) {
     log.warn("google price resolution failed; isolating from other stores", {
       projectId,
@@ -252,9 +326,8 @@ async function resolveGoogleEntries(
       err: err instanceof Error ? err.message : String(err),
     });
     for (const row of mapped) entries.set(row.packageIdentifier, { status: "error" });
+    return { entries, fetchedAt: null };
   }
-
-  return entries;
 }
 
 async function resolveStripeEntries(
@@ -336,11 +409,13 @@ export async function resolveOfferingPrices(
     });
   }
 
-  const [appleEntries, googleEntries, stripeEntries] = await Promise.all([
+  const [appleResult, googleResult, stripeEntries] = await Promise.all([
     resolveAppleEntries(projectId, offeringId, rows, overrides),
     resolveGoogleEntries(projectId, offeringId, rows, overrides),
     resolveStripeEntries(projectId, rows, overrides),
   ]);
+  const appleEntries = appleResult.entries;
+  const googleEntries = googleResult.entries;
 
   const packages: ResolvedPackageInfo[] = rows.map((row) => {
     const stores: ResolvedPackageInfo["stores"] = {};
@@ -360,9 +435,22 @@ export async function resolveOfferingPrices(
     };
   });
 
+  // "No store price in this response is older than this" — the oldest of
+  // the Apple/Google fetch timestamps that actually contributed live data
+  // (see StoreEntriesResult.fetchedAt). Stripe doesn't expose one (its own
+  // internal cache is opaque here). Nothing contributed -> fall back to
+  // the response-generation time.
+  const storeFetchedAts = [appleResult.fetchedAt, googleResult.fetchedAt].filter(
+    (v): v is string => v !== null,
+  );
+  const fetchedAt =
+    storeFetchedAts.length > 0
+      ? storeFetchedAts.reduce((oldest, current) => (current < oldest ? current : oldest))
+      : new Date().toISOString();
+
   return {
     offeringId,
     packages,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt,
   };
 }

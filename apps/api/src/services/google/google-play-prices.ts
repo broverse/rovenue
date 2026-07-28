@@ -3,7 +3,7 @@ import { logger } from "../../lib/logger";
 import { isoDurationToDays } from "../../lib/iso-duration";
 import { getGoogleAccessToken } from "./google-auth";
 import type { GoogleServiceAccountCredentials } from "./google-types";
-import { StoreApiError } from "../apple/app-store-connect";
+import { gpGet } from "./google-play-catalog";
 
 const log = logger.child("google-play-prices");
 
@@ -62,21 +62,6 @@ export interface GooglePlanPrice {
   trialDays: number | null;
 }
 
-async function gpGet(url: string, token: string, fetchImpl: typeof fetch): Promise<any> {
-  const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.text();
-      if (body) detail = body;
-    } catch {
-      /* keep statusText */
-    }
-    throw new StoreApiError(`Google Play API error (${res.status}): ${detail}`, res.status);
-  }
-  return res.json();
-}
-
 function moneyToDecimal(money: GoogleMoney): number {
   return Number(money.units ?? 0) + (money.nanos ?? 0) / 1_000_000_000;
 }
@@ -103,7 +88,7 @@ async function resolveTrialDays(
   const url = `${BASE}/${pkg}/subscriptions/${encodeURIComponent(productId)}/basePlans/${encodeURIComponent(basePlanId)}/offers`;
   let page: { subscriptionOffers?: GoogleSubscriptionOffer[] };
   try {
-    page = await gpGet(url, token, fetchImpl);
+    page = (await gpGet(url, token, fetchImpl)) as { subscriptionOffers?: GoogleSubscriptionOffer[] };
   } catch (err) {
     log.warn("offers lookup failed, degrading to no trial", {
       packageName,
@@ -140,7 +125,10 @@ export async function listGooglePlaySubscriptionPrices(
 
   let subUrl: string | undefined = `${BASE}/${pkg}/subscriptions?pageSize=100`;
   while (subUrl) {
-    const page = await gpGet(subUrl, token, fetchImpl);
+    const page = (await gpGet(subUrl, token, fetchImpl)) as {
+      subscriptions?: GoogleSubscription[];
+      nextPageToken?: string;
+    };
     for (const sub of (page.subscriptions ?? []) as GoogleSubscription[]) {
       if (sub.productId && wantedProductIds.has(sub.productId)) {
         subsByProductId.set(sub.productId, sub);

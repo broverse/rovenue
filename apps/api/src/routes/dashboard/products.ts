@@ -9,6 +9,8 @@ import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { ok, fail } from "../../lib/response";
 import { getStoreCatalog, StoreCatalogError } from "../../services/store-catalog";
+import { purgeResolvedPriceCache } from "../../services/offering-price-resolver";
+import { logger } from "../../lib/logger";
 import type {
   DashboardProductImportResponse,
   DashboardProductImportResultRow,
@@ -34,9 +36,21 @@ import type {
 // (createdAt DESC, id DESC) and over-fetch by 1 to settle
 // `nextCursor` without a second roundtrip.
 
+const log = logger.child("dashboard-products");
+
 const PAGE_LIMIT_DEFAULT = 50;
 const PAGE_LIMIT_MAX = 200;
 const CURSOR_VERSION = "v1";
+
+/** Fire-and-forget resolved-price cache bust; never blocks or fails the mutation response. */
+function purgeResolvedPriceCacheSafe(projectId: string): void {
+  purgeResolvedPriceCache(projectId).catch((err) => {
+    log.warn("resolved-price cache purge failed", {
+      projectId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
 
 interface ParsedProductsCursor {
   createdAt: Date;
@@ -338,6 +352,7 @@ export const productsDashboardRoute = new Hono()
     }
 
     purgeProjectCatalogCache(projectId);
+    purgeResolvedPriceCacheSafe(projectId);
     return c.json(ok({ product: toWire(row, grants) }));
   })
   .post("/import", validate("json", importBodySchema), async (c) => {
@@ -392,7 +407,10 @@ export const productsDashboardRoute = new Hono()
     };
     // Only the created products change the catalog; a skip-only import
     // is a no-op for cached offerings.
-    if (created.length > 0) purgeProjectCatalogCache(projectId);
+    if (created.length > 0) {
+      purgeProjectCatalogCache(projectId);
+      purgeResolvedPriceCacheSafe(projectId);
+    }
     return c.json(ok(payload));
   })
   .get(
@@ -510,6 +528,7 @@ export const productsDashboardRoute = new Hono()
     }
 
     purgeProjectCatalogCache(projectId);
+    purgeResolvedPriceCacheSafe(projectId);
     return c.json(ok({ product: toWire(row, grants) }));
   })
   .delete("/:id", async (c) => {
@@ -531,6 +550,7 @@ export const productsDashboardRoute = new Hono()
         throw new HTTPException(404, { message: "Product not found" });
       }
       purgeProjectCatalogCache(projectId);
+      purgeResolvedPriceCacheSafe(projectId);
       return c.json(ok({ deleted: true }));
     } catch (err) {
       // FK violation when historical purchases still reference

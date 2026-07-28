@@ -214,14 +214,35 @@ function mapSubscriptionPeriod(raw: string | undefined): string | null {
   return iso;
 }
 
+/** A row from `GET /v1/subscriptions/{id}/prices`. */
+interface AscPriceRow {
+  id: string;
+  attributes?: { startDate?: string | null };
+  relationships?: { subscriptionPricePoint?: { data?: { id?: string } } };
+}
+
+/** A `subscriptionPricePoint` row side-loaded via `included`. */
+interface AscPricePoint {
+  id: string;
+  attributes?: { customerPrice?: string | number | null };
+}
+
+/** Thrown internally when no price point resolves for a subscription's current price row; caught by the per-subscription loop in `listAppStoreSubscriptionPrices` (product omitted + log.warn), same as any other per-subscription lookup failure. Not a StoreApiError — it never reaches an HTTP boundary. */
+class MissingPricePointError extends Error {
+  constructor(subscriptionAscId: string) {
+    super(`No current price point found for App Store subscription ${subscriptionAscId}`);
+    this.name = "MissingPricePointError";
+  }
+}
+
 /** Picks the currently-effective price row: the greatest non-null startDate <= today, else the null-startDate row. */
-function pickCurrentPriceRow(rows: any[]): any | undefined {
+function pickCurrentPriceRow(rows: AscPriceRow[]): AscPriceRow | undefined {
   const today = new Date().toISOString().slice(0, 10);
   const candidates = rows.filter((row) => {
     const startDate = row.attributes?.startDate;
     return startDate == null || startDate <= today;
   });
-  let best: any | undefined;
+  let best: AscPriceRow | undefined;
   for (const row of candidates) {
     const startDate = row.attributes?.startDate;
     if (startDate == null) {
@@ -246,14 +267,12 @@ async function resolveSubscriptionPrice(
     `?filter[territory]=${APPLE_REFERENCE_TERRITORY}&include=subscriptionPricePoint&limit=200`;
   const { data, included } = await ascList(url, token, fetchImpl);
 
-  const current = pickCurrentPriceRow(data);
+  const current = pickCurrentPriceRow(data as AscPriceRow[]);
   const pricePointId = current?.relationships?.subscriptionPricePoint?.data?.id;
-  const pricePoint = included.find((row) => row.id === pricePointId);
+  const pricePoint = (included as AscPricePoint[]).find((row) => row.id === pricePointId);
   const customerPrice = pricePoint?.attributes?.customerPrice;
   if (customerPrice == null) {
-    throw new StoreApiError(
-      `No current price point found for App Store subscription ${subscriptionAscId}`,
-    );
+    throw new MissingPricePointError(subscriptionAscId);
   }
   return decimalToMinorUnits(Number(customerPrice), APPLE_REFERENCE_CURRENCY);
 }
