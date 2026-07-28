@@ -359,6 +359,8 @@ let carouselDefaultLoop = false
 /// dots move faster than a reader can follow) — `CarouselView` honours
 /// whatever `autoAdvanceSeconds` it is given; this is not a clamp.
 let carouselMinAutoAdvanceSeconds = 2
+/// The index a looping carousel wraps back to, and the page it opens on.
+private let carouselFirstPageIndex = 0
 
 /// Layout spacing constants for the three row-carrying node types, in
 /// points — named rather than inlined (mirrors NodeViewFactory.kt's
@@ -1179,6 +1181,54 @@ struct CountdownView: View {
     }
 }
 
+/// The single page-step rule the carousel's auto-advance obeys, kept a pure
+/// free function rather than a method on `CarouselView` precisely so the loop
+/// rule is unit-testable without a SwiftUI runtime — a SwiftUI `body` is not
+/// inspectable in this package (see the visibility-gate note in
+/// PaywallRenderSupportTests). Mirrors NodeViewFactory.kt's
+/// `nextCarouselPage` and nodes.tsx's auto-advance effect:
+///
+/// - exactly one step per call, never a counter that could drift;
+/// - `loop: false` on the last page returns `current` UNCHANGED. That equal
+///   return IS the stop signal — the caller latches `stoppedAtEnd` on it and
+///   tears the timer down, so a non-looping carousel never rewinds;
+/// - `loop: true` on the last page wraps to `carouselFirstPageIndex`;
+/// - `pageCount <= 0` returns `current` unchanged. Defensive: a carousel with
+///   no renderable pages takes the `fallback` branch instead of ever running
+///   a timer, so this is unreachable in practice — it exists so the rule
+///   cannot index into or divide by nothing.
+func nextCarouselPage(current: Int, pageCount: Int, loop: Bool) -> Int {
+    guard pageCount > 0 else { return current }
+    let next = current + 1
+    if next < pageCount { return next }
+    return loop ? carouselFirstPageIndex : current
+}
+
+/// The pages a `carousel` actually renders: its children that pass their OWN
+/// `visibility` gate, in order.
+///
+/// A page the gate rejects is DROPPED — not rendered as a blank page, and
+/// (because every count downstream derives from this list) with no dot of its
+/// own either. This is the cross-platform contract settled in the wave-D1
+/// trio review: Android already behaved this way and the web renderer was
+/// changed to match. The behaviour iOS shipped before — an empty tab plus a
+/// phantom dot — is indefensible from the reader's side: they swipe onto an
+/// empty screen, and the dots misreport how much content exists. Do not
+/// "restore" it.
+///
+/// When EVERY page is hidden this returns empty, which lands on exactly the
+/// same branch as an authored-empty carousel: render `fallback`, else
+/// nothing.
+///
+/// Pure and free-standing for the same reason as `nextCarouselPage`: it is
+/// the decision `CarouselView.body` branches on, and the only part of that
+/// branch a test without a SwiftUI runtime can reach.
+func visibleCarouselPages(_ children: [BuilderNode], appVersion: String?) -> [BuilderNode] {
+    children.filter {
+        isNodeVisible($0.visibility, platform: paywallVisibilityPlatform, appVersion: appVersion)
+    }
+}
+
 /// Renders `carousel`. Pages via `TabView` with `.tabViewStyle(.page)` —
 /// available since iOS 14, well under this package's iOS 16 floor, and it
 /// supplies BOTH the paging gesture and the dot indicator, so
@@ -1193,7 +1243,9 @@ struct CountdownView: View {
 ///
 /// Auto-advance reuses `CountdownView`'s exact `.onAppear`/`.onDisappear` +
 /// `Timer.publish(...).autoconnect().sink` lifecycle (start on appear,
-/// cancel on disappear — nothing outlives the view). It departs from
+/// cancel on disappear — nothing outlives the view), plus a `scenePhase`
+/// watch this node adds on top so backgrounding the app genuinely pauses it
+/// (see the `.onChange(of: scenePhase)` comment). It departs from
 /// `CountdownView` in one way: there is no separately-ticked clock to read
 /// back and recompute from. Each `Timer.publish(every: autoAdvanceSeconds)`
 /// fire directly performs exactly one page step — never a decrementing
@@ -1217,11 +1269,18 @@ struct CarouselView: View {
     let ctx: PaywallRenderContext
     let cell: CellScope?
 
-    @State private var currentPage = 0
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var currentPage = carouselFirstPageIndex
     @State private var stoppedAtEnd = false
     @State private var tickCancellable: AnyCancellable?
 
-    private var pageCount: Int { props.children.count }
+    /// The renderable pages — see `visibleCarouselPages`. Internal rather
+    /// than `private` for the same reason `BuilderNodeView.isVisible` is: it
+    /// is the value `body` branches on and the one part of that branch a
+    /// test can reach.
+    var pages: [BuilderNode] { visibleCarouselPages(props.children, appVersion: ctx.appVersion) }
+    private var pageCount: Int { pages.count }
     private var showsIndicator: Bool { props.showsIndicator ?? carouselDefaultShowsIndicator }
     private var loop: Bool { props.loop ?? carouselDefaultLoop }
 
@@ -1229,14 +1288,26 @@ struct CarouselView: View {
     /// always-opaque `background`: an absent `indicatorColor` must not even
     /// call `.tint`, since `.tint(nil)` resets to the system default rather
     /// than leaving whatever ambient tint the paywall already has alone.
-    private var indicatorColor: Color? {
-        props.indicatorColor.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }.map { color($0) }
+    ///
+    /// Split out of `indicatorColor` at the RGBA stage so a test can pin the
+    /// resolved value — which theme half won, and that it is the authored
+    /// colour rather than a placeholder — by component. What no unit test in
+    /// this package can pin is the step after it: that `.tint(_:)` actually
+    /// recolours `PageTabViewStyle`'s dots, which are a `UIPageControl`
+    /// underneath. That is device smoke item S7, deliberately left as smoke
+    /// rather than covered by a test that would pass either way.
+    var indicatorRGBA: RGBAColor? {
+        props.indicatorColor.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }
     }
+
+    private var indicatorColor: Color? { indicatorRGBA.map { color($0) } }
 
     var body: some View {
         if pageCount == 0 {
-            // No pages at all cannot render — mirrors every other node
-            // type's contract: fail to `fallback`, never throw.
+            // No RENDERABLE pages — either authored empty, or every child
+            // dropped by its own `visibility` gate (see
+            // `visibleCarouselPages`) — cannot render. Mirrors every other
+            // node type's contract: fail to `fallback`, never throw.
             if let fallback = props.fallback {
                 BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
             }
@@ -1245,13 +1316,46 @@ struct CarouselView: View {
                 .onAppear(perform: scheduleTimer)
                 .onDisappear(perform: stopTicking)
                 .onChange(of: currentPage) { _ in scheduleTimer() }
+                .onChange(of: scenePhase) { phase in
+                    // Spec §5 rule 1, "off-screen means paused", the
+                    // BACKGROUNDING half: a carousel that advanced while the
+                    // app was away would change the page the user comes back
+                    // to. `.onDisappear` does not cover this — it fires on
+                    // view-tree removal, not on the app leaving the front.
+                    // Web pauses on `visibilitychange`; Android on a
+                    // ProcessLifecycleOwner observer; this is the iOS half.
+                    //
+                    // Deliberately reacting only to a CHANGE of scenePhase,
+                    // never gating the initial `scheduleTimer()` on it: a
+                    // host that never publishes a scene phase (a SwiftUI
+                    // view hosted from UIKit without one) would otherwise
+                    // read a stale non-active value and disable auto-advance
+                    // outright. Reacting to changes degrades to today's
+                    // behaviour there instead.
+                    //
+                    // Resuming goes through `scheduleTimer`, so the
+                    // `stoppedAtEnd` latch still holds: a non-looping
+                    // carousel that already finished does not restart on
+                    // foreground.
+                    //
+                    // The OTHER half of §5 rule 1 — a carousel scrolled out
+                    // of view while still mounted — stays open on both
+                    // natives (neither has an IntersectionObserver
+                    // equivalent) and is deferred to the media-lifecycle
+                    // wave. Smoke item S10.
+                    if phase == .active { scheduleTimer() } else { stopTicking() }
+                }
         }
     }
 
     @ViewBuilder
     private var pagedContent: some View {
         let tabs = TabView(selection: $currentPage) {
-            ForEach(Array(props.children.enumerated()), id: \.offset) { index, child in
+            // `pages`, NOT `props.children`: a page hidden by its own
+            // `visibility` gate is dropped outright, so it gets neither a tab
+            // nor a dot (the dots are `TabView`'s own, derived from the tab
+            // count). See `visibleCarouselPages`.
+            ForEach(Array(pages.enumerated()), id: \.offset) { index, child in
                 BuilderNodeView(node: child, ctx: ctx, cell: cell)
                     .tag(index)
             }
@@ -1262,14 +1366,16 @@ struct CarouselView: View {
         // default `TabView` style, which is fine, since macOS never
         // actually renders this paywall UI in production.
         #if os(iOS)
-        let pages = tabs.tabViewStyle(.page(indexDisplayMode: showsIndicator ? .automatic : .never))
+        // Named `styled`, not `pages` — `pages` is now the renderable-page
+        // list this view iterates, and shadowing it here is a compile error.
+        let styled = tabs.tabViewStyle(.page(indexDisplayMode: showsIndicator ? .automatic : .never))
         #else
-        let pages = tabs
+        let styled = tabs
         #endif
         if let indicatorColor {
-            pages.tint(indicatorColor)
+            styled.tint(indicatorColor)
         } else {
-            pages
+            styled
         }
     }
 
@@ -1291,14 +1397,17 @@ struct CarouselView: View {
     }
 
     private func advance() {
-        let next = currentPage + 1
-        if next < pageCount {
-            currentPage = next
-        } else if loop {
-            currentPage = 0
-        } else {
+        // The rule itself lives in the pure `nextCarouselPage` so it can be
+        // tested without a runtime (mirrors Kotlin). An unchanged index is
+        // its stop signal — `loop: false` on the last page — and `.onChange`
+        // would never fire for it, so the latch and the teardown happen here
+        // in the same call rather than waiting on a page change.
+        let next = nextCarouselPage(current: currentPage, pageCount: pageCount, loop: loop)
+        if next == currentPage {
             stoppedAtEnd = true
             stopTicking()
+        } else {
+            currentPage = next
         }
     }
 }

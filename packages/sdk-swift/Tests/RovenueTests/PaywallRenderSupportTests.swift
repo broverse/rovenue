@@ -89,14 +89,14 @@ final class PaywallRenderSupportTests: XCTestCase {
     // renders the whole view, because both have a testable entry point at
     // that level; Swift does not.
 
-    private func makeCtx(appVersion: String?) throws -> PaywallRenderContext {
+    private func makeCtx(appVersion: String?, dark: Bool = false) throws -> PaywallRenderContext {
         let json = """
         {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
          "root":{"type":"stack","id":"root","axis":"v","children":[]}}
         """
         let config = try JSONDecoder().decode(BuilderConfigModel.self, from: Data(json.utf8))
         return PaywallRenderContext(
-            config: config, locale: "en", dark: false, offering: nil,
+            config: config, locale: "en", dark: dark, offering: nil,
             selectedPackageId: nil, isPurchasing: false,
             select: { _ in }, purchase: {},
             onClose: nil, onRestore: nil, onUrl: nil,
@@ -415,4 +415,144 @@ final class PaywallRenderSupportTests: XCTestCase {
         }
         XCTAssertEqual(unchanged.id, "t1")
     }
+
+    // MARK: - nextCarouselPage (wave D1 page-step rule)
+    //
+    // The loop rule is the single most important behaviour wave D1 adds, and
+    // the one three renderers will otherwise fill three different ways. It
+    // was unit-tested on web and on Android (`nextCarouselPage` in
+    // NodeViewFactoryTest.kt) and untested here until this fix; the rule now
+    // lives in a pure free function on this side too, so these exercise the
+    // SAME function `CarouselView.advance()` calls, not a restatement of it.
+
+    func test_nextCarouselPage_advancesOneStepInsideTheRange() {
+        XCTAssertEqual(nextCarouselPage(current: 0, pageCount: 3, loop: false), 1)
+        XCTAssertEqual(nextCarouselPage(current: 1, pageCount: 3, loop: true), 2)
+    }
+
+    /// The stop signal: an UNCHANGED index. `CarouselView.advance()` latches
+    /// `stoppedAtEnd` and cancels the subscription on exactly this, so a
+    /// non-looping carousel stops for good instead of rewinding.
+    func test_nextCarouselPage_staysOnTheLastPageWhenLoopIsFalse() {
+        XCTAssertEqual(nextCarouselPage(current: 2, pageCount: 3, loop: false), 2)
+    }
+
+    func test_nextCarouselPage_wrapsToTheFirstPageWhenLoopIsTrue() {
+        XCTAssertEqual(nextCarouselPage(current: 2, pageCount: 3, loop: true), 0)
+    }
+
+    /// Degenerate inputs must not crash, index past the end, or divide by
+    /// nothing. A single page has nowhere to go under either loop setting
+    /// (the scheduler's own `pageCount > 1` guard means it never even ticks),
+    /// and a zero-page carousel returns the index it was handed.
+    func test_nextCarouselPage_degenerateInputsStayPut() {
+        XCTAssertEqual(nextCarouselPage(current: 0, pageCount: 1, loop: false), 0)
+        XCTAssertEqual(nextCarouselPage(current: 0, pageCount: 1, loop: true), 0)
+        XCTAssertEqual(nextCarouselPage(current: 0, pageCount: 0, loop: true), 0)
+        XCTAssertEqual(nextCarouselPage(current: 4, pageCount: 0, loop: false), 4)
+    }
+
+    // MARK: - carousel pages: a page hidden by `visibility` is dropped (C3)
+    //
+    // The cross-platform contract settled in the wave-D1 trio review: a
+    // hidden page is dropped, so it gets neither a blank page nor a dot, and
+    // an all-hidden carousel collapses to the `fallback` branch. These read
+    // `CarouselView.pages` off a REAL view, which is the value `body`
+    // iterates and counts.
+    //
+    // KNOWN LIMIT, stated rather than implied — the same one the visibility
+    // gate above carries: they do not prove `body` still iterates `pages`
+    // rather than `props.children`. A SwiftUI `body` is not inspectable
+    // without a view-testing dependency this package does not carry. What
+    // they do pin is the drop rule itself and the empty/`fallback` branch
+    // condition.
+
+    private func carouselPage(_ id: String, visibility: Visibility? = nil) -> BuilderNode {
+        .text(TextProps(id: id, key: "k", role: .body, visibility: visibility))
+    }
+
+    private func carousel(
+        _ children: [BuilderNode], indicatorColor: ThemePair? = nil,
+        appVersion: String? = nil, dark: Bool = false
+    ) throws -> CarouselView {
+        CarouselView(
+            props: CarouselProps(id: "c1", children: children, indicatorColor: indicatorColor),
+            ctx: try makeCtx(appVersion: appVersion, dark: dark), cell: nil)
+    }
+
+    func test_carousel_dropsAPageHiddenByPlatform() throws {
+        let view = try carousel([
+            carouselPage("p1"),
+            carouselPage("p2", visibility: Visibility(platform: ["android"])),
+            carouselPage("p3"),
+        ])
+        // Two pages, in order, and no placeholder where p2 was — the old
+        // behaviour left a blank page here plus a dot for it.
+        XCTAssertEqual(nodeIds(view.pages), ["p1", "p3"])
+    }
+
+    func test_carousel_dropsAPageHiddenByTheContextAppVersion() throws {
+        let pages = [carouselPage("p1"), carouselPage("p2", visibility: Visibility(minAppVersion: "2.0.0"))]
+        // Same node list, two contexts: only ctx.appVersion differs, so this
+        // fails if the filter stops reading it.
+        XCTAssertEqual(nodeIds(try carousel(pages, appVersion: "1.9.9").pages), ["p1"])
+        XCTAssertEqual(nodeIds(try carousel(pages, appVersion: "2.0.0").pages), ["p1", "p2"])
+    }
+
+    func test_carousel_everyPageHiddenLeavesNoRenderablePages() throws {
+        let view = try carousel([
+            carouselPage("p1", visibility: Visibility(platform: ["android"])),
+            carouselPage("p2", visibility: Visibility(platform: ["web"])),
+        ])
+        // Empty is what puts `body` on the same branch an authored-empty
+        // carousel takes: render `fallback`, else nothing — never N blank
+        // pages with N dots.
+        XCTAssertTrue(view.pages.isEmpty)
+    }
+
+    func test_carousel_keepsEveryPageWhenNoneIsHidden() throws {
+        let view = try carousel([carouselPage("p1"), carouselPage("p2")])
+        XCTAssertEqual(nodeIds(view.pages), ["p1", "p2"])
+    }
+
+    // MARK: - carousel indicator colour
+    //
+    // Pins the resolved value that feeds `.tint(_:)` — which theme half won,
+    // and that it is the authored colour rather than a placeholder.
+    //
+    // KNOWN LIMIT, stated plainly: what happens AFTER `.tint(_:)` — whether
+    // SwiftUI actually recolours `PageTabViewStyle`'s dots, which are a
+    // `UIPageControl` underneath and have historically not followed `.tint` —
+    // is not observable from any unit test in this package. It stays device
+    // smoke item S7. No test here asserts it, because such a test would pass
+    // whether the dots recolour or not.
+
+    func test_carousel_absentIndicatorColorResolvesToNothingSoNoTintIsApplied() throws {
+        // Deliberately nil, not a substituted default: `.tint(nil)` would
+        // reset to the system tint rather than leave the paywall's ambient
+        // tint alone, so `body` must not call `.tint` at all.
+        XCTAssertNil(try carousel([carouselPage("p1")]).indicatorRGBA)
+    }
+
+    func test_carousel_indicatorColorResolvesThePerThemeHalfByValue() throws {
+        // Pure red light / pure blue dark: asserted by component, so a wrong
+        // theme half or a placeholder colour cannot pass.
+        let pair = ThemePair(light: "#FF0000", dark: "#0000FF")
+        let pages = [carouselPage("p1")]
+
+        let light = try XCTUnwrap(try carousel(pages, indicatorColor: pair).indicatorRGBA)
+        XCTAssertEqual(light.red, 1.0, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(light.green, 0.0, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(light.blue, 0.0, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(light.alpha, 1.0, accuracy: colorComponentAccuracy)
+
+        let dark = try XCTUnwrap(try carousel(pages, indicatorColor: pair, dark: true).indicatorRGBA)
+        XCTAssertEqual(dark.red, 0.0, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(dark.blue, 1.0, accuracy: colorComponentAccuracy)
+    }
 }
+
+/// Tolerance for a parsed 8-bit colour channel compared against its unit
+/// value — the parse divides by 255, so exact `==` on a `Double` is the wrong
+/// assertion shape even when it happens to hold.
+private let colorComponentAccuracy = 1e-9
