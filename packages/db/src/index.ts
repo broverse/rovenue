@@ -167,6 +167,7 @@ export type {
   Product,
   Offering,
   NewOffering,
+  Paywall,
   Purchase,
   Audience,
   Experiment,

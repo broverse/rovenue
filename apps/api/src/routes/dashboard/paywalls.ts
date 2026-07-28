@@ -3,7 +3,14 @@ import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
-import { MemberRole, drizzle, type Offering } from "@rovenue/db";
+import {
+  ExperimentType,
+  MemberRole,
+  drizzle,
+  type Db,
+  type Offering,
+  type Paywall,
+} from "@rovenue/db";
 import {
   MAX_BUILDER_DEPTH,
   MAX_BUILDER_NODES,
@@ -14,6 +21,7 @@ import {
   measureNodeTree,
   validateBuilderConfig,
 } from "@rovenue/shared/paywall";
+import { placementRowsSchema, type PlacementRow } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
@@ -22,6 +30,11 @@ import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { packagesSchema } from "../../lib/offering-hydration";
 import { resolvePlacement, type ResolvedPlacementData } from "../../lib/placement-resolution";
 import { ok } from "../../lib/response";
+import {
+  createExperimentValidated,
+  findOrCreateEveryoneAudience,
+} from "../../services/experiment-create";
+import { invalidateExperimentCache } from "../../services/experiment-engine";
 
 // =============================================================
 // Dashboard: Paywalls CRUD
@@ -194,6 +207,78 @@ function prepareBuilderConfigPatch(
 const versionLabelBodySchema = z.object({
   label: z.string().trim().min(1).max(120).nullable(),
 });
+
+// -------------------------------------------------------------
+// §6.19 — atomic builder A/B launch
+// -------------------------------------------------------------
+
+/** Variant weights split evenly across the two-variant A/B this endpoint
+ * always creates. */
+const DEFAULT_VARIANT_SPLIT = 0.5;
+
+/** Ceiling on the `-2`…`-N` de-dup suffix loop below — matches funnels'
+ * bounded-retry convention for auto-generated identifiers (see
+ * randomSuffix() usage in funnels.ts) rather than looping unbounded. */
+const IDENTIFIER_SUFFIX_MAX = 20;
+
+/** Headroom under `identifier`'s 160-char column limit (see
+ * PAYWALL_IDENTIFIER_RE/createBodySchema above) so a `-NN` suffix never
+ * pushes the candidate over the limit. */
+const IDENTIFIER_SLUG_MAX_LEN = 150;
+
+const launchBodySchema = z.object({
+  name: z.string().trim().min(1),
+  variantB: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("existing"), paywallId: z.string().min(1) }),
+    z.object({ kind: z.literal("duplicate"), name: z.string().trim().min(1) }),
+  ]),
+  audienceId: z.string().min(1).optional(),
+  placement: z
+    .object({ placementId: z.string().min(1), rowIndex: z.number().int().min(0) })
+    .optional(),
+});
+
+/** kebab-case a variant-B name into a PAYWALL_IDENTIFIER_RE-legal slug.
+ * Mirrors funnels.ts's `kebabCase` helper (same normalize+strip-diacritics
+ * approach) since paywalls have no shared slugify utility of their own. */
+function slugifyPaywallName(input: string): string {
+  return (
+    input
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, IDENTIFIER_SLUG_MAX_LEN) || "paywall"
+  );
+}
+
+// DB or Drizzle tx handle — this endpoint's whole handler body runs
+// inside one drizzle.db.transaction(...), same convention as
+// services/experiment-create.ts's DbOrTx.
+type DbOrTx = Db;
+
+/**
+ * Find a free paywall identifier for a duplicated variant B: the bare
+ * slugified name, then `-2`, `-3`, … up to IDENTIFIER_SUFFIX_MAX. Runs
+ * inside the caller's tx so the precheck is consistent with the insert
+ * that follows it.
+ */
+async function findFreePaywallIdentifier(
+  tx: DbOrTx,
+  projectId: string,
+  name: string,
+): Promise<string> {
+  const base = slugifyPaywallName(name);
+  const candidates = [base, ...Array.from({ length: IDENTIFIER_SUFFIX_MAX - 1 }, (_, i) => `${base}-${i + 2}`)];
+  for (const candidate of candidates) {
+    const hit = await drizzle.paywallRepo.findPaywallByIdentifier(tx, projectId, candidate);
+    if (!hit) return candidate;
+  }
+  throw new HTTPException(409, {
+    message: `Could not find a free paywall identifier for "${name}"`,
+  });
+}
 
 /** Parse a `:versionNo` path segment, 400ing on anything that is not a
  * canonical positive integer (rejects "", "0", negatives, "1.5", "1e2",
@@ -516,6 +601,179 @@ export const paywallsDashboardRoute = new Hono()
 
     purgeProjectCatalogCache(projectId);
     return c.json(ok(result));
+  })
+  // -----------------------------------------------------------
+  // §6.19 — atomic builder A/B launch. Paywall `id` becomes variant A;
+  // variant B is either an existing paywall or a fresh duplicate of A
+  // (same offering/config, unpublished draft). Everything — the optional
+  // paywall duplicate, the DRAFT PAYWALL experiment, and the optional
+  // placement-row repoint — happens in one tx: a mid-flight failure
+  // (e.g. a stale placement row target) leaves nothing behind.
+  // -----------------------------------------------------------
+  .post("/:id/experiments", validate("json", launchBodySchema), async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "experiments:write");
+    const body = c.req.valid("json");
+    const requestContext = extractRequestContext(c);
+
+    const result = await drizzle.db.transaction(async (tx) => {
+      const paywallA = await drizzle.paywallRepo.findPaywallById(tx, projectId, id);
+      if (!paywallA) {
+        throw new HTTPException(404, { message: "Paywall not found" });
+      }
+
+      let paywallB: Paywall;
+      let createdPaywallId: string | null = null;
+
+      if (body.variantB.kind === "existing") {
+        if (body.variantB.paywallId === paywallA.id) {
+          throw new HTTPException(400, {
+            message: "variantB.paywallId must be a different paywall than the one being launched",
+          });
+        }
+        const existing = await drizzle.paywallRepo.findPaywallById(
+          tx,
+          projectId,
+          body.variantB.paywallId,
+        );
+        if (!existing) {
+          throw new HTTPException(400, {
+            message: `Unknown variantB.paywallId: ${body.variantB.paywallId}`,
+          });
+        }
+        paywallB = existing;
+      } else {
+        const identifier = await findFreePaywallIdentifier(tx, projectId, body.variantB.name);
+        paywallB = await drizzle.paywallRepo.createPaywall(tx, {
+          projectId,
+          identifier,
+          name: body.variantB.name,
+          offeringId: paywallA.offeringId,
+          remoteConfig: paywallA.remoteConfig,
+          builderConfig: paywallA.builderConfig,
+          configFormatVersion: paywallA.configFormatVersion,
+          isActive: true,
+          status: "draft",
+          publishedVersionId: null,
+        });
+        createdPaywallId = paywallB.id;
+        await audit(
+          {
+            projectId,
+            userId: user.id,
+            action: "create",
+            resource: "paywall",
+            resourceId: paywallB.id,
+            after: {
+              identifier: paywallB.identifier,
+              name: paywallB.name,
+              duplicatedFrom: paywallA.id,
+            },
+            ...requestContext,
+          },
+          tx,
+        );
+      }
+
+      const audienceId =
+        body.audienceId ?? (await findOrCreateEveryoneAudience(tx, projectId)).id;
+
+      const experiment = await createExperimentValidated(tx, {
+        projectId,
+        name: body.name,
+        type: ExperimentType.PAYWALL,
+        audienceId,
+        variants: [
+          {
+            id: "a",
+            name: paywallA.name,
+            value: { paywallId: paywallA.id },
+            weight: DEFAULT_VARIANT_SPLIT,
+          },
+          {
+            id: "b",
+            name: paywallB.name,
+            value: { paywallId: paywallB.id },
+            weight: DEFAULT_VARIANT_SPLIT,
+          },
+        ],
+      });
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "create",
+          resource: "experiment",
+          resourceId: experiment.id,
+          after: {
+            key: experiment.key,
+            type: experiment.type,
+            paywallA: paywallA.id,
+            paywallB: paywallB.id,
+          },
+          ...requestContext,
+        },
+        tx,
+      );
+
+      let placementRepointed = false;
+      if (body.placement) {
+        const placementSpec = body.placement;
+        const placement = await drizzle.placementRepo.findPlacementById(
+          tx,
+          projectId,
+          placementSpec.placementId,
+        );
+        if (!placement) {
+          throw new HTTPException(404, { message: "Placement not found" });
+        }
+        const rows = placementRowsSchema.parse(placement.rows);
+        const row = rows[placementSpec.rowIndex];
+        if (!row || row.target.type !== "paywall" || row.target.paywallId !== paywallA.id) {
+          throw new HTTPException(409, {
+            message: "Placement row no longer targets this paywall",
+          });
+        }
+        const beforeTarget = row.target;
+        const afterTarget = { type: "experiment" as const, experimentId: experiment.id };
+        const nextRows: PlacementRow[] = rows.map((r, i) =>
+          i === placementSpec.rowIndex ? { ...r, target: afterTarget } : r,
+        );
+        await drizzle.placementRepo.updatePlacement(tx, projectId, placement.id, {
+          rows: nextRows,
+        });
+        await audit(
+          {
+            projectId,
+            userId: user.id,
+            action: "update",
+            resource: "placement",
+            resourceId: placement.id,
+            before: { rowIndex: placementSpec.rowIndex, target: beforeTarget },
+            after: { rowIndex: placementSpec.rowIndex, target: afterTarget },
+            ...requestContext,
+          },
+          tx,
+        );
+        placementRepointed = true;
+      }
+
+      return { experiment, createdPaywallId, placementRepointed };
+    });
+
+    await invalidateExperimentCache(projectId);
+    if (result.placementRepointed) {
+      purgeProjectCatalogCache(projectId);
+    }
+
+    return c.json(
+      ok({ experiment: result.experiment, createdPaywallId: result.createdPaywallId }),
+    );
   })
   .get("/:id/versions", async (c) => {
     const projectId = c.req.param("projectId");
