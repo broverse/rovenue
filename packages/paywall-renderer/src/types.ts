@@ -43,14 +43,18 @@ export type PaywallRendererProps = {
   /**
    * The instant this paywall was FIRST shown to this user, anchoring a
    * `durationSeconds` countdown's deadline (`endsAt` countdowns ignore this
-   * entirely — they carry their own absolute deadline). This package has no
-   * persistence layer of its own, so it cannot remember that instant across
-   * remounts; a host with real storage (the native SDKs) should look it up
-   * and supply it here. Absent, the countdown anchors to mount time instead
-   * — which means its deadline restarts every time the component remounts.
-   * That's fine for a demo or the dashboard's canvas preview; a real paywall
-   * needs the real value, because a timer that restarts on every open is not
-   * a deadline and users notice.
+   * entirely — they carry their own absolute deadline). The renderer itself
+   * is presentational and owns no storage, so the HOST looks the instant up
+   * and supplies it: the native SDKs from `UserDefaults`/`SharedPreferences`,
+   * web hosts from `resolvePersistedFirstShownAt` (this package's
+   * `localStorage` helper, same key as the natives).
+   *
+   * Absent, the countdown anchors to mount time — which restarts its
+   * deadline on every remount. That is the right answer for an AUTHORING
+   * preview (a persisted anchor would leave the builder canvas showing a
+   * permanently expired countdown) and the wrong one for a buyer-facing
+   * surface, because a timer that restarts on every open is not a deadline
+   * and users notice.
    */
   firstShownAt?: Date;
   /**

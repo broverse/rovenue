@@ -1,8 +1,14 @@
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
-import { iconRegistry, SOCIAL_PROOF_MAX_RATING } from "@rovenue/shared/paywall";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render } from "@testing-library/react";
+import {
+  COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX,
+  COUNTDOWN_TICK_MS,
+  iconRegistry,
+  SOCIAL_PROOF_MAX_RATING,
+} from "@rovenue/shared/paywall";
 import type { BuilderConfig, OverrideCondition, PackageView, PaywallNode } from "@rovenue/shared/paywall";
+import { resolvePersistedFirstShownAt } from "./first-shown";
 import { PaywallRenderer } from "./renderer";
 import type { RendererOffering } from "./types";
 
@@ -254,6 +260,11 @@ describe("PaywallRenderer", () => {
     const scroller = container.querySelector("[data-rov-paywall-scroll]") as HTMLElement;
     expect(scroller).not.toBeNull();
     expect(scroller.style.overflowY).toBe("auto");
+    // The scroller fills the root outright — it is NOT shortened to make
+    // room for a footer beside it (see the overlay tests below), and a
+    // definite height is also what the content's `minHeight: 100%` resolves
+    // against.
+    expect(scroller.style.height).toBe("100%");
     const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
     // The trap: without a viewport minimum the stack stops filling and any
     // paywall pushing its CTA down with a flexible spacer collapses upward.
@@ -1355,13 +1366,82 @@ describe("stickyFooter and countdown nodes", () => {
     expect(inner.style.paddingBottom).not.toBe("");
   });
 
+  it("overlays the footer on the scroll area instead of standing beside it", () => {
+    const { container } = render(<PaywallRenderer config={cfgWithFooter()} {...base} />);
+    const root = container.querySelector("[data-rov-paywall-root]") as HTMLElement;
+    const scroller = container.querySelector("[data-rov-paywall-scroll]") as HTMLElement;
+    const footer = container.querySelector("[data-rov-sticky-footer]") as HTMLElement;
+    // The clearance padding above is only CORRECT under an overlay: a footer
+    // laid out as a flex sibling already shortens the scroller by its own
+    // height, so the padding would then reserve that height a second time.
+    expect(root.style.position).toBe("relative");
+    expect(scroller.style.height).toBe("100%");
+    expect(footer.style.position).toBe("absolute");
+    expect(footer.style.bottom).toBe("0px");
+  });
+
+  it("carves the footer clearance out of the viewport minimum rather than adding to it", () => {
+    const { container } = render(<PaywallRenderer config={cfgWithFooter()} {...base} />);
+    const inner = container.querySelector("[data-rov-paywall-content]") as HTMLElement;
+    // content-box here would make `minHeight: 100%` mean "a viewport tall
+    // PLUS the footer", so every short footered paywall would scroll by
+    // exactly one footer's height of blank space.
+    expect(inner.style.boxSizing).toBe("border-box");
+    expect(inner.style.minHeight).toBe("100%");
+  });
+
   it("renders a nested stickyFooter inline instead of pinning it", () => {
     const { container } = render(<PaywallRenderer config={cfgWithNestedFooter()} {...base} />);
     const scroller = container.querySelector("[data-rov-paywall-scroll]")!;
     expect(scroller.querySelector('[data-rov-node="sf"]')).not.toBeNull();
   });
 
-  it("formats the remaining time and freezes at zero", () => {
+  it("pins a root-level stickyFooter that is not the last child", () => {
+    // The rule is "a direct child of root", not "the last child of root" —
+    // a single footer authored above a sibling still means "pin this", and
+    // the validator says nothing about that shape (by design), so leaving it
+    // unpinned would be silent.
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "stickyFooter", id: "sf", children: [{ type: "text", id: "sf-text", key: "title", role: "body" }] },
+          { type: "text", id: "trailing", key: "title", role: "body" },
+        ],
+      },
+    });
+    const { container } = render(<PaywallRenderer config={config} {...base} />);
+    const scroller = container.querySelector("[data-rov-paywall-scroll]")!;
+    expect(scroller.querySelector('[data-rov-node="sf"]')).toBeNull();
+    expect(container.querySelector("[data-rov-sticky-footer]")).not.toBeNull();
+    // …and the sibling that followed it stays in the scrolled content.
+    expect(scroller.querySelector('[data-rov-node="trailing"]')).not.toBeNull();
+  });
+
+  it("pins the LAST root-level stickyFooter and leaves the earlier ones inline", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "stickyFooter", id: "sfA", children: [{ type: "text", id: "sfa-text", key: "title", role: "body" }] },
+          { type: "stickyFooter", id: "sfB", children: [{ type: "text", id: "sfb-text", key: "title", role: "body" }] },
+          { type: "text", id: "trailing", key: "title", role: "body" },
+        ],
+      },
+    });
+    const { container } = render(<PaywallRenderer config={config} {...base} />);
+    const scroller = container.querySelector("[data-rov-paywall-scroll]")!;
+    const pinned = container.querySelector("[data-rov-sticky-footer]")!;
+    expect(pinned.querySelector('[data-rov-node="sfB"]')).not.toBeNull();
+    expect(scroller.querySelector('[data-rov-node="sfA"]')).not.toBeNull();
+    expect(scroller.querySelector('[data-rov-node="sfB"]')).toBeNull();
+  });
+
+  it("formats the remaining time", () => {
     const { container } = render(
       <PaywallRenderer
         config={cfgCountdown("2027-01-01T00:00:00.000Z")}
@@ -1433,5 +1513,325 @@ describe("stickyFooter and countdown nodes", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("falls back instead of printing NaN:NaN for an unparsable endsAt", () => {
+    // `endsAt` reaches the renderer as a decoded WIRE value, not as something
+    // the authoring schema just validated. Both native renderers return
+    // nil for an uninterpretable instant and route to `fallback`.
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({
+          type: "countdown",
+          id: "c1",
+          endsAt: "next tuesday",
+          fallback: { type: "text", id: "cd-fallback", key: "title", role: "body" },
+        })}
+        {...base}
+      />,
+    );
+    expect(container.querySelector('[data-rov-node="cd-fallback"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("NaN");
+  });
+
+  it("renders nothing for an unparsable endsAt with no fallback", () => {
+    const { container } = render(
+      <PaywallRenderer config={cfg({ type: "countdown", id: "c1", endsAt: "" })} {...base} />,
+    );
+    expect(container.querySelector('[data-rov-node="c1"]')).toBeNull();
+    expect(container.textContent).not.toContain("NaN");
+  });
+
+  it("resolves an uncoloured countdown to the same ink as the text beside it", () => {
+    // Chased to the RESOLVED colour, not to the branch: "emits no colour
+    // instruction" is only correct where the ambient ink IS the paywall's,
+    // which on the web it is not — the host document's colour is. Comparing
+    // against a sibling text node keeps this true whatever the default ink
+    // becomes, and would fail on the dark preview bug it exists for.
+    const { container } = render(
+      <PaywallRenderer
+        config={baseConfig({
+          root: {
+            type: "stack",
+            id: "root",
+            axis: "v",
+            children: [
+              { type: "text", id: "plain", key: "title", role: "body" },
+              { type: "countdown", id: "c1", endsAt: "2027-01-01T00:00:00.000Z" },
+            ],
+          },
+        })}
+        {...base}
+        colorScheme="dark"
+        now={new Date("2026-12-31T23:59:00.000Z")}
+      />,
+    );
+    const countdownInk = (container.querySelector('[data-rov-node="c1"]') as HTMLElement).style.color;
+    const textInk = (container.querySelector('[data-rov-node="plain"]') as HTMLElement).style.color;
+    expect(countdownInk).not.toBe("");
+    expect(countdownInk).toBe(textInk);
+  });
+
+  // ---------------------------------------------------------------
+  // The countdown's clock and tick lifecycle.
+  //
+  // Fake timers throughout: the displayed value is computed from the WALL
+  // CLOCK, so `Date.now()` has to be under the test's control for these
+  // assertions to be exact rather than "within a millisecond".
+  // ---------------------------------------------------------------
+  describe("countdown clock", () => {
+    const MOUNT_AT = new Date("2027-01-01T00:00:00.000Z");
+    /** Five minutes after MOUNT_AT. */
+    const DEADLINE = "2027-01-01T00:05:00.000Z";
+    const DEADLINE_MS = new Date(DEADLINE).getTime();
+    const ONE_MINUTE_MS = 60_000;
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function fakeClockAt(instant: Date): void {
+      vi.useFakeTimers();
+      vi.setSystemTime(instant);
+    }
+
+    function countdownText(container: HTMLElement): string {
+      return container.querySelector('[data-rov-node="c1"]')?.textContent ?? "";
+    }
+
+    it("recovers the whole elapsed time after its interval was throttled", () => {
+      // A hidden tab clamps setInterval to roughly one call a minute, so a
+      // display derived from how many ticks FIRED comes back minutes stale.
+      fakeClockAt(MOUNT_AT);
+      const { container, rerender } = render(
+        <PaywallRenderer config={cfgCountdown(DEADLINE)} {...base} now={MOUNT_AT} />,
+      );
+      expect(countdownText(container)).toContain("05:00");
+
+      act(() => {
+        vi.setSystemTime(new Date(MOUNT_AT.getTime() + 2 * ONE_MINUTE_MS));
+      });
+      // The next repaint — whatever triggers it — must read the clock.
+      rerender(<PaywallRenderer config={cfgCountdown(DEADLINE)} {...base} now={MOUNT_AT} />);
+      expect(countdownText(container)).toContain("03:00");
+    });
+
+    it("does not jump forward when a parent re-render supplies a fresh now", () => {
+      fakeClockAt(MOUNT_AT);
+      const { container, rerender } = render(
+        <PaywallRenderer config={cfgCountdown(DEADLINE)} {...base} now={MOUNT_AT} />,
+      );
+      act(() => {
+        vi.advanceTimersByTime(30 * COUNTDOWN_TICK_MS);
+      });
+      expect(countdownText(container)).toContain("04:30");
+
+      // Tapping a package re-renders the whole tree, and `props.now ?? new
+      // Date()` is re-evaluated with it. Adding the ticks that already fired
+      // ON TOP of that fresh instant skips the clock forward by the elapsed
+      // time and then runs at double speed until the next re-render.
+      rerender(
+        <PaywallRenderer
+          config={cfgCountdown(DEADLINE)}
+          {...base}
+          now={new Date(MOUNT_AT.getTime() + 30 * COUNTDOWN_TICK_MS)}
+        />,
+      );
+      expect(countdownText(container)).toContain("04:30");
+    });
+
+    it("rounds the remaining second UP, as the SwiftUI and Android renderers do", () => {
+      // 59.4 s left: the promotion has not ended, so 00:59 is a second the
+      // buyer never gets — and a permanent one-second disagreement with the
+      // other two renderers, since the remainder is never integral in life.
+      const now = new Date(DEADLINE_MS - 59_400);
+      fakeClockAt(now);
+      const { container } = render(
+        <PaywallRenderer config={cfgCountdown(DEADLINE)} {...base} now={now} />,
+      );
+      expect(countdownText(container)).toContain("01:00");
+    });
+
+    it("still shows 00:01 while any part of the last second remains", () => {
+      const now = new Date(DEADLINE_MS - 1);
+      fakeClockAt(now);
+      const { container } = render(
+        <PaywallRenderer config={cfgCountdown(DEADLINE)} {...base} now={now} />,
+      );
+      expect(countdownText(container)).toContain("00:01");
+    });
+
+    it("actually reaches 00:00 and freezes there", () => {
+      const now = new Date(DEADLINE_MS - 2 * COUNTDOWN_TICK_MS);
+      fakeClockAt(now);
+      const { container } = render(
+        <PaywallRenderer config={cfgCountdown(DEADLINE)} {...base} now={now} />,
+      );
+      expect(countdownText(container)).toContain("00:02");
+
+      act(() => {
+        vi.advanceTimersByTime(2 * COUNTDOWN_TICK_MS);
+      });
+      expect(countdownText(container)).toContain("00:00");
+
+      // Frozen, not negative, and not still counting: a minute later the
+      // node is still there showing the same zero.
+      act(() => {
+        vi.advanceTimersByTime(ONE_MINUTE_MS);
+      });
+      expect(countdownText(container)).toContain("00:00");
+    });
+
+    it("parks the tick while the paywall is off-screen and resumes when it returns", () => {
+      const observers: StubIntersectionObserver[] = [];
+      class StubIntersectionObserver {
+        #callback: IntersectionObserverCallback;
+        constructor(callback: IntersectionObserverCallback) {
+          this.#callback = callback;
+          observers.push(this);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+        emit(isIntersecting: boolean) {
+          this.#callback(
+            [{ isIntersecting } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+      }
+      vi.stubGlobal("IntersectionObserver", StubIntersectionObserver);
+      try {
+        fakeClockAt(MOUNT_AT);
+        const { container } = render(
+          <PaywallRenderer config={cfgCountdown(DEADLINE)} {...base} now={MOUNT_AT} />,
+        );
+        const observer = observers[0]!;
+
+        act(() => observer.emit(false));
+        act(() => {
+          vi.advanceTimersByTime(ONE_MINUTE_MS);
+        });
+        // A minute of clock passed with nothing repainted: the tick is parked.
+        expect(countdownText(container)).toContain("05:00");
+
+        // Coming back is the half that is easy to leave unimplemented.
+        act(() => observer.emit(true));
+        expect(countdownText(container)).toContain("04:00");
+        act(() => {
+          vi.advanceTimersByTime(COUNTDOWN_TICK_MS);
+        });
+        expect(countdownText(container)).toContain("03:59");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("parks the tick while the tab is hidden and resumes on return", () => {
+      let hidden = false;
+      const original = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => (hidden ? "hidden" : "visible"),
+      });
+      try {
+        fakeClockAt(MOUNT_AT);
+        const { container } = render(
+          <PaywallRenderer config={cfgCountdown(DEADLINE)} {...base} now={MOUNT_AT} />,
+        );
+
+        hidden = true;
+        act(() => {
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+        act(() => {
+          vi.advanceTimersByTime(ONE_MINUTE_MS);
+        });
+        expect(countdownText(container)).toContain("05:00");
+
+        hidden = false;
+        act(() => {
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+        expect(countdownText(container)).toContain("04:00");
+      } finally {
+        delete (document as unknown as Record<string, unknown>).visibilityState;
+        if (original) Object.defineProperty(Document.prototype, "visibilityState", original);
+      }
+    });
+
+    it("keeps a durationSeconds deadline across a remount when the host persists the anchor", () => {
+      // The whole point of the persisted anchor: reopening the paywall two
+      // minutes later must show three minutes left, not five.
+      const DURATION_SECONDS = 300;
+      const config = cfg({ type: "countdown", id: "c1", durationSeconds: DURATION_SECONDS });
+      localStorage.clear();
+      fakeClockAt(MOUNT_AT);
+      const first = render(
+        <PaywallRenderer
+          config={config}
+          {...base}
+          firstShownAt={resolvePersistedFirstShownAt("pw_1", MOUNT_AT)}
+          now={MOUNT_AT}
+        />,
+      );
+      expect(countdownText(first.container)).toContain("05:00");
+      first.unmount();
+
+      const laterOpen = new Date(MOUNT_AT.getTime() + 2 * ONE_MINUTE_MS);
+      act(() => {
+        vi.setSystemTime(laterOpen);
+      });
+      const second = render(
+        <PaywallRenderer
+          config={config}
+          {...base}
+          firstShownAt={resolvePersistedFirstShownAt("pw_1", laterOpen)}
+          now={laterOpen}
+        />,
+      );
+      expect(countdownText(second.container)).toContain("03:00");
+      localStorage.clear();
+    });
+  });
+});
+
+describe("resolvePersistedFirstShownAt", () => {
+  const FIRST_OPEN = new Date("2027-01-01T00:00:00.000Z");
+  const LATER_OPEN = new Date("2027-01-01T00:10:00.000Z");
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("stamps on the first call and reads that same instant back afterwards", () => {
+    const first = resolvePersistedFirstShownAt("pw_1", FIRST_OPEN);
+    const second = resolvePersistedFirstShownAt("pw_1", LATER_OPEN);
+    expect(first?.getTime()).toBe(FIRST_OPEN.getTime());
+    expect(second?.getTime()).toBe(FIRST_OPEN.getTime());
+  });
+
+  it("writes the same key the iOS and Android SDKs use", () => {
+    resolvePersistedFirstShownAt("pw_1", FIRST_OPEN);
+    expect(localStorage.getItem(`${COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX}pw_1`)).toBe(
+      String(FIRST_OPEN.getTime()),
+    );
+  });
+
+  it("keys the anchor per paywall", () => {
+    resolvePersistedFirstShownAt("pw_1", FIRST_OPEN);
+    const other = resolvePersistedFirstShownAt("pw_2", LATER_OPEN);
+    expect(other?.getTime()).toBe(LATER_OPEN.getTime());
+  });
+
+  it("collapses an absent identifier to the empty suffix, as the natives do", () => {
+    resolvePersistedFirstShownAt(undefined, FIRST_OPEN);
+    expect(localStorage.getItem(COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX)).toBe(String(FIRST_OPEN.getTime()));
+  });
+
+  it("re-stamps a corrupt stored value rather than returning an invalid date", () => {
+    localStorage.setItem(`${COUNTDOWN_FIRST_SHOWN_AT_KEY_PREFIX}pw_1`, "whenever");
+    const resolved = resolvePersistedFirstShownAt("pw_1", FIRST_OPEN);
+    expect(resolved?.getTime()).toBe(FIRST_OPEN.getTime());
   });
 });

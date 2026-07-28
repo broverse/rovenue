@@ -1,6 +1,7 @@
 export { PaywallRenderer } from "./renderer";
 export type { PaywallRendererProps, RendererOffering, RendererPackage } from "./types";
 export { renderNode, resolvePackageView, type RenderCtx } from "./nodes";
+export { resolvePersistedFirstShownAt } from "./first-shown";
 export {
   resolveThemeColor,
   resolveThemeUrl,

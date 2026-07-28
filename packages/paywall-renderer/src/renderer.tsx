@@ -13,6 +13,14 @@ import { resolveThemeColor } from "./styles";
  */
 const STICKY_FOOTER_CONTENT_CLEARANCE_PX = 96;
 
+/**
+ * The footer OVERLAYS the scroll area (it is absolutely positioned over the
+ * scroller, not a flex sibling beside it), so it must paint above the
+ * scrolled content. One layer is enough: nothing else in this renderer
+ * establishes a stacking order at the root.
+ */
+const STICKY_FOOTER_Z_INDEX = 1;
+
 // =============================================================
 // Root renderer. Presentational plus the one piece of local state
 // this package owns: which package is selected. Walks the config
@@ -49,20 +57,34 @@ function initialSelectedPackageId(root: PaywallNode, offering: RendererOffering 
 
 /**
  * Split the root's direct children into "everything the scroller owns" and
- * "the pinned footer", per the LAST direct child only: a `stickyFooter`
- * anywhere else (not last, not a direct child at all) is left in place and
- * reaches the ordinary dispatcher, which renders it in-flow like a stack —
- * see `renderStickyFooter` in `nodes.tsx`. The validator's
- * `STICKY_FOOTER_NOT_AT_ROOT` warning is what tells the author about that
- * case; this function does not warn, only partitions.
+ * "the pinned footer".
+ *
+ * The rule (shared across all three renderers, stated authoritatively in
+ * `validate.ts`'s sticky-footer block): a `stickyFooter` is pinned when it
+ * is a DIRECT child of the root, WHEREVER it sits among its siblings; among
+ * several direct-child footers the LAST one wins and the earlier ones stay
+ * in the scrolled content, reaching the ordinary dispatcher which renders
+ * them in-flow like a stack (see `renderStickyFooter` in `nodes.tsx`).
+ * Position among siblings deliberately does not matter for a single footer:
+ * a pinned bar's position is the bottom of the screen either way, so an
+ * author who dropped it above a text node still gets what they meant — the
+ * previous "last child only" reading silently un-pinned that shape and the
+ * validator, which only warns about non-direct children, said nothing.
+ *
+ * A footer that is not a direct root child at all is left where it is and
+ * renders inline; the validator's `STICKY_FOOTER_NOT_AT_ROOT` warning is
+ * what tells the author about that. This function does not warn, only
+ * partitions.
  */
 function partitionRootChildren(children: PaywallNode[]): {
   scrolledChildren: PaywallNode[];
   stickyFooter: StickyFooterNode | null;
 } {
-  const last = children[children.length - 1];
-  if (last?.type === "stickyFooter") {
-    return { scrolledChildren: children.slice(0, -1), stickyFooter: last };
+  for (let i = children.length - 1; i >= 0; i -= 1) {
+    const child = children[i];
+    if (child?.type === "stickyFooter") {
+      return { scrolledChildren: [...children.slice(0, i), ...children.slice(i + 1)], stickyFooter: child };
+    }
   }
   return { scrolledChildren: children, stickyFooter: null };
 }
@@ -121,35 +143,54 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) setFooterClearance(entry.contentRect.height);
+      // Border box, not content box: the footer carries its own
+      // safe-area bottom padding, and the content has to clear THAT too —
+      // `contentRect` excludes it, so on a device with a home indicator the
+      // content would stop short by exactly the inset. `borderBoxSize` is
+      // the modern field; `contentRect` is the fallback for anything that
+      // does not report it (and for the test double).
+      if (entry) setFooterClearance(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, [stickyFooter?.id]);
 
   return (
+    // The footer OVERLAYS the scroll area rather than standing beside it —
+    // the layout model the spec is written for ("the scrolled content gets
+    // bottom padding equal to the footer's height so the last item is never
+    // hidden beneath it", and the opaque-background default that exists
+    // precisely because content scrolls *under* a pinned bar). A flex
+    // sibling would shorten the scroller by the footer's height AND then
+    // pad the content by it again — the same clearance counted twice. So
+    // the root is only a positioning context here; the scroller fills it.
     <div
       data-rov-paywall-root=""
       style={{
         backgroundColor: resolveThemeColor(config.background, colorScheme),
         boxSizing: "border-box",
+        position: "relative",
         height: "100%",
-        display: "flex",
-        flexDirection: "column",
       }}
     >
-      <div data-rov-paywall-scroll="" style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+      <div data-rov-paywall-scroll="" style={{ height: "100%", overflowY: "auto" }}>
         {/* minHeight 100% is what keeps a short paywall filling the screen;
             without it a flexible spacer collapses and the CTA rides up. */}
         <div
           data-rov-paywall-content=""
           style={{
+            // border-box, so the footer clearance below is carved OUT of the
+            // 100% minimum instead of being added to it. content-box here
+            // would make every short footered paywall exactly one footer's
+            // height of blank space too tall, i.e. scrollable for nothing.
+            boxSizing: "border-box",
             minHeight: "100%",
             display: "flex",
             flexDirection: "column",
-            // Reserve clearance for the pinned footer below, or the last
-            // scrolled item ends up underneath it and unreachable — the
-            // same class of bug as no scrolling at all, just subtler.
+            // Reserve clearance for the footer overlaying the bottom of the
+            // scroll area, or the last scrolled item ends up underneath it
+            // and unreachable — the same class of bug as no scrolling at
+            // all, just subtler.
             paddingBottom: footerElement !== null ? `${footerClearance}px` : undefined,
           }}
         >
@@ -161,7 +202,11 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
           ref={footerRef}
           data-rov-sticky-footer=""
           style={{
-            flexShrink: 0,
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: STICKY_FOOTER_Z_INDEX,
             paddingBottom: "env(safe-area-inset-bottom)",
           }}
         >

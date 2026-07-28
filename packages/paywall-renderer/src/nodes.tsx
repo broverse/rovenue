@@ -79,9 +79,11 @@ export type RenderCtx = {
   locale: string;
   colorScheme: "light" | "dark";
   /** The instant the renderer treats as "now" — see `PaywallRendererProps.now`.
-   *  Fixed for the lifetime of a single `PaywallRenderer` render tree; the
-   *  countdown node ticks its OWN display forward from this anchor rather
-   *  than re-reading the wall clock, so it stays driven by the injected value. */
+   *  Re-evaluated on every `PaywallRenderer` render when the host does not
+   *  supply it. The countdown node reads the WALL CLOCK for its display and
+   *  uses this only as a one-off offset captured at mount, so an injected
+   *  value still pins the first frame deterministically while a later
+   *  re-render can never move the clock — see `Countdown`. */
   now: Date;
   /** See `PaywallRendererProps.firstShownAt` — anchors a `durationSeconds`
    *  countdown's deadline. Absent falls back to mount time (see
@@ -644,75 +646,161 @@ function renderStickyFooter(node: StickyFooterNode, ctx: RenderCtx): ReactElemen
 }
 
 const COUNTDOWN_PAD_WIDTH = 2;
+const COUNTDOWN_MS_PER_SECOND = 1000;
+const COUNTDOWN_SECONDS_PER_MINUTE = 60;
+const COUNTDOWN_SECONDS_PER_HOUR = 3600;
 
 /** `hh:mm:ss`, dropping the hours segment entirely once it's zero — a
- * countdown under an hour shows `mm:ss`, never a leading `00:`. */
+ * countdown under an hour shows `mm:ss`, never a leading `00:`.
+ *
+ * Rounds the remaining second UP (`ceil`), matching the SwiftUI and Android
+ * renderers by value: with 59.4 s left the promotion has not yet ended, so
+ * `01:00` is honest and `00:59` is a second the buyer never gets. Only an
+ * exhausted countdown (`remainingMs <= 0`, clamped by the caller) shows
+ * `00:00`. Since the remaining time is essentially never an integral number
+ * of milliseconds in production, floor-vs-ceil is a visible, permanent
+ * one-second disagreement, not an edge case. */
 function formatCountdown(remainingMs: number): string {
-  const totalSeconds = Math.floor(remainingMs / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
+  const totalSeconds = Math.ceil(remainingMs / COUNTDOWN_MS_PER_SECOND);
+  const hours = Math.floor(totalSeconds / COUNTDOWN_SECONDS_PER_HOUR);
+  const minutes = Math.floor((totalSeconds % COUNTDOWN_SECONDS_PER_HOUR) / COUNTDOWN_SECONDS_PER_MINUTE);
+  const seconds = totalSeconds % COUNTDOWN_SECONDS_PER_MINUTE;
   const pad = (n: number) => String(n).padStart(COUNTDOWN_PAD_WIDTH, "0");
   return hours > 0 ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
 }
 
 /**
  * The countdown's deadline in epoch ms: `endsAt` directly, or
- * `durationSeconds` anchored to `ctx.firstShownAt` when the host supplied
- * it. This package has no persistence layer of its own to remember an
- * actual "first shown to this user" instant across app launches — that's a
- * host-app/SDK concern (see `PaywallRendererProps.firstShownAt`) — so
- * WITHOUT it, this falls back to this instance's own mount time (captured
- * once via `useState`'s lazy initializer). That fallback is a deliberate
- * downgrade, not equivalent behaviour: a countdown anchored to mount
- * restarts on every remount, which is not a deadline. Null when neither
- * `endsAt` nor `durationSeconds` is set; `COUNTDOWN_NO_DEADLINE` already
- * flags that at validate time, so this is a defensive fail-open, not the
- * primary guard.
+ * `durationSeconds` anchored to `ctx.firstShownAt`.
+ *
+ * `endsAt` arrives as a decoded WIRE value, not something the authoring
+ * schema has just validated, so an unparsable string is a real possibility
+ * here: it yields `NaN`, `NaN <= 0` is false, and the raw arithmetic would
+ * paint `NaN:NaN` onto the paywall. Both native renderers return nil for an
+ * unparsable instant and route to `fallback`; returning null here does the
+ * same, honouring the standing "never show garbage" contract.
+ *
+ * WITHOUT a `firstShownAt` the `durationSeconds` anchor falls back to this
+ * instance's own mount time (captured once via `useState`'s lazy
+ * initializer). That fallback is a deliberate downgrade, not equivalent
+ * behaviour: a countdown anchored to mount restarts on every remount, which
+ * is not a deadline — which is why the funnel runner supplies a persisted
+ * anchor (`resolvePersistedFirstShownAt`) the way the SDKs do.
+ *
+ * Null when neither `endsAt` nor `durationSeconds` is set;
+ * `COUNTDOWN_NO_DEADLINE` already flags that at validate time, so this is a
+ * defensive fail-open, not the primary guard.
  */
 function useCountdownDeadline(node: CountdownNode, ctx: RenderCtx): number | null {
   const [mountedAt] = useState(() => ctx.now.getTime());
   const firstShownAt = ctx.firstShownAt?.getTime() ?? mountedAt;
-  if (node.endsAt !== undefined) return new Date(node.endsAt).getTime();
-  if (node.durationSeconds !== undefined) return firstShownAt + node.durationSeconds * 1000;
+  if (node.endsAt !== undefined) {
+    const endsAtMs = new Date(node.endsAt).getTime();
+    return Number.isNaN(endsAtMs) ? null : endsAtMs;
+  }
+  if (node.durationSeconds !== undefined) {
+    return firstShownAt + node.durationSeconds * COUNTDOWN_MS_PER_SECOND;
+  }
   return null;
+}
+
+/** True when the countdown may keep a live interval: only while the
+ * document is visible. A hidden tab's `setInterval` is throttled to roughly
+ * one call a minute anyway, so leaving it running buys nothing and costs a
+ * wakeup — and, because the display is computed from the clock rather than
+ * from tick count, the value is correct the instant the tab comes back. */
+function isDocumentVisible(): boolean {
+  if (typeof document === "undefined") return true;
+  return document.visibilityState !== "hidden";
 }
 
 /**
  * A real component (not a plain render function like its siblings above) —
- * it owns hook state (the tick counter) that must live and die with THIS
- * node's own position in the tree, not with whatever call order the
- * dispatcher happens to visit siblings in.
+ * it owns hook state that must live and die with THIS node's own position in
+ * the tree, not with whatever call order the dispatcher happens to visit
+ * siblings in.
  *
- * Ticks forward from `ctx.now` by counting elapsed `COUNTDOWN_TICK_MS`
- * intervals rather than re-reading the wall clock on every tick, so the
- * displayed value stays anchored to the injected `now` in tests (which never
- * advance the interval) while still advancing once per second in real usage
- * (where `now` defaults to `new Date()` at render time). The interval is
- * cleared on unmount — otherwise it keeps firing against a dead tree.
+ * The WALL CLOCK is the source of truth for the displayed value, exactly as
+ * on iOS (`Date()`) and Android (`System.currentTimeMillis()`); the interval
+ * is a repaint trigger and nothing more. Deriving the value from how many
+ * intervals had fired instead (the shape this replaced) drifts under load,
+ * stalls in a background tab, and — because `ctx.now` is re-evaluated on
+ * every parent render while the tick count survives reconciliation — jumps
+ * forward by the whole elapsed time the moment anything re-renders the tree,
+ * which a package tap does.
+ *
+ * `ctx.now` survives as a one-off OFFSET captured at mount, which is what
+ * keeps an injected `now` deterministic (first frame renders exactly the
+ * injected instant) without letting a later render move the clock.
  */
 function Countdown({ node, ctx }: { node: CountdownNode; ctx: RenderCtx }): ReactElement | null {
-  const [ticks, setTicks] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTicks((t) => t + 1), COUNTDOWN_TICK_MS);
-    return () => clearInterval(id);
-  }, []);
+  // Signed distance from the real clock to the instant the host asked us to
+  // treat as "now". Zero in production (`props.now` defaults to `new Date()`);
+  // non-zero only when a host/test pins an instant.
+  const [injectedClockOffsetMs] = useState(() => ctx.now.getTime() - Date.now());
+  // Repaint trigger only — never read. The value below comes from the clock.
+  const [, requestRepaint] = useState(0);
+  const [onScreen, setOnScreen] = useState(true);
+  const [documentVisible, setDocumentVisible] = useState(isDocumentVisible);
+  // Callback ref rather than useRef: the observer effect must re-run when the
+  // element actually appears, and a ref object's mutation does not re-run it.
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
 
   const deadline = useCountdownDeadline(node, ctx);
-  if (deadline === null) return renderFallbackOrNull(node, ctx);
+  const remainingMs = deadline === null ? null : deadline - (Date.now() + injectedClockOffsetMs);
+  // Nothing left to repaint once the deadline has passed: `freeze` holds at
+  // 00:00 for good and `hide` has removed the node. Keeping the interval
+  // alive past that is a wakeup a second, forever.
+  const expired = remainingMs !== null && remainingMs <= 0;
+  const ticking = deadline !== null && !expired && onScreen && documentVisible;
 
-  const current = ctx.now.getTime() + ticks * COUNTDOWN_TICK_MS;
-  const remainingMs = deadline - current;
+  useEffect(() => {
+    if (!ticking) return;
+    const id = setInterval(() => requestRepaint((n) => n + 1), COUNTDOWN_TICK_MS);
+    return () => clearInterval(id);
+    // Re-running on `ticking` is what implements BOTH halves of the spec's
+    // stop-off-screen rule: false tears the interval down, true builds a new
+    // one — so it resumes without a remount.
+  }, [ticking]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibilityChange = () => setDocumentVisible(isDocumentVisible());
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  // A visible tab is not the same as a visible paywall: the node can be
+  // scrolled out of the scroller, or sit on a funnel step behind an overlay.
+  // Absent `IntersectionObserver` (jsdom, very old engines) the countdown
+  // stays on-screen — fail open, never a stopped clock.
+  useEffect(() => {
+    if (element === null || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry) setOnScreen(entry.isIntersecting);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+
+  if (deadline === null || remainingMs === null) return renderFallbackOrNull(node, ctx);
+
   const onExpiry = node.onExpiry ?? COUNTDOWN_DEFAULT_ON_EXPIRY;
-  if (remainingMs <= 0 && onExpiry === "hide") return null;
+  if (expired && onExpiry === "hide") return null;
 
   const label = node.labelKey !== undefined ? resolveLabel(ctx, node.labelKey) : null;
   return (
-    // No colour default here (mirrors renderIcon/renderFeatureList's
-    // uncoloured mark): `resolveThemeColor` returns `undefined` when
-    // `node.color` is absent, so the style prop is omitted and the text
-    // inherits the ambient ink — never a substituted value.
-    <div data-rov-node={node.id} style={{ color: resolveThemeColor(node.color, ctx.colorScheme) }}>
+    // `resolveTextColor`, exactly like every other text-bearing node on this
+    // renderer: an absent `color` is "inherit the ambient ink", and on the
+    // WEB the ambient ink is the host document's, not the paywall's — the
+    // renderer paints its own background and therefore owns its own default
+    // ink. Substituting the same default its sibling text uses is what makes
+    // the RESOLVED colour match; honouring "no colour instruction" literally
+    // here would leave the countdown near-black on a dark paywall while the
+    // text beside it is near-white. The natives are consistent by doing the
+    // opposite, because their ambient ink IS the paywall's theme.
+    <div ref={setElement} data-rov-node={node.id} style={{ color: resolveTextColor(node.color, ctx.colorScheme) }}>
       {label !== null ? <span>{label} </span> : null}
       <span>{formatCountdown(Math.max(remainingMs, 0))}</span>
     </div>
