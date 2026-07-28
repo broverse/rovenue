@@ -4,19 +4,22 @@ import { validate } from "../../lib/validate";
 import { z } from "zod";
 import {
   ExperimentStatus,
+  ExperimentType,
   FeatureFlagType,
   drizzle,
-  type ExperimentType,
 } from "@rovenue/db";
 import {
   EXPERIMENT_TYPE,
   experimentObjectSchema,
   experimentSchema as sharedExperimentSchema,
+  placementRowsSchema,
+  type PlacementRow,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
+import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { ok } from "../../lib/response";
 import {
@@ -545,17 +548,93 @@ export const experimentsRoute = new Hono()
     const raw = await c.req.json().catch(() => ({}));
     const body = stopExperimentBodySchema.parse(raw);
 
-    const experiment = await drizzle.experimentRepo.updateExperiment(
-      drizzle.db,
-      id,
-      {
-        status: ExperimentStatus.COMPLETED,
-        completedAt: new Date(),
-        winnerVariantId: body.winnerVariantId,
+    const requestContext = extractRequestContext(c);
+
+    // The status flip and the (optional) placement repoint must land
+    // atomically: a stopped experiment whose placements still target it
+    // would leave live traffic on a completed experiment forever. The
+    // repoint itself is a resolve-then-skip-silently guard — an unknown
+    // winner id or a winner with no paywallId (e.g. FLAG/OFFERING type)
+    // just means there's nothing to repoint, mirroring the promoteToFlag
+    // guard just below.
+    const { experiment, repointedCount } = await drizzle.db.transaction(
+      async (tx) => {
+        const updated = await drizzle.experimentRepo.updateExperiment(
+          tx,
+          id,
+          {
+            status: ExperimentStatus.COMPLETED,
+            completedAt: new Date(),
+            winnerVariantId: body.winnerVariantId,
+          },
+        );
+        if (!updated) {
+          throw new HTTPException(404, { message: "Experiment not found" });
+        }
+
+        let changedPlacements = 0;
+        if (existing.type === ExperimentType.PAYWALL && body.winnerVariantId) {
+          const variants =
+            (existing.variants as unknown as Array<{
+              id: string;
+              value: unknown;
+            }>) ?? [];
+          const winner = variants.find((v) => v.id === body.winnerVariantId);
+          const winnerPaywallId =
+            winner && typeof winner.value === "object" && winner.value !== null
+              ? (winner.value as { paywallId?: unknown }).paywallId
+              : undefined;
+
+          if (typeof winnerPaywallId === "string" && winnerPaywallId.length > 0) {
+            const allPlacements = await drizzle.placementRepo.listPlacements(
+              tx,
+              existing.projectId,
+            );
+            for (const placement of allPlacements) {
+              const rows = placementRowsSchema.parse(placement.rows);
+              let rowChanged = false;
+              const nextRows: PlacementRow[] = rows.map((row) => {
+                if (row.target.type === "experiment" && row.target.experimentId === id) {
+                  rowChanged = true;
+                  return {
+                    ...row,
+                    target: { type: "paywall" as const, paywallId: winnerPaywallId },
+                  };
+                }
+                return row;
+              });
+              if (!rowChanged) continue;
+
+              await drizzle.placementRepo.updatePlacement(
+                tx,
+                existing.projectId,
+                placement.id,
+                { rows: nextRows },
+              );
+              await audit(
+                {
+                  projectId: existing.projectId,
+                  userId: user.id,
+                  action: "update",
+                  resource: "placement",
+                  resourceId: placement.id,
+                  before: { rows },
+                  after: { rows: nextRows },
+                  ...requestContext,
+                },
+                tx,
+              );
+              changedPlacements++;
+            }
+          }
+        }
+
+        return { experiment: updated, repointedCount: changedPlacements };
       },
     );
-    if (!experiment) {
-      throw new HTTPException(404, { message: "Experiment not found" });
+
+    if (repointedCount > 0) {
+      purgeProjectCatalogCache(existing.projectId);
     }
 
     let promotedFlag: { id: string; key: string } | null = null;
@@ -601,7 +680,7 @@ export const experimentsRoute = new Hono()
         winnerVariantId: body.winnerVariantId,
         promotedFlagId: promotedFlag?.id,
       },
-      ...extractRequestContext(c),
+      ...requestContext,
     });
 
     return c.json(ok({ experiment, promotedFlag }));
