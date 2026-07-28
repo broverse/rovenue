@@ -46,10 +46,31 @@ internal const val CAROUSEL_MIN_AUTO_ADVANCE_PAGES = 2
 private const val MIN_AUTO_ADVANCE_SECONDS = 0.0
 
 /**
- * Geometry half of the rule: does [visibleRect] — what
- * `View.getLocalVisibleRect` reported for a view of [viewWidth] x
- * [viewHeight], or `null` when it reported nothing visible at all — mean this
- * node is on screen?
+ * How much of a node the platform says is showing when NONE of it is: the
+ * value [NodeVisibilityDetector] substitutes when `getLocalVisibleRect`
+ * reports no visible rect at all, and equally what a degenerate (zero-area)
+ * intersection measures. Both mean the same thing to the decision below, so
+ * they are the same input rather than two branches.
+ */
+internal const val NO_VISIBLE_EXTENT_PX = 0
+
+/**
+ * Geometry half of the rule: given how much of a node is actually showing
+ * ([visibleWidthPx] x [visibleHeightPx], the intersection of the node with the
+ * viewport) and how big the node itself is ([viewWidthPx] x [viewHeightPx]),
+ * is this node on screen?
+ *
+ * TAKES PLAIN INTEGERS, DELIBERATELY. The obvious signature is
+ * `(visibleRect: Rect?, ...)`, and it is the wrong one: under this module's
+ * mockable `android.jar` a `Rect` is inert — `Rect(0, 0, 300, 200)` constructs
+ * with every field left at `0`, `width()`/`height()` return `0`, and
+ * `isEmpty()` returns the default `false` — so a test handing this function a
+ * `Rect` is not describing any geometry, and the decision could not be
+ * exercised off-device at all. Measured in px, the whole decision is pure and
+ * every branch below is reachable from a JVM test. Reading a real `Rect` is
+ * then a two-line adapter at the one call site that has one
+ * ([NodeVisibilityDetector.sampleOnScreen]), and THAT is all that stays
+ * device-only.
  *
  * ANY intersection counts. A node one pixel into the viewport is a node the
  * user can see a timer on, and there is deliberately no "at least N percent"
@@ -57,24 +78,22 @@ private const val MIN_AUTO_ADVANCE_SECONDS = 0.0
  * and iOS do not apply one either.
  *
  * FAIL OPEN, and note the ORDER — the unmeasured case is decided FIRST. Before
- * layout a view has no size and no visible rect, and reading that as
+ * layout a view has no size and nothing visible, and reading that as
  * "off screen" would stop every timer at attach and leave a paywall full of
  * frozen countdowns. A stopped clock is worse than a running one, so an
  * unmeasured view counts as on screen (matching web, where a node with no
  * `IntersectionObserver` entry yet is treated as visible, and iOS, where a
  * `.zero` viewport counts as visible). Only once the view HAS a size does a
- * missing visible rect actually mean "scrolled away".
- *
- * NOT OBSERVABLE OFF-DEVICE: under the mockable `android.jar` every `Rect`
- * accessor is inert (fields stay `0`, `isEmpty()` returns the default
- * `false`), so the unit tests pin the unmeasured and null-rect branches only.
- * The `isEmpty()` branch — a degenerate rect from a zero-area intersection —
- * is real device behaviour that a JVM test cannot reach.
+ * missing visible extent actually mean "scrolled away".
  */
-internal fun isNodeOnScreen(visibleRect: Rect?, viewWidth: Int, viewHeight: Int): Boolean {
-    if (viewWidth <= UNMEASURED_VIEW_DIMENSION_PX || viewHeight <= UNMEASURED_VIEW_DIMENSION_PX) return true
-    val rect = visibleRect ?: return false
-    return !rect.isEmpty()
+internal fun isNodeOnScreen(
+    visibleWidthPx: Int,
+    visibleHeightPx: Int,
+    viewWidthPx: Int,
+    viewHeightPx: Int,
+): Boolean {
+    if (viewWidthPx <= UNMEASURED_VIEW_DIMENSION_PX || viewHeightPx <= UNMEASURED_VIEW_DIMENSION_PX) return true
+    return visibleWidthPx > NO_VISIBLE_EXTENT_PX && visibleHeightPx > NO_VISIBLE_EXTENT_PX
 }
 
 /**
@@ -258,7 +277,7 @@ internal class NodeVisibilityDetector(
      */
     private fun publish() {
         val next = isNodeTimerActive(
-            onScreen = isNodeOnScreen(currentVisibleRect(), view.width, view.height),
+            onScreen = sampleOnScreen(),
             appForegrounded = appForegrounded,
         )
         isActive = next
@@ -267,9 +286,27 @@ internal class NodeVisibilityDetector(
         onActiveChanged(next)
     }
 
-    /** `getLocalVisibleRect` returns false — and leaves [scratchRect]
-     *  untouched — when no part of the view is visible, which is exactly the
-     *  `null` [isNodeOnScreen] expects. */
-    private fun currentVisibleRect(): Rect? =
-        if (view.getLocalVisibleRect(scratchRect)) scratchRect else null
+    /**
+     * The ONLY place a real `Rect` meets the on-screen decision: a thin
+     * adapter that reads the platform's geometry and hands [isNodeOnScreen]
+     * plain px. Kept to these few lines precisely because it is the part a JVM
+     * test cannot reach — `getLocalVisibleRect` is stubbed here, so what this
+     * pins on a device (does the platform report a real rect at the right
+     * moment?) is a smoke item, while the decision it feeds is fully unit
+     * tested.
+     *
+     * `getLocalVisibleRect` returns false — and leaves [scratchRect] untouched,
+     * i.e. holding a STALE rect from an earlier sample — when no part of the
+     * view is visible, so that case substitutes [NO_VISIBLE_EXTENT_PX] rather
+     * than measuring the scratch rect.
+     */
+    private fun sampleOnScreen(): Boolean {
+        val anyVisible = view.getLocalVisibleRect(scratchRect)
+        return isNodeOnScreen(
+            visibleWidthPx = if (anyVisible) scratchRect.width() else NO_VISIBLE_EXTENT_PX,
+            visibleHeightPx = if (anyVisible) scratchRect.height() else NO_VISIBLE_EXTENT_PX,
+            viewWidthPx = view.width,
+            viewHeightPx = view.height,
+        )
+    }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
@@ -34,6 +35,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -818,6 +820,71 @@ internal fun videoEffectiveAspectRatio(
 internal fun videoHeightForAspectRatio(widthPx: Int, aspectRatio: Double): Int =
     (widthPx / aspectRatio).roundToInt()
 
+/** No scaling at all along an axis — the picture already fills the view on
+ *  that axis, which is a `TextureView`'s own untransformed behaviour. */
+private const val VIDEO_SURFACE_SCALE_NONE = 1.0f
+
+/** The pivot the fit-inside scale is applied about, as a fraction of the
+ *  view's size: the CENTRE, so the letterbox bars are equal on both sides
+ *  rather than all on one. */
+private const val VIDEO_SURFACE_CENTER_FRACTION = 0.5f
+
+/**
+ * How the picture must be scaled inside a `video` node's box so that it
+ * LETTERBOXES instead of stretching, or `null` when there is not yet enough
+ * information to say (the view is unmeasured, or `MediaPlayer` has not
+ * reported the source's natural size).
+ *
+ * WHY THIS EXISTS AT ALL. A `TextureView` scales its `SurfaceTexture` to its
+ * own bounds, so with no transform the picture is DISTORTED whenever the box
+ * it sits in has a different shape from the source — which is exactly what an
+ * authored `aspectRatio` does. Both sibling renderers letterbox instead: web
+ * gets `object-fit: contain` (the default for `<video>`), iOS uses
+ * `AVLayerVideoGravity.resizeAspect`. A stretched face is worse than black
+ * bars on its own merits, and disagreeing with the other two about it is a
+ * visible cross-platform divergence, so Android matches them here.
+ *
+ * The returned factors are relative to that stretched-to-bounds default, which
+ * is why the axis that already fits is [VIDEO_SURFACE_SCALE_NONE] and only the
+ * over-filled axis shrinks. An authored ratio that MATCHES the source's own
+ * therefore returns 1 x 1 and changes nothing, and so does an absent authored
+ * ratio (the box is measured at the source's ratio in that case) — this is
+ * only ever a correction, never a resize.
+ *
+ * Pure, and separate from the `Matrix` that carries it, so the arithmetic is
+ * pinned by unit tests; `Matrix` and `TextureView` are both inert under this
+ * module's stub `android.jar`.
+ */
+internal fun videoSurfaceFitScale(
+    viewWidthPx: Int,
+    viewHeightPx: Int,
+    sourceWidthPx: Int,
+    sourceHeightPx: Int,
+): VideoSurfaceScale? {
+    if (viewWidthPx <= UNMEASURED_VIEW_DIMENSION_PX || viewHeightPx <= UNMEASURED_VIEW_DIMENSION_PX) return null
+    if (sourceWidthPx <= VIDEO_SOURCE_DIMENSION_UNKNOWN_PX ||
+        sourceHeightPx <= VIDEO_SOURCE_DIMENSION_UNKNOWN_PX
+    ) {
+        return null
+    }
+    val viewRatio = viewWidthPx.toDouble() / viewHeightPx.toDouble()
+    val sourceRatio = sourceWidthPx.toDouble() / sourceHeightPx.toDouble()
+    return if (sourceRatio > viewRatio) {
+        // Source is the wider shape: it keeps the full width and gives up
+        // height, leaving bars above and below.
+        VideoSurfaceScale(scaleX = VIDEO_SURFACE_SCALE_NONE, scaleY = (viewRatio / sourceRatio).toFloat())
+    } else {
+        // Source is the taller shape (or the same): full height, bars at the
+        // sides.
+        VideoSurfaceScale(scaleX = (sourceRatio / viewRatio).toFloat(), scaleY = VIDEO_SURFACE_SCALE_NONE)
+    }
+}
+
+/** The two axis factors [videoSurfaceFitScale] resolves to. A value type
+ *  rather than a `Pair` so neither call site nor test can silently swap the
+ *  axes. */
+internal data class VideoSurfaceScale(val scaleX: Float, val scaleY: Float)
+
 /**
  * Everything a host's Lottie player needs for one `lottie` node.
  *
@@ -902,6 +969,35 @@ internal fun lottieRenderRequest(
  */
 internal fun lottieViewOrNull(context: Context, request: LottieRenderRequest): View? =
     LottieRendererRegistry.current?.createView(context, request)
+
+/**
+ * Whether a `lottie`'s theme-resolved URL is a URL at all — the second half of
+ * "will this draw?", alongside "did the host register a player?", and knowable
+ * at the same synchronous, pre-mount moment. Mirrors iOS's `lottieCanRender`
+ * (`RovenuePaywallLottie.swift`) and the web sibling, and follows the same
+ * shape `video` already uses here ([videoHasParsableSource]).
+ *
+ * THE BLANK URL IS THE DEFAULT STATE, not an edge case: `newNode("lottie")`
+ * creates `url: { light: "" }`, so every freshly added lottie in the builder is
+ * in exactly this state until a URL is pasted. Handing `""` to a registered
+ * host player and leaving it to discover the problem is not a contract worth
+ * shipping — an unparsable URL means the node cannot render, so it takes the
+ * same path an unregistered player takes: `fallback`, else nothing.
+ *
+ * RELATIVE URLS ARE VALID, deliberately. Web parses against a base so
+ * `"anim.json"` resolves against the hosting document, and iOS's
+ * `URL(string:)` accepts a relative reference too; `java.net.URI` accepts one
+ * natively, which is why this uses `URI` rather than the `java.net.URL` the
+ * video sibling uses (that one rejects every relative string). Being stricter
+ * than the other two would drop a node they both draw.
+ */
+internal fun lottieHasParsableSource(url: ThemePair, dark: Boolean): Boolean {
+    val source = themeValue(url, dark).trim()
+    if (source.isEmpty()) return false
+    // Constructed only to see whether it throws; the host player is handed the
+    // authored string unchanged.
+    return runCatching { URI(source) }.isSuccess
+}
 
 private const val COUNTDOWN_NO_ANCHOR = -1L
 
@@ -1729,9 +1825,15 @@ internal object NodeViewFactory {
 
     /**
      * Renders `lottie` by handing a [LottieRenderRequest] to whatever player
-     * the host registered. With nothing registered — or a registered player
-     * that declines — this draws `fallback`, else nothing, which is the
-     * machinery every node type already has rather than a new failure mode.
+     * the host registered. With an unparsable URL, with nothing registered, or
+     * with a registered player that declines, this draws `fallback`, else
+     * nothing — the machinery every node type already has rather than a new
+     * failure mode.
+     *
+     * THE URL IS CHECKED BEFORE THE REGISTRY IS CONSULTED
+     * ([lottieHasParsableSource]), so a registered player is never handed a
+     * blank string to fail on — the same order iOS uses, and the same question
+     * [buildVideo] asks of its own source.
      *
      * Unlike [buildVideo], that decision is made HERE, synchronously, so a
      * `lottie` inside a `carousel` never costs a phantom dot: registration is
@@ -1747,6 +1849,9 @@ internal object NodeViewFactory {
         ctx: PaywallRenderContext,
         cell: CellScope?,
     ): View? {
+        if (!lottieHasParsableSource(node.url, ctx.dark)) {
+            return node.fallback?.let { build(context, it, ctx, cell) }
+        }
         val initialRequest = lottieRenderRequest(node, NODE_PLAYING_BEFORE_FIRST_SAMPLE, ctx.dark)
         val initialContent = lottieViewOrNull(context, initialRequest)
             ?: return node.fallback?.let { build(context, it, ctx, cell) }
@@ -2134,6 +2239,13 @@ private class CarouselDotsRow(
  * possibly rounded/animated layout, which is exactly the case a `SurfaceView`
  * (its own window, punched through the hierarchy) draws wrong.
  *
+ * THE PICTURE LETTERBOXES, it never stretches. A bare `TextureView` scales its
+ * texture to its bounds, so an authored `aspectRatio` unlike the source's own
+ * would distort the image; [onLayout] applies [videoSurfaceFitScale] to
+ * correct that, matching web's `object-fit: contain` and iOS's
+ * `resizeAspect`. The poster laid over it already letterboxes
+ * (`ImageView.ScaleType.FIT_CENTER`), so the two now agree as well.
+ *
  * PAUSE AND RESUME GO THROUGH THE PLAYER, never through rebuilding this view:
  * a rebuild restarts playback from zero, which is a different and worse
  * behaviour than "resume where it left off", and it is what both sibling
@@ -2170,6 +2282,10 @@ private class VideoNodeView(
 
     private val textureView = TextureView(context)
     private var posterView: ImageView? = poster
+
+    /** Reused across every layout pass so a scroll-driven re-layout allocates
+     *  nothing. Carries [videoSurfaceFitScale]'s answer onto the surface. */
+    private val surfaceTransform = Matrix()
 
     private var player: MediaPlayer? = null
     private var playerSurface: Surface? = null
@@ -2251,6 +2367,36 @@ private class VideoNodeView(
             MeasureSpec.makeMeasureSpec(widthPx, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(videoHeightForAspectRatio(widthPx, ratio), MeasureSpec.EXACTLY),
         )
+    }
+
+    /**
+     * [onMeasure] decides how big the BOX is; this decides how the picture
+     * sits inside it — letterboxed, never stretched (see
+     * [videoSurfaceFitScale]).
+     *
+     * Driven from layout rather than from the size callback because BOTH
+     * inputs can change independently: the box is re-measured when the paywall
+     * re-lays out, and the source's natural size arrives later, from
+     * `OnVideoSizeChangedListener`. That callback already calls
+     * `requestLayout()`, which guarantees another pass through here, so this
+     * one site covers both.
+     */
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (failed) return
+        val scale = videoSurfaceFitScale(
+            viewWidthPx = textureView.width,
+            viewHeightPx = textureView.height,
+            sourceWidthPx = sourceWidthPx,
+            sourceHeightPx = sourceHeightPx,
+        ) ?: return
+        surfaceTransform.setScale(
+            scale.scaleX,
+            scale.scaleY,
+            textureView.width * VIDEO_SURFACE_CENTER_FRACTION,
+            textureView.height * VIDEO_SURFACE_CENTER_FRACTION,
+        )
+        textureView.setTransform(surfaceTransform)
     }
 
     private fun openPlayer(surface: Surface) {

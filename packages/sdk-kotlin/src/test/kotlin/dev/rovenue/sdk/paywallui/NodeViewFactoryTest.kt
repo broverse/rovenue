@@ -926,6 +926,98 @@ class NodeViewFactoryTest {
         assertFalse(videoHasParsableSource(ThemePair(light = "not a url"), dark = false))
     }
 
+    // ---- video letterboxing (I1) ----------------------------------------
+    //
+    // The box is measured at the AUTHORED ratio (videoEffectiveAspectRatio,
+    // above); this is how the picture sits inside that box. A TextureView
+    // stretches its texture to its bounds by default, so without this the
+    // authored ratio distorts the image while web (object-fit: contain) and
+    // iOS (resizeAspect) letterbox it. Expected factors are literals, and
+    // each case also pins WHICH axis moved, so an implementation that scales
+    // the wrong axis (or inverts the ratio) fails rather than merely
+    // producing a different plausible number.
+
+    @Test
+    fun `a source wider than its box keeps its width and gives up height`() {
+        assertEquals(
+            VideoSurfaceScale(scaleX = 1.0f, scaleY = SQUARE_BOX_FIT_SCALE),
+            videoSurfaceFitScale(
+                viewWidthPx = SQUARE_BOX_PX,
+                viewHeightPx = SQUARE_BOX_PX,
+                sourceWidthPx = SOURCE_VIDEO_WIDTH_PX,
+                sourceHeightPx = SOURCE_VIDEO_HEIGHT_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `a source taller than its box keeps its height and gives up width`() {
+        assertEquals(
+            VideoSurfaceScale(scaleX = WIDE_BOX_FIT_SCALE, scaleY = 1.0f),
+            videoSurfaceFitScale(
+                viewWidthPx = WIDE_BOX_WIDTH_PX,
+                viewHeightPx = WIDE_BOX_HEIGHT_PX,
+                // The same source turned on its side, so the axis that gives
+                // way is the other one.
+                sourceWidthPx = SOURCE_VIDEO_HEIGHT_PX,
+                sourceHeightPx = SOURCE_VIDEO_WIDTH_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `a source shaped like its box is left alone`() {
+        // The common case — no authored ratio, so the box was measured at the
+        // source's own ratio. Letterboxing must be a CORRECTION, never a
+        // resize that shrinks a video that already fitted.
+        assertEquals(
+            VideoSurfaceScale(scaleX = 1.0f, scaleY = 1.0f),
+            videoSurfaceFitScale(
+                viewWidthPx = SOURCE_VIDEO_WIDTH_PX,
+                viewHeightPx = SOURCE_VIDEO_HEIGHT_PX,
+                sourceWidthPx = SOURCE_VIDEO_WIDTH_PX,
+                sourceHeightPx = SOURCE_VIDEO_HEIGHT_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `letterboxing only ever shrinks, never crops`() {
+        // Direction check independent of the exact factors: a fit-INSIDE must
+        // never scale an axis above 1, which is what a fit-outside (cover)
+        // implementation would do and what would crop the picture.
+        val wide = videoSurfaceFitScale(
+            viewWidthPx = SQUARE_BOX_PX,
+            viewHeightPx = SQUARE_BOX_PX,
+            sourceWidthPx = SOURCE_VIDEO_WIDTH_PX,
+            sourceHeightPx = SOURCE_VIDEO_HEIGHT_PX,
+        )
+        assertTrue(wide!!.scaleY < 1.0f, "a wider-than-box source must give up HEIGHT")
+        assertEquals(1.0f, wide.scaleX, "its width already fits, so it must not move")
+    }
+
+    @Test
+    fun `no fit is computed until both the box and the source are known`() {
+        assertNull(
+            videoSurfaceFitScale(
+                viewWidthPx = SQUARE_BOX_PX,
+                viewHeightPx = SQUARE_BOX_PX,
+                sourceWidthPx = UNREPORTED_VIDEO_DIMENSION_PX,
+                sourceHeightPx = UNREPORTED_VIDEO_DIMENSION_PX,
+            ),
+            "a source whose natural size MediaPlayer has not reported yet cannot be fitted",
+        )
+        assertNull(
+            videoSurfaceFitScale(
+                viewWidthPx = UNMEASURED_VIEW_DIMENSION_PX,
+                viewHeightPx = UNMEASURED_VIEW_DIMENSION_PX,
+                sourceWidthPx = SOURCE_VIDEO_WIDTH_PX,
+                sourceHeightPx = SOURCE_VIDEO_HEIGHT_PX,
+            ),
+            "an unmeasured box has no shape to fit into",
+        )
+    }
+
     @Test
     fun `a lottie node with no registered renderer has no view to build`() {
         registerLottieRenderer(null)
@@ -991,6 +1083,83 @@ class NodeViewFactoryTest {
         val node = bareLottieNode().copy(url = ThemePair(light = "https://x/a.json", dark = "https://x/a-dark.json"))
         assertEquals("https://x/a-dark.json", lottieRenderRequest(node, playing = true, dark = true).url)
         assertEquals("https://x/a.json", lottieRenderRequest(node, playing = true, dark = false).url)
+    }
+
+    // ---- lottie URL parsing (I6) -----------------------------------------
+    //
+    // iOS has always parsed the URL and treated an unparsable one as "cannot
+    // render"; Android used to hand the raw string — INCLUDING the "" that
+    // every freshly created lottie carries — straight to the host's player.
+    // The three now agree, and agree with how `video` already behaved.
+
+    @Test
+    fun `a blank lottie url cannot render`() {
+        // Not an edge case: `newNode("lottie")` creates `url: { light: "" }`,
+        // so this is the state of every lottie the builder has just added.
+        assertFalse(lottieHasParsableSource(ThemePair(light = ""), dark = false))
+        assertFalse(lottieHasParsableSource(ThemePair(light = "   "), dark = false))
+    }
+
+    @Test
+    fun `an unparsable lottie url cannot render`() {
+        assertFalse(lottieHasParsableSource(ThemePair(light = "not a url"), dark = false))
+    }
+
+    @Test
+    fun `an absolute lottie url can render`() {
+        assertTrue(lottieHasParsableSource(ThemePair(light = "https://x/a.json"), dark = false))
+    }
+
+    @Test
+    fun `a relative lottie url can render, matching web and iOS`() {
+        // Web resolves a relative source against the hosting document and iOS's
+        // `URL(string:)` accepts a relative reference, so rejecting one here
+        // would drop a node the other two draw. Being stricter is as much a
+        // divergence as being laxer.
+        assertTrue(lottieHasParsableSource(ThemePair(light = "anim.json"), dark = false))
+        assertTrue(lottieHasParsableSource(ThemePair(light = "/assets/anim.json"), dark = false))
+    }
+
+    @Test
+    fun `the theme half that would actually be used is the one parsed`() {
+        val onlyDarkIsUsable = ThemePair(light = "", dark = "https://x/a-dark.json")
+        assertTrue(lottieHasParsableSource(onlyDarkIsUsable, dark = true))
+        assertFalse(lottieHasParsableSource(onlyDarkIsUsable, dark = false))
+    }
+
+    @Test
+    fun `a lottie with an unparsable url never reaches the registered player`() {
+        var requests = 0
+        registerLottieRenderer { _, _ ->
+            requests++
+            mockk<View>(relaxed = true)
+        }
+
+        val view = NodeViewFactory.build(
+            mockContext(),
+            bareLottieNode().copy(url = ThemePair(light = "")),
+            renderContext(),
+            cell = null,
+        )
+
+        // Drawing nothing is what drops the node from a carousel's page and
+        // dot counts, exactly as an unregistered player does.
+        assertNull(view)
+        assertEquals(0, requests, "a host player must not be handed a URL the node already knows cannot render")
+    }
+
+    @Test
+    fun `a lottie with an unparsable url draws its fallback when it has one`() {
+        registerLottieRenderer { _, _ -> mockk<View>(relaxed = true) }
+
+        val view = NodeViewFactory.build(
+            mockContext(),
+            bareLottieNode().copy(url = ThemePair(light = ""), fallback = textNode()),
+            renderContext(),
+            cell = null,
+        )
+
+        assertTrue(view != null, "an unparsable URL takes the same fallback path an unregistered player takes")
     }
 
     private fun bareLottieNode() = BuilderNode.Lottie(id = "lot", url = ThemePair(light = "https://x/a.json"))
@@ -1454,5 +1623,22 @@ class NodeViewFactoryTest {
         /** Above `LOTTIE_MAX_SPEED` on purpose — the shared range is advice,
          *  not a clamp. */
         const val OVER_ADVISED_LOTTIE_SPEED = 9.0
+
+        /** A square box, so a 4:3 source is unambiguously the WIDER shape and
+         *  the axis that gives way is not in doubt. */
+        const val SQUARE_BOX_PX = 300
+
+        /** 480/640 ÷ (300/300) — the height a 4:3 source keeps inside a square
+         *  box. A literal rather than the implementation's own division
+         *  restated, which would pass however the ratio were written. */
+        const val SQUARE_BOX_FIT_SCALE = 0.75f
+
+        /** A box four times wider than it is tall. */
+        const val WIDE_BOX_WIDTH_PX = 400
+        const val WIDE_BOX_HEIGHT_PX = 100
+
+        /** (480/640) ÷ (400/100) — the width a 3:4 source keeps inside that
+         *  box. Also a literal, for the same reason. */
+        const val WIDE_BOX_FIT_SCALE = 0.1875f
     }
 }

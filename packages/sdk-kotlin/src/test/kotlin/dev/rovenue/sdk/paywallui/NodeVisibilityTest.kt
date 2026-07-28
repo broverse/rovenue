@@ -1,6 +1,5 @@
 package dev.rovenue.sdk.paywallui
 
-import android.graphics.Rect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -11,16 +10,21 @@ import kotlin.test.assertTrue
  * The one rule every time-driven node answers to: is this node on screen
  * right now, and is the app in front?
  *
- * SCOPE NOTE — what a JVM unit test can and cannot pin here. Under the
- * mockable `android.jar` (`isReturnDefaultValues = true`) every `Rect`
- * accessor is inert: `Rect(0, 0, 300, 200)` constructs with all four fields
- * left at `0`, `width()`/`height()` return `0`, and `isEmpty()` returns the
- * default `false`. So these tests pin the two branches that are decidable
- * off-device — an unmeasured view fails open, and a view the platform
- * reports no visible rect for is off screen — plus the composition of the
- * predicate with the foreground signal and with each consumer's own latch.
- * Whether `getLocalVisibleRect` and `OnScrollChangedListener` produce real
- * rects at real moments is device-only; see [NodeVisibilityDetector].
+ * SCOPE NOTE — what a JVM unit test can and cannot pin here, and why the
+ * predicate's signature is the way it is. Under the mockable `android.jar`
+ * (`isReturnDefaultValues = true`) a `Rect` is inert: `Rect(0, 0, 300, 200)`
+ * constructs with all four fields left at `0`, `width()`/`height()` return
+ * `0`, and `isEmpty()` returns the default `false` — probed, not assumed.
+ * These tests once handed [isNodeOnScreen] such a `Rect` and claimed to cover
+ * the "is any of it showing?" decision; they could not, because the two rects
+ * they built were indistinguishable at runtime and the decision leaned on the
+ * same stub default the assertion did.
+ *
+ * So [isNodeOnScreen] takes px, not a `Rect`, and every branch of it is
+ * genuinely exercised below. What stays device-only is the two-line adapter
+ * that reads a real `Rect` — `NodeVisibilityDetector.sampleOnScreen` — and
+ * whether `getLocalVisibleRect` and `OnScrollChangedListener` produce real
+ * geometry at the right moments.
  */
 class NodeVisibilityTest {
 
@@ -28,28 +32,144 @@ class NodeVisibilityTest {
 
     @Test
     fun `a fully visible view is on screen`() {
-        assertTrue(isNodeOnScreen(Rect(0, 0, 300, 200), viewWidth = 300, viewHeight = 200))
+        assertTrue(
+            isNodeOnScreen(
+                visibleWidthPx = VIEW_WIDTH_PX,
+                visibleHeightPx = VIEW_HEIGHT_PX,
+                viewWidthPx = VIEW_WIDTH_PX,
+                viewHeightPx = VIEW_HEIGHT_PX,
+            ),
+        )
     }
 
     @Test
-    fun `a view with no visible rect is off screen`() {
-        assertFalse(isNodeOnScreen(null, viewWidth = 300, viewHeight = 200))
+    fun `a view with nothing showing is off screen`() {
+        assertFalse(
+            isNodeOnScreen(
+                visibleWidthPx = NOTHING_SHOWING_PX,
+                visibleHeightPx = NOTHING_SHOWING_PX,
+                viewWidthPx = VIEW_WIDTH_PX,
+                viewHeightPx = VIEW_HEIGHT_PX,
+            ),
+        )
     }
 
     @Test
     fun `a partially visible view counts as on screen`() {
-        assertTrue(isNodeOnScreen(Rect(0, 0, 300, 40), viewWidth = 300, viewHeight = 200))
+        // A genuinely different input from the fully-visible case above: a
+        // sliver of height showing, the rest scrolled past. ANY intersection
+        // counts, so this must answer the same as full visibility.
+        assertTrue(
+            isNodeOnScreen(
+                visibleWidthPx = VIEW_WIDTH_PX,
+                visibleHeightPx = SLIVER_SHOWING_PX,
+                viewWidthPx = VIEW_WIDTH_PX,
+                viewHeightPx = VIEW_HEIGHT_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `a view showing exactly one pixel is still on screen`() {
+        // The boundary of "any intersection counts": one px is the smallest
+        // thing the platform can report as visible, and it must not be
+        // rounded away into "off screen".
+        assertTrue(
+            isNodeOnScreen(
+                visibleWidthPx = SINGLE_PIXEL_PX,
+                visibleHeightPx = SINGLE_PIXEL_PX,
+                viewWidthPx = VIEW_WIDTH_PX,
+                viewHeightPx = VIEW_HEIGHT_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `a view scrolled to a zero-area sliver is off screen`() {
+        // The degenerate intersection: the node is measured, and exactly its
+        // edge is at the viewport boundary, so the platform reports a rect
+        // with no area. Nothing is drawn, so nothing may run. THIS is the
+        // branch the old Rect-shaped signature could not reach.
+        assertFalse(
+            isNodeOnScreen(
+                visibleWidthPx = VIEW_WIDTH_PX,
+                visibleHeightPx = NOTHING_SHOWING_PX,
+                viewWidthPx = VIEW_WIDTH_PX,
+                viewHeightPx = VIEW_HEIGHT_PX,
+            ),
+        )
+        assertFalse(
+            isNodeOnScreen(
+                visibleWidthPx = NOTHING_SHOWING_PX,
+                visibleHeightPx = VIEW_HEIGHT_PX,
+                viewWidthPx = VIEW_WIDTH_PX,
+                viewHeightPx = VIEW_HEIGHT_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `an inverted intersection is off screen`() {
+        // `Rect.width()` is `right - left`, which goes NEGATIVE on the
+        // degenerate rects the platform can hand back; a `> 0` test must
+        // reject those rather than only the exact zero.
+        assertFalse(
+            isNodeOnScreen(
+                visibleWidthPx = INVERTED_EXTENT_PX,
+                visibleHeightPx = INVERTED_EXTENT_PX,
+                viewWidthPx = VIEW_WIDTH_PX,
+                viewHeightPx = VIEW_HEIGHT_PX,
+            ),
+        )
     }
 
     @Test
     fun `an unmeasured view fails open`() {
-        assertTrue(isNodeOnScreen(null, viewWidth = 0, viewHeight = 0))
+        assertTrue(
+            isNodeOnScreen(
+                visibleWidthPx = NOTHING_SHOWING_PX,
+                visibleHeightPx = NOTHING_SHOWING_PX,
+                viewWidthPx = UNMEASURED_PX,
+                viewHeightPx = UNMEASURED_PX,
+            ),
+        )
     }
 
     @Test
     fun `a view measured in only one dimension still fails open`() {
-        assertTrue(isNodeOnScreen(null, viewWidth = 300, viewHeight = 0))
-        assertTrue(isNodeOnScreen(null, viewWidth = 0, viewHeight = 200))
+        assertTrue(
+            isNodeOnScreen(
+                visibleWidthPx = NOTHING_SHOWING_PX,
+                visibleHeightPx = NOTHING_SHOWING_PX,
+                viewWidthPx = VIEW_WIDTH_PX,
+                viewHeightPx = UNMEASURED_PX,
+            ),
+        )
+        assertTrue(
+            isNodeOnScreen(
+                visibleWidthPx = NOTHING_SHOWING_PX,
+                visibleHeightPx = NOTHING_SHOWING_PX,
+                viewWidthPx = UNMEASURED_PX,
+                viewHeightPx = VIEW_HEIGHT_PX,
+            ),
+        )
+    }
+
+    @Test
+    fun `the unmeasured check is decided before the nothing-showing one`() {
+        // Order matters and is easy to invert: an unmeasured view has nothing
+        // showing BY DEFINITION, so if "nothing showing" were tested first,
+        // every node would start paused at attach and a paywall full of
+        // countdowns would come up frozen.
+        assertTrue(
+            isNodeOnScreen(
+                visibleWidthPx = NOTHING_SHOWING_PX,
+                visibleHeightPx = NOTHING_SHOWING_PX,
+                viewWidthPx = UNMEASURED_PX,
+                viewHeightPx = UNMEASURED_PX,
+            ),
+            "an unmeasured view must fail OPEN even though nothing is showing",
+        )
     }
 
     // ---- composing the two signals ------------------------------------
@@ -65,11 +185,25 @@ class NodeVisibilityTest {
     // ---- consumer 1: the countdown tick --------------------------------
 
     private fun countdownTickWhileOffScreen() = countdownTickShouldRun(
-        active = isNodeTimerActive(
-            onScreen = isNodeOnScreen(null, viewWidth = 300, viewHeight = 200),
-            appForegrounded = true,
-        ),
+        active = isNodeTimerActive(onScreen = offScreen(), appForegrounded = true),
         hiddenOnExpiry = false,
+    )
+
+    /** A measured node with none of it showing — what the detector samples for
+     *  a row scrolled out of the viewport. */
+    private fun offScreen() = isNodeOnScreen(
+        visibleWidthPx = NOTHING_SHOWING_PX,
+        visibleHeightPx = NOTHING_SHOWING_PX,
+        viewWidthPx = VIEW_WIDTH_PX,
+        viewHeightPx = VIEW_HEIGHT_PX,
+    )
+
+    /** The same node fully within the viewport. */
+    private fun onScreen() = isNodeOnScreen(
+        visibleWidthPx = VIEW_WIDTH_PX,
+        visibleHeightPx = VIEW_HEIGHT_PX,
+        viewWidthPx = VIEW_WIDTH_PX,
+        viewHeightPx = VIEW_HEIGHT_PX,
     )
 
     @Test
@@ -79,10 +213,7 @@ class NodeVisibilityTest {
 
     @Test
     fun `the countdown tick runs while its row is on screen`() {
-        val active = isNodeTimerActive(
-            onScreen = isNodeOnScreen(Rect(0, 0, 300, 200), viewWidth = 300, viewHeight = 200),
-            appForegrounded = true,
-        )
+        val active = isNodeTimerActive(onScreen = onScreen(), appForegrounded = true)
         assertTrue(countdownTickShouldRun(active = active, hiddenOnExpiry = false))
     }
 
@@ -95,10 +226,7 @@ class NodeVisibilityTest {
 
     private fun carouselDelayWhileOffScreen(stoppedAtEnd: Boolean = false) =
         carouselAutoAdvanceDelayMillis(
-            active = isNodeTimerActive(
-                onScreen = isNodeOnScreen(null, viewWidth = 300, viewHeight = 200),
-                appForegrounded = true,
-            ),
+            active = isNodeTimerActive(onScreen = offScreen(), appForegrounded = true),
             stoppedAtEnd = stoppedAtEnd,
             autoAdvanceSeconds = 3.0,
             pageCount = 4,
@@ -106,10 +234,7 @@ class NodeVisibilityTest {
 
     private fun carouselDelayWhileOnScreen(stoppedAtEnd: Boolean = false) =
         carouselAutoAdvanceDelayMillis(
-            active = isNodeTimerActive(
-                onScreen = isNodeOnScreen(Rect(0, 0, 300, 200), viewWidth = 300, viewHeight = 200),
-                appForegrounded = true,
-            ),
+            active = isNodeTimerActive(onScreen = onScreen(), appForegrounded = true),
             stoppedAtEnd = stoppedAtEnd,
             autoAdvanceSeconds = 3.0,
             pageCount = 4,
@@ -163,5 +288,33 @@ class NodeVisibilityTest {
             1500L,
             carouselAutoAdvanceDelayMillis(active = true, stoppedAtEnd = false, autoAdvanceSeconds = 1.5, pageCount = 3),
         )
+    }
+
+    private companion object {
+        /** A plausible laid-out node, in px. Any positive pair works; what is
+         *  under test is measured-vs-not and how much of it is showing. */
+        const val VIEW_WIDTH_PX = 300
+        const val VIEW_HEIGHT_PX = 200
+
+        /** What `View.getWidth()`/`getHeight()` report before the first layout
+         *  pass — the fail-open case. */
+        const val UNMEASURED_PX = 0
+
+        /** No part of the node is in the viewport. Also what the detector
+         *  substitutes when the platform reports no visible rect at all. */
+        const val NOTHING_SHOWING_PX = 0
+
+        /** A node scrolled almost all the way out: still visible, so still
+         *  running. Deliberately unlike [VIEW_HEIGHT_PX] so this is a
+         *  different input from full visibility and not merely a second
+         *  spelling of it. */
+        const val SLIVER_SHOWING_PX = 40
+
+        /** The smallest visible extent the platform can report. */
+        const val SINGLE_PIXEL_PX = 1
+
+        /** `Rect.width()` is `right - left`, so a degenerate rect can measure
+         *  negative — which is off screen, not "very on screen". */
+        const val INVERTED_EXTENT_PX = -10
     }
 }
