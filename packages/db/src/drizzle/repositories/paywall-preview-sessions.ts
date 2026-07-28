@@ -65,8 +65,12 @@ export async function findActiveByHash(
 
 /**
  * Scoped to `projectId` so a session minted for one project can't be
- * revoked (or even discovered) by a caller in another. Returns null
- * when no matching row exists, so the route can 404 rather than 200.
+ * revoked (or even discovered) by a caller in another. Returns null when no
+ * matching row exists, so the route can 404 rather than 200 — including
+ * when the row exists but is ALREADY revoked (`isNull(revokedAt)` below):
+ * without that guard a double-DELETE would match the row again, overwrite
+ * `revokedAt` with a second timestamp, return 200 twice, and leave the
+ * caller writing a duplicate audit row for a revoke that already happened.
  */
 export async function revokePreviewSession(
   db: Db,
@@ -80,6 +84,7 @@ export async function revokePreviewSession(
       and(
         eq(paywallPreviewSessions.id, sessionId),
         eq(paywallPreviewSessions.projectId, projectId),
+        isNull(paywallPreviewSessions.revokedAt),
       ),
     )
     .returning();
