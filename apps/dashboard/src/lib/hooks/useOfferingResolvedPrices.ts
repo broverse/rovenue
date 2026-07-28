@@ -16,6 +16,5 @@ export function useOfferingResolvedPrices(projectId: string, offeringId: string 
           param: { projectId, id: offeringId! },
         }),
       ),
-    select: (r) => r,
   });
 }

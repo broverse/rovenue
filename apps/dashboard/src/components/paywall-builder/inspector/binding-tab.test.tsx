@@ -240,6 +240,48 @@ describe("PackageListBinding — hook failure degrades to id-only rows", () => {
     expect(monthOption.textContent).toBe("pkg_month");
     expect(monthOption.textContent).not.toContain(" — ");
   });
+
+  // P6 deferred-cleanup finding: a row that RESOLVED (has a displayName) but
+  // has no "ok" store entry anywhere (e.g. every store is not_configured)
+  // and no metadataPeriod is NOT caught by isDegradedPriceRow (its stores
+  // field isn't null), so it fell through to
+  // `${periodLabel(row.period) ?? id} — ${firstOkAmount(row)}` — both halves
+  // fall back to the same raw id, rendering "pkg_id — pkg_id". The fix
+  // prefers displayName over the id for the label half, and only appends
+  // " — amount" when firstOkAmount actually resolved to something real.
+  it("renders displayName alone (no ' — id') when a resolved row has no ok store and no period", async () => {
+    mockedUseOfferingResolvedPrices.mockReturnValue({
+      data: {
+        offeringId: "off_1",
+        fetchedAt: "2026-07-27T00:00:00.000Z",
+        packages: [
+          {
+            packageIdentifier: "pkg_month",
+            productId: "prod_month",
+            displayName: "Monthly",
+            metadataPeriod: null,
+            stores: {
+              apple: { status: "not_configured" },
+              google: { status: "not_configured" },
+              stripe: { status: "not_configured" },
+            },
+          },
+        ],
+      } satisfies OfferingResolvedPrices,
+      isLoading: false,
+      error: null,
+    } as unknown as ReturnType<typeof useOfferingResolvedPrices>);
+
+    await renderHarness(["pkg_month"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Selection" }));
+
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    const options = within(select).getAllByRole("option") as HTMLOptionElement[];
+    const monthOption = options.find((o) => o.value === "pkg_month")!;
+    expect(monthOption.textContent).toBe("Monthly");
+    expect(monthOption.textContent).not.toContain(" — ");
+  });
 });
 
 describe("PackageListBinding — period conflict marker", () => {

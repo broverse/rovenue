@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatAmount,
-  stripeMinorUnitExponent,
-  toPriceView,
-} from "../funnel-runner";
+import { stripeMinorUnitExponent } from "@rovenue/shared";
+import { formatAmount, toPriceView } from "../funnel-runner";
 import type { ResolvedFunnelPrice } from "../runner-api";
 
 /** Intl separates the symbol from the number with U+00A0 in many locales. */

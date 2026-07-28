@@ -1,4 +1,7 @@
 import "@testing-library/jest-dom/vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render } from "@testing-library/react";
 import {
@@ -1202,10 +1205,6 @@ describe("featureList, timeline and socialProof nodes", () => {
 // table — do not restate the cases by hand.
 // =====================================================================
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
 const TRIAL_FIXTURE_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../shared/src/paywall/render-fixtures.json",
@@ -1218,6 +1217,11 @@ interface TrialLabelCase {
   selectedHasIntroPeriod: boolean | null;
   expectedKey: string;
 }
+
+/** Read once, shared by the fixture-shape guard test and the vector loop below. */
+const RENDER_FIXTURES = JSON.parse(readFileSync(TRIAL_FIXTURE_PATH, "utf8")) as {
+  trialLabel: { cases: TrialLabelCase[] };
+};
 
 const TRIAL_LOCALIZATIONS: Record<string, string> = {
   "cta.buy": "Buy now",
@@ -1257,15 +1261,11 @@ function trialLabelConfig(c: TrialLabelCase): BuilderConfig {
 }
 
 describe("trialLabel vectors (render-fixtures contract)", () => {
-  const fixture = JSON.parse(readFileSync(TRIAL_FIXTURE_PATH, "utf8")) as {
-    trialLabel: { cases: TrialLabelCase[] };
-  };
-
   it("fixture carries the trialLabel vector section", () => {
-    expect(fixture.trialLabel.cases.length).toBeGreaterThanOrEqual(4);
+    expect(RENDER_FIXTURES.trialLabel.cases.length).toBeGreaterThanOrEqual(4);
   });
 
-  for (const c of JSON.parse(readFileSync(TRIAL_FIXTURE_PATH, "utf8")).trialLabel.cases as TrialLabelCase[]) {
+  for (const c of RENDER_FIXTURES.trialLabel.cases) {
     it(`case: ${c.name}`, () => {
       const view: PackageView = {
         packageName: "Monthly",

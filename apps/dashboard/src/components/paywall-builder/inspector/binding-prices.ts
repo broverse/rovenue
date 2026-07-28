@@ -7,8 +7,14 @@ import type { OfferingResolvedPrices, ResolvedPackageInfo, ResolvedStoreEntry } 
  * be unit tested without mounting a component.
  */
 
-/** apple > google > stripe: the tie-break order for packagePeriod's majority pick. */
-const STORE_PRECEDENCE = ["apple", "google", "stripe"] as const;
+/**
+ * apple > google > stripe: the tie-break order for packagePeriod's majority
+ * pick. Also re-exported (under its own name) by binding-tab.tsx as the
+ * display order for per-store price badges and the default-selected
+ * option's amount — display order is deliberately the SAME order as
+ * precedence order, so there is exactly one list to keep in sync.
+ */
+export const STORE_PRECEDENCE = ["apple", "google", "stripe"] as const;
 
 const MONTHLY_PERIOD = "P1M";
 const ANNUAL_PERIOD = "P1Y";

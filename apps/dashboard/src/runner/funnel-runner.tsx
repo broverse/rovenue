@@ -54,10 +54,6 @@ function toRunnerOffering(offering: HydratedFunnelOffering | null): RendererOffe
   };
 }
 
-// Re-export for backward compatibility with existing test importers.
-// The authoritative implementation is in @rovenue/shared/currency.
-export { stripeMinorUnitExponent };
-
 /**
  * Renders a server-resolved amount, or null if it cannot be rendered.
  *

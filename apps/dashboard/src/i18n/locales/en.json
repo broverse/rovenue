@@ -1412,6 +1412,20 @@
         },
         "presetCustom": "Custom",
         "periodConflict": "Stores disagree on this package's billing period",
+        "periodLabel": {
+          "P1D": "Daily",
+          "P1W": "Weekly",
+          "P1M": "Monthly",
+          "P3M": "Quarterly",
+          "P6M": "6 months",
+          "P1Y": "Annual"
+        },
+        "storeBadge": {
+          "notConfigured": "not configured",
+          "noMapping": "no mapping",
+          "unavailable": "unavailable",
+          "trial": "{{days}}d trial"
+        },
         "purchase": "Purchase",
         "purchaseBinding": "Purchases the selected package.",
         "trialLabelKey": "Trial-aware label",
