@@ -168,7 +168,11 @@ impl HttpClient {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
                     if let Some(l) = &self.logger {
-                        let path = req.path.to_string();
+                        // Value-level scrub: a preview token rides in the
+                        // PATH itself, not a field value the key-based
+                        // `redact_fields` below would catch — see
+                        // `redact_path`. No-op for every other path.
+                        let path = crate::logging::redact::redact_path(req.path);
                         let corr_c = corr.clone();
                         l.log(
                             crate::logging::LogLevel::Debug,
@@ -234,7 +238,7 @@ impl HttpClient {
                             let body_text = resp.text().unwrap_or_default();
                             let err = error_from_status(status, &body_text);
                             if let Some(l) = &self.logger {
-                                let path = req.path.to_string();
+                                let path = crate::logging::redact::redact_path(req.path);
                                 let corr_c = corr.clone();
                                 let kind = format!("{:?}", err.kind);
                                 l.log(
@@ -275,7 +279,7 @@ impl HttpClient {
 
         // Terminal network/timeout failure after all attempts exhausted.
         if let Some(l) = &self.logger {
-            let path = req.path.to_string();
+            let path = crate::logging::redact::redact_path(req.path);
             let corr_c = corr.clone();
             let kind = format!("{:?}", last_err.kind);
             l.log(

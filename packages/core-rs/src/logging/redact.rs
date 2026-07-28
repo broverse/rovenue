@@ -63,6 +63,35 @@ fn is_secret_token(word: &str) -> bool {
     false
 }
 
+/// Path prefix under which the URL path segment itself IS the credential —
+/// see `redact_path`.
+const PREVIEW_PATH_PREFIX: &str = "/v1/preview/paywalls/";
+
+/// Scrub an opaque preview token that rides in the URL PATH itself
+/// (`GET /v1/preview/paywalls/{token}`), not as a field value or an
+/// `Authorization` header. Neither `redact_fields` (keys off the field
+/// NAME — "path" isn't sensitive) nor `redact_message`'s credential-prefix
+/// scan (only matches when an *entire* whitespace-split word starts with a
+/// known prefix; a token embedded mid-path never does) would catch this, so
+/// callers that log an HTTP path must run it through here first — at the
+/// point the path enters ANY log record (message or field), covering every
+/// branch (success/fatal/retry-exhausted) in one place. A no-op for every
+/// other path (e.g. `/v1/placements/...`, `/v1/me/entitlements`): only the
+/// `/v1/preview/paywalls/` prefix is special-cased, so no other logging
+/// behavior changes.
+pub fn redact_path(path: &str) -> String {
+    match path.strip_prefix(PREVIEW_PATH_PREFIX) {
+        Some(rest) => {
+            let query = match rest.find('?') {
+                Some(i) => &rest[i..],
+                None => "",
+            };
+            format!("{PREVIEW_PATH_PREFIX}[redacted]{query}")
+        }
+        None => path.to_string(),
+    }
+}
+
 pub fn redact_fields(fields: HashMap<String, String>) -> HashMap<String, String> {
     fields
         .into_iter()
@@ -177,6 +206,32 @@ mod tests {
         let m = redact_message(&format!("got jws {jws} for request"));
         assert!(!m.contains(jws), "JWS leaked: {m}");
         assert!(m.contains("[redacted]"), "JWS not masked: {m}");
+    }
+
+    #[test]
+    fn redact_path_masks_preview_token_segment() {
+        let out = redact_path("/v1/preview/paywalls/ptv_SuperSecretPreviewSession987");
+        assert!(
+            !out.contains("ptv_SuperSecretPreviewSession987"),
+            "token leaked: {out}"
+        );
+        assert_eq!(out, "/v1/preview/paywalls/[redacted]");
+    }
+
+    #[test]
+    fn redact_path_masks_preview_token_but_keeps_locale_query() {
+        let out = redact_path("/v1/preview/paywalls/ptv_secret123?locale=tr");
+        assert!(!out.contains("ptv_secret123"), "token leaked: {out}");
+        assert_eq!(out, "/v1/preview/paywalls/[redacted]?locale=tr");
+    }
+
+    #[test]
+    fn redact_path_is_a_noop_for_non_preview_paths() {
+        assert_eq!(
+            redact_path("/v1/placements/onboarding?locale=tr"),
+            "/v1/placements/onboarding?locale=tr"
+        );
+        assert_eq!(redact_path("/v1/me/entitlements"), "/v1/me/entitlements");
     }
 
     #[test]
