@@ -3,6 +3,7 @@ import {
   DIVIDER_DEFAULT_INSET,
   DIVIDER_DEFAULT_THICKNESS,
   ICON_DEFAULT_SIZE,
+  type CarouselNode,
   type PackageListNode,
   type PaywallNode,
   type StackNode,
@@ -399,6 +400,53 @@ describe("newNode", () => {
       id: node.id,
       durationSeconds: COUNTDOWN_DEFAULT_DURATION_SECONDS,
     });
+  });
+
+  it("creates a carousel with no children", () => {
+    const node = newNode("carousel", idGen);
+    expect(node).toEqual({ type: "carousel", id: node.id, children: [] });
+  });
+});
+
+// =============================================================
+// Wave D1 — `carousel` is a second container type alongside `stack`.
+// Without carousel wired into `isContainerNode` (search/searchParent/
+// transformNode + the insert/remove/move closures), an author could
+// create a carousel but never put a page inside it: insertNode would
+// silently no-op the same way it does for a non-container node like
+// `text`.
+// =============================================================
+describe("carousel as a container", () => {
+  it("accepts children into a carousel", () => {
+    const root: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [{ type: "carousel", id: "car1", children: [] }],
+    };
+    const node: PaywallNode = { type: "text", id: "t1", key: "k1", role: "body" };
+    const next = insertNode(root, "car1", node);
+    const carousel = findNode(next, "car1") as CarouselNode;
+    expect(carousel.children).toHaveLength(1);
+    expect(carousel.children[0]?.id).toBe("t1");
+  });
+
+  it("removes a child from a carousel", () => {
+    const root: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        {
+          type: "carousel",
+          id: "car1",
+          children: [{ type: "text", id: "t1", key: "k1", role: "body" }],
+        },
+      ],
+    };
+    const next = removeNode(root, "t1");
+    const carousel = findNode(next, "car1") as CarouselNode;
+    expect(carousel.children).toHaveLength(0);
   });
 });
 

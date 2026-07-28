@@ -42,6 +42,7 @@ const OVERRIDE_PROP_LABEL: Record<string, string> = {
   connectorColor: "Connector color",
   rating: "Rating",
   starColor: "Star color",
+  indicatorColor: "Indicator color",
 };
 
 /**
@@ -73,7 +74,8 @@ type OverridablePropCombo =
   | "socialProof.rating"
   | "socialProof.starColor"
   | "stickyFooter.background"
-  | "countdown.color";
+  | "countdown.color"
+  | "carousel.indicatorColor";
 
 export function OverridesSection({ node }: { node: PaywallNode }) {
   const vm = useService(PaywallBuilderViewModel);
@@ -228,6 +230,7 @@ function OverridePropField({
     case "socialProof.starColor":
     case "stickyFooter.background":
     case "countdown.color":
+    case "carousel.indicatorColor":
       return (
         <ThemeColorField
           label={label}

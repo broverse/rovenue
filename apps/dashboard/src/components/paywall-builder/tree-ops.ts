@@ -2,6 +2,7 @@ import {
   ICON_DEFAULT_SIZE,
   DIVIDER_DEFAULT_THICKNESS,
   DIVIDER_DEFAULT_INSET,
+  type CarouselNode,
   type PaywallNode,
   type StackNode,
 } from "@rovenue/shared/paywall";
@@ -28,8 +29,8 @@ export const COUNTDOWN_DEFAULT_DURATION_SECONDS = 900;
 // changed" and on the input tree being byte-for-byte identical
 // after every call (never mutated in place).
 //
-// Addressability model: a node's `children` array (only stack
-// nodes have one) is the only place `insertNode`/`removeNode`/
+// Addressability model: a node's `children` array (stack and
+// carousel nodes have one) is the only place `insertNode`/`removeNode`/
 // `moveNode` can act — a node that exists solely as some other
 // node's `fallback` has no parent + index in this model (there's
 // nothing to reorder a lone fallback slot against) and is therefore
@@ -45,16 +46,27 @@ export const COUNTDOWN_DEFAULT_DURATION_SECONDS = 900;
 // its own `children` — is fully addressable exactly like any other
 // part of the tree, so every op below also recurses into
 // `packageList.cellTemplate` alongside `fallback`.
+//
+// `carousel` (Wave D1) is a second container type alongside `stack` —
+// its `children` are pages, addressable by insertNode/removeNode/
+// moveNode exactly the same way. `isContainerNode` is the single
+// switch every traversal below shares, so a new container type is one
+// line to add here rather than one line in each of six places.
 // =============================================================
 
-/** Depth-first search for `id`, walking stack children AND fallback slots. */
+/** Node types whose `children` array is addressable by the ops below. */
+function isContainerNode(node: PaywallNode): node is StackNode | CarouselNode {
+  return node.type === "stack" || node.type === "carousel";
+}
+
+/** Depth-first search for `id`, walking container children AND fallback slots. */
 export function findNode(root: StackNode, id: string): PaywallNode | null {
   return search(root, id);
 }
 
 function search(node: PaywallNode, id: string): PaywallNode | null {
   if (node.id === id) return node;
-  if (node.type === "stack") {
+  if (isContainerNode(node)) {
     for (const child of node.children) {
       const found = search(child, id);
       if (found) return found;
@@ -72,19 +84,23 @@ function search(node: PaywallNode, id: string): PaywallNode | null {
 }
 
 /**
- * Finds the stack node whose `children` array contains `id`, plus
- * its index in that array. Returns null for the root (no parent),
- * an unknown id, or an id only reachable via a `fallback` slot.
+ * Finds the container node (stack or carousel) whose `children` array
+ * contains `id`, plus its index in that array. Returns null for the
+ * root (no parent), an unknown id, or an id only reachable via a
+ * `fallback` slot.
  */
 export function findParent(
   root: StackNode,
   id: string,
-): { parent: StackNode; index: number } | null {
+): { parent: StackNode | CarouselNode; index: number } | null {
   return searchParent(root, id);
 }
 
-function searchParent(node: PaywallNode, id: string): { parent: StackNode; index: number } | null {
-  if (node.type === "stack") {
+function searchParent(
+  node: PaywallNode,
+  id: string,
+): { parent: StackNode | CarouselNode; index: number } | null {
+  if (isContainerNode(node)) {
     const index = node.children.findIndex((c) => c.id === id);
     if (index >= 0) return { parent: node, index };
     for (const child of node.children) {
@@ -119,7 +135,7 @@ function transformNode(
 
   let next: PaywallNode = node;
 
-  if (node.type === "stack") {
+  if (isContainerNode(node)) {
     let childrenChanged = false;
     const nextChildren = node.children.map((child) => {
       const updated = transformNode(child, targetId, transform);
@@ -127,7 +143,8 @@ function transformNode(
       return updated;
     });
     // Spread the narrowed `node` (not the widened `next`) so the result
-    // stays a well-typed StackNode rather than an ambiguous union member.
+    // stays a well-typed StackNode/CarouselNode rather than an ambiguous
+    // union member.
     if (childrenChanged) next = { ...node, children: nextChildren };
   }
 
@@ -157,7 +174,7 @@ export function insertNode(
   index?: number,
 ): StackNode {
   return transformNode(root, parentId, (parent) => {
-    if (parent.type !== "stack") return parent; // not a container — no-op
+    if (!isContainerNode(parent)) return parent; // not a container — no-op
     const children = parent.children.slice();
     const at =
       index === undefined ? children.length : Math.max(0, Math.min(children.length, index));
@@ -173,7 +190,7 @@ export function removeNode(root: StackNode, id: string): StackNode {
   if (!located) return root;
   const { parent, index } = located;
   return transformNode(root, parent.id, (p) => {
-    if (p.type !== "stack") return p;
+    if (!isContainerNode(p)) return p;
     const children = p.children.slice();
     children.splice(index, 1);
     return { ...p, children };
@@ -189,7 +206,7 @@ export function moveNode(root: StackNode, id: string, dir: 1 | -1): StackNode {
   const target = index + dir;
   if (target < 0 || target >= parent.children.length) return root;
   return transformNode(root, parent.id, (p) => {
-    if (p.type !== "stack") return p;
+    if (!isContainerNode(p)) return p;
     const children = p.children.slice();
     const [item] = children.splice(index, 1);
     children.splice(target, 0, item);
@@ -251,6 +268,8 @@ export function newNode(type: PaywallNode["type"], idGen: () => string): Paywall
       return { type: "stickyFooter", id, children: [] };
     case "countdown":
       return { type: "countdown", id, durationSeconds: COUNTDOWN_DEFAULT_DURATION_SECONDS };
+    case "carousel":
+      return { type: "carousel", id, children: [] };
     default: {
       const exhaustive: never = type;
       throw new Error(`Unknown node type: ${String(exhaustive)}`);

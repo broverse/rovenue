@@ -14,6 +14,7 @@ import {
   Star,
   PanelBottom,
   Timer,
+  GalleryHorizontal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -39,6 +40,7 @@ export const NODE_TYPES: ReadonlyArray<PaywallNode["type"]> = [
   "socialProof",
   "stickyFooter",
   "countdown",
+  "carousel",
 ];
 
 export const NODE_ICON: Record<PaywallNode["type"], LucideIcon> = {
@@ -56,6 +58,7 @@ export const NODE_ICON: Record<PaywallNode["type"], LucideIcon> = {
   socialProof: Star,
   stickyFooter: PanelBottom,
   countdown: Timer,
+  carousel: GalleryHorizontal,
 };
 
 /** English fallback label per node type — mirrored by the `paywalls.builder.nodeTypes.*` i18n keys. */
@@ -74,6 +77,7 @@ export const NODE_TYPE_LABEL: Record<PaywallNode["type"], string> = {
   socialProof: "Social proof",
   stickyFooter: "Sticky footer",
   countdown: "Countdown",
+  carousel: "Carousel",
 };
 
 /**

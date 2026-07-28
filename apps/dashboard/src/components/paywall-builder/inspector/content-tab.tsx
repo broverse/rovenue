@@ -1,11 +1,14 @@
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import {
+  CAROUSEL_DEFAULT_LOOP,
+  CAROUSEL_DEFAULT_SHOWS_INDICATOR,
   COUNTDOWN_DEFAULT_ON_EXPIRY,
   FEATURE_ROW_DEFAULT_INCLUDED,
   ICON_NAMES,
   SOCIAL_PROOF_MAX_RATING,
   type ButtonNode,
+  type CarouselNode,
   type CountdownNode,
   type DividerNode,
   type FeatureListNode,
@@ -59,6 +62,8 @@ export const ContentTab = component(({ node }: { node: PaywallNode }) => {
       return <SocialProofContent node={node} />;
     case "countdown":
       return <CountdownContent node={node} />;
+    case "carousel":
+      return <CarouselContent node={node} />;
     default:
       return null;
   }
@@ -389,6 +394,50 @@ function CountdownContent({ node }: { node: CountdownNode }) {
           className={INPUT_CLASS}
         />
       </Field>
+    </Section>
+  );
+}
+
+/**
+ * `autoAdvanceSeconds` absent means auto-advance is OFF, not "use some
+ * default interval" — a paywall that starts moving on its own without the
+ * author asking is a surprise. `NumberField` already treats an emptied
+ * input as `undefined`, so clearing the field is enough to turn it off;
+ * there is no separate on/off toggle for it. `loop` and `showsIndicator`
+ * default from the shared constants when unset, never a hard-coded
+ * `true`/`false` in the JSX.
+ */
+function CarouselContent({ node }: { node: CarouselNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<CarouselNode>) => vm.updateNode<CarouselNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.content", "Content")} defaultOpen>
+      <NumberField
+        label={t(
+          "paywalls.builder.properties.carouselAutoAdvanceSeconds",
+          "Auto-advance (seconds)",
+        )}
+        value={node.autoAdvanceSeconds}
+        onChange={(v) => set({ autoAdvanceSeconds: v })}
+      />
+      <label className="mt-3 flex items-center gap-1.5 text-[11px] text-foreground">
+        <input
+          type="checkbox"
+          checked={node.loop ?? CAROUSEL_DEFAULT_LOOP}
+          onChange={(e) => set({ loop: e.currentTarget.checked })}
+        />
+        {t("paywalls.builder.properties.carouselLoop", "Loop")}
+      </label>
+      <label className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground">
+        <input
+          type="checkbox"
+          checked={node.showsIndicator ?? CAROUSEL_DEFAULT_SHOWS_INDICATOR}
+          onChange={(e) => set({ showsIndicator: e.currentTarget.checked })}
+        />
+        {t("paywalls.builder.properties.carouselShowsIndicator", "Shows indicator")}
+      </label>
     </Section>
   );
 }

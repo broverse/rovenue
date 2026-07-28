@@ -69,6 +69,16 @@ describe("tabsForNode", () => {
       ]);
     }
   });
+
+  // Wave D1 — the wave-B scar: `inspector/tabs.ts` was left off a task's file
+  // list once, and a node type shipped with `tabsForNode` returning an empty
+  // array (no inspector at all). This pins carousel getting a real,
+  // non-empty tab set in the same style, content, visibility shape as the
+  // other container-ish/row-carrying node types above.
+  it("gives carousel a non-empty tab set (style, content, visibility)", () => {
+    expect(tabsForNode("carousel")).not.toHaveLength(0);
+    expect(tabsForNode("carousel").map((t) => t.id)).toEqual(["style", "content", "visibility"]);
+  });
 });
 
 describe("tabIssues", () => {

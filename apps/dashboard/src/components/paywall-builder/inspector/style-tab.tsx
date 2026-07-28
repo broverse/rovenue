@@ -2,6 +2,7 @@ import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import type {
   ButtonNode,
+  CarouselNode,
   CountdownNode,
   DividerNode,
   FeatureListNode,
@@ -47,6 +48,8 @@ export const StyleTab = component(({ node }: { node: PaywallNode }) => {
       return <StickyFooterStyle node={node} />;
     case "countdown":
       return <CountdownStyle node={node} />;
+    case "carousel":
+      return <CarouselStyle node={node} />;
     default:
       return null;
   }
@@ -249,6 +252,25 @@ function CountdownStyle({ node }: { node: CountdownNode }) {
         label={t("paywalls.builder.properties.color", "Color")}
         value={node.color}
         onChange={(v) => set({ color: v })}
+      />
+    </Section>
+  );
+}
+
+/** Absent `indicatorColor` means inherit the ambient text colour — leaving
+ *  the field empty must produce no colour instruction, not a substituted
+ *  value, so this passes `node.indicatorColor` straight through undefined. */
+function CarouselStyle({ node }: { node: CarouselNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<CarouselNode>) => vm.updateNode<CarouselNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.appearance", "Appearance")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.carouselIndicatorColor", "Indicator color")}
+        value={node.indicatorColor}
+        onChange={(v) => set({ indicatorColor: v })}
       />
     </Section>
   );

@@ -59,7 +59,13 @@ describe("NODE_TYPES", () => {
       "socialProof",
       "stickyFooter",
       "countdown",
+      "carousel",
     ]);
+  });
+
+  it("exposes carousel in the palette with a label and icon", () => {
+    expect(NODE_TYPE_LABEL.carousel).toBeTruthy();
+    expect(NODE_ICON.carousel).toBeTruthy();
   });
 
   it("lists divider and icon in the palette", () => {

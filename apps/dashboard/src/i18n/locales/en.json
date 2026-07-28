@@ -1308,7 +1308,8 @@
         "timeline": "Timeline",
         "socialProof": "Social proof",
         "stickyFooter": "Sticky footer",
-        "countdown": "Countdown"
+        "countdown": "Countdown",
+        "carousel": "Carousel"
       },
       "addNode": {
         "title": "Add node"
@@ -1484,7 +1485,11 @@
         "countdownOnExpiry": "On expiry",
         "countdownOnExpiryFreeze": "Freeze at zero",
         "countdownOnExpiryHide": "Hide",
-        "countdownLabelKey": "Label key (optional)"
+        "countdownLabelKey": "Label key (optional)",
+        "carouselAutoAdvanceSeconds": "Auto-advance (seconds)",
+        "carouselLoop": "Loop",
+        "carouselShowsIndicator": "Shows indicator",
+        "carouselIndicatorColor": "Indicator color"
       },
       "topbar": {
         "close": "Close builder",

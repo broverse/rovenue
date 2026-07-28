@@ -12,6 +12,7 @@ import {
   SOCIAL_PROOF_MAX_RATING,
   emptyBuilderConfig,
   type BuilderConfig,
+  type CarouselNode,
   type CountdownNode,
   type DividerNode,
   type FeatureListNode,
@@ -80,6 +81,12 @@ function fakeConfig(): BuilderConfig {
     durationSeconds: 900,
     overrides: [{ when: { kind: "introEligible" }, props: { color: { light: "#555555" } } }],
   } as CountdownNode);
+  config.root.children.push({
+    type: "carousel",
+    id: "car1",
+    children: [],
+    overrides: [{ when: { kind: "introEligible" }, props: { indicatorColor: { light: "#666666" } } }],
+  } as CarouselNode);
   return config;
 }
 
@@ -279,5 +286,32 @@ describe("OverridesSection — countdown override fields", () => {
     fireEvent.change(light!, { target: { value: "#654321" } });
     const node = findNode(vm.config.root, "cd1") as CountdownNode;
     expect(node.overrides?.[0]?.props.color).toEqual({ light: "#654321" });
+  });
+});
+
+// =============================================================
+// Wave D1 — carousel.indicatorColor. Same defect class: Task 1 declared
+// the key in OVERRIDABLE_PROP_KEYS.carousel, and without a case in
+// OverridePropField's switch this would fall through to the removed
+// `default: return null` (now a compile-time exhaustiveness check
+// instead). Note: `indicatorColor` renders via `ThemeColorField`, whose
+// `Field` label is NOT wired via `htmlFor`/an id on the input (it's a
+// sibling label, not a wrapping one), so `getByLabelText` cannot find
+// it — this suite uses the same `getAllByPlaceholderText("#0F172A")`
+// pattern the divider/icon/stickyFooter/countdown color suites above use,
+// since that is what the widget actually exposes to a test.
+// =============================================================
+describe("OverridesSection — carousel override fields", () => {
+  it("renders a real color input, not a silent no-op", async () => {
+    await renderHarness("car1");
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+  });
+
+  it("writes an edited indicator color back onto the override's props", async () => {
+    const { vm } = await renderHarness("car1");
+    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(light!, { target: { value: "#777777" } });
+    const node = findNode(vm.config.root, "car1") as CarouselNode;
+    expect(node.overrides?.[0]?.props.indicatorColor).toEqual({ light: "#777777" });
   });
 });
