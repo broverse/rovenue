@@ -813,6 +813,43 @@ export type PaywallVersion = typeof paywallVersions.$inferSelect;
 export type NewPaywallVersion = typeof paywallVersions.$inferInsert;
 
 // =============================================================
+// paywall_preview_sessions — P9 on-device preview tokens
+// =============================================================
+//
+// Mint/lookup/revoke ledger for the short-lived tokens that let a
+// physical device preview a paywall's DRAFT (`paywalls.builderConfig`)
+// rather than the published snapshot `/v1/placements` normally serves.
+// Only `tokenHash` is stored (never the plaintext), mirroring
+// `personal_access_tokens`. See
+// apps/api/src/lib/placement-resolution.ts (`hydrateDraftPaywall`).
+
+export const paywallPreviewSessions = pgTable(
+  "paywall_preview_sessions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    paywallId: text("paywallId")
+      .notNull()
+      .references(() => paywalls.id, { onDelete: "cascade" }),
+    tokenHash: text("tokenHash").notNull().unique(),
+    createdBy: text("createdBy").notNull(),
+    expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revokedAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    expiresIdx: index("paywall_preview_sessions_expires_idx").on(t.expiresAt),
+  }),
+);
+
+export type PaywallPreviewSession = typeof paywallPreviewSessions.$inferSelect;
+export type NewPaywallPreviewSession = typeof paywallPreviewSessions.$inferInsert;
+
+// =============================================================
 // placements
 // =============================================================
 

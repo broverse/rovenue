@@ -42,42 +42,90 @@ type PaywallVersionRow = NonNullable<
   Awaited<ReturnType<typeof drizzle.paywallVersionRepo.findById>>
 >;
 
+// The subset of fields the shared hydration body needs, whichever table
+// they come from (a `paywall_versions` row for the published path, or
+// the `paywalls` row itself for the draft path below).
+interface HydrationSource {
+  offeringId: string;
+  remoteConfig: unknown;
+  configFormatVersion: number;
+  builderConfig: unknown;
+}
+
 /**
- * Hydrate the PUBLISHED snapshot, never `paywalls.builderConfig`.
- *
- * `paywalls.builderConfig` is the builder's private draft — serving it
- * here is exactly the P0 defect this split fixed. Identifier and name
- * come from the live row (identifier is immutable, name is cosmetic);
- * everything the device actually renders comes from `version`, including
- * `offeringId`, so re-pointing the draft at another offering can't
- * retroactively change what a published version resolves against.
+ * Shared hydration body for both the PUBLISHED path (`hydratePaywall`,
+ * fed a `paywall_versions` row) and the draft-preview path
+ * (`hydrateDraftPaywall` below, fed `paywalls` itself). Identifier and
+ * name always come from the live `paywall` row (identifier is
+ * immutable, name is cosmetic); everything the device actually renders
+ * comes from `source`, including `offeringId`, so which config source
+ * is passed in is the ENTIRE difference between "serve published" and
+ * "serve draft" — callers must get that choice right.
  */
-async function hydratePaywall(
+async function hydratePaywallBody(
   projectId: string,
   paywall: PaywallRow,
-  version: PaywallVersionRow,
+  source: HydrationSource,
   requestedLocale?: string,
 ) {
   const offering = await drizzle.offeringRepo.findOfferingById(
     drizzle.db,
     projectId,
-    version.offeringId,
+    source.offeringId,
   );
-  const { locale, data } = resolveLocale(version.remoteConfig, requestedLocale);
+  const { locale, data } = resolveLocale(source.remoteConfig, requestedLocale);
   return {
     id: paywall.id,
     identifier: paywall.identifier,
     name: paywall.name,
-    configFormatVersion: version.configFormatVersion,
+    configFormatVersion: source.configFormatVersion,
     remoteConfig: locale ? { locale, data } : null,
     // builderConfig ships whole (all localizations) — ?locale only slices
     // remoteConfig above. Field is present ONLY when non-null: the Rust
     // SDK wire fixtures decode this payload, and adding a field is safe
     // (serde ignores unknown fields) but an always-present `null` isn't
     // worth the wire-size cost for paywalls that don't use the builder.
-    ...(version.builderConfig !== null && { builderConfig: version.builderConfig }),
+    ...(source.builderConfig !== null && { builderConfig: source.builderConfig }),
     offering: offering ? await hydrateOffering(projectId, offering) : null,
   };
+}
+
+export type HydratedPaywall = Awaited<ReturnType<typeof hydratePaywallBody>>;
+
+/**
+ * Hydrate the PUBLISHED snapshot, never `paywalls.builderConfig`.
+ *
+ * `paywalls.builderConfig` is the builder's private draft — serving it
+ * here is exactly the P0 defect this split fixed. The ONE sanctioned
+ * exception is `hydrateDraftPaywall` below (P9 on-device preview): it
+ * is reachable only through a minted, token-gated, revocable preview
+ * session (`previewSessionRepo` / `paywall_preview_sessions`), never
+ * through `/v1/placements` or the fallback-file export, both of which
+ * continue to call this function exclusively.
+ */
+async function hydratePaywall(
+  projectId: string,
+  paywall: PaywallRow,
+  version: PaywallVersionRow,
+  requestedLocale?: string,
+): Promise<HydratedPaywall> {
+  return hydratePaywallBody(projectId, paywall, version, requestedLocale);
+}
+
+/**
+ * P9 on-device preview: hydrate `paywalls.builderConfig` (the DRAFT)
+ * instead of a published `paywall_versions` snapshot. Reachable only
+ * from the token-gated preview endpoint (Task 3) — never from
+ * `/v1/placements` or the fallback-file export. Returns null when the
+ * paywall has no draft builder config to preview.
+ */
+export async function hydrateDraftPaywall(
+  projectId: string,
+  paywall: PaywallRow,
+  requestedLocale: string | null,
+): Promise<HydratedPaywall | null> {
+  if (paywall.builderConfig === null) return null;
+  return hydratePaywallBody(projectId, paywall, paywall, requestedLocale ?? undefined);
 }
 
 type PlacementRow = NonNullable<
