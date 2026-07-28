@@ -1133,6 +1133,116 @@
           ]
         }
       }
+    },
+    {
+      "name": "video-bare",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "video",
+              "id": "vid_bare",
+              "url": {
+                "light": "https://x/a.mp4"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "video-full",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "video",
+              "id": "vid_full",
+              "url": {
+                "light": "https://x/a.mp4",
+                "dark": "https://x/a-dark.mp4"
+              },
+              "posterUrl": {
+                "light": "https://x/poster.png",
+                "dark": "https://x/poster-dark.png"
+              },
+              "autoplay": false,
+              "loop": false,
+              "muted": false,
+              "showsControls": true,
+              "aspectRatio": 1.777
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "lottie-bare",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "lottie",
+              "id": "lot_bare",
+              "url": {
+                "light": "https://x/a.json"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "lottie-full",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "lottie",
+              "id": "lot_full",
+              "url": {
+                "light": "https://x/a.json",
+                "dark": "https://x/a-dark.json"
+              },
+              "loop": false,
+              "autoplay": false,
+              "speed": 2
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [
@@ -1205,8 +1315,8 @@
           "axis": "v",
           "children": [
             {
-              "type": "video",
-              "id": "vid_1",
+              "type": "unknownFutureNode",
+              "id": "unk_1",
               "url": {
                 "light": "https://x/v.mp4"
               }
@@ -1275,8 +1385,8 @@
           "axis": "v",
           "children": [
             {
-              "type": "video",
-              "id": "v1",
+              "type": "unknownFutureNode",
+              "id": "unk_v1",
               "visibility": {
                 "platform": [
                   "ios"
@@ -1954,7 +2064,16 @@
     "STICKY_FOOTER_CONTENT_CLEARANCE_DEFAULT": 96,
     "CAROUSEL_DEFAULT_SHOWS_INDICATOR": true,
     "CAROUSEL_DEFAULT_LOOP": false,
-    "CAROUSEL_MIN_AUTO_ADVANCE_SECONDS": 2
+    "CAROUSEL_MIN_AUTO_ADVANCE_SECONDS": 2,
+    "VIDEO_DEFAULT_AUTOPLAY": true,
+    "VIDEO_DEFAULT_LOOP": true,
+    "VIDEO_DEFAULT_MUTED": true,
+    "VIDEO_DEFAULT_SHOWS_CONTROLS": false,
+    "LOTTIE_DEFAULT_LOOP": true,
+    "LOTTIE_DEFAULT_AUTOPLAY": true,
+    "LOTTIE_DEFAULT_SPEED": 1,
+    "LOTTIE_MIN_SPEED": 0.1,
+    "LOTTIE_MAX_SPEED": 4
   },
   "trialLabel": {
     "_comment": "expectedKey = which loc key the CTA renders. selectedHasIntroPeriod mirrors PackageView.introPeriod non-empty.",

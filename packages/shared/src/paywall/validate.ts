@@ -2,7 +2,11 @@ import { isKnownIconName } from "./icon-registry";
 import {
   CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
   FEATURE_LIST_SOFT_MAX,
+  LOTTIE_MAX_SPEED,
+  LOTTIE_MIN_SPEED,
   OVERRIDABLE_PROP_KEYS,
+  VIDEO_DEFAULT_AUTOPLAY,
+  VIDEO_DEFAULT_MUTED,
   type BuilderConfig,
   type PaywallNode,
   type StackNode,
@@ -74,6 +78,9 @@ export const LOCALIZED_KEYS: LocalizedKeyFns = {
   // Wave D1 — a carousel has no localized text of its own; each page carries
   // its own, and pages are walked separately, exactly as stack's children are.
   carousel: () => [],
+  // Wave D2 — video/lottie carry no localized text of their own.
+  video: () => [],
+  lottie: () => [],
 };
 
 /**
@@ -141,7 +148,17 @@ export type BuilderIssue = {
     // Wave D1 — autoAdvanceSeconds below CAROUSEL_MIN_AUTO_ADVANCE_SECONDS.
     | "CAROUSEL_AUTO_ADVANCE_TOO_FAST"
     // Wave D1 — a carousel with exactly one page; nothing to carousel through.
-    | "CAROUSEL_SINGLE_PAGE";
+    | "CAROUSEL_SINGLE_PAGE"
+    // Wave D2 — a video that autoplays with sound; browsers refuse to
+    // autoplay unmuted video, so it will not actually autoplay as authored.
+    | "VIDEO_AUTOPLAY_UNMUTED"
+    // Wave D2 — a video that does not autoplay and has no posterUrl, so it
+    // shows a blank frame until the viewer presses play.
+    | "VIDEO_NO_POSTER"
+    // Wave D2 — a lottie speed outside [LOTTIE_MIN_SPEED, LOTTIE_MAX_SPEED].
+    // Authoring guidance, not a broken config — the renderer honours whatever
+    // speed it is given.
+    | "LOTTIE_SPEED_OUT_OF_RANGE";
   nodeId?: string;
   locale?: string;
   key?: string;
@@ -200,6 +217,14 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   // Technically renders, just pointlessly — a single page is not a broken
   // config, only a probably-unintended one.
   CAROUSEL_SINGLE_PAGE: "warning",
+  // Authoring guidance — browsers silently refuse the autoplay rather than
+  // breaking the config; the renderer falls back to click-to-play.
+  VIDEO_AUTOPLAY_UNMUTED: "warning",
+  // A missing poster degrades the first frame, it doesn't break the config.
+  VIDEO_NO_POSTER: "warning",
+  // Authoring guidance, not a broken config — the renderer honours whatever
+  // speed it is given.
+  LOTTIE_SPEED_OUT_OF_RANGE: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
   // MUST still persist. Four of these are reachable from the builder UI in
@@ -568,6 +593,39 @@ export function validateBuilderConfig(
         code: "CAROUSEL_AUTO_ADVANCE_TOO_FAST",
         nodeId: node.id,
         message: `carousel "${node.id}" has autoAdvanceSeconds ${node.autoAdvanceSeconds}, below the ${CAROUSEL_MIN_AUTO_ADVANCE_SECONDS}s floor a reader can follow.`,
+      });
+    }
+  }
+
+  // VIDEO_AUTOPLAY_UNMUTED / VIDEO_NO_POSTER — wave D2.
+  for (const node of allNodes) {
+    if (node.type !== "video") continue;
+    const effectiveAutoplay = node.autoplay ?? VIDEO_DEFAULT_AUTOPLAY;
+    const effectiveMuted = node.muted ?? VIDEO_DEFAULT_MUTED;
+    if (effectiveAutoplay && !effectiveMuted) {
+      issues.push({
+        code: "VIDEO_AUTOPLAY_UNMUTED",
+        nodeId: node.id,
+        message: `video "${node.id}" autoplays with sound; browsers refuse to autoplay unmuted video, so it will not actually play automatically.`,
+      });
+    }
+    if (!effectiveAutoplay && node.posterUrl === undefined) {
+      issues.push({
+        code: "VIDEO_NO_POSTER",
+        nodeId: node.id,
+        message: `video "${node.id}" does not autoplay and has no posterUrl, so it shows a blank frame until the viewer presses play.`,
+      });
+    }
+  }
+
+  // LOTTIE_SPEED_OUT_OF_RANGE — wave D2.
+  for (const node of allNodes) {
+    if (node.type !== "lottie") continue;
+    if (node.speed !== undefined && (node.speed < LOTTIE_MIN_SPEED || node.speed > LOTTIE_MAX_SPEED)) {
+      issues.push({
+        code: "LOTTIE_SPEED_OUT_OF_RANGE",
+        nodeId: node.id,
+        message: `lottie "${node.id}" has speed ${node.speed}, outside ${LOTTIE_MIN_SPEED}–${LOTTIE_MAX_SPEED} — playback will read as broken rather than stylised.`,
       });
     }
   }

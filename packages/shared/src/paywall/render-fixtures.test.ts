@@ -254,6 +254,15 @@ describe("render-fixtures contract", () => {
         CAROUSEL_DEFAULT_SHOWS_INDICATOR: schema.CAROUSEL_DEFAULT_SHOWS_INDICATOR,
         CAROUSEL_DEFAULT_LOOP: schema.CAROUSEL_DEFAULT_LOOP,
         CAROUSEL_MIN_AUTO_ADVANCE_SECONDS: schema.CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
+        VIDEO_DEFAULT_AUTOPLAY: schema.VIDEO_DEFAULT_AUTOPLAY,
+        VIDEO_DEFAULT_LOOP: schema.VIDEO_DEFAULT_LOOP,
+        VIDEO_DEFAULT_MUTED: schema.VIDEO_DEFAULT_MUTED,
+        VIDEO_DEFAULT_SHOWS_CONTROLS: schema.VIDEO_DEFAULT_SHOWS_CONTROLS,
+        LOTTIE_DEFAULT_LOOP: schema.LOTTIE_DEFAULT_LOOP,
+        LOTTIE_DEFAULT_AUTOPLAY: schema.LOTTIE_DEFAULT_AUTOPLAY,
+        LOTTIE_DEFAULT_SPEED: schema.LOTTIE_DEFAULT_SPEED,
+        LOTTIE_MIN_SPEED: schema.LOTTIE_MIN_SPEED,
+        LOTTIE_MAX_SPEED: schema.LOTTIE_MAX_SPEED,
       });
     });
 
@@ -270,6 +279,23 @@ describe("render-fixtures contract", () => {
       expect(fixture.defaults.CAROUSEL_MIN_AUTO_ADVANCE_SECONDS).toBe(
         schema.CAROUSEL_MIN_AUTO_ADVANCE_SECONDS,
       );
+    });
+
+    // Wave D2 — the nine video/lottie defaults, asserted individually and by
+    // value. This is what the native tasks' own by-value sync tests mirror.
+    it("carries the nine video/lottie defaults by value", async () => {
+      const schema = await import("./schema");
+      expect(fixture.defaults.VIDEO_DEFAULT_AUTOPLAY).toBe(schema.VIDEO_DEFAULT_AUTOPLAY);
+      expect(fixture.defaults.VIDEO_DEFAULT_LOOP).toBe(schema.VIDEO_DEFAULT_LOOP);
+      expect(fixture.defaults.VIDEO_DEFAULT_MUTED).toBe(schema.VIDEO_DEFAULT_MUTED);
+      expect(fixture.defaults.VIDEO_DEFAULT_SHOWS_CONTROLS).toBe(
+        schema.VIDEO_DEFAULT_SHOWS_CONTROLS,
+      );
+      expect(fixture.defaults.LOTTIE_DEFAULT_LOOP).toBe(schema.LOTTIE_DEFAULT_LOOP);
+      expect(fixture.defaults.LOTTIE_DEFAULT_AUTOPLAY).toBe(schema.LOTTIE_DEFAULT_AUTOPLAY);
+      expect(fixture.defaults.LOTTIE_DEFAULT_SPEED).toBe(schema.LOTTIE_DEFAULT_SPEED);
+      expect(fixture.defaults.LOTTIE_MIN_SPEED).toBe(schema.LOTTIE_MIN_SPEED);
+      expect(fixture.defaults.LOTTIE_MAX_SPEED).toBe(schema.LOTTIE_MAX_SPEED);
     });
   });
 });

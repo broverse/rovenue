@@ -740,3 +740,72 @@ describe("wave D1: carousel node type", () => {
     expect(OVERRIDABLE_PROP_KEYS.carousel).toEqual(["indicatorColor"]);
   });
 });
+
+describe("wave D2: video and lottie node types", () => {
+  const wrap = (node: unknown) => ({
+    formatVersion: 2, defaultLocale: "en", localizations: { en: {} },
+    root: { type: "stack", id: "root", axis: "v", children: [node] },
+  });
+
+  it("round-trips a video with every optional prop absent", () => {
+    const node = { type: "video", id: "v1", url: { light: "https://x/a.mp4" } };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.root.children[0]).toEqual(node);
+    }
+  });
+
+  it("round-trips a lottie with every optional prop absent", () => {
+    const node = { type: "lottie", id: "l1", url: { light: "https://x/a.json" } };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.root.children[0]).toEqual(node);
+    }
+  });
+
+  it("rejects a video with no url", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "video", id: "v1" })).success).toBe(false);
+  });
+
+  it("rejects a lottie with no url", () => {
+    expect(builderConfigSchema.safeParse(wrap({ type: "lottie", id: "l1" })).success).toBe(false);
+  });
+
+  it("accepts a video with every optional prop present", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "video",
+      id: "v1",
+      url: { light: "https://x/a.mp4", dark: "https://x/a-dark.mp4" },
+      posterUrl: { light: "https://x/poster.png", dark: "https://x/poster-dark.png" },
+      autoplay: false,
+      loop: false,
+      muted: false,
+      showsControls: true,
+      aspectRatio: 1.777,
+    })).success).toBe(true);
+  });
+
+  it("accepts a lottie with every optional prop present", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "lottie",
+      id: "l1",
+      url: { light: "https://x/a.json", dark: "https://x/a-dark.json" },
+      loop: false,
+      autoplay: false,
+      speed: 2,
+    })).success).toBe(true);
+  });
+
+  it("rejects a non-positive lottie speed", () => {
+    expect(builderConfigSchema.safeParse(wrap({
+      type: "lottie", id: "l1", url: { light: "https://x/a.json" }, speed: 0,
+    })).success).toBe(false);
+  });
+
+  it("gives both types an OVERRIDABLE_PROP_KEYS row", () => {
+    expect(OVERRIDABLE_PROP_KEYS.video).toEqual(["url", "posterUrl"]);
+    expect(OVERRIDABLE_PROP_KEYS.lottie).toEqual(["url"]);
+  });
+});

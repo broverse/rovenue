@@ -16,6 +16,8 @@ import type { NodeVisibility } from "./visibility";
 
 export type ThemeColor = { light: string; dark?: string };
 
+export type ThemeUrl = { light: string; dark?: string };
+
 export type NodeSize = "fit" | "fill" | number;
 
 // -------------------------------------------------------------
@@ -64,7 +66,7 @@ export type TextNode = {
 export type ImageNode = {
   type: "image";
   id: string;
-  url: { light: string; dark?: string };
+  url: ThemeUrl;
   height?: number;
   cornerRadius?: number;
   alt?: string;
@@ -233,6 +235,20 @@ export const CAROUSEL_DEFAULT_LOOP = false;
  *  advice (a `warning`), not a clamp — the renderer honours what it is given. */
 export const CAROUSEL_MIN_AUTO_ADVANCE_SECONDS = 2;
 
+export const VIDEO_DEFAULT_AUTOPLAY = true;
+export const VIDEO_DEFAULT_LOOP = true;
+/** Browsers refuse to autoplay a video with sound, so muted is the only
+ *  default under which autoplay works on all three platforms. */
+export const VIDEO_DEFAULT_MUTED = true;
+export const VIDEO_DEFAULT_SHOWS_CONTROLS = false;
+export const LOTTIE_DEFAULT_LOOP = true;
+export const LOTTIE_DEFAULT_AUTOPLAY = true;
+export const LOTTIE_DEFAULT_SPEED = 1;
+/** Outside this range playback reads as broken rather than stylised.
+ *  Authoring-time advice (a `warning`), not a clamp. */
+export const LOTTIE_MIN_SPEED = 0.1;
+export const LOTTIE_MAX_SPEED = 4;
+
 export type FeatureRow = {
   labelKey: string;
   /** Registry icon name; unknown names fail open like any icon. */
@@ -332,6 +348,43 @@ export type CarouselNode = {
   visibility?: NodeVisibility;
 };
 
+export type VideoNode = {
+  type: "video";
+  id: string;
+  url: ThemeUrl;
+  posterUrl?: ThemeUrl;
+  /** Absent = VIDEO_DEFAULT_AUTOPLAY. */
+  autoplay?: boolean;
+  /** Absent = VIDEO_DEFAULT_LOOP. */
+  loop?: boolean;
+  /** Absent = VIDEO_DEFAULT_MUTED. Autoplay with sound is refused by
+   *  browsers — see the validator's VIDEO_AUTOPLAY_UNMUTED. */
+  muted?: boolean;
+  /** Absent = VIDEO_DEFAULT_SHOWS_CONTROLS. */
+  showsControls?: boolean;
+  /** Width ÷ height. Absent = the source's own ratio once known — NOT a
+   *  substituted number. */
+  aspectRatio?: number;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
+export type LottieNode = {
+  type: "lottie";
+  id: string;
+  url: ThemeUrl;
+  /** Absent = LOTTIE_DEFAULT_LOOP. */
+  loop?: boolean;
+  /** Absent = LOTTIE_DEFAULT_AUTOPLAY. */
+  autoplay?: boolean;
+  /** Absent = LOTTIE_DEFAULT_SPEED. */
+  speed?: number;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
 export type PaywallNode =
   | StackNode
   | TextNode
@@ -347,7 +400,9 @@ export type PaywallNode =
   | SocialProofNode
   | StickyFooterNode
   | CountdownNode
-  | CarouselNode;
+  | CarouselNode
+  | VideoNode
+  | LottieNode;
 
 /**
  * Per node-type whitelist of override-able prop keys — the node's own
@@ -371,6 +426,8 @@ export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[
   stickyFooter: ["background"],
   countdown: ["color"],
   carousel: ["indicatorColor"],
+  video: ["url", "posterUrl"],
+  lottie: ["url"],
 };
 
 export type BuilderConfig = {
@@ -390,6 +447,11 @@ export type BuilderConfig = {
 // -------------------------------------------------------------
 
 const themeColorSchema: z.ZodType<ThemeColor> = z.object({
+  light: z.string(),
+  dark: z.string().optional(),
+});
+
+const themeUrlSchema: z.ZodType<ThemeUrl> = z.object({
   light: z.string(),
   dark: z.string().optional(),
 });
@@ -488,7 +550,7 @@ const textNodeSchema: z.ZodType<TextNode> = z.object({
 const imageNodeSchema: z.ZodType<ImageNode> = z.object({
   type: z.literal("image"),
   id: z.string().min(1),
-  url: z.object({ light: z.string(), dark: z.string().optional() }),
+  url: themeUrlSchema,
   height: z.number().optional(),
   cornerRadius: z.number().optional(),
   alt: z.string().optional(),
@@ -652,6 +714,33 @@ const carouselNodeSchema: z.ZodType<CarouselNode> = z.object({
   visibility: nodeVisibilitySchema.optional(),
 });
 
+const videoNodeSchema: z.ZodType<VideoNode> = z.object({
+  type: z.literal("video"),
+  id: z.string().min(1),
+  url: themeUrlSchema,
+  posterUrl: themeUrlSchema.optional(),
+  autoplay: z.boolean().optional(),
+  loop: z.boolean().optional(),
+  muted: z.boolean().optional(),
+  showsControls: z.boolean().optional(),
+  aspectRatio: z.number().optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.video).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
+const lottieNodeSchema: z.ZodType<LottieNode> = z.object({
+  type: z.literal("lottie"),
+  id: z.string().min(1),
+  url: themeUrlSchema,
+  loop: z.boolean().optional(),
+  autoplay: z.boolean().optional(),
+  speed: z.number().positive().optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.lottie).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
 const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   stackNodeSchema,
   textNodeSchema,
@@ -668,6 +757,8 @@ const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   stickyFooterNodeSchema,
   countdownNodeSchema,
   carouselNodeSchema,
+  videoNodeSchema,
+  lottieNodeSchema,
 ]);
 paywallNodeSchemaRef = paywallNodeSchema;
 

@@ -11,7 +11,7 @@ import {
   validateBuilderConfig,
   type BuilderIssue,
 } from "./validate";
-import { CAROUSEL_MIN_AUTO_ADVANCE_SECONDS } from "./schema";
+import { CAROUSEL_MIN_AUTO_ADVANCE_SECONDS, LOTTIE_MAX_SPEED, LOTTIE_MIN_SPEED } from "./schema";
 import type { BuilderConfig, PaywallNode, StackNode, TextNode } from "./schema";
 
 function baseConfig(overrides: Partial<BuilderConfig> = {}): BuilderConfig {
@@ -1686,5 +1686,105 @@ describe("LOCALIZED_KEYS for carousel", () => {
     const usages = collectLocalizationUsages(config.root);
     expect(usages.some((u) => u.nodeId === "c1")).toBe(false);
     expect(usages.map((u) => u.key)).toEqual(expect.arrayContaining(["child_key"]));
+  });
+});
+
+describe("wave D2: VIDEO_AUTOPLAY_UNMUTED, VIDEO_NO_POSTER, LOTTIE_SPEED_OUT_OF_RANGE", () => {
+  function configWith(node: PaywallNode): BuilderConfig {
+    return baseConfig({
+      root: { type: "stack", id: "root", axis: "v", children: [node] },
+    });
+  }
+
+  it("raises VIDEO_AUTOPLAY_UNMUTED when autoplay is on and muted is off", () => {
+    const node: PaywallNode = {
+      type: "video",
+      id: "v1",
+      url: { light: "u" },
+      autoplay: true,
+      muted: false,
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).toContain("VIDEO_AUTOPLAY_UNMUTED");
+  });
+
+  it("does NOT raise VIDEO_AUTOPLAY_UNMUTED for the defaults", () => {
+    const node: PaywallNode = { type: "video", id: "v1", url: { light: "u" } };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("VIDEO_AUTOPLAY_UNMUTED");
+  });
+
+  it("does NOT raise VIDEO_AUTOPLAY_UNMUTED when autoplay is on and muted is left at its default", () => {
+    const node: PaywallNode = { type: "video", id: "v1", url: { light: "u" }, autoplay: true };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("VIDEO_AUTOPLAY_UNMUTED");
+  });
+
+  it("raises VIDEO_NO_POSTER when autoplay is off and no poster is given", () => {
+    const node: PaywallNode = { type: "video", id: "v1", url: { light: "u" }, autoplay: false };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).toContain("VIDEO_NO_POSTER");
+  });
+
+  it("does NOT raise VIDEO_NO_POSTER when autoplay is off but a poster is given", () => {
+    const node: PaywallNode = {
+      type: "video",
+      id: "v1",
+      url: { light: "u" },
+      autoplay: false,
+      posterUrl: { light: "p" },
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("VIDEO_NO_POSTER");
+  });
+
+  it("does NOT raise VIDEO_NO_POSTER for the defaults (autoplay defaults to on)", () => {
+    const node: PaywallNode = { type: "video", id: "v1", url: { light: "u" } };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("VIDEO_NO_POSTER");
+  });
+
+  it("raises LOTTIE_SPEED_OUT_OF_RANGE above the ceiling", () => {
+    const node: PaywallNode = { type: "lottie", id: "l1", url: { light: "u" }, speed: 99 };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).toContain("LOTTIE_SPEED_OUT_OF_RANGE");
+  });
+
+  it("raises LOTTIE_SPEED_OUT_OF_RANGE below the floor", () => {
+    const node: PaywallNode = { type: "lottie", id: "l1", url: { light: "u" }, speed: 0.01 };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).toContain("LOTTIE_SPEED_OUT_OF_RANGE");
+  });
+
+  it("does NOT raise LOTTIE_SPEED_OUT_OF_RANGE at either bound", () => {
+    for (const speed of [LOTTIE_MIN_SPEED, LOTTIE_MAX_SPEED]) {
+      const node: PaywallNode = { type: "lottie", id: "l1", url: { light: "u" }, speed };
+      const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+      expect(issues.map((i) => i.code)).not.toContain("LOTTIE_SPEED_OUT_OF_RANGE");
+    }
+  });
+
+  it("does NOT raise LOTTIE_SPEED_OUT_OF_RANGE when speed is absent (defaults to LOTTIE_DEFAULT_SPEED)", () => {
+    const node: PaywallNode = { type: "lottie", id: "l1", url: { light: "u" } };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("LOTTIE_SPEED_OUT_OF_RANGE");
+  });
+});
+
+describe("LOCALIZED_KEYS for video and lottie", () => {
+  it("contribute nothing of their own", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "video", id: "v1", url: { light: "u" } },
+          { type: "lottie", id: "l1", url: { light: "u" } },
+        ],
+      },
+    });
+    const usages = collectLocalizationUsages(config.root);
+    expect(usages.some((u) => u.nodeId === "v1" || u.nodeId === "l1")).toBe(false);
   });
 });
