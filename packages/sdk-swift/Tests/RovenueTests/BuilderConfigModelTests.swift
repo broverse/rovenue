@@ -372,6 +372,19 @@ final class BuilderConfigModelTests: XCTestCase {
             "cta.buy")
     }
 
+    /// Empty-string `trialLabelKey` is explicitly NOT a trial label, even
+    /// with a live trial selection — mirroring the TS truthiness check
+    /// (`node.trialLabelKey && hasIntroPeriod`), where an empty string is
+    /// falsy. Not represented in the shared fixture, so pinned directly
+    /// here, same as `testEmptyIntroPeriodIsNotATrial`.
+    func testEmptyTrialLabelKeyIsNotATrialLabel() {
+        let selectedView = PackageView(
+            packageName: "", price: "", pricePerPeriod: "", period: "", introPeriod: "1 week")
+        XCTAssertEqual(
+            ctaLabelKey(labelKey: "cta.buy", trialLabelKey: "", selectedView: selectedView),
+            "cta.buy")
+    }
+
     /// Decode-retention: `trialLabelKey` present on the wire is retained on
     /// `PurchaseButtonProps`; absent decodes to `nil`.
     func testPurchaseButtonTrialLabelKeyDecodeRetention() throws {

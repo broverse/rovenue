@@ -588,6 +588,20 @@ class BuilderConfigModelTest {
     }
 
     /**
+     * Empty-string `trialLabelKey` is explicitly NOT a trial label, even
+     * with a live trial selection — mirroring the TS truthiness check
+     * (`node.trialLabelKey && hasIntroPeriod`), where an empty string is
+     * falsy. Not represented in the shared fixture, so pinned directly
+     * here, same as `empty-string introPeriod is not a trial`.
+     */
+    @Test
+    fun `empty-string trialLabelKey is not a trial label`() {
+        val selectedView =
+            PackageView(packageName = "", price = "", pricePerPeriod = "", period = "", introPeriod = "1 week")
+        assertEquals("cta.buy", ctaLabelKey("cta.buy", "", selectedView))
+    }
+
+    /**
      * Decode-retention: `trialLabelKey` present on the wire is retained on
      * [BuilderNode.PurchaseButton]; absent decodes to `null`.
      */

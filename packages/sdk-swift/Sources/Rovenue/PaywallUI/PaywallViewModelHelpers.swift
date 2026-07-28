@@ -102,9 +102,14 @@ private func variableValue(named name: String, in pkg: PackageView) -> String? {
 /// check (`selected.introPeriod !== ""`) — `PackageView.introPeriod` being
 /// `String?` rather than TS's `string | undefined` makes the nil check do
 /// double duty here, but the empty-string branch still needs its own guard.
+/// The same TS truthiness mirror now covers `trialLabelKey` itself too
+/// (`node.trialLabelKey && hasIntroPeriod`): an empty-string `trialLabelKey`
+/// is falsy in TS and falls through to `labelKey`, so it must here as well.
 /// Mirrors variables.ts's `resolveCtaLabelKey`.
 public func ctaLabelKey(labelKey: String, trialLabelKey: String?, selectedView: PackageView?) -> String {
-    guard let trialLabelKey, let introPeriod = selectedView?.introPeriod, !introPeriod.isEmpty else {
+    guard let trialLabelKey, !trialLabelKey.isEmpty,
+          let introPeriod = selectedView?.introPeriod, !introPeriod.isEmpty
+    else {
         return labelKey
     }
     return trialLabelKey
