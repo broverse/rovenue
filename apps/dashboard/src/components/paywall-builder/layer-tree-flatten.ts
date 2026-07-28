@@ -1,9 +1,13 @@
 import type { PaywallNode, StackNode } from "@rovenue/shared/paywall";
+import { isContainerNode } from "./tree-ops";
 
 // =============================================================
 // Pure flattening of a builder-config node tree into indented rows
-// for the layer tree panel. Walks stack children AND (Phase D2)
-// `packageList.cellTemplate` subtrees — matches tree-ops'
+// for the layer tree panel. Walks CONTAINER children — stack,
+// carousel and stickyFooter, per tree-ops' `isContainerNode`, which
+// is imported rather than re-spelt so a new container type can never
+// be addressable by insert/remove/move yet invisible in the panel —
+// AND (Phase D2) `packageList.cellTemplate` subtrees — matches tree-ops'
 // addressability model for everything EXCEPT the cellTemplate root
 // itself: a node reachable solely via a `fallback` slot, or a
 // cellTemplate root's own single-slot position on its packageList,
@@ -44,7 +48,7 @@ export function flattenTree(root: StackNode): FlatTreeRow[] {
     isCellTemplateRoot: boolean,
   ) {
     rows.push({ node, depth, parentId, index, siblingCount, isCellTemplateRoot });
-    if (node.type === "stack") {
+    if (isContainerNode(node)) {
       node.children.forEach((child, i) =>
         walk(child, depth + 1, node.id, i, node.children.length, false),
       );

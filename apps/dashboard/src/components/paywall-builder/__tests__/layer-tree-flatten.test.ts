@@ -71,6 +71,70 @@ describe("flattenTree", () => {
 });
 
 // =============================================================
+// Container branch (Wave D1) — `flattenTree` used to recurse only
+// into `stack`, so a carousel's pages and a sticky footer's children
+// were invisible in the layer panel even though tree-ops could
+// insert/move/remove them. These are the unit-level companions to
+// layer-tree.test.tsx, which asserts the same thing through the DOM.
+// =============================================================
+
+// Fixture tree:
+// root (stack v)
+//   car1 (carousel)
+//     page_a (image)
+//     page_b (image)
+//   sf1 (stickyFooter)
+//     pb1 (purchaseButton)
+function containerFixture(): StackNode {
+  return {
+    type: "stack",
+    id: "root",
+    axis: "v",
+    children: [
+      {
+        type: "carousel",
+        id: "car1",
+        children: [
+          { type: "image", id: "page_a", url: { light: "https://x/a.png" } },
+          { type: "image", id: "page_b", url: { light: "https://x/b.png" } },
+        ],
+      },
+      {
+        type: "stickyFooter",
+        id: "sf1",
+        children: [{ type: "purchaseButton", id: "pb1", labelKey: "pb1_key" }],
+      },
+    ],
+  };
+}
+
+describe("flattenTree — carousel and stickyFooter containers", () => {
+  it("walks carousel pages and stickyFooter children, in document order", () => {
+    const rows = flattenTree(containerFixture());
+    expect(rows.map((r) => r.node.id)).toEqual(["root", "car1", "page_a", "page_b", "sf1", "pb1"]);
+  });
+
+  it("nests container children one level below their container", () => {
+    const rows = flattenTree(containerFixture());
+    const depthById = Object.fromEntries(rows.map((r) => [r.node.id, r.depth]));
+    expect(depthById).toEqual({ root: 0, car1: 1, page_a: 2, page_b: 2, sf1: 1, pb1: 2 });
+  });
+
+  it("addresses container children by parentId + index so move/delete apply", () => {
+    const rows = flattenTree(containerFixture());
+    const byId = Object.fromEntries(rows.map((r) => [r.node.id, r]));
+    expect(byId.page_a).toMatchObject({ parentId: "car1", index: 0, siblingCount: 2 });
+    expect(byId.page_b).toMatchObject({ parentId: "car1", index: 1, siblingCount: 2 });
+    expect(byId.pb1).toMatchObject({ parentId: "sf1", index: 0, siblingCount: 1 });
+  });
+
+  it("marks no container child as a cellTemplate root", () => {
+    const rows = flattenTree(containerFixture());
+    expect(rows.every((r) => r.isCellTemplateRoot === false)).toBe(true);
+  });
+});
+
+// =============================================================
 // cellTemplate branch (Phase D2) — unlike a `fallback` slot,
 // cellTemplate SHOULD show up in the layer tree, as a labeled
 // nested branch under its packageList, so the fixture below (and

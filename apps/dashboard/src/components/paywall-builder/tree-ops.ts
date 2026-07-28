@@ -63,8 +63,19 @@ export const COUNTDOWN_DEFAULT_DURATION_SECONDS = 900;
 // renderers did not surface it.
 // =============================================================
 
-/** Node types whose `children` array is addressable by the ops below. */
-function isContainerNode(node: PaywallNode): node is StackNode | CarouselNode | StickyFooterNode {
+/**
+ * Node types whose `children` array is addressable by the ops below.
+ *
+ * Exported because the LAYER TREE needs the same answer: `layer-tree.tsx`
+ * gates its "+ Add node" button on it and `layer-tree-flatten.ts` gates its
+ * recursion on it. Wave D1's first attempt taught the cost of a second list —
+ * the data layer here learned about carousel/stickyFooter while the UI kept
+ * its own `type === "stack"` literal, so `insertNode` worked and nothing at
+ * all changed on screen. One switch, imported everywhere; never re-spelt.
+ */
+export function isContainerNode(
+  node: PaywallNode,
+): node is StackNode | CarouselNode | StickyFooterNode {
   return node.type === "stack" || node.type === "carousel" || node.type === "stickyFooter";
 }
 

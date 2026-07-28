@@ -6,6 +6,7 @@ import { MAX_BUILDER_DEPTH, type PaywallNode } from "@rovenue/shared/paywall";
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { flattenTree } from "./layer-tree-flatten";
+import { isContainerNode } from "./tree-ops";
 import { NODE_ICON, NODE_TYPE_LABEL, nodeLocKey } from "./node-meta";
 import { AddNodePopover } from "./add-node-popover";
 
@@ -118,7 +119,12 @@ function LayerRow({
       </button>
 
       <div className="flex flex-shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
-        {node.type === "stack" && (
+        {/* Every container type gets the affordance, not just `stack` —
+            `isContainerNode` is tree-ops' single switch, so this button is
+            offered exactly where `vm.addNode` can actually insert. A
+            stickyFooter with no way to hold a purchase button, and a
+            carousel with no way to hold a page, were the C2 finding. */}
+        {isContainerNode(node) && (
           <div className="relative">
             <button
               type="button"
