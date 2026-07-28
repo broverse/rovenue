@@ -517,8 +517,15 @@ function renderDivider(node: DividerNode, ctx: RenderCtx): ReactElement {
 }
 
 /** `node.name` is a free string (see IconNode) — an unknown name resolves to
- * `undefined` in ICON_COMPONENT and renders the empty wrapper span, never a
- * thrown error. That fail-open behavior is the contract, not a fallback path.
+ * `undefined` in ICON_COMPONENT and renders NOTHING AT ALL, never a thrown
+ * error. That fail-open behavior is the contract, not a fallback path.
+ *
+ * "Nothing at all" means `null`, not an empty wrapper span: `renderNode`'s
+ * null return is this renderer's single "this node drew nothing" signal, and
+ * a carousel reads it to decide whether a page exists (see `carouselPages`).
+ * An empty-but-present span would make an unknown icon a real, swipeable,
+ * blank page with a dot beside it. Matches Android's `buildIcon`, which
+ * returns `null` the moment `drawableResFor` misses.
  *
  * `color` is intentionally NOT defaulted here (unlike divider/text): an
  * uncoloured icon inherits the ambient text colour via CSS `currentColor` —
@@ -526,12 +533,13 @@ function renderDivider(node: DividerNode, ctx: RenderCtx): ReactElement {
  * Lucide icons treat an undefined `color` prop as `currentColor`. An icon in
  * a feature row should match the colour of the text beside it, mirroring
  * SwiftUI's `nil` -> `.foregroundColor` behaviour. */
-function renderIcon(node: IconNode, ctx: RenderCtx): ReactElement {
+function renderIcon(node: IconNode, ctx: RenderCtx): ReactElement | null {
   const Cmp = ICON_COMPONENT[node.name];
+  if (!Cmp) return null;
   const size = node.size ?? ICON_DEFAULT_SIZE;
   return (
     <span data-rov-node={node.id} style={{ display: "inline-flex", flexShrink: 0 }}>
-      {Cmp ? <Cmp size={size} color={resolveThemeColor(node.color, ctx.colorScheme)} /> : null}
+      <Cmp size={size} color={resolveThemeColor(node.color, ctx.colorScheme)} />
     </span>
   );
 }
@@ -728,15 +736,39 @@ function formatCountdown(remainingMs: number): string {
  */
 function useCountdownDeadline(node: CountdownNode, ctx: RenderCtx): number | null {
   const [mountedAt] = useState(() => ctx.now.getTime());
-  const firstShownAt = ctx.firstShownAt?.getTime() ?? mountedAt;
+  return countdownDeadlineMs(node, ctx.firstShownAt?.getTime() ?? mountedAt);
+}
+
+/** The pure half of `useCountdownDeadline`: everything above minus the mount-
+ * time anchor, which is the only part that needs a hook. Split out so
+ * `countdownHasDeadline` can ask the SAME branch structure whether a deadline
+ * exists at all, from outside a component — one set of null branches, not two
+ * that can drift. */
+function countdownDeadlineMs(node: CountdownNode, firstShownAtMs: number): number | null {
   if (node.endsAt !== undefined) {
     const endsAtMs = new Date(node.endsAt).getTime();
     return Number.isNaN(endsAtMs) ? null : endsAtMs;
   }
   if (node.durationSeconds !== undefined) {
-    return firstShownAt + node.durationSeconds * COUNTDOWN_MS_PER_SECOND;
+    return firstShownAtMs + node.durationSeconds * COUNTDOWN_MS_PER_SECOND;
   }
   return null;
+}
+
+/** Any anchor at all answers "is there a deadline?": `countdownDeadlineMs`
+ * returns null on the `endsAt`-unparsable and neither-field branches, both of
+ * which ignore the anchor entirely, and returns non-null on the
+ * `durationSeconds` branch for EVERY anchor. The epoch is used to make that
+ * independence explicit rather than smuggling in a plausible-looking clock
+ * read that would suggest the answer depends on it. */
+const COUNTDOWN_ANCHOR_PROBE_MS = 0;
+
+/** Whether this countdown can resolve a deadline at all — the anchor-free
+ * question `renderNode` has to answer BEFORE mounting the component, since a
+ * countdown with no deadline draws nothing and a carousel must not give it a
+ * page (mirrors Android's `buildCountdown` returning null). */
+function countdownHasDeadline(node: CountdownNode): boolean {
+  return countdownDeadlineMs(node, COUNTDOWN_ANCHOR_PROBE_MS) !== null;
 }
 
 /** True when the countdown may keep a live interval: only while the
@@ -819,6 +851,10 @@ function Countdown({ node, ctx }: { node: CountdownNode; ctx: RenderCtx }): Reac
     return () => observer.disconnect();
   }, [element]);
 
+  // Unreachable in practice — `renderNode` runs `countdownHasDeadline` before
+  // it ever mounts this component, and the two share `countdownDeadlineMs`'s
+  // branches. Kept as the null-narrowing this render needs anyway, and as the
+  // same fail-to-fallback contract every other node type carries.
   if (deadline === null || remainingMs === null) return renderFallbackOrNull(node, ctx);
 
   const onExpiry = node.onExpiry ?? COUNTDOWN_DEFAULT_ON_EXPIRY;
@@ -859,6 +895,24 @@ function pageFromScrollLeft(track: HTMLElement, pageCount: number): number {
 }
 
 /**
+ * A carousel's renderable pages: every child that actually draws something,
+ * in order. `renderNode` returning null IS the "drew nothing" signal — the
+ * same one Android's `build(): View?` returns and `buildCarousel` filters on
+ * with `mapNotNull` — so this needs no per-node-type knowledge and cannot
+ * drift from what the individual renderers decide. Elements are built here,
+ * in the PARENT's render pass, which is where React builds children anyway;
+ * `Carousel` receives them ready-made.
+ */
+function carouselPages(node: CarouselNode, ctx: RenderCtx): ReactElement[] {
+  const pages: ReactElement[] = [];
+  for (const child of node.children) {
+    const page = renderNode(child, ctx);
+    if (page !== null) pages.push(page);
+  }
+  return pages;
+}
+
+/**
  * A carousel's pages, paged with CSS scroll-snap (spec §3.1) — the track
  * opts into `scroll-snap-type: x mandatory`, each page into
  * `scroll-snap-align: center`, and the BROWSER owns the animation; this
@@ -885,19 +939,27 @@ function pageFromScrollLeft(track: HTMLElement, pageCount: number): number {
  * and computes exactly one step from it, never a count of its own that could
  * drift or double-fire.
  *
- * A page hidden by its own `visibility` rule is DROPPED, not rendered blank
- * (spec §3, C3): the cross-platform contract this wave settled on is
- * Android's original behaviour — a blank page plus a phantom dot is
- * indefensible from the reader's side, since they swipe to an empty screen
- * and the dots lie about how much content exists. `pages` below is filtered
- * once, up front, and every downstream count (page slots, dots, the
- * loop/stop math) is derived from that filtered list, never from
- * `node.children.length` — so a hidden middle page shortens the carousel
- * instead of leaving a gap, and "every page hidden" collapses to the empty
+ * A page that renders NOTHING is dropped, not rendered blank (spec §3, C3):
+ * the cross-platform contract this wave settled on is Android's behaviour —
+ * a blank page plus a phantom dot is indefensible from the reader's side,
+ * since they swipe to an empty screen and the dots lie about how much
+ * content exists, and that lie is identical whether the page was hidden by a
+ * `visibility` rule or simply had nothing to draw (an unknown node type with
+ * no `fallback`, a restore button with no handler, an unknown icon name, a
+ * countdown with no deadline, a nested empty carousel). `carouselPages`
+ * decides that once, up front, by the one signal that already answers it —
+ * `renderNode` returning null — and every downstream count (page slots, dots,
+ * the loop/stop math) is derived from that filtered list, never from
+ * `node.children.length`. So an empty middle page shortens the carousel
+ * instead of leaving a gap, and "every page empty" collapses to the empty
  * case (`fallback`, else nothing) exactly like an authored-empty carousel.
+ *
+ * The filtering happens in `renderNode` rather than here because the empty
+ * carousel must resolve to `fallback` WITHOUT this component mounting — a
+ * component that returns null after its hooks still counts as a rendered
+ * page to ITS parent carousel, which is precisely the nesting case above.
  */
-function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactElement | null {
-  const pages = node.children.filter((child) => isNodeVisible(child.visibility, ctx));
+function Carousel({ node, ctx, pages }: { node: CarouselNode; ctx: RenderCtx; pages: ReactElement[] }): ReactElement {
   const pageCount = pages.length;
   const showsIndicator = node.showsIndicator ?? CAROUSEL_DEFAULT_SHOWS_INDICATOR;
   const loop = node.loop ?? CAROUSEL_DEFAULT_LOOP;
@@ -974,13 +1036,6 @@ function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactE
     return () => observer.disconnect();
   }, [element]);
 
-  // No RENDERABLE pages — either authored empty, or every child hidden by
-  // `visibility` (C3) — cannot render — `CAROUSEL_EMPTY` flags the authored
-  // case at publish time, but the renderer's own contract is the same as
-  // every other node type: fail to `fallback`, never throw. Placed after
-  // every hook above so the hook call order never depends on `pageCount`.
-  if (pageCount === 0) return renderFallbackOrNull(node, ctx);
-
   const handleScroll = () => {
     if (track === null) return;
     setCurrentPage(pageFromScrollLeft(track, pageCount));
@@ -1016,13 +1071,13 @@ function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactE
           scrollSnapType: CAROUSEL_TRACK_SCROLL_SNAP_TYPE,
         }}
       >
-        {pages.map((child, index) => (
+        {pages.map((page, index) => (
           <div
             key={index}
             data-rov-carousel-page=""
             style={{ flex: `0 0 ${CAROUSEL_PAGE_FLEX_BASIS}`, scrollSnapAlign: CAROUSEL_PAGE_SCROLL_SNAP_ALIGN }}
           >
-            {renderNode(child, ctx)}
+            {page}
           </div>
         ))}
       </div>
@@ -1103,10 +1158,19 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         return renderSocialProof(resolved, ctx);
       case "stickyFooter":
         return renderStickyFooter(resolved, ctx);
+      // Both of the stateful node types answer "do I draw anything?" HERE,
+      // before their component exists, so that a null answer becomes
+      // `renderNode` returning null — the one signal a parent carousel reads
+      // to decide a page exists. A component that mounts its hooks and then
+      // returns null is, to its parent, still a page.
       case "countdown":
+        if (!countdownHasDeadline(resolved)) return renderFallbackOrNull(resolved, ctx);
         return <Countdown node={resolved} ctx={ctx} />;
-      case "carousel":
-        return <Carousel node={resolved} ctx={ctx} />;
+      case "carousel": {
+        const pages = carouselPages(resolved, ctx);
+        if (pages.length === 0) return renderFallbackOrNull(resolved, ctx);
+        return <Carousel node={resolved} ctx={ctx} pages={pages} />;
+      }
       default:
         return renderFallbackOrNull(resolved, ctx);
     }

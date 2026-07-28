@@ -2100,6 +2100,49 @@ describe("carousel node", () => {
     expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(0);
   });
 
+  /** The four ways a page can draw nothing WITHOUT being hidden by a
+   *  `visibility` rule — the half of the empty-page rule that web and iOS
+   *  were missing and Android already had. Each is a page whose renderer
+   *  legitimately produces no content: an undecodable node type with nowhere
+   *  to fall back to, an icon name this build's registry does not know, a
+   *  countdown carrying neither `endsAt` nor `durationSeconds`, and a nested
+   *  carousel with no pages of its own. */
+  const emptyPages: PaywallNode[] = [
+    { type: "totally-unknown", id: "unknownPage" } as unknown as PaywallNode,
+    { type: "icon", id: "unknownIconPage", name: "definitely-not-a-registry-icon" },
+    { type: "countdown", id: "deadlinelessPage" },
+    { type: "carousel", id: "nestedEmptyPage", children: [] },
+  ];
+
+  it("drops a page that renders nothing at all — no blank page, no phantom dot (C3)", () => {
+    // Android's rule, which web now matches: the drop is keyed on "this page
+    // produced no content", not on "this page was hidden by `visibility`".
+    // Six authored pages, four of which draw nothing; two renderable.
+    const config = carouselWith(pageA, ...emptyPages, pageB);
+    const { container } = renderPaywall(config);
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(2);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(2);
+    // ...and the two survivors are the two real ones, in order — a count
+    // alone would pass even if the wrong pair survived.
+    expect(container.textContent).toContain("pageA");
+    expect(container.textContent).toContain("pageB");
+  });
+
+  it("renders the carousel's fallback when every page renders nothing (C3)", () => {
+    const config = carouselWith(...emptyPages, { fallback: textNode("nope") });
+    const { container } = renderPaywall(config);
+    expect(container.textContent).toContain("nope");
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(0);
+  });
+
+  it("renders nothing at all when every page renders nothing and there is no fallback (C3)", () => {
+    const { container } = renderPaywall(carouselWith(...emptyPages));
+    expect(container.querySelector("[data-rov-carousel-track]")).toBeNull();
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(0);
+  });
+
   it("does not crash on a single-page carousel, and draws no indicator (I2)", () => {
     // Web used to be the outlier here, drawing one lone dot where both
     // natives draw none (iOS `.automatic`, Android `pageCount > 1`) — this
