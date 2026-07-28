@@ -1571,6 +1571,7 @@
           "checklistBPublished": "Variant B is published",
           "checklistPlacement": "Attached to a placement",
           "start": "Start experiment",
+          "startError": "Couldn't start the experiment. Try again.",
           "viewLink": "View experiment",
           "darkPlacementWarning": "This experiment completed without a winner and a placement row still targets it — that row won't serve until you repoint it."
         }

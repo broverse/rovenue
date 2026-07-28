@@ -359,6 +359,15 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                     </Link>
                   </div>
 
+                  {startExperiment.isError && (
+                    <p className="text-[12px] text-rv-danger">
+                      {t(
+                        "paywalls.builder.experiment.status.startError",
+                        "Couldn't start the experiment. Try again.",
+                      )}
+                    </p>
+                  )}
+
                   {justCreated?.createdPaywallId && (
                     <Link
                       to="/projects/$projectId/paywalls/$paywallId/builder"

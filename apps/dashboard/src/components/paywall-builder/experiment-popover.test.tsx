@@ -131,8 +131,12 @@ function placementsResult(rows: DashboardPlacementRow[]) {
   } as unknown as ReturnType<typeof useProjectPlacements>;
 }
 
-function startExperimentResult(mutate: (id: string) => void, isPending = false) {
-  return { mutate, isPending } as unknown as ReturnType<typeof useStartExperiment>;
+function startExperimentResult(
+  mutate: (id: string) => void,
+  isPending = false,
+  isError = false,
+) {
+  return { mutate, isPending, isError } as unknown as ReturnType<typeof useStartExperiment>;
 }
 
 function audiencesResult(rows: AudienceRow[]) {
@@ -392,6 +396,42 @@ describe("ExperimentPopover — status-panel branch", () => {
 
     fireEvent.click(startButton);
     expect(startMutate).toHaveBeenCalledWith("exp_1");
+  });
+
+  it("renders a start error line when useStartExperiment.isError is true", async () => {
+    mockedUseExperiments.mockReturnValue(experimentsResult([fakeExperiment({ status: "DRAFT" })]));
+    mockedUseStartExperiment.mockReturnValue(startExperimentResult(vi.fn(), false, true));
+    mockedUseProjectPlacements.mockReturnValue(
+      placementsResult([
+        fakePlacementRow({
+          rows: [{ audienceId: null, target: { type: "experiment", experimentId: "exp_1" } }],
+        }),
+      ]),
+    );
+
+    await renderPopover();
+
+    expect(
+      screen.getByText(/couldn't start the experiment\. try again\./i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no start error line when useStartExperiment.isError is false", async () => {
+    mockedUseExperiments.mockReturnValue(experimentsResult([fakeExperiment({ status: "DRAFT" })]));
+    mockedUseStartExperiment.mockReturnValue(startExperimentResult(vi.fn(), false, false));
+    mockedUseProjectPlacements.mockReturnValue(
+      placementsResult([
+        fakePlacementRow({
+          rows: [{ audienceId: null, target: { type: "experiment", experimentId: "exp_1" } }],
+        }),
+      ]),
+    );
+
+    await renderPopover();
+
+    expect(
+      screen.queryByText(/couldn't start the experiment\. try again\./i),
+    ).not.toBeInTheDocument();
   });
 });
 

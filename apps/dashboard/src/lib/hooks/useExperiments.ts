@@ -183,11 +183,17 @@ export function useStopExperiment() {
           ...(body ? { json: body } : { json: {} }),
         }),
       ),
-    onSuccess: (data) => {
+    onSuccess: (data, vars) => {
       qc.invalidateQueries({ queryKey: ["experiments"] });
       qc.invalidateQueries({ queryKey: ["experiment", data.experiment.id] });
       if (data.promotedFlag) {
         qc.invalidateQueries({ queryKey: ["feature-flags"] });
+      }
+      // Server rewrites placement rows to point at the winning variant's
+      // paywall when a winner is declared on stop — placements must
+      // refetch. A winnerless stop touches no placement rows.
+      if (vars.body?.winnerVariantId) {
+        qc.invalidateQueries({ queryKey: ["placements"] });
       }
     },
   });
