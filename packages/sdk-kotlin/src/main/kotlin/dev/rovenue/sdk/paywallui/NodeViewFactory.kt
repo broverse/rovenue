@@ -1,6 +1,7 @@
 package dev.rovenue.sdk.paywallui
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -1318,24 +1319,59 @@ private class TickingCountdownRow(
     }
 }
 
+/** Connect/read timeouts for [loadImageInto]'s [HttpURLConnection]. */
+private const val IMAGE_LOAD_CONNECT_TIMEOUT_MS = 10_000
+private const val IMAGE_LOAD_READ_TIMEOUT_MS = 10_000
+
+/**
+ * Process-wide bitmap cache shared by every [loadImageInto] call. Module
+ * level (not per-view) because [RovenuePaywallView] rebuilds its entire
+ * view tree on every state change (see its class doc-comment), so the
+ * same URL is decoded by a freshly-constructed [ImageView] on every
+ * package tap — this is what turns that rebuild back into a map lookup.
+ */
+private val imageCache = BitmapLruCache<Bitmap>()
+
 /**
  * Minimal, dependency-free image loader (HttpURLConnection + BitmapFactory
  * — explicitly NO Coil per the Phase-C spec's non-goals). Runs on
  * [scope]'s dispatcher; lifecycle-safe because [scope] is cancelled by
  * [RovenuePaywallView] on detach, which cancels this coroutine before it
  * ever touches the (possibly-recycled) [imageView].
+ *
+ * Cache-hit path returns synchronously without launching a coroutine at
+ * all: the caller is a full-tree rebuild on every state change, so the
+ * common case (image already fetched) must cost nothing more than a map
+ * lookup, not a dispatcher hop.
  */
 internal fun loadImageInto(imageView: ImageView, url: String, scope: CoroutineScope) {
+    val cached = imageCache.get(url)
+    if (cached != null) {
+        imageView.setImageBitmap(cached)
+        return
+    }
     scope.launch(Dispatchers.IO) {
         val bitmap = runCatching {
             val connection = URL(url).openConnection() as HttpURLConnection
-            connection.connectTimeout = 10_000
-            connection.readTimeout = 10_000
+            connection.connectTimeout = IMAGE_LOAD_CONNECT_TIMEOUT_MS
+            connection.readTimeout = IMAGE_LOAD_READ_TIMEOUT_MS
             connection.doInput = true
             connection.connect()
-            connection.inputStream.use { BitmapFactory.decodeStream(it) }
+            val bytes = connection.inputStream.use { it.readBytes() }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = sampleSizeFor(
+                    sourceWidth = bounds.outWidth,
+                    sourceHeight = bounds.outHeight,
+                    targetWidth = imageView.width,
+                    targetHeight = imageView.height,
+                )
+            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
         }.getOrNull()
         if (bitmap != null) {
+            imageCache.put(url, bitmap)
             withContext(Dispatchers.Main) {
                 if (isActive) imageView.setImageBitmap(bitmap)
             }
