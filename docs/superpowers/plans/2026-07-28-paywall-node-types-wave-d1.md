@@ -267,7 +267,7 @@ fun `evicts the least recently used entry past the bound`() {
 fun `sampleSizeFor halves until the source fits the target`() {
     assertEquals(1, sampleSizeFor(100, 100, 100, 100))
     assertEquals(2, sampleSizeFor(200, 200, 100, 100))
-    assertEquals(4, sampleSizeFor(800, 800, 100, 100))
+    assertEquals(8, sampleSizeFor(800, 800, 100, 100))   // 800/8 = 100: the largest power of two that still COVERS the target
 }
 
 @Test
@@ -289,7 +289,9 @@ package dev.rovenue.sdk.paywallui
 /** Bound on the in-memory bitmap cache. Paywalls are small trees with a
  *  handful of distinct images; this is sized to hold a whole paywall's
  *  worth several times over without becoming a memory footprint of its
- *  own. Mirrors IMAGE_CACHE_MAX_ENTRIES in schema.ts. */
+ *  own. Android-only: the web and SwiftUI image paths get caching from
+ *  the browser and URLSession respectively, so there is deliberately no
+ *  shared-schema counterpart to mirror. */
 internal const val IMAGE_CACHE_MAX_ENTRIES = 32
 
 /**
