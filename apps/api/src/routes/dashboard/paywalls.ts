@@ -35,7 +35,7 @@ import { audit, extractRequestContext } from "../../lib/audit";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { packagesSchema } from "../../lib/offering-hydration";
 import { resolvePlacement, type ResolvedPlacementData } from "../../lib/placement-resolution";
-import { ok } from "../../lib/response";
+import { fail, ok } from "../../lib/response";
 import {
   createExperimentValidated,
   findOrCreateEveryoneAudience,
@@ -365,7 +365,19 @@ export const paywallsDashboardRoute = new Hono()
         listing = await fetchAppStoreListing(parsedUrl);
       } catch (err) {
         if (err instanceof AppStoreLookupError) {
-          throw new HTTPException(422, { message: err.code });
+          // Typed envelope code, not a generic HTTPException: the
+          // errorHandler maps unknown statuses to HTTP_ERROR, which
+          // would bury the code in `message` (STORE_API_ERROR
+          // precedent — see subscriptions.ts's fail() usage).
+          return c.json(
+            fail(
+              err.code,
+              err.code === "APP_NOT_FOUND"
+                ? "No app found for that App Store link"
+                : "App Store lookup failed — try again",
+            ),
+            422,
+          );
         }
         throw err;
       }

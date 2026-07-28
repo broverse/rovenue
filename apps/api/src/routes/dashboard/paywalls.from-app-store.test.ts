@@ -93,7 +93,10 @@ describe("POST /paywalls/from-app-store", () => {
     fetchAppStoreListing.mockRejectedValue(new AppStoreLookupError("APP_NOT_FOUND"));
     const res = await post("https://apps.apple.com/tr/app/super-app/id123");
     expect(res.status).toBe(422);
-    expect(JSON.stringify(await res.json())).toContain("APP_NOT_FOUND");
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    // The typed code must land in error.CODE — a generic HTTPException
+    // would bury it in message under HTTP_ERROR (review round 1 finding).
+    expect(body.error.code).toBe("APP_NOT_FOUND");
   });
 
   it("gates on project access before fetching", async () => {
