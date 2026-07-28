@@ -114,9 +114,21 @@ export function createApp() {
     .route("/api/auth", authRoute)
     .route("/billing", billingRoute)
     .route("/webhooks", webhooksRoute)
+    // paywallPreviewRoute MUST be registered before `.route("/v1", v1Route)`
+    // below. Hono composes middleware across sub-apps in REGISTRATION
+    // order, not by mount-path specificity: v1Route's `.use("*",
+    // apiKeyAuth("any"))` becomes a `/v1/*` wildcard in the parent
+    // router, and it would shadow this route's exact
+    // `/v1/preview/paywalls/:token` path (throwing 401 before the
+    // handler ever runs) if v1Route were registered first — verified
+    // empirically against the installed hono version. Registering the
+    // exact-path route first means it's matched (and terminates,
+    // without calling `next()`) before the wildcard auth is ever
+    // reached. This does not affect any other /v1/* path: only this
+    // route's own exact path is registered ahead of the wildcard.
+    .route("/", paywallPreviewRoute)
     .route("/v1", v1Route)
     .route("/", configStreamRoute)
-    .route("/", paywallPreviewRoute)
     .route("/invitations", publicInvitationsRoute)
     .route("/unsubscribe", publicUnsubscribeRoute)
     .route("/public", publicFunnelsRoute)
