@@ -199,7 +199,12 @@ final class BuilderConfigModelTests: XCTestCase {
         guard case .unknown(let id, _, let fallback) = root.children[0] else {
             return XCTFail("expected root.children[0] to decode as .unknown")
         }
-        XCTAssertEqual(id, "vid_1")
+        // The fixture's placeholder node was renamed in wave D2: it used the
+        // literal type string "video" as its "unknown type" stand-in, which
+        // stopped being unknown the moment `video` became a real schema
+        // member. Its id moved with it, vid_1 -> unk_1. A placeholder must be
+        // a name that can never become real, or the next wave arms it.
+        XCTAssertEqual(id, "unk_1")
         XCTAssertNil(fallback)
     }
 
