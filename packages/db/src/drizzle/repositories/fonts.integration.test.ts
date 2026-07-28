@@ -26,14 +26,23 @@ import { projects } from "../schema";
 
 const RUN_ID = Date.now();
 const PROJECT_ID = `prj_fonts_${RUN_ID}`;
+// Task 3 review, fix round 2: a second project, used only to prove
+// findLiveFamilyForProject actually excludes a family it doesn't own —
+// a family row needs a real projects.id to satisfy the FK, so "another
+// project" can't be faked with an arbitrary string.
+const OTHER_PROJECT_ID = `prj_fonts_other_${RUN_ID}`;
 const db = getDb();
 
 beforeAll(async () => {
   await db.insert(projects).values({ id: PROJECT_ID, name: `Fonts ${RUN_ID}` });
+  await db
+    .insert(projects)
+    .values({ id: OTHER_PROJECT_ID, name: `Fonts Other ${RUN_ID}` });
 });
 
 afterAll(async () => {
   await db.delete(projects).where(eq(projects.id, PROJECT_ID));
+  await db.delete(projects).where(eq(projects.id, OTHER_PROJECT_ID));
 });
 
 describe("fontRepo", () => {
@@ -183,5 +192,50 @@ describe("fontRepo", () => {
       PROJECT_ID,
     );
     expect(afterDelete).toBe(before);
+  });
+
+  // Task 3 review, fix round 2, item 1: the dashboard upload route's
+  // familyId ownership/liveness check used to be an inline query in
+  // the route file, pinned by nothing but a mock that ignored its
+  // WHERE clause entirely. It now lives here as
+  // findLiveFamilyForProject, and every predicate in it gets its own
+  // case against a real database.
+  describe("findLiveFamilyForProject", () => {
+    it("finds a family the project owns and that is not deleted", async () => {
+      const family = await drizzleRepos.fontRepo.createFamily(db, {
+        projectId: PROJECT_ID,
+        name: "Live Family",
+      });
+      const found = await drizzleRepos.fontRepo.findLiveFamilyForProject(db, {
+        projectId: PROJECT_ID,
+        familyId: family.id,
+      });
+      expect(found?.id).toBe(family.id);
+    });
+
+    it("does not find a family belonging to another project", async () => {
+      const family = await drizzleRepos.fontRepo.createFamily(db, {
+        projectId: OTHER_PROJECT_ID,
+        name: "Foreign Family",
+      });
+      const found = await drizzleRepos.fontRepo.findLiveFamilyForProject(db, {
+        projectId: PROJECT_ID,
+        familyId: family.id,
+      });
+      expect(found).toBeNull();
+    });
+
+    it("does not find a soft-deleted family, even one this project owns", async () => {
+      const family = await drizzleRepos.fontRepo.createFamily(db, {
+        projectId: PROJECT_ID,
+        name: "Deleted Family",
+      });
+      await drizzleRepos.fontRepo.softDeleteFamily(db, family.id);
+      const found = await drizzleRepos.fontRepo.findLiveFamilyForProject(db, {
+        projectId: PROJECT_ID,
+        familyId: family.id,
+      });
+      expect(found).toBeNull();
+    });
   });
 });

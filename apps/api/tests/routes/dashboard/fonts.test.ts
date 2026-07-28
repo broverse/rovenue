@@ -14,16 +14,20 @@ import { FONT_FACE_MAX_BYTES, FONT_FACES_MAX_PER_PROJECT } from "@rovenue/shared
 // the fourth test is that real magic-byte sniffing overrides the
 // filename, so it must not be stubbed.
 //
-// `drizzle.db.select` is mocked too (fix round 1): the route now runs
-// two inline `.select().from(table).where(...).limit(1)` queries (the
-// familyId ownership/liveness check, and the existing-face lookup
-// that backs the quota-skip-on-update fix) that would otherwise hit
-// the real DB. The mock below dispatches on which table object was
-// passed to `.from(...)` and returns whatever rows the current test
-// configured via `selectFamiliesResult` / `selectFacesResult` — it
-// does not re-verify the WHERE clause itself (that the query actually
-// filters by projectId/deletedAt is Drizzle query-builder correctness,
-// not route logic; see Task 1's real-Postgres coverage for that).
+// `drizzle.fontRepo.findLiveFamilyForProject` is mocked directly (fix
+// round 2): the familyId ownership/liveness check moved out of this
+// route and into fontRepo, where it now has real-Postgres coverage of
+// every predicate (packages/db/src/drizzle/repositories/
+// fonts.integration.test.ts). Mocking it here means these route tests
+// pin the route's *reaction* to found/not-found (status, error code,
+// whether upsertFace/createFamily get called), not the query itself —
+// that split is deliberate, not a gap.
+//
+// `drizzle.db.select` is still mocked, but now only backs the one
+// remaining inline query: the existing-face lookup that backs the
+// quota-skip-on-update fix. That query's shape (not its WHERE clause)
+// is an accepted, documented deferred minor — see the task report,
+// "still not to be fixed" in fix round 2.
 // =============================================================
 
 const assertProjectCapability = vi.hoisted(() => vi.fn());
@@ -51,14 +55,12 @@ vi.mock("../../../src/lib/audit", async (importOriginal) => ({
 const countFacesForProject = vi.hoisted(() => vi.fn());
 const createFamily = vi.hoisted(() => vi.fn());
 const upsertFace = vi.hoisted(() => vi.fn());
+const findLiveFamilyForProject = vi.hoisted(() => vi.fn());
 const transaction = vi.hoisted(() => vi.fn());
-// Controllable result sets for the two inline `select` queries. Reset
-// to a "found" default in beforeEach; individual tests override to
-// simulate "not found" (foreign project / soft-deleted family) or "no
-// existing face at this weight/style" (a genuinely new face).
-const selectFamiliesResult = vi.hoisted(() => ({
-  rows: [] as Array<{ id: string }>,
-}));
+// Controllable result set for the one remaining inline `select` query
+// (the existing-face lookup). Reset to "no existing face" by default
+// in beforeEach; tests that need "this weight/style already exists"
+// override it explicitly.
 const selectFacesResult = vi.hoisted(() => ({
   rows: [] as Array<{ id: string }>,
 }));
@@ -66,14 +68,9 @@ const selectFacesResult = vi.hoisted(() => ({
 vi.mock("@rovenue/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rovenue/db")>();
   const select = () => ({
-    from: (table: unknown) => ({
+    from: () => ({
       where: () => ({
-        limit: () =>
-          Promise.resolve(
-            table === actual.drizzle.schema.fontFamilies
-              ? selectFamiliesResult.rows
-              : selectFacesResult.rows,
-          ),
+        limit: () => Promise.resolve(selectFacesResult.rows),
       }),
     }),
   });
@@ -86,6 +83,7 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         countFacesForProject,
         createFamily,
         upsertFace,
+        findLiveFamilyForProject,
       },
       db: { ...actual.drizzle.db, transaction, select },
     },
@@ -188,7 +186,9 @@ beforeEach(() => {
   // Default: a familyId, if one is supplied, resolves to a live family
   // with no existing face at the requested weight/style. Tests that
   // need the other branches override these explicitly.
-  selectFamiliesResult.rows = [{ id: "family-existing" }];
+  findLiveFamilyForProject
+    .mockReset()
+    .mockResolvedValue({ id: "family-existing" });
   selectFacesResult.rows = [];
 });
 
@@ -271,18 +271,23 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
   });
 
   // -----------------------------------------------------------
-  // familyId branch (fix round 1, review item 2): previously zero
-  // coverage. Both "not found" causes the ownership+liveness query
-  // ANDs together (foreign project, soft-deleted family) collapse to
-  // the same empty-result branch by construction, so both tests below
-  // configure the mock identically — they exist to pin the observable
-  // route behaviour (404 FONT_FAMILY_NOT_FOUND, upsertFace never
-  // called) for each real-world precondition the check exists to
-  // cover, not to re-verify the WHERE clause's SQL.
+  // familyId branch (fix round 1, review item 2; ownership/liveness
+  // query moved to fontRepo.findLiveFamilyForProject in fix round 2).
+  // From the route's point of view "foreign project" and "soft-deleted
+  // family" both surface as findLiveFamilyForProject resolving null —
+  // that collapse happens inside the (now real-Postgres-tested) repo
+  // function, not here, so both tests below mock it identically on
+  // purpose. What each predicate (projectId ownership, deletedAt)
+  // individually does is pinned against a live database in
+  // packages/db/src/drizzle/repositories/fonts.integration.test.ts's
+  // findLiveFamilyForProject suite, with its own mutation-checked
+  // evidence — these route tests exist to pin the route's *reaction*
+  // (404 FONT_FAMILY_NOT_FOUND, upsertFace never called), not the
+  // query.
   // -----------------------------------------------------------
 
   it("404s with FONT_FAMILY_NOT_FOUND when familyId belongs to another project", async () => {
-    selectFamiliesResult.rows = [];
+    findLiveFamilyForProject.mockResolvedValue(null);
     const res = await uploadFont({
       bytes: otfBytes(),
       familyId: "foreign-family",
@@ -295,7 +300,7 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
   });
 
   it("404s with FONT_FAMILY_NOT_FOUND when familyId's family is soft-deleted", async () => {
-    selectFamiliesResult.rows = [];
+    findLiveFamilyForProject.mockResolvedValue(null);
     const res = await uploadFont({
       bytes: otfBytes(),
       familyId: "deleted-family",
@@ -308,7 +313,7 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
   });
 
   it("attaches a face to an existing, owned, live family via familyId", async () => {
-    selectFamiliesResult.rows = [{ id: "family-existing" }];
+    findLiveFamilyForProject.mockResolvedValue({ id: "family-existing" });
     selectFacesResult.rows = [];
     const res = await uploadFont({
       bytes: otfBytes(),
@@ -338,7 +343,7 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
 
   it("allows re-uploading an existing (familyId, weight, style) even at the face cap", async () => {
     countFacesForProject.mockResolvedValue(FONT_FACES_MAX_PER_PROJECT);
-    selectFamiliesResult.rows = [{ id: "family-existing" }];
+    findLiveFamilyForProject.mockResolvedValue({ id: "family-existing" });
     selectFacesResult.rows = [{ id: "face-existing" }];
     const res = await uploadFont({
       bytes: otfBytes(),
@@ -355,7 +360,7 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
 
   it("still rejects a genuinely new (weight, style) at the face cap", async () => {
     countFacesForProject.mockResolvedValue(FONT_FACES_MAX_PER_PROJECT);
-    selectFamiliesResult.rows = [{ id: "family-existing" }];
+    findLiveFamilyForProject.mockResolvedValue({ id: "family-existing" });
     selectFacesResult.rows = [];
     const res = await uploadFont({
       bytes: otfBytes(),

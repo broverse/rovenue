@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import {
   ERROR_CODE,
@@ -154,18 +154,13 @@ export const fontsRoute = new Hono()
       if (familyId) {
         // upsertFace has no aliveness/ownership check of its own — verify
         // here so a deleted or foreign familyId is rejected loudly instead
-        // of silently attaching a face nothing will ever read back.
-        const [existingFamily] = await drizzle.db
-          .select({ id: drizzle.schema.fontFamilies.id })
-          .from(drizzle.schema.fontFamilies)
-          .where(
-            and(
-              eq(drizzle.schema.fontFamilies.id, familyId),
-              eq(drizzle.schema.fontFamilies.projectId, projectId),
-              isNull(drizzle.schema.fontFamilies.deletedAt),
-            ),
-          )
-          .limit(1);
+        // of silently attaching a face nothing will ever read back. This
+        // query lives in fontRepo (not inline here) so it can be pinned
+        // against a real database — see fix round 2 in the task report.
+        const existingFamily = await drizzle.fontRepo.findLiveFamilyForProject(
+          drizzle.db,
+          { projectId, familyId },
+        );
         if (!existingFamily) {
           return c.json(
             fail(

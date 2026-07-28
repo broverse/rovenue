@@ -174,3 +174,35 @@ export async function softDeleteFamily(db: Db, familyId: string): Promise<void> 
     .set({ deletedAt: new Date(), updatedAt: new Date() })
     .where(eq(fontFamilies.id, familyId));
 }
+
+export interface FindLiveFamilyForProjectInput {
+  projectId: string;
+  familyId: string;
+}
+
+/**
+ * Task 3 review, fix round 2: the dashboard upload route accepts a
+ * client-supplied `familyId` and must reject one that belongs to
+ * another project or has been soft-deleted — `upsertFace` has no such
+ * check of its own (Task 1 review finding #2). That query used to
+ * live inline in the route; it moved here so it can be pinned against
+ * a real database (see fonts.integration.test.ts) instead of a mock
+ * that could agree with either predicate being silently dropped.
+ */
+export async function findLiveFamilyForProject(
+  db: Db,
+  input: FindLiveFamilyForProjectInput,
+): Promise<{ id: string } | null> {
+  const [row] = await db
+    .select({ id: fontFamilies.id })
+    .from(fontFamilies)
+    .where(
+      and(
+        eq(fontFamilies.id, input.familyId),
+        eq(fontFamilies.projectId, input.projectId),
+        isNull(fontFamilies.deletedAt),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
