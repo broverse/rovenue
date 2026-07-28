@@ -10,8 +10,17 @@ import {
   iconRegistry,
   SOCIAL_PROOF_MAX_RATING,
 } from "@rovenue/shared/paywall";
-import type { BuilderConfig, CarouselNode, OverrideCondition, PackageView, PaywallNode } from "@rovenue/shared/paywall";
+import type {
+  BuilderConfig,
+  CarouselNode,
+  LottieNode,
+  OverrideCondition,
+  PackageView,
+  PaywallNode,
+  VideoNode,
+} from "@rovenue/shared/paywall";
 import { resolvePersistedFirstShownAt } from "./first-shown";
+import { registerLottieRenderer } from "./index";
 import { PaywallRenderer } from "./renderer";
 import { CAROUSEL_DOT_ACTIVE_OPACITY, CAROUSEL_DOT_INACTIVE_OPACITY } from "./styles";
 import type { RendererOffering } from "./types";
@@ -2366,5 +2375,159 @@ describe("useNodeVisible", () => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
     expect(result.current).toBe(false);
+  });
+});
+
+describe("video and lottie nodes", () => {
+  function textNode(key: string): PaywallNode {
+    return { type: "text", id: key, key, role: "body" };
+  }
+
+  /** Every text key referenced anywhere under `node` (including `fallback`),
+   *  mapped to itself — see the identical helper in the carousel block above
+   *  for the full rationale. */
+  function collectTextKeys(node: PaywallNode | undefined, into: Record<string, string>): void {
+    if (!node) return;
+    if (node.type === "text") into[node.key] = node.key;
+    if ("children" in node && Array.isArray(node.children)) {
+      for (const child of node.children) collectTextKeys(child, into);
+    }
+    collectTextKeys(node.fallback, into);
+  }
+
+  function configFor(node: PaywallNode): BuilderConfig {
+    const localizations: Record<string, string> = {};
+    collectTextKeys(node, localizations);
+    return {
+      formatVersion: 2,
+      defaultLocale: "en",
+      localizations: { en: localizations },
+      background: { light: "#ffffff", dark: "#000000" },
+      root: { type: "stack", id: "root", axis: "v", children: [node] },
+    };
+  }
+
+  function videoNode(options: Partial<Omit<VideoNode, "type" | "id">> & Pick<VideoNode, "url">): BuilderConfig {
+    return configFor({ type: "video", id: "video-1", ...options });
+  }
+
+  function lottieNode(options: Partial<Omit<LottieNode, "type" | "id">> & Pick<LottieNode, "url">): BuilderConfig {
+    return configFor({ type: "lottie", id: "lottie-1", ...options });
+  }
+
+  function renderPaywall(config: BuilderConfig) {
+    return render(<PaywallRenderer config={config} {...base} />);
+  }
+
+  // Module-level registration state (see `registerLottieRenderer`'s own doc
+  // comment) — reset after every test so a renderer registered by one test
+  // can never leak into the next.
+  afterEach(() => {
+    registerLottieRenderer(null);
+  });
+
+  it("renders a muted, looping, autoplaying video by default", () => {
+    const { container } = renderPaywall(videoNode({ url: { light: "u.mp4" } }));
+    const el = container.querySelector("video") as HTMLVideoElement;
+    expect(el.muted).toBe(true);
+    expect(el.loop).toBe(true);
+    expect(el.autoplay).toBe(true);
+    expect(el.controls).toBe(false);
+  });
+
+  it("uses posterUrl as the poster", () => {
+    const { container } = renderPaywall(
+      videoNode({ url: { light: "u.mp4" }, posterUrl: { light: "p.jpg" } }),
+    );
+    expect((container.querySelector("video") as HTMLVideoElement).poster).toContain("p.jpg");
+  });
+
+  it("sets no CSS aspect-ratio when aspectRatio is absent, letting the source's own dimensions govern", () => {
+    const { container } = renderPaywall(videoNode({ url: { light: "u.mp4" } }));
+    const el = container.querySelector("video") as HTMLVideoElement;
+    expect(el.style.aspectRatio).toBe("");
+  });
+
+  it("applies the configured aspect ratio as a CSS ratio", () => {
+    const { container } = renderPaywall(videoNode({ url: { light: "u.mp4" }, aspectRatio: 1.5 }));
+    const el = container.querySelector("video") as HTMLVideoElement;
+    expect(el.style.aspectRatio).toBe("1.5");
+  });
+
+  it("renders the video's fallback once its source errors", () => {
+    const { container } = renderPaywall(
+      videoNode({ url: { light: "u.mp4" }, fallback: textNode("no video") }),
+    );
+    const el = container.querySelector("video") as HTMLVideoElement;
+    fireEvent.error(el);
+    expect(container.querySelector("video")).toBeNull();
+    expect(container.textContent).toContain("no video");
+  });
+
+  it("renders nothing, not a broken element, when a fallback-less video errors", () => {
+    const { container } = renderPaywall(videoNode({ url: { light: "u.mp4" } }));
+    const el = container.querySelector("video") as HTMLVideoElement;
+    fireEvent.error(el);
+    expect(container.querySelector("video")).toBeNull();
+    expect(container.textContent).toBe("");
+  });
+
+  it("pauses via the element when it scrolls off screen and resumes when it returns", () => {
+    // Same stub shape the carousel block above uses for its own
+    // off-screen/on-screen test — `useNodeVisible` is the identical hook.
+    const observers: Array<{ emit(isIntersecting: boolean): void }> = [];
+    class StubIntersectionObserver {
+      #callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.#callback = callback;
+        observers.push(this);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      emit(isIntersecting: boolean) {
+        this.#callback([{ isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", StubIntersectionObserver);
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    try {
+      renderPaywall(videoNode({ url: { light: "u.mp4" } }));
+      const observer = observers[0]!;
+
+      act(() => observer.emit(false));
+      expect(pauseSpy).toHaveBeenCalled();
+
+      const pauseCallsBeforeReturn = pauseSpy.mock.calls.length;
+      act(() => observer.emit(true));
+      expect(playSpy).toHaveBeenCalled();
+      // Still paused exactly as many times as it was told to go off-screen —
+      // coming back on-screen must not pause it again.
+      expect(pauseSpy.mock.calls.length).toBe(pauseCallsBeforeReturn);
+    } finally {
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("renders a lottie node's fallback when no renderer is registered", () => {
+    registerLottieRenderer(null);
+    const { container } = renderPaywall(
+      lottieNode({ url: { light: "a.json" }, fallback: textNode("no lottie") }),
+    );
+    expect(container.textContent).toContain("no lottie");
+  });
+
+  it("hands a registered lottie renderer the resolved defaults", () => {
+    const seen: unknown[] = [];
+    registerLottieRenderer((props) => {
+      seen.push(props);
+      return null;
+    });
+    renderPaywall(lottieNode({ url: { light: "a.json" } }));
+    expect(seen[0]).toMatchObject({ url: "a.json", loop: true, autoplay: true, speed: 1 });
+    registerLottieRenderer(null);
   });
 });

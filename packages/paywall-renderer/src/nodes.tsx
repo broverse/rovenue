@@ -21,11 +21,18 @@ import {
   FEATURE_ROW_DEFAULT_ICON,
   FEATURE_ROW_DEFAULT_INCLUDED,
   FEATURE_ROW_EXCLUDED_ICON,
+  LOTTIE_DEFAULT_AUTOPLAY,
+  LOTTIE_DEFAULT_LOOP,
+  LOTTIE_DEFAULT_SPEED,
   SOCIAL_PROOF_MAX_RATING,
   SOCIAL_PROOF_STAR_DEFAULT_COLOR,
   STICKY_FOOTER_DEFAULT_BACKGROUND,
   TIMELINE_CONNECTOR_DEFAULT_COLOR,
   TIMELINE_ROW_DEFAULT_ICON,
+  VIDEO_DEFAULT_AUTOPLAY,
+  VIDEO_DEFAULT_LOOP,
+  VIDEO_DEFAULT_MUTED,
+  VIDEO_DEFAULT_SHOWS_CONTROLS,
   type BuilderConfig,
   type ButtonNode,
   type CarouselNode,
@@ -34,6 +41,7 @@ import {
   type FeatureListNode,
   type IconNode,
   type ImageNode,
+  type LottieNode,
   type PackageListNode,
   type PackageView,
   type PaywallNode,
@@ -44,6 +52,7 @@ import {
   type StickyFooterNode,
   type TextNode,
   type TimelineNode,
+  type VideoNode,
   type VisibilityPlatform,
 } from "@rovenue/shared/paywall";
 import type { RendererOffering } from "./types";
@@ -57,6 +66,7 @@ import {
   resolveThemeColor,
   resolveThemeUrl,
   stackContainerStyle,
+  videoStyle,
   Z_OVERLAY_CHILD_STYLE,
 } from "./styles";
 import { useNodeVisible } from "./visibility";
@@ -1063,6 +1073,123 @@ function Carousel({ node, ctx, pages }: { node: CarouselNode; ctx: RenderCtx; pa
   );
 }
 
+/**
+ * A video plays or pauses via ITS OWN ELEMENT (`play()`/`pause()`), never by
+ * remounting — a remount restarts playback from zero, a different and worse
+ * behaviour than "resume where it left off", and it would diverge from both
+ * the SwiftUI and Android-Views renderers that follow this one. `useNodeVisible`
+ * is the exact same on/off-screen signal `Countdown` and `Carousel` already
+ * consume (document visible AND intersecting the viewport) — this is the
+ * third and intentionally last copy of "when is this on screen" logic; the
+ * signal itself lives in one place (`visibility.ts`).
+ *
+ * Unlike `Countdown`/`Carousel`, whether this node draws anything is NOT
+ * decidable before mount: a countdown with no deadline or an empty carousel
+ * both know that synchronously, but whether a video's source will fail is
+ * only known once the browser tries to load it (`onerror`, asynchronous).
+ * So this component always mounts, and answers "did it fail?" from state
+ * instead of from `renderNode`'s pre-mount branch — `errored` flips the
+ * render from the `<video>` element to `fallback`/null, following the exact
+ * same "fail to fallback, else nothing" contract as every other node type.
+ */
+function Video({ node, ctx }: { node: VideoNode; ctx: RenderCtx }): ReactElement | null {
+  // Callback ref, not useRef: same reasoning as `Countdown`'s `element` — the
+  // observer effect inside `useNodeVisible` must re-run once the element
+  // actually exists.
+  const [element, setElement] = useState<HTMLVideoElement | null>(null);
+  const [errored, setErrored] = useState(false);
+  const visible = useNodeVisible(element);
+
+  useEffect(() => {
+    if (element === null) return;
+    if (visible) {
+      // play() returns a promise that can reject (autoplay blocked, source
+      // not ready yet); swallowed deliberately — there is no fallback UI for
+      // "autoplay was refused" distinct from the element just sitting there
+      // paused, and an unhandled rejection here would fail tests for a
+      // condition this component has no way to react to differently. jsdom's
+      // own `play()` returns `undefined` rather than a promise, hence the
+      // guard rather than an unconditional `.catch`.
+      const playResult = element.play();
+      if (playResult && typeof playResult.catch === "function") playResult.catch(() => {});
+    } else {
+      element.pause();
+    }
+  }, [visible, element]);
+
+  if (errored) return renderFallbackOrNull(node, ctx);
+
+  return (
+    <video
+      ref={setElement}
+      data-rov-node={node.id}
+      src={resolveThemeUrl(node.url, ctx.colorScheme)}
+      poster={node.posterUrl !== undefined ? resolveThemeUrl(node.posterUrl, ctx.colorScheme) : undefined}
+      autoPlay={node.autoplay ?? VIDEO_DEFAULT_AUTOPLAY}
+      loop={node.loop ?? VIDEO_DEFAULT_LOOP}
+      muted={node.muted ?? VIDEO_DEFAULT_MUTED}
+      controls={node.showsControls ?? VIDEO_DEFAULT_SHOWS_CONTROLS}
+      onError={() => setErrored(true)}
+      style={videoStyle(node.aspectRatio)}
+    />
+  );
+}
+
+/**
+ * The host's registered Lottie player. This package stays dependency-free of
+ * any actual Lottie runtime (no `lottie-web`/`lottie-react` in its own
+ * `package.json`) — the host app registers whichever player it already
+ * ships, once, at startup. `null` unregisters. The five prop names below are
+ * the cross-platform contract: Swift and Kotlin carry the identical five
+ * fields to their own native players.
+ */
+export type LottieRenderer = (props: {
+  url: string;
+  loop: boolean;
+  autoplay: boolean;
+  speed: number;
+  playing: boolean;
+}) => ReactElement | null;
+
+// Module-level by design (the host registers this once, well before any
+// paywall mounts) — which also means it LEAKS ACROSS TESTS. Every test that
+// calls this must reset it to `null` in an `afterEach`.
+let lottieRenderer: LottieRenderer | null = null;
+
+/** Register (or, with `null`, unregister) the host's Lottie player. */
+export function registerLottieRenderer(render: LottieRenderer | null): void {
+  lottieRenderer = render;
+}
+
+/**
+ * With no renderer registered, this node renders `fallback` else nothing —
+ * the existing machinery every node type already has, not a new failure
+ * mode. `playing` rides the same `useNodeVisible` signal `Video` and
+ * `Carousel` use, so a host player that honours it pauses off-screen for
+ * free.
+ */
+function Lottie({ node, ctx }: { node: LottieNode; ctx: RenderCtx }): ReactElement | null {
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const visible = useNodeVisible(element);
+
+  if (lottieRenderer === null) return renderFallbackOrNull(node, ctx);
+
+  const rendered = lottieRenderer({
+    url: resolveThemeUrl(node.url, ctx.colorScheme),
+    loop: node.loop ?? LOTTIE_DEFAULT_LOOP,
+    autoplay: node.autoplay ?? LOTTIE_DEFAULT_AUTOPLAY,
+    speed: node.speed ?? LOTTIE_DEFAULT_SPEED,
+    playing: visible,
+  });
+  if (rendered === null) return renderFallbackOrNull(node, ctx);
+
+  return (
+    <div ref={setElement} data-rov-node={node.id}>
+      {rendered}
+    </div>
+  );
+}
+
 /** Recursive dispatcher: known node type -> its component; unknown type or a thrown error -> `fallback` if present, else nothing. Never throws.
  *
  * Every node passes through `applyOverrides` here, BEFORE any style/text
@@ -1128,6 +1255,14 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         if (pages.length === 0) return renderFallbackOrNull(resolved, ctx);
         return <Carousel node={resolved} ctx={ctx} pages={pages} />;
       }
+      // Unlike the two cases above, neither of these can decide "do I draw
+      // anything?" before mounting: a video's source failing and a lottie
+      // renderer being unregistered are both discoverable only inside the
+      // component (see `Video`/`Lottie`'s own doc comments).
+      case "video":
+        return <Video node={resolved} ctx={ctx} />;
+      case "lottie":
+        return <Lottie node={resolved} ctx={ctx} />;
       default:
         return renderFallbackOrNull(resolved, ctx);
     }

@@ -100,6 +100,31 @@ export const Z_OVERLAY_CHILD_STYLE: CSSProperties = {
 };
 
 // =============================================================
+// Video (spec §6, wave D2). The renderer draws a plain `<video>` element and
+// drives it via the element itself (`play()`/`pause()`) — see `Video` in
+// nodes.tsx — this file only owns the element's static style.
+// =============================================================
+
+/** A video always fills the width of its slot; height and only aspectRatio
+ *  ever constrain the vertical dimension, matching `renderImage`'s own
+ *  `maxWidth: "100%"`. */
+export const VIDEO_WIDTH_CSS = "100%";
+
+/**
+ * Style for the `<video>` element. `aspectRatio` is passed through ONLY when
+ * the node configures one — an absent `aspectRatio` must set no CSS ratio at
+ * all, letting the source's own intrinsic dimensions govern (spec §6.1: never
+ * substitute a number here, not even a "sensible" default like 16/9).
+ */
+export function videoStyle(aspectRatio: number | undefined): CSSProperties {
+  return {
+    display: "block",
+    width: VIDEO_WIDTH_CSS,
+    aspectRatio: aspectRatio !== undefined ? String(aspectRatio) : undefined,
+  };
+}
+
+// =============================================================
 // Carousel (spec §3, wave D1). Paging is CSS scroll-snap, never JS
 // scroll maths — the track opts into native snapping and each page
 // opts into a snap stop; the browser owns the animation, the
