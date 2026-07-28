@@ -4,6 +4,7 @@ import { apiKeyRateLimit } from "../../middleware/rate-limit";
 import { configRoute } from "./config";
 import { eventsRoute } from "./events";
 import { experimentsRoute } from "./experiments";
+import { fontsRoute } from "./fonts";
 import { funnelClaimRoute } from "./funnel-claim";
 import { meRoute } from "./me";
 import { receiptsRoute } from "./receipts";
@@ -44,6 +45,7 @@ export const v1Route = new Hono()
   .route("/identify", identifyRoute)
   .route("/events", eventsRoute)
   .route("/experiments", experimentsRoute)
+  .route("/fonts", fontsRoute)
   .route("/me", meRoute)
   .route("/receipts", receiptsRoute)
   .route("/sdk/sessions", sdkSessionsRoute)
