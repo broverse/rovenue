@@ -2056,10 +2056,58 @@ describe("carousel node", () => {
     expect(container.textContent).toContain("nope");
   });
 
-  it("does not crash on a single-page carousel and still draws its one dot", () => {
+  it("drops a page hidden by visibility — no blank page, no phantom dot (C3)", () => {
+    // The decided cross-platform contract (Android's original behaviour):
+    // a hidden page is DROPPED, not rendered as a blank slot with a dot
+    // that lies about how much content exists. Middle page hidden on
+    // android, three authored, two renderable.
+    const hiddenPage: PaywallNode = {
+      type: "text",
+      id: "hiddenPage",
+      key: "hiddenPage",
+      role: "body",
+      visibility: { platform: ["ios"] },
+    };
+    const config = carouselWith(pageA, hiddenPage, pageB);
+    const { container } = render(
+      <PaywallRenderer config={config} offering={offering} colorScheme="light" platform="android" onPurchase={vi.fn()} />,
+    );
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(2);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(2);
+  });
+
+  it("renders the carousel's fallback when every page is hidden by visibility (C3)", () => {
+    const hiddenA: PaywallNode = {
+      type: "text",
+      id: "hiddenA",
+      key: "hiddenA",
+      role: "body",
+      visibility: { platform: ["ios"] },
+    };
+    const hiddenB: PaywallNode = {
+      type: "text",
+      id: "hiddenB",
+      key: "hiddenB",
+      role: "body",
+      visibility: { platform: ["ios"] },
+    };
+    const config = carouselWith(hiddenA, hiddenB, { fallback: textNode("nope") });
+    const { container } = render(
+      <PaywallRenderer config={config} offering={offering} colorScheme="light" platform="android" onPurchase={vi.fn()} />,
+    );
+    expect(container.textContent).toContain("nope");
+    expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(0);
+  });
+
+  it("does not crash on a single-page carousel, and draws no indicator (I2)", () => {
+    // Web used to be the outlier here, drawing one lone dot where both
+    // natives draw none (iOS `.automatic`, Android `pageCount > 1`) — this
+    // test used to PIN that divergence; it now asserts the corrected,
+    // cross-platform-agreed behaviour.
     const { container } = renderPaywall(carouselWith(pageA));
     expect(container.querySelectorAll("[data-rov-carousel-page]")).toHaveLength(1);
-    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-rov-carousel-dot]")).toHaveLength(0);
   });
 
   it("stops the auto-advance interval when the document hides", () => {
@@ -2167,14 +2215,21 @@ describe("carousel node", () => {
     }
   });
 
-  it("emits no colour override on a dot when indicatorColor is absent", () => {
-    // The resolved-value caution (spec §3.2): this only proves no INSTRUCTION
-    // was emitted for this element, which is as far as jsdom (no real CSS
-    // cascade/paint) can go — see the report for what remains unverified.
+  it("resolves an absent indicatorColor to the paywall's own ink, not the host page's (I1)", () => {
+    // Judged at the RESOLVED colour, per spec §3.2 — a passed-through
+    // `undefined` (the previous behaviour) would also read as "no inline
+    // instruction" and pass a branch-only assertion, which is exactly the
+    // shape of bug this rule exists to catch: jsdom has no ambient `color`
+    // on the document, so a `currentColor` pass-through and a genuine
+    // resolved-ink substitution are indistinguishable by an emptiness check
+    // alone. rgb(15, 23, 42) is `DEFAULT_INK.light` (#0F172A) — the same
+    // light-mode ink `resolveTextColor` gives every other uncoloured text
+    // node on this renderer, and byte-identical to Android's
+    // `resolvedInkTintColorInt` for the same case.
     const { container } = renderPaywall(carouselWith(pageA, pageB));
     const dots = container.querySelectorAll("[data-rov-carousel-dot]");
     for (const dot of Array.from(dots)) {
-      expect((dot as HTMLElement).style.color).toBe("");
+      expect((dot as HTMLElement).style.color).toBe("rgb(15, 23, 42)");
     }
   });
 });

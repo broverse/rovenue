@@ -884,9 +884,21 @@ function pageFromScrollLeft(track: HTMLElement, pageCount: number): number {
  * the tick is a repaint trigger that reads `currentPage` fresh from state
  * and computes exactly one step from it, never a count of its own that could
  * drift or double-fire.
+ *
+ * A page hidden by its own `visibility` rule is DROPPED, not rendered blank
+ * (spec §3, C3): the cross-platform contract this wave settled on is
+ * Android's original behaviour — a blank page plus a phantom dot is
+ * indefensible from the reader's side, since they swipe to an empty screen
+ * and the dots lie about how much content exists. `pages` below is filtered
+ * once, up front, and every downstream count (page slots, dots, the
+ * loop/stop math) is derived from that filtered list, never from
+ * `node.children.length` — so a hidden middle page shortens the carousel
+ * instead of leaving a gap, and "every page hidden" collapses to the empty
+ * case (`fallback`, else nothing) exactly like an authored-empty carousel.
  */
 function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactElement | null {
-  const pageCount = node.children.length;
+  const pages = node.children.filter((child) => isNodeVisible(child.visibility, ctx));
+  const pageCount = pages.length;
   const showsIndicator = node.showsIndicator ?? CAROUSEL_DEFAULT_SHOWS_INDICATOR;
   const loop = node.loop ?? CAROUSEL_DEFAULT_LOOP;
   // Absent `autoAdvanceSeconds` means OFF, deliberately not a default
@@ -912,6 +924,20 @@ function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactE
     const id = setInterval(() => {
       const next = currentPage + 1;
       if (next < pageCount) {
+        // M1: an instant jump, not `scrollTo({ behavior: "smooth" })` — left
+        // this way deliberately, not for lack of a one-liner. `onScroll`
+        // (`handleScroll` below) re-derives `currentPage` from `scrollLeft`
+        // on every scroll event, and a smooth scroll fires many of those
+        // while it animates through intermediate positions. Each one would
+        // flip `currentPage` mid-transition, which re-keys this very effect
+        // and restarts the interval — racing the fixed-interval schedule
+        // this component works hard elsewhere to keep single-source. Both
+        // natives animate for free because their page transition and their
+        // "current page" signal are the same platform primitive; web's are
+        // two separate mechanisms wired together, so the two do not compose
+        // for free here. Left instant; a real animation needs the scroll
+        // handler to distinguish a programmatic scroll from a manual one
+        // first.
         track.scrollLeft = next * (track.clientWidth || 1);
         setCurrentPage(next);
       } else if (loop) {
@@ -948,8 +974,9 @@ function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactE
     return () => observer.disconnect();
   }, [element]);
 
-  // A carousel with no pages at all cannot render — `CAROUSEL_EMPTY` flags
-  // this at publish time, but the renderer's own contract is the same as
+  // No RENDERABLE pages — either authored empty, or every child hidden by
+  // `visibility` (C3) — cannot render — `CAROUSEL_EMPTY` flags the authored
+  // case at publish time, but the renderer's own contract is the same as
   // every other node type: fail to `fallback`, never throw. Placed after
   // every hook above so the hook call order never depends on `pageCount`.
   if (pageCount === 0) return renderFallbackOrNull(node, ctx);
@@ -959,9 +986,22 @@ function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactE
     setCurrentPage(pageFromScrollLeft(track, pageCount));
   };
 
-  // Never a substituted value here — see `carouselDotStyle`'s own doc
-  // comment for why this departs from `Countdown`'s uncoloured case.
-  const indicatorColor = resolveThemeColor(node.indicatorColor, ctx.colorScheme);
+  // A substituted default here, deliberately (I1): an absent
+  // `indicatorColor` inherits the PAYWALL's ink, not the host page's. The
+  // web root (`renderer.tsx`) never sets an ambient `color`, so a bare
+  // `currentColor` pass-through would resolve against whatever the
+  // EMBEDDING document happens to have — `resolveTextColor` is the same
+  // substitution `Countdown` makes for the same reason, and it resolves to
+  // the byte-identical ink Android's `resolvedInkTintColorInt` uses
+  // (#0F172A light / #F8FAFC dark), so all three platforms agree at the
+  // resolved value, not just in which branch runs.
+  //
+  // Deliberately NOT fixed by setting an ambient `color` on the paywall
+  // root instead: that would also change what every OTHER `currentColor`
+  // consumer inherits (`renderIcon`'s lucide icons have the identical
+  // latent pass-through problem) — a wider blast radius this wave does not
+  // take on. Scoping the fix to this one call site keeps it intentional.
+  const indicatorColor = resolveTextColor(node.indicatorColor, ctx.colorScheme);
 
   return (
     <div ref={setElement} data-rov-node={node.id} style={{ display: "flex", flexDirection: "column" }}>
@@ -976,7 +1016,7 @@ function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactE
           scrollSnapType: CAROUSEL_TRACK_SCROLL_SNAP_TYPE,
         }}
       >
-        {node.children.map((child, index) => (
+        {pages.map((child, index) => (
           <div
             key={index}
             data-rov-carousel-page=""
@@ -986,7 +1026,10 @@ function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactE
           </div>
         ))}
       </div>
-      {showsIndicator ? (
+      {/* I2: a single renderable page draws no indicator, matching both
+          natives (iOS `.automatic`, Android `pageCount > 1`) — web was the
+          outlier drawing one lone dot. */}
+      {showsIndicator && pageCount > 1 ? (
         <div
           style={{
             display: "flex",
@@ -995,7 +1038,7 @@ function Carousel({ node, ctx }: { node: CarouselNode; ctx: RenderCtx }): ReactE
             gap: `${CAROUSEL_DOT_GAP_PX}px`,
           }}
         >
-          {node.children.map((_, index) => (
+          {pages.map((_, index) => (
             <span
               key={index}
               data-rov-carousel-dot=""

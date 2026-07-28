@@ -128,18 +128,19 @@ export const CAROUSEL_DOT_ACTIVE_OPACITY = 1;
 export const CAROUSEL_DOT_INACTIVE_OPACITY = 0.3;
 
 /**
- * A page dot's own style. `color` is passed straight through — `undefined`
- * when `indicatorColor` is absent, EXACTLY like `renderIcon`'s uncoloured
- * case: no substituted default is ever computed here, so the dot's fill
- * (`currentColor`) resolves through ordinary CSS inheritance to whatever
- * ink is ambient at this point in the tree. That is a deliberate departure
- * from `Countdown`'s own uncoloured case (which DOES substitute a default)
- * — spec §3.2 calls out a real regression this rule already caused once
- * (wave B's Kotlin drew from a stale vendored asset instead of truly
- * inheriting), so the resolved colour is what a test must check, not the
- * mere absence of an inline instruction in this function's own branch.
+ * A page dot's own style. `color` is always a RESOLVED value by the time it
+ * reaches here — see the call site in `Carousel` (I1): an absent
+ * `indicatorColor` is substituted with the paywall's own ink via
+ * `resolveTextColor`, the same substitution `Countdown` makes for its own
+ * uncoloured case, rather than left as an `undefined` pass-through for
+ * `currentColor` to resolve against whatever the embedding page happens to
+ * have. Spec §3.2 calls out a real regression this "leave it uninstructed"
+ * shape already caused once (wave B's Kotlin drew from a stale vendored
+ * asset instead of truly inheriting), so a test must check the RESOLVED
+ * colour, not the mere presence or absence of an inline instruction on this
+ * element.
  */
-export function carouselDotStyle(active: boolean, color: string | undefined): CSSProperties {
+export function carouselDotStyle(active: boolean, color: string): CSSProperties {
   return {
     width: `${CAROUSEL_DOT_SIZE_PX}px`,
     height: `${CAROUSEL_DOT_SIZE_PX}px`,
