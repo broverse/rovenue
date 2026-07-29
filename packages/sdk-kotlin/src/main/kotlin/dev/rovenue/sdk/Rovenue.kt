@@ -615,11 +615,19 @@ class Rovenue private constructor(
      *  placement, an invalid preview token is an error condition, not
      *  "nothing to show". Resilient like [getPaywall]/[getOfferings]: if the
      *  offering's live price query fails, the paywall is still returned with
-     *  null price fields. */
+     *  null price fields.
+     *
+     *  [etag] is the *unquoted* revision off the currently-shown [Paywall] —
+     *  pass `null` for the initial fetch (the default), and the shown
+     *  paywall's [Paywall.revision] on a poll tick. Core sends it quoted as
+     *  `If-None-Match`; a 304 (unchanged) response resolves to `null` here —
+     *  the poll call site ([dev.rovenue.sdk.paywallui.RovenuePaywallPreviewView])
+     *  already treats a `null` result as "no change" via
+     *  [dev.rovenue.sdk.paywallui.previewPollDecision]. */
     @Throws(RovenueException::class)
-    suspend fun getPaywallPreview(token: String, locale: String? = null): Paywall? {
+    suspend fun getPaywallPreview(token: String, locale: String? = null, etag: String? = null): Paywall? {
         try {
-            val ffi = dispatcher.run { core.getPaywallPreview(token, locale) }
+            val ffi = dispatcher.run { core.getPaywallPreview(token, locale, etag) }
             val coreOffering = ffi?.offering
             val offering = if (coreOffering != null) {
                 val wrapped = CoreOfferings(current = null, offerings = listOf(coreOffering))

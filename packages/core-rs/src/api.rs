@@ -1122,10 +1122,17 @@ impl RovenueCore {
     /// experiment context) — see `PlacementsClient::get_paywall_preview`.
     /// An expired/invalid preview token surfaces as an `Err` (404
     /// `PREVIEW_SESSION_INVALID`), never `Ok(None)`.
+    ///
+    /// `revision` is the *unquoted* ISO timestamp off the currently-shown
+    /// `CorePaywall.revision` — pass `None` for the initial fetch, and the
+    /// shown paywall's revision for a poll tick. When given, it is sent
+    /// quoted as `If-None-Match`; a 304 (unchanged) surfaces as `Ok(None)` —
+    /// see `PlacementsClient::get_paywall_preview` for the full contract.
     pub fn get_paywall_preview(
         &self,
         token: String,
         locale: Option<String>,
+        revision: Option<String>,
     ) -> RovenueResult<Option<CorePaywall>> {
         self.log_op(
             LogLevel::Info,
@@ -1133,9 +1140,9 @@ impl RovenueCore {
             "get_paywall_preview",
             &[],
         );
-        let result = self
-            .placements
-            .get_paywall_preview(&token, locale.as_deref());
+        let result =
+            self.placements
+                .get_paywall_preview(&token, locale.as_deref(), revision.as_deref());
         match &result {
             Ok(_) => self.log_op(
                 LogLevel::Info,

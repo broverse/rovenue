@@ -714,10 +714,19 @@ public final class Rovenue: @unchecked Sendable {
     /// 404/expired session propagates as a thrown `RovenueError`, not a
     /// `nil` return — unlike an unmatched placement, an invalid preview
     /// token is an error condition, not "nothing to show".
+    ///
+    /// `etag` is the *unquoted* revision off the currently-shown `Paywall`
+    /// — pass `nil` for the initial fetch (the default), and the shown
+    /// paywall's `revision` on a poll tick. Core sends it quoted as
+    /// `If-None-Match`; when the server answers 304 (unchanged), this
+    /// resolves to `nil` — the poll call site (`RovenuePaywallPreviewView`)
+    /// already treats a `nil` result from `getPaywallPreview` as "no
+    /// change" via `previewPollDecision`, so no special-casing is needed
+    /// here beyond forwarding the value.
     @available(iOS 15.0, macOS 12.0, *)
-    public func getPaywallPreview(token: String, locale: String? = nil) async throws -> Paywall? {
+    public func getPaywallPreview(token: String, locale: String? = nil, etag: String? = nil) async throws -> Paywall? {
         let ffi: CorePaywall? = try await dispatcher.run { [core] in
-            do { return try core.getPaywallPreview(token: token, locale: locale) }
+            do { return try core.getPaywallPreview(token: token, locale: locale, revision: etag) }
             catch let err as RovenueErrorFfi { throw mapError(err) }
         }
         guard let ffi else { return nil }

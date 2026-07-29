@@ -164,17 +164,39 @@ impl PlacementsClient {
     /// propagates as an `Err` via the normal `get_json` status mapping —
     /// this never resolves to `Ok(None)` the way an unmatched placement
     /// does for `get_paywall`.
+    ///
+    /// `revision`, when given, is the *unquoted* ISO timestamp already
+    /// sitting on the currently-shown `CorePaywall.revision` (a poll passes
+    /// the shown paywall's revision; the initial fetch passes `None`). It is
+    /// sent quoted as `If-None-Match` — the server's ETag on this endpoint is
+    /// `'"' + revision + '"'`, so quoting here is what makes the comparison
+    /// match. This mirrors `HttpRequest::etag`'s existing contract
+    /// (`EntitlementsReader::refresh` stores and replays the response's raw
+    /// `ETag` header value verbatim); the difference here is that the
+    /// *caller* only ever has the unquoted revision string on hand (there is
+    /// no disk-cached ETag for an ephemeral preview draft), so this method —
+    /// not the caller — owns adding the quotes. A resulting 304 means
+    /// "unchanged" and surfaces as `Ok(None)` — the only case where this
+    /// method returns `Ok(None)` rather than `Err` or `Ok(Some(_))`.
     pub fn get_paywall_preview(
         &self,
         token: &str,
         locale: Option<&str>,
+        revision: Option<&str>,
     ) -> RovenueResult<Option<CorePaywall>> {
         let path = match locale {
             Some(l) if !l.is_empty() => format!("/v1/preview/paywalls/{token}?locale={l}"),
             _ => format!("/v1/preview/paywalls/{token}"),
         };
-        let req = HttpRequest::new(&path);
+        let if_none_match = revision.map(|r| format!("\"{r}\""));
+        let mut req = HttpRequest::new(&path);
+        if let Some(ref v) = if_none_match {
+            req = req.etag(v);
+        }
         let resp = self.http.get_json::<ApiEnvelope<PaywallWire>>(req)?;
+        if resp.status == 304 {
+            return Ok(None);
+        }
         let body = resp.body.ok_or(RovenueError::Internal())?;
         Ok(Some(build_preview_paywall(body.data)))
     }

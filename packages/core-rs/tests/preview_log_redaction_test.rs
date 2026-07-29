@@ -83,7 +83,7 @@ fn preview_token_never_leaks_on_success() {
     let records = Arc::new(StdMutex::new(Vec::new()));
     let client = PlacementsClient::new(Arc::new(logging_client(&server.url(), &records)), store());
     client
-        .get_paywall_preview(PREVIEW_TOKEN, None)
+        .get_paywall_preview(PREVIEW_TOKEN, None, None)
         .expect("preview fetch succeeds");
     m.assert();
 
@@ -103,7 +103,7 @@ fn preview_token_never_leaks_on_fatal_4xx() {
     let records = Arc::new(StdMutex::new(Vec::new()));
     let client = PlacementsClient::new(Arc::new(logging_client(&server.url(), &records)), store());
     let err = client
-        .get_paywall_preview(PREVIEW_TOKEN, None)
+        .get_paywall_preview(PREVIEW_TOKEN, None, None)
         .expect_err("404 must be an error");
     m.assert();
     assert_eq!(err.kind, rovenue::ErrorKind::NotFound);
@@ -122,7 +122,7 @@ fn preview_token_never_leaks_on_retry_exhausted() {
         store(),
     );
     client
-        .get_paywall_preview(PREVIEW_TOKEN, None)
+        .get_paywall_preview(PREVIEW_TOKEN, None, None)
         .expect_err("unroutable address must fail");
 
     assert_token_never_leaked(&records.lock().unwrap(), "retry-exhausted (Error log)");
@@ -141,7 +141,7 @@ fn preview_token_never_leaks_with_locale_query_param() {
     let records = Arc::new(StdMutex::new(Vec::new()));
     let client = PlacementsClient::new(Arc::new(logging_client(&server.url(), &records)), store());
     client
-        .get_paywall_preview(PREVIEW_TOKEN, Some("tr"))
+        .get_paywall_preview(PREVIEW_TOKEN, Some("tr"), None)
         .expect("preview fetch succeeds");
     m.assert();
 

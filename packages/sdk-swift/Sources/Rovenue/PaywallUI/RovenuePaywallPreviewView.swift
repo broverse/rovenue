@@ -163,10 +163,15 @@ public struct RovenuePaywallPreviewView: View {
     /// A background poll tick: fetches, then only re-binds `shown` when
     /// `previewPollDecision` says the revision actually moved — a poll
     /// that returns the same (or no) revision must not tear down and
-    /// rebuild the view a tester is actively looking at.
+    /// rebuild the view a tester is actively looking at. Passes the shown
+    /// paywall's `revision` as `etag` so an unchanged draft comes back as a
+    /// 304 (decoded to `nil` by `getPaywallPreview`) instead of paying full
+    /// server-side draft rehydration on every tick; `previewPollDecision`
+    /// already treats a `nil` `latest` as `.noChange`, so the 304 path needs
+    /// no special-casing here.
     private func poll() async {
         do {
-            let fetched = try await Rovenue.shared.getPaywallPreview(token: token, locale: locale)
+            let fetched = try await Rovenue.shared.getPaywallPreview(token: token, locale: locale, etag: shown?.revision)
             guard previewPollDecision(current: shown?.revision, latest: fetched?.revision) == .refetch else { return }
             shown = fetched
         } catch {

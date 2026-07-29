@@ -38,7 +38,7 @@ fn get_paywall_preview_hits_the_preview_url_and_decodes_builder_config_and_revis
 
     let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
     let paywall = client
-        .get_paywall_preview("tok_abc123", None)
+        .get_paywall_preview("tok_abc123", None, None)
         .unwrap()
         .expect("preview paywall resolved");
     m.assert();
@@ -77,7 +77,7 @@ fn get_paywall_preview_sends_locale_query_param() {
 
     let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
     client
-        .get_paywall_preview("tok_abc123", Some("tr"))
+        .get_paywall_preview("tok_abc123", Some("tr"), None)
         .unwrap();
     m.assert();
 }
@@ -93,12 +93,92 @@ fn get_paywall_preview_without_revision_decodes_to_none() {
 
     let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
     let paywall = client
-        .get_paywall_preview("tok_abc123", None)
+        .get_paywall_preview("tok_abc123", None, None)
         .unwrap()
         .expect("preview paywall resolved");
     m.assert();
 
     assert_eq!(paywall.revision, None);
+}
+
+// =============================================================
+// If-None-Match wiring (P9 follow-up: client-side ETag/revision poll).
+// `get_paywall_preview` takes an optional `revision` — the *unquoted* ISO
+// timestamp already sitting on the currently-shown `CorePaywall.revision` —
+// and, when present, sends it quoted as `If-None-Match` (matching the
+// server's own `'"' + revision + '"'` ETag format, mirrored from
+// `EntitlementsReader::refresh`'s `HttpRequest::etag` convention). A 304
+// response means "unchanged" and surfaces as `Ok(None)` — this is the only
+// case where `get_paywall_preview` returns `Ok(None)` instead of `Err` or
+// `Ok(Some(_))`.
+// =============================================================
+
+#[test]
+fn get_paywall_preview_sends_no_if_none_match_when_no_revision_given() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/v1/preview/paywalls/tok_abc123")
+        .match_header("if-none-match", mockito::Matcher::Missing)
+        .with_status(200)
+        .with_body(PREVIEW_BODY)
+        .create();
+
+    let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
+    client
+        .get_paywall_preview("tok_abc123", None, None)
+        .unwrap()
+        .expect("initial fetch (no revision) resolves the full paywall");
+    m.assert();
+}
+
+#[test]
+fn get_paywall_preview_sends_quoted_revision_as_if_none_match_when_given() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/v1/preview/paywalls/tok_abc123")
+        .match_header(
+            "if-none-match",
+            mockito::Matcher::Exact("\"2026-07-28T12:00:00.000Z\"".to_string()),
+        )
+        .with_status(304)
+        .create();
+
+    let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
+    let result = client
+        .get_paywall_preview("tok_abc123", None, Some("2026-07-28T12:00:00.000Z"))
+        .unwrap();
+    m.assert();
+
+    assert!(
+        result.is_none(),
+        "a 304 must surface as Ok(None), not Ok(Some(_))"
+    );
+}
+
+#[test]
+fn get_paywall_preview_200_with_body_still_decodes_when_revision_given() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/v1/preview/paywalls/tok_abc123")
+        .match_header(
+            "if-none-match",
+            mockito::Matcher::Exact("\"2026-07-20T00:00:00.000Z\"".to_string()),
+        )
+        .with_status(200)
+        .with_body(PREVIEW_BODY)
+        .create();
+
+    let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
+    let paywall = client
+        .get_paywall_preview("tok_abc123", None, Some("2026-07-20T00:00:00.000Z"))
+        .unwrap()
+        .expect("a changed revision returns 200 with the new body, not a 304");
+
+    assert_eq!(
+        paywall.revision.as_deref(),
+        Some("2026-07-28T12:00:00.000Z")
+    );
+    m.assert();
 }
 
 #[test]
@@ -112,7 +192,7 @@ fn get_paywall_preview_propagates_404_as_error_not_none() {
 
     let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
     let err = client
-        .get_paywall_preview("tok_expired", None)
+        .get_paywall_preview("tok_expired", None, None)
         .expect_err("an expired/invalid preview session must be an Err, not Ok(None)");
     m.assert();
 
