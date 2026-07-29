@@ -3,6 +3,7 @@ import {
   DIVIDER_DEFAULT_INSET,
   DIVIDER_DEFAULT_THICKNESS,
   ICON_DEFAULT_SIZE,
+  MAX_BUILDER_DEPTH,
   type CarouselNode,
   type PackageListNode,
   type PaywallNode,
@@ -16,6 +17,8 @@ import {
   insertNode,
   removeNode,
   moveNode,
+  moveNodeTo,
+  canMoveTo,
   updateNode,
   newNode,
   resolveAddTargetId,
@@ -255,6 +258,264 @@ describe("moveNode", () => {
     const original = JSON.parse(JSON.stringify(root));
     moveNode(root, "t1", 1);
     expect(root).toEqual(original);
+  });
+});
+
+// =============================================================
+// `moveNodeTo` backs the Layers panel's drag-and-drop (Part 1) — and is
+// designed to be reused unchanged by canvas dragging (Part 2). It's built
+// from the same `findParent`/`findNode`/`removeNode`/`insertNode`
+// primitives as every other op in this file, so its legality rules
+// (addressability, container-ness, self/descendant, depth) are exactly
+// theirs — see the function's own doc comment for the full list and the
+// cross-scope decision.
+// =============================================================
+describe("moveNodeTo", () => {
+  describe("reorder within the same parent", () => {
+    it("moves forward, applying the index shift for the removed slot", () => {
+      const root = fixture();
+      // root.children = [t1, s2, img3]. Dropping t1 "before the node
+      // currently at index 2" means before img3 — NOT at raw index 2 of
+      // the post-removal array (that would wrongly land t1 at the end).
+      const next = moveNodeTo(root, "t1", "root", 2);
+      expect(next?.children.map((c) => c.id)).toEqual(["s2", "t1", "img3"]);
+    });
+
+    it("moves backward, with no index shift needed", () => {
+      const root = fixture();
+      const next = moveNodeTo(root, "img3", "root", 0);
+      expect(next?.children.map((c) => c.id)).toEqual(["img3", "t1", "s2"]);
+    });
+
+    it("is a true no-op (same reference) when dropped back at its own position", () => {
+      const root = fixture();
+      const next = moveNodeTo(root, "t1", "root", 0);
+      expect(next).toBe(root);
+    });
+
+    it("reorders within a nested container", () => {
+      const root = fixture();
+      const next = moveNodeTo(root, "t2b", "s2", 0);
+      const s2 = findNode(next!, "s2") as StackNode;
+      expect(s2.children.map((c) => c.id)).toEqual(["t2b", "t2a"]);
+    });
+  });
+
+  describe("re-parenting", () => {
+    it("moves a node to a SHALLOWER container", () => {
+      const root = fixture();
+      const next = moveNodeTo(root, "t2a", "root", 0);
+      expect(next?.children.map((c) => c.id)).toEqual(["t2a", "t1", "s2", "img3"]);
+      const s2 = findNode(next!, "s2") as StackNode;
+      expect(s2.children.map((c) => c.id)).toEqual(["t2b"]);
+    });
+
+    it("moves a node to a DEEPER container", () => {
+      const root = fixture();
+      const next = moveNodeTo(root, "img3", "s2", 0);
+      expect(next?.children.map((c) => c.id)).toEqual(["t1", "s2"]);
+      const s2 = findNode(next!, "s2") as StackNode;
+      expect(s2.children.map((c) => c.id)).toEqual(["img3", "t2a", "t2b"]);
+    });
+
+    it("clamps an out-of-range index to the end (index > children.length appends)", () => {
+      const root = fixture();
+      const next = moveNodeTo(root, "img3", "s2", 999);
+      const s2 = findNode(next!, "s2") as StackNode;
+      expect(s2.children.map((c) => c.id)).toEqual(["t2a", "t2b", "img3"]);
+    });
+
+    it("does not mutate the input tree", () => {
+      const root = fixture();
+      const original = JSON.parse(JSON.stringify(root));
+      moveNodeTo(root, "img3", "s2", 0);
+      expect(root).toEqual(original);
+    });
+  });
+
+  describe("illegal moves reject with null, never a corrupted tree", () => {
+    it("rejects moving the root itself", () => {
+      const root = fixture();
+      expect(moveNodeTo(root, "root", "s2", 0)).toBeNull();
+    });
+
+    it("rejects an unknown source id", () => {
+      const root = fixture();
+      expect(moveNodeTo(root, "nope", "root", 0)).toBeNull();
+    });
+
+    it("rejects a source only reachable via a fallback slot (not addressable)", () => {
+      const root = fixture();
+      expect(moveNodeTo(root, "t2fallback", "root", 0)).toBeNull();
+    });
+
+    it("rejects an unknown target parent", () => {
+      const root = fixture();
+      expect(moveNodeTo(root, "t1", "nope", 0)).toBeNull();
+    });
+
+    it("rejects a target parent that isn't a container", () => {
+      const root = fixture();
+      expect(moveNodeTo(root, "t1", "img3", 0)).toBeNull();
+    });
+
+    it("rejects moving a node into itself", () => {
+      const root: StackNode = {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "stack",
+            id: "outer",
+            axis: "v",
+            children: [{ type: "stack", id: "inner", axis: "v", children: [] }],
+          },
+        ],
+      };
+      expect(moveNodeTo(root, "outer", "outer", 0)).toBeNull();
+    });
+
+    it("rejects moving a node into its own descendant", () => {
+      const root: StackNode = {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "stack",
+            id: "outer",
+            axis: "v",
+            children: [{ type: "stack", id: "inner", axis: "v", children: [] }],
+          },
+        ],
+      };
+      expect(moveNodeTo(root, "outer", "inner", 0)).toBeNull();
+    });
+
+    it("rejects moving the cellTemplate root (not addressable, like a fallback slot)", () => {
+      const root = cellTemplateFixture();
+      expect(moveNodeTo(root, "cell_root", "root", 0)).toBeNull();
+    });
+  });
+
+  // A chain of `containerDepth - 2` intermediate stacks between the root
+  // and `target`, so `target` sits at exactly `containerDepth` (root = 1).
+  // Two movable siblings hang off the root: a bare leaf (subtree height 1)
+  // and a 3-deep stack (subtree height 3).
+  function depthBreachFixture(containerDepth: number): StackNode {
+    let target: PaywallNode = { type: "stack", id: "target", axis: "v", children: [] };
+    let depth = containerDepth;
+    let i = 0;
+    while (depth > 2) {
+      target = { type: "stack", id: `chain${i++}`, axis: "v", children: [target] };
+      depth -= 1;
+    }
+    return {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        target,
+        { type: "text", id: "leafMover", key: "k1", role: "body" },
+        {
+          type: "stack",
+          id: "mover3",
+          axis: "v",
+          children: [
+            {
+              type: "stack",
+              id: "mover3_inner",
+              axis: "v",
+              children: [{ type: "text", id: "mover3_leaf", key: "k2", role: "body" }],
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("rejects a move that would breach MAX_BUILDER_DEPTH via the moved SUBTREE's height, not just the moved node's own depth", () => {
+    // `target` sits at depth MAX_BUILDER_DEPTH - 1 (31, with the default
+    // cap of 32).
+    const root = depthBreachFixture(MAX_BUILDER_DEPTH - 1);
+    // A bare leaf fits exactly at the cap: 31 + height(1) = 32.
+    expect(moveNodeTo(root, "leafMover", "target", 0)).not.toBeNull();
+    // The 3-deep subtree does not: 31 + height(3) = 34 > 32 — even though
+    // a naive "moved node's own depth" check (31 + 1 = 32) would have let
+    // it through.
+    expect(moveNodeTo(root, "mover3", "target", 0)).toBeNull();
+  });
+
+  // Main tree ↔ inside a `packageList.cellTemplate` subtree. DECISION:
+  // allowed — see `moveNodeTo`'s doc comment for why nothing about the
+  // tree shape is ambiguous here.
+  describe("cross-scope moves (main tree <-> cellTemplate subtree)", () => {
+    function crossScopeFixture(): StackNode {
+      return {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "text", id: "t1", key: "k1", role: "body" },
+          {
+            type: "packageList",
+            id: "pl1",
+            packageIds: [],
+            cellLayout: "column",
+            cellTemplate: {
+              type: "stack",
+              id: "cell_root",
+              axis: "v",
+              children: [{ type: "text", id: "cell_name", key: "k_name", role: "body" }],
+            },
+          },
+        ],
+      };
+    }
+
+    it("moves a main-tree node INTO a cellTemplate subtree", () => {
+      const root = crossScopeFixture();
+      const next = moveNodeTo(root, "t1", "cell_root", 0)!;
+      expect(next.children.map((c) => c.id)).toEqual(["pl1"]);
+      const pl1 = next.children[0] as PackageListNode;
+      expect(pl1.cellTemplate?.type).toBe("stack");
+      expect((pl1.cellTemplate as StackNode).children.map((c) => c.id)).toEqual(["t1", "cell_name"]);
+    });
+
+    it("moves a node OUT of a cellTemplate subtree, back into the main tree", () => {
+      const root = crossScopeFixture();
+      const next = moveNodeTo(root, "cell_name", "root", 0)!;
+      expect(next.children.map((c) => c.id)).toEqual(["cell_name", "t1", "pl1"]);
+      const pl1 = next.children.find((c) => c.id === "pl1") as PackageListNode;
+      expect((pl1.cellTemplate as StackNode).children).toEqual([]);
+    });
+  });
+});
+
+describe("canMoveTo", () => {
+  it("mirrors moveNodeTo's legality without needing an index", () => {
+    const root = fixture();
+    expect(canMoveTo(root, "t1", "s2")).toBe(true);
+    expect(canMoveTo(root, "t1", "img3")).toBe(false); // not a container
+    expect(canMoveTo(root, "root", "s2")).toBe(false); // root not movable
+  });
+
+  it("rejects into-descendant the same way moveNodeTo does", () => {
+    const root: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        {
+          type: "stack",
+          id: "outer",
+          axis: "v",
+          children: [{ type: "stack", id: "inner", axis: "v", children: [] }],
+        },
+      ],
+    };
+    expect(canMoveTo(root, "outer", "inner")).toBe(false);
   });
 });
 

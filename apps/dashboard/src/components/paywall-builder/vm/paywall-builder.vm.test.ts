@@ -150,6 +150,37 @@ describe("PaywallBuilderViewModel", () => {
     expect(vm.config.root.children).toHaveLength(0);
   });
 
+  // ----- moveNodeTo (Layers panel drag-and-drop) -----
+  it("moveNodeTo marks dirty and re-parents the node", async () => {
+    const config = fakeConfig();
+    config.root.children.unshift({ type: "stack", id: "group1", axis: "v", children: [] });
+    const get = vi.fn().mockResolvedValue(fakeDetail({ builderConfig: config }));
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    expect(vm.isDirty).toBe(false);
+
+    vm.moveNodeTo("t1", "group1", 0);
+
+    expect(vm.isDirty).toBe(true);
+    const group = findNode(vm.config.root, "group1") as StackNode;
+    expect(group.children.map((c) => c.id)).toEqual(["t1"]);
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["group1"]);
+  });
+
+  it("moveNodeTo is a full no-op — config untouched, not dirty — when the move is illegal", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const configBefore = vm.config;
+    expect(vm.isDirty).toBe(false);
+
+    // "t1" is not a container — an illegal target parent, per tree-ops.
+    vm.moveNodeTo("root", "t1", 0);
+
+    expect(vm.isDirty).toBe(false);
+    expect(vm.config).toBe(configBefore);
+  });
+
   // ----- Presets -----
   it("applyPreset('hero') produces a config with zero blocking validation issues", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail({ offeringPackageIds: [] }));
@@ -1418,6 +1449,42 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
     vm.moveNode(extraId, -1);
 
     expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("moveNodeTo clears a pending AI snapshot on a legal move", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const groupId = vm.addNode("stack", "root")!;
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp8", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    vm.moveNodeTo("t1", groupId, 0);
+
+    expect(vm.configBeforeAiApply).toBeNull();
+  });
+
+  it("moveNodeTo does NOT clear a pending AI snapshot when the move is illegal", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.applyExternalTreeOp({
+      kind: "insert",
+      parentId: "root",
+      index: 0,
+      subtree: { type: "spacer", id: "sp9", size: 8 },
+    });
+    expect(vm.configBeforeAiApply).not.toBeNull();
+
+    // "t1" is not a container — illegal target, per tree-ops.
+    vm.moveNodeTo("root", "t1", 0);
+
+    expect(vm.configBeforeAiApply).not.toBeNull();
   });
 
   it("removeNode clears a pending AI snapshot", async () => {

@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import { ServiceProvider, useService } from "impair";
 import {
   emptyBuilderConfig,
@@ -480,5 +480,126 @@ describe("LayerTree — add-node popover portal (BUG 1 regression)", () => {
 
     expect(aside.contains(heading)).toBe(false);
     expect(baseElement.contains(heading)).toBe(true);
+  });
+});
+
+// =============================================================
+// Drag-and-drop (Part 1 — the layer tree; canvas dragging is a separate
+// later task reusing `vm.moveNodeTo`, see tree-ops.ts/the VM).
+//
+// Two rows of the SAME node type render identical visible labels ("Stack"
+// twice, "Text" twice below), so these tests locate rows by
+// `layer-row-<id>` rather than the label-text helper the rest of this
+// file uses — see the `data-testid` comment on `LayerRow` itself.
+//
+// jsdom has no `DragEvent` constructor at all (jsdom/jsdom#1568), so
+// @testing-library falls back to a plain `Event` for dragStart/dragOver/
+// drop — which special-cases `dataTransfer` back on (see its
+// `event-map.js`) but silently drops any OTHER init property a plain
+// `Event` doesn't recognize, `clientY` included. `fireDnd` below builds
+// the event via `createEvent` (so `dataTransfer` still gets the library's
+// special handling) and then stamps `clientY` on afterwards by hand.
+// Every element's `getBoundingClientRect` is also all-zeros in jsdom, so
+// it's stubbed to a fixed 100px-tall rect so `clientY` can target a
+// specific band deterministically.
+// =============================================================
+describe("LayerTree — drag-and-drop (Part 1)", () => {
+  const ROW_HEIGHT_PX = 100;
+  const ROW_TOP_PX = 0;
+  const TOP_BAND_Y = ROW_TOP_PX + 10; // ratio 0.10 — "before" on any row
+  const MIDDLE_BAND_Y = ROW_TOP_PX + ROW_HEIGHT_PX / 2; // ratio 0.50 — "into" on a container
+
+  function fakeDataTransfer() {
+    const store: Record<string, string> = {};
+    return {
+      setData: (kind: string, value: string) => {
+        store[kind] = value;
+      },
+      getData: (kind: string) => store[kind] ?? "",
+      dropEffect: "none",
+      effectAllowed: "none",
+    };
+  }
+
+  function fireDnd(
+    kind: "dragStart" | "dragOver" | "drop",
+    el: HTMLElement,
+    init: { dataTransfer: ReturnType<typeof fakeDataTransfer>; clientY: number },
+  ) {
+    const event = createEvent[kind](el, init);
+    Object.defineProperty(event, "clientY", { value: init.clientY, configurable: true });
+    fireEvent(el, event);
+  }
+
+  function rowByNodeId(id: string): HTMLElement {
+    return screen.getByTestId(`layer-row-${id}`);
+  }
+
+  // root(stack) -> leafA(text), leafB(text), outer(stack) -> inner(stack)
+  function dndFixtureConfig(): BuilderConfig {
+    const config = emptyBuilderConfig("en");
+    const leafA: PaywallNode = { type: "text", id: "leafA", key: "kA", role: "body" };
+    const leafB: PaywallNode = { type: "text", id: "leafB", key: "kB", role: "body" };
+    const inner: PaywallNode = { type: "stack", id: "inner", axis: "v", children: [] };
+    const outer: PaywallNode = { type: "stack", id: "outer", axis: "v", children: [inner] };
+    config.root.children.push(leafA, leafB, outer);
+    return config;
+  }
+
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      top: ROW_TOP_PX,
+      bottom: ROW_TOP_PX + ROW_HEIGHT_PX,
+      height: ROW_HEIGHT_PX,
+      left: 0,
+      right: 240,
+      width: 240,
+      x: 0,
+      y: ROW_TOP_PX,
+      toJSON() {
+        return this;
+      },
+    });
+  });
+
+  it("reorders between rows via a top-band drop (insert-before)", async () => {
+    const { vm } = await renderLayerTree(dndFixtureConfig());
+    const dataTransfer = fakeDataTransfer();
+
+    fireDnd("dragStart", rowByNodeId("leafB"), { dataTransfer, clientY: 0 });
+    fireDnd("dragOver", rowByNodeId("leafA"), { dataTransfer, clientY: TOP_BAND_Y });
+    fireDnd("drop", rowByNodeId("leafA"), { dataTransfer, clientY: TOP_BAND_Y });
+
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["leafB", "leafA", "outer"]);
+  });
+
+  it("drops into a container via its middle band", async () => {
+    const { vm } = await renderLayerTree(dndFixtureConfig());
+    const dataTransfer = fakeDataTransfer();
+
+    fireDnd("dragStart", rowByNodeId("leafA"), { dataTransfer, clientY: 0 });
+    fireDnd("dragOver", rowByNodeId("outer"), { dataTransfer, clientY: MIDDLE_BAND_Y });
+    fireDnd("drop", rowByNodeId("outer"), { dataTransfer, clientY: MIDDLE_BAND_Y });
+
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["leafB", "outer"]);
+    const outer = vm.config.root.children.find((n) => n.id === "outer");
+    if (outer?.type !== "stack") throw new Error("expected the outer stack fixture");
+    expect(outer.children.map((c) => c.id)).toEqual(["inner", "leafA"]);
+  });
+
+  it("does nothing when dropped onto its own descendant", async () => {
+    const { vm } = await renderLayerTree(dndFixtureConfig());
+    const dataTransfer = fakeDataTransfer();
+    const configBefore = vm.config;
+
+    fireDnd("dragStart", rowByNodeId("outer"), { dataTransfer, clientY: 0 });
+    fireDnd("dragOver", rowByNodeId("inner"), { dataTransfer, clientY: MIDDLE_BAND_Y });
+    fireDnd("drop", rowByNodeId("inner"), { dataTransfer, clientY: MIDDLE_BAND_Y });
+
+    expect(vm.config).toBe(configBefore);
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["leafA", "leafB", "outer"]);
+    const outer = vm.config.root.children.find((n) => n.id === "outer");
+    if (outer?.type !== "stack") throw new Error("expected the outer stack fixture");
+    expect(outer.children.map((c) => c.id)).toEqual(["inner"]);
   });
 });

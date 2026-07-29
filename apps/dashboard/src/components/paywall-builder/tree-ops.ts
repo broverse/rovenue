@@ -2,6 +2,7 @@ import {
   ICON_DEFAULT_SIZE,
   DIVIDER_DEFAULT_THICKNESS,
   DIVIDER_DEFAULT_INSET,
+  MAX_BUILDER_DEPTH,
   type CarouselNode,
   type PaywallNode,
   type StackNode,
@@ -262,6 +263,143 @@ export function moveNode(root: StackNode, id: string, dir: 1 | -1): StackNode {
     children.splice(target, 0, item);
     return { ...p, children };
   }) as StackNode;
+}
+
+/**
+ * Depth of the node with `id`, root-relative (root itself is depth 1, same
+ * convention as `measureNodeTree`). Walks the identical addressability
+ * model as `search`/`searchParent` — container children, a `packageList`'s
+ * `cellTemplate`, and `fallback` — so a node reachable ONLY through a
+ * cellTemplate or fallback subtree still gets an honest depth. Returns
+ * null when `id` isn't found anywhere.
+ */
+function nodeDepth(node: PaywallNode, id: string, depth = 1): number | null {
+  if (node.id === id) return depth;
+  if (isContainerNode(node)) {
+    for (const child of node.children) {
+      const found = nodeDepth(child, id, depth + 1);
+      if (found !== null) return found;
+    }
+  }
+  if (node.type === "packageList" && node.cellTemplate) {
+    const found = nodeDepth(node.cellTemplate, id, depth + 1);
+    if (found !== null) return found;
+  }
+  if (node.fallback) {
+    const found = nodeDepth(node.fallback, id, depth + 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
+ * Height of `node`'s own subtree — 1 for a leaf, more for a container with
+ * descendants. `moveNodeTo` needs this (not the moved node's OWN depth)
+ * because what can breach `MAX_BUILDER_DEPTH` after a re-parent is the
+ * subtree's DEEPEST descendant, not the moved node itself: a 3-deep
+ * subtree dropped into a container near the cap can breach even though
+ * the moved node's own single-level depth would not. Same traversal
+ * (children/cellTemplate/fallback) as `nodeDepth`, for the same reason.
+ */
+function subtreeHeight(node: PaywallNode): number {
+  let tallestChild = 0;
+  if (isContainerNode(node)) {
+    for (const child of node.children) tallestChild = Math.max(tallestChild, subtreeHeight(child));
+  }
+  if (node.type === "packageList" && node.cellTemplate) {
+    tallestChild = Math.max(tallestChild, subtreeHeight(node.cellTemplate));
+  }
+  if (node.fallback) tallestChild = Math.max(tallestChild, subtreeHeight(node.fallback));
+  return 1 + tallestChild;
+}
+
+/** True when `id` names `node` itself or any of its descendants (children/cellTemplate/fallback). */
+function containsId(node: PaywallNode, id: string): boolean {
+  if (node.id === id) return true;
+  if (isContainerNode(node) && node.children.some((c) => containsId(c, id))) return true;
+  if (node.type === "packageList" && node.cellTemplate && containsId(node.cellTemplate, id)) return true;
+  if (node.fallback && containsId(node.fallback, id)) return true;
+  return false;
+}
+
+/**
+ * Moves `id` to `index` inside `newParentId`'s children — a re-parent when
+ * `newParentId` differs from the current parent, a reorder when it's the
+ * same. Returns a new root, or `null` when the move is illegal (never a
+ * corrupted tree). Illegal:
+ *
+ * - `id` isn't addressable (unknown id, the root itself, or a node only
+ *   reachable via a `fallback`/`cellTemplate` slot — same `findParent`
+ *   rule every other op here follows).
+ * - `newParentId` doesn't resolve to a node, or resolves to a non-container.
+ * - `newParentId` is `id` itself or one of `id`'s own descendants — you
+ *   cannot move a subtree inside itself.
+ * - The move would push some node in the moved SUBTREE past
+ *   `MAX_BUILDER_DEPTH`. Node count never changes on a move, so only depth
+ *   needs checking — and it's the subtree's HEIGHT that matters, not the
+ *   moved node's own depth (see `subtreeHeight`).
+ *
+ * CROSS-SCOPE DECISION (main tree ↔ inside a `packageList.cellTemplate`
+ * subtree): allowed, deliberately, with no extra scope-tracking. Every
+ * legality check above (`findParent`, `findNode`, `containsId`, the depth
+ * walk) already recurses through `cellTemplate` exactly like an ordinary
+ * `children` array — that's the whole point of the addressability model
+ * this file documents up top. There is no separate "which scope am I in"
+ * concept anywhere in insert/remove/find, so a move that crosses the
+ * boundary is just an ordinary re-parent to these functions, and nothing
+ * about the tree SHAPE is ambiguous. (Fallback subtrees are the same
+ * story, though moot in practice: the Layers panel never lists a fallback
+ * node as a row, so the UI never offers one as a drag source or drop
+ * target — see `layer-tree-flatten.ts`.)
+ *
+ * Reorders within the SAME parent get the classic index-shift treatment:
+ * removing the node at its old index shifts every later sibling left by
+ * one, so a forward move's target index (expressed against the ORIGINAL
+ * array) is decremented by one before inserting.
+ */
+export function moveNodeTo(
+  root: StackNode,
+  id: string,
+  newParentId: string,
+  index: number,
+): StackNode | null {
+  if (id === root.id) return null; // the root has no parent+index — not movable
+
+  const located = findParent(root, id);
+  if (!located) return null; // unknown id, or reachable only via fallback/cellTemplate slot
+
+  const { parent: oldParent, index: oldIndex } = located;
+  const movingNode = oldParent.children[oldIndex]!;
+
+  const newParent = findNode(root, newParentId);
+  if (!newParent || !isContainerNode(newParent)) return null; // target missing or not a container
+
+  if (containsId(movingNode, newParentId)) return null; // into itself or its own descendant
+
+  const parentDepth = nodeDepth(root, newParentId);
+  if (parentDepth === null) return null; // defensive — findNode above already guarantees this
+  if (parentDepth + subtreeHeight(movingNode) > MAX_BUILDER_DEPTH) return null;
+
+  let targetIndex = index;
+  if (oldParent.id === newParentId) {
+    if (targetIndex === oldIndex) return root; // dropped back where it started — true no-op
+    if (targetIndex > oldIndex) targetIndex -= 1;
+  }
+
+  const withoutNode = removeNode(root, id);
+  return insertNode(withoutNode, newParentId, movingNode, targetIndex);
+}
+
+/**
+ * Cheap legality probe for the Layers panel while dragging: "would ANY
+ * drop of `id` onto `newParentId` be legal?" Legality never depends on the
+ * drop index (only container-ness, self/descendant containment, and
+ * subtree depth do — see `moveNodeTo`), so a dry run at index 0 answers it
+ * without the caller needing to know a real index yet, and without
+ * duplicating `moveNodeTo`'s rules here.
+ */
+export function canMoveTo(root: StackNode, id: string, newParentId: string): boolean {
+  return moveNodeTo(root, id, newParentId, 0) !== null;
 }
 
 /** Shallow-merges `patch` into the node with `id` (root included). */

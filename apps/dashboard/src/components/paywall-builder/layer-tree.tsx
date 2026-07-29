@@ -1,14 +1,85 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { MAX_BUILDER_DEPTH, type PaywallNode } from "@rovenue/shared/paywall";
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
-import { flattenTree } from "./layer-tree-flatten";
-import { isContainerNode, resolveAddTargetId } from "./tree-ops";
+import { flattenTree, type FlatTreeRow } from "./layer-tree-flatten";
+import { canMoveTo, isContainerNode, resolveAddTargetId } from "./tree-ops";
 import { NODE_ICON, NODE_TYPE_LABEL, nodeLocKey } from "./node-meta";
 import { AddNodePopover } from "./add-node-popover";
+
+// =============================================================
+// Layers-panel drag-and-drop (Part 1 of paywall-builder DnD; canvas
+// dragging is a separate later task that reuses `vm.moveNodeTo` — see
+// its own doc comment). Native HTML5 DnD, mirroring the funnel builder's
+// precedent (`funnel-builder/page-preview.tsx`'s `ChoiceListEditable`):
+// draggable + onDragStart/onDragOver/onDrop, no new dependency.
+//
+// A hovered row offers up to three drop bands, from its own rect:
+//   - top/bottom edge  -> "before"/"after" this row, AMONG ITS SIBLINGS
+//     (reorder or re-parent to the sibling's own parent).
+//   - middle           -> "into" this row, APPENDED, but ONLY when the row
+//     is itself a container (`isContainerNode`) — a leaf has no middle
+//     band at all; it's a straight top-half/bottom-half split instead.
+// The root row (no parent to reorder against) always resolves to "into",
+// regardless of pointer position.
+//
+// Legality is never re-derived here: every band's target is checked with
+// `canMoveTo` (tree-ops' own dry-run of `moveNodeTo`), so a target that
+// `moveNodeTo` would reject (self/descendant, non-container, depth
+// breach, unaddressable source) simply never lights up — there is no
+// second copy of those rules in this file.
+// =============================================================
+
+/** Fraction of a CONTAINER row's height reserved for its top/bottom
+ * "before"/"after" bands; the remainder is the "into" band. A non-container
+ * row has no "into" band at all — see `computeDropZone`. */
+const DRAG_EDGE_BAND_FRACTION = 0.25;
+
+/** dataTransfer key carrying the dragged node's id — mirrors the funnel
+ * builder precedent (`page-preview.tsx`'s `ChoiceListEditable`). */
+const DRAG_DATA_MIME_TYPE = "text/plain";
+
+/** Thickness of the between-rows insertion line, in pixels. */
+const INSERTION_LINE_THICKNESS_PX = 2;
+
+type DropZone = "before" | "after" | "into";
+
+/**
+ * Which band of `row`'s rect `clientY` falls in. The root row always
+ * resolves to "into" — it has no parent, so "before"/"after" (which
+ * reorder among SIBLINGS) are meaningless for it. Division-by-zero-safe
+ * concerns are moot: callers only invoke this with a real, painted rect.
+ */
+function computeDropZone(row: FlatTreeRow, rect: DOMRect, clientY: number): DropZone {
+  if (row.parentId === null) return "into";
+  const ratio = (clientY - rect.top) / rect.height;
+  if (!isContainerNode(row.node)) return ratio < 0.5 ? "before" : "after";
+  if (ratio < DRAG_EDGE_BAND_FRACTION) return "before";
+  if (ratio > 1 - DRAG_EDGE_BAND_FRACTION) return "after";
+  return "into";
+}
+
+/**
+ * Resolves a drop band to a concrete (parentId, index) for `moveNodeTo` —
+ * `null` when the zone doesn't apply (an "into" resolution on a row that
+ * isn't a container, which `computeDropZone` never actually produces, but
+ * kept honest against the type rather than asserted away).
+ *
+ * "before"/"after" pass `row.index`/`row.index + 1` — positions in the
+ * CURRENT (pre-move) sibling array; `moveNodeTo` itself owns the
+ * same-parent forward-move index shift, so callers never need to.
+ */
+function dropTargetFor(row: FlatTreeRow, zone: DropZone): { parentId: string; index: number } | null {
+  if (zone === "into") {
+    if (!isContainerNode(row.node)) return null;
+    return { parentId: row.node.id, index: row.node.children.length };
+  }
+  if (row.parentId === null) return null; // defensive — computeDropZone never returns before/after for the root
+  return { parentId: row.parentId, index: zone === "before" ? row.index : row.index + 1 };
+}
 
 /**
  * A row at `depth` maps to `measureNodeTree` depth `depth + 1` (that
@@ -55,6 +126,69 @@ export const LayerTree = component(() => {
   const addTargetDepth = rows.find((row) => row.node.id === addTargetId)?.depth ?? 0;
   const addAtDepthCapacity = exceedsAddDepthCap(addTargetDepth);
 
+  // ----- Drag-and-drop state (shared across every row: dragging one row
+  // while hovering another needs a single source of truth, so it's lifted
+  // here rather than kept per-row). -----
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [hoverRowId, setHoverRowId] = useState<string | null>(null);
+  const [hoverZone, setHoverZone] = useState<DropZone | null>(null);
+
+  function clearDragHover() {
+    setHoverRowId(null);
+    setHoverZone(null);
+  }
+
+  function handleRowDragStart(e: DragEvent<HTMLDivElement>, id: string) {
+    e.dataTransfer.setData(DRAG_DATA_MIME_TYPE, id);
+    e.dataTransfer.effectAllowed = "move";
+    setDraggingId(id);
+  }
+
+  function handleRowDragEnd() {
+    setDraggingId(null);
+    clearDragHover();
+  }
+
+  function handleRowDragOver(e: DragEvent<HTMLDivElement>, row: FlatTreeRow) {
+    if (!draggingId) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const zone = computeDropZone(row, rect, e.clientY);
+    const target = dropTargetFor(row, zone);
+    if (!target || !canMoveTo(vm.config.root, draggingId, target.parentId)) {
+      e.dataTransfer.dropEffect = "none";
+      if (hoverRowId === row.node.id) clearDragHover();
+      return;
+    }
+    e.dataTransfer.dropEffect = "move";
+    setHoverRowId(row.node.id);
+    setHoverZone(zone);
+  }
+
+  function handleRowDragLeave(e: DragEvent<HTMLDivElement>, row: FlatTreeRow) {
+    const related = e.relatedTarget as Node | null;
+    if (related && e.currentTarget.contains(related)) return; // still inside the same row
+    if (hoverRowId === row.node.id) clearDragHover();
+  }
+
+  function handleRowDrop(e: DragEvent<HTMLDivElement>, row: FlatTreeRow) {
+    e.preventDefault();
+    const id = draggingId ?? e.dataTransfer.getData(DRAG_DATA_MIME_TYPE);
+    if (id) {
+      // Recomputed fresh from the event rather than trusting `hoverZone`
+      // state, so a drop always acts on exactly what the pointer is over
+      // at the moment of the drop, not a possibly-stale prior hover.
+      const rect = e.currentTarget.getBoundingClientRect();
+      const zone = computeDropZone(row, rect, e.clientY);
+      const target = dropTargetFor(row, zone);
+      if (target && canMoveTo(vm.config.root, id, target.parentId)) {
+        vm.moveNodeTo(id, target.parentId, target.index);
+      }
+    }
+    setDraggingId(null);
+    clearDragHover();
+  }
+
   return (
     <aside className="flex w-[240px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
       <div className="flex items-center justify-between border-b border-rv-divider px-3 py-3">
@@ -79,6 +213,12 @@ export const LayerTree = component(() => {
             isRoot={row.parentId === null}
             isCellTemplateRoot={row.isCellTemplateRoot}
             preview={rowPreview(row.node, localeTable)}
+            dropZone={hoverRowId === row.node.id ? hoverZone : null}
+            onRowDragStart={(e) => handleRowDragStart(e, row.node.id)}
+            onRowDragEnd={handleRowDragEnd}
+            onRowDragOver={(e) => handleRowDragOver(e, row)}
+            onRowDragLeave={(e) => handleRowDragLeave(e, row)}
+            onRowDrop={(e) => handleRowDrop(e, row)}
           />
         ))}
       </div>
@@ -168,6 +308,12 @@ function LayerRow({
   isRoot,
   isCellTemplateRoot,
   preview,
+  dropZone,
+  onRowDragStart,
+  onRowDragEnd,
+  onRowDragOver,
+  onRowDragLeave,
+  onRowDrop,
 }: {
   node: PaywallNode;
   depth: number;
@@ -177,6 +323,14 @@ function LayerRow({
   isRoot: boolean;
   isCellTemplateRoot: boolean;
   preview: string | null;
+  /** Set by the parent ONLY when this row is the current drag-hover
+   * target, and only to a LEGAL zone (see `canMoveTo` in `LayerTree`). */
+  dropZone: DropZone | null;
+  onRowDragStart: (e: DragEvent<HTMLDivElement>) => void;
+  onRowDragEnd: () => void;
+  onRowDragOver: (e: DragEvent<HTMLDivElement>) => void;
+  onRowDragLeave: (e: DragEvent<HTMLDivElement>) => void;
+  onRowDrop: (e: DragEvent<HTMLDivElement>) => void;
 }) {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
@@ -207,12 +361,37 @@ function LayerRow({
 
   return (
     <div
+      // Stable per-node hook for tests: two rows of the same TYPE render
+      // identical visible labels (e.g. two "Stack" rows), so drag-and-drop
+      // tests need something more precise than the label text the rest of
+      // this file's tests query by.
+      data-testid={`layer-row-${node.id}`}
+      draggable={movable}
+      onDragStart={movable ? onRowDragStart : undefined}
+      onDragEnd={movable ? onRowDragEnd : undefined}
+      onDragOver={onRowDragOver}
+      onDragLeave={onRowDragLeave}
+      onDrop={onRowDrop}
       className={cn(
         "group relative flex items-center gap-1.5 border-l-2 py-1 pr-1.5 transition",
         selected ? "border-rv-accent-500 bg-rv-accent-500/10" : "border-transparent hover:bg-rv-c2",
+        movable && "cursor-grab active:cursor-grabbing",
+        // "into" highlight: an inset ring around the whole row, distinct
+        // from the "before"/"after" insertion line rendered below.
+        dropZone === "into" && "ring-2 ring-inset ring-rv-accent-500 bg-rv-accent-500/10",
       )}
       style={{ paddingLeft: 10 + depth * 14 }}
     >
+      {(dropZone === "before" || dropZone === "after") && (
+        <div
+          className="pointer-events-none absolute inset-x-0 rounded-full bg-rv-accent-500"
+          style={{
+            height: INSERTION_LINE_THICKNESS_PX,
+            top: dropZone === "before" ? -INSERTION_LINE_THICKNESS_PX / 2 : undefined,
+            bottom: dropZone === "after" ? -INSERTION_LINE_THICKNESS_PX / 2 : undefined,
+          }}
+        />
+      )}
       <button
         type="button"
         onClick={() => vm.selectNode(node.id)}

@@ -493,6 +493,22 @@ export class PaywallBuilderViewModel {
     this.config = { ...this.config, root: treeOps.moveNode(this.config.root, id, dir) };
   }
 
+  /**
+   * Re-parents/reorders `id` to `index` inside `newParentId`'s children —
+   * the Layers panel's drag-and-drop (and designed to be reused unchanged
+   * by canvas dragging later: the op takes only ids + an index, nothing
+   * DOM- or panel-specific). `treeOps.moveNodeTo` returns `null` for an
+   * illegal move (see its doc comment); unlike `addNode`'s capacity guard,
+   * this is a full no-op on `null` — no AI-snapshot clear, no config
+   * write, so an invalid drag never marks the draft dirty.
+   */
+  moveNodeTo(id: string, newParentId: string, index: number) {
+    const nextRoot = treeOps.moveNodeTo(this.config.root, id, newParentId, index);
+    if (nextRoot === null) return;
+    this.clearAiSnapshotOnManualEdit();
+    this.config = { ...this.config, root: nextRoot };
+  }
+
   updateNode<T extends PaywallNode>(id: string, patch: Partial<T>) {
     this.clearAiSnapshotOnManualEdit();
     this.config = { ...this.config, root: treeOps.updateNode<T>(this.config.root, id, patch) };
