@@ -1206,6 +1206,48 @@ async function png(width: number, height: number): Promise<Buffer> {
     .toBuffer();
 }
 
+/** A PNG header that CLAIMS `width` x `height` without any pixel data
+ *  behind it — the decompression-bomb fixture. Signature + a single
+ *  IHDR chunk is enough for libvips to read the dimensions and refuse
+ *  on the pixel limit, so the test never allocates what it is testing
+ *  the rejection of. */
+function pngWithDeclaredSize(width: number, height: number): Buffer {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const data = Buffer.alloc(13);
+  data.writeUInt32BE(width, 0);
+  data.writeUInt32BE(height, 4);
+  data[8] = 8; // bit depth
+  data[9] = 2; // colour type: truecolour
+  // bytes 10-12: compression, filter, interlace — all zero
+  const type = Buffer.from("IHDR", "ascii");
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([type, data])), 0);
+  return Buffer.concat([signature, length, type, data, crc]);
+}
+
+/** CRC-32 as PNG specifies it. Table built once, on first use. */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buf: Buffer): number {
+  let c = 0xffffffff;
+  for (const byte of buf) {
+    c = CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
 describe("normalizeImage", () => {
   it("converts a PNG to WebP", async () => {
     const out = await normalizeImage(await png(400, 300));
@@ -1266,15 +1308,20 @@ describe("normalizeImage", () => {
   });
 
   it("rejects a decompression bomb rather than allocating it", async () => {
-    // 60000 x 60000 = 3.6e9 pixels, far past limitInputPixels.
-    const bomb = await sharp({
-      create: { width: 30000, height: 30000, channels: 3, background: { r: 0, g: 0, b: 0 } },
-      limitInputPixels: false,
-    })
-      .png()
-      .toBuffer();
+    // The fixture must DECLARE huge dimensions without the test itself
+    // allocating them — `sharp({create: {width: 30000, height: 30000}})`
+    // would need ~2.7 GB of RGB before it ever reached the code under
+    // test, which is the very failure the limit exists to prevent.
+    //
+    // libvips reads dimensions from the header, so a hand-built PNG
+    // whose IHDR claims a huge size is enough to trip the limit. Build
+    // the 8-byte PNG signature, then an IHDR chunk (length, "IHDR",
+    // width, height, bit depth 8, colour type 2, three zero bytes)
+    // with a correct CRC32 over the chunk type and data. No IDAT is
+    // needed: the pixel-count check must reject it before any decode.
+    const bomb = pngWithDeclaredSize(30000, 30000);
     await expect(normalizeImage(bomb)).rejects.toBeInstanceOf(AssetProcessingError);
-  }, 120_000);
+  });
 
   it("rejects SVG, whose loader is blocked", async () => {
     const svg = Buffer.from(
