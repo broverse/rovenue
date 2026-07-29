@@ -4,6 +4,7 @@ import type { PaywallNode } from "@rovenue/shared/paywall";
 import {
   buildEligibilityMap,
   computeResizedSize,
+  computeResizeOverlayRect,
   computeSelectionRect,
   isResizableNode,
   placeholderPriceView,
@@ -295,5 +296,55 @@ describe("computeResizedSize", () => {
 
   it("rounds fractional chrome-space deltas to the nearest integer node px", () => {
     expect(computeResizedSize("br", { x: 10 + 33.4, y: 20 + 33.6 }, RECT, 1)).toEqual({ width: 33, height: 34 });
+  });
+});
+
+describe("computeResizeOverlayRect", () => {
+  // Same 100x80 chrome-space box as computeResizedSize's fixture, at (10, 20).
+  const RECT = { left: 10, top: 20, width: 100, height: 80 };
+
+  it("br: grows down-right from the anchored top-left corner (10, 20)", () => {
+    expect(computeResizeOverlayRect("br", { width: 50, height: 30 }, RECT, 1)).toEqual({
+      left: 10,
+      top: 20,
+      width: 50,
+      height: 30,
+    });
+  });
+
+  it("tl: grows up-left from the anchored bottom-right corner (110, 100)", () => {
+    expect(computeResizeOverlayRect("tl", { width: 50, height: 30 }, RECT, 1)).toEqual({
+      left: 60, // 110 - 50
+      top: 70, // 100 - 30
+      width: 50,
+      height: 30,
+    });
+  });
+
+  it("tr: grows up-right from the anchored bottom-left corner (10, 100)", () => {
+    expect(computeResizeOverlayRect("tr", { width: 50, height: 30 }, RECT, 1)).toEqual({
+      left: 10,
+      top: 70, // 100 - 30
+      width: 50,
+      height: 30,
+    });
+  });
+
+  it("bl: grows down-left from the anchored top-right corner (110, 20)", () => {
+    expect(computeResizeOverlayRect("bl", { width: 50, height: 30 }, RECT, 1)).toEqual({
+      left: 60, // 110 - 50
+      top: 20,
+      width: 50,
+      height: 30,
+    });
+  });
+
+  it("scales node-px dims back up to chrome px by zoom", () => {
+    expect(computeResizeOverlayRect("br", { width: 50, height: 30 }, RECT, 2)).toEqual({
+      left: 10,
+      top: 20,
+      width: 100, // 50 * 2
+      height: 60, // 30 * 2
+    });
   });
 });

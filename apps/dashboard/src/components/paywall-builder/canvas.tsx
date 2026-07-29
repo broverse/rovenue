@@ -14,6 +14,7 @@ import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import {
   buildEligibilityMap,
   computeResizedSize,
+  computeResizeOverlayRect,
   computeSelectionRect,
   isResizableNode,
   resolvedPriceView,
@@ -83,8 +84,19 @@ const RESIZE_HANDLES: ReadonlyArray<{
 ];
 
 /** Live bookkeeping for one in-progress corner resize, kept in a ref for
- * the same reason `CanvasDragState` is: `endCanvasResize` must always read
- * the LATEST values, not ones captured by a stale closure. */
+ * the same reason `CanvasDragState` is: the pointer handlers must always
+ * read the LATEST values, not ones captured by a stale closure.
+ *
+ * Deliberately NOT written to the VM on every move (unlike an earlier
+ * version of this code): `vm.updateNode` changes `vm.config`'s identity,
+ * which bumps `rendererKey` below, which unmounts+remounts the ENTIRE
+ * `<PaywallRenderer>` subtree — renderer nodes carry mount-time state
+ * (a countdown's `mountedAt`, a carousel's `currentPage`, images/video
+ * that reload on mount), so a live per-pointermove write would visibly
+ * reset/flicker those dozens of times over one drag. The sibling
+ * move-drag in this same file already established the right pattern: no
+ * VM write mid-gesture, live feedback from local state only, one commit
+ * on release — this mirrors it exactly. */
 type CanvasResizeState = {
   id: string;
   corner: ResizeCorner;
@@ -92,15 +104,25 @@ type CanvasResizeState = {
    * resize; every subsequent move/up/cancel is filtered against it. */
   pointerId: number;
   /** The selection box in canvas-chrome coordinates, captured once at
-   * resize start — `computeResizedSize`'s anchor-corner math is relative
-   * to THIS rect for the whole gesture, never re-measured mid-drag. */
+   * resize start — `computeResizedSize`/`computeResizeOverlayRect`'s
+   * anchor-corner math is relative to THIS rect for the whole gesture,
+   * never re-measured mid-drag (the DOM doesn't move — see above). */
   startRect: Rect;
   /** Zoom captured at start alongside `startRect`, so a (hypothetical)
    * zoom change mid-drag can't retroactively skew an in-progress resize. */
   zoom: number;
-  /** The node's `size` before this resize started — restored verbatim on
-   * Escape/cancel. */
-  previousSize: StackNode["size"];
+  /** The `{width, height}` (node px) this gesture started from — compared
+   * against `lastDims` at release time so a resize that never actually
+   * moved skips the commit write entirely. */
+  startDims: { width: number; height: number };
+  /** The most recent dims `handleResizePointerMove` computed (mutated
+   * directly on this ref, NOT via React state) — read by `endCanvasResize`
+   * at commit time. Starts equal to `startDims` (no movement yet). Reading
+   * this off the ref rather than closing over React state sidesteps the
+   * stale-closure problem: `onUp`/`onCancel` are created once, at
+   * pointerdown time, so a `useState` value they closed over would still
+   * be whatever it was at gesture START, never the live one. */
+  lastDims: { width: number; height: number };
 };
 
 // =============================================================
@@ -344,13 +366,23 @@ export const Canvas = component(() => {
   // Corner resize — same single-source-of-truth-ref pattern as the move
   // drag above; declared alongside it so `handleCanvasPointerDown`'s
   // "one operation at a time" gate (below) can reference `resizeRef`
-  // and vice versa.
+  // and vice versa. `resizeRef` holds the event-handler bookkeeping
+  // (pointerId, the gesture's fixed anchor rect/zoom, the commit id); it
+  // is NEVER written to the VM mid-gesture (see `CanvasResizeState`'s own
+  // comment) — `activeResize` state below is the live RENDER-time mirror
+  // of the bits the overlay needs (corner/rect/zoom/dims), so the outline,
+  // handles, and badge can track the drag purely from local state without
+  // reading a ref during render.
   const resizeRef = useRef<CanvasResizeState | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
-  // The live `{width, height}` node-px badge shown while resizing; also
-  // doubles as the "a resize is in progress" flag (non-null exactly
-  // while one is), so there's no separate boolean to keep in sync.
-  const [resizeDims, setResizeDims] = useState<{ width: number; height: number } | null>(null);
+  // Non-null exactly while a resize is in progress — also the "is
+  // resizing" flag, so there's no separate boolean to keep in sync.
+  const [activeResize, setActiveResize] = useState<{
+    corner: ResizeCorner;
+    rect: Rect;
+    zoom: number;
+    dims: { width: number; height: number };
+  } | null>(null);
 
   /** Maps a viewport-space rect (`getBoundingClientRect()`) into the scroll
    * container's local coordinate space — the exact transform the selection
@@ -530,36 +562,47 @@ export const Canvas = component(() => {
 
   // =============================================================
   // Corner resize handles. Structurally mirrors the move-drag above:
-  // `resizeRef` is the single source of truth (read at commit time, never
-  // a stale closure), `pointerId` is captured at start and filtered on
-  // every move/up/cancel, Escape restores the pre-resize `size`, and every
-  // document listener is cleaned up on every exit path including unmount.
-  // Unlike the move-drag, there is no "below-threshold = plain click"
-  // phase — a handle's whole purpose is dragging, so the resize is armed
-  // immediately on pointerdown, and the box tracks the pointer from the
-  // very first move.
+  // `resizeRef` is the single source of truth for the event handlers
+  // (read at commit time, never a stale closure), `pointerId` is captured
+  // at start and filtered on every move/up/cancel, and every document
+  // listener is cleaned up on every exit path including unmount. Unlike
+  // the move-drag, there is no "below-threshold = plain click" phase —
+  // a handle's whole purpose is dragging, so the resize is armed
+  // immediately on pointerdown, and the overlay tracks the pointer from
+  // the very first move.
+  //
+  // Crucially — and unlike an earlier version of this code — `vm.config`
+  // is NEVER written mid-gesture (see `CanvasResizeState`'s doc comment
+  // for why: it would remount the whole `<PaywallRenderer>` on every
+  // pointermove). All live feedback (outline/handles/badge) comes from
+  // `activeResize` state alone, via `computeResizeOverlayRect`; the VM
+  // sees exactly ONE `updateNode` call, on pointerup, and only if the
+  // dims actually changed from where the gesture started. Escape/cancel
+  // therefore needs no restore write at all — the config was never
+  // touched — so `vm.config` is byte-identical before and after a
+  // cancelled resize.
   // =============================================================
 
-  /** Tears down the resize: removes the document-level listeners, and — on
-   * Escape/cancel (`commit: false`) — restores the node's pre-resize
-   * `size` (every live pointermove already applied a size, so there is
-   * always something concrete to undo). A committed resize needs no extra
-   * write here: the last pointermove already applied the final size. */
+  /** Tears down the resize and removes the document-level listeners.
+   * `commit: true` (pointerup) applies exactly one `vm.updateNode` — and
+   * only if the final dims differ from `startDims` — since every
+   * intermediate pointermove only updated LOCAL state. `commit: false`
+   * (Escape/cancel) writes nothing at all: `vm.config` was never touched
+   * mid-gesture, so there's nothing to undo. */
   const endCanvasResize = useCallback(
     (commit: boolean) => {
       const resize = resizeRef.current;
       resizeCleanupRef.current?.();
       resizeCleanupRef.current = null;
       resizeRef.current = null;
-      if (resize && !commit) {
-        vm.updateNode<StackNode>(resize.id, { size: resize.previousSize });
+      if (
+        commit &&
+        resize &&
+        (resize.lastDims.width !== resize.startDims.width || resize.lastDims.height !== resize.startDims.height)
+      ) {
+        vm.updateNode<StackNode>(resize.id, { size: resize.lastDims });
       }
-      setResizeDims(null);
-      // Belt-and-suspenders: force the selection ring to re-measure once
-      // the gesture is fully over, in case the DOM lagged a frame behind
-      // the last live update (see `handleResizePointerMove`'s comment on
-      // why it's normally unnecessary).
-      setRingTick((t) => t + 1);
+      setActiveResize(null);
     },
     [vm],
   );
@@ -567,25 +610,14 @@ export const Canvas = component(() => {
   function handleResizePointerMove(ev: PointerEvent) {
     const resize = resizeRef.current;
     if (!resize || ev.pointerId !== resize.pointerId) return; // a different, stray pointer — ignore
-    // The overlay/ring lives in canvas-chrome coordinates; convert the raw
+    // The overlay lives in canvas-chrome coordinates; convert the raw
     // client-space pointer into that same space (a zero-size "rect" at the
     // pointer position) before handing it to the pure resize math.
     const pointer = toLocalRect({ left: ev.clientX, top: ev.clientY, width: 0, height: 0 });
-    const { width, height } = computeResizedSize(
-      resize.corner,
-      { x: pointer.left, y: pointer.top },
-      resize.startRect,
-      resize.zoom,
-    );
-    setResizeDims({ width, height });
-    // Applied LIVE (not just on release) — this is what makes the box
-    // itself track the drag, not merely the overlay. `vm.updateNode`
-    // changes `vm.config`'s identity, which bumps `rendererKey` above,
-    // which is already a dependency of the selection-ring recompute effect
-    // — so that same machinery re-measures and re-anchors the ring/handles
-    // on every one of these live updates with no separate resize-specific
-    // recompute path needed.
-    vm.updateNode<StackNode>(resize.id, { size: { width, height } });
+    const dims = computeResizedSize(resize.corner, { x: pointer.left, y: pointer.top }, resize.startRect, resize.zoom);
+    resize.lastDims = dims; // mutate the ref directly — read back at commit time
+    // LOCAL state only — no VM write here (see the module comment above).
+    setActiveResize({ corner: resize.corner, rect: resize.startRect, zoom: resize.zoom, dims });
   }
 
   const handleResizePointerDown = useCallback(
@@ -606,20 +638,14 @@ export const Canvas = component(() => {
       // resize from ever reaching `handleClick`'s trailing click.
       e.stopPropagation();
 
-      resizeRef.current = {
-        id,
-        corner,
-        pointerId: e.pointerId,
-        startRect: ring,
-        zoom: vm.canvasZoom,
-        previousSize: node.size,
-      };
-      // Seed the badge with the box's CURRENT node-px size (no pointer
-      // movement yet to derive one from).
-      setResizeDims({
-        width: Math.round(ring.width / vm.canvasZoom),
-        height: Math.round(ring.height / vm.canvasZoom),
-      });
+      const zoom = vm.canvasZoom;
+      // The box's CURRENT node-px size — both the resize math's starting
+      // point AND (if the gesture ends with no movement) what the
+      // "did anything change" check in `endCanvasResize` compares the
+      // final dims against.
+      const startDims = { width: Math.round(ring.width / zoom), height: Math.round(ring.height / zoom) };
+      resizeRef.current = { id, corner, pointerId: e.pointerId, startRect: ring, zoom, startDims, lastDims: startDims };
+      setActiveResize({ corner, rect: ring, zoom, dims: startDims });
 
       const onMove = (ev: PointerEvent) => handleResizePointerMove(ev);
       const onUp = (ev: PointerEvent) => {
@@ -671,6 +697,16 @@ export const Canvas = component(() => {
     const node = findNode(vm.config.root, vm.selectedNodeId);
     return node !== null && isResizableNode(node);
   }, [vm.selectedNodeId, vm.config]);
+
+  // The rect the selection outline/handles/badge actually render at. While
+  // a resize is in progress, `vm.config` (and therefore the node's real
+  // on-screen rect `ring` reflects) is deliberately untouched — see
+  // `CanvasResizeState`'s comment — so the live box has to be derived
+  // purely from `activeResize`'s local state instead of the DOM-measured
+  // `ring`. Outside a resize, this is just `ring` unchanged.
+  const displayRect = activeResize
+    ? computeResizeOverlayRect(activeResize.corner, activeResize.dims, activeResize.rect, activeResize.zoom)
+    : ring;
 
   const zoom = vm.canvasZoom;
   const spec = deviceById(vm.canvasDevice);
@@ -921,11 +957,16 @@ export const Canvas = component(() => {
             opt back in with `pointer-events-auto`, and — being absolutely
             positioned — this same box IS the containing block they
             position against, so they always land exactly on ITS corners. */}
-        {ring && !vm.showAllSizes && (
+        {displayRect && !vm.showAllSizes && (
           <div
             aria-hidden="true"
             className="pointer-events-none absolute box-border border border-rv-accent-500"
-            style={{ left: ring.left, top: ring.top, width: ring.width, height: ring.height }}
+            style={{
+              left: displayRect.left,
+              top: displayRect.top,
+              width: displayRect.width,
+              height: displayRect.height,
+            }}
           >
             {selectedNodeResizable &&
               RESIZE_HANDLES.map(({ corner, cursor, insetX, insetY }) => (
@@ -946,15 +987,16 @@ export const Canvas = component(() => {
               ))}
             {/* Live "W × H" dimension badge — node px, shown only while a
                 resize is in progress (mirrors every design tool's resize
-                readout). */}
-            {resizeDims && (
+                readout). Reads `activeResize.dims` directly rather than
+                `displayRect` (which is in chrome/zoomed px, not node px). */}
+            {activeResize && (
               <div
                 aria-hidden="true"
                 data-testid="canvas-resize-badge"
                 className="pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-rv-divider-strong bg-rv-c1 px-1.5 py-0.5 font-rv-mono text-[10px] text-rv-mute-600"
-                style={{ top: ring.height + RESIZE_BADGE_GAP_PX }}
+                style={{ top: displayRect.height + RESIZE_BADGE_GAP_PX }}
               >
-                {resizeDims.width} × {resizeDims.height}
+                {activeResize.dims.width} × {activeResize.dims.height}
               </div>
             )}
           </div>

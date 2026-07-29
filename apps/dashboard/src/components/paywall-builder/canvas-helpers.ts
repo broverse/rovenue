@@ -278,3 +278,29 @@ export function computeResizedSize(
   const height = Math.max(RESIZE_MIN_SIZE_PX, Math.round(heightChrome / zoom));
   return { width, height };
 }
+
+/**
+ * Pure overlay-rect math for a resize IN PROGRESS. The canvas never writes
+ * to the VM mid-gesture (see `canvas.tsx`'s resize handlers) — `vm.config`,
+ * and therefore the node's real on-screen rect, stay frozen at whatever
+ * they were before the drag started. So the selection outline/handles/
+ * badge can't just re-measure the DOM like the ring effect normally does;
+ * instead this derives the LIVE box directly from the same anchor corner
+ * `computeResizedSize` used, `dims` (its latest {width, height} result,
+ * node px), and `zoom` (to scale back to chrome px) — no DOM access, no
+ * config read, just the numbers already in hand.
+ */
+export function computeResizeOverlayRect(
+  corner: ResizeCorner,
+  dims: { width: number; height: number },
+  rect: Rect,
+  zoom: number,
+): Rect {
+  const anchorX = corner === "tl" || corner === "bl" ? rect.left + rect.width : rect.left;
+  const anchorY = corner === "tl" || corner === "tr" ? rect.top + rect.height : rect.top;
+  const width = dims.width * zoom;
+  const height = dims.height * zoom;
+  const left = corner === "tl" || corner === "bl" ? anchorX - width : anchorX;
+  const top = corner === "tl" || corner === "tr" ? anchorY - height : anchorY;
+  return { left, top, width, height };
+}

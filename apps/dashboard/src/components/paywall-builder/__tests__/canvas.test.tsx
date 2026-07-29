@@ -418,7 +418,7 @@ describe("Canvas — selection chrome corner resize", () => {
     }
   });
 
-  it("drags the bottom-right handle to set both width and height together on the VM's stack node", async () => {
+  it("mid-gesture: tracks the live badge WITHOUT touching the VM, then commits exactly once on release", async () => {
     const { vm, container } = await renderCanvas();
     const rowContainer = nodeEl(container, "rowContainer");
     // 80x40 box at (100, 50) -> spans x:[100,180], y:[50,90].
@@ -427,6 +427,7 @@ describe("Canvas — selection chrome corner resize", () => {
     await act(async () => {
       vm.selectNode("rowContainer");
     });
+    const configBeforeSelect = vm.config;
 
     const handle = container.querySelector<HTMLElement>('[data-testid="canvas-resize-handle-br"]');
     if (!handle) throw new Error("expected a br resize handle");
@@ -435,11 +436,22 @@ describe("Canvas — selection chrome corner resize", () => {
     // (150, 130) -> width |150-100|=50, height |130-50|=80 (zoom is 1).
     firePointer("pointerdown", handle, { clientX: 180, clientY: 90 });
     firePointer("pointermove", document, { clientX: 150, clientY: 130 });
+
+    // MID-GESTURE: the VM must be untouched — a live per-pointermove write
+    // would remount the whole PaywallRenderer subtree every frame (mount-
+    // time state: countdown timers, carousel page, media elements). Only
+    // the local overlay/badge reflects the drag.
+    expect(vm.config).toBe(configBeforeSelect);
+    expect(container.querySelector('[data-testid="canvas-resize-badge"]')?.textContent).toBe("50 × 80");
+
     firePointer("pointerup", document, { clientX: 150, clientY: 130 });
 
+    // On release: exactly one commit, with the final {width, height}.
     const row = vm.config.root.children.find((n) => n.id === "rowContainer");
     if (row?.type !== "stack") throw new Error("expected the rowContainer fixture");
     expect(row.size).toEqual({ width: 50, height: 80 });
+    // The badge disappears once the gesture ends.
+    expect(container.querySelector('[data-testid="canvas-resize-badge"]')).toBeNull();
   });
 
   it("drags the top-left handle, anchored at the opposite (bottom-right) corner", async () => {
@@ -465,7 +477,7 @@ describe("Canvas — selection chrome corner resize", () => {
     expect(row.size).toEqual({ width: 120, height: 20 });
   });
 
-  it("cancels a resize on Escape, restoring the node's pre-resize size", async () => {
+  it("cancels a resize on Escape — the VM was never touched, so there's nothing to restore", async () => {
     const { vm, container } = await renderCanvas();
     const rowContainer = nodeEl(container, "rowContainer");
     stubRect(rowContainer, { left: 100, top: 50, width: 80, height: 40 });
@@ -473,19 +485,46 @@ describe("Canvas — selection chrome corner resize", () => {
     await act(async () => {
       vm.selectNode("rowContainer");
     });
+    const configBefore = vm.config;
 
     const handle = container.querySelector<HTMLElement>('[data-testid="canvas-resize-handle-br"]');
     if (!handle) throw new Error("expected a br resize handle");
 
     firePointer("pointerdown", handle, { clientX: 180, clientY: 90 });
     firePointer("pointermove", document, { clientX: 150, clientY: 130 });
+    expect(container.querySelector('[data-testid="canvas-resize-badge"]')?.textContent).toBe("50 × 80");
 
     fireEvent.keyDown(document, { key: "Escape" });
     firePointer("pointerup", document, { clientX: 150, clientY: 130 });
 
+    // Byte-identical: `vm.config` was never written to during the whole
+    // gesture, so it's still the exact same reference as before it started.
+    expect(vm.config).toBe(configBefore);
     const row = vm.config.root.children.find((n) => n.id === "rowContainer");
     if (row?.type !== "stack") throw new Error("expected the rowContainer fixture");
     expect(row.size).toBeUndefined();
+    expect(container.querySelector('[data-testid="canvas-resize-badge"]')).toBeNull();
+  });
+
+  it("skips the commit write entirely when the pointer never actually moved the dims", async () => {
+    const { vm, container } = await renderCanvas();
+    const rowContainer = nodeEl(container, "rowContainer");
+    stubRect(rowContainer, { left: 100, top: 50, width: 80, height: 40 });
+
+    await act(async () => {
+      vm.selectNode("rowContainer");
+    });
+    const configBefore = vm.config;
+
+    const handle = container.querySelector<HTMLElement>('[data-testid="canvas-resize-handle-br"]');
+    if (!handle) throw new Error("expected a br resize handle");
+
+    // No pointermove at all between down and up — dims never change from
+    // the gesture's own starting size.
+    firePointer("pointerdown", handle, { clientX: 180, clientY: 90 });
+    firePointer("pointerup", document, { clientX: 180, clientY: 90 });
+
+    expect(vm.config).toBe(configBefore);
   });
 
   it("clamps to the minimum size when dragged past or near the anchor", async () => {
