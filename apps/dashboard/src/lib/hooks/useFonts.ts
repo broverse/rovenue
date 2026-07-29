@@ -27,6 +27,9 @@ export interface FontFace {
   style: string;
   format: string;
   byteSize: number;
+  /** SHA-256 hex of the face's bytes; wave E2's picker needs this to
+   *  build the versioned `/v1/fonts/:faceId/:contentHash/file` URL. */
+  contentHash: string;
 }
 
 export interface FontFamily {

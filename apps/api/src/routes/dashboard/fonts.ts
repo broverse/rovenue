@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import {
   ERROR_CODE,
@@ -68,13 +67,14 @@ import { validate } from "../../lib/validate";
 const FONT_WEIGHT_MIN = 100;
 const FONT_WEIGHT_MAX = 900;
 const FONT_STYLES = ["normal", "italic"] as const;
+const FONT_FAMILY_NAME_MAX_LENGTH = 120;
 const FONT_FILE_TOO_LARGE_MESSAGE = `File exceeds the ${FONT_FACE_MAX_BYTES}-byte limit`;
 const FONT_FAMILY_NOT_FOUND_MESSAGE =
   "familyId does not reference an active font family in this project";
 
 const uploadFormSchema = z
   .object({
-    familyName: z.string().min(1).optional(),
+    familyName: z.string().min(1).max(FONT_FAMILY_NAME_MAX_LENGTH).optional(),
     familyId: z.string().min(1).optional(),
     weight: z.coerce.number().int().min(FONT_WEIGHT_MIN).max(FONT_WEIGHT_MAX),
     style: z.enum(FONT_STYLES),
@@ -124,10 +124,21 @@ export const fontsRoute = new Hono()
         );
       }
 
-      // Gate 2 (see module comment): redundant with body-limit above
-      // for the common case, but still the one that returns the typed
-      // code for a request whose total body slipped under body-limit's
-      // accounting while the file part itself is still over the cap.
+      // Gate 2 (see module comment): `bodyLimit({ maxSize: FONT_FACE_MAX_BYTES })`
+      // above measures the ENTIRE multipart body — boundary, part
+      // headers, and the four other form fields, not just `file`'s
+      // bytes — so the total is always strictly larger than the file
+      // part alone. That makes this branch currently unreachable: any
+      // body whose file part exceeds `FONT_FACE_MAX_BYTES` was already
+      // rejected by body-limit before parseBody, let alone this
+      // handler, ever ran. Kept anyway as defensive redundancy in case
+      // that relationship ever stops holding (e.g. body-limit's
+      // accounting logic changes upstream), and because it's what
+      // returns the typed `FONT_FILE_TOO_LARGE` envelope instead of
+      // body-limit's onError doing so alone. The real consequence of
+      // this ordering is that the effective per-file cap is
+      // `FONT_FACE_MAX_BYTES` minus multipart overhead — a font of
+      // exactly 2 MB is rejected despite this constant's docstring.
       if (file.size > FONT_FACE_MAX_BYTES) {
         return c.json(
           fail(ERROR_CODE.FONT_FILE_TOO_LARGE, FONT_FILE_TOO_LARGE_MESSAGE),
@@ -166,25 +177,15 @@ export const fontsRoute = new Hono()
         );
         if (!existingFamily) {
           return c.json(
-            fail(
-              ERROR_CODE.FONT_FAMILY_NOT_FOUND,
-              "familyId does not reference an active font family in this project",
-            ),
+            fail(ERROR_CODE.FONT_FAMILY_NOT_FOUND, FONT_FAMILY_NOT_FOUND_MESSAGE),
             404,
           );
         }
 
-        const [existingFace] = await drizzle.db
-          .select({ id: drizzle.schema.fontFaces.id })
-          .from(drizzle.schema.fontFaces)
-          .where(
-            and(
-              eq(drizzle.schema.fontFaces.familyId, familyId),
-              eq(drizzle.schema.fontFaces.weight, form.weight),
-              eq(drizzle.schema.fontFaces.style, form.style),
-            ),
-          )
-          .limit(1);
+        const existingFace = await drizzle.fontRepo.findFaceByKey(
+          drizzle.db,
+          { familyId, weight: form.weight, style: form.style },
+        );
         targetsExistingFace = Boolean(existingFace);
       }
 
@@ -252,6 +253,7 @@ export const fontsRoute = new Hono()
           style: face.style,
           format: face.format,
           byteSize: face.byteSize,
+          contentHash: face.contentHash,
         }),
       );
     },
@@ -280,6 +282,16 @@ export const fontsRoute = new Hono()
   })
   // ----- DELETE /dashboard/projects/:projectId/fonts/:familyId -----
   //
+  // Destructive, so this is gated the same as the upload route above —
+  // `fonts:write`, not the bare `assertProjectAccess` the read-only GET
+  // route uses. A live paywall renders with these bytes; letting a
+  // CUSTOMER_SUPPORT/GROWTH member remove a family they aren't allowed
+  // to upload in the first place would make delete weaker than the
+  // constructive action it undoes (sibling convention:
+  // virtual-currencies.ts uses `assertProjectAccess` for its GET and
+  // `assertProjectCapability(..., "virtual-currency:manage")` for its
+  // DELETE).
+  //
   // Deleting a family a paywall still references is allowed on purpose
   // (design spec §4.1) — there is deliberately no "font is in use"
   // guard here. `findLiveFamilyForProject` scopes the lookup to THIS
@@ -295,7 +307,7 @@ export const fontsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId or familyId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id);
+    await assertProjectCapability(projectId, user.id, "fonts:write");
 
     const family = await drizzle.fontRepo.findLiveFamilyForProject(
       drizzle.db,

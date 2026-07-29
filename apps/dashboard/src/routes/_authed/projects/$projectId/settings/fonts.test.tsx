@@ -52,7 +52,14 @@ describe("FontsPage", () => {
           id: "f1",
           name: "Brand Sans",
           faces: [
-            { id: "a", weight: 400, style: "normal", format: "otf", byteSize: 1024 },
+            {
+              id: "a",
+              weight: 400,
+              style: "normal",
+              format: "otf",
+              byteSize: 1024,
+              contentHash: "a".repeat(64),
+            },
           ],
         },
       ],

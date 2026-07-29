@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb } from "../client";
 import * as drizzleRepos from "../index";
-import { projects } from "../schema";
+import { fontFaces, projects } from "../schema";
 
 const RUN_ID = Date.now();
 const PROJECT_ID = `prj_fonts_${RUN_ID}`;
@@ -103,6 +103,50 @@ describe("fontRepo", () => {
     const families = await drizzleRepos.fontRepo.listFamiliesWithFaces(db, PROJECT_ID);
     expect(families.find((f) => f.id === family.id)).toBeUndefined();
     expect(await drizzleRepos.fontRepo.findFaceBytes(db, face.id)).toBeNull();
+  });
+
+  // Final-review Important 3: softDeleteFamily used to set `deletedAt`
+  // on the family only, leaving the `bytea` face rows resident forever
+  // (invisible to every read path, uncounted by the quota, unreachable
+  // by any cleanup job). This queries `fontFaces` directly — bypassing
+  // every repo read, which all filter on the family's `deletedAt` and
+  // would report "gone" whether the row was hard-deleted or merely
+  // hidden — so it proves physical removal, not filtering.
+  it("hard-deletes the face rows themselves, not just filters them out", async () => {
+    const family = await drizzleRepos.fontRepo.createFamily(db, {
+      projectId: PROJECT_ID,
+      name: "Bytes To Reclaim",
+    });
+    const faceA = await drizzleRepos.fontRepo.upsertFace(db, {
+      familyId: family.id,
+      weight: 400,
+      style: "normal",
+      format: "otf",
+      bytes: Buffer.from([1, 2, 3]),
+    });
+    const faceB = await drizzleRepos.fontRepo.upsertFace(db, {
+      familyId: family.id,
+      weight: 700,
+      style: "italic",
+      format: "otf",
+      bytes: Buffer.from([4, 5, 6]),
+    });
+
+    const beforeRows = await db
+      .select({ id: fontFaces.id })
+      .from(fontFaces)
+      .where(eq(fontFaces.familyId, family.id));
+    expect(beforeRows.map((r) => r.id).sort()).toEqual(
+      [faceA.id, faceB.id].sort(),
+    );
+
+    await drizzleRepos.fontRepo.softDeleteFamily(db, family.id);
+
+    const afterRows = await db
+      .select({ id: fontFaces.id })
+      .from(fontFaces)
+      .where(eq(fontFaces.familyId, family.id));
+    expect(afterRows).toHaveLength(0);
   });
 
   it("listFamiliesWithFaces does not select the bytes column, and exposes contentHash", async () => {
@@ -305,6 +349,76 @@ describe("fontRepo", () => {
       const found = await drizzleRepos.fontRepo.findLiveFamilyForProject(db, {
         projectId: PROJECT_ID,
         familyId: family.id,
+      });
+      expect(found).toBeNull();
+    });
+  });
+
+  // Final-review Important 2: this query used to be inline in the
+  // dashboard upload route, pinned by a mock whose `from`/`where`/
+  // `limit` all discarded their arguments — dropping either the
+  // `weight` or `style` predicate from the real WHERE clause would
+  // have silently let a project sail past FONT_FACES_MAX_PER_PROJECT,
+  // and the route's own tests would still pass green. Each predicate
+  // gets its own case here, against a real database, mutation-checked
+  // (see final-fix-report.md).
+  describe("findFaceByKey", () => {
+    it("finds the face at the matching (familyId, weight, style)", async () => {
+      const family = await drizzleRepos.fontRepo.createFamily(db, {
+        projectId: PROJECT_ID,
+        name: "Key Match Family",
+      });
+      const face = await drizzleRepos.fontRepo.upsertFace(db, {
+        familyId: family.id,
+        weight: 400,
+        style: "normal",
+        format: "otf",
+        bytes: Buffer.from([1]),
+      });
+      const found = await drizzleRepos.fontRepo.findFaceByKey(db, {
+        familyId: family.id,
+        weight: 400,
+        style: "normal",
+      });
+      expect(found?.id).toBe(face.id);
+    });
+
+    it("does not find a face with a different weight", async () => {
+      const family = await drizzleRepos.fontRepo.createFamily(db, {
+        projectId: PROJECT_ID,
+        name: "Key Weight Family",
+      });
+      await drizzleRepos.fontRepo.upsertFace(db, {
+        familyId: family.id,
+        weight: 400,
+        style: "normal",
+        format: "otf",
+        bytes: Buffer.from([1]),
+      });
+      const found = await drizzleRepos.fontRepo.findFaceByKey(db, {
+        familyId: family.id,
+        weight: 700,
+        style: "normal",
+      });
+      expect(found).toBeNull();
+    });
+
+    it("does not find a face with a different style", async () => {
+      const family = await drizzleRepos.fontRepo.createFamily(db, {
+        projectId: PROJECT_ID,
+        name: "Key Style Family",
+      });
+      await drizzleRepos.fontRepo.upsertFace(db, {
+        familyId: family.id,
+        weight: 400,
+        style: "normal",
+        format: "otf",
+        bytes: Buffer.from([1]),
+      });
+      const found = await drizzleRepos.fontRepo.findFaceByKey(db, {
+        familyId: family.id,
+        weight: 400,
+        style: "italic",
       });
       expect(found).toBeNull();
     });

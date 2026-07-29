@@ -70,7 +70,10 @@ export const fontsRoute = new Hono().get(
       `public, max-age=${FONT_FILE_CACHE_MAX_AGE_SECONDS}, immutable`,
     );
     c.header("ETag", `"${face.contentHash}"`);
-    c.header("Content-Type", FONT_CONTENT_TYPES[face.format as FontFormat]);
+    c.header(
+      "Content-Type",
+      FONT_CONTENT_TYPES[face.format as FontFormat] ?? "application/octet-stream",
+    );
 
     return c.body(new Uint8Array(face.bytes));
   },

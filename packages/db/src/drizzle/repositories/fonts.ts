@@ -182,11 +182,64 @@ export async function countFacesForProject(
   return rows.length;
 }
 
+/**
+ * Final-review Important 3: this repo stores font bytes directly in
+ * Postgres (no asset storage in this system, by design — see module
+ * note above), which makes retention this function's own
+ * responsibility. Soft-deleting only the family left the `bytea` face
+ * rows resident forever — invisible to every read path (all of them
+ * join through non-deleted families), uncounted by `countFacesForProject`
+ * (same join), and unreferenced by any cleanup job anywhere in this
+ * repo. There is no undelete path for a family, so nothing needs those
+ * bytes preserved: the face rows are hard-deleted here, while the
+ * family row itself stays soft-deleted (`deletedAt` set, never
+ * removed) for audit-log continuity. Runs as two statements against
+ * whatever `db` handle the caller passes in — the dashboard delete
+ * route already wraps this call in a transaction alongside the audit
+ * entry, so both statements land or roll back together with it.
+ */
 export async function softDeleteFamily(db: Db, familyId: string): Promise<void> {
+  await db.delete(fontFaces).where(eq(fontFaces.familyId, familyId));
   await db
     .update(fontFamilies)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
     .where(eq(fontFamilies.id, familyId));
+}
+
+export interface FindFaceByKeyInput {
+  familyId: string;
+  weight: number;
+  style: string;
+}
+
+/**
+ * Final-review Important 2: the dashboard upload route's quota-skip
+ * check ("does a face already exist at this (familyId, weight,
+ * style)?") used to be an inline `select` in the route, pinned by a
+ * test mock whose `from`/`where`/`limit` all discarded their
+ * arguments — any predicate agreed with it. Moved here, same remedy as
+ * `findLiveFamilyForProject` above, so every predicate (weight, style)
+ * gets its own case against a real database
+ * (fonts.integration.test.ts). A wrong/dropped predicate here silently
+ * lets a project sail past `FONT_FACES_MAX_PER_PROJECT` by treating
+ * every upload into a family that has any face as "already exists".
+ */
+export async function findFaceByKey(
+  db: Db,
+  input: FindFaceByKeyInput,
+): Promise<{ id: string } | null> {
+  const [row] = await db
+    .select({ id: fontFaces.id })
+    .from(fontFaces)
+    .where(
+      and(
+        eq(fontFaces.familyId, input.familyId),
+        eq(fontFaces.weight, input.weight),
+        eq(fontFaces.style, input.style),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 export interface FindLiveFamilyForProjectInput {

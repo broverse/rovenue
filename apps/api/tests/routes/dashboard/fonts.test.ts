@@ -23,11 +23,18 @@ import { FONT_FACE_MAX_BYTES, FONT_FACES_MAX_PER_PROJECT } from "@rovenue/shared
 // whether upsertFace/createFamily get called), not the query itself —
 // that split is deliberate, not a gap.
 //
-// `drizzle.db.select` is still mocked, but now only backs the one
-// remaining inline query: the existing-face lookup that backs the
-// quota-skip-on-update fix. That query's shape (not its WHERE clause)
-// is an accepted, documented deferred minor — see the task report,
-// "still not to be fixed" in fix round 2.
+// `drizzle.fontRepo.findFaceByKey` (final-review Important 2 fix,
+// round 3): the existing-face lookup backing the quota-skip-on-update
+// fix used to be an inline `drizzle.db.select` in this route, pinned
+// by a mock whose `from`/`where`/`limit` all discarded their
+// arguments — no test anywhere actually ran that query's WHERE clause,
+// so dropping the `weight`/`style` predicates would have silently
+// skipped the quota check for any upload into a family with any face,
+// and every test here would still pass. It now lives in fontRepo,
+// with real-Postgres, per-predicate coverage in
+// fonts.integration.test.ts (mutation-checked). Mocked here the same
+// way findLiveFamilyForProject is: these route tests pin the route's
+// *reaction*, not the query.
 // =============================================================
 
 const assertProjectCapability = vi.hoisted(() => vi.fn());
@@ -46,14 +53,19 @@ vi.mock("../../../src/lib/capabilities", async (importOriginal) => ({
     assertProjectCapability(...args),
 }));
 
-// Task 4 (list/delete): a bare membership gate, deliberately distinct
-// from `assertProjectCapability` above — the list/delete routes only
-// require the caller to belong to the project named in the URL, not
-// the `fonts:write` capability the upload route requires. Mocked to
-// always resolve (i.e. "the caller is a legitimate member of whatever
-// project the URL names") so that the cross-project delete test below
+// Task 4 (list): a bare membership gate, deliberately distinct from
+// `assertProjectCapability` above — the list route only requires the
+// caller to belong to the project named in the URL, not the
+// `fonts:write` capability the upload route requires. Mocked to always
+// resolve (i.e. "the caller is a legitimate member of whatever project
+// the URL names") so that the cross-project delete test below
 // exercises the thing it's meant to: family-vs-URL-project scoping via
 // `findLiveFamilyForProject`, not membership itself.
+//
+// DELETE does NOT use this gate (final-review fix): it is destructive,
+// so it is gated behind `assertProjectCapability(..., "fonts:write")`,
+// same as upload — see the route's own comment. `assertProjectAccess`
+// stays mocked to resolve for the GET/list tests below.
 const assertProjectAccess = vi.hoisted(() => vi.fn());
 vi.mock("../../../src/lib/project-access", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -70,26 +82,13 @@ const countFacesForProject = vi.hoisted(() => vi.fn());
 const createFamily = vi.hoisted(() => vi.fn());
 const upsertFace = vi.hoisted(() => vi.fn());
 const findLiveFamilyForProject = vi.hoisted(() => vi.fn());
+const findFaceByKey = vi.hoisted(() => vi.fn());
 const listFamiliesWithFaces = vi.hoisted(() => vi.fn());
 const softDeleteFamily = vi.hoisted(() => vi.fn());
 const transaction = vi.hoisted(() => vi.fn());
-// Controllable result set for the one remaining inline `select` query
-// (the existing-face lookup). Reset to "no existing face" by default
-// in beforeEach; tests that need "this weight/style already exists"
-// override it explicitly.
-const selectFacesResult = vi.hoisted(() => ({
-  rows: [] as Array<{ id: string }>,
-}));
 
 vi.mock("@rovenue/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rovenue/db")>();
-  const select = () => ({
-    from: () => ({
-      where: () => ({
-        limit: () => Promise.resolve(selectFacesResult.rows),
-      }),
-    }),
-  });
   return {
     ...actual,
     drizzle: {
@@ -100,10 +99,11 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         createFamily,
         upsertFace,
         findLiveFamilyForProject,
+        findFaceByKey,
         listFamiliesWithFaces,
         softDeleteFamily,
       },
-      db: { ...actual.drizzle.db, transaction, select },
+      db: { ...actual.drizzle.db, transaction },
     },
   };
 });
@@ -210,6 +210,7 @@ beforeEach(() => {
       format: input.format,
       bytes: input.bytes,
       byteSize: input.bytes.byteLength,
+      contentHash: `hash${faceIdCounter}`,
       createdAt: new Date(),
     }),
   );
@@ -224,7 +225,7 @@ beforeEach(() => {
   findLiveFamilyForProject
     .mockReset()
     .mockResolvedValue({ id: "family-existing" });
-  selectFacesResult.rows = [];
+  findFaceByKey.mockReset().mockResolvedValue(null);
 });
 
 describe("POST /dashboard/projects/:projectId/fonts", () => {
@@ -297,8 +298,14 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
       style: "normal",
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { format: string } };
+    const body = (await res.json()) as {
+      data: { format: string; contentHash: string };
+    };
     expect(body.data.format).toBe("otf");
+    // Minor fix: the upload response now carries contentHash so a
+    // client that just uploaded can build the versioned file URL
+    // without a second round-trip to GET /fonts.
+    expect(body.data.contentHash).toBe("hash1");
     expect(upsertFace).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ format: "otf" }),
@@ -349,7 +356,7 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
 
   it("attaches a face to an existing, owned, live family via familyId", async () => {
     findLiveFamilyForProject.mockResolvedValue({ id: "family-existing" });
-    selectFacesResult.rows = [];
+    findFaceByKey.mockResolvedValue(null);
     const res = await uploadFont({
       bytes: otfBytes(),
       familyId: "family-existing",
@@ -360,6 +367,11 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
     const body = (await res.json()) as { data: { familyId: string } };
     expect(body.data.familyId).toBe("family-existing");
     expect(createFamily).not.toHaveBeenCalled();
+    expect(findFaceByKey).toHaveBeenCalledWith(expect.anything(), {
+      familyId: "family-existing",
+      weight: 700,
+      style: "italic",
+    });
     expect(upsertFace).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -379,7 +391,7 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
   it("allows re-uploading an existing (familyId, weight, style) even at the face cap", async () => {
     countFacesForProject.mockResolvedValue(FONT_FACES_MAX_PER_PROJECT);
     findLiveFamilyForProject.mockResolvedValue({ id: "family-existing" });
-    selectFacesResult.rows = [{ id: "face-existing" }];
+    findFaceByKey.mockResolvedValue({ id: "face-existing" });
     const res = await uploadFont({
       bytes: otfBytes(),
       familyId: "family-existing",
@@ -391,12 +403,17 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
     // it's mocked to report "at cap" specifically to prove this isn't
     // an accidental pass from an unset default.
     expect(countFacesForProject).not.toHaveBeenCalled();
+    expect(findFaceByKey).toHaveBeenCalledWith(expect.anything(), {
+      familyId: "family-existing",
+      weight: 400,
+      style: "normal",
+    });
   });
 
   it("still rejects a genuinely new (weight, style) at the face cap", async () => {
     countFacesForProject.mockResolvedValue(FONT_FACES_MAX_PER_PROJECT);
     findLiveFamilyForProject.mockResolvedValue({ id: "family-existing" });
-    selectFacesResult.rows = [];
+    findFaceByKey.mockResolvedValue(null);
     const res = await uploadFont({
       bytes: otfBytes(),
       familyId: "family-existing",
@@ -406,6 +423,11 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("FONT_QUOTA_EXCEEDED");
     expect(upsertFace).not.toHaveBeenCalled();
+    expect(findFaceByKey).toHaveBeenCalledWith(expect.anything(), {
+      familyId: "family-existing",
+      weight: 900,
+      style: "italic",
+    });
   });
 });
 
@@ -533,6 +555,28 @@ describe("DELETE /dashboard/projects/:projectId/fonts/:familyId", () => {
       data: unknown[];
     };
     expect(listBody.data).toHaveLength(0);
+  });
+
+  it("gates deletion behind the fonts:write capability, not bare assertProjectAccess", async () => {
+    // Final-review Important 1: DELETE used to call bare
+    // `assertProjectAccess` (defaults to CUSTOMER_SUPPORT), weaker than
+    // the `fonts:write` capability the upload route requires. This
+    // pins the fix; it would fail if the route reverted to
+    // `assertProjectAccess` because that mock is never called for this
+    // request and `assertProjectCapability` would see zero calls.
+    assertProjectCapability.mockReset().mockResolvedValue({
+      id: "m1",
+      role: "OWNER",
+    });
+    findLiveFamilyForProject.mockResolvedValue({ id: "family1" });
+    const res = await deleteFamily("family1");
+    expect(res.status).toBe(200);
+    expect(assertProjectCapability).toHaveBeenCalledWith(
+      "p1",
+      "u1",
+      "fonts:write",
+    );
+    expect(assertProjectAccess).not.toHaveBeenCalled();
   });
 
   it("returns 404 FONT_FAMILY_NOT_FOUND, not 403, for a familyId outside the caller's project", async () => {
