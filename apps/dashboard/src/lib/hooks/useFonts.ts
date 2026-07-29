@@ -27,9 +27,12 @@ export interface FontFace {
   style: string;
   format: string;
   byteSize: number;
-  /** SHA-256 hex of the face's bytes; wave E2's picker needs this to
-   *  build the versioned `/v1/fonts/:faceId/:contentHash/file` URL. */
+  /** SHA-256 hex of the face's bytes. Still meaningful data, but no
+   *  longer how a client builds the file URL — see `fileUrl` below. */
   contentHash: string;
+  /** Ready-to-use URL for this face's bytes; the server resolves the
+   *  path, callers must not construct it themselves (wave E1 follow-up). */
+  fileUrl: string;
 }
 
 export interface FontFamily {

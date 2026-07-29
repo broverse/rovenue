@@ -6,7 +6,35 @@ import {
   FONT_FILE_CACHE_MAX_AGE_SECONDS,
   type FontFormat,
 } from "@rovenue/shared";
+import { env } from "../../lib/env";
 import { fail } from "../../lib/response";
+
+// Path segments for the route below, named so `buildFontFaceFileUrl`
+// and the route registration can never drift apart — see that
+// function's own comment for why nothing else should ever compose
+// this path by hand.
+const FONT_FILE_ROUTE_PREFIX = "/v1/fonts";
+const FONT_FILE_ROUTE_SUFFIX = "file";
+
+// =============================================================
+// buildFontFaceFileUrl — the ONE place that knows this route's path
+// shape (wave E1 follow-up, post-review).
+// =============================================================
+//
+// Every response that hands a face back to a caller (dashboard list,
+// dashboard upload) must go through this rather than building its own
+// URL. That is what lets the path above stay an internal detail: as
+// long as this function's output still resolves, the shape can change
+// later without a consumer noticing or breaking.
+//
+// Trailing-slash hazard is the same one documented on
+// routes/dashboard/stripe-connect.ts's `redirectUri()`: a
+// PUBLIC_BASE_URL of "https://host/" would otherwise double the slash
+// at the join and produce "https://host//v1/fonts/...".
+export function buildFontFaceFileUrl(faceId: string, contentHash: string): string {
+  const base = env.PUBLIC_BASE_URL.replace(/\/+$/, "");
+  return `${base}${FONT_FILE_ROUTE_PREFIX}/${faceId}/${contentHash}/${FONT_FILE_ROUTE_SUFFIX}`;
+}
 
 // =============================================================
 // GET /v1/fonts/:faceId/:contentHash/file — device-facing font byte
@@ -49,6 +77,11 @@ import { fail } from "../../lib/response";
 
 const FACE_NOT_FOUND_MESSAGE = "Font face not found";
 
+// This path shape is internal. Consumers receive a ready-to-use
+// `fileUrl` (from `buildFontFaceFileUrl` above, surfaced on every face
+// the dashboard API hands out) and use it verbatim rather than
+// constructing this URL themselves — that is what lets `immutable`
+// above stay honest even if this shape changes later.
 export const fontsRoute = new Hono().get(
   "/:faceId/:contentHash/file",
   async (c) => {

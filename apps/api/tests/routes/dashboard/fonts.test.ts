@@ -324,7 +324,7 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { format: string; contentHash: string };
+      data: { id: string; format: string; contentHash: string; fileUrl: string };
     };
     expect(body.data.format).toBe("otf");
     // Minor fix: the upload response now carries contentHash so a
@@ -334,6 +334,16 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
     expect(upsertFace).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ format: "otf" }),
+    );
+
+    // wave E1 follow-up: the server now hands back a ready-to-use
+    // fileUrl instead of leaving the client to construct it. Assert it
+    // resolves against the actual route shape
+    // (/v1/fonts/:faceId/:contentHash/file) with THIS face's own id
+    // and hash in the right positions — not merely that the field is
+    // a non-empty string.
+    expect(body.data.fileUrl).toBe(
+      `http://localhost:3000/v1/fonts/${body.data.id}/${body.data.contentHash}/file`,
     );
   });
 
@@ -471,13 +481,13 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
 // packages/db/src/drizzle/repositories/fonts.integration.test.ts.
 
 describe("GET /dashboard/projects/:projectId/fonts", () => {
-  it("lists families with face metadata, including contentHash; the response never carries a bytes field", async () => {
-    // NOTE on what this can and cannot prove: the route does a
-    // straight pass-through of whatever `listFamiliesWithFaces`
-    // returns — it does not itself strip anything. The guarantee that
-    // the repo query never SELECTs the `bytes` column is real and is
-    // pinned against a live database in
-    // fonts.integration.test.ts ("listFamiliesWithFaces does not
+  it("lists families with face metadata, including contentHash and fileUrl; the response never carries a bytes field", async () => {
+    // NOTE on what this can and cannot prove: the repo mock's return
+    // is passed through `listFamiliesWithFaces` mostly untouched — the
+    // one thing the route itself now adds is `fileUrl` per face (wave
+    // E1 follow-up). The guarantee that the repo query never SELECTs
+    // the `bytes` column is real and is pinned against a live database
+    // in fonts.integration.test.ts ("listFamiliesWithFaces does not
     // select the bytes column"). Because this mock, by construction,
     // never contains a `bytes` field, `not.toHaveProperty("bytes")`
     // below cannot by itself catch a regression that reintroduced
@@ -485,9 +495,10 @@ describe("GET /dashboard/projects/:projectId/fonts", () => {
     // at the response boundary. What this test DOES genuinely pin is
     // the route's shape-mapping: that `families[0].name` and
     // `families[0].faces[0]` (including `contentHash`, Task 7's
-    // addition so wave E2's picker can build the versioned file URL
-    // without a second round-trip) surface, untouched, under
-    // `{ data: [...] }`.
+    // addition) surface under `{ data: [...] }`, AND that `fileUrl` is
+    // built from THIS face's own id/contentHash — a URL built from the
+    // wrong face's hash, or a stale one, must fail this assertion, not
+    // merely "fileUrl is some non-empty string".
     const contentHash = "a".repeat(64);
     listFamiliesWithFaces.mockResolvedValue([
       {
@@ -518,6 +529,12 @@ describe("GET /dashboard/projects/:projectId/fonts", () => {
     expect(body.data[0].name).toBe("Brand");
     expect(body.data[0].faces[0]).not.toHaveProperty("bytes");
     expect(body.data[0].faces[0].contentHash).toBe(contentHash);
+    // Must match the actual route's registered shape:
+    // /v1/fonts/:faceId/:contentHash/file, with THIS face's id and
+    // hash in the right positions.
+    expect(body.data[0].faces[0].fileUrl).toBe(
+      `http://localhost:3000/v1/fonts/face1/${contentHash}/file`,
+    );
     expect(listFamiliesWithFaces).toHaveBeenCalledWith(
       expect.anything(),
       "p1",

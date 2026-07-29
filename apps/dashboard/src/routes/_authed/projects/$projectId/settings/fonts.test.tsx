@@ -59,6 +59,7 @@ describe("FontsPage", () => {
               format: "otf",
               byteSize: 1024,
               contentHash: "a".repeat(64),
+              fileUrl: `${BASE}/v1/fonts/a/${"a".repeat(64)}/file`,
             },
           ],
         },

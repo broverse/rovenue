@@ -15,6 +15,7 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { fail, ok } from "../../lib/response";
 import { validate } from "../../lib/validate";
+import { buildFontFaceFileUrl } from "../v1/fonts";
 
 // =============================================================
 // Dashboard: Fonts — upload a project font face
@@ -270,6 +271,9 @@ export const fontsRoute = new Hono()
           format: face.format,
           byteSize: face.byteSize,
           contentHash: face.contentHash,
+          // Ready-to-use; the caller must not build this URL itself —
+          // see buildFontFaceFileUrl's own comment.
+          fileUrl: buildFontFaceFileUrl(face.id, face.contentHash),
         }),
       );
     },
@@ -279,8 +283,11 @@ export const fontsRoute = new Hono()
   // Read-only, so this only needs `assertProjectAccess` (any project
   // member), not the `fonts:write` capability the upload route above
   // requires. `listFamiliesWithFaces` never selects the `bytes` column
-  // (see packages/db/src/drizzle/repositories/fonts.ts) — this route
-  // is a straight pass-through of that repo shape, no re-shaping.
+  // (see packages/db/src/drizzle/repositories/fonts.ts). Otherwise a
+  // straight pass-through of that repo shape — the one addition is
+  // `fileUrl` per face (wave E1 follow-up), freshly resolved from each
+  // face's own id/contentHash on every read rather than persisted, so
+  // a re-upload's new hash is reflected immediately.
   .get("/", async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
@@ -294,7 +301,15 @@ export const fontsRoute = new Hono()
       projectId,
     );
 
-    return c.json(ok(families));
+    const familiesWithFileUrls = families.map((family) => ({
+      ...family,
+      faces: family.faces.map((face) => ({
+        ...face,
+        fileUrl: buildFontFaceFileUrl(face.id, face.contentHash),
+      })),
+    }));
+
+    return c.json(ok(familiesWithFileUrls));
   })
   // ----- DELETE /dashboard/projects/:projectId/fonts/:familyId -----
   //
