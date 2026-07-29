@@ -42,6 +42,10 @@ import { fail } from "../../lib/response";
 // different URL, never the same one serving different bytes. The one
 // hash is stored at write time, served as the ETag, and compared
 // against the URL segment here — there is only ever the one value.
+// The ETag header wraps it in RFC 7232's required quoted-string
+// (`"<hash>"`); the stored column, the URL segment, and the comparison
+// above all stay the raw unquoted hex — quoting is header encoding
+// only, applied once, at the one place the value leaves as a header.
 
 const FACE_NOT_FOUND_MESSAGE = "Font face not found";
 
@@ -65,7 +69,7 @@ export const fontsRoute = new Hono().get(
       "Cache-Control",
       `public, max-age=${FONT_FILE_CACHE_MAX_AGE_SECONDS}, immutable`,
     );
-    c.header("ETag", face.contentHash);
+    c.header("ETag", `"${face.contentHash}"`);
     c.header("Content-Type", FONT_CONTENT_TYPES[face.format as FontFormat]);
 
     return c.body(new Uint8Array(face.bytes));

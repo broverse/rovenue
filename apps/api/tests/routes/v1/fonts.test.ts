@@ -170,12 +170,14 @@ describe("GET /v1/fonts/:faceId/:contentHash/file", () => {
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(uploadedBytes);
   });
 
-  it("caches immutably, with the ETag equal to the content hash", async () => {
+  it("caches immutably, with the ETag equal to the quoted content hash", async () => {
     const res = await getFaceFile(FACE_ID, CONTENT_HASH);
     const cc = res.headers.get("cache-control") ?? "";
     expect(cc).toContain("immutable");
     expect(cc).toContain(`max-age=${FONT_FILE_CACHE_MAX_AGE_SECONDS}`);
-    expect(res.headers.get("etag")).toBe(CONTENT_HASH);
+    // RFC 7232: an ETag value is a quoted-string. Matches the
+    // convention already used by v1/paywall-preview.ts's ETag.
+    expect(res.headers.get("etag")).toBe(`"${CONTENT_HASH}"`);
   });
 
   it("404s a stale-but-well-formed hash for a face that has since been re-uploaded", async () => {
