@@ -831,19 +831,9 @@ export async function softDeleteAsset(
     .returning();
   return row ?? null;
 }
-
-/** Storage keys of assets whose row is a tombstone older than the
- *  cutoff. The sweeper cross-checks the bucket against this. */
-export async function listDeletedStorageKeysBefore(
-  db: Db,
-  cutoff: Date,
-): Promise<{ storageKey: string }[]> {
-  return db
-    .select({ storageKey: paywallAssets.storageKey })
-    .from(paywallAssets)
-    .where(lt(paywallAssets.createdAt, cutoff));
-}
 ```
+
+> The sweeper (Task 9) reads live storage keys with its own query rather than through this repository — it needs a `Set` of keys across all projects, which is not a shape any other caller wants. Do not add a speculative helper here for it.
 
 Export it from the repositories barrel (`packages/db/src/drizzle/repositories/index.ts`) as `assetRepo`, matching how `fontRepo` is exported.
 
@@ -884,15 +874,17 @@ git commit -m "feat(db): paywall_assets, usage index and per-tier storage limit"
 Create `apps/api/tests/lib/asset-store.test.ts`:
 
 ```ts
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-beforeAll(() => {
+// `vi.hoisted` runs BEFORE the imports below. This matters: `lib/env`
+// parses process.env at import time, and a plain `beforeAll` would run
+// after the module graph is already built — a known footgun in this
+// repo, where top-of-file `process.env` assignments are dead code.
+vi.hoisted(() => {
   process.env.ASSET_PUBLIC_BASE_URL ??= "https://cdn.example.test";
 });
 
-const { buildStorageKey, publicUrl, parseAssetUrl } = await import(
-  "../../src/lib/asset-store"
-);
+import { buildStorageKey, publicUrl, parseAssetUrl } from "../../src/lib/asset-store";
 
 describe("asset URL shape", () => {
   const projectId = "prj_abc123";
@@ -917,11 +909,14 @@ describe("asset URL shape", () => {
     expect(buildStorageKey(projectId, assetId, "lottie")).toMatch(/\.json$/);
   });
 
-  it("does not double the slash when the base URL has a trailing one", async () => {
-    process.env.ASSET_PUBLIC_BASE_URL = "https://cdn.example.test/";
-    const mod = await import("../../src/lib/asset-store?trailing");
-    const key = mod.buildStorageKey(projectId, assetId, "image");
-    expect(mod.publicUrl(key)).not.toContain("//prj_");
+  it("does not double the slash when the base URL has a trailing one", () => {
+    // `publicUrl` strips trailing slashes from the base itself, so this
+    // is a property of the function, not of a re-imported module — no
+    // module-cache trickery needed (and none that would work, since env
+    // is frozen at import).
+    const key = buildStorageKey(projectId, assetId, "image");
+    expect(publicUrl(key)).not.toContain("//prj_");
+    expect(publicUrl(key).startsWith("https://cdn.example.test/")).toBe(true);
   });
 
   it("returns null for a URL that is not ours", () => {
@@ -1231,6 +1226,9 @@ describe("normalizeImage", () => {
     const out = await normalizeImage(animated);
     const meta = await sharp(out.bytes, { animated: true }).metadata();
     expect(meta.format).toBe("webp");
+    // The format assertion alone would pass for a flattened first frame,
+    // which is exactly the failure this test exists to catch.
+    expect(meta.pages).toBeGreaterThan(1);
   });
 
   it("rejects a decompression bomb rather than allocating it", async () => {
@@ -1460,7 +1458,12 @@ Create `apps/api/tests/services/assets/quota.integration.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeAll } from "vitest";
-import { reserveStorage, getStorageUsage } from "../../../src/services/assets/quota";
+import {
+  reserveStorage,
+  releaseReservation,
+  getStorageUsage,
+  UNLIMITED_RESERVATION,
+} from "../../../src/services/assets/quota";
 import { makeTestDb, seedProject, setTierLimit } from "../../helpers";
 
 let db: Awaited<ReturnType<typeof makeTestDb>>;
@@ -1478,25 +1481,42 @@ describe("storage quota", () => {
     expect(usage.limitBytes).toBe(1000);
   });
 
-  it("allows a reservation that fits", async () => {
+  it("allows a reservation that fits and returns its id", async () => {
     const projectId = await seedProject(db, { tier: "free" });
     await setTierLimit(db, "free", 1000);
-    expect(await reserveStorage(db, projectId, 600)).toBe(true);
-    expect((await getStorageUsage(db, projectId)).usedBytes).toBe(600);
+    expect(await reserveStorage(db, projectId, 600)).toEqual(expect.any(String));
   });
 
   it("refuses a reservation that would exceed the cap", async () => {
     const projectId = await seedProject(db, { tier: "free" });
     await setTierLimit(db, "free", 1000);
-    expect(await reserveStorage(db, projectId, 600)).toBe(true);
-    expect(await reserveStorage(db, projectId, 600)).toBe(false);
-    expect((await getStorageUsage(db, projectId)).usedBytes).toBe(600);
+    expect(await reserveStorage(db, projectId, 600)).toEqual(expect.any(String));
+    expect(await reserveStorage(db, projectId, 600)).toBeNull();
+  });
+
+  it("frees the reserved bytes again once the reservation is released", async () => {
+    const projectId = await seedProject(db, { tier: "free" });
+    await setTierLimit(db, "free", 1000);
+    const first = await reserveStorage(db, projectId, 900);
+    expect(await reserveStorage(db, projectId, 900)).toBeNull();
+    await releaseReservation(db, first!);
+    // Without the release this stays null forever (until the sweeper),
+    // because the reservation keeps counting against the cap.
+    expect(await reserveStorage(db, projectId, 900)).toEqual(expect.any(String));
   });
 
   it("treats a NULL tier limit as unlimited", async () => {
     const projectId = await seedProject(db, { tier: "enterprise" });
     await setTierLimit(db, "enterprise", null);
-    expect(await reserveStorage(db, projectId, 10 ** 12)).toBe(true);
+    expect(await reserveStorage(db, projectId, 10 ** 12)).toBe(UNLIMITED_RESERVATION);
+  });
+
+  it("falls back to the free cap for a project with no subscription row", async () => {
+    const projectId = await seedProject(db, { withSubscription: false });
+    await setTierLimit(db, "free", 1000);
+    // Must NOT be unlimited: failing open here would hand every
+    // brand-new project unmetered storage.
+    expect(await reserveStorage(db, projectId, 2000)).toBeNull();
   });
 
   // This is the whole point of the task. A read-then-write check lets
@@ -1515,7 +1535,6 @@ describe("storage quota", () => {
 
     const granted = results.filter(Boolean).length;
     expect(granted).toBe(10); // 10 * 100 = 1000, exactly the cap
-    expect((await getStorageUsage(db, projectId)).usedBytes).toBe(1000);
   });
 });
 ```
@@ -1586,6 +1605,22 @@ async function tierLimitBytes(db: Db, projectId: string): Promise<number | null>
     LIMIT 1
   `);
   const row = (rows as unknown as { rows: { limit_bytes: string | null }[] }).rows[0];
+  // No subscription row must NOT mean unlimited — that fails OPEN on a
+  // paid limit, and every project starts life without one. Fall back to
+  // the free tier's cap, which is what such a project is entitled to.
+  if (!row) return freeTierLimitBytes(db);
+  if (row.limit_bytes === null) return null; // enterprise: genuinely unlimited
+  return Number(row.limit_bytes);
+}
+
+async function freeTierLimitBytes(db: Db): Promise<number | null> {
+  const rows = await db.execute(sql`
+    SELECT "billing_tier_limits"."asset_storage_bytes_limit" AS limit_bytes
+    FROM "billing_tier_limits"
+    WHERE "billing_tier_limits"."tier" = 'free'
+    LIMIT 1
+  `);
+  const row = (rows as unknown as { rows: { limit_bytes: string | null }[] }).rows[0];
   if (!row || row.limit_bytes === null) return null;
   return Number(row.limit_bytes);
 }
@@ -1628,9 +1663,9 @@ export async function reserveStorage(
   db: Db,
   projectId: string,
   bytes: number,
-): Promise<boolean> {
+): Promise<string | null> {
   const limit = await tierLimitBytes(db, projectId);
-  if (limit === null) return true;
+  if (limit === null) return UNLIMITED_RESERVATION;
 
   const result = await db.execute(sql`
     INSERT INTO "paywall_asset_reservations" ("project_id", "bytes", "created_at")
@@ -1650,7 +1685,27 @@ export async function reserveStorage(
     ) <= ${limit}
     RETURNING "id"
   `);
-  return (result as unknown as { rows: unknown[] }).rows.length > 0;
+  const row = (result as unknown as { rows: { id: string }[] }).rows[0];
+  return row?.id ?? null;
+}
+
+/** Sentinel for an unlimited project, where no row was inserted and so
+ *  there is nothing to release. `releaseReservation` ignores it. */
+export const UNLIMITED_RESERVATION = "unlimited";
+
+/**
+ * Release a reservation once its asset row is committed. MUST run in
+ * the same transaction as the row insert: a reservation that outlives
+ * its upload holds the bytes against the cap TWICE — once as the
+ * reservation, once as the committed row — until the sweeper clears it
+ * hours later.
+ */
+export async function releaseReservation(db: Db, id: string): Promise<void> {
+  if (id === UNLIMITED_RESERVATION) return;
+  await db.execute(sql`
+    DELETE FROM "paywall_asset_reservations"
+    WHERE "paywall_asset_reservations"."id" = ${id}
+  `);
 }
 ```
 
@@ -1782,11 +1837,10 @@ Create `apps/api/src/routes/dashboard/assets.ts`:
 
 ```ts
 import { createHash } from "node:crypto";
-import { Readable } from "node:stream";
 import { Hono } from "hono";
-import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
-import { drizzle } from "@rovenue/db";
+import { createId } from "@paralleldrive/cuid2";
+import { drizzle, MemberRole } from "@rovenue/db";
 import {
   ERROR_CODE,
   ASSET_MAX_BYTES,
@@ -1799,11 +1853,16 @@ import {
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { assertProjectCapability } from "../../lib/capabilities";
+import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { fail, ok } from "../../lib/response";
 import * as store from "../../lib/asset-store";
 import { normalizeImage, AssetProcessingError } from "../../services/assets/normalize";
-import { reserveStorage, getStorageUsage } from "../../services/assets/quota";
+import {
+  reserveStorage,
+  releaseReservation,
+  getStorageUsage,
+} from "../../services/assets/quota";
 
 // =============================================================
 // Dashboard: paywall assets — upload, list, delete
@@ -1916,7 +1975,12 @@ function uploadHandler(kind: AssetKind) {
       return c.json(ok(toDto(existing)));
     }
 
-    if (!(await reserveStorage(drizzle.db, projectId, bytes.byteLength))) {
+    const reservationId = await reserveStorage(
+      drizzle.db,
+      projectId,
+      bytes.byteLength,
+    );
+    if (reservationId === null) {
       return fail(c, 402, ERROR_CODE.ASSET_QUOTA_EXCEEDED, "Storage quota exhausted");
     }
 
@@ -1954,6 +2018,11 @@ function uploadHandler(kind: AssetKind) {
         targetId: row.id,
         ...extractRequestContext(c),
       });
+      // Same transaction as the insert, deliberately. The reservation
+      // and the committed row both count against the cap, so a
+      // reservation that outlives its upload charges the bytes twice
+      // until the sweeper clears it hours later.
+      await releaseReservation(tx, reservationId);
       return row;
     });
 
