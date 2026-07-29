@@ -827,3 +827,170 @@ describe("wave D2: video and lottie node types", () => {
     expect(OVERRIDABLE_PROP_KEYS.lottie).toEqual(["url"]);
   });
 });
+
+describe("node style pass: border / background / labelColor", () => {
+  const wrap = (node: unknown) => ({
+    formatVersion: 2,
+    defaultLocale: "en",
+    localizations: { en: {} },
+    root: { type: "stack", id: "root", axis: "v", children: [node] },
+  });
+
+  const border = { width: 2, color: { light: "#000000", dark: "#ffffff" } };
+
+  it("round-trips a stack node with a border", () => {
+    const node = { type: "stack", id: "s1", axis: "v", children: [], border };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.root.children[0]).toEqual(node);
+  });
+
+  it("round-trips a text node with background and cornerRadius", () => {
+    const node = {
+      type: "text",
+      id: "t1",
+      key: "k",
+      role: "body",
+      background: { light: "#eeeeee" },
+      cornerRadius: 6,
+    };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.root.children[0]).toEqual(node);
+  });
+
+  it("round-trips an image node with a border", () => {
+    const node = {
+      type: "image",
+      id: "i1",
+      url: { light: "https://x/a.png" },
+      border,
+    };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.root.children[0]).toEqual(node);
+  });
+
+  it("round-trips a button node with background, labelColor, border, and cornerRadius", () => {
+    const node = {
+      type: "button",
+      id: "b1",
+      labelKey: "cta_key",
+      style: "primary",
+      action: { kind: "close" },
+      background: { light: "#111111" },
+      labelColor: { light: "#ffffff" },
+      border,
+      cornerRadius: 8,
+    };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.root.children[0]).toEqual(node);
+  });
+
+  it("round-trips a purchaseButton node with background, labelColor, border, and cornerRadius", () => {
+    const node = {
+      type: "purchaseButton",
+      id: "pb1",
+      labelKey: "cta_key",
+      background: { light: "#111111" },
+      labelColor: { light: "#ffffff" },
+      border,
+      cornerRadius: 8,
+    };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.root.children[0]).toEqual(node);
+  });
+
+  it("rejects a border missing width", () => {
+    const node = {
+      type: "stack",
+      id: "s1",
+      axis: "v",
+      children: [],
+      border: { color: { light: "#000000" } },
+    };
+    expect(builderConfigSchema.safeParse(wrap(node)).success).toBe(false);
+  });
+
+  it("rejects a border missing color", () => {
+    const node = { type: "image", id: "i1", url: { light: "https://x/a.png" }, border: { width: 2 } };
+    expect(builderConfigSchema.safeParse(wrap(node)).success).toBe(false);
+  });
+
+  it("rejects a border on a button missing both width and color", () => {
+    const node = {
+      type: "button",
+      id: "b1",
+      labelKey: "cta_key",
+      style: "primary",
+      action: { kind: "close" },
+      border: {},
+    };
+    expect(builderConfigSchema.safeParse(wrap(node)).success).toBe(false);
+  });
+
+  it("a config without any of the new props still parses, byte-identical to today", () => {
+    const node = {
+      type: "button",
+      id: "b1",
+      labelKey: "cta_key",
+      style: "primary",
+      action: { kind: "close" },
+    };
+    const result = builderConfigSchema.safeParse(wrap(node));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.root.children[0]).toEqual(node);
+  });
+
+  it("extends OVERRIDABLE_PROP_KEYS with the new keys per type", () => {
+    expect(OVERRIDABLE_PROP_KEYS.stack).toEqual(["spacing", "align", "background", "cornerRadius", "border"]);
+    expect(OVERRIDABLE_PROP_KEYS.text).toEqual(["key", "color", "align", "background", "cornerRadius"]);
+    expect(OVERRIDABLE_PROP_KEYS.image).toEqual(["cornerRadius", "border"]);
+    expect(OVERRIDABLE_PROP_KEYS.button).toEqual([
+      "labelKey",
+      "style",
+      "background",
+      "labelColor",
+      "border",
+      "cornerRadius",
+    ]);
+    expect(OVERRIDABLE_PROP_KEYS.purchaseButton).toEqual([
+      "labelKey",
+      "trialLabelKey",
+      "background",
+      "labelColor",
+      "border",
+      "cornerRadius",
+    ]);
+  });
+
+  it("accepts a stack override that sets a border", () => {
+    const config = wrap({
+      type: "stack",
+      id: "s1",
+      axis: "v",
+      children: [],
+      overrides: [{ when: { kind: "selected" }, props: { border } }],
+    });
+    expect(builderConfigSchema.safeParse(config).success).toBe(true);
+  });
+
+  it("accepts a button override that sets labelColor and background", () => {
+    const config = wrap({
+      type: "button",
+      id: "b1",
+      labelKey: "cta_key",
+      style: "primary",
+      action: { kind: "close" },
+      overrides: [
+        {
+          when: { kind: "selected" },
+          props: { labelColor: { light: "#fff" }, background: { light: "#000" } },
+        },
+      ],
+    });
+    expect(builderConfigSchema.safeParse(config).success).toBe(true);
+  });
+});

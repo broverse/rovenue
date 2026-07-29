@@ -20,6 +20,15 @@ export type ThemeUrl = { light: string; dark?: string };
 
 export type NodeSize = "fit" | "fill" | number;
 
+/**
+ * A drawn border, always resolved together — a width without a color (or
+ * vice versa) renders nothing and confuses every decoder, so both fields are
+ * required inside the optional `border` prop. Drawn INSIDE the node's own
+ * corner radius on every platform (web `border` + `borderRadius`, SwiftUI
+ * `overlay(RoundedRectangle().stroke)`, Android `GradientDrawable` stroke).
+ */
+export type NodeBorder = { width: number; color: ThemeColor };
+
 // -------------------------------------------------------------
 // Overrides (Phase D2) — conditional prop swaps evaluated at render
 // time. Every node type gains an optional `overrides` array; only
@@ -44,6 +53,8 @@ export type StackNode = {
   size?: { width?: NodeSize; height?: NodeSize };
   background?: ThemeColor;
   cornerRadius?: number;
+  /** Drawn inside `cornerRadius`. Absent = no border, today's output. */
+  border?: NodeBorder;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
   /** Which platforms / app versions this node renders on. Absent = everywhere. */
@@ -57,6 +68,11 @@ export type TextNode = {
   role: "title" | "subtitle" | "body" | "caption";
   color?: ThemeColor;
   align?: "start" | "center" | "end";
+  /** Lets a text node form a badge/chip. Absent = no fill, today's output. */
+  background?: ThemeColor;
+  /** Only meaningful together with `background` (or a border on this node
+   *  in a future prop) — a badge shape. Absent = today's output. */
+  cornerRadius?: number;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
   /** Which platforms / app versions this node renders on. Absent = everywhere. */
@@ -70,6 +86,8 @@ export type ImageNode = {
   height?: number;
   cornerRadius?: number;
   alt?: string;
+  /** Drawn inside `cornerRadius`. Absent = no border, today's output. */
+  border?: NodeBorder;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
   /** Which platforms / app versions this node renders on. Absent = everywhere. */
@@ -82,6 +100,13 @@ export type ButtonNode = {
   labelKey: string;
   style: "primary" | "secondary" | "plain";
   action: { kind: "close" } | { kind: "url"; url: string } | { kind: "restore" };
+  /** Overrides the `style` variant's own fill. Absent = today's output. */
+  background?: ThemeColor;
+  /** Overrides the `style` variant's own label color. Absent = today's output. */
+  labelColor?: ThemeColor;
+  /** Drawn inside `cornerRadius`. Absent = no border, today's output. */
+  border?: NodeBorder;
+  cornerRadius?: number;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
   /** Which platforms / app versions this node renders on. Absent = everywhere. */
@@ -117,6 +142,13 @@ export type PurchaseButtonNode = {
    *  period is active (see `resolveCtaLabelKey` in variables.ts). Absent =
    *  always `labelKey`. */
   trialLabelKey?: string;
+  /** Overrides the button's own fill. Absent = today's output. */
+  background?: ThemeColor;
+  /** Overrides the button's own label color. Absent = today's output. */
+  labelColor?: ThemeColor;
+  /** Drawn inside `cornerRadius`. Absent = no border, today's output. */
+  border?: NodeBorder;
+  cornerRadius?: number;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
   /** Which platforms / app versions this node renders on. Absent = everywhere. */
@@ -415,12 +447,12 @@ export type PaywallNode =
  * re-check (`OVERRIDE_BAD_PROP`) on already-parsed configs.
  */
 export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[]> = {
-  stack: ["spacing", "align", "background", "cornerRadius"],
-  text: ["key", "color", "align"],
-  image: ["cornerRadius"],
-  button: ["labelKey", "style"],
+  stack: ["spacing", "align", "background", "cornerRadius", "border"],
+  text: ["key", "color", "align", "background", "cornerRadius"],
+  image: ["cornerRadius", "border"],
+  button: ["labelKey", "style", "background", "labelColor", "border", "cornerRadius"],
   packageList: [],
-  purchaseButton: ["labelKey", "trialLabelKey"],
+  purchaseButton: ["labelKey", "trialLabelKey", "background", "labelColor", "border", "cornerRadius"],
   spacer: [],
   divider: ["color", "thickness"],
   icon: ["name", "color"],
@@ -465,6 +497,12 @@ const nodeSizeSchema: z.ZodType<NodeSize> = z.union([
   z.literal("fill"),
   z.number(),
 ]);
+
+// Both `width` and `color` are required — see `NodeBorder`'s doc comment.
+export const nodeBorderSchema: z.ZodType<NodeBorder> = z.object({
+  width: z.number(),
+  color: themeColorSchema,
+});
 
 // `paywallNodeSchema` is defined below via z.lazy once all node
 // schemas exist, then wired back in as `fallback` on each of them.
@@ -534,6 +572,7 @@ const stackNodeSchema: z.ZodType<StackNode> = z.object({
     .optional(),
   background: themeColorSchema.optional(),
   cornerRadius: z.number().optional(),
+  border: nodeBorderSchema.optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.stack).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
   visibility: nodeVisibilitySchema.optional(),
@@ -546,6 +585,8 @@ const textNodeSchema: z.ZodType<TextNode> = z.object({
   role: z.enum(["title", "subtitle", "body", "caption"]),
   color: themeColorSchema.optional(),
   align: z.enum(["start", "center", "end"]).optional(),
+  background: themeColorSchema.optional(),
+  cornerRadius: z.number().optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.text).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
   visibility: nodeVisibilitySchema.optional(),
@@ -558,6 +599,7 @@ const imageNodeSchema: z.ZodType<ImageNode> = z.object({
   height: z.number().optional(),
   cornerRadius: z.number().optional(),
   alt: z.string().optional(),
+  border: nodeBorderSchema.optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.image).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
   visibility: nodeVisibilitySchema.optional(),
@@ -575,6 +617,10 @@ const buttonNodeSchema: z.ZodType<ButtonNode> = z.object({
   labelKey: z.string(),
   style: z.enum(["primary", "secondary", "plain"]),
   action: buttonActionSchema,
+  background: themeColorSchema.optional(),
+  labelColor: themeColorSchema.optional(),
+  border: nodeBorderSchema.optional(),
+  cornerRadius: z.number().optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.button).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
   visibility: nodeVisibilitySchema.optional(),
@@ -597,6 +643,10 @@ const purchaseButtonNodeSchema: z.ZodType<PurchaseButtonNode> = z.object({
   id: z.string().min(1),
   labelKey: z.string(),
   trialLabelKey: z.string().min(1).optional(),
+  background: themeColorSchema.optional(),
+  labelColor: themeColorSchema.optional(),
+  border: nodeBorderSchema.optional(),
+  cornerRadius: z.number().optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.purchaseButton).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
   visibility: nodeVisibilitySchema.optional(),
