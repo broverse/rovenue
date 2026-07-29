@@ -186,6 +186,87 @@ final class PaywallOverridesTests: XCTestCase {
         XCTAssertEqual(result.size, 8)
     }
 
+    // MARK: - node style pass: override parity (spec 2026-07-29)
+    //
+    // The P6 lesson: override parity is a hard requirement. Each node type's
+    // new style keys must flow through the SAME `applyOverrides` merge rule
+    // (later/active wins, absent leaves the base untouched) as every
+    // pre-existing key on that type.
+
+    func test_stackProps_mergesBorder() {
+        let border = NodeBorder(width: 3, color: ThemePair(light: "#FF0000", dark: nil))
+        let overrides = [NodeOverride(when: .selected, props: StackOverrideProps(border: border))]
+        let node = StackProps(id: "s", axis: .v, children: [], overrides: overrides)
+        let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: false, selected: true))
+        XCTAssertEqual(result.border, border)
+    }
+
+    func test_stackProps_borderUntouchedWhenOverrideOmitsIt() {
+        let original = NodeBorder(width: 1, color: ThemePair(light: "#000000", dark: nil))
+        let overrides = [NodeOverride(when: .selected, props: StackOverrideProps(spacing: 9))]
+        let node = StackProps(id: "s", axis: .v, children: [], border: original, overrides: overrides)
+        let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: false, selected: true))
+        XCTAssertEqual(result.spacing, 9)
+        XCTAssertEqual(result.border, original, "an override that omits border must leave the base's border untouched")
+    }
+
+    func test_textProps_mergesBackgroundAndCornerRadius() {
+        let overrides = [NodeOverride(
+            when: .introEligible,
+            props: TextOverrideProps(background: ThemePair(light: "#EEF2FF", dark: nil), cornerRadius: 6))]
+        let node = TextProps(id: "t", key: "k", role: .body, overrides: overrides)
+        let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: true, selected: false))
+        XCTAssertEqual(result.background, ThemePair(light: "#EEF2FF", dark: nil))
+        XCTAssertEqual(result.cornerRadius, 6)
+    }
+
+    func test_imageProps_mergesBorder() {
+        let border = NodeBorder(width: 2, color: ThemePair(light: "#0000FF", dark: nil))
+        let overrides = [NodeOverride(when: .selected, props: ImageOverrideProps(border: border))]
+        let node = ImageProps(id: "i", url: ThemePair(light: "https://x", dark: nil), overrides: overrides)
+        let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: false, selected: true))
+        XCTAssertEqual(result.border, border)
+    }
+
+    func test_buttonProps_mergesAllFourStyleProps() {
+        let border = NodeBorder(width: 1, color: ThemePair(light: "#654321", dark: nil))
+        let overrides = [NodeOverride(when: .selected, props: ButtonOverrideProps(
+            background: ThemePair(light: "#ABCDEF", dark: nil),
+            labelColor: ThemePair(light: "#123456", dark: nil),
+            border: border, cornerRadius: 5))]
+        let node = ButtonProps(id: "b", labelKey: "cta", style: .primary, action: .close, overrides: overrides)
+        let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: false, selected: true))
+        XCTAssertEqual(result.background, ThemePair(light: "#ABCDEF", dark: nil))
+        XCTAssertEqual(result.labelColor, ThemePair(light: "#123456", dark: nil))
+        XCTAssertEqual(result.border, border)
+        XCTAssertEqual(result.cornerRadius, 5)
+    }
+
+    func test_buttonProps_styleOverrideLeavesUnrelatedStylePropsUntouched() {
+        let originalBackground = ThemePair(light: "#111111", dark: nil)
+        let overrides = [NodeOverride(when: .selected, props: ButtonOverrideProps(style: .secondary))]
+        let node = ButtonProps(
+            id: "b", labelKey: "cta", style: .primary, action: .close,
+            background: originalBackground, overrides: overrides)
+        let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: false, selected: true))
+        XCTAssertEqual(result.style, .secondary)
+        XCTAssertEqual(result.background, originalBackground, "an override that omits background must leave it untouched")
+    }
+
+    func test_purchaseButtonProps_mergesAllFourStyleProps() {
+        let border = NodeBorder(width: 2, color: ThemePair(light: "#654321", dark: nil))
+        let overrides = [NodeOverride(when: .selected, props: PurchaseButtonOverrideProps(
+            background: ThemePair(light: "#ABCDEF", dark: nil),
+            labelColor: ThemePair(light: "#123456", dark: nil),
+            border: border, cornerRadius: 9))]
+        let node = PurchaseButtonProps(id: "pb", labelKey: "buy", overrides: overrides)
+        let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: false, selected: true))
+        XCTAssertEqual(result.background, ThemePair(light: "#ABCDEF", dark: nil))
+        XCTAssertEqual(result.labelColor, ThemePair(light: "#123456", dark: nil))
+        XCTAssertEqual(result.border, border)
+        XCTAssertEqual(result.cornerRadius, 9)
+    }
+
     // MARK: - activeOverrideConditions
 
     func test_activeConditions_outsideCellTemplate_usesSelectedPackage() {

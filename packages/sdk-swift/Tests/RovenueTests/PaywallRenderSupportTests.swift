@@ -31,6 +31,92 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertNil(parseHexColor("rgb(1,2,3)"))
     }
 
+    // MARK: - node style pass: resolveBorder / resolveButtonVisual (spec 2026-07-29)
+    //
+    // Mirrors the web renderer's `borderStyle` / `resolveButtonVisualStyle`
+    // unit tests: border present/absent, light/dark resolution, and the
+    // custom-beats-variant precedence rule.
+
+    func test_resolveBorder_absentReturnsNil() {
+        XCTAssertNil(resolveBorder(nil, dark: false))
+    }
+
+    func test_resolveBorder_resolvesThePerThemeColorHalf() throws {
+        let border = NodeBorder(width: 2, color: ThemePair(light: "#FF0000", dark: "#0000FF"))
+        let light = try XCTUnwrap(resolveBorder(border, dark: false))
+        XCTAssertEqual(light.width, 2)
+        XCTAssertEqual(light.color.red, 1.0, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(light.color.blue, 0.0, accuracy: colorComponentAccuracy)
+
+        let dark = try XCTUnwrap(resolveBorder(border, dark: true))
+        XCTAssertEqual(dark.color.red, 0.0, accuracy: colorComponentAccuracy)
+        XCTAssertEqual(dark.color.blue, 1.0, accuracy: colorComponentAccuracy)
+    }
+
+    /// Unparsable color -> skip, don't guess (mirrors `parseHexColor`'s own
+    /// contract) — there is no default border to fall back to.
+    func test_resolveBorder_unparsableColorResolvesToNil() {
+        let border = NodeBorder(width: 2, color: ThemePair(light: "not-a-hex-colour", dark: nil))
+        XCTAssertNil(resolveBorder(border, dark: false))
+    }
+
+    func test_resolveButtonVisual_absentCustomLeavesBaseUntouched() {
+        let base = ButtonBaseVisual(
+            background: RGBAColor(red: 0, green: 0, blue: 0, alpha: 1),
+            labelColor: RGBAColor(red: 1, green: 1, blue: 1, alpha: 1),
+            border: ResolvedBorder(width: 1, color: RGBAColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)))
+        let resolved = resolveButtonVisual(
+            base: base, custom: ButtonCustomStyleProps(), defaultCornerRadius: 8, dark: false)
+        XCTAssertEqual(resolved.background, base.background)
+        XCTAssertEqual(resolved.labelColor, base.labelColor)
+        XCTAssertEqual(resolved.border, base.border)
+        XCTAssertEqual(resolved.cornerRadius, 8, "absent custom cornerRadius falls back to the caller's default")
+    }
+
+    func test_resolveButtonVisual_customBeatsBaseOnEveryField() {
+        let base = ButtonBaseVisual(
+            background: RGBAColor(red: 0, green: 0, blue: 0, alpha: 1),
+            labelColor: RGBAColor(red: 1, green: 1, blue: 1, alpha: 1),
+            border: nil)
+        let custom = ButtonCustomStyleProps(
+            background: ThemePair(light: "#ABCDEF", dark: nil),
+            labelColor: ThemePair(light: "#123456", dark: nil),
+            border: NodeBorder(width: 3, color: ThemePair(light: "#000000", dark: nil)),
+            cornerRadius: 20)
+        let resolved = resolveButtonVisual(base: base, custom: custom, defaultCornerRadius: 8, dark: false)
+        XCTAssertEqual(resolved.background, try? XCTUnwrap(parseHexColor("#ABCDEF")))
+        XCTAssertEqual(resolved.labelColor, try? XCTUnwrap(parseHexColor("#123456")))
+        XCTAssertEqual(resolved.border?.width, 3)
+        XCTAssertEqual(resolved.cornerRadius, 20, "a present custom cornerRadius always wins over the default")
+    }
+
+    /// Field-by-field precedence, not all-or-nothing: a custom `border` with
+    /// no custom `background`/`labelColor` must win ONLY on `border`,
+    /// leaving the other two on the base — mirrors the web renderer's own
+    /// "no deep merge, but per-field independence" contract.
+    func test_resolveButtonVisual_precedenceIsPerFieldNotAllOrNothing() {
+        let base = ButtonBaseVisual(
+            background: RGBAColor(red: 0, green: 0, blue: 0, alpha: 1),
+            labelColor: RGBAColor(red: 1, green: 1, blue: 1, alpha: 1),
+            border: nil)
+        let custom = ButtonCustomStyleProps(
+            border: NodeBorder(width: 3, color: ThemePair(light: "#00FF00", dark: nil)))
+        let resolved = resolveButtonVisual(base: base, custom: custom, defaultCornerRadius: 8, dark: false)
+        XCTAssertEqual(resolved.background, base.background, "background must stay the base's own value")
+        XCTAssertEqual(resolved.labelColor, base.labelColor, "labelColor must stay the base's own value")
+        XCTAssertEqual(resolved.border?.width, 3, "border must be the custom one")
+    }
+
+    func test_resolveButtonVisual_darkSchemeResolvesEachCustomFieldsDarkHalf() {
+        let custom = ButtonCustomStyleProps(
+            background: ThemePair(light: "#FFFFFF", dark: "#000000"),
+            labelColor: ThemePair(light: "#000000", dark: "#FFFFFF"))
+        let resolved = resolveButtonVisual(
+            base: ButtonBaseVisual(), custom: custom, defaultCornerRadius: 8, dark: true)
+        XCTAssertEqual(resolved.background, try? XCTUnwrap(parseHexColor("#000000")))
+        XCTAssertEqual(resolved.labelColor, try? XCTUnwrap(parseHexColor("#FFFFFF")))
+    }
+
     // MARK: themeValue
 
     func test_themeValue_prefers_dark_only_in_dark_mode_with_dark_present() {

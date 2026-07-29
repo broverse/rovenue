@@ -823,6 +823,194 @@ final class BuilderConfigModelTests: XCTestCase {
             "`speed` is not in OVERRIDABLE_PROP_KEYS.lottie, so the whole config must fail")
     }
 
+    // MARK: - node style pass: border / background / labelColor / cornerRadius (spec 2026-07-29)
+    //
+    // Not fixture-based (render-fixtures.json is edited only in the LAST
+    // task of this wave, per the plan's Global Constraints) — hand-built via
+    // `firstChild`, same idiom `testUrlButtonActionDecodesItsURL` etc. use
+    // above. Every new prop is optional and LENIENT on absence, matching
+    // every other optional prop this decoder already carries.
+
+    func test_stackDecodesBorder() throws {
+        let node = try firstChild(#"""
+        {"type":"stack","id":"s1","axis":"v","children":[],
+         "border":{"width":2,"color":{"light":"#111111","dark":"#EEEEEE"}}}
+        """#)
+        guard case .stack(let p) = node else { return XCTFail("expected stack") }
+        XCTAssertEqual(p.border?.width, 2)
+        XCTAssertEqual(p.border?.color, ThemePair(light: "#111111", dark: "#EEEEEE"))
+    }
+
+    func test_stackWithoutBorderDecodesLeniently() throws {
+        let node = try firstChild(#"{"type":"stack","id":"s1","axis":"v","children":[]}"#)
+        guard case .stack(let p) = node else { return XCTFail("expected stack") }
+        XCTAssertNil(p.border)
+    }
+
+    func test_textDecodesBackgroundAndCornerRadius() throws {
+        let node = try firstChild(#"""
+        {"type":"text","id":"t1","key":"k","role":"body",
+         "background":{"light":"#EEF2FF"},"cornerRadius":6}
+        """#)
+        guard case .text(let p) = node else { return XCTFail("expected text") }
+        XCTAssertEqual(p.background, ThemePair(light: "#EEF2FF", dark: nil))
+        XCTAssertEqual(p.cornerRadius, 6)
+    }
+
+    func test_textWithoutBadgePropsDecodesLeniently() throws {
+        let node = try firstChild(#"{"type":"text","id":"t1","key":"k","role":"body"}"#)
+        guard case .text(let p) = node else { return XCTFail("expected text") }
+        XCTAssertNil(p.background)
+        XCTAssertNil(p.cornerRadius)
+    }
+
+    func test_imageDecodesBorder() throws {
+        let node = try firstChild(#"""
+        {"type":"image","id":"i1","url":{"light":"https://x/a.png"},
+         "border":{"width":1,"color":{"light":"#000000"}}}
+        """#)
+        guard case .image(let p) = node else { return XCTFail("expected image") }
+        XCTAssertEqual(p.border?.width, 1)
+        XCTAssertEqual(p.border?.color, ThemePair(light: "#000000", dark: nil))
+    }
+
+    func test_imageWithoutBorderDecodesLeniently() throws {
+        let node = try firstChild(#"{"type":"image","id":"i1","url":{"light":"https://x/a.png"}}"#)
+        guard case .image(let p) = node else { return XCTFail("expected image") }
+        XCTAssertNil(p.border)
+    }
+
+    func test_buttonDecodesAllFourStyleProps() throws {
+        let node = try firstChild(#"""
+        {"type":"button","id":"b1","labelKey":"k","style":"primary","action":{"kind":"close"},
+         "background":{"light":"#111111"},"labelColor":{"light":"#FFFFFF"},
+         "border":{"width":1,"color":{"light":"#333333"}},"cornerRadius":10}
+        """#)
+        guard case .button(let p) = node else { return XCTFail("expected button") }
+        XCTAssertEqual(p.background, ThemePair(light: "#111111", dark: nil))
+        XCTAssertEqual(p.labelColor, ThemePair(light: "#FFFFFF", dark: nil))
+        XCTAssertEqual(p.border?.width, 1)
+        XCTAssertEqual(p.border?.color, ThemePair(light: "#333333", dark: nil))
+        XCTAssertEqual(p.cornerRadius, 10)
+    }
+
+    func test_buttonWithoutStylePropsDecodesLeniently() throws {
+        let node = try firstChild(#"{"type":"button","id":"b1","labelKey":"k","style":"primary","action":{"kind":"close"}}"#)
+        guard case .button(let p) = node else { return XCTFail("expected button") }
+        XCTAssertNil(p.background)
+        XCTAssertNil(p.labelColor)
+        XCTAssertNil(p.border)
+        XCTAssertNil(p.cornerRadius)
+    }
+
+    func test_purchaseButtonDecodesAllFourStyleProps() throws {
+        let node = try firstChild(#"""
+        {"type":"purchaseButton","id":"pb1","labelKey":"k",
+         "background":{"light":"#111111"},"labelColor":{"light":"#FFFFFF"},
+         "border":{"width":2,"color":{"light":"#333333"}},"cornerRadius":14}
+        """#)
+        guard case .purchaseButton(let p) = node else { return XCTFail("expected purchaseButton") }
+        XCTAssertEqual(p.background, ThemePair(light: "#111111", dark: nil))
+        XCTAssertEqual(p.labelColor, ThemePair(light: "#FFFFFF", dark: nil))
+        XCTAssertEqual(p.border?.width, 2)
+        XCTAssertEqual(p.cornerRadius, 14)
+    }
+
+    func test_purchaseButtonWithoutStylePropsDecodesLeniently() throws {
+        let node = try firstChild(#"{"type":"purchaseButton","id":"pb1","labelKey":"k"}"#)
+        guard case .purchaseButton(let p) = node else { return XCTFail("expected purchaseButton") }
+        XCTAssertNil(p.background)
+        XCTAssertNil(p.labelColor)
+        XCTAssertNil(p.border)
+        XCTAssertNil(p.cornerRadius)
+    }
+
+    /// A malformed `border` (missing `color`) fails the whole config decode —
+    /// same "structural defect on a KNOWN type" contract every other
+    /// malformed field on a known node type already has.
+    func test_malformedBorderMissingColorFailsTheWholeConfig() {
+        let json = """
+        {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
+         "root":{"type":"stack","id":"root","axis":"v","children":[
+           {"type":"stack","id":"s1","axis":"v","children":[],"border":{"width":2}}]}}
+        """
+        XCTAssertNil(decodeBuilderConfig(json), "a border missing its required `color` must fail the whole config")
+    }
+
+    /// Override parity (the P6 lesson): each node type's new keys must flow
+    /// through the SAME `NodeOverride<...Props>` whitelist/decode path every
+    /// other overridable key already uses — an active override actually
+    /// carries the new prop, and a key outside the whitelist still fails the
+    /// whole config (button/purchaseButton spot-checked; the others share
+    /// the identical `validateOverridePropKeys` mechanism).
+    func test_overridesCarryTheNewStyleKeysAcrossNodeTypes() throws {
+        let stack = try firstChild(#"""
+        {"type":"stack","id":"s1","axis":"v","children":[],
+         "overrides":[{"when":{"kind":"selected"},
+                       "props":{"border":{"width":3,"color":{"light":"#FF0000"}}}}]}
+        """#)
+        guard case .stack(let sp) = stack else { return XCTFail("expected stack") }
+        XCTAssertEqual(sp.overrides?.first?.props?.border?.width, 3)
+
+        let text = try firstChild(#"""
+        {"type":"text","id":"t1","key":"k","role":"body",
+         "overrides":[{"when":{"kind":"introEligible"},
+                       "props":{"background":{"light":"#00FF00"},"cornerRadius":4}}]}
+        """#)
+        guard case .text(let tp) = text else { return XCTFail("expected text") }
+        XCTAssertEqual(tp.overrides?.first?.props?.background, ThemePair(light: "#00FF00", dark: nil))
+        XCTAssertEqual(tp.overrides?.first?.props?.cornerRadius, 4)
+
+        let image = try firstChild(#"""
+        {"type":"image","id":"i1","url":{"light":"https://x/a.png"},
+         "overrides":[{"when":{"kind":"selected"},
+                       "props":{"border":{"width":1,"color":{"light":"#0000FF"}}}}]}
+        """#)
+        guard case .image(let ip) = image else { return XCTFail("expected image") }
+        XCTAssertEqual(ip.overrides?.first?.props?.border?.color, ThemePair(light: "#0000FF", dark: nil))
+
+        let button = try firstChild(#"""
+        {"type":"button","id":"b1","labelKey":"k","style":"primary","action":{"kind":"close"},
+         "overrides":[{"when":{"kind":"introEligible"},
+                       "props":{"background":{"light":"#ABCDEF"},"labelColor":{"light":"#123456"},
+                                "border":{"width":2,"color":{"light":"#654321"}},"cornerRadius":5}}]}
+        """#)
+        guard case .button(let bp) = button else { return XCTFail("expected button") }
+        let buttonPatch = try XCTUnwrap(bp.overrides?.first?.props)
+        XCTAssertEqual(buttonPatch.background, ThemePair(light: "#ABCDEF", dark: nil))
+        XCTAssertEqual(buttonPatch.labelColor, ThemePair(light: "#123456", dark: nil))
+        XCTAssertEqual(buttonPatch.border?.width, 2)
+        XCTAssertEqual(buttonPatch.cornerRadius, 5)
+
+        let purchaseButton = try firstChild(#"""
+        {"type":"purchaseButton","id":"pb1","labelKey":"k",
+         "overrides":[{"when":{"kind":"selected"},
+                       "props":{"background":{"light":"#ABCDEF"},"labelColor":{"light":"#123456"},
+                                "border":{"width":2,"color":{"light":"#654321"}},"cornerRadius":9}}]}
+        """#)
+        guard case .purchaseButton(let pbp) = purchaseButton else { return XCTFail("expected purchaseButton") }
+        let purchaseButtonPatch = try XCTUnwrap(pbp.overrides?.first?.props)
+        XCTAssertEqual(purchaseButtonPatch.background, ThemePair(light: "#ABCDEF", dark: nil))
+        XCTAssertEqual(purchaseButtonPatch.cornerRadius, 9)
+    }
+
+    /// The whitelist side of parity: a key that is NOT in
+    /// `OVERRIDABLE_PROP_KEYS.text` (e.g. `border` — text has no border prop
+    /// at all, per the matrix) still fails the whole config, exactly like
+    /// `test_aNonWhitelistedMediaOverridePropFailsTheWholeConfig` above.
+    func test_aNonWhitelistedStyleOverridePropFailsTheWholeConfig() {
+        let json = """
+        {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
+         "root":{"type":"stack","id":"root","axis":"v","children":[
+           {"type":"text","id":"t1","key":"k","role":"body",
+            "overrides":[{"when":{"kind":"selected"},
+                          "props":{"border":{"width":1,"color":{"light":"#000000"}}}}]}]}}
+        """
+        XCTAssertNil(
+            decodeBuilderConfig(json),
+            "`border` is not in OVERRIDABLE_PROP_KEYS.text, so the whole config must fail")
+    }
+
     func test_countdownDeadline_parsesBothIsoSpellings() throws {
         let defaults = try scratchDefaults("RovenueTests.countdownDeadline.iso")
         let plain = countdownDeadline(

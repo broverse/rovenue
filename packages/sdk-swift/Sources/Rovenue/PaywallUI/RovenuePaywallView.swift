@@ -749,11 +749,23 @@ struct BuilderNodeView: View {
         let base = Text(ctx.label(p.key, cell: cell))
             .font(font(for: p.role))
             .multilineTextAlignment(textAlignment(p.align))
+        // Badge/chip fill (spec 2026-07-29): absent background AND absent
+        // cornerRadius resolve to `.background(.clear).cornerRadius(0)` —
+        // both no-ops, today's output byte-identical.
         if let pair = p.color, let rgba = parseHexColor(themeValue(pair, dark: ctx.dark)) {
             base.foregroundColor(color(rgba))
+                .background(textBadgeBackgroundColor(p))
+                .cornerRadius(CGFloat(p.cornerRadius ?? 0))
         } else {
             base
+                .background(textBadgeBackgroundColor(p))
+                .cornerRadius(CGFloat(p.cornerRadius ?? 0))
         }
+    }
+
+    private func textBadgeBackgroundColor(_ p: TextProps) -> Color {
+        guard let pair = p.background, let rgba = parseHexColor(themeValue(pair, dark: ctx.dark)) else { return .clear }
+        return color(rgba)
     }
 
     @ViewBuilder
@@ -767,7 +779,18 @@ struct BuilderNodeView: View {
             }
             .frame(height: p.height.map { CGFloat($0) })
             .cornerRadius(CGFloat(p.cornerRadius ?? 0))
+            .overlay(imageBorderOverlay(p))
             .accessibilityLabel(p.alt.map { ctx.label($0, cell: cell) } ?? "")
+        }
+    }
+
+    // Drawn INSIDE the same `cornerRadius` the image itself is clipped to —
+    // absent `border` (or an unparsable color) draws nothing, today's output.
+    @ViewBuilder
+    private func imageBorderOverlay(_ p: ImageProps) -> some View {
+        if let resolved = resolveBorder(p.border, dark: ctx.dark) {
+            RoundedRectangle(cornerRadius: CGFloat(p.cornerRadius ?? 0))
+                .stroke(color(resolved.color), lineWidth: CGFloat(resolved.width))
         }
     }
 
@@ -833,6 +856,17 @@ struct StackNodeView: View {
             .frame(width: fixedWidth, height: fixedHeight)
             .background(backgroundColor)
             .cornerRadius(CGFloat(props.cornerRadius ?? 0))
+            .overlay(borderOverlay)
+    }
+
+    // Drawn INSIDE the same `cornerRadius` the stack itself is clipped to —
+    // absent `border` (or an unparsable color) draws nothing, today's output.
+    @ViewBuilder
+    private var borderOverlay: some View {
+        if let resolved = resolveBorder(props.border, dark: ctx.dark) {
+            RoundedRectangle(cornerRadius: CGFloat(props.cornerRadius ?? 0))
+                .stroke(color(resolved.color), lineWidth: CGFloat(resolved.width))
+        }
     }
 
     private var edgeInsets: EdgeInsets {
@@ -894,11 +928,54 @@ struct ActionButtonView: View {
     var body: some View {
         if actionButtonVisible(props.action, hasRestoreHandler: ctx.onRestore != nil) {
             Button(action: perform) {
-                Text(ctx.label(props.labelKey, cell: cell))
-                    .font(props.style == .primary ? .body.weight(.semibold) : .body)
+                label
             }
             .buttonStyle(.plain)
             .opacity(props.style == .plain ? 0.7 : 1)
+        }
+    }
+
+    // Node style pass (spec 2026-07-29): `button`'s `style` variant has never
+    // drawn a background/label-color/border of its own on this platform (only
+    // font weight + opacity, above) — unlike the web renderer's
+    // BUTTON_STYLE_BASE, there is no pre-existing base visual to override
+    // here. So the ONLY source of a background/border/custom label color is
+    // the node's own new props, and when none of the four is set this
+    // branches to the untouched `Text` — same type, same output as before
+    // this wave (the regression pin).
+    @ViewBuilder
+    private var label: some View {
+        let text = Text(ctx.label(props.labelKey, cell: cell))
+            .font(props.style == .primary ? .body.weight(.semibold) : .body)
+        if hasCustomVisual {
+            text
+                .foregroundColor(visual.labelColor.map(color))
+                .background(visual.background.map(color) ?? Color.clear)
+                .cornerRadius(CGFloat(visual.cornerRadius))
+                .overlay(borderOverlay)
+        } else {
+            text
+        }
+    }
+
+    private var hasCustomVisual: Bool {
+        props.background != nil || props.labelColor != nil || props.border != nil || props.cornerRadius != nil
+    }
+
+    private var visual: ResolvedButtonVisual {
+        resolveButtonVisual(
+            base: ButtonBaseVisual(),
+            custom: ButtonCustomStyleProps(
+                background: props.background, labelColor: props.labelColor,
+                border: props.border, cornerRadius: props.cornerRadius),
+            defaultCornerRadius: nodeButtonDefaultCornerRadiusPx, dark: ctx.dark)
+    }
+
+    @ViewBuilder
+    private var borderOverlay: some View {
+        if let border = visual.border {
+            RoundedRectangle(cornerRadius: CGFloat(visual.cornerRadius))
+                .stroke(color(border.color), lineWidth: CGFloat(border.width))
         }
     }
 
@@ -983,6 +1060,14 @@ struct PackageListView: View {
     }
 }
 
+/// `PurchaseButtonView`'s pre-existing corner radius, unrelated to the web
+/// renderer's `NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX` (8) — this platform has
+/// drawn a 12pt chip here since before the node style pass, and the
+/// regression pin requires that pre-existing default survive unchanged when
+/// `cornerRadius` is absent. See `nodeButtonDefaultCornerRadiusPx`'s doc
+/// comment in PaywallRenderSupport.swift for the `button` counterpart.
+let purchaseButtonDefaultCornerRadiusPx = 12.0
+
 struct PurchaseButtonView: View {
     let props: PurchaseButtonProps
     let ctx: PaywallRenderContext
@@ -999,17 +1084,36 @@ struct PurchaseButtonView: View {
             cell: nil, selectedPackageId: ctx.selectedPackageId, offering: ctx.offering)
         let resolvedLabelKey = ctaLabelKey(
             labelKey: props.labelKey, trialLabelKey: props.trialLabelKey, selectedView: selectedView)
+        let visual = resolveButtonVisual(
+            base: ButtonBaseVisual(),
+            custom: ButtonCustomStyleProps(
+                background: props.background, labelColor: props.labelColor,
+                border: props.border, cornerRadius: props.cornerRadius),
+            defaultCornerRadius: purchaseButtonDefaultCornerRadiusPx, dark: ctx.dark)
         Button(action: ctx.purchase) {
             Text(ctx.label(resolvedLabelKey, cell: nil))
                 .font(.body.weight(.semibold))
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
-                .background(Color.accentColor.opacity(enabled ? 1 : 0.4))
-                .foregroundColor(.white)
-                .cornerRadius(12)
+                // The disabled-state dim has ALWAYS applied to the
+                // background fill only (never the label) — preserved here by
+                // opacity-ing whichever fill wins (custom or the accent-color
+                // base), not the whole button.
+                .background((visual.background.map(color) ?? Color.accentColor).opacity(enabled ? 1 : 0.4))
+                .foregroundColor(visual.labelColor.map(color) ?? .white)
+                .cornerRadius(CGFloat(visual.cornerRadius))
+                .overlay(purchaseButtonBorderOverlay(visual))
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+    }
+
+    @ViewBuilder
+    private func purchaseButtonBorderOverlay(_ visual: ResolvedButtonVisual) -> some View {
+        if let border = visual.border {
+            RoundedRectangle(cornerRadius: CGFloat(visual.cornerRadius))
+                .stroke(color(border.color), lineWidth: CGFloat(border.width))
+        }
     }
 }
 

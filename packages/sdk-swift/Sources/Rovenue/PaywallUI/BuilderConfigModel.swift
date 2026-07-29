@@ -57,6 +57,22 @@ public enum NodeSize: Decodable, Equatable, Sendable {
     }
 }
 
+/// A drawn border, always resolved together — a width without a color (or
+/// vice versa) renders nothing meaningful, so both fields are non-optional
+/// inside the optional `border` prop. Drawn INSIDE the node's own corner
+/// radius on every platform (web `border` + `borderRadius`; SwiftUI
+/// `overlay(RoundedRectangle().stroke)`; Android `GradientDrawable` stroke).
+/// Mirrors packages/shared/src/paywall/schema.ts's `NodeBorder`.
+public struct NodeBorder: Decodable, Equatable, Sendable {
+    public let width: Double
+    public let color: ThemePair
+
+    public init(width: Double, color: ThemePair) {
+        self.width = width
+        self.color = color
+    }
+}
+
 public struct Padding: Decodable, Equatable, Sendable {
     public let t: Double?
     public let r: Double?
@@ -223,12 +239,14 @@ public enum OverrideConditionKind: Equatable, Sendable {
 /// packages/shared/src/paywall/schema.ts's `OVERRIDABLE_PROP_KEYS`, the
 /// single source of truth; keep the two tables in sync by hand.
 enum OverridablePropKeys {
-    static let stack: Set<String> = ["spacing", "align", "background", "cornerRadius"]
-    static let text: Set<String> = ["key", "color", "align"]
-    static let image: Set<String> = ["cornerRadius"]
-    static let button: Set<String> = ["labelKey", "style"]
+    static let stack: Set<String> = ["spacing", "align", "background", "cornerRadius", "border"]
+    static let text: Set<String> = ["key", "color", "align", "background", "cornerRadius"]
+    static let image: Set<String> = ["cornerRadius", "border"]
+    static let button: Set<String> = ["labelKey", "style", "background", "labelColor", "border", "cornerRadius"]
     static let packageList: Set<String> = []
-    static let purchaseButton: Set<String> = ["labelKey", "trialLabelKey"]
+    static let purchaseButton: Set<String> = [
+        "labelKey", "trialLabelKey", "background", "labelColor", "border", "cornerRadius",
+    ]
     static let spacer: Set<String> = []
     static let divider: Set<String> = ["color", "thickness"]
     static let icon: Set<String> = ["name", "color"]
@@ -276,12 +294,15 @@ public struct StackOverrideProps: Decodable, Equatable, Sendable {
     public let align: HAlign?
     public let background: ThemePair?
     public let cornerRadius: Double?
+    public let border: NodeBorder?
 
-    public init(spacing: Double? = nil, align: HAlign? = nil, background: ThemePair? = nil, cornerRadius: Double? = nil) {
+    public init(spacing: Double? = nil, align: HAlign? = nil, background: ThemePair? = nil, cornerRadius: Double? = nil,
+                border: NodeBorder? = nil) {
         self.spacing = spacing; self.align = align; self.background = background; self.cornerRadius = cornerRadius
+        self.border = border
     }
 
-    private enum CodingKeys: String, CodingKey { case spacing, align, background, cornerRadius }
+    private enum CodingKeys: String, CodingKey { case spacing, align, background, cornerRadius, border }
 
     public init(from decoder: Decoder) throws {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.stack)
@@ -290,6 +311,7 @@ public struct StackOverrideProps: Decodable, Equatable, Sendable {
         align = try container.decodeIfPresent(HAlign.self, forKey: .align)
         background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+        border = try container.decodeIfPresent(NodeBorder.self, forKey: .border)
     }
 }
 
@@ -297,12 +319,16 @@ public struct TextOverrideProps: Decodable, Equatable, Sendable {
     public let key: String?
     public let color: ThemePair?
     public let align: HAlign?
+    public let background: ThemePair?
+    public let cornerRadius: Double?
 
-    public init(key: String? = nil, color: ThemePair? = nil, align: HAlign? = nil) {
+    public init(key: String? = nil, color: ThemePair? = nil, align: HAlign? = nil, background: ThemePair? = nil,
+                cornerRadius: Double? = nil) {
         self.key = key; self.color = color; self.align = align
+        self.background = background; self.cornerRadius = cornerRadius
     }
 
-    private enum CodingKeys: String, CodingKey { case key, color, align }
+    private enum CodingKeys: String, CodingKey { case key, color, align, background, cornerRadius }
 
     public init(from decoder: Decoder) throws {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.text)
@@ -310,40 +336,55 @@ public struct TextOverrideProps: Decodable, Equatable, Sendable {
         key = try container.decodeIfPresent(String.self, forKey: .key)
         color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
         align = try container.decodeIfPresent(HAlign.self, forKey: .align)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
     }
 }
 
 public struct ImageOverrideProps: Decodable, Equatable, Sendable {
     public let cornerRadius: Double?
+    public let border: NodeBorder?
 
-    public init(cornerRadius: Double? = nil) {
+    public init(cornerRadius: Double? = nil, border: NodeBorder? = nil) {
         self.cornerRadius = cornerRadius
+        self.border = border
     }
 
-    private enum CodingKeys: String, CodingKey { case cornerRadius }
+    private enum CodingKeys: String, CodingKey { case cornerRadius, border }
 
     public init(from decoder: Decoder) throws {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.image)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+        border = try container.decodeIfPresent(NodeBorder.self, forKey: .border)
     }
 }
 
 public struct ButtonOverrideProps: Decodable, Equatable, Sendable {
     public let labelKey: String?
     public let style: ButtonVisualStyle?
+    public let background: ThemePair?
+    public let labelColor: ThemePair?
+    public let border: NodeBorder?
+    public let cornerRadius: Double?
 
-    public init(labelKey: String? = nil, style: ButtonVisualStyle? = nil) {
+    public init(labelKey: String? = nil, style: ButtonVisualStyle? = nil, background: ThemePair? = nil,
+                labelColor: ThemePair? = nil, border: NodeBorder? = nil, cornerRadius: Double? = nil) {
         self.labelKey = labelKey; self.style = style
+        self.background = background; self.labelColor = labelColor; self.border = border; self.cornerRadius = cornerRadius
     }
 
-    private enum CodingKeys: String, CodingKey { case labelKey, style }
+    private enum CodingKeys: String, CodingKey { case labelKey, style, background, labelColor, border, cornerRadius }
 
     public init(from decoder: Decoder) throws {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.button)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         labelKey = try container.decodeIfPresent(String.self, forKey: .labelKey)
         style = try container.decodeIfPresent(ButtonVisualStyle.self, forKey: .style)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        labelColor = try container.decodeIfPresent(ThemePair.self, forKey: .labelColor)
+        border = try container.decodeIfPresent(NodeBorder.self, forKey: .border)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
     }
 }
 
@@ -363,19 +404,31 @@ public struct PurchaseButtonOverrideProps: Decodable, Equatable, Sendable {
     /// whitelists `trialLabelKey` alongside `labelKey` — an active
     /// `introEligible`/`selected` override can swap either.
     public let trialLabelKey: String?
+    public let background: ThemePair?
+    public let labelColor: ThemePair?
+    public let border: NodeBorder?
+    public let cornerRadius: Double?
 
-    public init(labelKey: String? = nil, trialLabelKey: String? = nil) {
+    public init(labelKey: String? = nil, trialLabelKey: String? = nil, background: ThemePair? = nil,
+                labelColor: ThemePair? = nil, border: NodeBorder? = nil, cornerRadius: Double? = nil) {
         self.labelKey = labelKey
         self.trialLabelKey = trialLabelKey
+        self.background = background; self.labelColor = labelColor; self.border = border; self.cornerRadius = cornerRadius
     }
 
-    private enum CodingKeys: String, CodingKey { case labelKey, trialLabelKey }
+    private enum CodingKeys: String, CodingKey {
+        case labelKey, trialLabelKey, background, labelColor, border, cornerRadius
+    }
 
     public init(from decoder: Decoder) throws {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.purchaseButton)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         labelKey = try container.decodeIfPresent(String.self, forKey: .labelKey)
         trialLabelKey = try container.decodeIfPresent(String.self, forKey: .trialLabelKey)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        labelColor = try container.decodeIfPresent(ThemePair.self, forKey: .labelColor)
+        border = try container.decodeIfPresent(NodeBorder.self, forKey: .border)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
     }
 }
 
@@ -617,6 +670,8 @@ public struct StackProps: Decodable {
     public let size: SizeSpec?
     public let background: ThemePair?
     public let cornerRadius: Double?
+    /// Drawn INSIDE `cornerRadius`. Absent = no border, today's output.
+    public let border: NodeBorder?
     public let overrides: [NodeOverride<StackOverrideProps>]?
     public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
@@ -626,16 +681,18 @@ public struct StackProps: Decodable {
     // programmatically-built trees) still need to construct these directly.
     public init(id: String, axis: Axis, children: [BuilderNode], spacing: Double? = nil, align: HAlign? = nil,
                 padding: Padding? = nil, size: SizeSpec? = nil, background: ThemePair? = nil,
-                cornerRadius: Double? = nil, overrides: [NodeOverride<StackOverrideProps>]? = nil,
+                cornerRadius: Double? = nil, border: NodeBorder? = nil,
+                overrides: [NodeOverride<StackOverrideProps>]? = nil,
                 visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
         self.id = id; self.axis = axis; self.children = children; self.spacing = spacing; self.align = align
         self.padding = padding; self.size = size; self.background = background
-        self.cornerRadius = cornerRadius; self.overrides = overrides
+        self.cornerRadius = cornerRadius; self.border = border; self.overrides = overrides
         self.visibility = visibility; self.fallback = fallback
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, axis, children, spacing, align, padding, size, background, cornerRadius, overrides, visibility, fallback
+        case id, axis, children, spacing, align, padding, size, background, cornerRadius, border, overrides,
+             visibility, fallback
     }
 
     // A custom decoder (rather than relying on Codable synthesis, as this
@@ -653,6 +710,7 @@ public struct StackProps: Decodable {
         size = try container.decodeIfPresent(SizeSpec.self, forKey: .size)
         background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+        border = try container.decodeIfPresent(NodeBorder.self, forKey: .border)
         overrides = try container.decodeIfPresent([NodeOverride<StackOverrideProps>].self, forKey: .overrides)
         visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
         fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
@@ -665,18 +723,27 @@ public struct TextProps: Decodable {
     public let role: TextRole
     public let color: ThemePair?
     public let align: HAlign?
+    /// Badge/chip fill. Absent = no background, today's output. Only
+    /// meaningful together with `cornerRadius` (or standalone as a
+    /// square-cornered fill) — mirrors the shared schema's own doc comment.
+    public let background: ThemePair?
+    public let cornerRadius: Double?
     public let overrides: [NodeOverride<TextOverrideProps>]?
     public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, key: String, role: TextRole, color: ThemePair? = nil, align: HAlign? = nil,
+                background: ThemePair? = nil, cornerRadius: Double? = nil,
                 overrides: [NodeOverride<TextOverrideProps>]? = nil, visibility: Visibility? = nil,
                 fallback: BuilderNodeBox? = nil) {
         self.id = id; self.key = key; self.role = role; self.color = color; self.align = align
+        self.background = background; self.cornerRadius = cornerRadius
         self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
     }
 
-    private enum CodingKeys: String, CodingKey { case id, key, role, color, align, overrides, visibility, fallback }
+    private enum CodingKeys: String, CodingKey {
+        case id, key, role, color, align, background, cornerRadius, overrides, visibility, fallback
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -685,6 +752,8 @@ public struct TextProps: Decodable {
         role = try container.decode(TextRole.self, forKey: .role)
         color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
         align = try container.decodeIfPresent(HAlign.self, forKey: .align)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
         overrides = try container.decodeIfPresent([NodeOverride<TextOverrideProps>].self, forKey: .overrides)
         visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
         fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
@@ -696,20 +765,24 @@ public struct ImageProps: Decodable {
     public let url: ThemePair
     public let height: Double?
     public let cornerRadius: Double?
+    /// Drawn INSIDE `cornerRadius`. Absent = no border, today's output.
+    public let border: NodeBorder?
     public let alt: String?
     public let overrides: [NodeOverride<ImageOverrideProps>]?
     public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, url: ThemePair, height: Double? = nil, cornerRadius: Double? = nil,
-                alt: String? = nil, overrides: [NodeOverride<ImageOverrideProps>]? = nil,
+                border: NodeBorder? = nil, alt: String? = nil,
+                overrides: [NodeOverride<ImageOverrideProps>]? = nil,
                 visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
         self.id = id; self.url = url; self.height = height; self.cornerRadius = cornerRadius
+        self.border = border
         self.alt = alt; self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, url, height, cornerRadius, alt, overrides, visibility, fallback
+        case id, url, height, cornerRadius, border, alt, overrides, visibility, fallback
     }
 
     public init(from decoder: Decoder) throws {
@@ -718,6 +791,7 @@ public struct ImageProps: Decodable {
         url = try container.decode(ThemePair.self, forKey: .url)
         height = try container.decodeIfPresent(Double.self, forKey: .height)
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+        border = try container.decodeIfPresent(NodeBorder.self, forKey: .border)
         alt = try container.decodeIfPresent(String.self, forKey: .alt)
         overrides = try container.decodeIfPresent([NodeOverride<ImageOverrideProps>].self, forKey: .overrides)
         visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
@@ -730,18 +804,31 @@ public struct ButtonProps: Decodable {
     public let labelKey: String
     public let style: ButtonVisualStyle
     public let action: ButtonAction
+    /// Custom style props (spec 2026-07-29): all override the `style`
+    /// variant's own visual; absent = the variant's current look, today's
+    /// output. See `resolveButtonVisual` for the merge rule.
+    public let background: ThemePair?
+    public let labelColor: ThemePair?
+    /// Drawn INSIDE `cornerRadius`. Absent = no border, today's output.
+    public let border: NodeBorder?
+    public let cornerRadius: Double?
     public let overrides: [NodeOverride<ButtonOverrideProps>]?
     public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, labelKey: String, style: ButtonVisualStyle, action: ButtonAction,
-                overrides: [NodeOverride<ButtonOverrideProps>]? = nil, visibility: Visibility? = nil,
-                fallback: BuilderNodeBox? = nil) {
+                background: ThemePair? = nil, labelColor: ThemePair? = nil, border: NodeBorder? = nil,
+                cornerRadius: Double? = nil, overrides: [NodeOverride<ButtonOverrideProps>]? = nil,
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
         self.id = id; self.labelKey = labelKey; self.style = style; self.action = action
+        self.background = background; self.labelColor = labelColor; self.border = border
+        self.cornerRadius = cornerRadius
         self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
     }
 
-    private enum CodingKeys: String, CodingKey { case id, labelKey, style, action, overrides, visibility, fallback }
+    private enum CodingKeys: String, CodingKey {
+        case id, labelKey, style, action, background, labelColor, border, cornerRadius, overrides, visibility, fallback
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -749,6 +836,10 @@ public struct ButtonProps: Decodable {
         labelKey = try container.decode(String.self, forKey: .labelKey)
         style = try container.decode(ButtonVisualStyle.self, forKey: .style)
         action = try container.decode(ButtonAction.self, forKey: .action)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        labelColor = try container.decodeIfPresent(ThemePair.self, forKey: .labelColor)
+        border = try container.decodeIfPresent(NodeBorder.self, forKey: .border)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
         overrides = try container.decodeIfPresent([NodeOverride<ButtonOverrideProps>].self, forKey: .overrides)
         visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
         fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
@@ -802,24 +893,41 @@ public struct PurchaseButtonProps: Decodable {
     /// the Swift port of variables.ts's `resolveCtaLabelKey`). Absent =
     /// always `labelKey`. Mirrors schema.ts's `PurchaseButtonNode.trialLabelKey`.
     public let trialLabelKey: String?
+    /// Custom style props (spec 2026-07-29): all override the button's own
+    /// base visual; absent = today's output. See `resolveButtonVisual`.
+    public let background: ThemePair?
+    public let labelColor: ThemePair?
+    /// Drawn INSIDE `cornerRadius`. Absent = no border, today's output.
+    public let border: NodeBorder?
+    public let cornerRadius: Double?
     public let overrides: [NodeOverride<PurchaseButtonOverrideProps>]?
     public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
-    public init(id: String, labelKey: String, trialLabelKey: String? = nil,
+    public init(id: String, labelKey: String, trialLabelKey: String? = nil, background: ThemePair? = nil,
+                labelColor: ThemePair? = nil, border: NodeBorder? = nil, cornerRadius: Double? = nil,
                 overrides: [NodeOverride<PurchaseButtonOverrideProps>]? = nil,
                 visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
-        self.id = id; self.labelKey = labelKey; self.trialLabelKey = trialLabelKey; self.overrides = overrides
+        self.id = id; self.labelKey = labelKey; self.trialLabelKey = trialLabelKey
+        self.background = background; self.labelColor = labelColor; self.border = border
+        self.cornerRadius = cornerRadius
+        self.overrides = overrides
         self.visibility = visibility; self.fallback = fallback
     }
 
-    private enum CodingKeys: String, CodingKey { case id, labelKey, trialLabelKey, overrides, visibility, fallback }
+    private enum CodingKeys: String, CodingKey {
+        case id, labelKey, trialLabelKey, background, labelColor, border, cornerRadius, overrides, visibility, fallback
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         labelKey = try container.decode(String.self, forKey: .labelKey)
         trialLabelKey = try container.decodeIfPresent(String.self, forKey: .trialLabelKey)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        labelColor = try container.decodeIfPresent(ThemePair.self, forKey: .labelColor)
+        border = try container.decodeIfPresent(NodeBorder.self, forKey: .border)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
         overrides = try container.decodeIfPresent([NodeOverride<PurchaseButtonOverrideProps>].self, forKey: .overrides)
         visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
         fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)

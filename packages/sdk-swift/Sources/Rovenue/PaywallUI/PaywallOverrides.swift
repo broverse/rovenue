@@ -57,6 +57,7 @@ public func applyOverrides(_ props: StackProps, active: OverrideActiveConditions
             padding: result.padding, size: result.size,
             background: patch.background ?? result.background,
             cornerRadius: patch.cornerRadius ?? result.cornerRadius,
+            border: patch.border ?? result.border,
             overrides: result.overrides, fallback: result.fallback)
     }
     return result
@@ -70,6 +71,8 @@ public func applyOverrides(_ props: TextProps, active: OverrideActiveConditions)
         result = TextProps(
             id: result.id, key: patch.key ?? result.key, role: result.role,
             color: patch.color ?? result.color, align: patch.align ?? result.align,
+            background: patch.background ?? result.background,
+            cornerRadius: patch.cornerRadius ?? result.cornerRadius,
             overrides: result.overrides, fallback: result.fallback)
     }
     return result
@@ -83,6 +86,7 @@ public func applyOverrides(_ props: ImageProps, active: OverrideActiveConditions
         result = ImageProps(
             id: result.id, url: result.url, height: result.height,
             cornerRadius: patch.cornerRadius ?? result.cornerRadius,
+            border: patch.border ?? result.border,
             alt: result.alt, overrides: result.overrides, fallback: result.fallback)
     }
     return result
@@ -96,6 +100,10 @@ public func applyOverrides(_ props: ButtonProps, active: OverrideActiveCondition
         result = ButtonProps(
             id: result.id, labelKey: patch.labelKey ?? result.labelKey,
             style: patch.style ?? result.style, action: result.action,
+            background: patch.background ?? result.background,
+            labelColor: patch.labelColor ?? result.labelColor,
+            border: patch.border ?? result.border,
+            cornerRadius: patch.cornerRadius ?? result.cornerRadius,
             overrides: result.overrides, fallback: result.fallback)
     }
     return result
@@ -116,6 +124,10 @@ public func applyOverrides(_ props: PurchaseButtonProps, active: OverrideActiveC
         result = PurchaseButtonProps(
             id: result.id, labelKey: patch.labelKey ?? result.labelKey,
             trialLabelKey: patch.trialLabelKey ?? result.trialLabelKey,
+            background: patch.background ?? result.background,
+            labelColor: patch.labelColor ?? result.labelColor,
+            border: patch.border ?? result.border,
+            cornerRadius: patch.cornerRadius ?? result.cornerRadius,
             overrides: result.overrides, fallback: result.fallback)
     }
     return result
