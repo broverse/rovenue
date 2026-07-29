@@ -380,3 +380,133 @@ describe("Canvas — drag-and-drop inside the device mockup (Part 2)", () => {
     for (const name of EVENT_NAMES) expect(countCalls(removeSpy, name)).toBe(1);
   });
 });
+
+// =============================================================
+// Selection chrome — corner-drag resize. `rowContainer` (a `stack`) is the
+// fixture's only node whose schema carries a `size` box (see
+// `isResizableNode` in canvas-helpers.ts); the leaf `text` nodes exercise
+// the "no handles for this node type" gate. The viewport/scroll-container
+// rect is left at jsdom's default (all-zero, unscrolled), so
+// `computeSelectionRect`'s chrome-coordinate transform is a no-op and the
+// selection/resize math lines up directly with each stubbed node rect.
+// =============================================================
+
+describe("Canvas — selection chrome corner resize", () => {
+  it("renders no resize handles for a node whose schema has no `size` field", async () => {
+    const { vm, container } = await renderCanvas();
+    const leafA = nodeEl(container, "leafA");
+    stubRect(leafA, { left: 0, top: 0, width: 200, height: 50 });
+
+    await act(async () => {
+      vm.selectNode("leafA");
+    });
+
+    expect(container.querySelector('[data-testid^="canvas-resize-handle-"]')).toBeNull();
+  });
+
+  it("renders all four corner handles for a selected stack node", async () => {
+    const { vm, container } = await renderCanvas();
+    const rowContainer = nodeEl(container, "rowContainer");
+    stubRect(rowContainer, { left: 100, top: 50, width: 80, height: 40 });
+
+    await act(async () => {
+      vm.selectNode("rowContainer");
+    });
+
+    for (const corner of ["tl", "tr", "bl", "br"]) {
+      expect(container.querySelector(`[data-testid="canvas-resize-handle-${corner}"]`)).not.toBeNull();
+    }
+  });
+
+  it("drags the bottom-right handle to set both width and height together on the VM's stack node", async () => {
+    const { vm, container } = await renderCanvas();
+    const rowContainer = nodeEl(container, "rowContainer");
+    // 80x40 box at (100, 50) -> spans x:[100,180], y:[50,90].
+    stubRect(rowContainer, { left: 100, top: 50, width: 80, height: 40 });
+
+    await act(async () => {
+      vm.selectNode("rowContainer");
+    });
+
+    const handle = container.querySelector<HTMLElement>('[data-testid="canvas-resize-handle-br"]');
+    if (!handle) throw new Error("expected a br resize handle");
+
+    // "br" anchors at the OPPOSITE corner, top-left (100, 50). Dragging to
+    // (150, 130) -> width |150-100|=50, height |130-50|=80 (zoom is 1).
+    firePointer("pointerdown", handle, { clientX: 180, clientY: 90 });
+    firePointer("pointermove", document, { clientX: 150, clientY: 130 });
+    firePointer("pointerup", document, { clientX: 150, clientY: 130 });
+
+    const row = vm.config.root.children.find((n) => n.id === "rowContainer");
+    if (row?.type !== "stack") throw new Error("expected the rowContainer fixture");
+    expect(row.size).toEqual({ width: 50, height: 80 });
+  });
+
+  it("drags the top-left handle, anchored at the opposite (bottom-right) corner", async () => {
+    const { vm, container } = await renderCanvas();
+    const rowContainer = nodeEl(container, "rowContainer");
+    stubRect(rowContainer, { left: 100, top: 50, width: 80, height: 40 });
+
+    await act(async () => {
+      vm.selectNode("rowContainer");
+    });
+
+    const handle = container.querySelector<HTMLElement>('[data-testid="canvas-resize-handle-tl"]');
+    if (!handle) throw new Error("expected a tl resize handle");
+
+    // "tl" anchors at the OPPOSITE corner, bottom-right (180, 90). Dragging
+    // to (60, 70) -> width |60-180|=120, height |70-90|=20.
+    firePointer("pointerdown", handle, { clientX: 100, clientY: 50 });
+    firePointer("pointermove", document, { clientX: 60, clientY: 70 });
+    firePointer("pointerup", document, { clientX: 60, clientY: 70 });
+
+    const row = vm.config.root.children.find((n) => n.id === "rowContainer");
+    if (row?.type !== "stack") throw new Error("expected the rowContainer fixture");
+    expect(row.size).toEqual({ width: 120, height: 20 });
+  });
+
+  it("cancels a resize on Escape, restoring the node's pre-resize size", async () => {
+    const { vm, container } = await renderCanvas();
+    const rowContainer = nodeEl(container, "rowContainer");
+    stubRect(rowContainer, { left: 100, top: 50, width: 80, height: 40 });
+
+    await act(async () => {
+      vm.selectNode("rowContainer");
+    });
+
+    const handle = container.querySelector<HTMLElement>('[data-testid="canvas-resize-handle-br"]');
+    if (!handle) throw new Error("expected a br resize handle");
+
+    firePointer("pointerdown", handle, { clientX: 180, clientY: 90 });
+    firePointer("pointermove", document, { clientX: 150, clientY: 130 });
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    firePointer("pointerup", document, { clientX: 150, clientY: 130 });
+
+    const row = vm.config.root.children.find((n) => n.id === "rowContainer");
+    if (row?.type !== "stack") throw new Error("expected the rowContainer fixture");
+    expect(row.size).toBeUndefined();
+  });
+
+  it("clamps to the minimum size when dragged past or near the anchor", async () => {
+    const { vm, container } = await renderCanvas();
+    const rowContainer = nodeEl(container, "rowContainer");
+    stubRect(rowContainer, { left: 100, top: 50, width: 80, height: 40 });
+
+    await act(async () => {
+      vm.selectNode("rowContainer");
+    });
+
+    const handle = container.querySelector<HTMLElement>('[data-testid="canvas-resize-handle-br"]');
+    if (!handle) throw new Error("expected a br resize handle");
+
+    // Dragged almost onto the anchor (100, 50) itself.
+    firePointer("pointerdown", handle, { clientX: 180, clientY: 90 });
+    firePointer("pointermove", document, { clientX: 101, clientY: 51 });
+    firePointer("pointerup", document, { clientX: 101, clientY: 51 });
+
+    const row = vm.config.root.children.find((n) => n.id === "rowContainer");
+    if (row?.type !== "stack") throw new Error("expected the rowContainer fixture");
+    expect(row.size).toEqual({ width: 8, height: 8 });
+  });
+});

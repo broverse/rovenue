@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { DashboardOfferingRow } from "@rovenue/shared";
+import type { PaywallNode } from "@rovenue/shared/paywall";
 import {
   buildEligibilityMap,
+  computeResizedSize,
   computeSelectionRect,
+  isResizableNode,
   placeholderPriceView,
+  RESIZE_MIN_SIZE_PX,
   toRendererOffering,
 } from "../canvas-helpers";
 
@@ -227,5 +231,69 @@ describe("resolvedPriceView", () => {
     const none = resolvedPriceView(offering, undefined, "ios");
     expect(none.coverage).toBe("none");
     expect(none.view).toEqual(placeholderPriceView(offering));
+  });
+});
+
+// =====================================================================
+// isResizableNode / computeResizedSize — canvas selection chrome's
+// corner-drag resize (only a `stack` node's schema carries `size`).
+// =====================================================================
+
+describe("isResizableNode", () => {
+  it("is true only for stack nodes", () => {
+    const stack: PaywallNode = { type: "stack", id: "s1", axis: "v", children: [] };
+    const text: PaywallNode = { type: "text", id: "t1", key: "k", role: "body" };
+    expect(isResizableNode(stack)).toBe(true);
+    expect(isResizableNode(text)).toBe(false);
+  });
+});
+
+describe("computeResizedSize", () => {
+  // A 100x80 chrome-space box at (10, 20), i.e. spanning x:[10,110], y:[20,100].
+  const RECT = { left: 10, top: 20, width: 100, height: 80 };
+
+  it("br: anchors at the top-left corner (10, 20)", () => {
+    // Pointer dragged to (210, 220) -> width 200, height 200 chrome px.
+    expect(computeResizedSize("br", { x: 210, y: 220 }, RECT, 1)).toEqual({ width: 200, height: 200 });
+  });
+
+  it("tl: anchors at the bottom-right corner (110, 100)", () => {
+    // Pointer dragged to (10, 0) -> width |10-110|=100, height |0-100|=100.
+    expect(computeResizedSize("tl", { x: 10, y: 0 }, RECT, 1)).toEqual({ width: 100, height: 100 });
+  });
+
+  it("tr: anchors at the bottom-left corner (10, 100)", () => {
+    // Pointer dragged to (60, 50) -> width |60-10|=50, height |50-100|=50.
+    expect(computeResizedSize("tr", { x: 60, y: 50 }, RECT, 1)).toEqual({ width: 50, height: 50 });
+  });
+
+  it("bl: anchors at the top-right corner (110, 20)", () => {
+    // Pointer dragged to (30, 70) -> width |30-110|=80, height |70-20|=50.
+    expect(computeResizedSize("bl", { x: 30, y: 70 }, RECT, 1)).toEqual({ width: 80, height: 50 });
+  });
+
+  it("divides the chrome-space delta by zoom to recover node px", () => {
+    // Same drag as the `br` case above, at 2x zoom -> half the node px.
+    expect(computeResizedSize("br", { x: 210, y: 220 }, RECT, 2)).toEqual({ width: 100, height: 100 });
+    // And at 0.5x zoom -> double the node px.
+    expect(computeResizedSize("br", { x: 210, y: 220 }, RECT, 0.5)).toEqual({ width: 400, height: 400 });
+  });
+
+  it("clamps to RESIZE_MIN_SIZE_PX when dragged past the anchor or below the minimum", () => {
+    // Pointer barely moved from the anchor -> near-zero raw delta.
+    expect(computeResizedSize("br", { x: 11, y: 21 }, RECT, 1)).toEqual({
+      width: RESIZE_MIN_SIZE_PX,
+      height: RESIZE_MIN_SIZE_PX,
+    });
+    // Pointer dragged PAST the anchor (br anchor is top-left) -> abs() still
+    // yields a positive delta, but small enough to clamp.
+    expect(computeResizedSize("br", { x: 8, y: 18 }, RECT, 1)).toEqual({
+      width: RESIZE_MIN_SIZE_PX,
+      height: RESIZE_MIN_SIZE_PX,
+    });
+  });
+
+  it("rounds fractional chrome-space deltas to the nearest integer node px", () => {
+    expect(computeResizedSize("br", { x: 10 + 33.4, y: 20 + 33.6 }, RECT, 1)).toEqual({ width: 33, height: 34 });
   });
 });

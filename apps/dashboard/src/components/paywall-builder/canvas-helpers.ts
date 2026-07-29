@@ -4,7 +4,7 @@ import type {
   ResolvedStoreEntry,
   ResolvedStorePrice,
 } from "@rovenue/shared";
-import type { PackageView } from "@rovenue/shared/paywall";
+import type { PackageView, PaywallNode, StackNode } from "@rovenue/shared/paywall";
 import type { RendererOffering } from "@rovenue/paywall-renderer";
 import { formatMinorAmount, periodNoun } from "./inspector/binding-prices";
 
@@ -225,4 +225,56 @@ export function computeSelectionRect(
     width: target.width,
     height: target.height,
   };
+}
+
+// =============================================================
+// Canvas selection chrome — corner-drag resize (design-tool precision
+// idiom). Only a `StackNode` carries `size?: { width?: NodeSize;
+// height?: NodeSize }` in the schema (`packages/shared/src/paywall/
+// schema.ts`); every other node type has no resizable box at all, so
+// this is the single gate `canvas.tsx` uses to decide whether to render
+// corner handles for the current selection.
+// =============================================================
+
+/** True for the one node type whose schema carries a `size` box — the
+ * gate for whether the canvas renders corner resize handles at all. */
+export function isResizableNode(node: PaywallNode): node is StackNode {
+  return node.type === "stack";
+}
+
+/** Which corner of the selection box a resize handle/drag started from. */
+export type ResizeCorner = "tl" | "tr" | "bl" | "br";
+
+/** A `size` dimension can never be dragged smaller than this, in node px —
+ * small enough to stay practically invisible-adjacent, large enough that
+ * the corner handle itself (see `RESIZE_HANDLE_SIZE_PX` in canvas.tsx)
+ * never has to sit outside the box it's resizing. */
+export const RESIZE_MIN_SIZE_PX = 8;
+
+/**
+ * Pure corner-drag resize math. `rect` is the node's selection box in
+ * canvas-CHROME coordinates (already zoom-scaled + scroll-adjusted — the
+ * same space `computeSelectionRect` produces and the selection outline
+ * renders in), captured once at the start of the drag; `pointer` is the
+ * live pointer position in that SAME chrome space. The corner OPPOSITE
+ * `corner` anchors the resize — exactly like every design tool's corner
+ * handle — so the new width/height is just the chrome-space distance from
+ * that fixed anchor point to the live pointer, divided by `zoom` to get
+ * back to node px (the box on screen is zoom-scaled, node px isn't).
+ * Result is rounded to the nearest integer and clamped to
+ * `RESIZE_MIN_SIZE_PX`.
+ */
+export function computeResizedSize(
+  corner: ResizeCorner,
+  pointer: { x: number; y: number },
+  rect: Rect,
+  zoom: number,
+): { width: number; height: number } {
+  const anchorX = corner === "tl" || corner === "bl" ? rect.left + rect.width : rect.left;
+  const anchorY = corner === "tl" || corner === "tr" ? rect.top + rect.height : rect.top;
+  const widthChrome = Math.abs(pointer.x - anchorX);
+  const heightChrome = Math.abs(pointer.y - anchorY);
+  const width = Math.max(RESIZE_MIN_SIZE_PX, Math.round(widthChrome / zoom));
+  const height = Math.max(RESIZE_MIN_SIZE_PX, Math.round(heightChrome / zoom));
+  return { width, height };
 }

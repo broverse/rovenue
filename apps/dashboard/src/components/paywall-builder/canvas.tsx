@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { PaywallRenderer } from "@rovenue/paywall-renderer";
 import type { DashboardOfferingRow } from "@rovenue/shared";
+import type { StackNode } from "@rovenue/shared/paywall";
 import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
 import { useOfferingById } from "../../lib/hooks/useProjectOfferings";
@@ -12,11 +13,14 @@ import { useOfferingResolvedPrices } from "../../lib/hooks/useOfferingResolvedPr
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import {
   buildEligibilityMap,
+  computeResizedSize,
   computeSelectionRect,
+  isResizableNode,
   resolvedPriceView,
   toRendererOffering,
   type CanvasPriceCoverage,
   type Rect,
+  type ResizeCorner,
 } from "./canvas-helpers";
 import { canMoveTo, findNode, findParent } from "./tree-ops";
 import {
@@ -39,6 +43,65 @@ const ALL_SIZES_SCALE = 0.64;
  * stable string works, since drag scoping compares DOM node identity, not
  * this value (see `handleCanvasPointerDown`'s comment). */
 const SINGLE_FRAME_ID = "single";
+
+// =============================================================
+// Selection chrome — a crisp 1px outline drawn exactly on the selected
+// node's bounding box (no ring glow/offset), plus corner resize handles
+// for the one node type whose schema carries a `size` box (`isResizableNode`
+// — see canvas-helpers.ts). Handle geometry constants live here since
+// they're pure presentation (px sizes, cursors, shadow), not shared with
+// any other surface the way the drag constants in canvas-drag.ts are.
+// =============================================================
+
+/** Edge length of a corner resize handle square, in CSS px — matches
+ * Tailwind's `size-2` (0.5rem = 8px) used on the handle element itself. */
+const RESIZE_HANDLE_SIZE_PX = 8;
+/** Half the handle size, used to center each handle square ON the corner
+ * (rather than inside or outside the selection box). */
+const RESIZE_HANDLE_HALF_PX = RESIZE_HANDLE_SIZE_PX / 2;
+/** Subtle drop shadow under each handle, matching the design spec exactly
+ * (a design-tool handle needs just enough depth to read as "liftable"). */
+const RESIZE_HANDLE_SHADOW = "0 1px 2px rgba(0,0,0,0.25)";
+/** Gap between the selection box's bottom edge and the live dimension
+ * badge shown while resizing. */
+const RESIZE_BADGE_GAP_PX = 6;
+
+/** One entry per corner: which CSS cursor to show, and which two edges
+ * (`insetX`/`insetY`) the handle centers itself against — e.g. the "tl"
+ * handle sits at `left`/`top`, "br" at `right`/`bottom`, so it stays
+ * pinned to ITS corner as the selection box's width/height change. */
+const RESIZE_HANDLES: ReadonlyArray<{
+  corner: ResizeCorner;
+  cursor: string;
+  insetX: "left" | "right";
+  insetY: "top" | "bottom";
+}> = [
+  { corner: "tl", cursor: "cursor-nwse-resize", insetX: "left", insetY: "top" },
+  { corner: "tr", cursor: "cursor-nesw-resize", insetX: "right", insetY: "top" },
+  { corner: "bl", cursor: "cursor-nesw-resize", insetX: "left", insetY: "bottom" },
+  { corner: "br", cursor: "cursor-nwse-resize", insetX: "right", insetY: "bottom" },
+];
+
+/** Live bookkeeping for one in-progress corner resize, kept in a ref for
+ * the same reason `CanvasDragState` is: `endCanvasResize` must always read
+ * the LATEST values, not ones captured by a stale closure. */
+type CanvasResizeState = {
+  id: string;
+  corner: ResizeCorner;
+  /** Mirrors `CanvasDragState.pointerId` — the pointer that armed this
+   * resize; every subsequent move/up/cancel is filtered against it. */
+  pointerId: number;
+  /** The selection box in canvas-chrome coordinates, captured once at
+   * resize start — `computeResizedSize`'s anchor-corner math is relative
+   * to THIS rect for the whole gesture, never re-measured mid-drag. */
+  startRect: Rect;
+  /** Zoom captured at start alongside `startRect`, so a (hypothetical)
+   * zoom change mid-drag can't retroactively skew an in-progress resize. */
+  zoom: number;
+  /** The node's `size` before this resize started — restored verbatim on
+   * Escape/cancel. */
+  previousSize: StackNode["size"];
+};
 
 // =============================================================
 // Part 2 of paywall-builder drag-and-drop: dragging elements directly
@@ -278,6 +341,17 @@ export const Canvas = component(() => {
   const [dragSourceRect, setDragSourceRect] = useState<Rect | null>(null);
   const [dropPreview, setDropPreview] = useState<{ resolution: CanvasDropResolution; rect: Rect } | null>(null);
 
+  // Corner resize — same single-source-of-truth-ref pattern as the move
+  // drag above; declared alongside it so `handleCanvasPointerDown`'s
+  // "one operation at a time" gate (below) can reference `resizeRef`
+  // and vice versa.
+  const resizeRef = useRef<CanvasResizeState | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  // The live `{width, height}` node-px badge shown while resizing; also
+  // doubles as the "a resize is in progress" flag (non-null exactly
+  // while one is), so there's no separate boolean to keep in sync.
+  const [resizeDims, setResizeDims] = useState<{ width: number; height: number } | null>(null);
+
   /** Maps a viewport-space rect (`getBoundingClientRect()`) into the scroll
    * container's local coordinate space — the exact transform the selection
    * ring above uses, so the drag overlay gets the same zoom/scroll handling
@@ -395,8 +469,10 @@ export const Canvas = component(() => {
       // must NOT overwrite `dragRef`/`dragCleanupRef` — that would orphan
       // the first drag's four document listeners forever (nothing else
       // retains that closure, and unmount only ever cleans up the CURRENT
-      // one). Simplest correct rule: ignore it outright.
-      if (dragRef.current) return;
+      // one). Simplest correct rule: ignore it outright. Also bail while a
+      // corner resize is in flight — the two operations are mutually
+      // exclusive (see `handleResizePointerDown`'s matching check).
+      if (dragRef.current || resizeRef.current) return;
       const nodeEl = (e.target as HTMLElement).closest<HTMLElement>("[data-rov-node]");
       if (!nodeEl) return;
       const id = nodeEl.getAttribute("data-rov-node");
@@ -452,6 +528,127 @@ export const Canvas = component(() => {
   // away), don't leak the document-level listeners.
   useEffect(() => () => dragCleanupRef.current?.(), []);
 
+  // =============================================================
+  // Corner resize handles. Structurally mirrors the move-drag above:
+  // `resizeRef` is the single source of truth (read at commit time, never
+  // a stale closure), `pointerId` is captured at start and filtered on
+  // every move/up/cancel, Escape restores the pre-resize `size`, and every
+  // document listener is cleaned up on every exit path including unmount.
+  // Unlike the move-drag, there is no "below-threshold = plain click"
+  // phase — a handle's whole purpose is dragging, so the resize is armed
+  // immediately on pointerdown, and the box tracks the pointer from the
+  // very first move.
+  // =============================================================
+
+  /** Tears down the resize: removes the document-level listeners, and — on
+   * Escape/cancel (`commit: false`) — restores the node's pre-resize
+   * `size` (every live pointermove already applied a size, so there is
+   * always something concrete to undo). A committed resize needs no extra
+   * write here: the last pointermove already applied the final size. */
+  const endCanvasResize = useCallback(
+    (commit: boolean) => {
+      const resize = resizeRef.current;
+      resizeCleanupRef.current?.();
+      resizeCleanupRef.current = null;
+      resizeRef.current = null;
+      if (resize && !commit) {
+        vm.updateNode<StackNode>(resize.id, { size: resize.previousSize });
+      }
+      setResizeDims(null);
+      // Belt-and-suspenders: force the selection ring to re-measure once
+      // the gesture is fully over, in case the DOM lagged a frame behind
+      // the last live update (see `handleResizePointerMove`'s comment on
+      // why it's normally unnecessary).
+      setRingTick((t) => t + 1);
+    },
+    [vm],
+  );
+
+  function handleResizePointerMove(ev: PointerEvent) {
+    const resize = resizeRef.current;
+    if (!resize || ev.pointerId !== resize.pointerId) return; // a different, stray pointer — ignore
+    // The overlay/ring lives in canvas-chrome coordinates; convert the raw
+    // client-space pointer into that same space (a zero-size "rect" at the
+    // pointer position) before handing it to the pure resize math.
+    const pointer = toLocalRect({ left: ev.clientX, top: ev.clientY, width: 0, height: 0 });
+    const { width, height } = computeResizedSize(
+      resize.corner,
+      { x: pointer.left, y: pointer.top },
+      resize.startRect,
+      resize.zoom,
+    );
+    setResizeDims({ width, height });
+    // Applied LIVE (not just on release) — this is what makes the box
+    // itself track the drag, not merely the overlay. `vm.updateNode`
+    // changes `vm.config`'s identity, which bumps `rendererKey` above,
+    // which is already a dependency of the selection-ring recompute effect
+    // — so that same machinery re-measures and re-anchors the ring/handles
+    // on every one of these live updates with no separate resize-specific
+    // recompute path needed.
+    vm.updateNode<StackNode>(resize.id, { size: { width, height } });
+  }
+
+  const handleResizePointerDown = useCallback(
+    (corner: ResizeCorner) => (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return; // primary press only
+      // Mutual exclusion with the move-drag, and with a second resize
+      // starting before the first ends (multi-touch) — same "ignore it
+      // outright" rule `handleCanvasPointerDown` applies to itself.
+      if (dragRef.current || resizeRef.current) return;
+      const id = vm.selectedNodeId;
+      if (!id || !ring) return; // defensive — a handle only renders when both exist
+      const node = findNode(vm.config.root, id);
+      if (!node || !isResizableNode(node)) return; // defensive — handles only render for these anyway
+      // Handles are overlay chrome, not `[data-rov-node]`, so the
+      // viewport's move-drag pointerdown handler already ignores this
+      // event on its own (its `.closest("[data-rov-node]")` lookup finds
+      // nothing) — this stop is belt-and-suspenders, and also keeps the
+      // resize from ever reaching `handleClick`'s trailing click.
+      e.stopPropagation();
+
+      resizeRef.current = {
+        id,
+        corner,
+        pointerId: e.pointerId,
+        startRect: ring,
+        zoom: vm.canvasZoom,
+        previousSize: node.size,
+      };
+      // Seed the badge with the box's CURRENT node-px size (no pointer
+      // movement yet to derive one from).
+      setResizeDims({
+        width: Math.round(ring.width / vm.canvasZoom),
+        height: Math.round(ring.height / vm.canvasZoom),
+      });
+
+      const onMove = (ev: PointerEvent) => handleResizePointerMove(ev);
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId === resizeRef.current?.pointerId) endCanvasResize(true);
+      };
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId === resizeRef.current?.pointerId) endCanvasResize(false);
+      };
+      const onKeyDown = (ev: KeyboardEvent) => {
+        if (ev.key === "Escape") endCanvasResize(false);
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onCancel);
+      document.addEventListener("keydown", onKeyDown);
+      resizeCleanupRef.current = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        document.removeEventListener("pointercancel", onCancel);
+        document.removeEventListener("keydown", onKeyDown);
+      };
+    },
+    [vm, ring, endCanvasResize],
+  );
+
+  // Belt-and-suspenders: if the Canvas unmounts mid-resize, don't leak the
+  // document-level listeners (mirrors the drag cleanup above).
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (suppressClickRef.current) {
@@ -465,6 +662,15 @@ export const Canvas = component(() => {
     },
     [vm],
   );
+
+  // Gates the corner resize handles: only the selected node types whose
+  // schema carries a `size` box get them (see `isResizableNode`) — every
+  // other selection gets the selection outline alone.
+  const selectedNodeResizable = useMemo(() => {
+    if (!vm.selectedNodeId) return false;
+    const node = findNode(vm.config.root, vm.selectedNodeId);
+    return node !== null && isResizableNode(node);
+  }, [vm.selectedNodeId, vm.config]);
 
   const zoom = vm.canvasZoom;
   const spec = deviceById(vm.canvasDevice);
@@ -699,16 +905,59 @@ export const Canvas = component(() => {
           </div>
         )}
 
-        {/* Selection ring is a single-frame affordance: all-sizes repeats every
-            node id across N frames, and the lookup takes the FIRST match, so the
-            ring would land on a different frame than the one clicked. Selection
-            itself still works (the properties panel edits the right node). */}
+        {/* Selection chrome is a single-frame affordance: all-sizes repeats
+            every node id across N frames, and the lookup takes the FIRST
+            match, so it would land on a different frame than the one
+            clicked. Selection itself still works (the properties panel
+            edits the right node).
+
+            The outline is a crisp 1px solid border drawn EXACTLY on the
+            node's bounding box (`box-border` keeps the border INSIDE that
+            box rather than adding to it, so it stays pixel-exact at every
+            zoom level) — no ring glow, no offset gap, square corners (the
+            node's own corner radius already shows inside it). The div
+            itself is `pointer-events-none` so it never intercepts
+            clicks/drags over the node body; only the handle squares below
+            opt back in with `pointer-events-auto`, and — being absolutely
+            positioned — this same box IS the containing block they
+            position against, so they always land exactly on ITS corners. */}
         {ring && !vm.showAllSizes && (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute rounded-sm ring-2 ring-rv-accent-500 ring-offset-1 ring-offset-transparent"
+            className="pointer-events-none absolute box-border border border-rv-accent-500"
             style={{ left: ring.left, top: ring.top, width: ring.width, height: ring.height }}
-          />
+          >
+            {selectedNodeResizable &&
+              RESIZE_HANDLES.map(({ corner, cursor, insetX, insetY }) => (
+                <div
+                  key={corner}
+                  data-testid={`canvas-resize-handle-${corner}`}
+                  onPointerDown={handleResizePointerDown(corner)}
+                  className={cn(
+                    "absolute size-2 border border-rv-accent-500 bg-white pointer-events-auto",
+                    cursor,
+                  )}
+                  style={{
+                    [insetX]: -RESIZE_HANDLE_HALF_PX,
+                    [insetY]: -RESIZE_HANDLE_HALF_PX,
+                    boxShadow: RESIZE_HANDLE_SHADOW,
+                  }}
+                />
+              ))}
+            {/* Live "W × H" dimension badge — node px, shown only while a
+                resize is in progress (mirrors every design tool's resize
+                readout). */}
+            {resizeDims && (
+              <div
+                aria-hidden="true"
+                data-testid="canvas-resize-badge"
+                className="pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-rv-divider-strong bg-rv-c1 px-1.5 py-0.5 font-rv-mono text-[10px] text-rv-mute-600"
+                style={{ top: ring.height + RESIZE_BADGE_GAP_PX }}
+              >
+                {resizeDims.width} × {resizeDims.height}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Canvas drag overlay (Part 2) — a dashed outline over the drag
