@@ -80,6 +80,11 @@ import {
 } from "./workers/refund-shield-responder";
 import { bootIntegrations } from "./integrations-boot";
 import { checkConnectWebhookEvents } from "./services/stripe/connect-endpoint-check";
+import { applySharpHardening } from "./services/assets/sharp-hardening";
+
+// Lock the libvips loader allowlist down before any image bytes reach
+// sharp — see services/assets/sharp-hardening.ts for the rationale.
+applySharpHardening();
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
