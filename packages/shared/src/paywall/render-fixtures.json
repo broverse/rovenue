@@ -1784,6 +1784,27 @@
           ]
         }
       }
+    },
+    {
+      "name": "malformed border missing color",
+      "reason": "NodeBorder requires both width and color — a width without a color renders nothing meaningful, so strict schema rejects, and platform decoders must ALSO fail the whole config (not silently drop the border)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "cornerRadius": 10,
+          "border": {
+            "width": 2
+          },
+          "children": []
+        }
+      }
     }
   ],
   "variables": [
