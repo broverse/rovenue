@@ -1766,8 +1766,8 @@ export async function reserveStorage(
   if (limit === null) return UNLIMITED_RESERVATION;
 
   const result = await db.execute(sql`
-    INSERT INTO "paywall_asset_reservations" ("projectId", "bytes", "createdAt")
-    SELECT ${projectId}, ${bytes}, now()
+    INSERT INTO "paywall_asset_reservations" ("id", "projectId", "bytes", "createdAt")
+    SELECT ${createId()}, ${projectId}, ${bytes}, now()
     WHERE (
       COALESCE((
         SELECT SUM("paywall_assets"."byteSize") FROM "paywall_assets"
@@ -1817,8 +1817,11 @@ Append to `packages/db/drizzle/migrations/0099_paywall_assets.sql`:
 -- Short-lived rows holding bytes an in-flight upload has claimed but
 -- not yet committed. Without them two concurrent uploads both measure
 -- a pre-upload total and both fit.
+-- `id` has no DB default: the caller passes a cuid2, matching every
+-- other id in this schema. A `gen_random_uuid()` default would make
+-- this the one table whose ids are shaped differently.
 CREATE TABLE "paywall_asset_reservations" (
-  "id"        text PRIMARY KEY NOT NULL DEFAULT gen_random_uuid()::text,
+  "id"        text PRIMARY KEY NOT NULL,
   "projectId" text NOT NULL REFERENCES "projects"("id") ON DELETE CASCADE,
   "bytes"     integer NOT NULL,
   "createdAt" timestamp with time zone DEFAULT now() NOT NULL
