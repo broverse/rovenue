@@ -237,6 +237,15 @@ const envSchema = z
     ROVI_DEFAULT_MODEL: z.string().optional(),
     ROVI_DEFAULT_API_KEY: z.string().optional(),
     ROVI_DEFAULT_BASE_URL: z.string().url().optional(),
+    // ---- Paywall asset storage (S3-compatible: MinIO self-host, R2/S3 cloud) ----
+    // All optional so a dev environment without MinIO still boots; see
+    // lib/asset-store.ts for the single seam that consumes these.
+    ASSET_STORAGE_ENDPOINT: z.string().url().optional(),
+    ASSET_STORAGE_REGION: z.string().optional(),
+    ASSET_STORAGE_BUCKET: z.string().optional(),
+    ASSET_STORAGE_ACCESS_KEY_ID: z.string().optional(),
+    ASSET_STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
+    ASSET_PUBLIC_BASE_URL: z.string().url().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
