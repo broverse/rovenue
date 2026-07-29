@@ -212,14 +212,60 @@ describe("BorderField — collapses to undefined, never a partial object", () =>
     expect(onChange).toHaveBeenLastCalledWith(undefined);
   });
 
-  it("never calls onChange with a partial object across any of the above", () => {
+  it("never calls onChange with a partial object across a full interaction sequence", () => {
+    // Unlike the scenario tests above (each one render, one edit, one
+    // assertion), this drives ONE mounted field through a SEQUENCE that
+    // touches both width and color repeatedly — including both collapse
+    // triggers — using `rerender` to feed each write back in as the next
+    // render's `value` prop, exactly as the real inspector does when a VM
+    // update flows back down. Every entry `onChange` was ever called with,
+    // across the whole sequence, must be `undefined` or a COMPLETE
+    // `{ width: number > 0, color }` — this is the one test that would catch
+    // a NEW write path someone adds later that skips the collapse/default
+    // logic and slips a partial object through; `calls.length` and the
+    // collapse count are asserted too, so the loop provably ran and
+    // provably saw both collapses, not zero interactions.
     const onChange = vi.fn();
-    renderBorderField({ onChange });
-    for (const call of onChange.mock.calls) {
-      const arg = call[0];
+    let border: NodeBorder | undefined;
+    const capture = (next: NodeBorder | undefined) => {
+      border = next;
+      onChange(next);
+    };
+    const { container, rerender } = renderBorderField({ onChange: capture });
+    const rerenderWith = (value: NodeBorder | undefined) =>
+      rerender(<BorderField label={BORDER_LABEL} value={value} onChange={capture} />);
+    const widthInput = () => container.querySelector('input[type="number"]') as HTMLInputElement;
+    const lightInput = () => screen.getAllByPlaceholderText("#0F172A")[0] as HTMLInputElement;
+
+    // 1. type a width with no color yet → defaults the color.
+    fireEvent.change(widthInput(), { target: { value: "2" } });
+    rerenderWith(border);
+    // 2. pick a color → keeps the width just set.
+    fireEvent.change(lightInput(), { target: { value: "#123456" } });
+    rerenderWith(border);
+    // 3. change the width again → keeps the color just picked.
+    fireEvent.change(widthInput(), { target: { value: "6" } });
+    rerenderWith(border);
+    // 4. clear the color → collapses to undefined.
+    fireEvent.change(lightInput(), { target: { value: "" } });
+    rerenderWith(border);
+    // 5. re-set a width from the now-collapsed state → defaults the color again.
+    fireEvent.change(widthInput(), { target: { value: "3" } });
+    rerenderWith(border);
+    // 6. drive the width to zero → collapses to undefined again.
+    fireEvent.change(widthInput(), { target: { value: "0" } });
+
+    expect(onChange.mock.calls.length).toBe(6);
+    for (const [arg] of onChange.mock.calls) {
       if (arg === undefined) continue;
-      expect(arg).toHaveProperty("width");
-      expect(arg).toHaveProperty("color");
+      const b = arg as NodeBorder;
+      expect(Object.keys(b).sort()).toEqual(["color", "width"]);
+      expect(typeof b.width).toBe("number");
+      expect(b.width).toBeGreaterThan(0);
+      expect(b.color).toEqual(expect.objectContaining({ light: expect.any(String) }));
     }
+    // The sequence actually reached both collapse points (steps 4 and 6),
+    // proving the loop above didn't vacuously pass over an all-defined list.
+    expect(onChange.mock.calls.filter(([arg]) => arg === undefined)).toHaveLength(2);
   });
 });
