@@ -19,15 +19,21 @@ const POPOVER_GAP_PX = 4;
 const POPOVER_VIEWPORT_MARGIN_PX = 8;
 
 /**
- * Fixed-position coordinates for the panel, derived from the anchor
- * button's rect (captured once, at open time, by the caller) and clamped
- * so the panel never overflows the viewport:
+ * Fixed-position coordinates (+ an effective max-height) for the panel,
+ * derived from the anchor button's rect (captured once, at open time, by
+ * the caller) and clamped so the panel never overflows the viewport:
  *  - horizontally: clamps `left` so the panel's right edge never crosses
  *    the viewport's right edge.
  *  - vertically: opens below the anchor by default; flips to open
  *    upward when there isn't enough room below but there is above — a
  *    row's own "+" near the bottom of a long, scrolled layer list is the
  *    case this exists for.
+ *  - height: `POPOVER_MAX_HEIGHT_VH` is a PREFERENCE, not a guarantee — on
+ *    a short viewport (or an anchor near the top/bottom edge) that much
+ *    space may not actually be available in whichever direction was
+ *    chosen. Clamping `maxHeight` to the real available space keeps the
+ *    panel fully on-screen and internally scrollable rather than
+ *    rendering past the viewport edge with no way to reach the rest.
  */
 function computePopoverStyle(anchorRect: DOMRect): CSSProperties {
   const viewportWidth = window.innerWidth;
@@ -36,15 +42,20 @@ function computePopoverStyle(anchorRect: DOMRect): CSSProperties {
   const maxLeft = viewportWidth - POPOVER_VIEWPORT_MARGIN_PX - POPOVER_WIDTH_PX;
   const left = Math.max(POPOVER_VIEWPORT_MARGIN_PX, Math.min(anchorRect.left, maxLeft));
 
-  const spaceBelow = viewportHeight - anchorRect.bottom;
-  const spaceAbove = anchorRect.top;
+  // Space on each side, net of the anchor gap and a viewport-edge margin —
+  // i.e. the room the panel could actually occupy in that direction.
+  const spaceBelow = viewportHeight - anchorRect.bottom - POPOVER_GAP_PX - POPOVER_VIEWPORT_MARGIN_PX;
+  const spaceAbove = anchorRect.top - POPOVER_GAP_PX - POPOVER_VIEWPORT_MARGIN_PX;
   const preferredHeight = viewportHeight * (POPOVER_MAX_HEIGHT_VH / 100);
   const openUpward = spaceBelow < preferredHeight && spaceBelow < spaceAbove;
 
+  const availableSpace = openUpward ? spaceAbove : spaceBelow;
+  const maxHeight = Math.max(0, Math.min(preferredHeight, availableSpace));
+
   if (openUpward) {
-    return { left, bottom: viewportHeight - anchorRect.top + POPOVER_GAP_PX };
+    return { left, bottom: viewportHeight - anchorRect.top + POPOVER_GAP_PX, maxHeight };
   }
-  return { left, top: anchorRect.bottom + POPOVER_GAP_PX };
+  return { left, top: anchorRect.bottom + POPOVER_GAP_PX, maxHeight };
 }
 
 /**
@@ -77,7 +88,6 @@ export function AddNodePopover({
         style={{
           ...computePopoverStyle(anchorRect),
           width: POPOVER_WIDTH_PX,
-          maxHeight: `${POPOVER_MAX_HEIGHT_VH}vh`,
         }}
         className="fixed z-50 flex flex-col rounded-lg border border-rv-divider-strong bg-rv-c1 p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.5)]"
       >

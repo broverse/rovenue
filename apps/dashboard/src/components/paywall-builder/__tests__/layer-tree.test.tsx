@@ -266,6 +266,47 @@ function deepFixtureConfig(depth: number): BuilderConfig {
   return config;
 }
 
+/**
+ * Same nested-stack chain as `deepFixtureConfig`, but the innermost stack —
+ * at row depth `containerDepth` — additionally holds one LEAF child
+ * (`leaf`, at row depth `containerDepth + 1`). Selecting that leaf must
+ * resolve, via `resolveAddTargetId`, to its CONTAINER parent for the
+ * depth-capacity check — using the leaf's own (one deeper) depth directly
+ * would wrongly disable the button one level earlier than the real cap.
+ */
+function deepFixtureConfigWithLeaf(containerDepth: number): BuilderConfig {
+  const config = emptyBuilderConfig("en");
+  let node: PaywallNode = {
+    type: "stack",
+    id: `d${containerDepth - 1}`,
+    axis: "v",
+    children: [{ type: "text", id: "leaf", key: "k_leaf", role: "body" }],
+  };
+  for (let i = containerDepth - 2; i >= 0; i--) {
+    node = { type: "stack", id: `d${i}`, axis: "v", children: [node] };
+  }
+  config.root.children.push(node);
+  return config;
+}
+
+/**
+ * root(stack) -> group1(stack) -> leaf_text(text) — a plain leaf nested
+ * inside an ordinary stack (deliberately not the carousel/stickyFooter
+ * used by `fixtureConfig()`, so this scenario reads unambiguously as "a
+ * leaf inside a stack" on its own).
+ */
+function fixtureConfigWithLeafInStack(): BuilderConfig {
+  const config = emptyBuilderConfig("en");
+  const group: PaywallNode = {
+    type: "stack",
+    id: "group1",
+    axis: "v",
+    children: [{ type: "text", id: "leaf_text", key: "k_leaf", role: "body" }],
+  };
+  config.root.children.push(group);
+  return config;
+}
+
 // =============================================================
 // BUG 2 / FEATURE — adding elements used to depend entirely on hovering a
 // container row's own "+", which is invisible until you find one. This
@@ -321,6 +362,36 @@ describe("LayerTree — 'New Element' button (BUG 2 / feature)", () => {
     expect(vm.config.root.children.map((c) => c.id)).toEqual(["car1", "sf1"]);
   });
 
+  // Every OTHER test in this block selects either nothing (→ root fallback)
+  // or a CONTAINER (where the resolved target and the selected id are the
+  // SAME string) — so none of them would notice a regression that swapped
+  // the resolved `addTargetId` back to `vm.selectedNodeId` directly. This
+  // is the one case where they diverge: a selected LEAF.
+  it("resolves a selected LEAF to its parent container's id, not the leaf's own id", async () => {
+    const { vm } = await renderLayerTree(fixtureConfigWithLeafInStack());
+
+    await act(async () => {
+      vm.selectNode("leaf_text");
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: NEW_ELEMENT_LABEL }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: LABEL_PURCHASE_BUTTON }));
+    });
+
+    // A regression that swapped the resolved target back to
+    // `vm.selectedNodeId` directly would call `addNode("purchaseButton",
+    // "leaf_text")` — "leaf_text" is a TEXT leaf, not a container, so
+    // `insertNode` silently no-ops for a non-container parent (see
+    // tree-ops.ts) and NOTHING would appear anywhere in the tree. The
+    // correct target is "group1", the leaf's parent stack.
+    expect(screen.queryByText(LABEL_PURCHASE_BUTTON)).not.toBeNull();
+    const group = vm.config.root.children.find((n) => n.id === "group1");
+    if (group?.type !== "stack") throw new Error("expected the group1 stack fixture");
+    expect(group.children.map((c) => c.type)).toEqual(["text", "purchaseButton"]);
+  });
+
   it("disables the button and shows the node-capacity title when the tree is at capacity", async () => {
     await renderLayerTree(flatWideFixtureConfig(MAX_BUILDER_NODES));
     const button = screen.getByRole("button", { name: NEW_ELEMENT_LABEL }) as HTMLButtonElement;
@@ -339,10 +410,34 @@ describe("LayerTree — 'New Element' button (BUG 2 / feature)", () => {
     expect(button.title).toBe(TITLE_AT_DEPTH_CAPACITY);
   });
 
-  it("stays enabled comfortably below the depth cap", async () => {
-    await renderLayerTree(deepFixtureConfig(MAX_BUILDER_DEPTH - 10));
+  it("stays enabled comfortably below the depth cap when a deep container is selected", async () => {
+    const depth = MAX_BUILDER_DEPTH - 10;
+    const { vm } = await renderLayerTree(deepFixtureConfig(depth));
+
+    await act(async () => {
+      vm.selectNode(`d${depth - 1}`);
+    });
+
     const button = screen.getByRole("button", { name: NEW_ELEMENT_LABEL }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
+  });
+
+  it("derives the depth-capacity check from a selected leaf's PARENT container, not the leaf's own (one deeper) depth", async () => {
+    // Container at depth 30: 30 + ADD_CHILD_DEPTH_OFFSET(2) = 32, not over
+    // MAX_BUILDER_DEPTH(32) — comfortably insertable. The leaf sitting
+    // inside it is one level deeper (31): 31 + 2 = 33, which WOULD trip the
+    // cap if the check ever used the leaf's own depth instead of resolving
+    // to its container first.
+    const containerDepth = MAX_BUILDER_DEPTH - 2;
+    const { vm } = await renderLayerTree(deepFixtureConfigWithLeaf(containerDepth));
+
+    await act(async () => {
+      vm.selectNode("leaf");
+    });
+
+    const button = screen.getByRole("button", { name: NEW_ELEMENT_LABEL }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(button.title).toBe(NEW_ELEMENT_LABEL);
   });
 });
 
