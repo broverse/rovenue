@@ -38,6 +38,17 @@ export const ERROR_CODE = {
   FONT_FILE_TOO_LARGE: "FONT_FILE_TOO_LARGE",
   FONT_QUOTA_EXCEEDED: "FONT_QUOTA_EXCEEDED",
   FONT_FAMILY_NOT_FOUND: "FONT_FAMILY_NOT_FOUND",
+  // Paywall asset CDN (design spec §11). Six distinct machine-readable
+  // rejections a dashboard client needs to tell apart — notably
+  // ASSET_FILE_TOO_LARGE, which `bodyLimit`'s onError returns for the
+  // transport-level rejection and the in-handler check returns for the
+  // ordinary case, so a caller sees one code either way.
+  ASSET_FORMAT_UNSUPPORTED: "ASSET_FORMAT_UNSUPPORTED",
+  ASSET_FILE_TOO_LARGE: "ASSET_FILE_TOO_LARGE",
+  ASSET_QUOTA_EXCEEDED: "ASSET_QUOTA_EXCEEDED",
+  ASSET_STORAGE_UNAVAILABLE: "ASSET_STORAGE_UNAVAILABLE",
+  ASSET_INVALID_NAME: "ASSET_INVALID_NAME",
+  ASSET_PROCESSING_FAILED: "ASSET_PROCESSING_FAILED",
 } as const;
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];
 
@@ -202,3 +213,9 @@ export * from "./webhook-events";
 // =============================================================
 
 export * from "./fonts";
+
+// =============================================================
+// Paywall assets — kind detection, name validation, and caps
+// =============================================================
+
+export * from "./assets";
