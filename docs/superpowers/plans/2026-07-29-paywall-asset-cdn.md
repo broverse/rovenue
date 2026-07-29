@@ -1382,12 +1382,19 @@ import sharp from "sharp";
 // 35591, which land in the GIF, TIFF and VIPS loaders. GIF is on our
 // accept list.
 
-/** libvips operation classes for the loaders we accept. */
+/** libvips operation classes for the loaders we accept.
+ *
+ *  GIF is `VipsForeignLoadNsgif`, NOT `VipsForeignLoadGif` — libvips
+ *  moved to libnsgif and the class name followed. This matters more
+ *  than a typo normally would: unblocking a class name that does not
+ *  exist is a silent no-op, so the wrong name leaves GIF BLOCKED while
+ *  the code reads as if it were allowed. Verify any change here by
+ *  round-tripping a real file of each type, not by reading the list. */
 const ALLOWED_LOADERS = [
   "VipsForeignLoadJpeg",
   "VipsForeignLoadPng",
   "VipsForeignLoadWebp",
-  "VipsForeignLoadGif",
+  "VipsForeignLoadNsgif",
 ] as const;
 
 let applied = false;
