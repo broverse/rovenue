@@ -239,15 +239,50 @@ describe("LayerTree — adding through the UI path (finding C2)", () => {
   });
 });
 
-/** A flat tree with `childCount` spacer leaves under the root — enough of them trips `vm.atNodeCapacity`. */
-function flatWideFixtureConfig(childCount: number): BuilderConfig {
+// A flat tree of `MAX_BUILDER_NODES` sibling rows used to be built here to
+// trip `vm.atNodeCapacity` — real DATA (no interactive `vm.addNode` loop),
+// but the LayerTree still has to actually RENDER every one of those ~500
+// rows into real DOM (icons, buttons, the lot). That's fine on an idle
+// machine (a couple of seconds) but slow enough under CI load to blow the
+// suite's timeout. `measureNodeTree` (which `vm.atNodeCapacity` reads)
+// counts nodes reached through `fallback` chains exactly like ordinary
+// `children` — but `flattenTree` (layer-tree-flatten.ts) never walks
+// `fallback` AT ALL, so a fallback-heavy tree trips the same capacity
+// check while rendering only a handful of visible rows.
+//
+// `measureNodeTree`'s walk also breaks the instant ANY branch's depth
+// exceeds `MAX_BUILDER_DEPTH` — a single long fallback CHAIN (depth increases
+// one per link) would hit that wall around ~30 nodes, long before 500. So
+// this fans out across several shallow VISIBLE anchors (each just one
+// level under root), each carrying its own fallback chain capped at
+// `MAX_BUILDER_DEPTH`, rather than one deep chain.
+const FALLBACK_CHAIN_LENGTH = MAX_BUILDER_DEPTH - 2; // hidden nodes per anchor (root=depth1, anchor=depth2, chain=depth3..MAX_BUILDER_DEPTH)
+const CAPACITY_ANCHOR_COUNT = Math.ceil(MAX_BUILDER_NODES / (FALLBACK_CHAIN_LENGTH + 1)) + 1; // +1 margin past the exact boundary
+
+/** A `length`-long linked chain of spacers nested in one another's `fallback` slot. */
+function fallbackChain(idPrefix: string, length: number): PaywallNode | undefined {
+  let node: PaywallNode | undefined;
+  for (let i = length - 1; i >= 0; i--) {
+    node = { type: "spacer", id: `${idPrefix}_fb${i}`, size: 8, fallback: node };
+  }
+  return node;
+}
+
+/**
+ * Trips `vm.atNodeCapacity` (measured node count >= `MAX_BUILDER_NODES`)
+ * while rendering only `CAPACITY_ANCHOR_COUNT` visible layer-tree rows —
+ * see the comment above for why. Built once, statically, as data; loaded
+ * via the mocked API detail exactly like every other fixture in this file.
+ */
+function atNodeCapacityFixtureConfig(): BuilderConfig {
   const config = emptyBuilderConfig("en");
-  const children: PaywallNode[] = Array.from({ length: childCount }, (_, i) => ({
+  const anchors: PaywallNode[] = Array.from({ length: CAPACITY_ANCHOR_COUNT }, (_, i) => ({
     type: "spacer",
-    id: `sp${i}`,
+    id: `anchor${i}`,
     size: 8,
+    fallback: fallbackChain(`anchor${i}`, FALLBACK_CHAIN_LENGTH),
   }));
-  config.root.children.push(...children);
+  config.root.children.push(...anchors);
   return config;
 }
 
@@ -393,7 +428,7 @@ describe("LayerTree — 'New Element' button (BUG 2 / feature)", () => {
   });
 
   it("disables the button and shows the node-capacity title when the tree is at capacity", async () => {
-    await renderLayerTree(flatWideFixtureConfig(MAX_BUILDER_NODES));
+    await renderLayerTree(atNodeCapacityFixtureConfig());
     const button = screen.getByRole("button", { name: NEW_ELEMENT_LABEL }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.title).toBe(TITLE_AT_NODE_CAPACITY);
