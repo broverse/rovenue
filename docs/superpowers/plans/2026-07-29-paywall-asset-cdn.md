@@ -19,6 +19,7 @@
 - **The filename is never consulted** for type detection. The kind comes from the URL path segment and the magic bytes must agree with it.
 - TypeScript strict everywhere; Zod for API input; all responses are `{ data: T }` or `{ error: { code, message } }`.
 - Postgres access via Drizzle repositories only. In `sql` templates, qualify columns (`"paywall_assets"."id"`).
+- **Column naming in this repo is mixed, and raw SQL must match the actual table.** Table names are snake_case throughout, but *column* names are not uniform: the paywall and font families (`paywalls`, `paywall_versions`, `font_faces`) and `billing_subscriptions` use **camelCase** DB columns (`"publishedVersionId"`, `"projectId"`, `"byteSize"`), while `billing_tier_limits` uses **snake_case** (`"events_limit"`, `"asset_storage_bytes_limit"`). New `paywall_asset*` tables use **camelCase**, matching their siblings. Before writing any raw `sql` template, verify each column name against `packages/db/src/drizzle/schema.ts` — guessing produces SQL that typechecks and fails at runtime.
 - `audit()` runs inside the caller's Drizzle transaction.
 - Conventional commits. **Stay on the current branch** — do not create branches or worktrees.
 - Tests: Vitest. `*.integration.test.ts` use testcontainers with real Postgres and real MinIO. A failure path tested by hand-constructing the error it is meant to catch, or an atomicity claim demonstrated over a mocked transaction, is not accepted as evidence.
@@ -584,48 +585,51 @@ Create `packages/db/drizzle/migrations/0099_paywall_assets.sql`:
 -- serves two different byte sequences, and it is what makes the
 -- `immutable` cache header on the served object an honest claim.
 
+-- Column names are camelCase, matching the sibling paywall_versions and
+-- font_faces tables. Only `billing_tier_limits` below is snake_case,
+-- because that existing table already is.
 CREATE TABLE "paywall_assets" (
-  "id"              text PRIMARY KEY NOT NULL,
-  "project_id"      text NOT NULL REFERENCES "projects"("id") ON DELETE CASCADE,
-  "kind"            text NOT NULL,
-  "name"            text NOT NULL,
-  "storage_key"     text NOT NULL,
-  "content_hash"    text NOT NULL,
-  "content_type"    text NOT NULL,
-  "byte_size"       integer NOT NULL,
-  "width"           integer,
-  "height"          integer,
-  "source_format"   text,
-  "source_width"    integer,
-  "source_height"   integer,
-  "policy_version"  integer NOT NULL,
-  "created_at"      timestamp with time zone DEFAULT now() NOT NULL,
-  "updated_at"      timestamp with time zone DEFAULT now() NOT NULL,
-  "deleted_at"      timestamp with time zone
+  "id"             text PRIMARY KEY NOT NULL,
+  "projectId"      text NOT NULL REFERENCES "projects"("id") ON DELETE CASCADE,
+  "kind"           text NOT NULL,
+  "name"           text NOT NULL,
+  "storageKey"     text NOT NULL,
+  "contentHash"    text NOT NULL,
+  "contentType"    text NOT NULL,
+  "byteSize"       integer NOT NULL,
+  "width"          integer,
+  "height"         integer,
+  "sourceFormat"   text,
+  "sourceWidth"    integer,
+  "sourceHeight"   integer,
+  "policyVersion"  integer NOT NULL,
+  "createdAt"      timestamp with time zone DEFAULT now() NOT NULL,
+  "updatedAt"      timestamp with time zone DEFAULT now() NOT NULL,
+  "deletedAt"      timestamp with time zone
 );
 
 -- Partial, so that deleting an asset frees its hash for re-upload.
 CREATE UNIQUE INDEX "paywall_assets_project_hash_key"
-  ON "paywall_assets" ("project_id", "content_hash")
-  WHERE "deleted_at" IS NULL;
+  ON "paywall_assets" ("projectId", "contentHash")
+  WHERE "deletedAt" IS NULL;
 
 CREATE INDEX "paywall_assets_project_idx"
-  ON "paywall_assets" ("project_id") WHERE "deleted_at" IS NULL;
+  ON "paywall_assets" ("projectId") WHERE "deletedAt" IS NULL;
 
 -- The sweeper scans by age across all projects.
-CREATE INDEX "paywall_assets_created_at_idx" ON "paywall_assets" ("created_at");
+CREATE INDEX "paywall_assets_created_at_idx" ON "paywall_assets" ("createdAt");
 
 -- Which published paywall version references which asset. Derived data,
 -- rewritten on every publish (design spec §7).
 CREATE TABLE "paywall_asset_usages" (
-  "asset_id"   text NOT NULL REFERENCES "paywall_assets"("id") ON DELETE CASCADE,
-  "paywall_id" text NOT NULL REFERENCES "paywalls"("id") ON DELETE CASCADE,
-  "version_id" text NOT NULL REFERENCES "paywall_versions"("id") ON DELETE CASCADE,
-  CONSTRAINT "paywall_asset_usages_pk" PRIMARY KEY ("asset_id", "version_id")
+  "assetId"   text NOT NULL REFERENCES "paywall_assets"("id") ON DELETE CASCADE,
+  "paywallId" text NOT NULL REFERENCES "paywalls"("id") ON DELETE CASCADE,
+  "versionId" text NOT NULL REFERENCES "paywall_versions"("id") ON DELETE CASCADE,
+  CONSTRAINT "paywall_asset_usages_pk" PRIMARY KEY ("assetId", "versionId")
 );
 
 CREATE INDEX "paywall_asset_usages_version_idx"
-  ON "paywall_asset_usages" ("version_id");
+  ON "paywall_asset_usages" ("versionId");
 
 -- Per-project storage cap. NULL means unlimited, matching how
 -- `events_limit` and `sql_limit` already behave in this table.
@@ -664,29 +668,36 @@ export const paywallAssets = pgTable(
   "paywall_assets",
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
-    projectId: text("project_id")
+    projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     kind: text("kind").notNull(),
     name: text("name").notNull(),
-    storageKey: text("storage_key").notNull(),
-    contentHash: text("content_hash").notNull(),
-    contentType: text("content_type").notNull(),
-    byteSize: integer("byte_size").notNull(),
+    storageKey: text("storageKey").notNull(),
+    contentHash: text("contentHash").notNull(),
+    contentType: text("contentType").notNull(),
+    byteSize: integer("byteSize").notNull(),
     width: integer("width"),
     height: integer("height"),
-    sourceFormat: text("source_format"),
-    sourceWidth: integer("source_width"),
-    sourceHeight: integer("source_height"),
-    policyVersion: integer("policy_version").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    sourceFormat: text("sourceFormat"),
+    sourceWidth: integer("sourceWidth"),
+    sourceHeight: integer("sourceHeight"),
+    policyVersion: integer("policyVersion").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deletedAt", { withTimezone: true }),
   },
+  // Every index the migration creates is mirrored here. schema.ts is the
+  // only place a reader — or `drizzle-kit generate` — learns what indexes
+  // exist, so one left out reads as absent and can be "re-added".
   (t) => ({
     hashKey: uniqueIndex("paywall_assets_project_hash_key")
       .on(t.projectId, t.contentHash)
       .where(sql`${t.deletedAt} is null`),
+    projectIdx: index("paywall_assets_project_idx")
+      .on(t.projectId)
+      .where(sql`${t.deletedAt} is null`),
+    createdAtIdx: index("paywall_assets_created_at_idx").on(t.createdAt),
   }),
 );
 
@@ -696,18 +707,19 @@ export type NewPaywallAsset = typeof paywallAssets.$inferInsert;
 export const paywallAssetUsages = pgTable(
   "paywall_asset_usages",
   {
-    assetId: text("asset_id")
+    assetId: text("assetId")
       .notNull()
       .references(() => paywallAssets.id, { onDelete: "cascade" }),
-    paywallId: text("paywall_id")
+    paywallId: text("paywallId")
       .notNull()
       .references(() => paywalls.id, { onDelete: "cascade" }),
-    versionId: text("version_id")
+    versionId: text("versionId")
       .notNull()
       .references(() => paywallVersions.id, { onDelete: "cascade" }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.assetId, t.versionId] }),
+    versionIdx: index("paywall_asset_usages_version_idx").on(t.versionId),
   }),
 );
 
@@ -1601,7 +1613,7 @@ async function tierLimitBytes(db: Db, projectId: string): Promise<number | null>
     JOIN "billing_tier_limits"
       ON "billing_tier_limits"."tier" = "billing_subscriptions"."tier"
      AND "billing_tier_limits"."cycle" = "billing_subscriptions"."cycle"
-    WHERE "billing_subscriptions"."project_id" = ${projectId}
+    WHERE "billing_subscriptions"."projectId" = ${projectId}
     LIMIT 1
   `);
   const row = (rows as unknown as { rows: { limit_bytes: string | null }[] }).rows[0];
@@ -1627,10 +1639,10 @@ async function freeTierLimitBytes(db: Db): Promise<number | null> {
 
 async function usedBytes(db: Db, projectId: string): Promise<number> {
   const rows = await db.execute(sql`
-    SELECT COALESCE(SUM("paywall_assets"."byte_size"), 0) AS used
+    SELECT COALESCE(SUM("paywall_assets"."byteSize"), 0) AS used
     FROM "paywall_assets"
-    WHERE "paywall_assets"."project_id" = ${projectId}
-      AND "paywall_assets"."deleted_at" IS NULL
+    WHERE "paywall_assets"."projectId" = ${projectId}
+      AND "paywall_assets"."deletedAt" IS NULL
   `);
   const row = (rows as unknown as { rows: { used: string }[] }).rows[0];
   return Number(row?.used ?? 0);
@@ -1668,18 +1680,18 @@ export async function reserveStorage(
   if (limit === null) return UNLIMITED_RESERVATION;
 
   const result = await db.execute(sql`
-    INSERT INTO "paywall_asset_reservations" ("project_id", "bytes", "created_at")
+    INSERT INTO "paywall_asset_reservations" ("projectId", "bytes", "createdAt")
     SELECT ${projectId}, ${bytes}, now()
     WHERE (
       COALESCE((
-        SELECT SUM("paywall_assets"."byte_size") FROM "paywall_assets"
-        WHERE "paywall_assets"."project_id" = ${projectId}
-          AND "paywall_assets"."deleted_at" IS NULL
+        SELECT SUM("paywall_assets"."byteSize") FROM "paywall_assets"
+        WHERE "paywall_assets"."projectId" = ${projectId}
+          AND "paywall_assets"."deletedAt" IS NULL
       ), 0)
       + COALESCE((
         SELECT SUM("paywall_asset_reservations"."bytes")
         FROM "paywall_asset_reservations"
-        WHERE "paywall_asset_reservations"."project_id" = ${projectId}
+        WHERE "paywall_asset_reservations"."projectId" = ${projectId}
       ), 0)
       + ${bytes}
     ) <= ${limit}
@@ -1720,16 +1732,16 @@ Append to `packages/db/drizzle/migrations/0099_paywall_assets.sql`:
 -- not yet committed. Without them two concurrent uploads both measure
 -- a pre-upload total and both fit.
 CREATE TABLE "paywall_asset_reservations" (
-  "id"         text PRIMARY KEY NOT NULL DEFAULT gen_random_uuid()::text,
-  "project_id" text NOT NULL REFERENCES "projects"("id") ON DELETE CASCADE,
-  "bytes"      integer NOT NULL,
-  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+  "id"        text PRIMARY KEY NOT NULL DEFAULT gen_random_uuid()::text,
+  "projectId" text NOT NULL REFERENCES "projects"("id") ON DELETE CASCADE,
+  "bytes"     integer NOT NULL,
+  "createdAt" timestamp with time zone DEFAULT now() NOT NULL
 );
 
 CREATE INDEX "paywall_asset_reservations_project_idx"
-  ON "paywall_asset_reservations" ("project_id");
+  ON "paywall_asset_reservations" ("projectId");
 CREATE INDEX "paywall_asset_reservations_created_at_idx"
-  ON "paywall_asset_reservations" ("created_at");
+  ON "paywall_asset_reservations" ("createdAt");
 ```
 
 Add the matching Drizzle table to `packages/db/src/drizzle/schema.ts` alongside `paywallAssets`.
@@ -2214,9 +2226,9 @@ export async function listPublishedUsage(
     SELECT DISTINCT "paywalls"."id" AS id, "paywalls"."name" AS name
     FROM "paywall_asset_usages"
     JOIN "paywalls"
-      ON "paywalls"."id" = "paywall_asset_usages"."paywall_id"
-     AND "paywalls"."published_version_id" = "paywall_asset_usages"."version_id"
-    WHERE "paywall_asset_usages"."asset_id" = ${assetId}
+      ON "paywalls"."id" = "paywall_asset_usages"."paywallId"
+     AND "paywalls"."publishedVersionId" = "paywall_asset_usages"."versionId"
+    WHERE "paywall_asset_usages"."assetId" = ${assetId}
   `);
   return (rows as unknown as { rows: { id: string; name: string }[] }).rows;
 }
@@ -2397,11 +2409,11 @@ export async function sweepOrphanedAssets(): Promise<{ reclaimed: number }> {
   const liveKeys = new Set(
     (
       await drizzle.db.execute(sql`
-        SELECT "paywall_assets"."storage_key" AS storage_key
+        SELECT "paywall_assets"."storageKey" AS "storageKey"
         FROM "paywall_assets"
-        WHERE "paywall_assets"."deleted_at" IS NULL
+        WHERE "paywall_assets"."deletedAt" IS NULL
       `)
-    ).rows.map((r: { storage_key: string }) => r.storage_key),
+    ).rows.map((r: { storageKey: string }) => r.storageKey),
   );
 
   const allKeys = await store.listAllKeys();
@@ -2418,7 +2430,7 @@ export async function sweepOrphanedAssets(): Promise<{ reclaimed: number }> {
 
   await drizzle.db.execute(sql`
     DELETE FROM "paywall_asset_reservations"
-    WHERE "paywall_asset_reservations"."created_at" < ${cutoff}
+    WHERE "paywall_asset_reservations"."createdAt" < ${cutoff}
   `);
 
   logger.info({ reclaimed }, "asset orphan sweep complete");
