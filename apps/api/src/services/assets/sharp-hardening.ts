@@ -32,7 +32,7 @@ import sharp from "sharp";
  *  silent no-op (GIF stays blocked) rather than an error, so this was
  *  checked by round-tripping a real GIF through the hardened pipeline,
  *  not just by reading libvips source. */
-const ALLOWED_LOADERS = [
+export const ALLOWED_LOADERS = [
   "VipsForeignLoadJpeg",
   "VipsForeignLoadPng",
   "VipsForeignLoadWebp",
