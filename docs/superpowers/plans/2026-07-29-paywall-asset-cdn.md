@@ -1206,11 +1206,21 @@ async function png(width: number, height: number): Promise<Buffer> {
     .toBuffer();
 }
 
-/** A PNG header that CLAIMS `width` x `height` without any pixel data
- *  behind it — the decompression-bomb fixture. Signature + a single
- *  IHDR chunk is enough for libvips to read the dimensions and refuse
- *  on the pixel limit, so the test never allocates what it is testing
- *  the rejection of. */
+/** A PNG that CLAIMS `width` x `height` without allocating it — the
+ *  decompression-bomb fixture.
+ *
+ *  Signature + IHDR alone is NOT enough, and getting this wrong makes
+ *  the test prove nothing: with no IDAT, libvips rejects the file as a
+ *  corrupt header BEFORE the pixel limit is ever consulted, so the test
+ *  passes even with `limitInputPixels: false`. The fixture must
+ *  therefore carry a valid (empty) IDAT and an IEND, so the file is
+ *  well-formed and the ONLY thing wrong with it is its declared size.
+ *
+ *  The bomb test must additionally assert the rejection's cause carries
+ *  libvips' pixel-limit message, distinct from the corrupt-input test's
+ *  message — otherwise the two failure modes are indistinguishable and
+ *  a real bomb (a valid, complete file that merely decompresses
+ *  enormously) would slip through a suite that looks green. */
 function pngWithDeclaredSize(width: number, height: number): Buffer {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const data = Buffer.alloc(13);
