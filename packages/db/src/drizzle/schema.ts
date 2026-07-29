@@ -3043,29 +3043,34 @@ export const paywallAssets = pgTable(
   "paywall_assets",
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
-    projectId: text("project_id")
+    projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     kind: text("kind").notNull(),
     name: text("name").notNull(),
-    storageKey: text("storage_key").notNull(),
-    contentHash: text("content_hash").notNull(),
-    contentType: text("content_type").notNull(),
-    byteSize: integer("byte_size").notNull(),
+    storageKey: text("storageKey").notNull(),
+    contentHash: text("contentHash").notNull(),
+    contentType: text("contentType").notNull(),
+    byteSize: integer("byteSize").notNull(),
     width: integer("width"),
     height: integer("height"),
-    sourceFormat: text("source_format"),
-    sourceWidth: integer("source_width"),
-    sourceHeight: integer("source_height"),
-    policyVersion: integer("policy_version").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    sourceFormat: text("sourceFormat"),
+    sourceWidth: integer("sourceWidth"),
+    sourceHeight: integer("sourceHeight"),
+    policyVersion: integer("policyVersion").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deletedAt", { withTimezone: true }),
   },
   (t) => ({
     hashKey: uniqueIndex("paywall_assets_project_hash_key")
       .on(t.projectId, t.contentHash)
       .where(sql`${t.deletedAt} is null`),
+    projectIdx: index("paywall_assets_project_idx")
+      .on(t.projectId)
+      .where(sql`${t.deletedAt} is null`),
+    // The sweeper scans by age across all projects.
+    createdAtIdx: index("paywall_assets_created_at_idx").on(t.createdAt),
   }),
 );
 
@@ -3075,18 +3080,19 @@ export type NewPaywallAsset = typeof paywallAssets.$inferInsert;
 export const paywallAssetUsages = pgTable(
   "paywall_asset_usages",
   {
-    assetId: text("asset_id")
+    assetId: text("assetId")
       .notNull()
       .references(() => paywallAssets.id, { onDelete: "cascade" }),
-    paywallId: text("paywall_id")
+    paywallId: text("paywallId")
       .notNull()
       .references(() => paywalls.id, { onDelete: "cascade" }),
-    versionId: text("version_id")
+    versionId: text("versionId")
       .notNull()
       .references(() => paywallVersions.id, { onDelete: "cascade" }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.assetId, t.versionId] }),
+    versionIdx: index("paywall_asset_usages_version_idx").on(t.versionId),
   }),
 );
 

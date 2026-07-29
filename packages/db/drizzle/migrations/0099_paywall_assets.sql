@@ -5,49 +5,54 @@
 -- storage key omit a content hash and still guarantee a key never
 -- serves two different byte sequences, and it is what makes the
 -- `immutable` cache header on the served object an honest claim.
+--
+-- Column names are camelCase, matching the paywalls/paywall_versions/
+-- font_families family this table joins against (billing_tier_limits
+-- below is the one genuinely snake_case table in this file, and its
+-- existing columns are left untouched).
 
 CREATE TABLE "paywall_assets" (
   "id"              text PRIMARY KEY NOT NULL,
-  "project_id"      text NOT NULL REFERENCES "projects"("id") ON DELETE CASCADE,
+  "projectId"       text NOT NULL REFERENCES "projects"("id") ON DELETE CASCADE,
   "kind"            text NOT NULL,
   "name"            text NOT NULL,
-  "storage_key"     text NOT NULL,
-  "content_hash"    text NOT NULL,
-  "content_type"    text NOT NULL,
-  "byte_size"       integer NOT NULL,
+  "storageKey"      text NOT NULL,
+  "contentHash"     text NOT NULL,
+  "contentType"     text NOT NULL,
+  "byteSize"        integer NOT NULL,
   "width"           integer,
   "height"          integer,
-  "source_format"   text,
-  "source_width"    integer,
-  "source_height"   integer,
-  "policy_version"  integer NOT NULL,
-  "created_at"      timestamp with time zone DEFAULT now() NOT NULL,
-  "updated_at"      timestamp with time zone DEFAULT now() NOT NULL,
-  "deleted_at"      timestamp with time zone
+  "sourceFormat"    text,
+  "sourceWidth"     integer,
+  "sourceHeight"    integer,
+  "policyVersion"   integer NOT NULL,
+  "createdAt"       timestamp with time zone DEFAULT now() NOT NULL,
+  "updatedAt"       timestamp with time zone DEFAULT now() NOT NULL,
+  "deletedAt"       timestamp with time zone
 );
 
 -- Partial, so that deleting an asset frees its hash for re-upload.
 CREATE UNIQUE INDEX "paywall_assets_project_hash_key"
-  ON "paywall_assets" ("project_id", "content_hash")
-  WHERE "deleted_at" IS NULL;
+  ON "paywall_assets" ("projectId", "contentHash")
+  WHERE "deletedAt" IS NULL;
 
 CREATE INDEX "paywall_assets_project_idx"
-  ON "paywall_assets" ("project_id") WHERE "deleted_at" IS NULL;
+  ON "paywall_assets" ("projectId") WHERE "deletedAt" IS NULL;
 
 -- The sweeper scans by age across all projects.
-CREATE INDEX "paywall_assets_created_at_idx" ON "paywall_assets" ("created_at");
+CREATE INDEX "paywall_assets_created_at_idx" ON "paywall_assets" ("createdAt");
 
 -- Which published paywall version references which asset. Derived data,
 -- rewritten on every publish (design spec §7).
 CREATE TABLE "paywall_asset_usages" (
-  "asset_id"   text NOT NULL REFERENCES "paywall_assets"("id") ON DELETE CASCADE,
-  "paywall_id" text NOT NULL REFERENCES "paywalls"("id") ON DELETE CASCADE,
-  "version_id" text NOT NULL REFERENCES "paywall_versions"("id") ON DELETE CASCADE,
-  CONSTRAINT "paywall_asset_usages_pk" PRIMARY KEY ("asset_id", "version_id")
+  "assetId"   text NOT NULL REFERENCES "paywall_assets"("id") ON DELETE CASCADE,
+  "paywallId" text NOT NULL REFERENCES "paywalls"("id") ON DELETE CASCADE,
+  "versionId" text NOT NULL REFERENCES "paywall_versions"("id") ON DELETE CASCADE,
+  CONSTRAINT "paywall_asset_usages_pk" PRIMARY KEY ("assetId", "versionId")
 );
 
 CREATE INDEX "paywall_asset_usages_version_idx"
-  ON "paywall_asset_usages" ("version_id");
+  ON "paywall_asset_usages" ("versionId");
 
 -- Per-project storage cap. NULL means unlimited, matching how
 -- `events_limit` and `sql_limit` already behave in this table.
