@@ -2,7 +2,7 @@ import { component, useService } from "impair";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Languages } from "lucide-react";
-import type { NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
+import type { NodeBorder, NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
 import { ColorSwatchInput } from "../../funnel-builder/color-swatch-input";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { Field, INPUT_CLASS, Segmented } from "./primitives";
@@ -114,6 +114,93 @@ export function ThemeColorField({
         </div>
       </div>
     </Field>
+  );
+}
+
+/**
+ * Neutral divider-ish gray assigned to a border's `color` the first time an
+ * author raises its `width` above zero before ever touching color — the
+ * schema requires both fields together (see `NodeBorder`'s doc comment), so
+ * a lone width can't be written as the partial `{ width }`. Close to the
+ * app's own divider line color, so an unstyled border reads as a subtle
+ * outline rather than a jarring default.
+ */
+export const DEFAULT_BORDER_COLOR_HEX = "#94A3B8";
+
+/**
+ * Border width assigned the first time an author picks a `color` before
+ * ever setting `width` — the mirror of `DEFAULT_BORDER_COLOR_HEX` above.
+ * 1px is the thinnest width that still renders as a visible line on every
+ * platform.
+ */
+export const DEFAULT_BORDER_WIDTH = 1;
+
+/**
+ * `NodeBorder`'s `width` and `color` are resolved together as one
+ * composite (see its doc comment in schema.ts) — this field writes the
+ * pair complete or not at all, never a partial the schema would reject.
+ *
+ * Collapses to `undefined` — mirroring how `ThemeColorField`/`ThemeUrlField`
+ * collapse an emptied pair — in two cases: the width is cleared, or it is
+ * driven to `0`. A zero-width border draws nothing (an invisible line), so
+ * treating it the same as "cleared" keeps the field's meaning aligned with
+ * what would actually appear on screen, rather than leaving a `width: 0`
+ * object silently doing nothing. Clearing the color (both light AND dark
+ * emptied, `ThemeColorField`'s own collapse rule) also collapses the whole
+ * border, for the same "no partial" reason.
+ *
+ * Setting one side before the other still has to write a COMPLETE object
+ * immediately, so the first edit picks a sensible default for the side the
+ * author hasn't touched yet: the first width picks
+ * `DEFAULT_BORDER_COLOR_HEX`, the first color picks `DEFAULT_BORDER_WIDTH`
+ * — cleanest UX because a border becomes visible on the very first field
+ * touched, instead of requiring both controls before anything renders.
+ */
+export function BorderField({
+  label,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  value: NodeBorder | undefined;
+  onChange: (next: NodeBorder | undefined) => void;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+
+  const setWidth = (width: number | undefined) => {
+    if (width === undefined || width === 0) {
+      onChange(undefined);
+      return;
+    }
+    onChange({ width, color: value?.color ?? { light: DEFAULT_BORDER_COLOR_HEX } });
+  };
+
+  const setColor = (color: ThemeColor | undefined) => {
+    if (color === undefined) {
+      onChange(undefined);
+      return;
+    }
+    onChange({ width: value?.width ?? DEFAULT_BORDER_WIDTH, color });
+  };
+
+  return (
+    <div className={className}>
+      <div className="mb-1 font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">{label}</div>
+      <NumberField
+        label={t("paywalls.builder.properties.borderWidth", "Width")}
+        value={value?.width}
+        onChange={setWidth}
+        min={0}
+      />
+      <ThemeColorField
+        className="mt-2"
+        label={t("paywalls.builder.properties.color", "Color")}
+        value={value?.color}
+        onChange={setColor}
+      />
+    </div>
   );
 }
 

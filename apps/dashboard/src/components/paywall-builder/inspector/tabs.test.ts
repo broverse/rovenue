@@ -51,8 +51,11 @@ describe("tabsForNode", () => {
   it("filters out tabs a node type has nothing on", () => {
     expect(tabsForNode("spacer").map((t) => t.id)).toEqual(["layout", "visibility"]);
     // Task 13: purchaseButton gained a Binding tab (trialLabelKey editing),
-    // so it now sits between Content and Visibility, in table order.
+    // so it sat between Content and Visibility, in table order. The node
+    // style pass then gave it background/labelColor/border/cornerRadius, so
+    // it also gained a Style tab — first in table order, ahead of Content.
     expect(tabsForNode("purchaseButton").map((t) => t.id)).toEqual([
+      "style",
       "content",
       "binding",
       "visibility",

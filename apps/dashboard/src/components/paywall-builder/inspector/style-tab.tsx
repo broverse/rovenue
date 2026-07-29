@@ -9,6 +9,7 @@ import type {
   IconNode,
   ImageNode,
   PaywallNode,
+  PurchaseButtonNode,
   SocialProofNode,
   StackNode,
   StickyFooterNode,
@@ -16,7 +17,7 @@ import type {
   TimelineNode,
 } from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
-import { AlignField, NumberField, ThemeColorField } from "./fields";
+import { AlignField, BorderField, NumberField, ThemeColorField } from "./fields";
 import { Field, Section, Segmented } from "./primitives";
 
 // =============================================================
@@ -41,6 +42,8 @@ export const StyleTab = component(({ node }: { node: PaywallNode }) => {
       return <ImageStyle node={node} />;
     case "button":
       return <ButtonStyle node={node} />;
+    case "purchaseButton":
+      return <PurchaseButtonStyle node={node} />;
     case "divider":
       return <DividerStyle node={node} />;
     case "icon":
@@ -80,6 +83,12 @@ function StackStyle({ node }: { node: StackNode }) {
         value={node.cornerRadius}
         onChange={(v) => set({ cornerRadius: v })}
       />
+      <BorderField
+        className="mt-3"
+        label={t("paywalls.builder.properties.border", "Border")}
+        value={node.border}
+        onChange={(v) => set({ border: v })}
+      />
     </Section>
   );
 }
@@ -110,6 +119,18 @@ function TextStyle({ node }: { node: TextNode }) {
         value={node.color}
         onChange={(v) => set({ color: v })}
       />
+      <ThemeColorField
+        className="mt-3"
+        label={t("paywalls.builder.properties.background", "Background")}
+        value={node.background}
+        onChange={(v) => set({ background: v })}
+      />
+      <NumberField
+        className="mt-3"
+        label={t("paywalls.builder.properties.cornerRadius", "Corner radius")}
+        value={node.cornerRadius}
+        onChange={(v) => set({ cornerRadius: v })}
+      />
     </Section>
   );
 }
@@ -125,6 +146,12 @@ function ImageStyle({ node }: { node: ImageNode }) {
         label={t("paywalls.builder.properties.cornerRadius", "Corner radius")}
         value={node.cornerRadius}
         onChange={(v) => set({ cornerRadius: v })}
+      />
+      <BorderField
+        className="mt-3"
+        label={t("paywalls.builder.properties.border", "Border")}
+        value={node.border}
+        onChange={(v) => set({ border: v })}
       />
     </Section>
   );
@@ -148,6 +175,64 @@ function ButtonStyle({ node }: { node: ButtonNode }) {
           ]}
         />
       </Field>
+      <ThemeColorField
+        className="mt-3"
+        label={t("paywalls.builder.properties.background", "Background")}
+        value={node.background}
+        onChange={(v) => set({ background: v })}
+      />
+      <ThemeColorField
+        className="mt-3"
+        label={t("paywalls.builder.properties.labelColor", "Label color")}
+        value={node.labelColor}
+        onChange={(v) => set({ labelColor: v })}
+      />
+      <BorderField
+        className="mt-3"
+        label={t("paywalls.builder.properties.border", "Border")}
+        value={node.border}
+        onChange={(v) => set({ border: v })}
+      />
+      <NumberField
+        className="mt-3"
+        label={t("paywalls.builder.properties.cornerRadius", "Corner radius")}
+        value={node.cornerRadius}
+        onChange={(v) => set({ cornerRadius: v })}
+      />
+    </Section>
+  );
+}
+
+function PurchaseButtonStyle({ node }: { node: PurchaseButtonNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<PurchaseButtonNode>) => vm.updateNode<PurchaseButtonNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.style", "Style")} defaultOpen>
+      <ThemeColorField
+        label={t("paywalls.builder.properties.background", "Background")}
+        value={node.background}
+        onChange={(v) => set({ background: v })}
+      />
+      <ThemeColorField
+        className="mt-3"
+        label={t("paywalls.builder.properties.labelColor", "Label color")}
+        value={node.labelColor}
+        onChange={(v) => set({ labelColor: v })}
+      />
+      <BorderField
+        className="mt-3"
+        label={t("paywalls.builder.properties.border", "Border")}
+        value={node.border}
+        onChange={(v) => set({ border: v })}
+      />
+      <NumberField
+        className="mt-3"
+        label={t("paywalls.builder.properties.cornerRadius", "Corner radius")}
+        value={node.cornerRadius}
+        onChange={(v) => set({ cornerRadius: v })}
+      />
     </Section>
   );
 }

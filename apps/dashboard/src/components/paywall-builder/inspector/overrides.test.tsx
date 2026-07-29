@@ -12,14 +12,19 @@ import {
   SOCIAL_PROOF_MAX_RATING,
   emptyBuilderConfig,
   type BuilderConfig,
+  type ButtonNode,
   type CarouselNode,
   type CountdownNode,
   type DividerNode,
   type FeatureListNode,
   type IconNode,
+  type ImageNode,
   type LottieNode,
+  type PurchaseButtonNode,
   type SocialProofNode,
+  type StackNode,
   type StickyFooterNode,
+  type TextNode,
   type TimelineNode,
   type VideoNode,
 } from "@rovenue/shared/paywall";
@@ -114,6 +119,65 @@ function fakeConfig(): BuilderConfig {
       },
     ],
   } as LottieNode);
+  // Node style pass — border/background/labelColor/cornerRadius overrides,
+  // reusing `root` itself for the stack case (it's already a StackNode).
+  config.root.overrides = [
+    { when: { kind: "introEligible" }, props: { border: { width: 2, color: { light: "#0f1720" } } } },
+  ];
+  config.root.children.push({
+    type: "text",
+    id: "t1",
+    key: "k_t1",
+    role: "body",
+    overrides: [
+      {
+        when: { kind: "introEligible" },
+        props: { background: { light: "#101010" }, cornerRadius: 4 },
+      },
+    ],
+  } as TextNode);
+  config.root.children.push({
+    type: "image",
+    id: "img1",
+    url: { light: "https://cdn.example.com/img.png" },
+    overrides: [
+      { when: { kind: "introEligible" }, props: { border: { width: 1, color: { light: "#202020" } } } },
+    ],
+  } as ImageNode);
+  config.root.children.push({
+    type: "button",
+    id: "b1",
+    labelKey: "k_b1",
+    style: "primary",
+    action: { kind: "close" },
+    overrides: [
+      {
+        when: { kind: "introEligible" },
+        props: {
+          background: { light: "#303030" },
+          labelColor: { light: "#ffffff" },
+          border: { width: 1, color: { light: "#404040" } },
+          cornerRadius: 6,
+        },
+      },
+    ],
+  } as ButtonNode);
+  config.root.children.push({
+    type: "purchaseButton",
+    id: "pb1",
+    labelKey: "k_pb1",
+    overrides: [
+      {
+        when: { kind: "introEligible" },
+        props: {
+          background: { light: "#505050" },
+          labelColor: { light: "#eeeeee" },
+          border: { width: 2, color: { light: "#606060" } },
+          cornerRadius: 8,
+        },
+      },
+    ],
+  } as PurchaseButtonNode);
   return config;
 }
 
@@ -405,5 +469,166 @@ describe("OverridesSection — lottie override fields", () => {
     fireEvent.change(urlInput, { target: { value: "https://cdn.example.com/new-anim.json" } });
     const node = findNode(vm.config.root, "lt1") as LottieNode;
     expect(node.overrides?.[0]?.props.url).toEqual({ light: "https://cdn.example.com/new-anim.json" });
+  });
+});
+
+// =============================================================
+// Node style pass — border/background/labelColor/cornerRadius overrides.
+// Task 1 added these keys to OVERRIDABLE_PROP_KEYS for stack/text/image/
+// button/purchaseButton; same defect class as every wave above applies:
+// a declared override key with no case in `OverridePropField`'s switch
+// falls through to the compile-time exhaustiveness check instead of
+// rendering a real control.
+// =============================================================
+
+describe("OverridesSection — stack (root) border override field", () => {
+  it("renders a real border width input and color inputs, not a silent no-op", async () => {
+    const { container } = await renderHarness("root");
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    // spacing + cornerRadius + border width.
+    expect(numberInputs.length).toBe(3);
+    const borderWidthInput = numberInputs[numberInputs.length - 1] as HTMLInputElement;
+    expect(borderWidthInput.value).toBe("2");
+    // background color pair + border color pair.
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(4);
+  });
+
+  it("writes an edited border width back onto the override's props, keeping its color", async () => {
+    const { vm, container } = await renderHarness("root");
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    const borderWidthInput = numberInputs[numberInputs.length - 1] as HTMLInputElement;
+    fireEvent.change(borderWidthInput, { target: { value: "5" } });
+    const node = findNode(vm.config.root, "root") as StackNode;
+    expect(node.overrides?.[0]?.props.border).toEqual({ width: 5, color: { light: "#0f1720" } });
+  });
+});
+
+describe("OverridesSection — text background + corner radius override fields", () => {
+  it("renders real background and corner-radius controls, not a silent no-op", async () => {
+    const { container } = await renderHarness("t1");
+    // color + background = 2 pairs.
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(4);
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    expect(numberInputs).toHaveLength(1);
+    expect((numberInputs[0] as HTMLInputElement).value).toBe("4");
+  });
+
+  it("writes an edited background back onto the override's props", async () => {
+    const { vm } = await renderHarness("t1");
+    const colorInputs = screen.getAllByPlaceholderText("#0F172A");
+    const [, , backgroundLight] = colorInputs;
+    fireEvent.change(backgroundLight!, { target: { value: "#a1a1a1" } });
+    const node = findNode(vm.config.root, "t1") as TextNode;
+    expect(node.overrides?.[0]?.props.background).toEqual({ light: "#a1a1a1" });
+  });
+
+  it("writes an edited corner radius back onto the override's props", async () => {
+    const { vm, container } = await renderHarness("t1");
+    const radiusInput = container.querySelector('input[type="number"]')!;
+    fireEvent.change(radiusInput, { target: { value: "10" } });
+    const node = findNode(vm.config.root, "t1") as TextNode;
+    expect(node.overrides?.[0]?.props.cornerRadius).toBe(10);
+  });
+});
+
+describe("OverridesSection — image border override field", () => {
+  it("renders a real border width input and color inputs, not a silent no-op", async () => {
+    const { container } = await renderHarness("img1");
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    // cornerRadius + border width.
+    expect(numberInputs).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+  });
+
+  it("writes an edited border color back onto the override's props, keeping its width", async () => {
+    const { vm } = await renderHarness("img1");
+    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(light!, { target: { value: "#909090" } });
+    const node = findNode(vm.config.root, "img1") as ImageNode;
+    expect(node.overrides?.[0]?.props.border).toEqual({ width: 1, color: { light: "#909090" } });
+  });
+});
+
+describe("OverridesSection — button background/labelColor/border/cornerRadius override fields", () => {
+  it("renders real controls for all four, not a silent no-op", async () => {
+    const { container } = await renderHarness("b1");
+    // background + labelColor + border color = 3 pairs.
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(6);
+    // border width + cornerRadius.
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    expect(numberInputs).toHaveLength(2);
+  });
+
+  it("writes an edited background back onto the override's props", async () => {
+    const { vm } = await renderHarness("b1");
+    const [bgLight] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(bgLight!, { target: { value: "#1a1a1a" } });
+    const node = findNode(vm.config.root, "b1") as ButtonNode;
+    expect(node.overrides?.[0]?.props.background).toEqual({ light: "#1a1a1a" });
+  });
+
+  it("writes an edited labelColor back onto the override's props", async () => {
+    const { vm } = await renderHarness("b1");
+    const [, , labelLight] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(labelLight!, { target: { value: "#2b2b2b" } });
+    const node = findNode(vm.config.root, "b1") as ButtonNode;
+    expect(node.overrides?.[0]?.props.labelColor).toEqual({ light: "#2b2b2b" });
+  });
+
+  it("writes an edited border width back onto the override's props, keeping its color", async () => {
+    const { vm, container } = await renderHarness("b1");
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    fireEvent.change(numberInputs[0]!, { target: { value: "3" } });
+    const node = findNode(vm.config.root, "b1") as ButtonNode;
+    expect(node.overrides?.[0]?.props.border).toEqual({ width: 3, color: { light: "#404040" } });
+  });
+
+  it("writes an edited corner radius back onto the override's props", async () => {
+    const { vm, container } = await renderHarness("b1");
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    fireEvent.change(numberInputs[numberInputs.length - 1]!, { target: { value: "9" } });
+    const node = findNode(vm.config.root, "b1") as ButtonNode;
+    expect(node.overrides?.[0]?.props.cornerRadius).toBe(9);
+  });
+});
+
+describe("OverridesSection — purchaseButton background/labelColor/border/cornerRadius override fields", () => {
+  it("renders real controls for all four, not a silent no-op", async () => {
+    const { container } = await renderHarness("pb1");
+    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(6);
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    expect(numberInputs).toHaveLength(2);
+  });
+
+  it("writes an edited background back onto the override's props", async () => {
+    const { vm } = await renderHarness("pb1");
+    const [bgLight] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(bgLight!, { target: { value: "#3c3c3c" } });
+    const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
+    expect(node.overrides?.[0]?.props.background).toEqual({ light: "#3c3c3c" });
+  });
+
+  it("writes an edited labelColor back onto the override's props", async () => {
+    const { vm } = await renderHarness("pb1");
+    const [, , labelLight] = screen.getAllByPlaceholderText("#0F172A");
+    fireEvent.change(labelLight!, { target: { value: "#4d4d4d" } });
+    const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
+    expect(node.overrides?.[0]?.props.labelColor).toEqual({ light: "#4d4d4d" });
+  });
+
+  it("writes an edited border width back onto the override's props, keeping its color", async () => {
+    const { vm, container } = await renderHarness("pb1");
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    fireEvent.change(numberInputs[0]!, { target: { value: "4" } });
+    const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
+    expect(node.overrides?.[0]?.props.border).toEqual({ width: 4, color: { light: "#606060" } });
+  });
+
+  it("writes an edited corner radius back onto the override's props", async () => {
+    const { vm, container } = await renderHarness("pb1");
+    const numberInputs = container.querySelectorAll('input[type="number"]');
+    fireEvent.change(numberInputs[numberInputs.length - 1]!, { target: { value: "11" } });
+    const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
+    expect(node.overrides?.[0]?.props.cornerRadius).toBe(11);
   });
 });

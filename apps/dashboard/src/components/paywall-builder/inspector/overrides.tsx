@@ -2,6 +2,7 @@ import { useService } from "impair";
 import { useTranslation } from "react-i18next";
 import { Plus, X } from "lucide-react";
 import type {
+  NodeBorder,
   NodeOverride,
   OverrideCondition,
   PaywallNode,
@@ -10,7 +11,7 @@ import type {
 } from "@rovenue/shared/paywall";
 import { ICON_NAMES, OVERRIDABLE_PROP_KEYS, SOCIAL_PROOF_MAX_RATING } from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
-import { AlignField, NumberField, SelectField, ThemeColorField, ThemeUrlField } from "./fields";
+import { AlignField, BorderField, NumberField, SelectField, ThemeColorField, ThemeUrlField } from "./fields";
 import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
 
 /** Ratings never go negative — same floor `content-tab.tsx`'s SocialProof field clamps to. */
@@ -46,6 +47,8 @@ const OVERRIDE_PROP_LABEL: Record<string, string> = {
   indicatorColor: "Indicator color",
   url: "URL",
   posterUrl: "Poster URL",
+  labelColor: "Label color",
+  border: "Border",
 };
 
 /**
@@ -61,13 +64,25 @@ type OverridablePropCombo =
   | "stack.align"
   | "stack.background"
   | "stack.cornerRadius"
+  | "stack.border"
   | "text.key"
   | "text.color"
   | "text.align"
+  | "text.background"
+  | "text.cornerRadius"
   | "image.cornerRadius"
+  | "image.border"
   | "button.labelKey"
   | "button.style"
+  | "button.background"
+  | "button.labelColor"
+  | "button.border"
+  | "button.cornerRadius"
   | "purchaseButton.labelKey"
+  | "purchaseButton.background"
+  | "purchaseButton.labelColor"
+  | "purchaseButton.border"
+  | "purchaseButton.cornerRadius"
   | "divider.color"
   | "divider.thickness"
   | "icon.name"
@@ -200,6 +215,9 @@ function OverridePropField({
     case "stack.spacing":
     case "stack.cornerRadius":
     case "image.cornerRadius":
+    case "text.cornerRadius":
+    case "button.cornerRadius":
+    case "purchaseButton.cornerRadius":
       return (
         <NumberField
           label={label}
@@ -229,6 +247,11 @@ function OverridePropField({
       );
     case "stack.background":
     case "text.color":
+    case "text.background":
+    case "button.background":
+    case "button.labelColor":
+    case "purchaseButton.background":
+    case "purchaseButton.labelColor":
     case "divider.color":
     case "icon.color":
     case "featureList.iconColor":
@@ -241,6 +264,17 @@ function OverridePropField({
         <ThemeColorField
           label={label}
           value={value as ThemeColor | undefined}
+          onChange={(v) => onChange(v)}
+        />
+      );
+    case "stack.border":
+    case "image.border":
+    case "button.border":
+    case "purchaseButton.border":
+      return (
+        <BorderField
+          label={label}
+          value={value as NodeBorder | undefined}
           onChange={(v) => onChange(v)}
         />
       );

@@ -59,6 +59,7 @@ export const INSPECTOR_TABS = [
       "text",
       "image",
       "button",
+      "purchaseButton",
       "divider",
       "icon",
       "featureList",
