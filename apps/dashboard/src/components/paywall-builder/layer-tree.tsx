@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
@@ -6,9 +6,22 @@ import { MAX_BUILDER_DEPTH, type PaywallNode } from "@rovenue/shared/paywall";
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { flattenTree } from "./layer-tree-flatten";
-import { isContainerNode } from "./tree-ops";
+import { isContainerNode, resolveAddTargetId } from "./tree-ops";
 import { NODE_ICON, NODE_TYPE_LABEL, nodeLocKey } from "./node-meta";
 import { AddNodePopover } from "./add-node-popover";
+
+/**
+ * A row at `depth` maps to `measureNodeTree` depth `depth + 1` (that
+ * function's depth is 1-based at the root), so a child inserted under a
+ * node at `depth` would land at `depth + ADD_CHILD_DEPTH_OFFSET`. Shared by
+ * every "add a child here" affordance in this file (a row's own "+", and
+ * the panel-wide "New Element" button) so the two can never drift apart.
+ */
+const ADD_CHILD_DEPTH_OFFSET = 2;
+
+function exceedsAddDepthCap(depth: number): boolean {
+  return depth + ADD_CHILD_DEPTH_OFFSET > MAX_BUILDER_DEPTH;
+}
 
 /** Row label: type name, plus a short preview of the node's edit-locale text for text/button/purchaseButton. */
 function rowPreview(node: PaywallNode, localeTable: Record<string, string> | undefined): string | null {
@@ -28,15 +41,33 @@ export const LayerTree = component(() => {
   const { t } = useTranslation();
   const rows = flattenTree(vm.config.root);
   const localeTable = vm.config.localizations[vm.editLocale];
+  // Resolved HERE, in `LayerTree`'s own `component()`-tracked body, rather
+  // than inside `NewElementButton` itself: `component()` is the only
+  // reactive boundary in this file (impair's `useService` alone — as
+  // `LayerRow`/`NewElementButton` use it — doesn't subscribe to anything;
+  // it just resolves the service). Reading `vm.selectedNodeId` down inside
+  // a plain child component would silently never refresh the button on
+  // selection changes, since nothing would ever schedule a re-render for
+  // it in isolation. Doing it here makes selecting a node's disabled/title
+  // state correct on its own, independent of any ancestor incidentally
+  // cascading a re-render for an unrelated reason.
+  const addTargetId = resolveAddTargetId(vm.config.root, vm.selectedNodeId);
+  const addTargetDepth = rows.find((row) => row.node.id === addTargetId)?.depth ?? 0;
+  const addAtDepthCapacity = exceedsAddDepthCap(addTargetDepth);
 
   return (
-    <aside className="flex w-[240px] flex-shrink-0 flex-col overflow-y-auto border-r border-rv-divider bg-rv-c1">
+    <aside className="flex w-[240px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
       <div className="flex items-center justify-between border-b border-rv-divider px-3 py-3">
         <h3 className="m-0 font-rv-mono text-[10px] font-semibold uppercase tracking-wider text-rv-mute-500">
           {t("paywalls.builder.layers.title", "Layers")}
         </h3>
       </div>
-      <div className="flex-1 py-1">
+      <NewElementButton
+        targetId={addTargetId}
+        atDepthCapacity={addAtDepthCapacity}
+        atNodeCapacity={vm.atNodeCapacity}
+      />
+      <div className="flex-1 overflow-y-auto py-1">
         {rows.map((row) => (
           <LayerRow
             key={row.node.id}
@@ -54,6 +85,79 @@ export const LayerTree = component(() => {
     </aside>
   );
 });
+
+/**
+ * Persistent "add" affordance pinned directly under the panel header,
+ * above the (scrolling) row list — always visible without hunting for a
+ * container row to hover. Unlike a row's own "+", there's no row to
+ * anchor from, so the target container/capacity are resolved by the
+ * caller (`LayerTree`, the reactive boundary — see the comment there)
+ * and handed down as plain props.
+ */
+function NewElementButton({
+  targetId,
+  atDepthCapacity,
+  atNodeCapacity,
+}: {
+  targetId: string;
+  atDepthCapacity: boolean;
+  atNodeCapacity: boolean;
+}) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const [addOpen, setAddOpen] = useState(false);
+  const [addAnchorRect, setAddAnchorRect] = useState<DOMRect | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+
+  const addDisabled = atNodeCapacity || atDepthCapacity;
+
+  function toggleOpen() {
+    if (addOpen) {
+      setAddOpen(false);
+      return;
+    }
+    setAddAnchorRect(addButtonRef.current?.getBoundingClientRect() ?? null);
+    setAddOpen(true);
+  }
+
+  return (
+    <div className="flex-shrink-0 border-b border-rv-divider p-1.5">
+      <button
+        ref={addButtonRef}
+        type="button"
+        disabled={addDisabled}
+        title={
+          atDepthCapacity
+            ? t(
+                "paywalls.builder.layers.addAtDepthCapacity",
+                "This branch is nested too deeply to add another element.",
+              )
+            : atNodeCapacity
+              ? t(
+                  "paywalls.builder.layers.addAtCapacity",
+                  "This paywall has reached the maximum number of elements.",
+                )
+              : t("paywalls.builder.layers.newElement", "New Element")
+        }
+        onClick={toggleOpen}
+        className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-rv-divider-strong py-1.5 text-[12px] font-medium text-foreground transition hover:bg-rv-c2 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <Plus size={13} />
+        {t("paywalls.builder.layers.newElement", "New Element")}
+      </button>
+      {addOpen && addAnchorRect && (
+        <AddNodePopover
+          anchorRect={addAnchorRect}
+          onPick={(type) => {
+            setAddOpen(false);
+            vm.addNode(type, targetId);
+          }}
+          onClose={() => setAddOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
 
 function LayerRow({
   node,
@@ -77,6 +181,8 @@ function LayerRow({
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
   const [addOpen, setAddOpen] = useState(false);
+  const [addAnchorRect, setAddAnchorRect] = useState<DOMRect | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
   const Icon = NODE_ICON[node.type];
   const selected = vm.selectedNodeId === node.id;
   const label = t(`paywalls.builder.nodeTypes.${node.type}`, NODE_TYPE_LABEL[node.type]);
@@ -84,14 +190,20 @@ function LayerRow({
   // model) — move/reorder controls don't apply to it; "delete" instead
   // clears the whole template off its packageList via setCellTemplate.
   const movable = !isRoot && !isCellTemplateRoot;
-  // A row at `depth` maps to `measureNodeTree` depth `depth + 1` (that
-  // function's depth is 1-based at the root), so a child added under this
-  // row would land at `depth + 2`. Node-count and depth are independent
-  // caps — `vm.atNodeCapacity` alone would leave the add button enabled
-  // right up against the depth cap, opening the popover for a pick that
-  // `addNode` then silently refuses.
-  const atDepthCapacity = depth + 2 > MAX_BUILDER_DEPTH;
+  // Node-count and depth are independent caps — `vm.atNodeCapacity` alone
+  // would leave the add button enabled right up against the depth cap,
+  // opening the popover for a pick that `addNode` then silently refuses.
+  const atDepthCapacity = exceedsAddDepthCap(depth);
   const addDisabled = vm.atNodeCapacity || atDepthCapacity;
+
+  function toggleAddOpen() {
+    if (addOpen) {
+      setAddOpen(false);
+      return;
+    }
+    setAddAnchorRect(addButtonRef.current?.getBoundingClientRect() ?? null);
+    setAddOpen(true);
+  }
 
   return (
     <div
@@ -125,8 +237,9 @@ function LayerRow({
             stickyFooter with no way to hold a purchase button, and a
             carousel with no way to hold a page, were the C2 finding. */}
         {isContainerNode(node) && (
-          <div className="relative">
+          <>
             <button
+              ref={addButtonRef}
               type="button"
               disabled={addDisabled}
               title={
@@ -142,13 +255,14 @@ function LayerRow({
                       )
                     : t("paywalls.builder.layers.add", "Add node")
               }
-              onClick={() => setAddOpen((o) => !o)}
+              onClick={toggleAddOpen}
               className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Plus size={11} />
             </button>
-            {addOpen && (
+            {addOpen && addAnchorRect && (
               <AddNodePopover
+                anchorRect={addAnchorRect}
                 onPick={(type) => {
                   setAddOpen(false);
                   vm.addNode(type, node.id);
@@ -156,7 +270,7 @@ function LayerRow({
                 onClose={() => setAddOpen(false)}
               />
             )}
-          </div>
+          </>
         )}
         {movable && (
           <>

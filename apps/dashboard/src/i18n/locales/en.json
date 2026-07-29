@@ -1384,7 +1384,8 @@
         "moveDown": "Move down",
         "delete": "Delete",
         "cellTemplate": "Cell template",
-        "cellTemplateRemove": "Remove cell template"
+        "cellTemplateRemove": "Remove cell template",
+        "newElement": "New Element"
       },
       "rowList": {
         "moveUp": "Move up row {{index}}",

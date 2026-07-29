@@ -79,6 +79,36 @@ export function isContainerNode(
   return node.type === "stack" || node.type === "carousel" || node.type === "stickyFooter";
 }
 
+/**
+ * Resolves the insert target for the Layers panel's "New Element" button
+ * (below the row list, not anchored to any particular row):
+ *
+ * - A selected CONTAINER node is used directly. This includes a
+ *   `cellTemplate` root that happens to be a container (always true today —
+ *   `setCellTemplate`'s "default" mode always seeds a stack) even though
+ *   that id has no parent+index of its own (see the addressability-model
+ *   note atop this file) — `insertNode` finds targets by id, not by
+ *   parent+index, so it's still a perfectly valid target.
+ * - A selected LEAF resolves to its immediate container parent.
+ *   `findParent` already recurses through `cellTemplate`/`fallback`
+ *   subtrees, so a leaf nested inside a cellTemplate still resolves to
+ *   the right container.
+ * - Anything else falls back to the tree's root: nothing selected, a
+ *   stale/deleted selection, or a selected id that resolves to neither
+ *   of the above (e.g. a non-container cellTemplate root, or a lone
+ *   `fallback` leaf — both have no parent+index and so no `findParent`
+ *   result). The root is always a valid, always-present container.
+ */
+export function resolveAddTargetId(root: StackNode, selectedNodeId: string | null): string {
+  if (selectedNodeId !== null) {
+    const selected = findNode(root, selectedNodeId);
+    if (selected && isContainerNode(selected)) return selected.id;
+    const located = findParent(root, selectedNodeId);
+    if (located) return located.parent.id;
+  }
+  return root.id;
+}
+
 /** Depth-first search for `id`, walking container children AND fallback slots. */
 export function findNode(root: StackNode, id: string): PaywallNode | null {
   return search(root, id);

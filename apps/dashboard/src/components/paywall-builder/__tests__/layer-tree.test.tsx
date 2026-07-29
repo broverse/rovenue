@@ -4,6 +4,8 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { ServiceProvider, useService } from "impair";
 import {
   emptyBuilderConfig,
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_NODES,
   type BuilderConfig,
   type PaywallNode,
 } from "@rovenue/shared/paywall";
@@ -189,9 +191,11 @@ describe("LayerTree — adding through the UI path (finding C2)", () => {
     await act(async () => {
       fireEvent.click(within(row).getByTitle(ADD_NODE_TITLE));
     });
-    // The popover renders inside the same row; its entries are plain buttons.
+    // The popover portals to `document.body` (BUG 1 fix — it must escape
+    // the Layers aside's own `overflow-y-auto` clipping), so it's no
+    // longer a descendant of `row`; query the full document instead.
     await act(async () => {
-      fireEvent.click(within(row).getByRole("button", { name: pickLabel }));
+      fireEvent.click(screen.getByRole("button", { name: pickLabel }));
     });
   }
 
@@ -232,5 +236,154 @@ describe("LayerTree — adding through the UI path (finding C2)", () => {
     const carousel = vm.config.root.children.find((n) => n.id === "car1");
     if (carousel?.type !== "carousel") throw new Error("expected the carousel fixture");
     expect(carousel.children).toEqual([]);
+  });
+});
+
+/** A flat tree with `childCount` spacer leaves under the root — enough of them trips `vm.atNodeCapacity`. */
+function flatWideFixtureConfig(childCount: number): BuilderConfig {
+  const config = emptyBuilderConfig("en");
+  const children: PaywallNode[] = Array.from({ length: childCount }, (_, i) => ({
+    type: "spacer",
+    id: `sp${i}`,
+    size: 8,
+  }));
+  config.root.children.push(...children);
+  return config;
+}
+
+/**
+ * A single chain of `depth` nested stacks under the root (root itself is
+ * depth 0), so the innermost stack — id `d${depth - 1}` — sits at exactly
+ * `depth` in the layer tree's own depth numbering.
+ */
+function deepFixtureConfig(depth: number): BuilderConfig {
+  const config = emptyBuilderConfig("en");
+  let node: PaywallNode = { type: "stack", id: `d${depth - 1}`, axis: "v", children: [] };
+  for (let i = depth - 2; i >= 0; i--) {
+    node = { type: "stack", id: `d${i}`, axis: "v", children: [node] };
+  }
+  config.root.children.push(node);
+  return config;
+}
+
+// =============================================================
+// BUG 2 / FEATURE — adding elements used to depend entirely on hovering a
+// container row's own "+", which is invisible until you find one. This
+// button is pinned under the panel header (always visible, no hover
+// hunting) and resolves its own insert target from the current selection
+// via `resolveAddTargetId` (unit-covered separately in tree-ops.test.ts) —
+// these tests drive it through the DOM the same way the C2 file above
+// drives the per-row "+", per this file's own lesson: asserting on the
+// pure helper alone would have missed the button never being wired to it.
+// =============================================================
+describe("LayerTree — 'New Element' button (BUG 2 / feature)", () => {
+  const NEW_ELEMENT_LABEL = "New Element";
+  const TITLE_AT_NODE_CAPACITY = "This paywall has reached the maximum number of elements.";
+  const TITLE_AT_DEPTH_CAPACITY = "This branch is nested too deeply to add another element.";
+
+  it("renders a persistent button, visible without hovering any row", async () => {
+    await renderLayerTree();
+    expect(screen.getByRole("button", { name: NEW_ELEMENT_LABEL })).not.toBeNull();
+  });
+
+  it("falls back to the root when nothing is selected", async () => {
+    const { vm } = await renderLayerTree();
+    expect(screen.queryByText(LABEL_TEXT)).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: NEW_ELEMENT_LABEL }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: LABEL_TEXT }));
+    });
+
+    expect(screen.queryByText(LABEL_TEXT)).not.toBeNull();
+    expect(vm.config.root.children.map((c) => c.type)).toEqual(["carousel", "stickyFooter", "text"]);
+  });
+
+  it("inserts into the selected container, not the root", async () => {
+    const { vm } = await renderLayerTree();
+
+    await act(async () => {
+      vm.selectNode("sf1");
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: NEW_ELEMENT_LABEL }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: LABEL_PURCHASE_BUTTON }));
+    });
+
+    const footer = vm.config.root.children.find((n) => n.id === "sf1");
+    if (footer?.type !== "stickyFooter") throw new Error("expected the stickyFooter fixture");
+    expect(footer.children.map((c) => c.type)).toEqual(["divider", "purchaseButton"]);
+    // Not dropped at the root alongside it.
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["car1", "sf1"]);
+  });
+
+  it("disables the button and shows the node-capacity title when the tree is at capacity", async () => {
+    await renderLayerTree(flatWideFixtureConfig(MAX_BUILDER_NODES));
+    const button = screen.getByRole("button", { name: NEW_ELEMENT_LABEL }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe(TITLE_AT_NODE_CAPACITY);
+  });
+
+  it("disables the button and shows the depth-capacity title when the resolved target is too deep", async () => {
+    const targetDepth = MAX_BUILDER_DEPTH - 1;
+    const { vm } = await renderLayerTree(deepFixtureConfig(targetDepth));
+    await act(async () => {
+      vm.selectNode(`d${targetDepth - 1}`);
+    });
+    const button = screen.getByRole("button", { name: NEW_ELEMENT_LABEL }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe(TITLE_AT_DEPTH_CAPACITY);
+  });
+
+  it("stays enabled comfortably below the depth cap", async () => {
+    await renderLayerTree(deepFixtureConfig(MAX_BUILDER_DEPTH - 10));
+    const button = screen.getByRole("button", { name: NEW_ELEMENT_LABEL }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+});
+
+// =============================================================
+// BUG 1 regression — the palette used to be `absolute`-positioned inside
+// a `relative` wrapper nested in this aside's own `overflow-y-auto` rows
+// area. Per the CSS overflow model, that clips ANY descendant regardless
+// of its own `position` (fixed included) — a portal to `document.body` is
+// the only fix that holds regardless of anchor or scroll state. This test
+// pins that: if the popover ever goes back to rendering as a plain nested
+// element, it will start failing (`aside.contains(heading)` flips true).
+// =============================================================
+describe("LayerTree — add-node popover portal (BUG 1 regression)", () => {
+  it("renders the palette outside the Layers aside, via a portal to document.body", async () => {
+    const { baseElement } = await renderLayerTree();
+
+    const row = rowByLabel(LABEL_STACK);
+    await act(async () => {
+      fireEvent.click(within(row).getByTitle(ADD_NODE_TITLE));
+    });
+
+    const aside = baseElement.querySelector("aside");
+    if (!aside) throw new Error("expected the Layers aside to be in the document");
+    const heading = screen.getByText("Add node");
+
+    expect(aside.contains(heading)).toBe(false);
+    expect(baseElement.contains(heading)).toBe(true);
+  });
+
+  it("renders the 'New Element' button's palette outside the aside too", async () => {
+    const { baseElement } = await renderLayerTree();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New Element" }));
+    });
+
+    const aside = baseElement.querySelector("aside");
+    if (!aside) throw new Error("expected the Layers aside to be in the document");
+    const heading = screen.getByText("Add node");
+
+    expect(aside.contains(heading)).toBe(false);
+    expect(baseElement.contains(heading)).toBe(true);
   });
 });

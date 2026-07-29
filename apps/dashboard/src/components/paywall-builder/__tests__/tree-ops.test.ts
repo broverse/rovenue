@@ -18,6 +18,7 @@ import {
   moveNode,
   updateNode,
   newNode,
+  resolveAddTargetId,
   COUNTDOWN_DEFAULT_DURATION_SECONDS,
 } from "../tree-ops";
 
@@ -664,5 +665,77 @@ describe("stickyFooter as a container", () => {
     };
     const next = removeNode(root, "t1");
     expect((findNode(next, "foot1") as StickyFooterNode).children).toHaveLength(0);
+  });
+});
+
+// =============================================================
+// `resolveAddTargetId` backs the Layers panel's "New Element" button
+// (unlike a row's own "+", it has no row to anchor from, so the target
+// container has to be resolved from `selectedNodeId`). Covers the same
+// addressability edge cases as the rest of this file: a plain container
+// selection, a leaf selection, nothing selected, a stale id, a fallback
+// leaf, and the cellTemplate-root subtleties documented on the function.
+// =============================================================
+describe("resolveAddTargetId", () => {
+  it("returns the root when nothing is selected", () => {
+    const root = fixture();
+    expect(resolveAddTargetId(root, null)).toBe("root");
+  });
+
+  it("returns a selected container's own id", () => {
+    const root = fixture();
+    expect(resolveAddTargetId(root, "s2")).toBe("s2");
+  });
+
+  it("returns a selected leaf's immediate container parent", () => {
+    const root = fixture();
+    expect(resolveAddTargetId(root, "t2a")).toBe("s2");
+  });
+
+  it("returns the root for a top-level leaf's parent", () => {
+    const root = fixture();
+    expect(resolveAddTargetId(root, "t1")).toBe("root");
+  });
+
+  it("falls back to the root for a stale/unknown selected id", () => {
+    const root = fixture();
+    expect(resolveAddTargetId(root, "nope")).toBe("root");
+  });
+
+  it("falls back to the root for a leaf only reachable via a fallback slot (no parent+index)", () => {
+    const root = fixture();
+    expect(resolveAddTargetId(root, "t2fallback")).toBe("root");
+  });
+
+  it("uses a cellTemplate root directly when it's a container (setCellTemplate always seeds a stack)", () => {
+    const root = cellTemplateFixture();
+    expect(resolveAddTargetId(root, "cell_root")).toBe("cell_root");
+  });
+
+  it("resolves a leaf inside a cellTemplate subtree to its container within that subtree", () => {
+    const root = cellTemplateFixture();
+    expect(resolveAddTargetId(root, "cell_price")).toBe("cell_root");
+  });
+
+  it("falls back to the root for a hypothetical non-container cellTemplate root", () => {
+    // cellTemplate roots are stacks in practice (setCellTemplate's only
+    // producer), but the type doesn't guarantee it — if it were ever a
+    // leaf, it has no parent+index (same as a fallback slot) AND isn't
+    // itself a container, so neither branch applies; must fall back safely.
+    const root: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        {
+          type: "packageList",
+          id: "pl1",
+          packageIds: [],
+          cellLayout: "column",
+          cellTemplate: { type: "text", id: "leaf_cell_root", key: "k", role: "body" },
+        },
+      ],
+    };
+    expect(resolveAddTargetId(root, "leaf_cell_root")).toBe("root");
   });
 });
