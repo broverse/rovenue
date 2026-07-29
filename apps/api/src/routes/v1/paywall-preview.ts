@@ -30,6 +30,10 @@ import { hydrateDraftPaywall } from "../../lib/placement-resolution";
 // shape/status as an oracle to enumerate live tokens. Every failure
 // branch below funnels through `invalidToken()`.
 
+// Headroom: the SDK polls this endpoint every 2s (30 req/min per device),
+// so 120/min supports at most 4 devices sharing one preview token. A 5th
+// device degrades gracefully rather than erroring — poll failures are
+// swallowed client-side and the last-shown paywall just persists on screen.
 export const PREVIEW_RATE_LIMIT_PER_MIN = 120;
 
 const INVALID_TOKEN_MESSAGE = "Preview session not found or expired";

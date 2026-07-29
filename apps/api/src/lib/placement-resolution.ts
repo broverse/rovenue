@@ -49,6 +49,9 @@ interface HydrationSource {
   offeringId: string;
   remoteConfig: unknown;
   configFormatVersion: number;
+  // null is expected here (a draft paywall with no builder tree yet) and
+  // is handled below by omitting the field; see hydrateDraftPaywall, which
+  // returns null outright instead of hydrating a builderConfig-less draft.
   builderConfig: unknown;
 }
 

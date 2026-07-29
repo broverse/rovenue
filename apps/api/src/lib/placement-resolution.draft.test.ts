@@ -120,5 +120,13 @@ describe("hydrateDraftPaywall", () => {
 
     expect(result?.builderConfig).toEqual(draftBuilderConfig);
     expect(result?.builderConfig).not.toEqual(publishedVersion.builderConfig);
+    // Explicit node-id-level pin, on top of the whole-object checks above:
+    // the draft's node id must be present, and the published version's
+    // node id must not have leaked in.
+    const resultNodeIds = (result?.builderConfig as { nodes: { id: string }[] }).nodes.map(
+      (n) => n.id,
+    );
+    expect(resultNodeIds).toContain(draftBuilderConfig.nodes[0]!.id);
+    expect(resultNodeIds).not.toContain(publishedBuilderConfig.nodes[0]!.id);
   });
 });
