@@ -48,7 +48,7 @@ export function publicUrl(storageKey: string): string {
   return `${base}/${storageKey}`;
 }
 
-const KEY_PATTERN = /^\/([^/]+)\/([^/.]+)\.(webp|mp4|json)$/;
+const KEY_PATTERN = /^([^/]+)\/([^/.]+)\.(webp|mp4|json)$/;
 
 export function parseAssetUrl(
   url: string,
@@ -64,7 +64,19 @@ export function parseAssetUrl(
     return null;
   }
   if (parsed.origin !== baseParsed.origin) return null;
-  const match = KEY_PATTERN.exec(parsed.pathname);
+
+  // The base URL may carry a path prefix, and in one supported
+  // deployment it always does: path-style MinIO puts the bucket in the
+  // path (`http://host:9000/rovenue-assets`). Anchoring the pattern to
+  // the whole pathname would make every parse return null there — and
+  // a null here does not look like a failure, it looks like "no paywall
+  // uses this asset", which is the answer that gets an in-use asset
+  // deleted. So strip the base's own path before matching.
+  const basePath = baseParsed.pathname.replace(/\/+$/, "");
+  if (basePath && !parsed.pathname.startsWith(`${basePath}/`)) return null;
+  const keyPath = parsed.pathname.slice(basePath.length).replace(/^\/+/, "");
+
+  const match = KEY_PATTERN.exec(keyPath);
   if (!match) return null;
   return { projectId: match[1]!, assetId: match[2]! };
 }
@@ -82,6 +94,15 @@ export function isStorageConfigured(): boolean {
 let client: S3Client | null = null;
 
 function s3(): S3Client {
+  if (!isStorageConfigured()) {
+    // Without this guard, a caller who skips `isStorageConfigured()`
+    // hits a non-null assertion below and gets an opaque SDK error
+    // (or a client silently pointed at nothing) instead of a message
+    // that names the actual problem.
+    throw new Error(
+      "asset storage is not configured — set ASSET_STORAGE_ENDPOINT, ASSET_STORAGE_BUCKET, ASSET_STORAGE_ACCESS_KEY_ID, ASSET_STORAGE_SECRET_ACCESS_KEY and ASSET_PUBLIC_BASE_URL",
+    );
+  }
   if (!client) {
     client = new S3Client({
       endpoint: env.ASSET_STORAGE_ENDPOINT,
