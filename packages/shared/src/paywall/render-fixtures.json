@@ -1243,6 +1243,223 @@
           ]
         }
       }
+    },
+    {
+      "name": "stack: border drawn inside its cornerRadius (node style pass)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "stack",
+              "id": "stk_border",
+              "axis": "v",
+              "cornerRadius": 10,
+              "border": {
+                "width": 2,
+                "color": {
+                  "light": "#101010",
+                  "dark": "#EFEFEF"
+                }
+              },
+              "children": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "text: badge via background + cornerRadius (node style pass)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "badge_key": "New"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "txt_badge",
+              "key": "badge_key",
+              "role": "caption",
+              "background": {
+                "light": "#EEF2FF",
+                "dark": "#1E1B4B"
+              },
+              "cornerRadius": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "button: custom background/labelColor/border/cornerRadius overriding its style variant (node style pass)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "button",
+              "id": "btn_custom",
+              "labelKey": "cta_custom",
+              "style": "primary",
+              "action": {
+                "kind": "close"
+              },
+              "background": {
+                "light": "#111111",
+                "dark": "#F8FAFC"
+              },
+              "labelColor": {
+                "light": "#FFFFFF",
+                "dark": "#0F172A"
+              },
+              "border": {
+                "width": 1,
+                "color": {
+                  "light": "#333333"
+                }
+              },
+              "cornerRadius": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "purchaseButton: custom background/labelColor/border/cornerRadius (node style pass)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "purchaseButton",
+              "id": "pb_custom",
+              "labelKey": "cta_custom",
+              "background": {
+                "light": "#111111"
+              },
+              "labelColor": {
+                "light": "#FFFFFF"
+              },
+              "border": {
+                "width": 2,
+                "color": {
+                  "light": "#333333"
+                }
+              },
+              "cornerRadius": 14
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "image: border drawn inside its cornerRadius (node style pass)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "image",
+              "id": "img_border",
+              "url": {
+                "light": "https://x/a.png"
+              },
+              "cornerRadius": 4,
+              "border": {
+                "width": 1,
+                "color": {
+                  "light": "#000000"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "override: introEligible flips a button's border color (node style pass)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "button",
+              "id": "btn_border_override",
+              "labelKey": "cta",
+              "style": "secondary",
+              "action": {
+                "kind": "close"
+              },
+              "border": {
+                "width": 1,
+                "color": {
+                  "light": "#CCCCCC",
+                  "dark": "#3F3F46"
+                }
+              },
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "introEligible"
+                  },
+                  "props": {
+                    "border": {
+                      "width": 1,
+                      "color": {
+                        "light": "#4338CA",
+                        "dark": "#818CF8"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [
