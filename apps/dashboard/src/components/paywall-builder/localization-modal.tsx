@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import { CornerUpRight, X } from "lucide-react";
@@ -5,7 +6,14 @@ import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { buildMatrixRows, isCellMissing, localeCompletion } from "./localization-model";
 
-type Props = { onClose: () => void };
+type Props = {
+  onClose: () => void;
+  /** The row to scroll to and highlight on open — the "jump to translation"
+   *  affordance from a `LocalizedTextField`'s translate button
+   *  (`inspector/fields.tsx`). `null`/absent = no row focused, same as the
+   *  top bar's own "Localization" opener. */
+  focusKey?: string | null;
+};
 
 /** Locale column width in px — wide enough for a short sentence without
  * letting one long string stretch the whole table. */
@@ -14,16 +22,43 @@ const LOCALE_COL_WIDTH = 220;
 const KEY_COL_WIDTH = 200;
 
 /**
+ * The focused row's highlight — the same "this is the target" ring the
+ * builder already uses for the selected layer row and a legal drag-drop
+ * "into" target (`layer-tree.tsx`), reused here rather than inventing a
+ * second highlight idiom. Persists for as long as the row stays focused
+ * (i.e. the whole time the modal is open for this key), matching how the
+ * selected-row ring in the layer tree behaves — not a timed fade, so
+ * there's no timer to race in tests or to leave a row highlighted after
+ * its window closes.
+ */
+const FOCUSED_ROW_HIGHLIGHT_CLASS = "ring-2 ring-inset ring-rv-accent-500 bg-rv-accent-500/10";
+
+/**
  * Every localization key the tree uses × every locale it ships in. Blank
  * cells are the point: the builder stubs new keys as "" everywhere, so
  * "present" says nothing — `isCellMissing` uses the same predicate the
  * validator does, so this table and the publish gate agree.
  */
-export const LocalizationModal = component(({ onClose }: Props) => {
+export const LocalizationModal = component(({ onClose, focusKey = null }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
+  const focusedRowRef = useRef<HTMLTableRowElement | null>(null);
 
   const rows = buildMatrixRows(vm.config);
+  const focusRowExists = focusKey !== null && rows.some((row) => row.key === focusKey);
+
+  // Scrolls to the focused row once it actually exists in the table —
+  // depending on `focusRowExists` rather than just `focusKey` so this
+  // fires whether the row was already there on the render `focusKey`
+  // arrived on, or only shows up on a later render (e.g. this modal's own
+  // config read resolving after the tree finishes loading). Not re-run on
+  // every keystroke a co-open edit makes elsewhere in the table, since
+  // neither dependency changes while the modal stays open on the same key.
+  useEffect(() => {
+    if (!focusRowExists) return;
+    focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusKey, focusRowExists]);
+
   const completions = vm.locales.map((l) => localeCompletion(vm.config, rows, l));
   const baseGaps = completions.find((c) => c.locale === vm.defaultLocale)?.missingKeys.length ?? 0;
   const otherGaps = completions
@@ -117,7 +152,15 @@ export const LocalizationModal = component(({ onClose }: Props) => {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.key} className="border-t border-rv-divider">
+                  <tr
+                    key={row.key}
+                    ref={row.key === focusKey ? focusedRowRef : undefined}
+                    data-testid={`loc-row-${row.key}`}
+                    className={cn(
+                      "border-t border-rv-divider",
+                      row.key === focusKey && FOCUSED_ROW_HIGHLIGHT_CLASS,
+                    )}
+                  >
                     <td className="py-2 pr-3 align-top">
                       <div className="font-rv-mono text-[11px] text-foreground">{row.key}</div>
                       <div className="mt-0.5 flex items-center gap-1 font-rv-mono text-[10px] text-rv-mute-500">

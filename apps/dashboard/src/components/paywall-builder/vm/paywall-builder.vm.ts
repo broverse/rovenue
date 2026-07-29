@@ -156,6 +156,19 @@ export class PaywallBuilderViewModel {
   @state defaultLocale = "en";
   @state locales: string[] = ["en"];
 
+  /**
+   * The loc key the localization modal should scroll to and highlight when
+   * it next opens — the "jump to translation" affordance from a
+   * `LocalizedTextField`'s translate button (`fields.tsx`). `null` = no
+   * pending focus, the modal's ordinary/unfocused open (e.g. the top bar's
+   * own "Localization" button, whose `onOpenLocalization` never touches
+   * this). `BuilderShell` reads it to force the modal open even when its
+   * own local `showLocalization` state is false, and clears it back to
+   * `null` when the modal closes, so reopening normally afterward is
+   * unaffected.
+   */
+  @state localizationFocusKey: string | null = null;
+
   @state colorScheme: ColorScheme = "light";
 
   setColorScheme(scheme: ColorScheme) {
@@ -610,6 +623,22 @@ export class PaywallBuilderViewModel {
       [locale]: { ...(this.config.localizations[locale] ?? {}), [key]: value },
     };
     this.config = { ...this.config, localizations };
+  }
+
+  /**
+   * Opens the localization modal focused on `focusKey` (or unfocused, if
+   * omitted — same effect as the top bar's own opener). Keeps `editLocale`
+   * as-is: the modal shows every locale as its own column, so there is
+   * nothing to switch.
+   */
+  openLocalizationModal(focusKey?: string) {
+    this.localizationFocusKey = focusKey ?? null;
+  }
+
+  /** Called when the localization modal closes, so reopening it later (via
+   *  the top bar) starts unfocused rather than re-highlighting a stale row. */
+  clearLocalizationFocusKey() {
+    this.localizationFocusKey = null;
   }
 
   // ----- Locale ops (mirror the paywalls remote-config-utils semantics) -----

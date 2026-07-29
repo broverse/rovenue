@@ -1451,6 +1451,7 @@
         "urlDark": "URL (dark)",
         "alt": "Alt text",
         "label": "Label",
+        "editTranslations": "Edit translations",
         "buttonStyle": "Style",
         "buttonStylePrimary": "Primary",
         "buttonStyleSecondary": "Secondary",

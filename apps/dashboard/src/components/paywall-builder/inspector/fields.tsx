@@ -1,6 +1,7 @@
-import { useService } from "impair";
+import { component, useService } from "impair";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Languages } from "lucide-react";
 import type { NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
 import { ColorSwatchInput } from "../../funnel-builder/color-swatch-input";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
@@ -10,8 +11,32 @@ import { Field, INPUT_CLASS, Segmented } from "./primitives";
 // Shared field widgets
 // =============================================================
 
-/** Text/button/purchaseButton label editing — writes into `config.localizations[editLocale][locKey]`. */
-export function LocalizedTextField({ label, locKey }: { label: string; locKey: string }) {
+/**
+ * Text/button/purchaseButton label editing — writes into
+ * `config.localizations[editLocale][locKey]`.
+ *
+ * Wrapped in `component()` (unlike the other field widgets in this file,
+ * which read their value from a plain `node` PROP): this is the only field
+ * that reads live VM state (`vm.config.localizations`/`vm.editLocale`)
+ * DIRECTLY inside its own body via `useService`. impair's `useService` alone
+ * does not subscribe to anything — only a `component()`-wrapped body's
+ * synchronous execution is tracked by an effect (see `layer-tree.tsx`'s
+ * `LayerTree` for the established idiom of resolving such reads in a
+ * tracked ancestor instead). Content-tab's own reactive boundary is
+ * `ContentTab` (`content-tab.tsx`), which is `React.memo`'d via
+ * `component()` and only re-renders when its `node` prop changes identity.
+ * `setLocaleText`/`setEditLocale` mutate `config.localizations`/`editLocale`
+ * — both SIBLINGS of `config.root`, never touched by those calls — so the
+ * selected node's identity never changes and `ContentTab`'s memo bail-out
+ * skips this subtree entirely. Without its OWN tracked scope, this field
+ * never saw a typed keystroke or a locale switch: React's controlled-input
+ * mechanism reset the DOM value back to the stale prop after every
+ * keystroke, and switching locale left the previous locale's text on
+ * screen. Wrapping this component alone (leaving the callers as plain
+ * functions) gives it an independent reactive effect that re-renders it on
+ * exactly the properties it reads, regardless of what its parent does.
+ */
+export const LocalizedTextField = component(({ label, locKey }: { label: string; locKey: string }) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
   const value = vm.config.localizations[vm.editLocale]?.[locKey] ?? "";
@@ -20,18 +45,28 @@ export function LocalizedTextField({ label, locKey }: { label: string; locKey: s
 
   return (
     <Field label={label}>
-      <input
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => vm.setLocaleText(locKey, vm.editLocale, e.currentTarget.value)}
-        className={INPUT_CLASS}
-      />
+      <div className="flex items-center gap-1.5">
+        <input
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => vm.setLocaleText(locKey, vm.editLocale, e.currentTarget.value)}
+          className={INPUT_CLASS}
+        />
+        <button
+          type="button"
+          onClick={() => vm.openLocalizationModal(locKey)}
+          title={t("paywalls.builder.properties.editTranslations", "Edit translations")}
+          className="flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded border border-rv-divider text-rv-mute-500 transition hover:bg-rv-c2 hover:text-foreground"
+        >
+          <Languages size={14} />
+        </button>
+      </div>
       <div className="mt-1 font-rv-mono text-[10px] text-rv-mute-500">
         {t("paywalls.builder.properties.locKeyHint", "Key")}: {locKey} · {vm.editLocale.toUpperCase()}
       </div>
     </Field>
   );
-}
+});
 
 export function ThemeColorField({
   label,

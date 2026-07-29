@@ -275,6 +275,37 @@ describe("PaywallBuilderViewModel", () => {
     expect(vm.config.localizations.zz).toBeUndefined();
   });
 
+  // ----- Localization modal jump-to-translation -----
+  it("openLocalizationModal sets the pending focus key", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    expect(vm.localizationFocusKey).toBeNull();
+    vm.openLocalizationModal("t1_key");
+    expect(vm.localizationFocusKey).toBe("t1_key");
+  });
+
+  it("openLocalizationModal with no key opens unfocused, same as the top bar's own opener", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    vm.openLocalizationModal("t1_key");
+    vm.openLocalizationModal();
+    expect(vm.localizationFocusKey).toBeNull();
+  });
+
+  it("clearLocalizationFocusKey resets the focus so reopening later starts unfocused", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    vm.openLocalizationModal("t1_key");
+    vm.clearLocalizationFocusKey();
+    expect(vm.localizationFocusKey).toBeNull();
+  });
+
   // ----- Validation issues -----
   it("flags FOREIGN_PACKAGE_ID for a packageList referencing an id outside the offering", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail({ offeringPackageIds: ["pkg_monthly"] }));

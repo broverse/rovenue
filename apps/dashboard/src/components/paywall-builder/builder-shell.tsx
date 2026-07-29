@@ -153,7 +153,15 @@ export const BuilderShell = component(({ projectId }: Props) => {
       )}
       {showValidation && <ValidationDrawer onClose={() => setShowValidation(false)} />}
       {showDiff && <DiffModal onClose={() => setShowDiff(false)} />}
-      {showLocalization && <LocalizationModal onClose={() => setShowLocalization(false)} />}
+      {(showLocalization || vm.localizationFocusKey !== null) && (
+        <LocalizationModal
+          focusKey={vm.localizationFocusKey}
+          onClose={() => {
+            setShowLocalization(false);
+            vm.clearLocalizationFocusKey();
+          }}
+        />
+      )}
       {showStart && <StartModal onClose={() => setShowStart(false)} />}
       {showExperiment && <ExperimentPopover onClose={() => setShowExperiment(false)} />}
       {showDevicePreview && (
