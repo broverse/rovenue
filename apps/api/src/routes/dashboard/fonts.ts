@@ -36,14 +36,20 @@ import { validate } from "../../lib/validate";
 // still streaming in (body-limit reads and counts chunks itself,
 // or — when a `Content-Length` header is present — rejects off the
 // header alone without reading any of the body), never reaching
-// parseBody's full-buffer step. The in-handler `file.size` check
-// stays as a second, redundant gate: by the time it runs the bytes
-// are already resident in memory regardless (parseBody already ran),
-// so it buys no memory saving, but it is what returns the typed
+// parseBody's full-buffer step. `hono/body-limit` measures the whole
+// multipart body though, not just the file part, so it is bound to
+// `FONT_FACE_MAX_BYTES + FONT_UPLOAD_MULTIPART_FRAMING_ALLOWANCE_BYTES`
+// (see that constant's comment below) rather than the bare constant —
+// otherwise a file of exactly `FONT_FACE_MAX_BYTES` would be rejected
+// at the transport layer despite fitting the documented cap. The
+// in-handler `file.size` check stays as the second gate and is the
+// precise authority on the actual file size: by the time it runs the
+// bytes are already resident in memory regardless (parseBody already
+// ran), so it buys no memory saving, but it is what returns the typed
 // `FONT_FILE_TOO_LARGE` envelope for the ordinary "the file itself is
 // too big" case, and body-limit's own `onError` below returns the
-// identical code for the body-level rejection, so a caller sees one
-// consistent error either way.
+// identical code for the rarer body-level rejection, so a caller sees
+// one consistent error either way.
 //
 // What follows body size is the rest of cheapest-first: magic-byte
 // format (bytes already resident from parseBody, no DB call) ->
@@ -68,6 +74,15 @@ const FONT_WEIGHT_MIN = 100;
 const FONT_WEIGHT_MAX = 900;
 const FONT_STYLES = ["normal", "italic"] as const;
 const FONT_FAMILY_NAME_MAX_LENGTH = 120;
+// `bodyLimit` below measures the ENTIRE multipart body — boundary
+// lines, each field's Content-Disposition/Content-Type headers, and
+// the four other form fields — not just the file part's bytes, so
+// binding it to bare `FONT_FACE_MAX_BYTES` would reject a file of
+// exactly that size. This is a fixed, generous allowance for that
+// framing overhead only; it does NOT raise the product's per-file
+// cap, which stays exactly `FONT_FACE_MAX_BYTES` and is enforced
+// precisely by the in-handler `file.size` check (Gate 2 below).
+const FONT_UPLOAD_MULTIPART_FRAMING_ALLOWANCE_BYTES = 4 * 1024;
 const FONT_FILE_TOO_LARGE_MESSAGE = `File exceeds the ${FONT_FACE_MAX_BYTES}-byte limit`;
 const FONT_FAMILY_NOT_FOUND_MESSAGE =
   "familyId does not reference an active font family in this project";
@@ -98,7 +113,8 @@ export const fontsRoute = new Hono()
     // Gate 1 (see module comment): rejects an oversized body before
     // parseBody ever buffers it. Bound ahead of validate() on purpose.
     bodyLimit({
-      maxSize: FONT_FACE_MAX_BYTES,
+      maxSize:
+        FONT_FACE_MAX_BYTES + FONT_UPLOAD_MULTIPART_FRAMING_ALLOWANCE_BYTES,
       onError: (c) =>
         c.json(
           fail(ERROR_CODE.FONT_FILE_TOO_LARGE, FONT_FILE_TOO_LARGE_MESSAGE),
@@ -124,21 +140,21 @@ export const fontsRoute = new Hono()
         );
       }
 
-      // Gate 2 (see module comment): `bodyLimit({ maxSize: FONT_FACE_MAX_BYTES })`
-      // above measures the ENTIRE multipart body — boundary, part
-      // headers, and the four other form fields, not just `file`'s
-      // bytes — so the total is always strictly larger than the file
-      // part alone. That makes this branch currently unreachable: any
-      // body whose file part exceeds `FONT_FACE_MAX_BYTES` was already
-      // rejected by body-limit before parseBody, let alone this
-      // handler, ever ran. Kept anyway as defensive redundancy in case
-      // that relationship ever stops holding (e.g. body-limit's
-      // accounting logic changes upstream), and because it's what
-      // returns the typed `FONT_FILE_TOO_LARGE` envelope instead of
-      // body-limit's onError doing so alone. The real consequence of
-      // this ordering is that the effective per-file cap is
-      // `FONT_FACE_MAX_BYTES` minus multipart overhead — a font of
-      // exactly 2 MB is rejected despite this constant's docstring.
+      // Gate 2 (see module comment and the constant's own comment
+      // above): `bodyLimit` is bound to `FONT_FACE_MAX_BYTES +
+      // FONT_UPLOAD_MULTIPART_FRAMING_ALLOWANCE_BYTES`, not the bare
+      // constant, precisely so a file part of exactly `FONT_FACE_MAX_
+      // BYTES` survives the transport-layer guard (bodyLimit measures
+      // the whole multipart body — boundary, part headers, and the
+      // other form fields — which is always larger than the file part
+      // alone). That slack is what makes this check reachable again: a
+      // body whose file part exceeds `FONT_FACE_MAX_BYTES` by less than
+      // the framing allowance still fits under bodyLimit's raised
+      // ceiling and reaches the handler. THIS check is the precise
+      // authority on the actual file size — bodyLimit's job is only to
+      // stop unbounded bodies from being buffered at all — and it is
+      // what returns the typed `FONT_FILE_TOO_LARGE` envelope for the
+      // ordinary "the file itself is too big" case.
       if (file.size > FONT_FACE_MAX_BYTES) {
         return c.json(
           fail(ERROR_CODE.FONT_FILE_TOO_LARGE, FONT_FILE_TOO_LARGE_MESSAGE),

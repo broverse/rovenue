@@ -253,6 +253,31 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
     expect((await res.json()).error.code).toBe("FONT_FILE_TOO_LARGE");
   });
 
+  it("accepts a file of exactly FONT_FACE_MAX_BYTES (the documented cap is reachable)", async () => {
+    // FONT_FACE_MAX_BYTES's own docstring in @rovenue/shared describes
+    // it as the cap for one uploaded face ("2 MB comfortably holds a
+    // full-featured OTF"). bodyLimit measures the WHOLE multipart body
+    // (boundary + part headers + the other form fields), which is
+    // always a bit larger than the file part alone, so bodyLimit is
+    // bound to FONT_FACE_MAX_BYTES plus a small framing allowance
+    // (FONT_UPLOAD_MULTIPART_FRAMING_ALLOWANCE_BYTES in the route) —
+    // otherwise a file of exactly this size would be rejected at the
+    // transport layer despite fitting the documented cap.
+    const bytes = new Uint8Array(FONT_FACE_MAX_BYTES);
+    bytes.set([0x4f, 0x54, 0x54, 0x4f]);
+    const res = await uploadFont({
+      bytes,
+      familyName: "Brand",
+      weight: 400,
+      style: "normal",
+    });
+    expect(res.status).toBe(200);
+    expect(upsertFace).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ format: "otf" }),
+    );
+  });
+
   it("rejects an upload past the per-project face cap", async () => {
     // seed FONT_FACES_MAX_PER_PROJECT faces first
     countFacesForProject.mockResolvedValue(FONT_FACES_MAX_PER_PROJECT);
@@ -580,8 +605,9 @@ describe("DELETE /dashboard/projects/:projectId/fonts/:familyId", () => {
   });
 
   it("returns 404 FONT_FAMILY_NOT_FOUND, not 403, for a familyId outside the caller's project", async () => {
-    // The caller genuinely has access to the project named in the URL
-    // (assertProjectAccess resolves — see the module-level mock note
+    // The caller genuinely passes the `fonts:write` capability gate for
+    // the project named in the URL (assertProjectCapability resolves —
+    // see the "gates deletion behind the fonts:write capability" test
     // above); the familyId they supply simply belongs to a different
     // project and so is invisible under this project's scope. A 403
     // here would leak that the id exists somewhere; 404 does not.

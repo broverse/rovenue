@@ -2962,9 +2962,12 @@ export const warehouseQueryRuns = pgTable(
 // `byteSize` is denormalised at write time so the metadata-only list
 // query (`listFamiliesWithFaces`) never has to touch the blob column
 // to report a size. Deleting a family a paywall references is
-// allowed (design spec §4.1) — `softDeleteFamily` sets `deletedAt`,
-// and every read filters it out, so a deleted font stops being served
-// without a blocking check on delete.
+// allowed (design spec §4.1) — `softDeleteFamily` sets `deletedAt` on
+// the family row, and every read filters it out, so a deleted font
+// stops being served without a blocking check on delete. The family
+// row itself survives soft-deleted for audit, but its `fontFaces` rows
+// (and the `bytea` blobs they carry) are hard-deleted in the same
+// transaction, so the face bytes do not linger in the database.
 
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 

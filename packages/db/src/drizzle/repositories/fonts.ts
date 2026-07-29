@@ -193,17 +193,30 @@ export async function countFacesForProject(
  * repo. There is no undelete path for a family, so nothing needs those
  * bytes preserved: the face rows are hard-deleted here, while the
  * family row itself stays soft-deleted (`deletedAt` set, never
- * removed) for audit-log continuity. Runs as two statements against
- * whatever `db` handle the caller passes in — the dashboard delete
- * route already wraps this call in a transaction alongside the audit
- * entry, so both statements land or roll back together with it.
+ * removed) for audit-log continuity. Owns its own transaction (see
+ * comment inside) so the two statements always land or roll back
+ * together, regardless of whether the caller wraps this call in a
+ * transaction of its own — the dashboard delete route does, alongside
+ * the audit entry, and this function's own transaction nests inside
+ * that one as a savepoint.
  */
 export async function softDeleteFamily(db: Db, familyId: string): Promise<void> {
-  await db.delete(fontFaces).where(eq(fontFaces.familyId, familyId));
-  await db
-    .update(fontFamilies)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(fontFamilies.id, familyId));
+  // Owns its own transaction (matches setProductGrants / createOffering /
+  // updateOffering — repository functions with 2+ related writes wrap
+  // themselves rather than trusting the caller). `Db` is a
+  // `NodePgDatabase`, which nests transactions via savepoints, so this
+  // is safe even called from inside the DELETE route's own transaction.
+  // Without it, a caller that forgot to wrap these two statements could
+  // hard-delete the face bytes (no undo path) and then fail the
+  // `deletedAt` update, leaving a live family with zero faces and no
+  // audit entry.
+  await db.transaction(async (tx) => {
+    await tx.delete(fontFaces).where(eq(fontFaces.familyId, familyId));
+    await tx
+      .update(fontFamilies)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(fontFamilies.id, familyId));
+  });
 }
 
 export interface FindFaceByKeyInput {
