@@ -395,8 +395,12 @@ gets a 404, and D1's fallback rules for media that fails to load take over.
 ### 8.1 Limits
 
 Flat per-file caps (§3.2). Total storage per project comes from the plan tier and is unlimited under
-`HOST_MODE=self`. Proposed ladder, defined in `packages/shared/src/billing.ts` alongside the existing
-tiers:
+`HOST_MODE=self`.
+
+The limit lives in the existing `billing_tier_limits` table as a new nullable
+`asset_storage_bytes_limit` column, following that table's established convention where `NULL` means
+unlimited (as `events_limit` and `sql_limit` already do). It is **`bigint`, not `integer`** — 50 GB is
+53,687,091,200, well past `integer`'s ceiling. Proposed ladder:
 
 | Tier | Total asset storage |
 |---|---|
@@ -408,8 +412,8 @@ tiers:
 
 These are starting figures, sized so a single paywall's worth of assets (a handful of images and one
 video, well under 100 MB) fits comfortably in the free tier while a project cannot host a video
-library on it. They are cheap to revise later — the cap is read at request time, so changing a
-constant changes behaviour with no migration and no backfill.
+library on it. They are cheap to revise later — the cap is read at request time, so changing a row
+changes behaviour with no backfill.
 
 ### 8.2 Accounting is atomic
 
