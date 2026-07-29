@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { component, ServiceProvider, useService } from "impair";
 import "../../../i18n/config";
+import { UNSET_HEX_PLACEHOLDER } from "./fields";
 import { StyleTab } from "./style-tab";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../../lib/services/paywall-builder-api";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
@@ -109,12 +110,12 @@ async function renderHarness(id: string) {
 describe("StyleTab — divider color", () => {
   it("renders a color field (light + dark) for a divider node", async () => {
     await renderHarness("d1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes a light color back onto the divider node", async () => {
     const { vm } = await renderHarness("d1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     // fireEvent.change (one shot) rather than userEvent.type (per keystroke):
     // ColorSwatchInput commits and re-syncs its local text from the prop on
     // every VALID partial hex (a 3-digit shorthand mid-typing counts), so
@@ -131,12 +132,12 @@ describe("StyleTab — divider color", () => {
 describe("StyleTab — icon color", () => {
   it("renders a color field (light + dark) for an icon node", async () => {
     await renderHarness("i1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes a light color back onto the icon node", async () => {
     const { vm } = await renderHarness("i1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(light!, { target: { value: "#445566" } });
     const node = findNode(vm.config.root, "i1") as IconNode;
     expect(node.color?.light).toBe("#445566");
@@ -157,7 +158,7 @@ describe("StyleTab — stack border", () => {
     const numberInputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     // Corner radius (pre-existing) + border width (new).
     expect(numberInputs.length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByPlaceholderText("#0F172A").length).toBeGreaterThanOrEqual(4);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER).length).toBeGreaterThanOrEqual(4);
   });
 
   it("writes a complete border object onto the stack node", async () => {
@@ -175,13 +176,13 @@ describe("StyleTab — text background + corner radius", () => {
   it("renders background and corner-radius fields for a text node", async () => {
     await renderHarness("t1");
     // Existing `color` field + new `background` field = 2 pairs = 4 inputs.
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(4);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(4);
     expect(screen.getAllByRole("spinbutton")).toHaveLength(1);
   });
 
   it("writes a background color onto the text node", async () => {
     const { vm } = await renderHarness("t1");
-    const colorInputs = screen.getAllByPlaceholderText("#0F172A");
+    const colorInputs = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     const [, , backgroundLight] = colorInputs;
     fireEvent.change(backgroundLight!, { target: { value: "#abcdef" } });
     const node = findNode(vm.config.root, "t1") as TextNode;
@@ -202,7 +203,7 @@ describe("StyleTab — image border", () => {
     await renderHarness("img1");
     // Existing corner-radius NumberField + new border-width NumberField.
     expect(screen.getAllByRole("spinbutton")).toHaveLength(2);
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes a complete border object onto the image node", async () => {
@@ -220,14 +221,14 @@ describe("StyleTab — button background, label color, border, corner radius", (
   it("renders background, label color, border, and corner-radius controls", async () => {
     await renderHarness("b1");
     // background + labelColor + border-color = 3 pairs = 6 inputs.
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(6);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(6);
     // border width + corner radius = 2 number inputs.
     expect(screen.getAllByRole("spinbutton")).toHaveLength(2);
   });
 
   it("writes a background color onto the button node", async () => {
     const { vm } = await renderHarness("b1");
-    const [bgLight] = screen.getAllByPlaceholderText("#0F172A");
+    const [bgLight] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(bgLight!, { target: { value: "#111111" } });
     const node = findNode(vm.config.root, "b1") as ButtonNode;
     expect(node.background?.light).toBe("#111111");
@@ -235,7 +236,7 @@ describe("StyleTab — button background, label color, border, corner radius", (
 
   it("writes a label color onto the button node", async () => {
     const { vm } = await renderHarness("b1");
-    const [, , labelLight] = screen.getAllByPlaceholderText("#0F172A");
+    const [, , labelLight] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(labelLight!, { target: { value: "#222222" } });
     const node = findNode(vm.config.root, "b1") as ButtonNode;
     expect(node.labelColor?.light).toBe("#222222");
@@ -264,13 +265,13 @@ describe("StyleTab — button background, label color, border, corner radius", (
 describe("StyleTab — purchaseButton background, label color, border, corner radius", () => {
   it("renders background, label color, border, and corner-radius controls", async () => {
     await renderHarness("pb1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(6);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(6);
     expect(screen.getAllByRole("spinbutton")).toHaveLength(2);
   });
 
   it("writes a background color onto the purchaseButton node", async () => {
     const { vm } = await renderHarness("pb1");
-    const [bgLight] = screen.getAllByPlaceholderText("#0F172A");
+    const [bgLight] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(bgLight!, { target: { value: "#333333" } });
     const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
     expect(node.background?.light).toBe("#333333");
@@ -278,7 +279,7 @@ describe("StyleTab — purchaseButton background, label color, border, corner ra
 
   it("writes a label color onto the purchaseButton node", async () => {
     const { vm } = await renderHarness("pb1");
-    const [, , labelLight] = screen.getAllByPlaceholderText("#0F172A");
+    const [, , labelLight] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(labelLight!, { target: { value: "#444444" } });
     const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
     expect(node.labelColor?.light).toBe("#444444");

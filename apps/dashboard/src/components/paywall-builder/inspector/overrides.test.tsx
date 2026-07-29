@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { component, ServiceProvider, useService } from "impair";
 import "../../../i18n/config";
+import { UNSET_HEX_PLACEHOLDER } from "./fields";
 import { OverridesSection } from "./overrides";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../../lib/services/paywall-builder-api";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
@@ -246,7 +247,7 @@ describe("OverridesSection — divider override fields", () => {
     const numberInputs = container.querySelectorAll('input[type="number"]');
     expect(numberInputs).toHaveLength(1);
     expect((numberInputs[0] as HTMLInputElement).value).toBe("3");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes an edited thickness back onto the override's props", async () => {
@@ -266,7 +267,7 @@ describe("OverridesSection — icon override fields", () => {
     const optionValues = Array.from(select!.querySelectorAll("option")).map((o) => o.value);
     expect(optionValues).toEqual([...ICON_NAMES]);
     expect(select!.value).toBe("star");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes a picked icon name back onto the override's props", async () => {
@@ -290,12 +291,12 @@ describe("OverridesSection — icon override fields", () => {
 describe("OverridesSection — featureList override fields", () => {
   it("renders a real color input, not a silent no-op", async () => {
     await renderHarness("fl1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes an edited icon color back onto the override's props", async () => {
     const { vm } = await renderHarness("fl1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(light!, { target: { value: "#123456" } });
     const node = findNode(vm.config.root, "fl1") as FeatureListNode;
     expect(node.overrides?.[0]?.props.iconColor).toEqual({ light: "#123456" });
@@ -305,12 +306,12 @@ describe("OverridesSection — featureList override fields", () => {
 describe("OverridesSection — timeline override fields", () => {
   it("renders a real color input, not a silent no-op", async () => {
     await renderHarness("tl1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes an edited connector color back onto the override's props", async () => {
     const { vm } = await renderHarness("tl1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(light!, { target: { value: "#234567" } });
     const node = findNode(vm.config.root, "tl1") as TimelineNode;
     expect(node.overrides?.[0]?.props.connectorColor).toEqual({ light: "#234567" });
@@ -323,7 +324,7 @@ describe("OverridesSection — socialProof override fields", () => {
     const numberInputs = container.querySelectorAll('input[type="number"]');
     expect(numberInputs).toHaveLength(1);
     expect((numberInputs[0] as HTMLInputElement).value).toBe("4");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes an edited rating back onto the override's props, clamped to the max", async () => {
@@ -336,7 +337,7 @@ describe("OverridesSection — socialProof override fields", () => {
 
   it("writes an edited star color back onto the override's props", async () => {
     const { vm } = await renderHarness("sp1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(light!, { target: { value: "#abcdef" } });
     const node = findNode(vm.config.root, "sp1") as SocialProofNode;
     expect(node.overrides?.[0]?.props.starColor).toEqual({ light: "#abcdef" });
@@ -353,12 +354,12 @@ describe("OverridesSection — socialProof override fields", () => {
 describe("OverridesSection — stickyFooter override fields", () => {
   it("renders a real color input, not a silent no-op", async () => {
     await renderHarness("sf1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes an edited background back onto the override's props", async () => {
     const { vm } = await renderHarness("sf1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(light!, { target: { value: "#123456" } });
     const node = findNode(vm.config.root, "sf1") as StickyFooterNode;
     expect(node.overrides?.[0]?.props.background).toEqual({ light: "#123456" });
@@ -368,12 +369,12 @@ describe("OverridesSection — stickyFooter override fields", () => {
 describe("OverridesSection — countdown override fields", () => {
   it("renders a real color input, not a silent no-op", async () => {
     await renderHarness("cd1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes an edited color back onto the override's props", async () => {
     const { vm } = await renderHarness("cd1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(light!, { target: { value: "#654321" } });
     const node = findNode(vm.config.root, "cd1") as CountdownNode;
     expect(node.overrides?.[0]?.props.color).toEqual({ light: "#654321" });
@@ -388,19 +389,19 @@ describe("OverridesSection — countdown override fields", () => {
 // instead). Note: `indicatorColor` renders via `ThemeColorField`, whose
 // `Field` label is NOT wired via `htmlFor`/an id on the input (it's a
 // sibling label, not a wrapping one), so `getByLabelText` cannot find
-// it — this suite uses the same `getAllByPlaceholderText("#0F172A")`
+// it — this suite uses the same `getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)`
 // pattern the divider/icon/stickyFooter/countdown color suites above use,
 // since that is what the widget actually exposes to a test.
 // =============================================================
 describe("OverridesSection — carousel override fields", () => {
   it("renders a real color input, not a silent no-op", async () => {
     await renderHarness("car1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes an edited indicator color back onto the override's props", async () => {
     const { vm } = await renderHarness("car1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(light!, { target: { value: "#777777" } });
     const node = findNode(vm.config.root, "car1") as CarouselNode;
     expect(node.overrides?.[0]?.props.indicatorColor).toEqual({ light: "#777777" });
@@ -490,7 +491,7 @@ describe("OverridesSection — stack (root) border override field", () => {
     const borderWidthInput = numberInputs[numberInputs.length - 1] as HTMLInputElement;
     expect(borderWidthInput.value).toBe("2");
     // background color pair + border color pair.
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(4);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(4);
   });
 
   it("writes an edited border width back onto the override's props, keeping its color", async () => {
@@ -507,7 +508,7 @@ describe("OverridesSection — text background + corner radius override fields",
   it("renders real background and corner-radius controls, not a silent no-op", async () => {
     const { container } = await renderHarness("t1");
     // color + background = 2 pairs.
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(4);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(4);
     const numberInputs = container.querySelectorAll('input[type="number"]');
     expect(numberInputs).toHaveLength(1);
     expect((numberInputs[0] as HTMLInputElement).value).toBe("4");
@@ -515,7 +516,7 @@ describe("OverridesSection — text background + corner radius override fields",
 
   it("writes an edited background back onto the override's props", async () => {
     const { vm } = await renderHarness("t1");
-    const colorInputs = screen.getAllByPlaceholderText("#0F172A");
+    const colorInputs = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     const [, , backgroundLight] = colorInputs;
     fireEvent.change(backgroundLight!, { target: { value: "#a1a1a1" } });
     const node = findNode(vm.config.root, "t1") as TextNode;
@@ -537,12 +538,12 @@ describe("OverridesSection — image border override field", () => {
     const numberInputs = container.querySelectorAll('input[type="number"]');
     // cornerRadius + border width.
     expect(numberInputs).toHaveLength(2);
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(2);
   });
 
   it("writes an edited border color back onto the override's props, keeping its width", async () => {
     const { vm } = await renderHarness("img1");
-    const [light] = screen.getAllByPlaceholderText("#0F172A");
+    const [light] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(light!, { target: { value: "#909090" } });
     const node = findNode(vm.config.root, "img1") as ImageNode;
     expect(node.overrides?.[0]?.props.border).toEqual({ width: 1, color: { light: "#909090" } });
@@ -553,7 +554,7 @@ describe("OverridesSection — button background/labelColor/border/cornerRadius 
   it("renders real controls for all four, not a silent no-op", async () => {
     const { container } = await renderHarness("b1");
     // background + labelColor + border color = 3 pairs.
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(6);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(6);
     // border width + cornerRadius.
     const numberInputs = container.querySelectorAll('input[type="number"]');
     expect(numberInputs).toHaveLength(2);
@@ -561,7 +562,7 @@ describe("OverridesSection — button background/labelColor/border/cornerRadius 
 
   it("writes an edited background back onto the override's props", async () => {
     const { vm } = await renderHarness("b1");
-    const [bgLight] = screen.getAllByPlaceholderText("#0F172A");
+    const [bgLight] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(bgLight!, { target: { value: "#1a1a1a" } });
     const node = findNode(vm.config.root, "b1") as ButtonNode;
     expect(node.overrides?.[0]?.props.background).toEqual({ light: "#1a1a1a" });
@@ -569,7 +570,7 @@ describe("OverridesSection — button background/labelColor/border/cornerRadius 
 
   it("writes an edited labelColor back onto the override's props", async () => {
     const { vm } = await renderHarness("b1");
-    const [, , labelLight] = screen.getAllByPlaceholderText("#0F172A");
+    const [, , labelLight] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(labelLight!, { target: { value: "#2b2b2b" } });
     const node = findNode(vm.config.root, "b1") as ButtonNode;
     expect(node.overrides?.[0]?.props.labelColor).toEqual({ light: "#2b2b2b" });
@@ -595,14 +596,14 @@ describe("OverridesSection — button background/labelColor/border/cornerRadius 
 describe("OverridesSection — purchaseButton background/labelColor/border/cornerRadius override fields", () => {
   it("renders real controls for all four, not a silent no-op", async () => {
     const { container } = await renderHarness("pb1");
-    expect(screen.getAllByPlaceholderText("#0F172A")).toHaveLength(6);
+    expect(screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)).toHaveLength(6);
     const numberInputs = container.querySelectorAll('input[type="number"]');
     expect(numberInputs).toHaveLength(2);
   });
 
   it("writes an edited background back onto the override's props", async () => {
     const { vm } = await renderHarness("pb1");
-    const [bgLight] = screen.getAllByPlaceholderText("#0F172A");
+    const [bgLight] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(bgLight!, { target: { value: "#3c3c3c" } });
     const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
     expect(node.overrides?.[0]?.props.background).toEqual({ light: "#3c3c3c" });
@@ -610,7 +611,7 @@ describe("OverridesSection — purchaseButton background/labelColor/border/corne
 
   it("writes an edited labelColor back onto the override's props", async () => {
     const { vm } = await renderHarness("pb1");
-    const [, , labelLight] = screen.getAllByPlaceholderText("#0F172A");
+    const [, , labelLight] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
     fireEvent.change(labelLight!, { target: { value: "#4d4d4d" } });
     const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
     expect(node.overrides?.[0]?.props.labelColor).toEqual({ light: "#4d4d4d" });

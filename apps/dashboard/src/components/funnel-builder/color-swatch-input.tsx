@@ -40,12 +40,28 @@ export interface ColorSwatchInputProps {
   placeholder?: string;
   className?: string;
   presets?: ReadonlyArray<ReadonlyArray<string>>;
-  size?: "sm" | "md";
+  /**
+   * `"xs"` is a 20px swatch paired with the SAME `h-7` input `"sm"` uses —
+   * added for the paywall-builder inspector's inline light/dark pairs, which
+   * sit next to a micro "L"/"D" tag and need a smaller swatch without also
+   * shrinking (and re-cramping) the hex input next to it. `"sm"`/`"md"` are
+   * the pre-existing sizes and render byte-for-byte as before.
+   */
+  size?: "xs" | "sm" | "md";
   // Color rendered downstream when `value` is blank (e.g. a theme default the
   // page falls back to). Shown in the swatch + popover preview so the picker
   // matches what the user actually sees. The text input still shows the
   // placeholder, so it's visually obvious the value isn't an explicit override.
   inheritedColor?: string;
+  /**
+   * How the swatch reads when there is no color to show (no explicit `value`
+   * and no `inheritedColor`). `"checker"` (the pre-existing default, kept for
+   * every funnel-builder call site) is a light conic-gradient pattern.
+   * `"dashed"` is a transparent-fill swatch with a dashed 1px outline — used
+   * by the paywall-builder inspector, where the checker pattern's very light
+   * tones read as "white was chosen" rather than "nothing is set".
+   */
+  unsetSwatch?: "checker" | "dashed";
 }
 
 export function ColorSwatchInput({
@@ -56,6 +72,7 @@ export function ColorSwatchInput({
   presets = PRESETS,
   size = "md",
   inheritedColor,
+  unsetSwatch = "checker",
 }: ColorSwatchInputProps) {
   const [text, setText] = useState(value);
   const [open, setOpen] = useState(false);
@@ -72,8 +89,8 @@ export function ColorSwatchInput({
       ? normalizeHex(inheritedColor)
       : "";
   const display = explicit || inherited;
-  const swatchSize = size === "sm" ? "h-7 w-7" : "h-8 w-8";
-  const inputHeight = size === "sm" ? "h-7" : "h-8";
+  const swatchSize = size === "xs" ? "h-5 w-5" : size === "sm" ? "h-7 w-7" : "h-8 w-8";
+  const inputHeight = size === "md" ? "h-8" : "h-7";
 
   const commit = (raw: string) => {
     const v = raw.trim() === "" ? "" : normalizeHex(raw);
@@ -89,8 +106,12 @@ export function ColorSwatchInput({
             aria-label="Open color picker"
             className={cn(
               swatchSize,
-              "flex-shrink-0 cursor-pointer rounded-md border border-rv-divider transition hover:scale-[1.04] focus:outline-none focus:ring-2 focus:ring-rv-accent-500",
-              !display && "bg-[conic-gradient(at_50%_50%,#f4f4f5_0deg,#fff_90deg,#f4f4f5_180deg,#fff_270deg)]",
+              "flex-shrink-0 cursor-pointer rounded-md transition hover:scale-[1.04] focus:outline-none focus:ring-2 focus:ring-rv-accent-500",
+              display
+                ? "border border-rv-divider"
+                : unsetSwatch === "dashed"
+                  ? "border border-dashed border-rv-mute-500 bg-transparent"
+                  : "border border-rv-divider bg-[conic-gradient(at_50%_50%,#f4f4f5_0deg,#fff_90deg,#f4f4f5_180deg,#fff_270deg)]",
             )}
             style={display ? { background: display } : undefined}
           />

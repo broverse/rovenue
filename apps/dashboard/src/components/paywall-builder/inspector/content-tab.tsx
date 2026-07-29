@@ -535,7 +535,7 @@ function VideoContent({ node }: { node: VideoNode }) {
       </label>
       <NumberField
         className="mt-3"
-        label={t("paywalls.builder.properties.videoAspectRatio", "Aspect ratio (width ÷ height)")}
+        label={t("paywalls.builder.properties.videoAspectRatio", "Aspect ratio")}
         value={node.aspectRatio}
         onChange={(v) => set({ aspectRatio: v })}
         min={POSITIVE_NUMBER_FIELD_MIN}

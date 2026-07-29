@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Languages } from "lucide-react";
 import type { NodeBorder, NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
+import { cn } from "../../../lib/cn";
 import { ColorSwatchInput } from "../../funnel-builder/color-swatch-input";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { Field, INPUT_CLASS, Segmented } from "./primitives";
@@ -68,18 +69,74 @@ export const LocalizedTextField = component(({ label, locKey }: { label: string;
   );
 });
 
-export function ThemeColorField({
-  label,
+/**
+ * The hex input's placeholder when a `ThemeColor` side is unset. Deliberately
+ * NOT a hex-looking string (the widget's own `"#0F172A"` default) — a
+ * placeholder that looks like a color reads as an unobtrusive "current
+ * value" rather than "nothing chosen yet". An en dash reads as "empty" at a
+ * glance without looking like truncated input.
+ */
+export const UNSET_HEX_PLACEHOLDER = "–";
+
+/** Fixed width for one `ColorTagSwatch`: the `xs` swatch (20px) + its gap-2
+ *  (8px) + the hex input (76px) it's paired with, so two of these sit inline
+ *  without either growing to fill leftover row space. `ColorSwatchInput`
+ *  already sets the hex input's own font (`font-rv-mono`); this only fixes
+ *  the pair's overall width. */
+const COLOR_TAG_SWATCH_WIDTH_CLASS = "w-[104px]";
+
+/** One [tag][swatch][hex] unit — "L" or "D" in front of a compact
+ *  `ColorSwatchInput`. The tag is plain text rather than a Sun/Moon icon:
+ *  equally legible at 9px and avoids importing icon glyphs purely for
+ *  decoration. */
+function ColorTagSwatch({
+  tag,
+  value,
+  onChange,
+}: {
+  tag: "L" | "D";
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="font-rv-mono text-[9px] leading-none text-rv-mute-500" aria-hidden>
+        {tag}
+      </span>
+      <ColorSwatchInput
+        size="xs"
+        unsetSwatch="dashed"
+        placeholder={UNSET_HEX_PLACEHOLDER}
+        value={value}
+        onChange={onChange}
+        className={COLOR_TAG_SWATCH_WIDTH_CLASS}
+      />
+    </div>
+  );
+}
+
+/**
+ * The right-hand content of a `ThemeColor` field: both light and dark as
+ * compact inline [tag][swatch][hex] pairs on ONE row, instead of two
+ * "LIGHT"/"DARK" sub-columns each carrying their own caps label. Factored out
+ * of `ThemeColorField` so `BorderField` can compose the SAME pair inline next
+ * to its width control, rather than duplicating the collapse-to-`undefined`
+ * logic below.
+ *
+ * Collapse rule unchanged from before this redesign: clearing a side that
+ * would leave the OTHER side also empty collapses the whole `ThemeColor` to
+ * `undefined`, mirroring how `BorderField`/`ThemeUrlField` collapse an
+ * emptied pair — never leaves a `{ light: "" }` husk behind.
+ */
+function ThemeColorPairInline({
   value,
   onChange,
   className,
 }: {
-  label: string;
   value: ThemeColor | undefined;
   onChange: (next: ThemeColor | undefined) => void;
   className?: string;
 }) {
-  const { t } = useTranslation();
   const setLight = (hex: string) => {
     const dark = value?.dark;
     if (!hex && !dark) {
@@ -98,21 +155,27 @@ export function ThemeColorField({
   };
 
   return (
+    <div className={cn("flex flex-wrap items-center gap-3", className)}>
+      <ColorTagSwatch tag="L" value={value?.light ?? ""} onChange={setLight} />
+      <ColorTagSwatch tag="D" value={value?.dark ?? ""} onChange={setDark} />
+    </div>
+  );
+}
+
+export function ThemeColorField({
+  label,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  value: ThemeColor | undefined;
+  onChange: (next: ThemeColor | undefined) => void;
+  className?: string;
+}) {
+  return (
     <Field label={label} className={className}>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <div className="mb-1 font-rv-mono text-[9px] uppercase tracking-wider text-rv-mute-500">
-            {t("paywalls.builder.properties.colorLight", "Light")}
-          </div>
-          <ColorSwatchInput size="sm" value={value?.light ?? ""} onChange={setLight} />
-        </div>
-        <div>
-          <div className="mb-1 font-rv-mono text-[9px] uppercase tracking-wider text-rv-mute-500">
-            {t("paywalls.builder.properties.colorDark", "Dark")}
-          </div>
-          <ColorSwatchInput size="sm" value={value?.dark ?? ""} onChange={setDark} />
-        </div>
-      </div>
+      <ThemeColorPairInline value={value} onChange={onChange} />
     </Field>
   );
 }
@@ -134,6 +197,13 @@ export const DEFAULT_BORDER_COLOR_HEX = "#94A3B8";
  * platform.
  */
 export const DEFAULT_BORDER_WIDTH = 1;
+
+/** The border-width control's own compact size — narrower than
+ *  `NUMBER_INPUT_CLASS`'s default (`w-14` vs `w-20`): it sits inline next to
+ *  a "px" suffix and the color pair, in a row that already has a label, so
+ *  it only needs room for the 1-3 digit widths borders actually use. */
+const BORDER_WIDTH_INPUT_CLASS =
+  "h-7 w-14 rounded border border-rv-divider bg-rv-c2 px-1.5 text-center font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500";
 
 /**
  * `NodeBorder`'s `width` and `color` are resolved together as one
@@ -186,21 +256,17 @@ export function BorderField({
   };
 
   return (
-    <div className={className}>
-      <div className="mb-1 font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">{label}</div>
-      <NumberField
-        label={t("paywalls.builder.properties.borderWidth", "Width")}
-        value={value?.width}
-        onChange={setWidth}
-        min={0}
-      />
-      <ThemeColorField
-        className="mt-2"
-        label={t("paywalls.builder.properties.color", "Color")}
-        value={value?.color}
-        onChange={setColor}
-      />
-    </div>
+    <Field label={label} className={className}>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1">
+          <NumberInput value={value?.width} onChange={setWidth} min={0} className={BORDER_WIDTH_INPUT_CLASS} />
+          <span className="font-rv-mono text-[10px] text-rv-mute-500">
+            {t("paywalls.builder.properties.borderWidthUnit", "px")}
+          </span>
+        </div>
+        <ThemeColorPairInline value={value?.color} onChange={setColor} />
+      </div>
+    </Field>
   );
 }
 
@@ -448,31 +514,41 @@ function numberFieldText(value: number | undefined): string {
   return value === undefined ? "" : String(value);
 }
 
+/** Compact by default — a corner radius, a spacing value, a thickness are all
+ *  2-4 digit numbers, so the control shouldn't claim the whole row's width
+ *  the way a URL or localized-text input legitimately does. `BorderField`
+ *  passes its own (narrower still, `w-14`) className for the width control
+ *  instead of this one, since it sits inline next to a color pair rather
+ *  than alone in a row. */
+const NUMBER_INPUT_CLASS =
+  "h-8 w-20 rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[12px] text-foreground outline-none focus:border-rv-accent-500";
+
 /**
- * A numeric input whose `min`, when given, is enforced on what it WRITES,
- * not merely advertised to the browser.
+ * The bare numeric `<input>` — no `Field`/label wrapper — so a caller that
+ * needs the number control inline next to something else (`BorderField`'s
+ * width-then-color row) can compose it directly instead of going through
+ * `NumberField`'s own label column.
  *
- * Which is why it keeps a local draft of the text. A below-minimum entry is
- * usually a PREFIX of a valid one — "0" on the way to "0.5" — so refusing to
- * display it (the naive controlled-input guard) makes every value under 1
- * untypeable, while writing it through is the schema-invalidating bug this
- * minimum exists to stop. The draft holds such an entry on screen without
- * committing it, and blur clamps whatever is left to the minimum, exactly as
- * the `min` attribute promises.
+ * `min`, when given, is enforced on what it WRITES, not merely advertised to
+ * the browser. Which is why it keeps a local draft of the text: a
+ * below-minimum entry is usually a PREFIX of a valid one — "0" on the way to
+ * "0.5" — so refusing to display it (the naive controlled-input guard) makes
+ * every value under 1 untypeable, while writing it through is the
+ * schema-invalidating bug this minimum exists to stop. The draft holds such
+ * an entry on screen without committing it, and blur clamps whatever is left
+ * to the minimum, exactly as the `min` attribute promises.
  */
-export function NumberField({
-  label,
+export function NumberInput({
   value,
   onChange,
-  className,
   min,
+  className,
 }: {
-  label: string;
   value: number | undefined;
   onChange: (v: number | undefined) => void;
-  className?: string;
   /** Smallest writable value. Absent = no floor (every value commits). */
   min?: number;
+  className?: string;
 }) {
   const [draft, setDraft] = useState(() => numberFieldText(value));
   // Re-sync the draft when the committed value changes from OUTSIDE this
@@ -488,39 +564,58 @@ export function NumberField({
   const belowMin = (n: number): boolean => min !== undefined && n < min;
 
   return (
+    <input
+      type="number"
+      min={min}
+      value={draft}
+      onChange={(e) => {
+        const text = e.currentTarget.value;
+        setDraft(text);
+        if (text === "") {
+          onChange(undefined);
+          return;
+        }
+        const parsed = Number(text);
+        // NaN never reaches the config: `type="number"` normally reports
+        // unparsable input as "", but a partial entry that slips through
+        // must not be written either.
+        if (Number.isNaN(parsed) || belowMin(parsed)) return;
+        onChange(parsed);
+      }}
+      onBlur={() => {
+        if (draft === "") return;
+        const parsed = Number(draft);
+        if (Number.isNaN(parsed)) {
+          setDraft(numberFieldText(value));
+          return;
+        }
+        if (!belowMin(parsed)) return;
+        // min is defined whenever belowMin is true.
+        setDraft(numberFieldText(min));
+        onChange(min);
+      }}
+      className={className ?? NUMBER_INPUT_CLASS}
+    />
+  );
+}
+
+export function NumberField({
+  label,
+  value,
+  onChange,
+  className,
+  min,
+}: {
+  label: string;
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  className?: string;
+  /** Smallest writable value. Absent = no floor (every value commits). */
+  min?: number;
+}) {
+  return (
     <Field label={label} className={className}>
-      <input
-        type="number"
-        min={min}
-        value={draft}
-        onChange={(e) => {
-          const text = e.currentTarget.value;
-          setDraft(text);
-          if (text === "") {
-            onChange(undefined);
-            return;
-          }
-          const parsed = Number(text);
-          // NaN never reaches the config: `type="number"` normally reports
-          // unparsable input as "", but a partial entry that slips through
-          // must not be written either.
-          if (Number.isNaN(parsed) || belowMin(parsed)) return;
-          onChange(parsed);
-        }}
-        onBlur={() => {
-          if (draft === "") return;
-          const parsed = Number(draft);
-          if (Number.isNaN(parsed)) {
-            setDraft(numberFieldText(value));
-            return;
-          }
-          if (!belowMin(parsed)) return;
-          // min is defined whenever belowMin is true.
-          setDraft(numberFieldText(min));
-          onChange(min);
-        }}
-        className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[12px] text-foreground outline-none focus:border-rv-accent-500"
-      />
+      <NumberInput value={value} onChange={onChange} min={min} />
     </Field>
   );
 }

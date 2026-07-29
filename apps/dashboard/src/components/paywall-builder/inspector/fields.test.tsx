@@ -3,7 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import "../../../i18n/config";
 import type { NodeBorder } from "@rovenue/shared/paywall";
-import { BorderField, DEFAULT_BORDER_COLOR_HEX, DEFAULT_BORDER_WIDTH, NumberField, POSITIVE_NUMBER_FIELD_MIN } from "./fields";
+import {
+  BorderField,
+  DEFAULT_BORDER_COLOR_HEX,
+  DEFAULT_BORDER_WIDTH,
+  NumberField,
+  POSITIVE_NUMBER_FIELD_MIN,
+  UNSET_HEX_PLACEHOLDER,
+} from "./fields";
 
 // =============================================================
 // NumberField — the schema floor.
@@ -138,7 +145,7 @@ function renderBorderField(props: {
   const utils = render(<BorderField label={BORDER_LABEL} value={props.value} onChange={props.onChange} />);
   const widthInput = utils.container.querySelector('input[type="number"]');
   if (!widthInput) throw new Error("BorderField rendered no width input");
-  const [lightInput, darkInput] = screen.getAllByPlaceholderText("#0F172A");
+  const [lightInput, darkInput] = screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER);
   if (!lightInput || !darkInput) throw new Error("BorderField rendered no color inputs");
   return { ...utils, widthInput, lightInput, darkInput };
 }
@@ -235,7 +242,7 @@ describe("BorderField — collapses to undefined, never a partial object", () =>
     const rerenderWith = (value: NodeBorder | undefined) =>
       rerender(<BorderField label={BORDER_LABEL} value={value} onChange={capture} />);
     const widthInput = () => container.querySelector('input[type="number"]') as HTMLInputElement;
-    const lightInput = () => screen.getAllByPlaceholderText("#0F172A")[0] as HTMLInputElement;
+    const lightInput = () => screen.getAllByPlaceholderText(UNSET_HEX_PLACEHOLDER)[0] as HTMLInputElement;
 
     // 1. type a width with no color yet → defaults the color.
     fireEvent.change(widthInput(), { target: { value: "2" } });

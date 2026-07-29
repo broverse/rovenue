@@ -164,7 +164,7 @@ function ButtonStyle({ node }: { node: ButtonNode }) {
 
   return (
     <Section title={t("paywalls.builder.properties.style", "Style")} defaultOpen>
-      <Field label={t("paywalls.builder.properties.buttonStyle", "Style")}>
+      <Field label={t("paywalls.builder.properties.buttonStyle", "Variant")}>
         <Segmented
           value={node.style}
           onChange={(v) => set({ style: v })}
