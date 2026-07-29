@@ -65,6 +65,13 @@ const SINGLE_FRAME_ID = "single";
  * declaration comment. */
 type CanvasDragState = {
   id: string;
+  /** The pointer that armed this drag (`PointerEvent.pointerId`). One drag
+   * at a time: a second pointerdown while this is set is ignored outright
+   * (see `handleCanvasPointerDown`), and every subsequent pointermove/
+   * pointerup/pointercancel checks its OWN `pointerId` against this one so
+   * a stray second pointer (multi-touch, stylus + touch) can't move or end
+   * a drag it didn't start. */
+  pointerId: number;
   /** The exact DOM element the drag started on — kept directly (rather
    * than re-querying by id later) so the source ghost never risks the
    * same by-id ambiguity All-sizes creates for every OTHER lookup. */
@@ -329,7 +336,7 @@ export const Canvas = component(() => {
 
   function handleCanvasPointerMove(ev: PointerEvent) {
     const drag = dragRef.current;
-    if (!drag) return;
+    if (!drag || ev.pointerId !== drag.pointerId) return; // a different, stray pointer — ignore
     const clientX = ev.clientX;
     const clientY = ev.clientY;
 
@@ -383,6 +390,13 @@ export const Canvas = component(() => {
   const handleCanvasPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return; // primary press only
+      // One drag at a time: a second pointerdown arriving before the first
+      // one's pointerup/pointercancel/Escape (multi-touch, stylus + touch)
+      // must NOT overwrite `dragRef`/`dragCleanupRef` — that would orphan
+      // the first drag's four document listeners forever (nothing else
+      // retains that closure, and unmount only ever cleans up the CURRENT
+      // one). Simplest correct rule: ignore it outright.
+      if (dragRef.current) return;
       const nodeEl = (e.target as HTMLElement).closest<HTMLElement>("[data-rov-node]");
       if (!nodeEl) return;
       const id = nodeEl.getAttribute("data-rov-node");
@@ -398,6 +412,7 @@ export const Canvas = component(() => {
 
       dragRef.current = {
         id,
+        pointerId: e.pointerId,
         sourceEl: nodeEl,
         frameEl,
         startX: e.clientX,
@@ -407,8 +422,15 @@ export const Canvas = component(() => {
       };
 
       const onMove = (ev: PointerEvent) => handleCanvasPointerMove(ev);
-      const onUp = () => endCanvasDrag(true);
-      const onCancel = () => endCanvasDrag(false);
+      // A stray second pointer's up/cancel must not tear down the FIRST
+      // pointer's still-in-progress drag — same `pointerId` check
+      // `handleCanvasPointerMove` applies.
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId === dragRef.current?.pointerId) endCanvasDrag(true);
+      };
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId === dragRef.current?.pointerId) endCanvasDrag(false);
+      };
       const onKeyDown = (ev: KeyboardEvent) => {
         if (ev.key === "Escape") endCanvasDrag(false);
       };

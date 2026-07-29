@@ -156,14 +156,18 @@ function nodeEl(container: HTMLElement, id: string): HTMLElement {
  * (mirroring `layer-tree.test.tsx`'s `fireDnd` workaround for `clientY`)
  * every field is stamped on by hand after construction. */
 function firePointer(
-  kind: "pointerdown" | "pointermove" | "pointerup",
+  kind: "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
   target: EventTarget,
-  init: { clientX: number; clientY: number; button?: number },
+  init: { clientX: number; clientY: number; button?: number; pointerId?: number },
 ) {
   const event = new Event(kind, { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clientX", { value: init.clientX, configurable: true });
   Object.defineProperty(event, "clientY", { value: init.clientY, configurable: true });
   Object.defineProperty(event, "button", { value: init.button ?? 0, configurable: true });
+  // Defaults to a single stable pointer (1) so every existing call site
+  // (single-pointer drags) keeps working unchanged; re-entrancy tests pass
+  // a distinct id for the SECOND, stray pointer.
+  Object.defineProperty(event, "pointerId", { value: init.pointerId ?? 1, configurable: true });
   // Dispatched directly (not via RTL's `fireEvent`, which has no
   // `pointerdown`-family awareness beyond what jsdom's `Event` already
   // gives it here) — wrap in `act` ourselves so the resulting state
@@ -266,5 +270,113 @@ describe("Canvas — drag-and-drop inside the device mockup (Part 2)", () => {
 
     expect(vm.config).toBe(configBefore); // no tree mutation
     expect(vm.selectedNodeId).toBe("leafA"); // but selection still works
+  });
+
+  // ===========================================================
+  // Fix round 1 — pointerdown re-entrancy leak: a second pointerdown
+  // arriving before the first drag's pointerup/pointercancel/Escape (two
+  // fingers, or a stylus and a finger both down) used to overwrite
+  // `dragRef`/`dragCleanupRef`, silently orphaning the first drag's four
+  // document listeners forever (nothing else retained that closure).
+  // `handleCanvasPointerDown` now ignores a pointerdown while a drag is
+  // already armed, and every pointermove/pointerup/pointercancel checks
+  // its OWN `pointerId` against the armed one.
+  // ===========================================================
+  it("ignores a second pointerdown while a drag is already armed — the original drag still completes", async () => {
+    const { vm, container } = await renderCanvas();
+
+    const leafA = nodeEl(container, "leafA");
+    const leafB = nodeEl(container, "leafB");
+    stubRect(leafA, { left: 0, top: 0, width: 200, height: 50 });
+    stubRect(leafB, { left: 0, top: 50, width: 200, height: 50 });
+
+    // Pointer 1 arms a drag on leafB, past the threshold.
+    firePointer("pointerdown", leafB, { clientX: 100, clientY: 75, pointerId: 1 });
+    firePointer("pointermove", document, {
+      clientX: 100,
+      clientY: 75 + CANVAS_DRAG_THRESHOLD_PX + 1,
+      pointerId: 1,
+    });
+
+    // A second, distinct pointer (id 2) presses down on a DIFFERENT node
+    // mid-drag — must be a complete no-op: no new drag armed for leafA,
+    // pointer 1's drag untouched.
+    firePointer("pointerdown", leafA, { clientX: 100, clientY: 10, pointerId: 2 });
+
+    // Pointer 1 continues and completes the ORIGINAL drag exactly as the
+    // very first test does.
+    (document.elementsFromPoint as ReturnType<typeof vi.fn>).mockReturnValue([leafA]);
+    firePointer("pointermove", document, { clientX: 100, clientY: 10, pointerId: 1 });
+    firePointer("pointerup", document, { clientX: 100, clientY: 10, pointerId: 1 });
+
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["leafB", "leafA", "rowContainer"]);
+    expect(vm.selectedNodeId).toBe("leafB");
+  });
+
+  it("ignores a pointerup/pointercancel from a stray pointer that didn't start the drag", async () => {
+    const { vm, container } = await renderCanvas();
+    const configBefore = vm.config;
+
+    const leafA = nodeEl(container, "leafA");
+    const leafB = nodeEl(container, "leafB");
+    stubRect(leafA, { left: 0, top: 0, width: 200, height: 50 });
+    stubRect(leafB, { left: 0, top: 50, width: 200, height: 50 });
+
+    firePointer("pointerdown", leafB, { clientX: 100, clientY: 75, pointerId: 1 });
+    firePointer("pointermove", document, {
+      clientX: 100,
+      clientY: 75 + CANVAS_DRAG_THRESHOLD_PX + 1,
+      pointerId: 1,
+    });
+
+    // A stray pointer 2 ending (or cancelling) must NOT tear down pointer
+    // 1's still-in-progress drag.
+    firePointer("pointerup", document, { clientX: 999, clientY: 999, pointerId: 2 });
+    firePointer("pointercancel", document, { clientX: 999, clientY: 999, pointerId: 2 });
+    expect(vm.config).toBe(configBefore); // drag 1 wasn't ended by either
+
+    // Pointer 1 itself still completes the drag correctly afterwards.
+    (document.elementsFromPoint as ReturnType<typeof vi.fn>).mockReturnValue([leafA]);
+    firePointer("pointermove", document, { clientX: 100, clientY: 10, pointerId: 1 });
+    firePointer("pointerup", document, { clientX: 100, clientY: 10, pointerId: 1 });
+
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["leafB", "leafA", "rowContainer"]);
+  });
+
+  it("adds and removes exactly one set of document listeners per drag, even with a re-entrant pointerdown", async () => {
+    const { container } = await renderCanvas();
+
+    const leafA = nodeEl(container, "leafA");
+    const leafB = nodeEl(container, "leafB");
+    stubRect(leafA, { left: 0, top: 0, width: 200, height: 50 });
+    stubRect(leafB, { left: 0, top: 50, width: 200, height: 50 });
+
+    const EVENT_NAMES = ["pointermove", "pointerup", "pointercancel", "keydown"] as const;
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+    const countCalls = (spy: typeof addSpy, name: string) =>
+      spy.mock.calls.filter(([eventName]) => eventName === name).length;
+
+    firePointer("pointerdown", leafB, { clientX: 100, clientY: 75, pointerId: 1 });
+    firePointer("pointermove", document, {
+      clientX: 100,
+      clientY: 75 + CANVAS_DRAG_THRESHOLD_PX + 1,
+      pointerId: 1,
+    });
+    for (const name of EVENT_NAMES) expect(countCalls(addSpy, name)).toBe(1);
+
+    // The re-entrant pointerdown must add NOTHING — still exactly one
+    // listener per event type, proving it was ignored outright rather
+    // than adding a second (leaked) set on top of the first.
+    firePointer("pointerdown", leafA, { clientX: 100, clientY: 10, pointerId: 2 });
+    for (const name of EVENT_NAMES) expect(countCalls(addSpy, name)).toBe(1);
+
+    (document.elementsFromPoint as ReturnType<typeof vi.fn>).mockReturnValue([leafA]);
+    firePointer("pointermove", document, { clientX: 100, clientY: 10, pointerId: 1 });
+    firePointer("pointerup", document, { clientX: 100, clientY: 10, pointerId: 1 });
+
+    // Cleanup ran exactly once — one matching `removeEventListener` per
+    // event type, not zero (leaked) and not more than one (double-cleanup).
+    for (const name of EVENT_NAMES) expect(countCalls(removeSpy, name)).toBe(1);
   });
 });
