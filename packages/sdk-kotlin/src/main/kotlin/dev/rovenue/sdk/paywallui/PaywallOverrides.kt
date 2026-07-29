@@ -48,6 +48,7 @@ fun applyOverrides(node: BuilderNode.Stack, active: OverrideActiveConditions): B
             align = patch.align ?: result.align,
             background = patch.background ?: result.background,
             cornerRadius = patch.cornerRadius ?: result.cornerRadius,
+            border = patch.border ?: result.border,
         )
     }
     return result
@@ -62,6 +63,8 @@ fun applyOverrides(node: BuilderNode.Text, active: OverrideActiveConditions): Bu
             key = patch.key ?: result.key,
             color = patch.color ?: result.color,
             align = patch.align ?: result.align,
+            background = patch.background ?: result.background,
+            cornerRadius = patch.cornerRadius ?: result.cornerRadius,
         )
     }
     return result
@@ -72,7 +75,10 @@ fun applyOverrides(node: BuilderNode.Image, active: OverrideActiveConditions): B
     if (patches.isEmpty()) return node
     var result = node
     for (patch in patches) {
-        result = result.copy(cornerRadius = patch.cornerRadius ?: result.cornerRadius)
+        result = result.copy(
+            cornerRadius = patch.cornerRadius ?: result.cornerRadius,
+            border = patch.border ?: result.border,
+        )
     }
     return result
 }
@@ -85,6 +91,10 @@ fun applyOverrides(node: BuilderNode.Button, active: OverrideActiveConditions): 
         result = result.copy(
             labelKey = patch.labelKey ?: result.labelKey,
             style = patch.style ?: result.style,
+            background = patch.background ?: result.background,
+            labelColor = patch.labelColor ?: result.labelColor,
+            border = patch.border ?: result.border,
+            cornerRadius = patch.cornerRadius ?: result.cornerRadius,
         )
     }
     return result
@@ -105,6 +115,10 @@ fun applyOverrides(node: BuilderNode.PurchaseButton, active: OverrideActiveCondi
         result = result.copy(
             labelKey = patch.labelKey ?: result.labelKey,
             trialLabelKey = patch.trialLabelKey ?: result.trialLabelKey,
+            background = patch.background ?: result.background,
+            labelColor = patch.labelColor ?: result.labelColor,
+            border = patch.border ?: result.border,
+            cornerRadius = patch.cornerRadius ?: result.cornerRadius,
         )
     }
     return result

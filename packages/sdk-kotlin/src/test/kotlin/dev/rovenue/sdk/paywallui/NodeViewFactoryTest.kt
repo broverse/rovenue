@@ -135,6 +135,101 @@ class NodeViewFactoryTest {
         assertEquals("#FFFFFF", themeValue(pair, dark = false))
     }
 
+    // ---- resolveBorder / resolveButtonVisual (node style pass, spec 2026-07-29) ----
+    //
+    // Mirrors the web renderer's `borderStyle`/`resolveButtonVisualStyle`
+    // unit tests and Swift's `resolveBorder`/`resolveButtonVisual` tests:
+    // border present/absent, light/dark resolution, and the
+    // custom-beats-variant precedence rule (per-field, not all-or-nothing).
+
+    @Test
+    fun `resolveBorder returns null when the border itself is absent`() {
+        assertNull(resolveBorder(null, dark = false))
+    }
+
+    @Test
+    fun `resolveBorder resolves the per-theme color half`() {
+        val border = NodeBorder(width = 2.0, color = ThemePair(light = "#FF0000", dark = "#0000FF"))
+        val light = resolveBorder(border, dark = false)
+        assertEquals(2.0, light?.width)
+        assertEquals(1.0, light?.color?.red)
+        assertEquals(0.0, light?.color?.blue)
+
+        val dark = resolveBorder(border, dark = true)
+        assertEquals(0.0, dark?.color?.red)
+        assertEquals(1.0, dark?.color?.blue)
+    }
+
+    /** Unparsable color -> skip, don't guess (mirrors [parseHexColor]'s own
+     *  contract) — there is no default border to fall back to. */
+    @Test
+    fun `resolveBorder resolves to null for an unparsable color`() {
+        val border = NodeBorder(width = 2.0, color = ThemePair(light = "not-a-hex-colour", dark = null))
+        assertNull(resolveBorder(border, dark = false))
+    }
+
+    @Test
+    fun `resolveButtonVisual leaves the base untouched when custom is entirely absent`() {
+        val base = ButtonBaseVisual(
+            background = RgbaColor(red = 0.0, green = 0.0, blue = 0.0, alpha = 1.0),
+            labelColor = RgbaColor(red = 1.0, green = 1.0, blue = 1.0, alpha = 1.0),
+            border = ResolvedBorder(width = 1.0, color = RgbaColor(red = 0.5, green = 0.5, blue = 0.5, alpha = 1.0)),
+        )
+        val resolved = resolveButtonVisual(base = base, custom = ButtonCustomStyleProps(), defaultCornerRadius = 8.0, dark = false)
+        assertEquals(base.background, resolved.background)
+        assertEquals(base.labelColor, resolved.labelColor)
+        assertEquals(base.border, resolved.border)
+        assertEquals(8.0, resolved.cornerRadius, "absent custom cornerRadius falls back to the caller's default")
+    }
+
+    @Test
+    fun `resolveButtonVisual custom beats base on every field`() {
+        val base = ButtonBaseVisual(
+            background = RgbaColor(red = 0.0, green = 0.0, blue = 0.0, alpha = 1.0),
+            labelColor = RgbaColor(red = 1.0, green = 1.0, blue = 1.0, alpha = 1.0),
+            border = null,
+        )
+        val custom = ButtonCustomStyleProps(
+            background = ThemePair(light = "#ABCDEF", dark = null),
+            labelColor = ThemePair(light = "#123456", dark = null),
+            border = NodeBorder(width = 3.0, color = ThemePair(light = "#000000", dark = null)),
+            cornerRadius = 20.0,
+        )
+        val resolved = resolveButtonVisual(base = base, custom = custom, defaultCornerRadius = 8.0, dark = false)
+        assertEquals(parseHexColor("#ABCDEF"), resolved.background)
+        assertEquals(parseHexColor("#123456"), resolved.labelColor)
+        assertEquals(3.0, resolved.border?.width)
+        assertEquals(20.0, resolved.cornerRadius, "a present custom cornerRadius always wins over the default")
+    }
+
+    /** Field-by-field precedence, not all-or-nothing: a custom `border` with
+     *  no custom `background`/`labelColor` must win ONLY on `border`,
+     *  leaving the other two on the base. */
+    @Test
+    fun `resolveButtonVisual precedence is per-field not all-or-nothing`() {
+        val base = ButtonBaseVisual(
+            background = RgbaColor(red = 0.0, green = 0.0, blue = 0.0, alpha = 1.0),
+            labelColor = RgbaColor(red = 1.0, green = 1.0, blue = 1.0, alpha = 1.0),
+            border = null,
+        )
+        val custom = ButtonCustomStyleProps(border = NodeBorder(width = 3.0, color = ThemePair(light = "#00FF00", dark = null)))
+        val resolved = resolveButtonVisual(base = base, custom = custom, defaultCornerRadius = 8.0, dark = false)
+        assertEquals(base.background, resolved.background, "background must stay the base's own value")
+        assertEquals(base.labelColor, resolved.labelColor, "labelColor must stay the base's own value")
+        assertEquals(3.0, resolved.border?.width, "border must be the custom one")
+    }
+
+    @Test
+    fun `resolveButtonVisual dark scheme resolves each custom field's dark half`() {
+        val custom = ButtonCustomStyleProps(
+            background = ThemePair(light = "#FFFFFF", dark = "#000000"),
+            labelColor = ThemePair(light = "#000000", dark = "#FFFFFF"),
+        )
+        val resolved = resolveButtonVisual(base = ButtonBaseVisual(), custom = custom, defaultCornerRadius = 8.0, dark = true)
+        assertEquals(parseHexColor("#000000"), resolved.background)
+        assertEquals(parseHexColor("#FFFFFF"), resolved.labelColor)
+    }
+
     // ---- computeDarkMode ---------------------------------------------------
 
     @Test

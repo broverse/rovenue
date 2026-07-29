@@ -184,6 +184,112 @@ class PaywallOverridesTest {
         assertEquals("buy_selected", result.labelKey)
     }
 
+    // ---- node style pass: override parity (spec 2026-07-29) ---------------
+    //
+    // The P6 lesson: override parity is a hard requirement. Each node
+    // type's new style keys must flow through the SAME `applyOverrides`
+    // merge rule (later/active wins, absent leaves the base untouched) as
+    // every pre-existing key on that type.
+
+    @Test
+    fun `stack node merges border`() {
+        val border = NodeBorder(width = 3.0, color = ThemePair("#FF0000", null))
+        val overrides = listOf(NodeOverride(OverrideConditionKind.SELECTED, StackOverrideProps(border = border)))
+        val node = BuilderNode.Stack(id = "s", axis = Axis.V, children = emptyList(), overrides = overrides)
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        assertEquals(border, result.border)
+    }
+
+    @Test
+    fun `stack node border untouched when override omits it`() {
+        val original = NodeBorder(width = 1.0, color = ThemePair("#000000", null))
+        val overrides = listOf(NodeOverride(OverrideConditionKind.SELECTED, StackOverrideProps(spacing = 9.0)))
+        val node = BuilderNode.Stack(id = "s", axis = Axis.V, children = emptyList(), border = original, overrides = overrides)
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        assertEquals(9.0, result.spacing)
+        assertEquals(original, result.border, "an override that omits border must leave the base's border untouched")
+    }
+
+    @Test
+    fun `text node merges background and cornerRadius`() {
+        val overrides = listOf(
+            NodeOverride(
+                OverrideConditionKind.INTRO_ELIGIBLE,
+                TextOverrideProps(background = ThemePair("#EEF2FF", null), cornerRadius = 6.0),
+            ),
+        )
+        val node = baseText.copy(overrides = overrides)
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = true, selected = false))
+        assertEquals(ThemePair("#EEF2FF", null), result.background)
+        assertEquals(6.0, result.cornerRadius)
+    }
+
+    @Test
+    fun `image node merges border`() {
+        val border = NodeBorder(width = 2.0, color = ThemePair("#0000FF", null))
+        val overrides = listOf(NodeOverride(OverrideConditionKind.SELECTED, ImageOverrideProps(border = border)))
+        val node = BuilderNode.Image(id = "i", url = ThemePair("https://x", null), overrides = overrides)
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        assertEquals(border, result.border)
+    }
+
+    @Test
+    fun `button node merges all four style props`() {
+        val border = NodeBorder(width = 1.0, color = ThemePair("#654321", null))
+        val overrides = listOf(
+            NodeOverride(
+                OverrideConditionKind.SELECTED,
+                ButtonOverrideProps(
+                    background = ThemePair("#ABCDEF", null),
+                    labelColor = ThemePair("#123456", null),
+                    border = border, cornerRadius = 5.0,
+                ),
+            ),
+        )
+        val node = BuilderNode.Button(
+            id = "b", labelKey = "cta", style = ButtonVisualStyle.PRIMARY, action = ButtonAction.Close, overrides = overrides,
+        )
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        assertEquals(ThemePair("#ABCDEF", null), result.background)
+        assertEquals(ThemePair("#123456", null), result.labelColor)
+        assertEquals(border, result.border)
+        assertEquals(5.0, result.cornerRadius)
+    }
+
+    @Test
+    fun `button node style override leaves unrelated style props untouched`() {
+        val originalBackground = ThemePair("#111111", null)
+        val overrides = listOf(NodeOverride(OverrideConditionKind.SELECTED, ButtonOverrideProps(style = ButtonVisualStyle.SECONDARY)))
+        val node = BuilderNode.Button(
+            id = "b", labelKey = "cta", style = ButtonVisualStyle.PRIMARY, action = ButtonAction.Close,
+            background = originalBackground, overrides = overrides,
+        )
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        assertEquals(ButtonVisualStyle.SECONDARY, result.style)
+        assertEquals(originalBackground, result.background, "an override that omits background must leave it untouched")
+    }
+
+    @Test
+    fun `purchaseButton node merges all four style props`() {
+        val border = NodeBorder(width = 2.0, color = ThemePair("#654321", null))
+        val overrides = listOf(
+            NodeOverride(
+                OverrideConditionKind.SELECTED,
+                PurchaseButtonOverrideProps(
+                    background = ThemePair("#ABCDEF", null),
+                    labelColor = ThemePair("#123456", null),
+                    border = border, cornerRadius = 9.0,
+                ),
+            ),
+        )
+        val node = BuilderNode.PurchaseButton(id = "pb", labelKey = "buy", overrides = overrides)
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        assertEquals(ThemePair("#ABCDEF", null), result.background)
+        assertEquals(ThemePair("#123456", null), result.labelColor)
+        assertEquals(border, result.border)
+        assertEquals(9.0, result.cornerRadius)
+    }
+
     /** `trialLabelKey` is in TS's `OVERRIDABLE_PROP_KEYS.purchaseButton`
      *  alongside `labelKey` — an override can swap it just like `labelKey`. */
     @Test

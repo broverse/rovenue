@@ -123,6 +123,111 @@ fun computeDarkMode(optionsDarkMode: Boolean?, isSystemNight: Boolean): Boolean 
     optionsDarkMode ?: isSystemNight
 
 // ---------------------------------------------------------------
+// Pure: node style pass (border / background / labelColor / cornerRadius,
+// spec 2026-07-29). Mirrors packages/paywall-renderer/src/styles.ts's own
+// pure helpers (`borderStyle`, `resolveButtonVisualStyle`) and Swift's
+// `resolveBorder`/`resolveButtonVisual` in PaywallRenderSupport.swift — same
+// precedence rule (custom always wins, absent leaves the base/variant
+// untouched), same "skip rather than guess" leniency on an unparsable color.
+// All additive: every helper below returns exactly what the pre-existing
+// call sites produced when the new props are absent, which is the
+// regression pin this wave requires.
+// ---------------------------------------------------------------
+
+/** A border resolved for the active color scheme. `null` when [NodeBorder]
+ *  itself is absent OR its color fails to parse — mirrors [parseHexColor]'s
+ *  own "skip, don't guess" contract; there is no default border to fall
+ *  back to; absent means no border, today's output. */
+data class ResolvedBorder(val width: Double, val color: RgbaColor)
+
+/** Resolves a `NodeBorder?` against the active color scheme. Drawn INSIDE
+ *  the node's own `cornerRadius` at every call site — this helper only
+ *  resolves the color/width, the caller supplies the shared radius. */
+fun resolveBorder(border: NodeBorder?, dark: Boolean): ResolvedBorder? {
+    if (border == null) return null
+    val rgba = parseHexColor(themeValue(border.color, dark)) ?: return null
+    return ResolvedBorder(width = border.width, color = rgba)
+}
+
+/** The visual a button/purchaseButton draws before any of its own custom
+ *  style props are considered. On this platform NEITHER node type has ever
+ *  drawn a background/label-color/border from anything but this base — for
+ *  `button` that base is "nothing" ([Button]'s stock OS chrome is left
+ *  untouched below, unlike [background]/[border]), for `purchaseButton` it
+ *  is the fixed accent-color chip [buildPurchaseButton] has always drawn.
+ *  Passing an all-null [ButtonBaseVisual] is therefore the correct base for
+ *  `button`; `purchaseButton`'s own base is assembled at its call site
+ *  because it depends on `enabled`, which this pure helper has no way to
+ *  know about. */
+data class ButtonBaseVisual(
+    val background: RgbaColor? = null,
+    val labelColor: RgbaColor? = null,
+    val border: ResolvedBorder? = null,
+)
+
+/** The subset of [BuilderNode.Button]/[BuilderNode.PurchaseButton] this wave
+ *  added — both node payload classes carry these four fields with
+ *  identical names/types, so one shape covers either caller. */
+data class ButtonCustomStyleProps(
+    val background: ThemePair? = null,
+    val labelColor: ThemePair? = null,
+    val border: NodeBorder? = null,
+    val cornerRadius: Double? = null,
+)
+
+/** A button/purchaseButton's fully-resolved visual, ready to hand to the
+ *  view construction below. */
+data class ResolvedButtonVisual(
+    val background: RgbaColor?,
+    val labelColor: RgbaColor?,
+    val border: ResolvedBorder?,
+    val cornerRadius: Double,
+)
+
+/** `button`'s shared default corner radius for a chip that gains one for
+ *  the first time because a custom style prop made it visible — mirrors the
+ *  web renderer's `NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX` (8) and Swift's
+ *  `nodeButtonDefaultCornerRadiusPx`. `purchaseButton` does NOT use this
+ *  constant: unlike `button`, it has drawn its own 12dp chip since before
+ *  this wave, regardless of any new prop, and that pre-existing value is its
+ *  own default (see [PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_DP]) — switching
+ *  it to 8 here would violate the regression pin. */
+internal const val NODE_BUTTON_DEFAULT_CORNER_RADIUS_DP = 8.0
+
+/** `purchaseButton`'s pre-existing corner radius, unrelated to
+ *  [NODE_BUTTON_DEFAULT_CORNER_RADIUS_DP] — this platform has drawn a 12dp
+ *  chip here since before the node style pass, and the regression pin
+ *  requires that pre-existing default survive unchanged when `cornerRadius`
+ *  is absent. */
+internal const val PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_DP = 12.0
+
+/**
+ * Merge a button/purchaseButton's base visual with its own optional custom
+ * style props (mirrors the web renderer's `resolveButtonVisualStyle`).
+ * Custom always wins; an absent custom prop leaves [base]'s own value
+ * untouched — the regression pin: a node with none of the four new props
+ * produces exactly [base], unchanged in `background`/`labelColor`/`border`,
+ * with `cornerRadius` resolving to [defaultCornerRadius] (the caller's own
+ * literal — see [NODE_BUTTON_DEFAULT_CORNER_RADIUS_DP]'s doc comment for why
+ * button and purchaseButton do not share one).
+ */
+fun resolveButtonVisual(
+    base: ButtonBaseVisual,
+    custom: ButtonCustomStyleProps,
+    defaultCornerRadius: Double,
+    dark: Boolean,
+): ResolvedButtonVisual {
+    val customBackground = custom.background?.let { parseHexColor(themeValue(it, dark)) }
+    val customLabelColor = custom.labelColor?.let { parseHexColor(themeValue(it, dark)) }
+    return ResolvedButtonVisual(
+        background = customBackground ?: base.background,
+        labelColor = customLabelColor ?: base.labelColor,
+        border = resolveBorder(custom.border, dark) ?: base.border,
+        cornerRadius = custom.cornerRadius ?: defaultCornerRadius,
+    )
+}
+
+// ---------------------------------------------------------------
 // Pure: purchase / action-visibility rules
 // ---------------------------------------------------------------
 
@@ -1235,11 +1340,17 @@ internal object NodeViewFactory {
             )
         }
 
-        if (node.background != null || node.cornerRadius != null) {
+        if (node.background != null || node.cornerRadius != null || node.border != null) {
             group.background = GradientDrawable().apply {
                 cornerRadius = dp(context, node.cornerRadius ?: 0.0).toFloat()
                 val color = node.background?.let { parseHexColor(themeValue(it, ctx.dark))?.toColorInt() }
                 setColor(color ?: 0x00000000)
+                // Drawn INSIDE the same cornerRadius the fill above uses —
+                // absent `border` (or an unparsable color) draws nothing,
+                // today's output.
+                resolveBorder(node.border, ctx.dark)?.let { border ->
+                    setStroke(dp(context, border.width), border.color.toColorInt())
+                }
             }
         }
 
@@ -1293,6 +1404,16 @@ internal object NodeViewFactory {
             setTypeface(typeface, if (style.bold) Typeface.BOLD else Typeface.NORMAL)
             gravity = textGravity(node.align)
             node.color?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.let { setTextColor(it.toColorInt()) } }
+            // Badge/chip fill (spec 2026-07-29): absent background AND
+            // absent cornerRadius leave `background` untouched (today's
+            // output, byte-identical).
+            if (node.background != null || node.cornerRadius != null) {
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(context, node.cornerRadius ?: 0.0).toFloat()
+                    val color = node.background?.let { parseHexColor(themeValue(it, ctx.dark))?.toColorInt() }
+                    setColor(color ?: 0x00000000)
+                }
+            }
         }
     }
 
@@ -1320,6 +1441,17 @@ internal object NodeViewFactory {
                 }
             }
         }
+        // Drawn INSIDE the same cornerRadius the image itself is clipped to
+        // (foreground draws on top of the bitmap, unlike `background`) —
+        // absent `border` (or an unparsable color) draws nothing, today's
+        // output.
+        resolveBorder(node.border, ctx.dark)?.let { border ->
+            iv.foreground = GradientDrawable().apply {
+                cornerRadius = dp(context, node.cornerRadius ?: 0.0).toFloat()
+                setColor(0x00000000)
+                setStroke(dp(context, border.width), border.color.toColorInt())
+            }
+        }
         ctx.loadImage(iv, themeValue(node.url, ctx.dark))
         return iv
     }
@@ -1331,11 +1463,36 @@ internal object NodeViewFactory {
         cell: CellScope?,
     ): View? {
         if (!actionButtonVisible(node.action, hasRestoreHandler = ctx.onRestore != null)) return null
+        // Node style pass (spec 2026-07-29): `button`'s `style` variant has
+        // never drawn a background/label-color/border of its own on this
+        // platform (only typeface weight + opacity, below) — the ONLY
+        // source of a background/border/custom label color is the node's
+        // own new props, so an absent-everything node leaves the stock
+        // Button chrome completely untouched (the regression pin).
+        val hasCustomVisual = node.background != null || node.labelColor != null ||
+            node.border != null || node.cornerRadius != null
         return Button(context).apply {
             text = ctx.label(node.labelKey, cell)
             isAllCaps = false
             setTypeface(typeface, if (node.style == ButtonVisualStyle.PRIMARY) Typeface.BOLD else Typeface.NORMAL)
             alpha = if (node.style == ButtonVisualStyle.PLAIN) 0.7f else 1f
+            if (hasCustomVisual) {
+                val visual = resolveButtonVisual(
+                    base = ButtonBaseVisual(),
+                    custom = ButtonCustomStyleProps(
+                        background = node.background, labelColor = node.labelColor,
+                        border = node.border, cornerRadius = node.cornerRadius,
+                    ),
+                    defaultCornerRadius = NODE_BUTTON_DEFAULT_CORNER_RADIUS_DP,
+                    dark = ctx.dark,
+                )
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(context, visual.cornerRadius).toFloat()
+                    setColor(visual.background?.toColorInt() ?: 0x00000000)
+                    visual.border?.let { border -> setStroke(dp(context, border.width), border.color.toColorInt()) }
+                }
+                visual.labelColor?.let { setTextColor(it.toColorInt()) }
+            }
             setOnClickListener {
                 routeButtonAction(node.action, onClose = ctx.onClose, onRestore = ctx.onRestore, onUrl = ctx.onUrl)
             }
@@ -1432,16 +1589,37 @@ internal object NodeViewFactory {
         // with the selected package's view and Swift's `PurchaseButtonView`.
         val selectedView = relevantPackageView(cell = null, selectedPackageId = ctx.selectedPackageId, offering = ctx.offering)
         val resolvedLabelKey = ctaLabelKey(labelKey = node.labelKey, trialLabelKey = node.trialLabelKey, selectedView = selectedView)
+        // Node style pass (spec 2026-07-29): the fixed accent-color/12dp chip
+        // below has always been this node's OWN base visual (unlike
+        // `button`, which draws nothing of its own) — passing an all-null
+        // [ButtonBaseVisual] here and falling back to the pre-existing
+        // literals at each field below is what keeps an absent-everything
+        // node byte-identical to today's output.
+        val visual = resolveButtonVisual(
+            base = ButtonBaseVisual(),
+            custom = ButtonCustomStyleProps(
+                background = node.background, labelColor = node.labelColor,
+                border = node.border, cornerRadius = node.cornerRadius,
+            ),
+            defaultCornerRadius = PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_DP,
+            dark = ctx.dark,
+        )
         return Button(context).apply {
             text = ctx.label(resolvedLabelKey, null)
             isAllCaps = false
             isEnabled = enabled
             setTypeface(typeface, Typeface.BOLD)
+            // The disabled-state dim has ALWAYS applied to the background
+            // fill only (never the label) — preserved here by dimming
+            // whichever fill wins (custom or the accent-color base), not
+            // the label color, which is set (if at all) below.
             background = GradientDrawable().apply {
-                cornerRadius = dp(context, 12.0).toFloat()
-                setColor(ACCENT_COLOR)
+                cornerRadius = dp(context, visual.cornerRadius).toFloat()
+                setColor(visual.background?.toColorInt() ?: ACCENT_COLOR)
                 alpha = if (enabled) 255 else 102 // ~0.4 opacity, mirrors the SwiftUI renderer
+                visual.border?.let { border -> setStroke(dp(context, border.width), border.color.toColorInt()) }
             }
+            visual.labelColor?.let { setTextColor(it.toColorInt()) }
             setOnClickListener { ctx.purchase() }
         }
     }

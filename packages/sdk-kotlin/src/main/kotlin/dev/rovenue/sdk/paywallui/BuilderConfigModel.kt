@@ -28,6 +28,14 @@ import kotlinx.serialization.json.jsonObject
 
 data class ThemePair(val light: String, val dark: String? = null)
 
+/** A drawn border, always resolved together — a width without a color (or
+ *  vice versa) renders nothing meaningful, so both fields are required
+ *  inside the optional `border` prop. Drawn INSIDE the node's own corner
+ *  radius on every platform (web `border` + `borderRadius`; SwiftUI
+ *  `overlay(RoundedRectangle().stroke)`; Android `GradientDrawable`
+ *  stroke). Mirrors packages/shared/src/paywall/schema.ts's `NodeBorder`. */
+data class NodeBorder(val width: Double, val color: ThemePair)
+
 sealed class NodeSize {
     object Fit : NodeSize()
     object Fill : NodeSize()
@@ -106,12 +114,14 @@ enum class OverrideConditionKind { INTRO_ELIGIBLE, SELECTED, UNKNOWN }
  * single source of truth; keep the two tables in sync by hand.
  */
 private object OverridablePropKeys {
-    val stack: Set<String> = setOf("spacing", "align", "background", "cornerRadius")
-    val text: Set<String> = setOf("key", "color", "align")
-    val image: Set<String> = setOf("cornerRadius")
-    val button: Set<String> = setOf("labelKey", "style")
+    val stack: Set<String> = setOf("spacing", "align", "background", "cornerRadius", "border")
+    val text: Set<String> = setOf("key", "color", "align", "background", "cornerRadius")
+    val image: Set<String> = setOf("cornerRadius", "border")
+    val button: Set<String> = setOf("labelKey", "style", "background", "labelColor", "border", "cornerRadius")
     val packageList: Set<String> = emptySet()
-    val purchaseButton: Set<String> = setOf("labelKey", "trialLabelKey")
+    val purchaseButton: Set<String> = setOf(
+        "labelKey", "trialLabelKey", "background", "labelColor", "border", "cornerRadius",
+    )
     val spacer: Set<String> = emptySet()
     val divider: Set<String> = setOf("color", "thickness")
     val icon: Set<String> = setOf("name", "color")
@@ -134,24 +144,41 @@ data class StackOverrideProps(
     val align: HAlign? = null,
     val background: ThemePair? = null,
     val cornerRadius: Double? = null,
+    val border: NodeBorder? = null,
 )
 
 data class TextOverrideProps(
     val key: String? = null,
     val color: ThemePair? = null,
     val align: HAlign? = null,
+    val background: ThemePair? = null,
+    val cornerRadius: Double? = null,
 )
 
-data class ImageOverrideProps(val cornerRadius: Double? = null)
+data class ImageOverrideProps(val cornerRadius: Double? = null, val border: NodeBorder? = null)
 
-data class ButtonOverrideProps(val labelKey: String? = null, val style: ButtonVisualStyle? = null)
+data class ButtonOverrideProps(
+    val labelKey: String? = null,
+    val style: ButtonVisualStyle? = null,
+    val background: ThemePair? = null,
+    val labelColor: ThemePair? = null,
+    val border: NodeBorder? = null,
+    val cornerRadius: Double? = null,
+)
 
 /** Empty whitelist (`OVERRIDABLE_PROP_KEYS.packageList == []`) — no fields
  *  to merge; an `overrides` array on this type can only ever carry
  *  `props: {}`, so applying it is always a no-op. */
 object PackageListOverrideProps
 
-data class PurchaseButtonOverrideProps(val labelKey: String? = null, val trialLabelKey: String? = null)
+data class PurchaseButtonOverrideProps(
+    val labelKey: String? = null,
+    val trialLabelKey: String? = null,
+    val background: ThemePair? = null,
+    val labelColor: ThemePair? = null,
+    val border: NodeBorder? = null,
+    val cornerRadius: Double? = null,
+)
 
 /** Empty whitelist (`OVERRIDABLE_PROP_KEYS.spacer == []`) — same as
  *  [PackageListOverrideProps], always a no-op. */
@@ -211,6 +238,8 @@ sealed class BuilderNode {
         val size: SizeSpec? = null,
         val background: ThemePair? = null,
         val cornerRadius: Double? = null,
+        /** Drawn INSIDE [cornerRadius]. Absent = no border, today's output. */
+        val border: NodeBorder? = null,
         val overrides: List<NodeOverride<StackOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
@@ -222,6 +251,9 @@ sealed class BuilderNode {
         val role: TextRole,
         val color: ThemePair? = null,
         val align: HAlign? = null,
+        /** Badge/chip fill. Absent = no background, today's output. */
+        val background: ThemePair? = null,
+        val cornerRadius: Double? = null,
         val overrides: List<NodeOverride<TextOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
@@ -232,6 +264,8 @@ sealed class BuilderNode {
         val url: ThemePair,
         val height: Double? = null,
         val cornerRadius: Double? = null,
+        /** Drawn INSIDE [cornerRadius]. Absent = no border, today's output. */
+        val border: NodeBorder? = null,
         val alt: String? = null,
         val overrides: List<NodeOverride<ImageOverrideProps>>? = null,
         override val visibility: Visibility? = null,
@@ -243,6 +277,15 @@ sealed class BuilderNode {
         val labelKey: String,
         val style: ButtonVisualStyle,
         val action: ButtonAction,
+        /** Custom style props (spec 2026-07-29): all override the `style`
+         *  variant's own visual; absent = the variant's current look, today's
+         *  output. See `resolveButtonVisual` in NodeViewFactory.kt for the
+         *  merge rule. */
+        val background: ThemePair? = null,
+        val labelColor: ThemePair? = null,
+        /** Drawn INSIDE [cornerRadius]. Absent = no border, today's output. */
+        val border: NodeBorder? = null,
+        val cornerRadius: Double? = null,
         val overrides: List<NodeOverride<ButtonOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
@@ -273,6 +316,14 @@ sealed class BuilderNode {
          *  `resolveCtaLabelKey`). Absent = always [labelKey]. Mirrors
          *  schema.ts's `PurchaseButtonNode.trialLabelKey`. */
         val trialLabelKey: String? = null,
+        /** Custom style props (spec 2026-07-29): all override the button's
+         *  own base visual; absent = today's output. See
+         *  `resolveButtonVisual` in NodeViewFactory.kt. */
+        val background: ThemePair? = null,
+        val labelColor: ThemePair? = null,
+        /** Drawn INSIDE [cornerRadius]. Absent = no border, today's output. */
+        val border: NodeBorder? = null,
+        val cornerRadius: Double? = null,
         val overrides: List<NodeOverride<PurchaseButtonOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
@@ -539,6 +590,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             },
             background = obj["background"]?.letObject(::parseThemePair),
             cornerRadius = obj.optionalDouble("cornerRadius"),
+            border = obj["border"]?.letObject(::parseNodeBorder),
             overrides = obj.parseOverrideList(::parseStackOverrideProps),
             visibility = visibility,
             fallback = fallback,
@@ -555,6 +607,8 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             ),
             color = obj["color"]?.letObject(::parseThemePair),
             align = obj.optionalAlign(),
+            background = obj["background"]?.letObject(::parseThemePair),
+            cornerRadius = obj.optionalDouble("cornerRadius"),
             overrides = obj.parseOverrideList(::parseTextOverrideProps),
             visibility = visibility,
             fallback = fallback,
@@ -565,6 +619,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
                 ?: throw BuilderDecodeException("image.url required"),
             height = obj.optionalDouble("height"),
             cornerRadius = obj.optionalDouble("cornerRadius"),
+            border = obj["border"]?.letObject(::parseNodeBorder),
             alt = obj.optionalString("alt"),
             overrides = obj.parseOverrideList(::parseImageOverrideProps),
             visibility = visibility,
@@ -584,6 +639,10 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             action = parseAction(
                 obj["action"] as? JsonObject ?: throw BuilderDecodeException("button.action required"),
             ),
+            background = obj["background"]?.letObject(::parseThemePair),
+            labelColor = obj["labelColor"]?.letObject(::parseThemePair),
+            border = obj["border"]?.letObject(::parseNodeBorder),
+            cornerRadius = obj.optionalDouble("cornerRadius"),
             overrides = obj.parseOverrideList(::parseButtonOverrideProps),
             visibility = visibility,
             fallback = fallback,
@@ -611,6 +670,10 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             id = id,
             labelKey = obj.requireString("labelKey"),
             trialLabelKey = obj.optionalString("trialLabelKey"),
+            background = obj["background"]?.letObject(::parseThemePair),
+            labelColor = obj["labelColor"]?.letObject(::parseThemePair),
+            border = obj["border"]?.letObject(::parseNodeBorder),
+            cornerRadius = obj.optionalDouble("cornerRadius"),
             overrides = obj.parseOverrideList(::parsePurchaseButtonOverrideProps),
             visibility = visibility,
             fallback = fallback,
@@ -796,6 +859,7 @@ private fun parseStackOverrideProps(props: JsonObject): StackOverrideProps {
         align = props.optionalAlign(),
         background = props["background"]?.letObject(::parseThemePair),
         cornerRadius = props.optionalDouble("cornerRadius"),
+        border = props["border"]?.letObject(::parseNodeBorder),
     )
 }
 
@@ -805,12 +869,17 @@ private fun parseTextOverrideProps(props: JsonObject): TextOverrideProps {
         key = props.optionalString("key"),
         color = props["color"]?.letObject(::parseThemePair),
         align = props.optionalAlign(),
+        background = props["background"]?.letObject(::parseThemePair),
+        cornerRadius = props.optionalDouble("cornerRadius"),
     )
 }
 
 private fun parseImageOverrideProps(props: JsonObject): ImageOverrideProps {
     validateOverridePropKeys(props, OverridablePropKeys.image)
-    return ImageOverrideProps(cornerRadius = props.optionalDouble("cornerRadius"))
+    return ImageOverrideProps(
+        cornerRadius = props.optionalDouble("cornerRadius"),
+        border = props["border"]?.letObject(::parseNodeBorder),
+    )
 }
 
 private fun parseButtonOverrideProps(props: JsonObject): ButtonOverrideProps {
@@ -826,6 +895,10 @@ private fun parseButtonOverrideProps(props: JsonObject): ButtonOverrideProps {
                 else -> throw BuilderDecodeException("style has invalid value \"${prim.content}\"")
             }
         },
+        background = props["background"]?.letObject(::parseThemePair),
+        labelColor = props["labelColor"]?.letObject(::parseThemePair),
+        border = props["border"]?.letObject(::parseNodeBorder),
+        cornerRadius = props.optionalDouble("cornerRadius"),
     )
 }
 
@@ -839,6 +912,10 @@ private fun parsePurchaseButtonOverrideProps(props: JsonObject): PurchaseButtonO
     return PurchaseButtonOverrideProps(
         labelKey = props.optionalString("labelKey"),
         trialLabelKey = props.optionalString("trialLabelKey"),
+        background = props["background"]?.letObject(::parseThemePair),
+        labelColor = props["labelColor"]?.letObject(::parseThemePair),
+        border = props["border"]?.letObject(::parseNodeBorder),
+        cornerRadius = props.optionalDouble("cornerRadius"),
     )
 }
 
@@ -1006,6 +1083,15 @@ private fun parseAction(obj: JsonObject): ButtonAction = when (val kind = obj.re
 
 private fun parseThemePair(obj: JsonObject): ThemePair =
     ThemePair(light = obj.requireString("light"), dark = obj.optionalString("dark"))
+
+/** Both `width` and `color` are required — a border missing either fails
+ *  the whole config decode, same "structural defect on a KNOWN type"
+ *  contract every other malformed field on a known node type already has
+ *  (mirrors Swift's `NodeBorder`, whose two fields are non-optional). */
+private fun parseNodeBorder(obj: JsonObject): NodeBorder = NodeBorder(
+    width = obj.optionalDouble("width") ?: throw BuilderDecodeException("border.width required"),
+    color = obj["color"]?.letObject(::parseThemePair) ?: throw BuilderDecodeException("border.color required"),
+)
 
 private fun parseNodeSize(el: kotlinx.serialization.json.JsonElement): NodeSize {
     val prim = el as? JsonPrimitive ?: throw BuilderDecodeException("NodeSize must be a string or number")

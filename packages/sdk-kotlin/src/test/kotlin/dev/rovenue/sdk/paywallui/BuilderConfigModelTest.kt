@@ -819,4 +819,216 @@ class BuilderConfigModelTest {
         val override = pb.overrides!!.first()
         assertEquals("trial_selected", override.props?.trialLabelKey)
     }
+
+    // ---- node style pass: border / background / labelColor / cornerRadius
+    // (spec 2026-07-29) -----------------------------------------------------
+    //
+    // Not fixture-based (render-fixtures.json is edited only in the LAST
+    // task of this wave, per the plan's Global Constraints) — hand-built via
+    // `rootWith`/`firstChild`, same idiom the "unknown icon name" test above
+    // uses. Every new prop is optional and LENIENT on absence, matching
+    // every other optional prop this decoder already carries. Mirrors
+    // packages/sdk-swift .../RovenueTests/BuilderConfigModelTests.swift's
+    // "node style pass" section.
+
+    @Test
+    fun `stack decodes border`() {
+        val node = firstChild(
+            rootWith(
+                """{"type":"stack","id":"s1","axis":"v","children":[],
+                   "border":{"width":2,"color":{"light":"#111111","dark":"#EEEEEE"}}}""",
+            ),
+        ) as BuilderNode.Stack
+        assertEquals(2.0, node.border?.width)
+        assertEquals(ThemePair("#111111", "#EEEEEE"), node.border?.color)
+    }
+
+    @Test
+    fun `stack without border decodes leniently`() {
+        val node = firstChild(rootWith("""{"type":"stack","id":"s1","axis":"v","children":[]}""")) as BuilderNode.Stack
+        assertNull(node.border)
+    }
+
+    @Test
+    fun `text decodes background and cornerRadius`() {
+        val node = firstChild(
+            rootWith(
+                """{"type":"text","id":"t1","key":"k","role":"body",
+                   "background":{"light":"#EEF2FF"},"cornerRadius":6}""",
+            ),
+        ) as BuilderNode.Text
+        assertEquals(ThemePair("#EEF2FF", null), node.background)
+        assertEquals(6.0, node.cornerRadius)
+    }
+
+    @Test
+    fun `text without badge props decodes leniently`() {
+        val node = firstChild(rootWith("""{"type":"text","id":"t1","key":"k","role":"body"}""")) as BuilderNode.Text
+        assertNull(node.background)
+        assertNull(node.cornerRadius)
+    }
+
+    @Test
+    fun `image decodes border`() {
+        val node = firstChild(
+            rootWith(
+                """{"type":"image","id":"i1","url":{"light":"https://x/a.png"},
+                   "border":{"width":1,"color":{"light":"#000000"}}}""",
+            ),
+        ) as BuilderNode.Image
+        assertEquals(1.0, node.border?.width)
+        assertEquals(ThemePair("#000000", null), node.border?.color)
+    }
+
+    @Test
+    fun `image without border decodes leniently`() {
+        val node =
+            firstChild(rootWith("""{"type":"image","id":"i1","url":{"light":"https://x/a.png"}}""")) as BuilderNode.Image
+        assertNull(node.border)
+    }
+
+    @Test
+    fun `button decodes all four style props`() {
+        val node = firstChild(
+            rootWith(
+                """{"type":"button","id":"b1","labelKey":"k","style":"primary","action":{"kind":"close"},
+                   "background":{"light":"#111111"},"labelColor":{"light":"#FFFFFF"},
+                   "border":{"width":1,"color":{"light":"#333333"}},"cornerRadius":10}""",
+            ),
+        ) as BuilderNode.Button
+        assertEquals(ThemePair("#111111", null), node.background)
+        assertEquals(ThemePair("#FFFFFF", null), node.labelColor)
+        assertEquals(1.0, node.border?.width)
+        assertEquals(ThemePair("#333333", null), node.border?.color)
+        assertEquals(10.0, node.cornerRadius)
+    }
+
+    @Test
+    fun `button without style props decodes leniently`() {
+        val node = firstChild(
+            rootWith("""{"type":"button","id":"b1","labelKey":"k","style":"primary","action":{"kind":"close"}}"""),
+        ) as BuilderNode.Button
+        assertNull(node.background)
+        assertNull(node.labelColor)
+        assertNull(node.border)
+        assertNull(node.cornerRadius)
+    }
+
+    @Test
+    fun `purchaseButton decodes all four style props`() {
+        val node = firstChild(
+            rootWith(
+                """{"type":"purchaseButton","id":"pb1","labelKey":"k",
+                   "background":{"light":"#111111"},"labelColor":{"light":"#FFFFFF"},
+                   "border":{"width":2,"color":{"light":"#333333"}},"cornerRadius":14}""",
+            ),
+        ) as BuilderNode.PurchaseButton
+        assertEquals(ThemePair("#111111", null), node.background)
+        assertEquals(ThemePair("#FFFFFF", null), node.labelColor)
+        assertEquals(2.0, node.border?.width)
+        assertEquals(14.0, node.cornerRadius)
+    }
+
+    @Test
+    fun `purchaseButton without style props decodes leniently`() {
+        val node = firstChild(rootWith("""{"type":"purchaseButton","id":"pb1","labelKey":"k"}""")) as BuilderNode.PurchaseButton
+        assertNull(node.background)
+        assertNull(node.labelColor)
+        assertNull(node.border)
+        assertNull(node.cornerRadius)
+    }
+
+    /** A malformed `border` (missing `color`) fails the whole config decode
+     *  — same "structural defect on a KNOWN type" contract every other
+     *  malformed field on a known node type already has. */
+    @Test
+    fun `malformed border missing color fails the whole config`() {
+        val json = """
+            {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
+             "root":{"type":"stack","id":"root","axis":"v","children":[
+               {"type":"stack","id":"s1","axis":"v","children":[],"border":{"width":2}}]}}
+        """
+        assertNull(decodeBuilderConfig(json), "a border missing its required color must fail the whole config")
+    }
+
+    /**
+     * Override parity (the P6 lesson): each node type's new keys must flow
+     * through the SAME `NodeOverride<...Props>` whitelist/decode path every
+     * other overridable key already uses — an active override actually
+     * carries the new prop.
+     */
+    @Test
+    fun `overrides carry the new style keys across node types`() {
+        val stack = firstChild(
+            rootWith(
+                """{"type":"stack","id":"s1","axis":"v","children":[],
+                   "overrides":[{"when":{"kind":"selected"},
+                                 "props":{"border":{"width":3,"color":{"light":"#FF0000"}}}}]}""",
+            ),
+        ) as BuilderNode.Stack
+        assertEquals(3.0, stack.overrides?.first()?.props?.border?.width)
+
+        val text = firstChild(
+            rootWith(
+                """{"type":"text","id":"t1","key":"k","role":"body",
+                   "overrides":[{"when":{"kind":"introEligible"},
+                                 "props":{"background":{"light":"#00FF00"},"cornerRadius":4}}]}""",
+            ),
+        ) as BuilderNode.Text
+        assertEquals(ThemePair("#00FF00", null), text.overrides?.first()?.props?.background)
+        assertEquals(4.0, text.overrides?.first()?.props?.cornerRadius)
+
+        val image = firstChild(
+            rootWith(
+                """{"type":"image","id":"i1","url":{"light":"https://x/a.png"},
+                   "overrides":[{"when":{"kind":"selected"},
+                                 "props":{"border":{"width":1,"color":{"light":"#0000FF"}}}}]}""",
+            ),
+        ) as BuilderNode.Image
+        assertEquals(ThemePair("#0000FF", null), image.overrides?.first()?.props?.border?.color)
+
+        val button = firstChild(
+            rootWith(
+                """{"type":"button","id":"b1","labelKey":"k","style":"primary","action":{"kind":"close"},
+                   "overrides":[{"when":{"kind":"introEligible"},
+                                 "props":{"background":{"light":"#ABCDEF"},"labelColor":{"light":"#123456"},
+                                          "border":{"width":2,"color":{"light":"#654321"}},"cornerRadius":5}}]}""",
+            ),
+        ) as BuilderNode.Button
+        val buttonPatch = button.overrides!!.first().props!!
+        assertEquals(ThemePair("#ABCDEF", null), buttonPatch.background)
+        assertEquals(ThemePair("#123456", null), buttonPatch.labelColor)
+        assertEquals(2.0, buttonPatch.border?.width)
+        assertEquals(5.0, buttonPatch.cornerRadius)
+
+        val purchaseButton = firstChild(
+            rootWith(
+                """{"type":"purchaseButton","id":"pb1","labelKey":"k",
+                   "overrides":[{"when":{"kind":"selected"},
+                                 "props":{"background":{"light":"#ABCDEF"},"labelColor":{"light":"#123456"},
+                                          "border":{"width":2,"color":{"light":"#654321"}},"cornerRadius":9}}]}""",
+            ),
+        ) as BuilderNode.PurchaseButton
+        val purchaseButtonPatch = purchaseButton.overrides!!.first().props!!
+        assertEquals(ThemePair("#ABCDEF", null), purchaseButtonPatch.background)
+        assertEquals(9.0, purchaseButtonPatch.cornerRadius)
+    }
+
+    /** The whitelist side of parity: a key that is NOT in
+     *  `OVERRIDABLE_PROP_KEYS.text` (e.g. `border` — text has no border prop
+     *  at all, per the matrix) still fails the whole config. */
+    @Test
+    fun `a non-whitelisted style override prop fails the whole config`() {
+        val json = """
+            {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
+             "root":{"type":"stack","id":"root","axis":"v","children":[
+               {"type":"text","id":"t1","key":"k","role":"body",
+                "overrides":[{"when":{"kind":"selected"},
+                              "props":{"border":{"width":1,"color":{"light":"#000000"}}}}]}]}}
+        """
+        assertNull(
+            decodeBuilderConfig(json),
+            "`border` is not in OVERRIDABLE_PROP_KEYS.text, so the whole config must fail",
+        )
+    }
 }
