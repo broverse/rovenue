@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { drizzle } from "@rovenue/db";
 import {
@@ -10,7 +9,8 @@ import {
 import { fail } from "../../lib/response";
 
 // =============================================================
-// GET /v1/fonts/:faceId/file — device-facing font byte serving
+// GET /v1/fonts/:faceId/:contentHash/file — device-facing font byte
+// serving
 // =============================================================
 //
 // The other half of the paywall fonts wave: Tasks 1-4 built the
@@ -26,41 +26,48 @@ import { fail } from "../../lib/response";
 // here. What it does NOT filter is project ownership — it has no
 // projectId argument to scope by — so this route compares the
 // returned `projectId` against the authenticated caller's project
-// itself. Both that mismatch and "face/family doesn't exist" collapse
-// onto the identical 404: this is a binary endpoint, and a 403 would
-// tell a caller who cannot have the face that the id exists somewhere.
+// itself. Face/family missing, cross-project, AND a `:contentHash`
+// segment that doesn't match the stored hash all collapse onto the
+// identical 404: this is a binary endpoint, and a 403 (or a 200 that
+// leaks whether the id exists) would tell a caller who cannot have the
+// face that it exists somewhere.
 //
-// A face's bytes are meant to never change once uploaded, so the
-// response is cached immutably for a year (design spec invariant).
-// CAUTION: `fontRepo.upsertFace` (Task 1) actually REPLACES the bytes
-// of the existing row for a repeated (familyId, weight, style) rather
-// than inserting a new one — so the invariant this caching contract
-// leans on does not hold today; a same-weight/style re-upload keeps
-// the same faceId with different bytes, and an `immutable` response
-// tells clients not to even revalidate for a year. See the task
-// report for the full writeup. The ETag is a hash of the bytes
-// themselves, not the faceId, so at least a client that DOES
-// revalidate (a cache not honoring `immutable`) detects the change.
+// Task 7: the URL is versioned by content hash instead of `immutable`
+// resting on a false premise. `fontRepo.upsertFace` (Task 1) replaces
+// the bytes of the existing row in place for a repeated (familyId,
+// weight, style) — Task 1's own test mandates exactly that, and this
+// task does not touch it — so a re-upload changes the STORED hash,
+// which changes the URL a client must use, which is what makes
+// `immutable` honest: the URL for a re-uploaded face's bytes is a
+// different URL, never the same one serving different bytes. The one
+// hash is stored at write time, served as the ETag, and compared
+// against the URL segment here — there is only ever the one value.
 
 const FACE_NOT_FOUND_MESSAGE = "Font face not found";
 
-export const fontsRoute = new Hono().get("/:faceId/file", async (c) => {
-  const faceId = c.req.param("faceId");
-  const project = c.get("project");
+export const fontsRoute = new Hono().get(
+  "/:faceId/:contentHash/file",
+  async (c) => {
+    const faceId = c.req.param("faceId");
+    const contentHash = c.req.param("contentHash");
+    const project = c.get("project");
 
-  const face = await drizzle.fontRepo.findFaceBytes(drizzle.db, faceId);
-  if (!face || face.projectId !== project.id) {
-    return c.json(fail(ERROR_CODE.NOT_FOUND, FACE_NOT_FOUND_MESSAGE), 404);
-  }
+    const face = await drizzle.fontRepo.findFaceBytes(drizzle.db, faceId);
+    if (
+      !face ||
+      face.projectId !== project.id ||
+      face.contentHash !== contentHash
+    ) {
+      return c.json(fail(ERROR_CODE.NOT_FOUND, FACE_NOT_FOUND_MESSAGE), 404);
+    }
 
-  const etag = `"${createHash("sha256").update(face.bytes).digest("hex")}"`;
+    c.header(
+      "Cache-Control",
+      `public, max-age=${FONT_FILE_CACHE_MAX_AGE_SECONDS}, immutable`,
+    );
+    c.header("ETag", face.contentHash);
+    c.header("Content-Type", FONT_CONTENT_TYPES[face.format as FontFormat]);
 
-  c.header(
-    "Cache-Control",
-    `public, max-age=${FONT_FILE_CACHE_MAX_AGE_SECONDS}, immutable`,
-  );
-  c.header("ETag", etag);
-  c.header("Content-Type", FONT_CONTENT_TYPES[face.format as FontFormat]);
-
-  return c.body(new Uint8Array(face.bytes));
-});
+    return c.body(new Uint8Array(face.bytes));
+  },
+);

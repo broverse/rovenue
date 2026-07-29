@@ -424,7 +424,7 @@ describe("POST /dashboard/projects/:projectId/fonts", () => {
 // packages/db/src/drizzle/repositories/fonts.integration.test.ts.
 
 describe("GET /dashboard/projects/:projectId/fonts", () => {
-  it("lists families with face metadata; the response never carries a bytes field", async () => {
+  it("lists families with face metadata, including contentHash; the response never carries a bytes field", async () => {
     // NOTE on what this can and cannot prove: the route does a
     // straight pass-through of whatever `listFamiliesWithFaces`
     // returns — it does not itself strip anything. The guarantee that
@@ -437,7 +437,11 @@ describe("GET /dashboard/projects/:projectId/fonts", () => {
     // bytes into the repo's result — it documents the same invariant
     // at the response boundary. What this test DOES genuinely pin is
     // the route's shape-mapping: that `families[0].name` and
-    // `families[0].faces[0]` surface, untouched, under `{ data: [...] }`.
+    // `families[0].faces[0]` (including `contentHash`, Task 7's
+    // addition so wave E2's picker can build the versioned file URL
+    // without a second round-trip) surface, untouched, under
+    // `{ data: [...] }`.
+    const contentHash = "a".repeat(64);
     listFamiliesWithFaces.mockResolvedValue([
       {
         id: "family1",
@@ -447,7 +451,14 @@ describe("GET /dashboard/projects/:projectId/fonts", () => {
         updatedAt: new Date(),
         deletedAt: null,
         faces: [
-          { id: "face1", weight: 400, style: "normal", format: "otf", byteSize: 16 },
+          {
+            id: "face1",
+            weight: 400,
+            style: "normal",
+            format: "otf",
+            byteSize: 16,
+            contentHash,
+          },
         ],
       },
     ]);
@@ -459,6 +470,7 @@ describe("GET /dashboard/projects/:projectId/fonts", () => {
     };
     expect(body.data[0].name).toBe("Brand");
     expect(body.data[0].faces[0]).not.toHaveProperty("bytes");
+    expect(body.data[0].faces[0].contentHash).toBe(contentHash);
     expect(listFamiliesWithFaces).toHaveBeenCalledWith(
       expect.anything(),
       "p1",

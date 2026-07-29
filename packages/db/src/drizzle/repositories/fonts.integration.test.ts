@@ -105,7 +105,7 @@ describe("fontRepo", () => {
     expect(await drizzleRepos.fontRepo.findFaceBytes(db, face.id)).toBeNull();
   });
 
-  it("listFamiliesWithFaces does not select the bytes column", async () => {
+  it("listFamiliesWithFaces does not select the bytes column, and exposes contentHash", async () => {
     const family = await drizzleRepos.fontRepo.createFamily(db, {
       projectId: PROJECT_ID,
       name: "Brand Sans",
@@ -121,6 +121,77 @@ describe("fontRepo", () => {
     const withFaces = families.find((f) => f.id === family.id);
     expect(withFaces?.faces[0]).not.toHaveProperty("bytes");
     expect(withFaces?.faces[0]?.byteSize).toBe(3);
+    expect(typeof withFaces?.faces[0]?.contentHash).toBe("string");
+    expect(withFaces?.faces[0]?.contentHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  // Task 7: the URL-versioning fix rests entirely on `contentHash` being
+  // recomputed on every write, including the ON CONFLICT DO UPDATE path —
+  // a re-upload that changed the bytes but left a stale hash behind is
+  // exactly the bug this task exists to prevent. This is the update path,
+  // not the insert path.
+  it("a re-upload with different bytes changes the stored contentHash", async () => {
+    const family = await drizzleRepos.fontRepo.createFamily(db, {
+      projectId: PROJECT_ID,
+      name: "Brand Sans",
+    });
+    const first = await drizzleRepos.fontRepo.upsertFace(db, {
+      familyId: family.id,
+      weight: 400,
+      style: "normal",
+      format: "otf",
+      bytes: Buffer.from([1, 2, 3]),
+    });
+    const firstFound = await drizzleRepos.fontRepo.findFaceBytes(db, first.id);
+
+    const second = await drizzleRepos.fontRepo.upsertFace(db, {
+      familyId: family.id,
+      weight: 400,
+      style: "normal",
+      format: "otf",
+      bytes: Buffer.from([9, 9, 9, 9]),
+    });
+    const secondFound = await drizzleRepos.fontRepo.findFaceBytes(db, second.id);
+
+    // Still the same row (Task 1's replace-in-place semantics), but the
+    // hash must have moved with the bytes.
+    expect(second.id).toBe(first.id);
+    expect(secondFound?.contentHash).not.toBe(firstFound?.contentHash);
+  });
+
+  it("hashes bytes deterministically: identical bytes hash the same, different bytes hash differently", async () => {
+    const family = await drizzleRepos.fontRepo.createFamily(db, {
+      projectId: PROJECT_ID,
+      name: "Brand Sans",
+    });
+    const faceA = await drizzleRepos.fontRepo.upsertFace(db, {
+      familyId: family.id,
+      weight: 400,
+      style: "normal",
+      format: "otf",
+      bytes: Buffer.from([5, 6, 7]),
+    });
+    const faceB = await drizzleRepos.fontRepo.upsertFace(db, {
+      familyId: family.id,
+      weight: 400,
+      style: "italic",
+      format: "otf",
+      bytes: Buffer.from([5, 6, 7]),
+    });
+    const faceC = await drizzleRepos.fontRepo.upsertFace(db, {
+      familyId: family.id,
+      weight: 700,
+      style: "normal",
+      format: "otf",
+      bytes: Buffer.from([8, 8, 8]),
+    });
+
+    const foundA = await drizzleRepos.fontRepo.findFaceBytes(db, faceA.id);
+    const foundB = await drizzleRepos.fontRepo.findFaceBytes(db, faceB.id);
+    const foundC = await drizzleRepos.fontRepo.findFaceBytes(db, faceC.id);
+
+    expect(foundA?.contentHash).toBe(foundB?.contentHash);
+    expect(foundA?.contentHash).not.toBe(foundC?.contentHash);
   });
 
   // Task 3 review, fix round 1, item 1: countFacesForProject previously

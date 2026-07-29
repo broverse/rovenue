@@ -687,6 +687,13 @@
       "when": 1785269745601,
       "tag": "0097_paywall_fonts",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1785292730240,
+      "tag": "0098_font_face_content_hash",
+      "breakpoints": true
     }
   ]
 }

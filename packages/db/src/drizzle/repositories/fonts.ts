@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "../client";
 import {
@@ -52,6 +53,10 @@ export async function upsertFace(
   db: Db,
   input: UpsertFaceInput,
 ): Promise<FontFace> {
+  // One hash, one meaning (Task 7): SHA-256 of the face's bytes,
+  // lowercase hex. The identical value is stored here, served as the
+  // device route's ETag, and used as its URL segment.
+  const contentHash = createHash("sha256").update(input.bytes).digest("hex");
   const [row] = await db
     .insert(fontFaces)
     .values({
@@ -61,6 +66,7 @@ export async function upsertFace(
       format: input.format,
       bytes: input.bytes,
       byteSize: input.bytes.byteLength,
+      contentHash,
     })
     .onConflictDoUpdate({
       target: [fontFaces.familyId, fontFaces.weight, fontFaces.style],
@@ -68,6 +74,10 @@ export async function upsertFace(
         format: input.format,
         bytes: input.bytes,
         byteSize: input.bytes.byteLength,
+        // A re-upload that changed the bytes but left a stale hash
+        // behind is exactly the bug Task 7 exists to prevent — this
+        // must be in the UPDATE set-list, not only the INSERT values.
+        contentHash,
       },
     })
     .returning();
@@ -80,6 +90,7 @@ export interface FaceMeta {
   style: string;
   format: string;
   byteSize: number;
+  contentHash: string;
 }
 
 export interface FamilyWithFaces extends FontFamily {
@@ -106,6 +117,7 @@ export async function listFamiliesWithFaces(
         style: fontFaces.style,
         format: fontFaces.format,
         byteSize: fontFaces.byteSize,
+        contentHash: fontFaces.contentHash,
       },
     })
     .from(fontFamilies)
@@ -130,6 +142,7 @@ export interface FaceBytes {
   bytes: Buffer;
   format: string;
   projectId: string;
+  contentHash: string;
 }
 
 /**
@@ -146,6 +159,7 @@ export async function findFaceBytes(
       bytes: fontFaces.bytes,
       format: fontFaces.format,
       projectId: fontFamilies.projectId,
+      contentHash: fontFaces.contentHash,
     })
     .from(fontFaces)
     .innerJoin(fontFamilies, eq(fontFaces.familyId, fontFamilies.id))

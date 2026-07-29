@@ -2998,6 +2998,13 @@ export const fontFaces = pgTable(
     format: text("format").notNull(),
     bytes: bytea("bytes").notNull(),
     byteSize: integer("byteSize").notNull(),
+    // SHA-256 of `bytes`, lowercase hex. Denormalised at write time
+    // (Task 7) so the metadata-only list query never has to touch the
+    // `bytes` column to report it — the same value is also served as
+    // the device route's `ETag` and its URL's content-hash segment, so
+    // the URL changes whenever a re-upload changes the bytes and
+    // `immutable` caching stays honest. See fonts.ts module comment.
+    contentHash: text("contentHash").notNull(),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),

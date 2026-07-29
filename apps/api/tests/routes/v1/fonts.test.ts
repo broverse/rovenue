@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { FONT_FILE_CACHE_MAX_AGE_SECONDS } from "@rovenue/shared";
 
 // =============================================================
-// GET /v1/fonts/:faceId/file (paywall fonts wave E1, Task 5)
+// GET /v1/fonts/:faceId/:contentHash/file (paywall fonts wave E1,
+// Task 5 + Task 7)
 // =============================================================
 //
 // Mounts the REAL `apiKeyAuth("any")` middleware ahead of `fontsRoute`
@@ -26,6 +28,14 @@ import { FONT_FILE_CACHE_MAX_AGE_SECONDS } from "@rovenue/shared";
 // packages/db/src/drizzle/repositories/fonts.integration.test.ts. This
 // file pins the ROUTE's reaction (200/404, headers, byte-for-byte
 // body), not that query.
+//
+// Task 7: the URL now carries the face's content hash
+// (`/:faceId/:contentHash/file`), so `immutable` caching is honest even
+// though `upsertFace` replaces bytes in place under the same face id.
+// The mock's `contentHash` here is a REAL sha256 of `uploadedBytes`
+// (not a fixture string) so the "correct hash" test can't pass by
+// coincidence, and a mismatched-hash test genuinely exercises the
+// comparison rather than two accidentally-equal fixtures.
 
 const PROJECT_ID = "proj_test";
 const OTHER_PROJECT_ID = "proj_other";
@@ -43,6 +53,12 @@ function otfBytes(): Uint8Array {
 }
 
 const uploadedBytes = otfBytes();
+const CONTENT_HASH = createHash("sha256").update(uploadedBytes).digest("hex");
+// A well-formed hash of DIFFERENT bytes — stands in for "the face was
+// re-uploaded since this URL was minted" (Task 7's stale-hash case).
+const STALE_HASH = createHash("sha256")
+  .update(new Uint8Array([0x4f, 0x54, 0x54, 0x4f, 0xff]))
+  .digest("hex");
 
 const apiKeyRecords: Record<
   string,
@@ -106,8 +122,12 @@ function app() {
     .route("/v1/fonts", fontsRoute);
 }
 
-function getFaceFile(faceId: string, opts?: { key?: string }) {
-  return app().request(`/v1/fonts/${faceId}/file`, {
+function getFaceFile(
+  faceId: string,
+  contentHash: string,
+  opts?: { key?: string },
+) {
+  return app().request(`/v1/fonts/${faceId}/${contentHash}/file`, {
     headers: { authorization: `Bearer ${opts?.key ?? PUBLIC_KEY}` },
   });
 }
@@ -137,34 +157,52 @@ beforeEach(() => {
       bytes: Buffer.from(uploadedBytes),
       format: "otf",
       projectId: PROJECT_ID,
+      contentHash: CONTENT_HASH,
     };
   });
 });
 
-describe("GET /v1/fonts/:faceId/file", () => {
+describe("GET /v1/fonts/:faceId/:contentHash/file", () => {
   it("serves the bytes with the format's content type", async () => {
-    const res = await getFaceFile(FACE_ID);
+    const res = await getFaceFile(FACE_ID, CONTENT_HASH);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("font/otf");
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(uploadedBytes);
   });
 
-  it("caches immutably, because a face's bytes never change", async () => {
-    const res = await getFaceFile(FACE_ID);
+  it("caches immutably, with the ETag equal to the content hash", async () => {
+    const res = await getFaceFile(FACE_ID, CONTENT_HASH);
     const cc = res.headers.get("cache-control") ?? "";
     expect(cc).toContain("immutable");
     expect(cc).toContain(`max-age=${FONT_FILE_CACHE_MAX_AGE_SECONDS}`);
-    expect(res.headers.get("etag")).toBeTruthy();
+    expect(res.headers.get("etag")).toBe(CONTENT_HASH);
+  });
+
+  it("404s a stale-but-well-formed hash for a face that has since been re-uploaded", async () => {
+    const res = await getFaceFile(FACE_ID, STALE_HASH);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s a hash belonging to a different face", async () => {
+    // FACE_ID's real hash is CONTENT_HASH; requesting some OTHER face's
+    // hash against FACE_ID's own faceId must not serve it.
+    const otherFaceHash = createHash("sha256")
+      .update(new Uint8Array([0x4f, 0x54, 0x54, 0x4f, 0x01]))
+      .digest("hex");
+    const res = await getFaceFile(FACE_ID, otherFaceHash);
+    expect(res.status).toBe(404);
   });
 
   it("404s a face whose family was deleted", async () => {
     await deleteFamily("family_1");
-    const res = await getFaceFile(FACE_ID);
+    const res = await getFaceFile(FACE_ID, CONTENT_HASH);
     expect(res.status).toBe(404);
   });
 
   it("refuses a key from another project", async () => {
-    const res = await getFaceFile(FACE_ID, { key: OTHER_PUBLIC_KEY });
+    const res = await getFaceFile(FACE_ID, CONTENT_HASH, {
+      key: OTHER_PUBLIC_KEY,
+    });
     expect(res.status).toBe(404);
   });
 });

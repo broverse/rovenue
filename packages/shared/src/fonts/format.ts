@@ -6,7 +6,10 @@ export const FONT_ALLOWED_FORMATS: readonly FontFormat[] = ["otf", "ttf", "woff2
 export const FONT_FACE_MAX_BYTES = 2 * 1024 * 1024;
 /** Four families at six weights — a bound on storage, not a ration. */
 export const FONT_FACES_MAX_PER_PROJECT = 24;
-/** A face's bytes never change (a re-upload creates a new row), so the
+/** The bytes at a given font-file URL never change, because the URL
+ *  carries the face's content hash (Task 1's `upsertFace` replaces a
+ *  repeated weight/style's bytes in place, under the same face id — a
+ *  re-upload therefore produces a different URL, not a new row), so the
  *  served file is immutable for a year. */
 export const FONT_FILE_CACHE_MAX_AGE_SECONDS = 31536000;
 
