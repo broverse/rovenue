@@ -2254,6 +2254,8 @@ export const billingTierLimits = pgTable(
     sqlLimit: integer("sql_limit"),
     retentionDays: integer("retention_days").notNull(),
     auditLogDays: integer("audit_log_days").notNull(),
+    // NULL means unlimited (migration 0099), matching eventsLimit/sqlLimit.
+    assetStorageBytesLimit: bigint("asset_storage_bytes_limit", { mode: "number" }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.tier, t.cycle] }),
@@ -3023,3 +3025,69 @@ export const fontFaces = pgTable(
 
 export type FontFace = typeof fontFaces.$inferSelect;
 export type NewFontFace = typeof fontFaces.$inferInsert;
+
+// =============================================================
+// paywall assets (paywall_assets / paywall_asset_usages)
+// =============================================================
+//
+// Uploaded images, video and Lottie files served from an S3-compatible
+// bucket. Rows are IMMUTABLE — created and deleted, never overwritten
+// (design spec §4.1) — which is why `storageKey` carries no content
+// hash: the id alone already guarantees a key's bytes are permanent.
+//
+// `contentHash` is still stored, for two jobs: the partial unique index
+// that makes a repeat upload idempotent, and the ETag on the served
+// object.
+
+export const paywallAssets = pgTable(
+  "paywall_assets",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    storageKey: text("storage_key").notNull(),
+    contentHash: text("content_hash").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    sourceFormat: text("source_format"),
+    sourceWidth: integer("source_width"),
+    sourceHeight: integer("source_height"),
+    policyVersion: integer("policy_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => ({
+    hashKey: uniqueIndex("paywall_assets_project_hash_key")
+      .on(t.projectId, t.contentHash)
+      .where(sql`${t.deletedAt} is null`),
+  }),
+);
+
+export type PaywallAsset = typeof paywallAssets.$inferSelect;
+export type NewPaywallAsset = typeof paywallAssets.$inferInsert;
+
+export const paywallAssetUsages = pgTable(
+  "paywall_asset_usages",
+  {
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => paywallAssets.id, { onDelete: "cascade" }),
+    paywallId: text("paywall_id")
+      .notNull()
+      .references(() => paywalls.id, { onDelete: "cascade" }),
+    versionId: text("version_id")
+      .notNull()
+      .references(() => paywallVersions.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.assetId, t.versionId] }),
+  }),
+);
+
+export type PaywallAssetUsage = typeof paywallAssetUsages.$inferSelect;

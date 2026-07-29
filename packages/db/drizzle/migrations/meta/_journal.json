@@ -694,6 +694,13 @@
       "when": 1785292730240,
       "tag": "0098_font_face_content_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1785293000000,
+      "tag": "0099_paywall_assets",
+      "breakpoints": true
     }
   ]
 }
