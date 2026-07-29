@@ -62,12 +62,17 @@ import {
   CAROUSEL_PAGE_SCROLL_SNAP_ALIGN,
   CAROUSEL_TRACK_SCROLL_SNAP_TYPE,
   carouselDotStyle,
+  borderStyle,
+  NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX,
+  resolveButtonVisualStyle,
   resolveTextColor,
   resolveThemeColor,
   resolveThemeUrl,
   stackContainerStyle,
+  textBadgeStyle,
   videoStyle,
   Z_OVERLAY_CHILD_STYLE,
+  type ButtonBaseVisual,
 } from "./styles";
 import { useNodeVisible } from "./visibility";
 
@@ -264,6 +269,7 @@ function renderText(node: TextNode, ctx: RenderCtx): ReactElement | null {
         color: resolveTextColor(node.color, ctx.colorScheme),
         textAlign: node.align ? ALIGN_TO_TEXT[node.align] : undefined,
         ...roleStyle,
+        ...textBadgeStyle(node.background, node.cornerRadius, ctx.colorScheme),
       }}
     >
       {text}
@@ -282,16 +288,21 @@ function renderImage(node: ImageNode, ctx: RenderCtx): ReactElement {
         maxWidth: "100%",
         height: node.height !== undefined ? `${node.height}px` : undefined,
         borderRadius: node.cornerRadius !== undefined ? `${node.cornerRadius}px` : undefined,
+        border: borderStyle(node.border, ctx.colorScheme),
       }}
     />
   );
 }
 
-const BUTTON_STYLE_BASE: Record<ButtonNode["style"], { background?: string; color: string; border: string }> = {
+const BUTTON_STYLE_BASE: Record<ButtonNode["style"], ButtonBaseVisual> = {
   primary: { background: "#111111", color: "#ffffff", border: "none" },
   secondary: { background: "#eeeeee", color: "#111111", border: "none" },
   plain: { background: "transparent", color: "#111111", border: "none" },
 };
+
+/** `purchaseButton` has no style variant — a single fixed base visual, same
+ *  values it always drew inline before this wave added its custom props. */
+const PURCHASE_BUTTON_BASE_VISUAL: ButtonBaseVisual = { background: "#111111", color: "#ffffff", border: "none" };
 
 function renderButton(node: ButtonNode, ctx: RenderCtx): ReactElement | null {
   // The funnel runner suppresses restore entirely when there's nowhere to
@@ -316,10 +327,9 @@ function renderButton(node: ButtonNode, ctx: RenderCtx): ReactElement | null {
       style={{
         cursor: "pointer",
         padding: "10px 16px",
-        borderRadius: "8px",
         fontSize: "14px",
         fontWeight: 600,
-        ...visual,
+        ...resolveButtonVisualStyle(visual, node, NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX, ctx.colorScheme),
       }}
     >
       {label}
@@ -454,13 +464,15 @@ function renderPurchaseButton(node: PurchaseButtonNode, ctx: RenderCtx): ReactEl
       style={{
         cursor: selectedId ? "pointer" : "not-allowed",
         padding: "12px 20px",
-        borderRadius: "8px",
         fontSize: "16px",
         fontWeight: 700,
-        background: "#111111",
-        color: "#ffffff",
-        border: "none",
         opacity: selectedId ? 1 : 0.5,
+        ...resolveButtonVisualStyle(
+          PURCHASE_BUTTON_BASE_VISUAL,
+          node,
+          NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX,
+          ctx.colorScheme,
+        ),
       }}
     >
       {label}

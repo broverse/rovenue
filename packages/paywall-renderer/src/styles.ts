@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { NodeSize, StackNode, ThemeColor } from "@rovenue/shared/paywall";
+import type { NodeBorder, NodeSize, StackNode, ThemeColor } from "@rovenue/shared/paywall";
 
 // =============================================================
 // Pure style-computation helpers. No CSS framework — every node
@@ -48,6 +48,89 @@ export function resolveThemeUrl(
   return url.light;
 }
 
+// =============================================================
+// Node style pass (border / background / labelColor / cornerRadius, spec
+// 2026-07-29). All additive: every helper below returns exactly what the
+// pre-existing call sites produced when the new props are absent, which is
+// the regression pin this wave requires on every platform.
+// =============================================================
+
+/**
+ * CSS `border` shorthand for a `NodeBorder` — always drawn INSIDE the node's
+ * own `cornerRadius` (spec: standard CSS box-model already does this, so no
+ * extra clipping is needed here). `NodeBorder`'s own doc comment is why both
+ * fields are read together rather than independently: a border with only a
+ * width or only a color would render nothing meaningful, so the type makes
+ * that state unrepresentable and this helper has nothing to guard against.
+ * Absent `border` -> undefined, i.e. no CSS `border` instruction at all,
+ * which is today's output on every node type that gains this prop.
+ */
+export function borderStyle(
+  border: NodeBorder | undefined,
+  colorScheme: "light" | "dark",
+): string | undefined {
+  if (!border) return undefined;
+  return `${border.width}px solid ${resolveThemeColor(border.color, colorScheme)}`;
+}
+
+/** A text node's optional badge/chip fill — background + cornerRadius, the
+ *  only two props `TextNode` gains (spec: no padding). Absent background AND
+ *  absent cornerRadius resolve to `{ backgroundColor: undefined, borderRadius:
+ *  undefined }`, i.e. no style instruction at all — today's output. */
+export function textBadgeStyle(
+  background: ThemeColor | undefined,
+  cornerRadius: number | undefined,
+  colorScheme: "light" | "dark",
+): CSSProperties {
+  return {
+    backgroundColor: resolveThemeColor(background, colorScheme),
+    borderRadius: cornerRadius !== undefined ? `${cornerRadius}px` : undefined,
+  };
+}
+
+/** The visual a button/purchaseButton draws before any of its own custom
+ *  style props are considered — for `button` this is `BUTTON_STYLE_BASE[node
+ *  .style]`, for `purchaseButton` (which has no variant) a single fixed
+ *  visual. Both live in nodes.tsx, next to the JSX that consumes them. */
+export type ButtonBaseVisual = { background?: string; color: string; border: string };
+
+/** The subset of `ButtonNode`/`PurchaseButtonNode` this wave added — passed
+ *  in directly from the node object, which is structurally a superset. */
+export type ButtonCustomStyleProps = {
+  background?: ThemeColor;
+  labelColor?: ThemeColor;
+  border?: NodeBorder;
+  cornerRadius?: number;
+};
+
+/**
+ * Merge a button's variant/base visual with its own optional custom style
+ * props. Custom always wins; an absent custom prop leaves the base's own
+ * value untouched — which is the regression pin: a button/purchaseButton
+ * with none of the new props set produces exactly `{ background: base
+ * .background, color: base.color, border: base.border, borderRadius:
+ * `${defaultCornerRadiusPx}px` }`, byte-identical to what nodes.tsx used to
+ * inline directly.
+ */
+export function resolveButtonVisualStyle(
+  base: ButtonBaseVisual,
+  custom: ButtonCustomStyleProps,
+  defaultCornerRadiusPx: number,
+  colorScheme: "light" | "dark",
+): CSSProperties {
+  return {
+    background: resolveThemeColor(custom.background, colorScheme) ?? base.background,
+    color: resolveThemeColor(custom.labelColor, colorScheme) ?? base.color,
+    border: borderStyle(custom.border, colorScheme) ?? base.border,
+    borderRadius: `${custom.cornerRadius ?? defaultCornerRadiusPx}px`,
+  };
+}
+
+/** Both `button` and `purchaseButton` drew a hardcoded `"8px"` corner radius
+ *  before either type had a `cornerRadius` prop — hoisted so `cornerRadius`'s
+ *  absence resolves to the exact same literal, not a re-typed copy of it. */
+export const NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX = 8;
+
 function nodeSizeToCss(size: NodeSize | undefined): string | undefined {
   if (size === undefined || size === "fit") return undefined;
   if (size === "fill") return "100%";
@@ -62,7 +145,10 @@ const ALIGN_TO_FLEX: Record<"start" | "center" | "end", CSSProperties["alignItem
 
 /** Container styles for a stack node: axis v/h drive flex, z is a single-cell grid overlay. */
 export function stackContainerStyle(
-  node: Pick<StackNode, "axis" | "spacing" | "align" | "padding" | "size" | "background" | "cornerRadius">,
+  node: Pick<
+    StackNode,
+    "axis" | "spacing" | "align" | "padding" | "size" | "background" | "cornerRadius" | "border"
+  >,
   colorScheme: "light" | "dark",
 ): CSSProperties {
   const style: CSSProperties = {
@@ -76,6 +162,7 @@ export function stackContainerStyle(
     paddingLeft: node.padding?.l !== undefined ? `${node.padding.l}px` : undefined,
     backgroundColor: resolveThemeColor(node.background, colorScheme),
     borderRadius: node.cornerRadius !== undefined ? `${node.cornerRadius}px` : undefined,
+    border: borderStyle(node.border, colorScheme),
   };
 
   if (node.axis === "z") {

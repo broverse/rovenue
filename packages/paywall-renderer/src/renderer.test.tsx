@@ -716,6 +716,35 @@ describe("PaywallRenderer", () => {
       // base labelKey "purchase" resolves normally; "selected" never activates outside cellTemplate.
       expect(getByText("Subscribe for $39.99")).toBeInTheDocument();
     });
+
+    it("flows a node-level border/labelColor override through applyOverrides onto the resolved style (node style pass)", () => {
+      const config = eligibilityConfig();
+      const purchaseNode = config.root.children.find(
+        (c): c is Extract<PaywallNode, { type: "purchaseButton" }> => c.type === "purchaseButton",
+      )!;
+      purchaseNode.overrides = [
+        {
+          when: { kind: "introEligible" },
+          props: {
+            labelColor: { light: "#ff0000" },
+            border: { width: 3, color: { light: "#00ff00" } },
+          },
+        },
+      ];
+      const { container } = render(
+        <PaywallRenderer
+          config={config}
+          offering={offering}
+          priceView={priceView}
+          eligibility={{ annual: true }}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      const button = container.querySelector('[data-rov-node="purchase"]') as HTMLElement;
+      expect(button.style.color).toBe("rgb(255, 0, 0)");
+      expect(button.style.border).toBe("3px solid rgb(0, 255, 0)");
+    });
   });
 
   describe("cellTemplate", () => {
@@ -999,6 +1028,189 @@ describe("PaywallRenderer", () => {
       expect(selected.style.border).toBe("2px solid rgb(17, 17, 17)");
       expect(unselected.style.border).toBe("1px solid rgb(204, 204, 204)");
     });
+  });
+});
+
+describe("node style pass — border / background / labelColor / cornerRadius", () => {
+  it("draws a text node's badge background + cornerRadius", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({
+          type: "text",
+          id: "badge",
+          key: "title",
+          role: "caption",
+          background: { light: "#eeeeee", dark: "#333333" },
+          cornerRadius: 6,
+        })}
+        {...base}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="badge"]') as HTMLElement;
+    expect(el.style.backgroundColor).toBe("rgb(238, 238, 238)");
+    expect(el.style.borderRadius).toBe("6px");
+  });
+
+  it("draws no badge background/radius on a text node without them (regression pin)", () => {
+    const { container } = render(
+      <PaywallRenderer config={cfg({ type: "text", id: "plain", key: "title", role: "caption" })} {...base} />,
+    );
+    const el = container.querySelector('[data-rov-node="plain"]') as HTMLElement;
+    expect(el.style.backgroundColor).toBe("");
+    expect(el.style.borderRadius).toBe("");
+  });
+
+  it("draws an image node's border inside its cornerRadius", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({
+          type: "image",
+          id: "framed",
+          url: { light: "https://example.com/a.png" },
+          cornerRadius: 4,
+          border: { width: 2, color: { light: "#000000" } },
+        })}
+        {...base}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="framed"]') as HTMLElement;
+    expect(el.style.borderRadius).toBe("4px");
+    expect(el.style.border).toBe("2px solid rgb(0, 0, 0)");
+  });
+
+  it("draws no border on an image node without one (regression pin)", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({ type: "image", id: "plain-img", url: { light: "https://example.com/a.png" } })}
+        {...base}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="plain-img"]') as HTMLElement;
+    expect(el.style.border).toBe("");
+  });
+
+  it("lets a button's custom background/labelColor/border/cornerRadius override its style variant", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({
+          type: "button",
+          id: "custom-btn",
+          labelKey: "close",
+          style: "primary",
+          action: { kind: "close" },
+          background: { light: "#ff0000" },
+          labelColor: { light: "#0000ff" },
+          border: { width: 3, color: { light: "#00ff00" } },
+          cornerRadius: 20,
+        })}
+        {...base}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="custom-btn"]') as HTMLElement;
+    expect(el.style.background).toBe("rgb(255, 0, 0)");
+    expect(el.style.color).toBe("rgb(0, 0, 255)");
+    expect(el.style.border).toBe("3px solid rgb(0, 255, 0)");
+    expect(el.style.borderRadius).toBe("20px");
+  });
+
+  it("leaves a button's variant style untouched when it has none of the new custom props (regression pin)", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({
+          type: "button",
+          id: "plain-btn",
+          labelKey: "close",
+          style: "secondary",
+          action: { kind: "close" },
+        })}
+        {...base}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="plain-btn"]') as HTMLElement;
+    expect(el.style.background).toBe("rgb(238, 238, 238)");
+    expect(el.style.color).toBe("rgb(17, 17, 17)");
+    // Not `expect(el.style.border).toBe("none")`: jsdom's CSSStyleDeclaration
+    // (cssstyle) can't round-trip the bare "none" shorthand back out of
+    // `style.border` at all (verified directly against jsdom above — setting
+    // `style.border = "none"` leaves `cssText` empty) — a jsdom limitation,
+    // not a renderer bug. `resolveButtonVisualStyle`'s exact `border: "none"`
+    // byte-identity with the variant base is covered at the pure-helper level
+    // in styles.test.ts instead.
+    expect(el.style.borderRadius).toBe("8px");
+  });
+
+  it("lets a purchaseButton's custom background/labelColor/border/cornerRadius override its base visual", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({
+          type: "purchaseButton",
+          id: "custom-purchase",
+          labelKey: "purchase",
+          background: { light: "#ff0000" },
+          labelColor: { light: "#0000ff" },
+          border: { width: 3, color: { light: "#00ff00" } },
+          cornerRadius: 20,
+        })}
+        offering={offering}
+        priceView={priceView}
+        colorScheme="light"
+        onPurchase={noop}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="custom-purchase"]') as HTMLElement;
+    expect(el.style.background).toBe("rgb(255, 0, 0)");
+    expect(el.style.color).toBe("rgb(0, 0, 255)");
+    expect(el.style.border).toBe("3px solid rgb(0, 255, 0)");
+    expect(el.style.borderRadius).toBe("20px");
+  });
+
+  it("leaves purchaseButton's default visual untouched with none of the new custom props (regression pin)", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({ type: "purchaseButton", id: "plain-purchase", labelKey: "purchase" })}
+        offering={offering}
+        priceView={priceView}
+        colorScheme="light"
+        onPurchase={noop}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="plain-purchase"]') as HTMLElement;
+    expect(el.style.background).toBe("rgb(17, 17, 17)");
+    expect(el.style.color).toBe("rgb(255, 255, 255)");
+    // See the same jsdom "none" shorthand note above.
+    expect(el.style.borderRadius).toBe("8px");
+  });
+
+  it("draws a stack node's border inside its cornerRadius", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({
+          type: "stack",
+          id: "framed-stack",
+          axis: "v",
+          children: [],
+          cornerRadius: 10,
+          border: { width: 2, color: { light: "#101010", dark: "#efefef" } },
+        })}
+        offering={offering}
+        colorScheme="dark"
+        onPurchase={noop}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="framed-stack"]') as HTMLElement;
+    expect(el.style.borderRadius).toBe("10px");
+    expect(el.style.border).toBe("2px solid rgb(239, 239, 239)");
+  });
+
+  it("draws no border on a stack node without one (regression pin)", () => {
+    const { container } = render(
+      <PaywallRenderer
+        config={cfg({ type: "stack", id: "plain-stack", axis: "v", children: [] })}
+        {...base}
+      />,
+    );
+    const el = container.querySelector('[data-rov-node="plain-stack"]') as HTMLElement;
+    expect(el.style.border).toBe("");
   });
 });
 
