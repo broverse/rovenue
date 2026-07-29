@@ -892,8 +892,12 @@ import { describe, it, expect, vi } from "vitest";
 // parses process.env at import time, and a plain `beforeAll` would run
 // after the module graph is already built — a known footgun in this
 // repo, where top-of-file `process.env` assignments are dead code.
+// The base deliberately carries BOTH hazards this module has to
+// survive: a path prefix (path-style MinIO puts the bucket in the path)
+// and a trailing slash. Testing against a bare origin would leave both
+// code paths unexercised while looking fully covered.
 vi.hoisted(() => {
-  process.env.ASSET_PUBLIC_BASE_URL ??= "https://cdn.example.test";
+  process.env.ASSET_PUBLIC_BASE_URL ??= "https://cdn.example.test/rovenue-assets/";
 });
 
 import { buildStorageKey, publicUrl, parseAssetUrl } from "../../src/lib/asset-store";
@@ -922,13 +926,19 @@ describe("asset URL shape", () => {
   });
 
   it("does not double the slash when the base URL has a trailing one", () => {
-    // `publicUrl` strips trailing slashes from the base itself, so this
-    // is a property of the function, not of a re-imported module — no
-    // module-cache trickery needed (and none that would work, since env
-    // is frozen at import).
+    // The hoisted base above ends in "/", so this exercises the strip
+    // for real. Against a slash-less base the test would be
+    // self-confirming — deleting the strip from `publicUrl` would leave
+    // it green, because there would be nothing to strip.
     const key = buildStorageKey(projectId, assetId, "image");
+    expect(publicUrl(key)).toBe(`https://cdn.example.test/rovenue-assets/${key}`);
     expect(publicUrl(key)).not.toContain("//prj_");
-    expect(publicUrl(key).startsWith("https://cdn.example.test/")).toBe(true);
+  });
+
+  it("rejects a URL under our origin but outside our base path", () => {
+    expect(
+      parseAssetUrl(`https://cdn.example.test/other-bucket/${projectId}/${assetId}.webp`),
+    ).toBeNull();
   });
 
   it("returns null for a URL that is not ours", () => {
@@ -1012,7 +1022,7 @@ export function publicUrl(storageKey: string): string {
   return `${base}/${storageKey}`;
 }
 
-const KEY_PATTERN = /^\/([^/]+)\/([^/.]+)\.(webp|mp4|json)$/;
+const KEY_PATTERN = /^([^/]+)\/([^/.]+)\.(webp|mp4|json)$/;
 
 export function parseAssetUrl(
   url: string,
@@ -1028,7 +1038,19 @@ export function parseAssetUrl(
     return null;
   }
   if (parsed.origin !== baseParsed.origin) return null;
-  const match = KEY_PATTERN.exec(parsed.pathname);
+
+  // The base URL may carry a path prefix, and in one supported
+  // deployment it always does: path-style MinIO puts the bucket in the
+  // path (`http://host:9000/rovenue-assets`). Anchoring the pattern to
+  // the whole pathname would make every parse return null there — and
+  // a null here does not look like a failure, it looks like "no paywall
+  // uses this asset", which is the answer that gets an in-use asset
+  // deleted. So strip the base's own path before matching.
+  const basePath = baseParsed.pathname.replace(/\/+$/, "");
+  if (basePath && !parsed.pathname.startsWith(`${basePath}/`)) return null;
+  const keyPath = parsed.pathname.slice(basePath.length).replace(/^\/+/, "");
+
+  const match = KEY_PATTERN.exec(keyPath);
   if (!match) return null;
   return { projectId: match[1]!, assetId: match[2]! };
 }
