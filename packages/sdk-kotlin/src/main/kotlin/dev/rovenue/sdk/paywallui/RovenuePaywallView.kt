@@ -472,6 +472,13 @@ class RovenuePaywallView @JvmOverloads constructor(
     }
 
     private fun startPurchase() {
+        // Preview must never charge — gated FIRST, before any purchasing
+        // state (isPurchasing/selectedPackageId) is even read, so a preview
+        // build never reaches Rovenue.shared.purchase. No fabricated
+        // success/failure callback either: onPurchaseCompleted/
+        // onPurchaseFailed are left untouched, same as if the tap never
+        // happened. See purchaseGate's doc.
+        if (!purchaseGate(previewMode = options.previewMode)) return
         if (isPurchasing) return
         val id = selectedPackageId ?: return
         val pkg = paywall?.offering?.packageBy(id) ?: return

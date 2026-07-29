@@ -34,6 +34,12 @@ import kotlinx.coroutines.launch
  * (see PreviewPollDecision.kt). Mirrors the SwiftUI sibling
  * (`RovenuePaywallPreviewView.swift`) exactly.
  *
+ * Preview must never charge: the wrapped [RovenuePaywallView] is always
+ * bound with `previewMode = true` (see [buildPreviewWrappedOptions]), which
+ * gates its internal `startPurchase()` FIRST via [purchaseGate] — a tap on
+ * "Subscribe" here can never reach `Rovenue.shared.purchase`, not merely
+ * suppress the reaction to it.
+ *
  * Usage:
  * ```kotlin
  * val previewView = RovenuePaywallPreviewView(context)
@@ -91,9 +97,11 @@ class RovenuePaywallPreviewView @JvmOverloads constructor(
      * the short-lived preview [token] (see [Rovenue.getPaywallPreview]).
      * [options]' `onPurchaseCompleted`/`onPurchaseFailed`/`onRestore` are
      * intentionally IGNORED — the wrapped [RovenuePaywallView] is always
-     * bound with no-op purchase/restore callbacks (see [buildWrappedOptions]'
-     * doc): previewing a draft must never be mistaken for a completed sale.
-     * `locale`/`darkMode`/`onClose`/`onUrl` pass straight through.
+     * bound with no-op purchase/restore callbacks AND `previewMode = true`
+     * (see [buildPreviewWrappedOptions]' doc): previewing a draft must never
+     * be mistaken for a completed sale, and must never even START a real
+     * billing flow. `locale`/`darkMode`/`onClose`/`onUrl` pass straight
+     * through.
      */
     fun bindPreview(token: String, options: PaywallViewOptions = PaywallViewOptions()) {
         this.token = token
@@ -184,7 +192,7 @@ class RovenuePaywallPreviewView @JvmOverloads constructor(
             paywallView.visibility = View.VISIBLE
             loadingView.visibility = View.GONE
             retryContainer.visibility = View.GONE
-            paywallView.bind(current, buildWrappedOptions())
+            paywallView.bind(current, buildPreviewWrappedOptions(hostOptions))
         } else if (loadError != null) {
             paywallView.visibility = View.GONE
             loadingView.visibility = View.GONE
@@ -195,33 +203,6 @@ class RovenuePaywallPreviewView @JvmOverloads constructor(
             retryContainer.visibility = View.GONE
         }
     }
-
-    /**
-     * The [PaywallViewOptions] the wrapped [RovenuePaywallView] is actually
-     * bound with. Previewing a draft must NEVER charge: a preview token
-     * carries no real purchase intent, so both purchase-outcome callbacks
-     * are no-ops and restore is a no-op too (there is nothing meaningful to
-     * restore against a draft that isn't published). `onClose`/`onUrl` are
-     * pure navigation and pass straight through to the preview host.
-     *
-     * KNOWN GAP (mirrors the SwiftUI sibling): [RovenuePaywallView]'s
-     * internal `startPurchase()` calls [Rovenue.purchase] directly when its
-     * purchase button is tapped — it does not consult
-     * `onPurchaseCompleted`/`onPurchaseFailed` before launching the real
-     * Play Billing flow, only after. These no-op callbacks suppress the
-     * *reaction* to a purchase outcome; they do not stop the tap from
-     * starting a REAL billing flow. Fixing that is out of scope here (wave
-     * D2 owns [RovenuePaywallView]/[NodeViewFactory]).
-     */
-    private fun buildWrappedOptions(): PaywallViewOptions = PaywallViewOptions(
-        locale = hostOptions.locale,
-        darkMode = hostOptions.darkMode,
-        onPurchaseCompleted = {},
-        onPurchaseFailed = {},
-        onClose = hostOptions.onClose,
-        onRestore = {},
-        onUrl = hostOptions.onUrl,
-    )
 
     private fun buildRetryContainer(context: Context): LinearLayout {
         val message = TextView(context).apply {
@@ -264,6 +245,36 @@ class RovenuePaywallPreviewView @JvmOverloads constructor(
         }
     }
 }
+
+/**
+ * The [PaywallViewOptions] the wrapped [RovenuePaywallView] is actually
+ * bound with, given the preview host's [hostOptions]. Previewing a draft
+ * must NEVER charge: `previewMode = true` gates [RovenuePaywallView]'s
+ * internal `startPurchase()` FIRST via [purchaseGate], so a tap on
+ * "Subscribe" here can never reach `Rovenue.purchase` at all — not merely
+ * suppress the *reaction* to a purchase outcome via no-op callbacks (which
+ * this also does, belt-and-braces). Restore is a no-op too — there is
+ * nothing meaningful to restore against a draft that isn't published, and
+ * [RovenuePaywallView] never calls a real restore API internally in the
+ * first place (restore is entirely host-delegated via `onRestore`), so the
+ * no-op closure alone already closed that path. `locale`/`darkMode`/
+ * `onClose`/`onUrl` are pure navigation/cosmetic and pass straight through
+ * to the preview host.
+ *
+ * A top-level, dependency-free pure function (not a private view method) so
+ * it is directly unit-testable without constructing any Android views —
+ * mirrors this module's other pure helpers (e.g. [previewPollDecision]).
+ */
+internal fun buildPreviewWrappedOptions(hostOptions: PaywallViewOptions): PaywallViewOptions = PaywallViewOptions(
+    locale = hostOptions.locale,
+    darkMode = hostOptions.darkMode,
+    onPurchaseCompleted = {},
+    onPurchaseFailed = {},
+    onClose = hostOptions.onClose,
+    onRestore = {},
+    onUrl = hostOptions.onUrl,
+    previewMode = true,
+)
 
 /** How often the poll loop re-fetches the preview while this view is on
  *  screen. Named rather than inlined per the "no magic values" convention —

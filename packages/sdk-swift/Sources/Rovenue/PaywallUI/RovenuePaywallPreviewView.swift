@@ -29,13 +29,14 @@ private let previewPillTopInset: CGFloat = 12
 private let previewPillTrailingInset: CGFloat = 12
 
 /// Fetches and renders an on-device preview of a draft paywall by its
-/// short-lived preview `token` (see `Rovenue.getPaywallPreview`). Purchase
-/// is never wired to the real StoreKit outcome callbacks here beyond a
-/// no-op — see the inline comment at the `RovenuePaywallView` call site —
-/// because previewing a draft must never be mistaken for a completed sale.
-/// `onClose`/`onUrl` pass straight through to the caller: they're
-/// navigation, not money, and the preview host (e.g. the dashboard's
-/// device-preview screen) still needs to react to them.
+/// short-lived preview `token` (see `Rovenue.getPaywallPreview`). Preview
+/// must never charge: the wrapped `RovenuePaywallView` is always bound with
+/// `previewMode: true` (see `buildWrappedView(shown:)`), which gates its
+/// internal `startPurchase()` FIRST via `purchaseGate` — a tap on
+/// "Subscribe" here can never reach `Rovenue.shared.purchase`, not merely
+/// suppress the reaction to it. `onClose`/`onUrl` pass straight through to
+/// the caller: they're navigation, not money, and the preview host (e.g.
+/// the dashboard's device-preview screen) still needs to react to them.
 public struct RovenuePaywallPreviewView: View {
     private let token: String
     private let locale: String?
@@ -70,26 +71,43 @@ public struct RovenuePaywallPreviewView: View {
     @ViewBuilder
     private var content: some View {
         if let shown {
-            RovenuePaywallView(
-                paywall: shown,
-                locale: locale,
-                // Previewing a draft must never charge: a preview token
-                // carries no real purchase intent, so both StoreKit-outcome
-                // callbacks are no-ops and restore is a no-op too (there is
-                // nothing meaningful to restore against a draft that isn't
-                // published). `onClose`/`onUrl` are pure navigation and pass
-                // straight through to the preview host.
-                onPurchaseCompleted: { _ in },
-                onPurchaseFailed: { _ in },
-                onClose: onClose,
-                onRestore: {},
-                onUrl: onUrl
-            )
+            buildWrappedView(shown: shown)
         } else if loadError != nil {
             retryView
         } else {
             ProgressView()
         }
+    }
+
+    /// The `RovenuePaywallView` this preview always wraps `shown` in.
+    ///
+    /// Previewing a draft must never charge: `previewMode: true` gates
+    /// `RovenuePaywallView.startPurchase()` FIRST (see `purchaseGate`), so
+    /// tapping "Subscribe" here can never reach `Rovenue.shared.purchase` —
+    /// not the no-op callbacks below, the gate itself. Restore is likewise
+    /// never wired to a real restore call: this view passes `onRestore: {}`
+    /// (there is nothing meaningful to restore against a draft that isn't
+    /// published), and `RovenuePaywallView` never calls
+    /// `Rovenue.shared.restorePurchases()` internally — restore is entirely
+    /// host-delegated via `onRestore`, so the no-op closure alone already
+    /// closes that path; no `previewMode` gate is needed for it.
+    /// `onClose`/`onUrl` are pure navigation and pass straight through to
+    /// the preview host.
+    ///
+    /// Not `private`: `PreviewModeTests` calls this directly (via
+    /// `@testable import`) to pin `previewMode: true` without needing a
+    /// SwiftUI view-testing dependency this package doesn't carry.
+    func buildWrappedView(shown: Paywall) -> RovenuePaywallView {
+        RovenuePaywallView(
+            paywall: shown,
+            locale: locale,
+            onPurchaseCompleted: { _ in },
+            onPurchaseFailed: { _ in },
+            onClose: onClose,
+            onRestore: {},
+            onUrl: onUrl,
+            previewMode: true
+        )
     }
 
     private var retryView: some View {

@@ -29,4 +29,10 @@ data class PaywallViewOptions(
      *  `url`-action button does anything; without a handler the button
      *  renders but is inert. */
     val onUrl: ((String) -> Unit)? = null,
+    /** `true` only for an on-device draft preview
+     *  ([RovenuePaywallPreviewView]) — gates `startPurchase()` FIRST via
+     *  [purchaseGate], before any purchasing state is touched, so a preview
+     *  never reaches `Rovenue.shared.purchase`. `false` for every ordinary
+     *  host, which is byte-identical to the pre-`previewMode` behavior. */
+    val previewMode: Boolean = false,
 )

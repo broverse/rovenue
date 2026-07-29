@@ -24,6 +24,12 @@ public struct RovenuePaywallView: View {
     private let onRestore: (() -> Void)?
     private let onUrl: ((URL) -> Void)?
     private let config: BuilderConfigModel?
+    /// `true` only for an on-device draft preview
+    /// (`RovenuePaywallPreviewView`) — gates `startPurchase()` FIRST via
+    /// `purchaseGate`, before any purchasing state is touched, so a preview
+    /// never reaches `Rovenue.shared.purchase`. `false` for every ordinary
+    /// host, which is byte-identical to the pre-`previewMode` behavior.
+    private let previewMode: Bool
 
     @Environment(\.colorScheme) private var environmentScheme
     @State private var selectedPackageId: String?
@@ -45,7 +51,8 @@ public struct RovenuePaywallView: View {
         onPurchaseFailed: ((Error) -> Void)? = nil,
         onClose: (() -> Void)? = nil,
         onRestore: (() -> Void)? = nil,
-        onUrl: ((URL) -> Void)? = nil
+        onUrl: ((URL) -> Void)? = nil,
+        previewMode: Bool = false
     ) {
         self.paywall = paywall
         self.locale = locale
@@ -55,6 +62,7 @@ public struct RovenuePaywallView: View {
         self.onClose = onClose
         self.onRestore = onRestore
         self.onUrl = onUrl
+        self.previewMode = previewMode
         let decoded = paywall.builderConfigJson.flatMap(decodeBuilderConfig)
         self.config = decoded
         _selectedPackageId = State(
@@ -243,6 +251,13 @@ public struct RovenuePaywallView: View {
     }
 
     private func startPurchase() {
+        // Preview must never charge — gated FIRST, before any purchasing
+        // state (isPurchasing/selectedPackageId) is even read, so a preview
+        // build never reaches `Rovenue.shared.purchase`. No fabricated
+        // success/failure callback either: `onPurchaseCompleted`/
+        // `onPurchaseFailed` are left untouched, same as if the tap never
+        // happened. See `purchaseGate`'s doc.
+        guard purchaseGate(previewMode: previewMode) else { return }
         guard !isPurchasing,
               let id = selectedPackageId,
               let pkg = paywall.offering?.packages.first(where: { $0.identifier == id })
