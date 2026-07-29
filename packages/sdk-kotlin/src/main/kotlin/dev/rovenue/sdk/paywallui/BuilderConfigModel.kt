@@ -32,7 +32,7 @@ data class ThemePair(val light: String, val dark: String? = null)
  *  vice versa) renders nothing meaningful, so both fields are required
  *  inside the optional `border` prop. Drawn INSIDE the node's own corner
  *  radius on every platform (web `border` + `borderRadius`; SwiftUI
- *  `overlay(RoundedRectangle().stroke)`; Android `GradientDrawable`
+ *  `overlay(RoundedRectangle().strokeBorder)`; Android `GradientDrawable`
  *  stroke). Mirrors packages/shared/src/paywall/schema.ts's `NodeBorder`. */
 data class NodeBorder(val width: Double, val color: ThemePair)
 

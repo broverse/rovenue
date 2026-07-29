@@ -25,7 +25,7 @@ export type NodeSize = "fit" | "fill" | number;
  * vice versa) renders nothing and confuses every decoder, so both fields are
  * required inside the optional `border` prop. Drawn INSIDE the node's own
  * corner radius on every platform (web `border` + `borderRadius`, SwiftUI
- * `overlay(RoundedRectangle().stroke)`, Android `GradientDrawable` stroke).
+ * `overlay(RoundedRectangle().strokeBorder)`, Android `GradientDrawable` stroke).
  */
 export type NodeBorder = { width: number; color: ThemeColor };
 

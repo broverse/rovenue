@@ -61,7 +61,7 @@ public enum NodeSize: Decodable, Equatable, Sendable {
 /// vice versa) renders nothing meaningful, so both fields are non-optional
 /// inside the optional `border` prop. Drawn INSIDE the node's own corner
 /// radius on every platform (web `border` + `borderRadius`; SwiftUI
-/// `overlay(RoundedRectangle().stroke)`; Android `GradientDrawable` stroke).
+/// `overlay(RoundedRectangle().strokeBorder)`; Android `GradientDrawable` stroke).
 /// Mirrors packages/shared/src/paywall/schema.ts's `NodeBorder`.
 public struct NodeBorder: Decodable, Equatable, Sendable {
     public let width: Double

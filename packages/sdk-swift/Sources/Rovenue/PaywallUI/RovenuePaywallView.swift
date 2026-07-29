@@ -785,12 +785,15 @@ struct BuilderNodeView: View {
     }
 
     // Drawn INSIDE the same `cornerRadius` the image itself is clipped to —
-    // absent `border` (or an unparsable color) draws nothing, today's output.
+    // `strokeBorder` (not `stroke`) insets the line so the full width renders
+    // within the shape's bounds, matching web (CSS border) and Android
+    // (GradientDrawable); absent `border` (or an unparsable color) draws
+    // nothing, today's output.
     @ViewBuilder
     private func imageBorderOverlay(_ p: ImageProps) -> some View {
         if let resolved = resolveBorder(p.border, dark: ctx.dark) {
             RoundedRectangle(cornerRadius: CGFloat(p.cornerRadius ?? 0))
-                .stroke(color(resolved.color), lineWidth: CGFloat(resolved.width))
+                .strokeBorder(color(resolved.color), lineWidth: CGFloat(resolved.width))
         }
     }
 
@@ -860,12 +863,15 @@ struct StackNodeView: View {
     }
 
     // Drawn INSIDE the same `cornerRadius` the stack itself is clipped to —
-    // absent `border` (or an unparsable color) draws nothing, today's output.
+    // `strokeBorder` (not `stroke`) insets the line so the full width renders
+    // within the shape's bounds, matching web (CSS border) and Android
+    // (GradientDrawable); absent `border` (or an unparsable color) draws
+    // nothing, today's output.
     @ViewBuilder
     private var borderOverlay: some View {
         if let resolved = resolveBorder(props.border, dark: ctx.dark) {
             RoundedRectangle(cornerRadius: CGFloat(props.cornerRadius ?? 0))
-                .stroke(color(resolved.color), lineWidth: CGFloat(resolved.width))
+                .strokeBorder(color(resolved.color), lineWidth: CGFloat(resolved.width))
         }
     }
 
@@ -971,11 +977,14 @@ struct ActionButtonView: View {
             defaultCornerRadius: nodeButtonDefaultCornerRadiusPx, dark: ctx.dark)
     }
 
+    // `strokeBorder` (not `stroke`) insets the line so the full width renders
+    // within the shape's bounds, matching web (CSS border) and Android
+    // (GradientDrawable).
     @ViewBuilder
     private var borderOverlay: some View {
         if let border = visual.border {
             RoundedRectangle(cornerRadius: CGFloat(visual.cornerRadius))
-                .stroke(color(border.color), lineWidth: CGFloat(border.width))
+                .strokeBorder(color(border.color), lineWidth: CGFloat(border.width))
         }
     }
 
@@ -1108,11 +1117,14 @@ struct PurchaseButtonView: View {
         .disabled(!enabled)
     }
 
+    // `strokeBorder` (not `stroke`) insets the line so the full width renders
+    // within the shape's bounds, matching web (CSS border) and Android
+    // (GradientDrawable).
     @ViewBuilder
     private func purchaseButtonBorderOverlay(_ visual: ResolvedButtonVisual) -> some View {
         if let border = visual.border {
             RoundedRectangle(cornerRadius: CGFloat(visual.cornerRadius))
-                .stroke(color(border.color), lineWidth: CGFloat(border.width))
+                .strokeBorder(color(border.color), lineWidth: CGFloat(border.width))
         }
     }
 }
