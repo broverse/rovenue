@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { component, useService } from "impair";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,15 @@ import {
   type CanvasPriceCoverage,
   type Rect,
 } from "./canvas-helpers";
+import { canMoveTo, findNode, findParent } from "./tree-ops";
+import {
+  CANVAS_DRAG_THRESHOLD_PX,
+  CANVAS_INSERTION_LINE_THICKNESS_PX,
+  resolveCanvasDropTarget,
+  type CanvasDragCandidate,
+  type CanvasDropResolution,
+  type CanvasNodeInfo,
+} from "./canvas-drag";
 import { deviceById, devicesForPlatform } from "./device-catalog";
 import { DeviceFrame } from "./device-frame";
 
@@ -25,6 +34,54 @@ const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 // All-sizes mode ignores the live zoom and renders every device at a fixed
 // scale so the whole platform fits in a scrolling row.
 const ALL_SIZES_SCALE = 0.64;
+
+/** Frame id stamped on the single-device wrapper's `data-rov-frame` — any
+ * stable string works, since drag scoping compares DOM node identity, not
+ * this value (see `handleCanvasPointerDown`'s comment). */
+const SINGLE_FRAME_ID = "single";
+
+// =============================================================
+// Part 2 of paywall-builder drag-and-drop: dragging elements directly
+// inside the device mockup. Pointer-event-based (pointerdown/pointermove/
+// pointerup on the canvas viewport), NOT HTML5 DnD — `packages/paywall-renderer`
+// renders live production paywalls and must never grow a `draggable`
+// attribute or any other builder-only DOM. Every rendered node already
+// carries `data-rov-node="<id>"` (used by `handleClick`'s selection and
+// the selection-ring effect below); dragging hit-tests that same
+// attribute via `document.elementsFromPoint` rather than adding anything
+// new to the renderer's own markup.
+//
+// All the zone/legality math is pure and lives in `canvas-drag.ts`
+// (`computeCanvasDropZone`/`resolveCanvasDropTarget`); this file only:
+// resolves DOM candidates + the config-tree lookup they need, maps
+// viewport rects into the scroll container's local space for the overlay
+// (`toLocalRect`, reusing the same `computeSelectionRect` helper the
+// selection ring uses), and calls `vm.moveNodeTo` on drop.
+// =============================================================
+
+/** Live bookkeeping for one in-progress canvas drag, kept in a ref (not
+ * state) so `endCanvasDrag` always reads the LATEST resolved drop target
+ * rather than a value captured by a stale closure — see the ref's own
+ * declaration comment. */
+type CanvasDragState = {
+  id: string;
+  /** The exact DOM element the drag started on — kept directly (rather
+   * than re-querying by id later) so the source ghost never risks the
+   * same by-id ambiguity All-sizes creates for every OTHER lookup. */
+  sourceEl: HTMLElement;
+  /** The `[data-rov-frame]` ancestor the drag started in — hit-testing
+   * during the drag is scoped to this exact DOM node (see
+   * `handleCanvasPointerMove`). */
+  frameEl: HTMLElement;
+  startX: number;
+  startY: number;
+  /** False until the pointer has moved past `CANVAS_DRAG_THRESHOLD_PX` —
+   * before that, this is still a candidate plain click. */
+  active: boolean;
+  /** The last legal drop this drag resolved to, or null if none yet /
+   * the pointer isn't currently over a legal target. */
+  resolution: CanvasDropResolution | null;
+};
 
 interface ProductNameDto {
   id: string;
@@ -49,6 +106,33 @@ function useProductDisplayNames(projectId: string) {
 
 function noop() {
   // Preview canvas: purchase/close/restore/url are inert — this is a design surface, not a live paywall.
+}
+
+/**
+ * Inline style for the "before"/"after" insertion line: a thin bar spanning
+ * the target's full width (vertical split, drawn at its top/bottom edge) or
+ * full height (horizontal split, drawn at its left/right edge). `rect` is
+ * already in the canvas viewport's local coordinate space (`toLocalRect`),
+ * so this is a pure layout computation with no DOM access of its own.
+ */
+function insertionLineStyle(preview: { resolution: CanvasDropResolution; rect: Rect }): React.CSSProperties {
+  const { resolution, rect } = preview;
+  const isAfter = resolution.zone === "after";
+  const half = CANVAS_INSERTION_LINE_THICKNESS_PX / 2;
+  if (resolution.splitAxis === "horizontal") {
+    return {
+      top: rect.top,
+      height: rect.height,
+      width: CANVAS_INSERTION_LINE_THICKNESS_PX,
+      left: (isAfter ? rect.left + rect.width : rect.left) - half,
+    };
+  }
+  return {
+    left: rect.left,
+    width: rect.width,
+    height: CANVAS_INSERTION_LINE_THICKNESS_PX,
+    top: (isAfter ? rect.top + rect.height : rect.top) - half,
+  };
 }
 
 /** Badge copy tracks how much of the preview is real: all packages resolved, some, or none. */
@@ -172,8 +256,186 @@ export const Canvas = component(() => {
     // frame for an N-frame row at a different scale, so every node moves.
   }, [vm.selectedNodeId, rendererKey, vm.canvasZoom, vm.canvasDevice, vm.showAllSizes, ringTick]);
 
+  // A drag that crossed `CANVAS_DRAG_THRESHOLD_PX` must not ALSO select via
+  // the trailing click the browser fires on pointerup — `handleClick`
+  // checks this ref first and clears it. Left `false` for a plain click
+  // (below threshold), so that regression case needs no special-casing.
+  const suppressClickRef = useRef(false);
+  const dragRef = useRef<CanvasDragState | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  // Mirror the ref's live/visual bits into state purely so the overlay
+  // (rendered below) re-renders as the drag progresses; `dragRef` stays
+  // the single source of truth read at commit time, so a stale closure
+  // over these state values can never cause a wrong or duplicate move.
+  const [isCanvasDragging, setIsCanvasDragging] = useState(false);
+  const [dragSourceRect, setDragSourceRect] = useState<Rect | null>(null);
+  const [dropPreview, setDropPreview] = useState<{ resolution: CanvasDropResolution; rect: Rect } | null>(null);
+
+  /** Maps a viewport-space rect (`getBoundingClientRect()`) into the scroll
+   * container's local coordinate space — the exact transform the selection
+   * ring above uses, so the drag overlay gets the same zoom/scroll handling
+   * for free (rects are already CSS-scaled, so no separate zoom math). */
+  const toLocalRect = useCallback((rect: Rect): Rect => {
+    const container = viewportRef.current;
+    if (!container) return rect;
+    const containerRect = container.getBoundingClientRect();
+    return computeSelectionRect(
+      { left: containerRect.left, top: containerRect.top },
+      { left: container.scrollLeft, top: container.scrollTop },
+      rect,
+    );
+  }, []);
+
+  /** Resolves a `data-rov-node` id to what `resolveCanvasDropTarget` needs,
+   * via the SAME `findNode`/`findParent` tree-ops.ts exports Part 1 (the
+   * Layers panel) uses — no new legality/addressability logic here. */
+  const lookupNodeInfo = useCallback(
+    (id: string): CanvasNodeInfo | null => {
+      const node = findNode(vm.config.root, id);
+      if (!node) return null;
+      const located = findParent(vm.config.root, id);
+      return { node, parentId: located ? located.parent.id : null, index: located ? located.index : 0 };
+    },
+    [vm],
+  );
+
+  /** Tears down the drag: removes the document-level listeners, and — when
+   * `commit` is true and the pointer moved past the threshold — applies
+   * whatever drop `dragRef` last resolved (a no-op if it never resolved
+   * one, e.g. the pointer never hovered a legal target). Escape and
+   * pointercancel call this with `commit: false`, discarding any pending
+   * resolution instead of applying it. */
+  const endCanvasDrag = useCallback(
+    (commit: boolean) => {
+      const drag = dragRef.current;
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+      dragRef.current = null;
+      if (drag?.active) {
+        suppressClickRef.current = true; // swallow the trailing click either way
+        if (commit && drag.resolution) {
+          vm.moveNodeTo(drag.id, drag.resolution.parentId, drag.resolution.index);
+          // Keep the dragged node selected after a successful move — the
+          // suppressed click never re-selects it.
+          vm.selectNode(drag.id);
+        }
+      }
+      setDropPreview(null);
+      setDragSourceRect(null);
+      setIsCanvasDragging(false);
+    },
+    [vm],
+  );
+
+  function handleCanvasPointerMove(ev: PointerEvent) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const clientX = ev.clientX;
+    const clientY = ev.clientY;
+
+    if (!drag.active) {
+      const dx = clientX - drag.startX;
+      const dy = clientY - drag.startY;
+      if (Math.hypot(dx, dy) < CANVAS_DRAG_THRESHOLD_PX) return; // still a plain click, maybe
+      drag.active = true;
+      setIsCanvasDragging(true);
+      setDragSourceRect(toLocalRect(drag.sourceEl.getBoundingClientRect()));
+    }
+
+    // Deepest-first, exactly like the DOM already stacks them.
+    const elements = document.elementsFromPoint(clientX, clientY);
+    const candidates: CanvasDragCandidate[] = [];
+    const seen = new Set<string>();
+    for (const el of elements) {
+      if (!(el instanceof HTMLElement)) continue;
+      const nodeEl = el.closest<HTMLElement>("[data-rov-node]");
+      if (!nodeEl) continue;
+      // Scope to the frame the drag STARTED in: All-sizes mounts the whole
+      // tree once per device, so every id repeats across frames. Comparing
+      // DOM node identity (not a frame id string) is the simplest rule that
+      // still can't confuse two frames — a drag never resolves a target in
+      // a frame other than the one it began in, it just shows no indicator
+      // while the pointer is over a different frame.
+      if (nodeEl.closest("[data-rov-frame]") !== drag.frameEl) continue;
+      const nodeId = nodeEl.getAttribute("data-rov-node");
+      if (!nodeId || seen.has(nodeId)) continue;
+      seen.add(nodeId);
+      candidates.push({ nodeId, rect: nodeEl.getBoundingClientRect() });
+    }
+
+    const resolution = resolveCanvasDropTarget(
+      candidates,
+      { x: clientX, y: clientY },
+      drag.id,
+      lookupNodeInfo,
+      (parentId) => canMoveTo(vm.config.root, drag.id, parentId),
+    );
+    drag.resolution = resolution;
+
+    if (!resolution) {
+      setDropPreview(null);
+      return;
+    }
+    const targetRect = candidates.find((c) => c.nodeId === resolution.targetNodeId)?.rect;
+    setDropPreview(targetRect ? { resolution, rect: toLocalRect(targetRect) } : null);
+  }
+
+  const handleCanvasPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return; // primary press only
+      const nodeEl = (e.target as HTMLElement).closest<HTMLElement>("[data-rov-node]");
+      if (!nodeEl) return;
+      const id = nodeEl.getAttribute("data-rov-node");
+      // `findParent` returning null covers BOTH the root and a cellTemplate
+      // root (tree-ops.ts's addressability model) — the same gate
+      // `moveNodeTo` itself applies, so no new legality logic lives here.
+      // The explicit root-id check is redundant with it but kept since a
+      // pointerdown on empty device-screen space is the single most common
+      // way to land on the root.
+      if (!id || id === vm.config.root.id || !findParent(vm.config.root, id)) return;
+      const frameEl = nodeEl.closest<HTMLElement>("[data-rov-frame]");
+      if (!frameEl) return; // defensive — every rendered frame carries this
+
+      dragRef.current = {
+        id,
+        sourceEl: nodeEl,
+        frameEl,
+        startX: e.clientX,
+        startY: e.clientY,
+        active: false,
+        resolution: null,
+      };
+
+      const onMove = (ev: PointerEvent) => handleCanvasPointerMove(ev);
+      const onUp = () => endCanvasDrag(true);
+      const onCancel = () => endCanvasDrag(false);
+      const onKeyDown = (ev: KeyboardEvent) => {
+        if (ev.key === "Escape") endCanvasDrag(false);
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onCancel);
+      document.addEventListener("keydown", onKeyDown);
+      dragCleanupRef.current = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        document.removeEventListener("pointercancel", onCancel);
+        document.removeEventListener("keydown", onKeyDown);
+      };
+    },
+    [vm, endCanvasDrag],
+  );
+
+  // Belt-and-suspenders: if the Canvas unmounts mid-drag (e.g. navigating
+  // away), don't leak the document-level listeners.
+  useEffect(() => () => dragCleanupRef.current?.(), []);
+
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
       const el = (e.target as HTMLElement).closest("[data-rov-node]");
       if (!el) return;
       const id = el.getAttribute("data-rov-node");
@@ -194,9 +456,12 @@ export const Canvas = component(() => {
     : undefined;
 
   // Factored so the single-device and all-sizes branches share one renderer
-  // element; each DeviceFrame is a distinct parent, so React mounts an
-  // independent renderer instance per frame.
-  const renderPaywall = (
+  // function; each DeviceFrame is a distinct parent, so React mounts an
+  // independent renderer instance per frame. Takes `frameId` so each call
+  // site can stamp a DISTINCT `data-rov-frame` marker — the drag scoping
+  // boundary in `handleCanvasPointerMove`/`handleCanvasPointerDown` (All-
+  // sizes renders this same function once per device, so ids repeat).
+  const renderPaywall = (frameId: string) => (
     // `h-full`, not `min-h-full`: the renderer root is `height: 100%`, and a
     // percentage height resolves to `auto` against an auto-height ancestor.
     // With `min-h-full` (min-height:100%, height:auto) the whole scroll model
@@ -205,7 +470,7 @@ export const Canvas = component(() => {
     // bottom of the device. The DeviceFrame's content area is absolutely
     // positioned with top+bottom, so it IS a definite height to resolve
     // against; this wrapper is the one link that broke the chain.
-    <div onClick={handleClick} className="h-full">
+    <div data-rov-frame={frameId} onClick={handleClick} className="h-full">
       <PaywallRenderer
         key={rendererKey}
         // No `firstShownAt` on purpose. This is an AUTHORING preview: a
@@ -374,7 +639,13 @@ export const Canvas = component(() => {
 
       <div
         ref={setViewportEl}
-        className="relative flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
+        onPointerDown={handleCanvasPointerDown}
+        className={cn(
+          "relative flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8",
+          // `select-none` while dragging — otherwise a fast pointer move
+          // during the drag selects surrounding page text as a side effect.
+          isCanvasDragging && "cursor-grabbing select-none",
+        )}
       >
         {!vm.showAllSizes && (
           <DeviceFrame
@@ -384,7 +655,7 @@ export const Canvas = component(() => {
             showSafeArea={vm.showSafeArea}
             screenBackground={screenBackground}
           >
-            {renderPaywall}
+            {renderPaywall(SINGLE_FRAME_ID)}
           </DeviceFrame>
         )}
 
@@ -400,7 +671,7 @@ export const Canvas = component(() => {
                 screenBackground={screenBackground}
                 label
               >
-                {renderPaywall}
+                {renderPaywall(d.id)}
               </DeviceFrame>
             ))}
           </div>
@@ -415,6 +686,47 @@ export const Canvas = component(() => {
             aria-hidden="true"
             className="pointer-events-none absolute rounded-sm ring-2 ring-rv-accent-500 ring-offset-1 ring-offset-transparent"
             style={{ left: ring.left, top: ring.top, width: ring.width, height: ring.height }}
+          />
+        )}
+
+        {/* Canvas drag overlay (Part 2) — a dashed outline over the drag
+            SOURCE's rect (captured once, at threshold-cross time) plus
+            either an insertion line ("before"/"after") or an inset ring
+            ("into") over the currently-resolved LEGAL drop target. Unlike
+            the selection ring above, this is safe in All-sizes too: every
+            rect here comes straight off the specific DOM element the
+            pointer is over, never from an ambiguous by-id lookup. */}
+        {dragSourceRect && isCanvasDragging && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute rounded-sm border-2 border-dashed border-rv-accent-500/70"
+            style={{
+              left: dragSourceRect.left,
+              top: dragSourceRect.top,
+              width: dragSourceRect.width,
+              height: dragSourceRect.height,
+            }}
+          />
+        )}
+        {dropPreview && dropPreview.resolution.zone === "into" && (
+          <div
+            aria-hidden="true"
+            data-testid="canvas-drop-into"
+            className="pointer-events-none absolute rounded-sm ring-2 ring-inset ring-rv-accent-500 bg-rv-accent-500/10"
+            style={{
+              left: dropPreview.rect.left,
+              top: dropPreview.rect.top,
+              width: dropPreview.rect.width,
+              height: dropPreview.rect.height,
+            }}
+          />
+        )}
+        {dropPreview && dropPreview.resolution.zone !== "into" && (
+          <div
+            aria-hidden="true"
+            data-testid="canvas-drop-line"
+            className="pointer-events-none absolute rounded-full bg-rv-accent-500"
+            style={insertionLineStyle(dropPreview)}
           />
         )}
       </div>

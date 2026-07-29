@@ -11,9 +11,12 @@ import { NODE_ICON, NODE_TYPE_LABEL, nodeLocKey } from "./node-meta";
 import { AddNodePopover } from "./add-node-popover";
 
 // =============================================================
-// Layers-panel drag-and-drop (Part 1 of paywall-builder DnD; canvas
-// dragging is a separate later task that reuses `vm.moveNodeTo` — see
-// its own doc comment). Native HTML5 DnD, mirroring the funnel builder's
+// Layers-panel drag-and-drop (Part 1 of paywall-builder DnD; canvas.tsx's
+// `canvas-drag.ts` is Part 2 — dragging directly inside the device mockup,
+// pointer-event-based rather than HTML5 DnD since it must not leak any
+// builder-only DOM into `@rovenue/paywall-renderer`, but it reuses
+// `vm.moveNodeTo`/`canMoveTo` and this file's `DRAG_EDGE_BAND_FRACTION`).
+// Native HTML5 DnD, mirroring the funnel builder's
 // precedent (`funnel-builder/page-preview.tsx`'s `ChoiceListEditable`):
 // draggable + onDragStart/onDragOver/onDrop, no new dependency.
 //
@@ -35,8 +38,11 @@ import { AddNodePopover } from "./add-node-popover";
 
 /** Fraction of a CONTAINER row's height reserved for its top/bottom
  * "before"/"after" bands; the remainder is the "into" band. A non-container
- * row has no "into" band at all — see `computeDropZone`. */
-const DRAG_EDGE_BAND_FRACTION = 0.25;
+ * row has no "into" band at all — see `computeDropZone`. Exported: Part 2
+ * (`canvas-drag.ts`, dragging directly in the device mockup) reuses the
+ * same fraction rather than re-tuning a second one, so the two drag
+ * surfaces feel identical. */
+export const DRAG_EDGE_BAND_FRACTION = 0.25;
 
 /** dataTransfer key carrying the dragged node's id — mirrors the funnel
  * builder precedent (`page-preview.tsx`'s `ChoiceListEditable`). */
