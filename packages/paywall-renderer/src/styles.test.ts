@@ -68,7 +68,7 @@ describe("resolveButtonVisualStyle", () => {
       background: "#111111",
       color: "#ffffff",
       border: "none",
-      borderRadius: "8px",
+      borderRadius: "0px",
     });
   });
 
@@ -129,7 +129,7 @@ describe("resolveButtonVisualStyle", () => {
       background: "#000000",
       color: "#eeeeee",
       border: "1px solid #555555",
-      borderRadius: "8px",
+      borderRadius: "0px",
     });
   });
 });

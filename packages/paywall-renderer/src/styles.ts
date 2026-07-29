@@ -126,10 +126,15 @@ export function resolveButtonVisualStyle(
   };
 }
 
-/** Both `button` and `purchaseButton` drew a hardcoded `"8px"` corner radius
- *  before either type had a `cornerRadius` prop — hoisted so `cornerRadius`'s
- *  absence resolves to the exact same literal, not a re-typed copy of it. */
-export const NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX = 8;
+/** Product decision (2026-07-29): a plain `button` with no `cornerRadius`
+ *  renders SQUARE — authors opt into rounding. (Both button types drew a
+ *  hardcoded `"8px"` before `cornerRadius` existed; `purchaseButton` keeps
+ *  that look via its own constant below.) */
+export const NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX = 0;
+/** `purchaseButton`'s pre-existing chip radius — deliberately NOT flipped to
+ *  0 with the button default above: the purchase CTA keeps its rounded look
+ *  unless a `cornerRadius` explicitly overrides it. */
+export const PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_PX = 8;
 
 function nodeSizeToCss(size: NodeSize | undefined): string | undefined {
   if (size === undefined || size === "fit") return undefined;

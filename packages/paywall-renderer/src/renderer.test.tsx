@@ -1136,7 +1136,9 @@ describe("node style pass — border / background / labelColor / cornerRadius", 
     // not a renderer bug. `resolveButtonVisualStyle`'s exact `border: "none"`
     // byte-identity with the variant base is covered at the pure-helper level
     // in styles.test.ts instead.
-    expect(el.style.borderRadius).toBe("8px");
+    // 0px: a plain button with no cornerRadius renders square by product
+    // decision (2026-07-29) — purchaseButton keeps its rounded default below.
+    expect(el.style.borderRadius).toBe("0px");
   });
 
   it("lets a purchaseButton's custom background/labelColor/border/cornerRadius override its base visual", () => {

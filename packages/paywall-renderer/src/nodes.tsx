@@ -64,6 +64,7 @@ import {
   carouselDotStyle,
   borderStyle,
   NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX,
+  PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_PX,
   resolveButtonVisualStyle,
   resolveTextColor,
   resolveThemeColor,
@@ -470,7 +471,7 @@ function renderPurchaseButton(node: PurchaseButtonNode, ctx: RenderCtx): ReactEl
         ...resolveButtonVisualStyle(
           PURCHASE_BUTTON_BASE_VISUAL,
           node,
-          NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX,
+          PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_PX,
           ctx.colorScheme,
         ),
       }}

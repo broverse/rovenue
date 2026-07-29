@@ -185,14 +185,15 @@ data class ResolvedButtonVisual(
 )
 
 /** `button`'s shared default corner radius for a chip that gains one for
- *  the first time because a custom style prop made it visible — mirrors the
- *  web renderer's `NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX` (8) and Swift's
+ *  the first time because a custom style prop made it visible — 0 by product
+ *  decision (2026-07-29): a plain `button` with no `cornerRadius` renders
+ *  SQUARE; authors opt into rounding. Mirrors the web renderer's
+ *  `NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX` (0) and Swift's
  *  `nodeButtonDefaultCornerRadiusPx`. `purchaseButton` does NOT use this
- *  constant: unlike `button`, it has drawn its own 12dp chip since before
- *  this wave, regardless of any new prop, and that pre-existing value is its
- *  own default (see [PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_DP]) — switching
- *  it to 8 here would violate the regression pin. */
-internal const val NODE_BUTTON_DEFAULT_CORNER_RADIUS_DP = 8.0
+ *  constant: it has drawn its own 12dp chip since before this wave (see
+ *  [PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_DP]) and the purchase CTA
+ *  deliberately keeps that rounded default. */
+internal const val NODE_BUTTON_DEFAULT_CORNER_RADIUS_DP = 0.0
 
 /** `purchaseButton`'s pre-existing corner radius, unrelated to
  *  [NODE_BUTTON_DEFAULT_CORNER_RADIUS_DP] — this platform has drawn a 12dp

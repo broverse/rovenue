@@ -138,15 +138,15 @@ public struct ResolvedButtonVisual: Equatable, Sendable {
     }
 }
 
-/// `ActionButtonView`'s shared default corner radius for a chip that gains
-/// one for the first time because a custom style prop made it visible —
-/// mirrors the web renderer's `NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX` (8).
-/// `PurchaseButtonView` does NOT use this constant: unlike `button`, it has
-/// drawn its own 12pt chip since before this wave, regardless of any new
-/// prop, and that pre-existing value is its own default (see
-/// `RovenuePaywallView.swift`'s `purchaseButtonDefaultCornerRadiusPx`) —
-/// switching it to 8 here would violate the regression pin.
-public let nodeButtonDefaultCornerRadiusPx = 8.0
+/// `ActionButtonView`'s default corner radius for a chip that gains one for
+/// the first time because a custom style prop made it visible — 0 by product
+/// decision (2026-07-29): a plain `button` with no `cornerRadius` renders
+/// SQUARE; authors opt into rounding. Mirrors the web renderer's
+/// `NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX` (0). `PurchaseButtonView` does NOT
+/// use this constant: it has drawn its own 12pt chip since before this wave
+/// (see `RovenuePaywallView.swift`'s `purchaseButtonDefaultCornerRadiusPx`)
+/// and the purchase CTA deliberately keeps that rounded default.
+public let nodeButtonDefaultCornerRadiusPx = 0.0
 
 /// Merge a button/purchaseButton's base visual with its own optional custom
 /// style props (mirrors the web renderer's `resolveButtonVisualStyle`).
