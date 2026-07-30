@@ -1712,10 +1712,16 @@ async function tierLimitBytes(db: Db, projectId: string): Promise<number | null>
 }
 
 async function freeTierLimitBytes(db: Db): Promise<number | null> {
+  // `billing_tier_limits` is keyed on (tier, cycle), so filtering by
+  // tier alone returns TWO rows and `LIMIT 1` picks between them
+  // nondeterministically. If either row's limit were NULL that would
+  // intermittently read as "unlimited" — a fail-open on the fallback
+  // path that exists precisely to avoid failing open.
   const rows = await db.execute(sql`
     SELECT "billing_tier_limits"."asset_storage_bytes_limit" AS limit_bytes
     FROM "billing_tier_limits"
     WHERE "billing_tier_limits"."tier" = 'free'
+      AND "billing_tier_limits"."cycle" = 'monthly'
     LIMIT 1
   `);
   const row = (rows as unknown as { rows: { limit_bytes: string | null }[] }).rows[0];
