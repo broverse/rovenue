@@ -143,6 +143,23 @@ function uploadUrl(
   return `/dashboard/projects/${projectId}/assets/${kind}?name=${encodeURIComponent(name)}`;
 }
 
+/** Full control over headers/body — the primitive the more convenient
+ *  helpers below build on. Exists because several tests need a
+ *  Content-Length that's ABSENT or WRONG on purpose (see the
+ *  Content-Length trust tests), which `upload()` cannot express. */
+function uploadWithHeaders(
+  kind: string,
+  body: BodyInit,
+  headers: Record<string, string>,
+  opts?: { projectId?: string; name?: string },
+) {
+  return app().request(uploadUrl(kind, opts), {
+    method: "POST",
+    headers,
+    body,
+  });
+}
+
 function upload(
   kind: string,
   bytes: Uint8Array,
@@ -155,11 +172,39 @@ function upload(
   // for an in-memory body, so it's set explicitly here to match what
   // production actually sees — this is what lets the video route take
   // its real streaming path rather than the chunked-transfer fallback.
+  return uploadWithHeaders(
+    kind,
+    bytes as BlobPart,
+    { "content-length": String(bytes.byteLength) },
+    opts,
+  );
+}
+
+/** Delivers `chunks` as SEPARATE reads on the wire, unlike `upload()`
+ *  (a plain `Uint8Array` body, which this runtime always delivers as
+ *  ONE chunk — confirmed by hand against undici). Needed to exercise
+ *  `peekPrefix`'s break-then-continue-reading-the-same-stream path,
+ *  which a single-chunk body cannot reach: the peek loop's `break`
+ *  only matters when there is more to read afterward. `duplex: "half"`
+ *  is required by the Fetch API whenever the body is a stream. */
+function uploadStream(
+  kind: string,
+  chunks: Buffer[],
+  headers: Record<string, string>,
+  opts?: { projectId?: string; name?: string },
+) {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
   return app().request(uploadUrl(kind, opts), {
     method: "POST",
-    headers: { "content-length": String(bytes.byteLength) },
-    body: bytes as BlobPart,
-  });
+    headers,
+    body,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
 }
 
 /** A minimal, but real, PNG-shaped prefix (8-byte PNG magic). */
@@ -484,5 +529,141 @@ describe("POST /dashboard/projects/:projectId/assets/:kind", () => {
     // releaseReservation must be called exactly once, with the tx
     // object above — never a second time with the bare db handle.
     expect(releaseReservation).toHaveBeenCalledTimes(1);
+  });
+
+  // -----------------------------------------------------------
+  // Content-Length trust boundary (review round 1, Important finding
+  // 1). `hono/body-limit` (node_modules/hono/dist/middleware/body-
+  // limit/index.js) does ONE comparison against the header and calls
+  // `next()` WITHOUT reading a byte when Content-Length is present and
+  // Transfer-Encoding is absent — it does NOT bound the transport by
+  // reading chunks in that case. The chunk-counting fallback only runs
+  // when there's no reliable declared length. These tests pin what
+  // THIS route does with that declared value in each case, rather than
+  // leaving the claim as an unverified comment.
+  // -----------------------------------------------------------
+
+  it("falls back to the buffered path and reserves the TRUE byte count when Content-Length is absent", async () => {
+    // No header at all (the chunked-transfer shape): body-limit itself
+    // falls back to reading and counting chunks, so there is no
+    // reliable declared size for this route to stream against. The
+    // load-bearing assertion is that `reserveStorage` receives the
+    // REAL, already-known byte count — not NaN, 0, or undefined, which
+    // is what a naive `Number(undefined)` would have produced.
+    const bytes = mp4Bytes(2048);
+    const res = await uploadWithHeaders("video", bytes as BlobPart, {}, {});
+    expect(res.status).toBe(201);
+    expect(reserveStorage).toHaveBeenCalledWith(
+      expect.anything(),
+      "p1",
+      bytes.byteLength,
+    );
+    // Confirms the buffered fallback was actually taken (a Buffer, not
+    // a stream, reached putObject) — not the streaming path fed a
+    // fallback estimate.
+    expect(Buffer.isBuffer(putObject.mock.calls[0]?.[1])).toBe(true);
+  });
+
+  it("does not trust a Content-Length that's accompanied by Transfer-Encoding", async () => {
+    // Per RFC 7230 §3.3.3, Content-Length must be ignored when
+    // Transfer-Encoding is also present — and body-limit's own source
+    // already behaves that way (`hasContentLength && !hasTransferEncoding`).
+    // This route must mirror that, not trust the header just because
+    // it's present: reserving off a number body-limit itself no longer
+    // believes would be worse than not having the header at all.
+    const bytes = mp4Bytes(2048);
+    const res = await uploadWithHeaders(
+      "video",
+      bytes as BlobPart,
+      { "content-length": "10", "transfer-encoding": "chunked" },
+      {},
+    );
+    expect(res.status).toBe(201);
+    expect(reserveStorage).toHaveBeenCalledWith(
+      expect.anything(),
+      "p1",
+      bytes.byteLength,
+    );
+    expect(Buffer.isBuffer(putObject.mock.calls[0]?.[1])).toBe(true);
+  });
+
+  it("reserves against the declared Content-Length, not the actual streamed size, when they disagree", async () => {
+    // Behind a real HTTP server this specific mismatch (declared
+    // SMALLER than actual) cannot happen — Content-Length bounds how
+    // many body bytes the server ever delivers to this handler (RFC
+    // 7230 §3.3.3), so actual received is bounded by declared there.
+    // It CAN happen in a synthetic Request built directly (no real
+    // wire framing to enforce it), which is exactly what's constructed
+    // here — this is what turns "the reservation is an upper-bound
+    // estimate" from a comment into an assertion.
+    const bytes = mp4Bytes(2048);
+    const declared = 100;
+    const res = await uploadWithHeaders(
+      "video",
+      bytes as BlobPart,
+      { "content-length": String(declared) },
+      {},
+    );
+    expect(res.status).toBe(201);
+    // Reserved against the (wrong, too-small) declared size...
+    expect(reserveStorage).toHaveBeenCalledWith(
+      expect.anything(),
+      "p1",
+      declared,
+    );
+    // ...but the committed row always carries the TRUE size, hashed
+    // from what actually streamed through — an under-reservation never
+    // corrupts the record, it only under-charges the quota for that
+    // one upload (documented accepted risk, same class as the Task 5
+    // tier-limit-read-before-lock race).
+    expect(createAsset).toHaveBeenCalledWith(
+      TX_SENTINEL,
+      expect.objectContaining({ byteSize: bytes.byteLength }),
+    );
+  });
+
+  // -----------------------------------------------------------
+  // Regression test for the `destroyOnReturn: false` fix in
+  // `peekPrefix` (review round 1, Important finding 2). A single-chunk
+  // body — what `upload()`'s plain `Uint8Array` is always delivered as
+  // by this runtime — cannot exercise the bug: the peek loop's `break`
+  // only matters when the stream has more to give afterward. Four real
+  // wire chunks force exactly that: the peek loop must break mid-
+  // stream (after chunk 3, once >= DETECT_PREFIX_BYTES=64 bytes have
+  // accumulated) and the replay loop must then keep reading the SAME
+  // underlying Readable to pick up chunk 4. Before the fix, breaking
+  // destroyed the stream and chunk 4 was silently lost — the response
+  // still succeeded, the row's byteSize just came up short, which is
+  // exactly the "video looks uploaded but won't finish playing" defect
+  // class this exists to catch.
+  // -----------------------------------------------------------
+
+  it("streams a multi-chunk video body into putObject byte-for-byte, in order", async () => {
+    const chunks = [
+      Buffer.from(mp4Bytes(30)), // carries the ftyp magic at offset 4
+      Buffer.alloc(30, 2),
+      Buffer.alloc(30, 3),
+      Buffer.alloc(30, 4),
+    ];
+    const expected = Buffer.concat(chunks);
+    // 120 bytes > the route's internal DETECT_PREFIX_BYTES (64), so the
+    // peek loop is guaranteed to break with data still unread.
+    expect(expected.byteLength).toBeGreaterThan(64);
+
+    const res = await uploadStream(
+      "video",
+      chunks,
+      { "content-length": String(expected.byteLength) },
+      {},
+    );
+    expect(res.status).toBe(201);
+    expect(createAsset).toHaveBeenCalledWith(
+      TX_SENTINEL,
+      expect.objectContaining({
+        kind: "video",
+        byteSize: expected.byteLength,
+        contentHash: createHash("sha256").update(expected).digest("hex"),
+      }),
+    );
   });
 });

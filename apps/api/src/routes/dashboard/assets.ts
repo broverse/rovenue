@@ -312,14 +312,36 @@ async function handleStreamedVideo(
   userId: string,
 ) {
   const contentLengthHeader = c.req.header("content-length");
+  // Mirrors `hono/body-limit`'s OWN trust condition exactly (see
+  // node_modules/hono/dist/middleware/body-limit: `hasContentLength &&
+  // !hasTransferEncoding`) rather than trusting Content-Length whenever
+  // it's merely present. Per RFC 7230 §3.3.3, a request carrying BOTH
+  // headers must have Content-Length ignored — Transfer-Encoding wins —
+  // and body-limit already does that (it falls through to its
+  // read-and-count loop). If this route trusted the header anyway, a
+  // request with a stale/attacker-chosen Content-Length alongside
+  // `transfer-encoding: chunked` would size the reservation off a
+  // number body-limit itself no longer believes.
+  const hasTransferEncoding = c.req.header("transfer-encoding") !== undefined;
   const body = c.req.raw.body;
-  const declaredBytes = contentLengthHeader ? Number(contentLengthHeader) : NaN;
+  const declaredBytes =
+    contentLengthHeader && !hasTransferEncoding
+      ? Number(contentLengthHeader)
+      : NaN;
 
-  // No Content-Length (chunked transfer) or no body: `hono/body-limit`
-  // has already fully buffered the request into memory before we got
-  // here (it cannot enforce the byte cap off a header that isn't
-  // there), so streaming buys us nothing extra — fall back to the
-  // simple buffered path rather than duplicate that buffering.
+  // No RELIABLE declared size (Content-Length absent, or present
+  // alongside Transfer-Encoding and therefore untrusted — see above) or
+  // no body: `hono/body-limit` has already fully buffered the request
+  // into memory before we got here in that case — its header check is
+  // ONE comparison against the header value with no body read at all
+  // when Content-Length is present and trusted (confirmed by reading
+  // hono/body-limit's source: `contentLength > maxSize ? onError(c) :
+  // next()`, nothing else); the read-and-count loop that actually
+  // bounds the transport is its FALLBACK, used only when there's no
+  // Content-Length to trust. So streaming buys nothing extra here —
+  // fall back to the simple buffered path rather than duplicate that
+  // buffering, and reserve against the TRUE (already-buffered) byte
+  // count instead of a number we don't have.
   if (!body || !Number.isFinite(declaredBytes) || declaredBytes <= 0) {
     return handleBufferedVideo(c, projectId, name, userId);
   }
@@ -412,6 +434,19 @@ async function streamVideo(
   // this is an upper-bound gate, not the final charge. The committed
   // row below always stores the true byte count from the counting
   // transform.
+  //
+  // Declared > actual: over-reserves harmlessly; released in the same
+  // tx as the row once the true (smaller) count is known.
+  // Declared < actual: behind a real HTTP server this cannot happen —
+  // Content-Length delimits how many body bytes the server will ever
+  // deliver to this handler (RFC 7230 §3.3.3), so actual bytes received
+  // is bounded by the declared value there. It CAN happen in a
+  // synthetic Request built directly (no real framing to enforce it,
+  // which is exactly what the "reserves against the declared size, not
+  // the actual streamed size" test below constructs) — in that case
+  // this route still stores the TRUE hashed/counted size on the row, it
+  // just under-reserved against the cap for that one upload, the same
+  // class of accepted race the tier-limit read documents in Task 5.
   const reservationId = await reserveStorage(drizzle.db, projectId, declaredBytes);
   if (reservationId === null) {
     return c.json(fail(ERROR_CODE.ASSET_QUOTA_EXCEEDED, "Storage quota exhausted"), 402);
