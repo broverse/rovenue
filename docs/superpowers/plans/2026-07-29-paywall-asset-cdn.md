@@ -2710,9 +2710,28 @@ git commit -m "feat(dashboard): asset library and paywall builder asset picker"
 - Modify: `docker-compose.yml`, `.env.example`, `apps/api/Dockerfile`
 - Create: `deploy/minio/README.md`
 
-- [ ] **Step 1: Add MinIO to compose**
+- [ ] **Step 1: Add MinIO to compose (self-hosted only)**
 
 A `minio` service with a persistent volume, plus a one-shot `mc` init container that creates the bucket, sets **anonymous read on objects** and leaves **listing disabled**.
+
+This is the **self-hosted** path. The cloud deployment uses R2, and the two are not configured the same way even though they run identical code — see Step 1b.
+
+- [ ] **Step 1b: Public read on R2 is not an ACL**
+
+`mc anonymous set download` is MinIO-specific. **R2 does not implement S3 object ACLs at all** — a `putObject` carrying an ACL is ignored, and there is no per-object public flag to set. Public read on R2 comes from the *bucket*: either an `r2.dev` development subdomain or, for production, a **custom domain bound through Cloudflare**.
+
+Use the custom domain. Two reasons beyond tidiness:
+
+- `r2.dev` is rate-limited and explicitly not for production traffic.
+- §6 requires the asset origin to sit **outside the session cookie's scope**. A custom domain is the only way to control that; it is also what puts Cloudflare's cache in front, which is the whole point of §2.2 keeping the API out of the serving path.
+
+Note the two env vars are deliberately different values on R2 and must not be conflated:
+- `ASSET_STORAGE_ENDPOINT` = `https://<accountid>.r2.cloudflarestorage.com` (the S3 write API)
+- `ASSET_PUBLIC_BASE_URL` = `https://cdn.<domain>` (the public read origin)
+
+On MinIO they happen to share a host, which is exactly why a MinIO-only test would not catch conflating them.
+
+Verify on R2 specifically, since neither the unit tests nor the MinIO integration tests exercise it: an uploaded object is publicly readable at `ASSET_PUBLIC_BASE_URL`, the bucket is **not** listable, and `Cache-Control: immutable` survives to the client.
 
 - [ ] **Step 2: Set `VIPS_BLOCK_UNTRUSTED` in the API image**
 
