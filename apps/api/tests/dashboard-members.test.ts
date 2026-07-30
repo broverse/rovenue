@@ -128,7 +128,10 @@ vi.mock("@rovenue/db", async () => {
   return {
     ...actual,
     default: dbMock,
-    drizzle: drizzleMock,
+    // Real `schema` — pure table definitions with no connection behind them.
+    // src/lib/audit.ts destructures `drizzle.schema` at module scope, so a
+    // drizzle mock without it fails collection before any test runs.
+    drizzle: { ...drizzleMock, schema: actual.drizzle.schema },
     MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   };
 });

@@ -46,10 +46,19 @@ vi.mock("../src/lib/edge-cache", () => ({
   purgeProjectCatalogCache: vi.fn(async () => undefined),
 }));
 
-vi.mock("@rovenue/db", () => ({
-  MemberRole: { CUSTOMER_SUPPORT: "CUSTOMER_SUPPORT" },
-  drizzle: {
-    db: {} as unknown,
+// Starts from the real module rather than replacing it: the route's import
+// graph reaches modules that destructure `drizzle.schema` at module scope
+// (src/lib/audit.ts does `const { auditLogs } = drizzle.schema`), and a
+// missing export there fails collection — the file reports "no tests" and
+// blames a TypeError in someone else's module.
+vi.mock("@rovenue/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@rovenue/db")>();
+  return {
+    ...actual,
+    MemberRole: { CUSTOMER_SUPPORT: "CUSTOMER_SUPPORT" },
+    drizzle: {
+      schema: actual.drizzle.schema,
+      db: {} as unknown,
     placementRepo: {
       findPlacementById: vi.fn(async (_db: unknown, _projectId: string, id: string) => ({
         id,
@@ -61,8 +70,9 @@ vi.mock("@rovenue/db", () => ({
         isActive: true,
       })),
     },
-  },
-}));
+    },
+  };
+});
 
 import { Hono } from "hono";
 import { placementsDashboardRoute } from "../src/routes/dashboard/placements";

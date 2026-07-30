@@ -68,78 +68,91 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   return { dbMock, drizzleMock, authMock };
 });
 
-vi.mock("@rovenue/db", () => ({
-  default: dbMock,
-  drizzle: drizzleMock,
-  MemberRole: {
-    OWNER: "OWNER",
-    ADMIN: "ADMIN",
-    VIEWER: "VIEWER",
-  },
-  FeatureFlagType: {
-    BOOLEAN: "BOOLEAN",
-    STRING: "STRING",
-    NUMBER: "NUMBER",
-    JSON: "JSON",
-  },
-  ExperimentStatus: {
-    DRAFT: "DRAFT",
-    RUNNING: "RUNNING",
-    PAUSED: "PAUSED",
-    COMPLETED: "COMPLETED",
-  },
-  Store: {
-    APP_STORE: "APP_STORE",
-    PLAY_STORE: "PLAY_STORE",
-    STRIPE: "STRIPE",
-  },
-  Environment: { PRODUCTION: "PRODUCTION", SANDBOX: "SANDBOX" },
-  PurchaseStatus: {
-    TRIAL: "TRIAL",
-    ACTIVE: "ACTIVE",
-    EXPIRED: "EXPIRED",
-    REFUNDED: "REFUNDED",
-    REVOKED: "REVOKED",
-    PAUSED: "PAUSED",
-    GRACE_PERIOD: "GRACE_PERIOD",
-  },
-  ProductType: {
-    SUBSCRIPTION: "SUBSCRIPTION",
-    CONSUMABLE: "CONSUMABLE",
-    NON_CONSUMABLE: "NON_CONSUMABLE",
-  },
-  CreditLedgerType: {
-    PURCHASE: "PURCHASE",
-    SPEND: "SPEND",
-    REFUND: "REFUND",
-    BONUS: "BONUS",
-    EXPIRE: "EXPIRE",
-  },
-  WebhookEventStatus: {
-    RECEIVED: "RECEIVED",
-    PROCESSING: "PROCESSING",
-    PROCESSED: "PROCESSED",
-    FAILED: "FAILED",
-  },
-  WebhookSource: { APPLE: "APPLE", GOOGLE: "GOOGLE", STRIPE: "STRIPE" },
-  OutgoingWebhookStatus: {
-    PENDING: "PENDING",
-    SENT: "SENT",
-    FAILED: "FAILED",
-    DEAD: "DEAD",
-    DISMISSED: "DISMISSED",
-  },
-  RevenueEventType: {
-    INITIAL: "INITIAL",
-    RENEWAL: "RENEWAL",
-    TRIAL_CONVERSION: "TRIAL_CONVERSION",
-    CANCELLATION: "CANCELLATION",
-    REFUND: "REFUND",
-    REACTIVATION: "REACTIVATION",
-    CREDIT_PURCHASE: "CREDIT_PURCHASE",
-  },
-  FeatureFlagEnv: { PROD: "PROD", STAGING: "STAGING", DEVELOPMENT: "DEVELOPMENT" },
-}));
+// What is under test is the database, not the package around it. This mock
+// used to replace @rovenue/db wholesale, which meant every unrelated export
+// the import graph happens to touch had to be re-listed here by hand — and a
+// missing one is not a test failure but a COLLECTION failure, so the file
+// reports "no tests" and blames a TypeError in someone else's module.
+// `drizzle.schema` is the sharpest case: src/lib/audit.ts does
+// `const { auditLogs } = drizzle.schema` at module scope, so the file could
+// not be loaded at all. Starting from the real module and overriding only
+// what talks to a database keeps that failure mode from coming back.
+vi.mock("@rovenue/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@rovenue/db")>();
+  return {
+    ...actual,
+    default: dbMock,
+    drizzle: { ...drizzleMock, schema: actual.drizzle.schema },
+    MemberRole: {
+      OWNER: "OWNER",
+      ADMIN: "ADMIN",
+      VIEWER: "VIEWER",
+    },
+    FeatureFlagType: {
+      BOOLEAN: "BOOLEAN",
+      STRING: "STRING",
+      NUMBER: "NUMBER",
+      JSON: "JSON",
+    },
+    ExperimentStatus: {
+      DRAFT: "DRAFT",
+      RUNNING: "RUNNING",
+      PAUSED: "PAUSED",
+      COMPLETED: "COMPLETED",
+    },
+    Store: {
+      APP_STORE: "APP_STORE",
+      PLAY_STORE: "PLAY_STORE",
+      STRIPE: "STRIPE",
+    },
+    Environment: { PRODUCTION: "PRODUCTION", SANDBOX: "SANDBOX" },
+    PurchaseStatus: {
+      TRIAL: "TRIAL",
+      ACTIVE: "ACTIVE",
+      EXPIRED: "EXPIRED",
+      REFUNDED: "REFUNDED",
+      REVOKED: "REVOKED",
+      PAUSED: "PAUSED",
+      GRACE_PERIOD: "GRACE_PERIOD",
+    },
+    ProductType: {
+      SUBSCRIPTION: "SUBSCRIPTION",
+      CONSUMABLE: "CONSUMABLE",
+      NON_CONSUMABLE: "NON_CONSUMABLE",
+    },
+    CreditLedgerType: {
+      PURCHASE: "PURCHASE",
+      SPEND: "SPEND",
+      REFUND: "REFUND",
+      BONUS: "BONUS",
+      EXPIRE: "EXPIRE",
+    },
+    WebhookEventStatus: {
+      RECEIVED: "RECEIVED",
+      PROCESSING: "PROCESSING",
+      PROCESSED: "PROCESSED",
+      FAILED: "FAILED",
+    },
+    WebhookSource: { APPLE: "APPLE", GOOGLE: "GOOGLE", STRIPE: "STRIPE" },
+    OutgoingWebhookStatus: {
+      PENDING: "PENDING",
+      SENT: "SENT",
+      FAILED: "FAILED",
+      DEAD: "DEAD",
+      DISMISSED: "DISMISSED",
+    },
+    RevenueEventType: {
+      INITIAL: "INITIAL",
+      RENEWAL: "RENEWAL",
+      TRIAL_CONVERSION: "TRIAL_CONVERSION",
+      CANCELLATION: "CANCELLATION",
+      REFUND: "REFUND",
+      REACTIVATION: "REACTIVATION",
+      CREDIT_PURCHASE: "CREDIT_PURCHASE",
+    },
+    FeatureFlagEnv: { PROD: "PROD", STAGING: "STAGING", DEVELOPMENT: "DEVELOPMENT" },
+  };
+});
 
 vi.mock("../src/lib/auth", () => authMock);
 
