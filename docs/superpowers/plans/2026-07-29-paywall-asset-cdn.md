@@ -2544,7 +2544,18 @@ export async function sweepOrphanedAssets(): Promise<{ reclaimed: number }> {
     // Age comes from the object's own LastModified, not the DB — an
     // orphan by definition may have no row to read a timestamp from.
     const lastModified = await store.getObjectLastModified(key);
-    if (lastModified && lastModified > cutoff) continue;
+    // A null means we could NOT establish the object's age. Skip it.
+    //
+    // The tempting reading is "HeadObject said NotFound, so the object
+    // is already gone, so deleting is a harmless no-op" — and for that
+    // specific race it is. But nothing here distinguishes that race
+    // from a false NotFound under read-after-write lag, and this is
+    // the one component in the product that deletes customer data on
+    // its own initiative. "Could not confirm" must not resolve to
+    // "delete"; the sweeper runs again on the next cycle, so skipping
+    // costs a few hours of retained bytes, while deleting wrongly
+    // costs an asset that a published paywall is serving.
+    if (lastModified === null || lastModified > cutoff) continue;
     await store.deleteObject(key);
     reclaimed += 1;
   }
