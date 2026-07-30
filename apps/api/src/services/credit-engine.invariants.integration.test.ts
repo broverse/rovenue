@@ -1,6 +1,13 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { getDb, creditLedger, projects, subscribers, virtualCurrencies } from "@rovenue/db";
+import {
+  getDb,
+  drizzle,
+  creditLedger,
+  projects,
+  subscribers,
+  virtualCurrencies,
+} from "@rovenue/db";
 
 const RUN_ID = Date.now();
 const P = `prj_ledinv_${RUN_ID}`;
@@ -30,18 +37,23 @@ function flatMessages(err: unknown): string {
 describe("credit_ledger invariants", () => {
   afterAll(async () => {
     const db = getDb();
-    // credit_ledger is now append-only at the DB level (trigger rejects DELETE).
-    // Disable the trigger for test cleanup only, then re-enable.
-    await db.execute(
-      sql`ALTER TABLE "credit_ledger" DISABLE TRIGGER "credit_ledger_append_only"`,
-    );
-    await db.delete(creditLedger).where(sql`"projectId" = ${P}`);
-    await db.execute(
-      sql`ALTER TABLE "credit_ledger" ENABLE TRIGGER "credit_ledger_append_only"`,
-    );
-    await db.delete(virtualCurrencies).where(sql`id = ${C}`);
-    await db.delete(subscribers).where(sql`id = ${S}`);
-    await db.delete(projects).where(sql`id = ${P}`);
+    // `credit_ledger` is append-only at the DB level. This used to clear it
+    // with ALTER TABLE ... DISABLE TRIGGER, which is a much bigger hammer
+    // than the job needs: it takes an ACCESS EXCLUSIVE lock and, worse,
+    // disables the guard for EVERY session for the duration — so any test
+    // running concurrently could delete ledger rows unnoticed, and a crash
+    // between the two statements would leave the trigger off entirely.
+    //
+    // `withLedgerDeleteAuthorized` sets the bypass with SET LOCAL inside one
+    // transaction, so it is scoped to this connection and unwinds itself.
+    // The subsequent deletes cascade into the ledger too, so they belong in
+    // the same authorised transaction.
+    await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(db, async (tx) => {
+      await tx.delete(creditLedger).where(sql`"projectId" = ${P}`);
+      await tx.delete(virtualCurrencies).where(sql`id = ${C}`);
+      await tx.delete(subscribers).where(sql`id = ${S}`);
+      await tx.delete(projects).where(sql`id = ${P}`);
+    });
   });
 
   it("rejects a negative balance via CHECK", async () => {

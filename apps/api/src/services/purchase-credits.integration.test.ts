@@ -16,10 +16,15 @@ describe("grantPurchaseCurrencies", () => {
   let goldId: string;
   let gemId: string;
 
+  // Deleting the project cascades into `credit_ledger`, which is append-only
+  // at the DB level — the trigger rejects the DELETE and fails the whole
+  // statement even though this teardown never names the ledger.
   afterAll(async () => {
-    await drizzle.db
-      .delete(drizzle.schema.projects)
-      .where(eq(drizzle.schema.projects.id, PROJECT_ID));
+    await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(drizzle.db, (tx) =>
+      tx
+        .delete(drizzle.schema.projects)
+        .where(eq(drizzle.schema.projects.id, PROJECT_ID)),
+    );
   });
 
   it("grants all bundle currencies and is idempotent on replay", async () => {

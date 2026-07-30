@@ -30,16 +30,24 @@ describe("bindAppUserId", () => {
     SEED_CURRENCY_ID = currency.id;
   });
 
+  // `credit_ledger` is append-only at the DATABASE level (a trigger, not a
+  // convention), so a DELETE is rejected unless the transaction sets
+  // `rovenue.allow_ledger_delete`. Neither of these statements touches the
+  // ledger directly — but both CASCADE into it, which is enough to trip the
+  // trigger and fail the whole statement. `withLedgerDeleteAuthorized` is
+  // the sanctioned way to say "this teardown really does mean it".
   afterAll(async () => {
-    await getDb().delete(projects).where(eq(projects.id, PROJECT_ID));
+    await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(getDb(), (tx) =>
+      tx.delete(projects).where(eq(projects.id, PROJECT_ID)),
+    );
   });
 
   beforeEach(async () => {
     // Remove all subscribers for this project between tests so each
     // case starts from a clean slate.
-    await getDb()
-      .delete(subscribers)
-      .where(eq(subscribers.projectId, PROJECT_ID));
+    await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(getDb(), (tx) =>
+      tx.delete(subscribers).where(eq(subscribers.projectId, PROJECT_ID)),
+    );
   });
 
   async function insertSub(rovenueId: string, appUserId: string | null) {

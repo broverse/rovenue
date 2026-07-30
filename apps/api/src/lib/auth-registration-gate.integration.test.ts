@@ -71,10 +71,16 @@ async function seedPendingInvitation(
 // shared across tests that run sequentially in this file only.
 async function truncateForCase() {
   const db = getDb();
-  // Remove invitations seeded by this test run first (FK: invitedByUserId → user.id).
-  await db
-    .delete(drizzle.schema.projectInvitations)
-    .where(eq(drizzle.schema.projectInvitations.projectId, SEED_PROJECT_ID));
+  // Remove invitations first (FK: invitedByUserId → user.id).
+  //
+  // This deliberately clears ALL invitations, not just this project's. The
+  // next statement wipes the `user` table globally, so any invitation left
+  // behind by another suite still points at a user being deleted and the FK
+  // rejects the whole thing — which is exactly how this failed: leftover
+  // rows from other runs blocked a delete that only tidied its own project.
+  // Scoping one side globally and the other narrowly cannot work; the
+  // global wipe below is the more destructive of the two, so this matches it.
+  await db.delete(drizzle.schema.projectInvitations);
   // Delete all users — cascades to sessions, accounts, verifications.
   await db.execute(sql`DELETE FROM "user"`);
 }
@@ -98,7 +104,12 @@ afterAll(async () => {
   env.HOST_MODE = origMode;
   env.ALLOW_REGISTRATION = origAllow;
   // Remove the seed project row (invitations cascade-deleted by FK).
-  await getDb().delete(projects).where(eq(projects.id, SEED_PROJECT_ID));
+  // The same cascade reaches `credit_ledger`, which is append-only at the DB
+  // level, so the delete has to be authorised even though this suite never
+  // touches credits.
+  await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(getDb(), (tx) =>
+    tx.delete(projects).where(eq(projects.id, SEED_PROJECT_ID)),
+  );
 });
 
 afterEach(async () => {
