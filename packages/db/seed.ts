@@ -117,6 +117,23 @@ async function main() {
     )
     .onConflictDoNothing();
 
+  // Migration 0100 now seeds this ladder, so the insert above is a no-op on
+  // any migrated database and its `stripePriceId` never lands. The price id
+  // is the one field here that is environment-specific rather than reference
+  // data — the migration leaves it NULL on purpose — so set it explicitly.
+  // Guarded on the env var: without it this would blank a configured id.
+  if (indieMonthlyPriceId) {
+    await db
+      .update(billingTierLimits)
+      .set({ stripePriceId: indieMonthlyPriceId })
+      .where(
+        and(
+          eq(billingTierLimits.tier, "indie"),
+          eq(billingTierLimits.cycle, "monthly"),
+        ),
+      );
+  }
+
   await db
     .insert(userTable)
     .values({
