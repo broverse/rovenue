@@ -8,7 +8,6 @@ import {
   importX509,
   type CompactJWSHeaderParameters,
   type FlattenedJWSInput,
-  type KeyLike,
 } from "jose";
 import {
   APPLE_ENVIRONMENT,
@@ -88,10 +87,13 @@ export class LibraryAppleNotificationVerifier
 // Jose-backed verifier — test fallback (insecure: no chain validation)
 // =============================================================
 
+// jose 6 removed the `KeyLike` alias; a key is now a CryptoKey (what
+// importX509/importPKCS8 return) or raw bytes. Same set of accepted values,
+// spelled without the alias.
 export type AppleKeyLookup = (
   protectedHeader: CompactJWSHeaderParameters,
   token: FlattenedJWSInput,
-) => Promise<KeyLike | Uint8Array>;
+) => Promise<CryptoKey | Uint8Array>;
 
 function pemFromBase64(der: string): string {
   const wrapped = der.match(/.{1,64}/g)?.join("\n") ?? der;
