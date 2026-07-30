@@ -2118,14 +2118,23 @@ function uploadHandler(kind: AssetKind) {
         sourceHeight,
         policyVersion,
       });
-      await audit(tx, {
-        projectId,
-        actorId: user.id,
-        action: "asset.upload",
-        targetType: "paywall_asset",
-        targetId: row.id,
-        ...extractRequestContext(c),
-      });
+      // `audit(entry, callerTx?)` — the entry comes FIRST and the
+      // transaction second. Field names are `userId` / `resource` /
+      // `resourceId` (see the `AuditEntry` interface in
+      // apps/api/src/lib/audit.ts), and actions are past tense
+      // (`asset.uploaded`, matching `font.uploaded`).
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "asset.uploaded",
+          resource: "paywall_asset",
+          resourceId: row.id,
+          after: { kind, name, byteSize: row.byteSize, contentHash: row.contentHash },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
       // Same transaction as the insert, deliberately. The reservation
       // and the committed row both count against the cap, so a
       // reservation that outlives its upload charges the bytes twice
@@ -2291,16 +2300,32 @@ assetsRoute
     // would leave a live row pointing at nothing.
     await drizzle.db.transaction(async (tx) => {
       await drizzle.assetRepo.softDeleteAsset(tx, projectId, id);
-      await audit(tx, {
-        projectId,
-        actorId: user.id,
-        action: "asset.delete",
-        targetType: "paywall_asset",
-        targetId: id,
-        ...extractRequestContext(c),
-      });
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "asset.deleted",
+          resource: "paywall_asset",
+          resourceId: id,
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
     });
-    await store.deleteObject(asset.storageKey);
+
+    // The row is already tombstoned and the delete has substantially
+    // succeeded, so a storage failure here must NOT surface as a 500 —
+    // that would tell the caller the delete failed when it did not, and
+    // invite a retry that can only 404. Log it and let the orphan
+    // sweeper reclaim the object.
+    try {
+      await store.deleteObject(asset.storageKey);
+    } catch (err) {
+      logger.error(
+        { err, assetId: id, storageKey: asset.storageKey },
+        "asset row deleted but storage object delete failed; sweeper will reclaim",
+      );
+    }
 
     return c.json(ok({ deleted: true }));
   });
