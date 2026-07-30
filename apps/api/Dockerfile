@@ -111,7 +111,13 @@ COPY --from=builder --chown=rovenue:rovenue /app/packages/email-templates/locale
 USER rovenue
 
 ENV NODE_ENV=production \
-    PORT=3000
+    PORT=3000 \
+    # Second layer behind the libvips loader allowlist applied in
+    # apps/api/src/services/assets/sharp-hardening.ts (design spec §5.4)
+    # — that allowlist is the primary control and does not depend on
+    # upstream's "untrusted" classification. This is defense in depth,
+    # not a replacement for it.
+    VIPS_BLOCK_UNTRUSTED=1
 
 EXPOSE 3000
 

@@ -59,6 +59,13 @@ services:
       # false so it can scale to N replicas without double-dispatching.
       # See docs/architecture/outbox-dispatcher.md.
       OUTBOX_DISPATCHER_ENABLED: "false"
+      # Self-hosted default: the in-network MinIO service below. Cloud
+      # deployments override ASSET_STORAGE_ENDPOINT in .env to point at
+      # R2 instead (https://<accountid>.r2.cloudflarestorage.com) — see
+      # .env.example and deploy/minio/README.md. ASSET_STORAGE_BUCKET /
+      # _REGION / _ACCESS_KEY_ID / _SECRET_ACCESS_KEY / ASSET_PUBLIC_BASE_URL
+      # need no docker-network translation and flow through from env_file.
+      ASSET_STORAGE_ENDPOINT: ${ASSET_STORAGE_ENDPOINT:-http://minio:9000}
     volumes:
       - ${APPLE_ROOT_CERTS_HOST_DIR:-./deploy/apple-certs}:/etc/rovenue/apple-certs:ro
     ports:
@@ -104,6 +111,10 @@ services:
       # to its entrypoint (which calls runOutboxDispatcher directly) but
       # we set it true to document intent and satisfy the guard test.
       OUTBOX_DISPATCHER_ENABLED: "true"
+      # The asset orphan sweeper (apps/api/src/workers/asset-orphan-sweeper.ts)
+      # also runs in this process — same reasoning as ASSET_STORAGE_ENDPOINT
+      # on the `api` service above.
+      ASSET_STORAGE_ENDPOINT: ${ASSET_STORAGE_ENDPOINT:-http://minio:9000}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -323,6 +334,110 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # --- Self-hosted asset storage (paywall asset CDN, design spec §6) -----
+  # S3-compatible object store for paywall images/Lottie/video, used only
+  # under HOST_MODE=self. Cloud (HOST_MODE=cloud) deployments use Cloudflare
+  # R2 instead and never talk to this container — R2 has no object-ACL
+  # concept at all, so the anonymous-read bucket policy `minio-init` sets
+  # below is MinIO-specific; on R2, public read comes from binding a
+  # custom domain to the bucket (see deploy/minio/README.md for the full
+  # self-host/R2 split, including why ASSET_STORAGE_ENDPOINT and
+  # ASSET_PUBLIC_BASE_URL must NOT be the same host in production).
+  #
+  # Root credentials double as the S3 client credentials AssetStore uses
+  # (apps/api/src/lib/asset-store.ts) — one pair of env vars
+  # (ASSET_STORAGE_ACCESS_KEY_ID / ASSET_STORAGE_SECRET_ACCESS_KEY) to set,
+  # not two that can drift out of sync.
+  #
+  # Left in the default boot list (like db/redis) so a bare `docker
+  # compose up` gives a working self-hosted asset CDN out of the box. It
+  # is NOT a dependency of `api`/`dispatcher` (no depends_on / health
+  # gate) — asset uploads degrade to a typed ASSET_STORAGE_UNAVAILABLE
+  # when storage is unconfigured or unreachable, same contract as a blank
+  # ClickHouse. Deploying against R2 instead means this container simply
+  # goes unused; stop it with `docker compose stop minio minio-init`.
+  minio:
+    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+    environment:
+      MINIO_ROOT_USER: ${ASSET_STORAGE_ACCESS_KEY_ID:-rovenue-assets}
+      MINIO_ROOT_PASSWORD: ${ASSET_STORAGE_SECRET_ACCESS_KEY:-rovenue-assets-dev-secret}
+    command: server /data --console-address ":9090"
+    volumes:
+      - rovenue-minio-data:/data
+    ports:
+      # Host 9002 → container 9000 (S3 API) so rovenue can coexist with
+      # other MinIO/S3-ish services bound to 9000 on the host (same
+      # reasoning as db's 5433 and redis's 6380 above). Published so
+      # ASSET_PUBLIC_BASE_URL=http://localhost:9002/... resolves from the
+      # host/SDK during local dev. A production self-host deploy puts a
+      # real hostname in front of this (Caddy or otherwise) and points
+      # ASSET_PUBLIC_BASE_URL at that — see deploy/minio/README.md.
+      - "9002:9000"
+      # Host 9091 → container 9090 (web console) — dev convenience only.
+      # Put it behind auth/off a public interface before exposing this
+      # host to the internet.
+      - "9091:9090"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # One-shot: creates the bucket, grants anonymous READ on objects, and
+  # leaves bucket listing disabled. This is a hand-written bucket policy
+  # (`s3:GetObject` on the object ARN only), NOT `mc anonymous set
+  # download` — verified by hand that the canned `download` policy also
+  # grants `s3:ListBucket` (+ `s3:GetBucketLocation`) on this MinIO
+  # release (`mc anonymous get-json` shows both actions; an anonymous
+  # `GET /bucket?list-type=2` against it returns 200 with the key), which
+  # is exactly the enumeration this bucket must not allow. An unguessable
+  # cuid2 key is the whole security boundary (design spec §6), and that
+  # boundary evaporates the moment the bucket can be listed instead of
+  # guessed. With the policy below, the same anonymous list request
+  # returns 403 AccessDenied while GetObject on a known key still
+  # returns 200 — both checked against a live container, not assumed.
+  # Exits 0 and does not restart; `api`/`dispatcher` do not gate on it,
+  # matching the "storage unconfigured degrades, does not block boot"
+  # contract.
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${ASSET_STORAGE_ACCESS_KEY_ID:-rovenue-assets}
+      MINIO_ROOT_PASSWORD: ${ASSET_STORAGE_SECRET_ACCESS_KEY:-rovenue-assets-dev-secret}
+      ASSET_STORAGE_BUCKET: ${ASSET_STORAGE_BUCKET:-rovenue-assets}
+    # `command` is given as a 2-element list ([-c, <script>]), not a bare
+    # string — compose shell-splits a scalar `command:` string into argv
+    # BEFORE it ever reaches `sh -c`, which silently turns everything
+    # after the first word into extra positional args instead of part of
+    # the script (confirmed by running this: bare-string form printed
+    # `mc`'s usage/help and never got past `alias set`).
+    entrypoint: ["sh"]
+    command:
+      - -c
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$ASSET_STORAGE_BUCKET" &&
+        cat > /tmp/anon-read-policy.json <<POLICY &&
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {"AWS": ["*"]},
+              "Action": ["s3:GetObject"],
+              "Resource": ["arn:aws:s3:::$$ASSET_STORAGE_BUCKET/*"]
+            }
+          ]
+        }
+        POLICY
+        mc anonymous set-json /tmp/anon-read-policy.json "local/$$ASSET_STORAGE_BUCKET" &&
+        echo "minio-init: bucket $$ASSET_STORAGE_BUCKET ready — anonymous GetObject only, ListBucket denied"
+    restart: "no"
+
   clickhouse:
     # Pinned to 24.3 LTS — the oldest series that carries
     # `windowFunnel`, projections, and the @clickhouse/client 1.x wire
@@ -513,6 +628,7 @@ services:
 
 volumes:
   rovenue-data:
+  rovenue-minio-data:
   rovenue-clickhouse-data:
   rovenue-redpanda-data:
   caddy-data:
