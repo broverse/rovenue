@@ -19,24 +19,36 @@
 // teardowns were already written against. What goes away is the PARALLEL
 // interference between workers — the part no single test file could fix.
 //
-// WHY THE TEMPLATE IS CLONED AND NOT MIGRATED
+// WHY THE TEMPLATE IS MIGRATED AND NOT CLONED
 //
-// The obvious build is "create an empty database and run the migrations".
-// That does not work here, and the reason is worth knowing: migration 0015a's
-// lineage still does `CREATE EXTENSION timescaledb`, and the Postgres image
-// this repo ships (deploy/postgres, pg_partman) has no timescaledb.control.
-// The migrations therefore CANNOT be replayed from scratch on the current
-// image — the working dev database is a historical artifact created under an
-// older image. Fixing that is its own piece of work; until then the template
-// is a clone of whatever database DATABASE_URL already points at.
+// It used to be cloned from whatever database DATABASE_URL pointed at,
+// because the migrations could not be replayed: migration 0015a's lineage
+// does `CREATE EXTENSION timescaledb`, and the Postgres image this repo
+// ships (deploy/postgres, pg_partman) has no timescaledb.control. That made
+// the test template a copy of a historical artifact — a database nobody
+// could recreate, carrying whatever rows the developer happened to have.
 //
-// The template is built ONCE and kept. Cloning needs the source to have no
-// other sessions, so building it terminates idle connections to the source —
-// an intrusive act, deliberately made rare rather than something every test
-// run does silently. Delete `rovenue_test_tpl` by hand to force a rebuild
-// after a migration.
+// `runFreshInstall` (packages/db/src/fresh-install.ts) removes that
+// constraint: it walks the journal and marks the timescale-era entries
+// applied without executing them, landing the same schema the upgrade path
+// produces. The template is now built from migrations alone, so it is empty,
+// deterministic, and reproducible on a machine that has never had a dev
+// database — which is what lets CI run these suites at all.
+//
+// The template is built ONCE and kept. Delete `rovenue_test_tpl` by hand to
+// force a rebuild after adding a migration.
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { Client } from "pg";
+import { runFreshInstall } from "@rovenue/db/src/fresh-install";
+
+const execFileAsync = promisify(execFile);
+
+/** Repo root, from apps/api/tests/ — used to locate the seed script and
+ *  the tsx binary that runs it. */
+const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 export const TEMPLATE_DB = "rovenue_test_tpl";
 /** Worker databases are named `<prefix><poolId>` — see tests/setup.ts. */
@@ -47,11 +59,6 @@ function baseUrl(): string {
     process.env.DATABASE_URL ??
     "postgresql://rovenue:rovenue@localhost:5433/rovenue"
   );
-}
-
-/** The database DATABASE_URL currently names — the clone source. */
-export function sourceDbName(): string {
-  return new URL(baseUrl()).pathname.replace(/^\//, "") || "rovenue";
 }
 
 /** The configured URL with its database swapped for `postgres`: neither
@@ -93,33 +100,61 @@ async function exists(client: Client, name: string): Promise<boolean> {
   return (rowCount ?? 0) > 0;
 }
 
+/** Run packages/db/seed.ts against the template.
+ *
+ *  The suites expect a seeded database — billing_tier_limits' four-tier
+ *  ladder, the demo project, and the demo subscribers are all fixtures that
+ *  no migration creates (the header note in billing-tier-limits-seed.test.ts
+ *  says as much). While the template was a clone of the developer's database
+ *  this came for free, because that database had been seeded by hand at some
+ *  point. Building from migrations alone drops it, so the seed becomes an
+ *  explicit step — which is the point: reproducible rather than inherited.
+ *
+ *  Spawned rather than imported because seed.ts is a script: it runs on
+ *  import and reads DATABASE_URL when its pool module is first evaluated, so
+ *  pointing it at the template means setting the variable in a child
+ *  process, not in ours. */
+async function seedTemplate(): Promise<void> {
+  await execFileAsync(
+    `${REPO_ROOT}node_modules/.bin/tsx`,
+    [`${REPO_ROOT}packages/db/seed.ts`],
+    {
+      cwd: `${REPO_ROOT}packages/db`,
+      env: { ...process.env, DATABASE_URL: databaseUrlFor(TEMPLATE_DB) },
+    },
+  );
+}
+
 export async function setup(): Promise<void> {
+  const alreadyBuilt = await withAdmin((client) => exists(client, TEMPLATE_DB));
+  if (alreadyBuilt) return;
+
+  console.log(`[test-db] building template "${TEMPLATE_DB}" from migrations`);
   await withAdmin(async (client) => {
-    if (await exists(client, TEMPLATE_DB)) return;
-
-    const source = sourceDbName();
-    // CREATE DATABASE ... TEMPLATE refuses while any other session is on the
-    // source. Terminate only IDLE ones and say so — an in-flight query is
-    // somebody's work and killing it would be worse than failing loudly.
-    const { rows } = await client.query<{ pid: number }>(
-      `SELECT pid FROM pg_stat_activity
-        WHERE datname = $1 AND pid <> pg_backend_pid() AND state = 'idle'`,
-      [source],
-    );
-    if (rows.length > 0) {
-      console.log(
-        `[test-db] terminating ${rows.length} idle connection(s) to "${source}" to build the template`,
-      );
-      await client.query(
-        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-          WHERE datname = $1 AND pid <> pg_backend_pid() AND state = 'idle'`,
-        [source],
-      );
-    }
-
-    console.log(`[test-db] building template "${TEMPLATE_DB}" from "${source}"`);
-    await client.query(`CREATE DATABASE "${TEMPLATE_DB}" TEMPLATE "${source}"`);
+    await client.query(`CREATE DATABASE "${TEMPLATE_DB}"`);
   });
+
+  // If either step throws, drop the half-built database rather than leave it
+  // behind: `exists()` is the only staleness check there is, so an
+  // empty-but-present template would be cloned by every subsequent run and
+  // every suite would fail on missing tables instead of on the error that
+  // actually happened.
+  try {
+    const client = new Client({ connectionString: databaseUrlFor(TEMPLATE_DB) });
+    await client.connect();
+    try {
+      await runFreshInstall(client);
+    } finally {
+      // Close before seeding: seed.ts opens its own pool, and the template
+      // must end up with no sessions at all — CREATE DATABASE ... TEMPLATE
+      // refuses while any session is attached to it.
+      await client.end();
+    }
+    await seedTemplate();
+  } catch (err) {
+    await withAdmin((c) => dropDatabase(c, TEMPLATE_DB));
+    throw err;
+  }
 }
 
 export async function teardown(): Promise<void> {
