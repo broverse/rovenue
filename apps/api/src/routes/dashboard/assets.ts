@@ -21,6 +21,7 @@ import { assertProjectCapability } from "../../lib/capabilities";
 import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { fail, ok } from "../../lib/response";
+import { logger } from "../../lib/logger";
 import * as store from "../../lib/asset-store";
 import { normalizeImage, AssetProcessingError } from "../../services/assets/normalize";
 import {
@@ -700,7 +701,23 @@ assetsRoute
         tx,
       );
     });
-    await store.deleteObject(asset.storageKey);
+
+    // The row is already tombstoned and the transaction has committed,
+    // so the delete has substantially succeeded at this point — every
+    // read path already treats this asset as gone. A storage failure
+    // here must NOT surface as a 500: that would tell the caller the
+    // delete failed when it did not, and the natural response (retry)
+    // can only ever 404, since the row is already soft-deleted. Log it
+    // and let the orphan sweeper (Task 9) reclaim the object instead.
+    try {
+      await store.deleteObject(asset.storageKey);
+    } catch (err) {
+      logger.error("asset row deleted but storage object delete failed; sweeper will reclaim", {
+        assetId: id,
+        storageKey: asset.storageKey,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     return c.json(ok({ deleted: true }));
   });

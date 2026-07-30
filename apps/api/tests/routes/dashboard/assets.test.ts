@@ -82,6 +82,31 @@ vi.mock("../../../src/lib/audit", async (importOriginal) => ({
   audit: (...args: unknown[]) => auditMock(...args),
 }));
 
+// Review finding (Task 7): a storage failure AFTER the row is already
+// tombstoned must be logged, not surfaced as a 500 — mocked here so the
+// "still succeeds" test below can assert on the log call directly
+// rather than merely on the response not being a 500 (which the error
+// handler catching an UNRELATED thrown error would also satisfy).
+//
+// `logger.child(...)` must keep working too: `audit.ts`'s real module
+// (loaded via `importOriginal` in the audit mock below) calls
+// `logger.child("audit")` at module scope, so a bare `{ error: fn }`
+// stub breaks import entirely — `child()` returns an equally-shaped
+// stub, recursively.
+const loggerError = vi.hoisted(() => vi.fn());
+vi.mock("../../../src/lib/logger", () => {
+  function makeLoggerStub(): Record<string, unknown> {
+    return {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: (...args: unknown[]) => loggerError(...args),
+      child: () => makeLoggerStub(),
+    };
+  }
+  return { logger: makeLoggerStub() };
+});
+
 const buildStorageKey = vi.hoisted(() => vi.fn());
 const publicUrl = vi.hoisted(() => vi.fn());
 const putObject = vi.hoisted(() => vi.fn());
@@ -276,6 +301,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ id: "m1", role: "OWNER" });
   auditMock.mockReset().mockResolvedValue(undefined);
+  loggerError.mockReset();
 
   buildStorageKey
     .mockReset()
@@ -917,6 +943,38 @@ describe("DELETE /dashboard/projects/:projectId/assets/:id", () => {
     expect(order).toEqual(["softDeleteAsset", "deleteObject"]);
     expect(softDeleteAsset).toHaveBeenCalledWith(TX_SENTINEL, "p1", "asset_1");
     expect(deleteObject).toHaveBeenCalledWith("p1/asset_1.webp");
+  });
+
+  // Review finding (Task 7, Important): the row is already tombstoned
+  // and the transaction has committed by the time `deleteObject` runs —
+  // the delete has substantially succeeded. If `deleteObject` rejects,
+  // that must NOT surface as a 500 (which would tell the caller the
+  // delete failed and invite a retry that can only ever 404, since the
+  // row is already gone); it must be logged and the response must
+  // still be the normal success envelope. A test that only checked
+  // "no 500" would also pass if the route swallowed some UNRELATED
+  // error, so this asserts the specific log call too.
+  it("still returns success and logs when the storage delete fails after the row is tombstoned", async () => {
+    findAssetById.mockResolvedValue(assetFixture({ storageKey: "p1/asset_1.webp" }));
+    const storageErr = new Error("S3 unreachable");
+    deleteObject.mockRejectedValue(storageErr);
+
+    const res = await deleteAssetRes("asset_1");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: { deleted: true } });
+
+    // The row is still tombstoned regardless of the storage outcome —
+    // softDeleteAsset already ran and committed before deleteObject was
+    // ever called.
+    expect(softDeleteAsset).toHaveBeenCalledWith(TX_SENTINEL, "p1", "asset_1");
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining("sweeper will reclaim"),
+      expect.objectContaining({
+        assetId: "asset_1",
+        storageKey: "p1/asset_1.webp",
+        err: "S3 unreachable",
+      }),
+    );
   });
 
   it("returns 404 for another project's asset", async () => {
