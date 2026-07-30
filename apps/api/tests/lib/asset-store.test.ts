@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { mockClient } from "aws-sdk-client-mock";
+import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
 
 // `vi.hoisted` runs BEFORE the imports below. This matters: `lib/env`
 // parses process.env at import time, and a plain `beforeAll` would run
@@ -10,9 +12,23 @@ import { describe, it, expect, vi } from "vitest";
 // code paths unexercised while looking fully covered.
 vi.hoisted(() => {
   process.env.ASSET_PUBLIC_BASE_URL ??= "https://cdn.example.test/rovenue-assets/";
+  // Only listAllKeys()'s pagination test below needs these — the URL
+  // helpers above never touch S3 — but isStorageConfigured() checks all
+  // five together, so a partial set would make that test silently
+  // no-op instead of exercising the real code path.
+  process.env.ASSET_STORAGE_ENDPOINT ??= "https://s3.example.test";
+  process.env.ASSET_STORAGE_REGION ??= "us-east-1";
+  process.env.ASSET_STORAGE_BUCKET ??= "rovenue-assets-test";
+  process.env.ASSET_STORAGE_ACCESS_KEY_ID ??= "test-key";
+  process.env.ASSET_STORAGE_SECRET_ACCESS_KEY ??= "test-secret";
 });
 
-import { buildStorageKey, publicUrl, parseAssetUrl } from "../../src/lib/asset-store";
+import {
+  buildStorageKey,
+  publicUrl,
+  parseAssetUrl,
+  listAllKeys,
+} from "../../src/lib/asset-store";
 
 describe("asset URL shape", () => {
   const projectId = "prj_abc123";
@@ -57,5 +73,41 @@ describe("asset URL shape", () => {
     expect(parseAssetUrl("https://example.com/hero.png")).toBeNull();
     expect(parseAssetUrl("https://cdn.example.test/nope")).toBeNull();
     expect(parseAssetUrl("not a url")).toBeNull();
+  });
+});
+
+describe("listAllKeys pagination", () => {
+  // The orphan sweeper's entire safety property rests on this: if
+  // listAllKeys() silently truncated at the first page, every key past
+  // it would look orphaned — including keys with a perfectly live row —
+  // and get deleted. A real MinIO bucket with >1000 objects is
+  // impractical to spin up for a test, so this pins the continuation
+  // behavior against a mocked S3 client instead.
+  it("follows the continuation token across pages", async () => {
+    const s3Mock = mockClient(S3Client);
+    s3Mock
+      .on(ListObjectsV2Command)
+      .resolvesOnce({
+        Contents: [{ Key: "prj_a/ast_1.webp" }, { Key: "prj_a/ast_2.webp" }],
+        NextContinuationToken: "page-2-token",
+      })
+      .resolvesOnce({
+        Contents: [{ Key: "prj_a/ast_3.webp" }],
+      });
+
+    const keys = await listAllKeys();
+
+    // Every key across BOTH pages is present — the case a silent
+    // one-page truncation would fail.
+    expect(keys).toEqual([
+      "prj_a/ast_1.webp",
+      "prj_a/ast_2.webp",
+      "prj_a/ast_3.webp",
+    ]);
+
+    const calls = s3Mock.commandCalls(ListObjectsV2Command);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.args[0].input.ContinuationToken).toBeUndefined();
+    expect(calls[1]?.args[0].input.ContinuationToken).toBe("page-2-token");
   });
 });

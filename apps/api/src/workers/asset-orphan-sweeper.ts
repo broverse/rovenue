@@ -67,8 +67,15 @@ export async function sweepOrphanedAssets(
     if (liveKeys.has(key)) continue;
     // Age comes from the object's own LastModified, not the DB — an
     // orphan by definition may have no row to read a timestamp from.
+    // A null age (HeadObject came back NotFound) is NOT proof the
+    // object is gone — read-after-write lag or a transient S3 error can
+    // surface as NotFound while the object still exists and may be
+    // live. "Could not confirm this object's age" must resolve to
+    // "leave it alone", not "delete it": skipping costs one more sweep
+    // cycle of retained bytes; deleting wrongly costs a published
+    // paywall's asset.
     const lastModified = await store.getObjectLastModified(key);
-    if (lastModified && lastModified > cutoff) continue;
+    if (lastModified === null || lastModified > cutoff) continue;
     await store.deleteObject(key);
     reclaimed += 1;
   }
@@ -80,7 +87,7 @@ export async function sweepOrphanedAssets(
     WHERE "paywall_asset_reservations"."createdAt" < ${cutoff}
   `);
 
-  logger.info("asset orphan sweep complete", { reclaimed });
+  log.info("asset orphan sweep complete", { reclaimed });
   return { reclaimed };
 }
 
