@@ -19,7 +19,8 @@
 - **The filename is never consulted** for type detection. The kind comes from the URL path segment and the magic bytes must agree with it.
 - TypeScript strict everywhere; Zod for API input; all responses are `{ data: T }` or `{ error: { code, message } }`.
 - Postgres access via Drizzle repositories only. In `sql` templates, qualify columns (`"paywall_assets"."id"`).
-- **Column naming in this repo is mixed, and raw SQL must match the actual table.** Table names are snake_case throughout, but *column* names are not uniform: the paywall and font families (`paywalls`, `paywall_versions`, `font_faces`) and `billing_subscriptions` use **camelCase** DB columns (`"publishedVersionId"`, `"projectId"`, `"byteSize"`), while `billing_tier_limits` uses **snake_case** (`"events_limit"`, `"asset_storage_bytes_limit"`). New `paywall_asset*` tables use **camelCase**, matching their siblings. Before writing any raw `sql` template, verify each column name against `packages/db/src/drizzle/schema.ts` — guessing produces SQL that typechecks and fails at runtime.
+- **Column naming in this repo is genuinely mixed, table by table, and raw SQL must match the actual table.** Table names are snake_case throughout. Column names are not: for the single column `projectId`, **34 tables** declare it as `text("projectId")` and **19** as `text("project_id")`. There is no rule to infer and no safe sample to generalise from — this plan has already shipped the bug twice, once by assuming snake_case everywhere and once by assuming camelCase for `billing_subscriptions` (it is `"project_id"`). **Open `packages/db/src/drizzle/schema.ts` and read the specific table's specific column before writing any raw `sql` template.** A wrong name typechecks and fails at runtime.
+  Known values this plan depends on: `paywalls."publishedVersionId"`, `font_faces."byteSize"`, `billing_subscriptions."project_id"`, `billing_tier_limits."asset_storage_bytes_limit"`, and the new `paywall_asset*` tables in **camelCase** (`"projectId"`, `"byteSize"`, `"deletedAt"`, `"storageKey"`).
 - `audit()` runs inside the caller's Drizzle transaction.
 - Conventional commits. **Stay on the current branch** — do not create branches or worktrees.
 - Tests: Vitest. `*.integration.test.ts` use testcontainers with real Postgres and real MinIO. A failure path tested by hand-constructing the error it is meant to catch, or an atomicity claim demonstrated over a mocked transaction, is not accepted as evidence.
@@ -1699,7 +1700,7 @@ async function tierLimitBytes(db: Db, projectId: string): Promise<number | null>
     JOIN "billing_tier_limits"
       ON "billing_tier_limits"."tier" = "billing_subscriptions"."tier"
      AND "billing_tier_limits"."cycle" = "billing_subscriptions"."cycle"
-    WHERE "billing_subscriptions"."projectId" = ${projectId}
+    WHERE "billing_subscriptions"."project_id" = ${projectId}
     LIMIT 1
   `);
   const row = (rows as unknown as { rows: { limit_bytes: string | null }[] }).rows[0];
