@@ -48,6 +48,7 @@ import {
   findOrCreateEveryoneAudience,
 } from "../../services/experiment-create";
 import { invalidateExperimentCache } from "../../services/experiment-engine";
+import { parseAssetUrl } from "../../lib/asset-store";
 
 // =============================================================
 // Dashboard: Paywalls CRUD
@@ -752,6 +753,17 @@ export const paywallsDashboardRoute = new Hono()
         projectId,
         id,
         version.id,
+        {
+          config: parsed.data,
+          resolveAssetUrl: (url) => {
+            const resolved = parseAssetUrl(url);
+            // A URL that parses but names another project's asset is just
+            // as "not ours" here as an external URL — never record usage
+            // against an asset this project doesn't own.
+            if (!resolved || resolved.projectId !== projectId) return null;
+            return resolved.assetId;
+          },
+        },
       );
       await audit(
         {

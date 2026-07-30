@@ -22,6 +22,7 @@ process.env.DATABASE_URL ??=
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createId } from "@paralleldrive/cuid2";
 import { eq } from "drizzle-orm";
+import type { BuilderConfig } from "@rovenue/shared/paywall";
 import { getDb } from "../client";
 import * as drizzleRepos from "../index";
 import { offerings, paywallAssetUsages, paywalls, projects } from "../schema";
@@ -256,5 +257,203 @@ describe("listPublishedUsage", () => {
     expect(await drizzleRepos.assetRepo.listPublishedUsage(db, created.id)).toEqual(
       [],
     );
+  });
+});
+
+// =============================================================
+// setPublishedVersion — asset usage index (Task 10)
+// =============================================================
+//
+// `resolveAssetUrl` here stands in for `AssetStore.parseAssetUrl`
+// (apps/api/src/lib/asset-store.ts) — `@rovenue/db` cannot import from
+// `apps/api`, so the real repository takes the resolver as a parameter
+// (design spec §7) and these tests supply a trivial one keyed off a
+// URL->assetId map, exactly like a real caller would.
+function usageBuilderConfig(urls: string[]): BuilderConfig {
+  return {
+    formatVersion: 2,
+    defaultLocale: "en",
+    localizations: { en: {} },
+    root: {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: urls.map((url, i) => ({
+        type: "image" as const,
+        id: `img-${i}`,
+        url: { light: url },
+      })),
+    },
+  };
+}
+
+describe("setPublishedVersion — asset usage index (Task 10)", () => {
+  let usageIndexPaywallId: string;
+  let usageIndexOfferingId: string;
+  let assetA: string;
+  let assetB: string;
+  let urlA: string;
+  let urlB: string;
+  const EXTERNAL_URL = "https://not-ours.example/photo.jpg";
+
+  function resolveAssetUrl(url: string): string | null {
+    if (url === urlA) return assetA;
+    if (url === urlB) return assetB;
+    return null;
+  }
+
+  async function usageRowsFor(versionId: string): Promise<string[]> {
+    const rows = await db
+      .select({ assetId: paywallAssetUsages.assetId })
+      .from(paywallAssetUsages)
+      .where(eq(paywallAssetUsages.versionId, versionId));
+    return rows.map((r) => r.assetId).sort();
+  }
+
+  beforeAll(async () => {
+    const [offering] = await db
+      .insert(offerings)
+      .values({
+        projectId: PROJECT_ID,
+        identifier: `off-usage-index-${RUN_ID}`,
+        packages: [{ identifier: "monthly", productId: null }],
+      })
+      .returning();
+    usageIndexOfferingId = offering!.id;
+
+    const [paywall] = await db
+      .insert(paywalls)
+      .values({
+        projectId: PROJECT_ID,
+        identifier: `pw-usage-index-${RUN_ID}`,
+        name: "Usage index paywall",
+        offeringId: usageIndexOfferingId,
+        remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      })
+      .returning();
+    usageIndexPaywallId = paywall!.id;
+
+    const [createdA, createdB] = await Promise.all([
+      drizzleRepos.assetRepo.createAsset(
+        db,
+        input({ contentHash: createId().padEnd(64, "i") }),
+      ),
+      drizzleRepos.assetRepo.createAsset(
+        db,
+        input({ contentHash: createId().padEnd(64, "j") }),
+      ),
+    ]);
+    assetA = createdA.id;
+    assetB = createdB.id;
+    urlA = `https://cdn.test/${assetA}.webp`;
+    urlB = `https://cdn.test/${assetB}.webp`;
+  });
+
+  it("writes usage rows when a version is published", async () => {
+    const version = await drizzleRepos.paywallVersionRepo.insert(db, {
+      paywallId: usageIndexPaywallId,
+      versionNo: 1,
+      builderConfig: usageBuilderConfig([urlA, urlB]),
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      offeringId: usageIndexOfferingId,
+      configFormatVersion: 2,
+    });
+
+    await drizzleRepos.paywallRepo.setPublishedVersion(
+      db,
+      PROJECT_ID,
+      usageIndexPaywallId,
+      version.id,
+      { config: usageBuilderConfig([urlA, urlB]), resolveAssetUrl },
+    );
+
+    expect(await usageRowsFor(version.id)).toEqual([assetA, assetB].sort());
+  });
+
+  it("replaces, not appends, when the same version is republished", async () => {
+    const version = await drizzleRepos.paywallVersionRepo.insert(db, {
+      paywallId: usageIndexPaywallId,
+      versionNo: 2,
+      builderConfig: usageBuilderConfig([urlA]),
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      offeringId: usageIndexOfferingId,
+      configFormatVersion: 2,
+    });
+    const opts = { config: usageBuilderConfig([urlA]), resolveAssetUrl };
+
+    // Publishing the SAME versionId twice must not double the row count —
+    // otherwise a usage count inflates every time someone republishes.
+    await drizzleRepos.paywallRepo.setPublishedVersion(
+      db,
+      PROJECT_ID,
+      usageIndexPaywallId,
+      version.id,
+      opts,
+    );
+    await drizzleRepos.paywallRepo.setPublishedVersion(
+      db,
+      PROJECT_ID,
+      usageIndexPaywallId,
+      version.id,
+      opts,
+    );
+
+    expect(await usageRowsFor(version.id)).toEqual([assetA]);
+  });
+
+  it("clears rows for an asset the new version no longer references", async () => {
+    const version = await drizzleRepos.paywallVersionRepo.insert(db, {
+      paywallId: usageIndexPaywallId,
+      versionNo: 3,
+      builderConfig: usageBuilderConfig([urlA, urlB]),
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      offeringId: usageIndexOfferingId,
+      configFormatVersion: 2,
+    });
+
+    await drizzleRepos.paywallRepo.setPublishedVersion(
+      db,
+      PROJECT_ID,
+      usageIndexPaywallId,
+      version.id,
+      { config: usageBuilderConfig([urlA, urlB]), resolveAssetUrl },
+    );
+    expect(await usageRowsFor(version.id)).toEqual([assetA, assetB].sort());
+
+    // Same versionId, republished with a tree that dropped assetB — its
+    // row must be gone, not just uncounted, so the deletion warning for
+    // assetB does not keep reporting this paywall as live usage.
+    await drizzleRepos.paywallRepo.setPublishedVersion(
+      db,
+      PROJECT_ID,
+      usageIndexPaywallId,
+      version.id,
+      { config: usageBuilderConfig([urlA]), resolveAssetUrl },
+    );
+
+    expect(await usageRowsFor(version.id)).toEqual([assetA]);
+  });
+
+  it("ignores external URLs that are not ours", async () => {
+    const version = await drizzleRepos.paywallVersionRepo.insert(db, {
+      paywallId: usageIndexPaywallId,
+      versionNo: 4,
+      builderConfig: usageBuilderConfig([urlA, EXTERNAL_URL]),
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      offeringId: usageIndexOfferingId,
+      configFormatVersion: 2,
+    });
+
+    await drizzleRepos.paywallRepo.setPublishedVersion(
+      db,
+      PROJECT_ID,
+      usageIndexPaywallId,
+      version.id,
+      { config: usageBuilderConfig([urlA, EXTERNAL_URL]), resolveAssetUrl },
+    );
+
+    // Not two rows, and not a null-id row for the external URL — just
+    // the one asset the resolver actually recognised.
+    expect(await usageRowsFor(version.id)).toEqual([assetA]);
   });
 });

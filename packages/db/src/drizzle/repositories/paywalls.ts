@@ -1,6 +1,14 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { collectMediaUrls, type BuilderConfig } from "@rovenue/shared/paywall";
 import type { Db } from "../client";
-import { experiments, paywalls, placements, type NewPaywall, type Paywall } from "../schema";
+import {
+  experiments,
+  paywallAssetUsages,
+  paywalls,
+  placements,
+  type NewPaywall,
+  type Paywall,
+} from "../schema";
 
 // =============================================================
 // Paywall catalog — Drizzle repository
@@ -158,21 +166,89 @@ export async function deletePaywall(
   return rows.length > 0;
 }
 
+export interface AssetUsageInput {
+  /** The published version's builder config, already parsed/validated by
+   *  the caller (e.g. the publish route's `builderConfigSchema.safeParse`
+   *  result) — this repo does not re-fetch or re-validate it. */
+  config: BuilderConfig | null | undefined;
+  /**
+   * Resolves a media URL back to a `paywall_assets.id`, or `null` when the
+   * URL isn't ours (an external image, say) — those are skipped rather
+   * than stored as null-id rows. This lives in the API layer
+   * (`AssetStore.parseAssetUrl` in `apps/api/src/lib/asset-store.ts`)
+   * because `@rovenue/db` cannot import from `apps/api`; passing the
+   * resolver in as a parameter keeps the dependency pointed the right way
+   * instead of inverting it or duplicating the URL-parsing logic here.
+   */
+  resolveAssetUrl: (url: string) => string | null;
+}
+
+/**
+ * Replaces — never appends — the `paywall_asset_usages` rows for one
+ * `(paywallId, versionId)` pair with `assetIds`. Delete-then-insert, so a
+ * republish of the same version never inflates its usage count, and an
+ * asset the new tree no longer references has its row cleared (otherwise
+ * the deletion warning would keep reporting stale usage forever).
+ */
+export async function replaceUsageForVersion(
+  db: Db,
+  {
+    paywallId,
+    versionId,
+    assetIds,
+  }: { paywallId: string; versionId: string; assetIds: string[] },
+): Promise<void> {
+  await db
+    .delete(paywallAssetUsages)
+    .where(eq(paywallAssetUsages.versionId, versionId));
+  if (assetIds.length === 0) return;
+  await db
+    .insert(paywallAssetUsages)
+    .values(assetIds.map((assetId) => ({ assetId, paywallId, versionId })));
+}
+
 /**
  * Point a paywall at a published version. Also flips `status` to
  * `published` — the two always move together, so callers can't leave a
  * paywall claiming `draft` while serving a version.
+ *
+ * When `assetUsage` is passed, the version's media URLs are collected
+ * (`collectMediaUrls`), resolved through `assetUsage.resolveAssetUrl`, and
+ * that versionId's `paywall_asset_usages` rows are replaced — all inside
+ * the same transaction as the `publishedVersionId` flip, so the usage
+ * index and what's actually live never disagree. Omitting `assetUsage`
+ * (existing callers that only care about the pointer, e.g. most
+ * integration test fixtures) leaves the usage index untouched.
  */
 export async function setPublishedVersion(
   db: Db,
   projectId: string,
   paywallId: string,
   versionId: string,
+  assetUsage?: AssetUsageInput,
 ): Promise<Paywall | null> {
-  const [row] = await db
-    .update(paywalls)
-    .set({ publishedVersionId: versionId, status: "published", updatedAt: new Date() })
-    .where(and(eq(paywalls.projectId, projectId), eq(paywalls.id, paywallId)))
-    .returning();
-  return row ?? null;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(paywalls)
+      .set({ publishedVersionId: versionId, status: "published", updatedAt: new Date() })
+      .where(and(eq(paywalls.projectId, projectId), eq(paywalls.id, paywallId)))
+      .returning();
+
+    if (assetUsage) {
+      // Deduped twice over: `collectMediaUrls` already dedups URLs, but
+      // two distinct URLs (e.g. a light/dark pair) could resolve to the
+      // same assetId, and the table's primary key is (assetId, versionId)
+      // — a duplicate insert would violate it.
+      const assetIds = [
+        ...new Set(
+          collectMediaUrls(assetUsage.config)
+            .map(assetUsage.resolveAssetUrl)
+            .filter((assetId): assetId is string => assetId !== null),
+        ),
+      ];
+      await replaceUsageForVersion(tx, { paywallId, versionId, assetIds });
+    }
+
+    return row ?? null;
+  });
 }

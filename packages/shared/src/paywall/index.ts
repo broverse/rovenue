@@ -1,4 +1,5 @@
 export * from "./schema";
+export { collectMediaUrls } from "./collect-urls";
 export * from "./validate";
 export * from "./variables";
 export * from "./visibility";
