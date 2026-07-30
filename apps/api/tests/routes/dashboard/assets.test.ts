@@ -622,6 +622,50 @@ describe("POST /dashboard/projects/:projectId/assets/:kind", () => {
     );
   });
 
+  it("reserves against a Content-Length larger than the actual body, then releases the over-reservation and stores the TRUE byte count", async () => {
+    // The mirror image of the test above, and the third of the three
+    // Content-Length cases the comment above `reserveStorage(...)` in
+    // streamVideo enumerates: declared > actual. This one is the
+    // ordinary case for a well-behaved client (an accurate-but-rounded
+    // estimate, or one that pads slightly) rather than the synthetic
+    // edge case above, and it's the one whose "harmless" claim depends
+    // entirely on the release actually happening — a lingering
+    // reservation here would hold phantom bytes against the project's
+    // cap until the sweeper cleared it hours later, with no error to
+    // surface it.
+    const bytes = mp4Bytes(2048); // the TRUE body
+    const declared = bytes.byteLength + 5_000_000; // claims ~5 MB more
+    const res = await uploadWithHeaders(
+      "video",
+      bytes as BlobPart,
+      { "content-length": String(declared) },
+      {},
+    );
+    expect(res.status).toBe(201);
+
+    // Reserved against the (over-stated) declared size...
+    expect(reserveStorage).toHaveBeenCalledWith(
+      expect.anything(),
+      "p1",
+      declared,
+    );
+    // ...but the committed row carries the TRUE, smaller streamed size.
+    expect(createAsset).toHaveBeenCalledWith(
+      TX_SENTINEL,
+      expect.objectContaining({ byteSize: bytes.byteLength }),
+    );
+    // The load-bearing assertion: the over-reservation does not linger.
+    // It must be released with the SAME reservation id reserveStorage
+    // returned ("res_1" — the mock's counter resets to 0 in beforeEach,
+    // so this test's single reservation call is deterministically the
+    // first), inside the SAME transaction as the row commit (the tx
+    // sentinel, not the bare db handle — see the "releases the
+    // reservation inside the same transaction" test above for what a
+    // regression here looks like) — exactly once, never left open.
+    expect(releaseReservation).toHaveBeenCalledWith(TX_SENTINEL, "res_1");
+    expect(releaseReservation).toHaveBeenCalledTimes(1);
+  });
+
   // -----------------------------------------------------------
   // Regression test for the `destroyOnReturn: false` fix in
   // `peekPrefix` (review round 1, Important finding 2). A single-chunk
