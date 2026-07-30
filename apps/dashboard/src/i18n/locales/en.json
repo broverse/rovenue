@@ -583,7 +583,8 @@
       "invoices": "Invoices",
       "members": "Members",
       "auditLogs": "Audit log",
-      "fonts": "Fonts"
+      "fonts": "Fonts",
+      "assets": "Assets"
     },
     "fonts": {
       "title": "Fonts",

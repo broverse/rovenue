@@ -188,6 +188,7 @@ function OverrideRow({
             key={key}
             node={node}
             propKey={key}
+            projectId={vm.projectId}
             value={override.props[key]}
             onChange={(v) => vm.updateOverrideProps(node.id, index, { [key]: v })}
           />
@@ -202,11 +203,13 @@ function OverridePropField({
   propKey,
   value,
   onChange,
+  projectId,
 }: {
   node: PaywallNode;
   propKey: string;
   value: unknown;
   onChange: (v: unknown) => void;
+  projectId: string;
 }) {
   const label = OVERRIDE_PROP_LABEL[propKey] ?? propKey;
   const combo = `${node.type}.${propKey}` as OverridablePropCombo;
@@ -321,7 +324,29 @@ function OverridePropField({
         />
       );
     case "video.url":
+      return (
+        <ThemeUrlField
+          labelLight={`${label} (light)`}
+          labelDark={`${label} (dark)`}
+          value={value as ThemeUrl | undefined}
+          onChange={(v) => onChange(v)}
+          kind="video"
+          projectId={projectId}
+        />
+      );
     case "video.posterUrl":
+      // A poster is a still frame — the picker here browses IMAGE
+      // assets, matching content-tab.tsx's identical `posterUrl` field.
+      return (
+        <ThemeUrlField
+          labelLight={`${label} (light)`}
+          labelDark={`${label} (dark)`}
+          value={value as ThemeUrl | undefined}
+          onChange={(v) => onChange(v)}
+          kind="image"
+          projectId={projectId}
+        />
+      );
     case "lottie.url":
       return (
         <ThemeUrlField
@@ -329,6 +354,8 @@ function OverridePropField({
           labelDark={`${label} (dark)`}
           value={value as ThemeUrl | undefined}
           onChange={(v) => onChange(v)}
+          kind="lottie"
+          projectId={projectId}
         />
       );
     default: {

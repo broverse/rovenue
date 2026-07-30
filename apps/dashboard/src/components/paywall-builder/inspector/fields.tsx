@@ -287,15 +287,20 @@ export function BorderField({
  * an empty `posterUrl` means "no poster", not a `{ light: "" }` object.
  *
  * `kind`/`projectId` are both optional and BOTH are required together to
- * turn on the asset picker — the overrides panel's calls (`overrides.tsx`)
- * pass neither and get the plain text field they always have, since that
- * surface has no natural single `kind` to hand down for every combo it
- * renders. When both are supplied (content-tab.tsx's image/video/lottie
- * fields), each row gets a "Browse" button that opens `AssetPickerDialog`
- * filtered to `kind`; picking an asset there calls the EXACT SAME
- * `setLight`/`setDark` a keystroke would, so a hand-typed external URL is
- * never a degraded path — uploading is only ever an alternative to typing,
- * never a replacement for it (task-11-brief constraint 3).
+ * turn on the asset picker. Every real caller passes both: content-tab.tsx's
+ * image/video/lottie fields, and overrides.tsx's `video.url`/`video.
+ * posterUrl`/`lottie.url` combos (`OverridePropField`'s switch gives each
+ * combo its own explicit `kind` — `posterUrl` browses IMAGE assets, since a
+ * poster is a still frame, not a second video). Omitting either prop simply
+ * falls back to the plain text field with no picker — there's no case in
+ * this codebase that currently does that on purpose, but the fallback
+ * exists so a future caller with no natural project id in scope isn't
+ * forced to fake one. When both are supplied, each row gets a "Browse"
+ * button that opens `AssetPickerDialog` filtered to `kind`; picking an
+ * asset there calls the EXACT SAME `setLight`/`setDark` a keystroke would,
+ * so a hand-typed external URL is never a degraded path — uploading is
+ * only ever an alternative to typing, never a replacement for it
+ * (task-11-brief constraint 3).
  */
 export function ThemeUrlField({
   labelLight,

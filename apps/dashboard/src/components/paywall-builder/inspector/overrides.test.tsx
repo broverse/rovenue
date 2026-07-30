@@ -1,8 +1,11 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
+import { http, HttpResponse } from "msw";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { component, ServiceProvider, useService } from "impair";
 import "../../../i18n/config";
+import { server } from "../../../../tests/msw/server";
 import { UNSET_HEX_PLACEHOLDER } from "./fields";
 import { OverridesSection } from "./overrides";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../../lib/services/paywall-builder-api";
@@ -219,14 +222,22 @@ async function renderHarness(id: string) {
     return null;
   }
 
+  // `video.url`/`video.posterUrl`/`lottie.url` now render a `ThemeUrlField`
+  // with `kind`+`projectId` set (asset-picker wiring, task 11), so
+  // `AssetPickerDialog` — and the `useAssets` query it calls once opened —
+  // needs a real `QueryClientProvider` ancestor, same as
+  // `asset-library.test.tsx`'s own `wrap()` helper.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const utils = render(
-    <ServiceProvider
-      provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
-      props={{ projectId: "p_1", paywallId: "pw_1" }}
-    >
-      <Probe />
-      <Harness id={id} />
-    </ServiceProvider>,
+    <QueryClientProvider client={qc}>
+      <ServiceProvider
+        provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
+        props={{ projectId: "p_1", paywallId: "pw_1" }}
+      >
+        <Probe />
+        <Harness id={id} />
+      </ServiceProvider>
+    </QueryClientProvider>,
   );
 
   await act(async () => {
@@ -452,6 +463,63 @@ describe("OverridesSection — video override fields", () => {
     fireEvent.change(posterInput, { target: { value: "https://cdn.example.com/new-poster.png" } });
     const node = findNode(vm.config.root, "v1") as VideoNode;
     expect(node.overrides?.[0]?.props.posterUrl).toEqual({ light: "https://cdn.example.com/new-poster.png" });
+  });
+});
+
+// =============================================================
+// Wave task-11 fix round — the picker must actually be reachable from
+// the overrides panel, not just from content-tab.tsx: an author
+// overriding `video.url` for an `introEligible` condition gets the
+// SAME "Browse assets" affordance as the base field, scoped to the
+// SAME kind (`posterUrl` browses images, `url` browses videos).
+// =============================================================
+
+function mockVideoAsset() {
+  server.use(
+    http.get("http://localhost:3000/dashboard/projects/p_1/assets", () =>
+      HttpResponse.json({
+        data: {
+          assets: [
+            {
+              id: "vid_1",
+              projectId: "p_1",
+              kind: "video",
+              name: "hero-video",
+              contentHash: "h".repeat(64),
+              contentType: "video/mp4",
+              byteSize: 1024,
+              width: null,
+              height: null,
+              sourceFormat: null,
+              sourceWidth: null,
+              sourceHeight: null,
+              policyVersion: 0,
+              createdAt: "2026-07-01T00:00:00.000Z",
+              updatedAt: "2026-07-01T00:00:00.000Z",
+              deletedAt: null,
+              url: "http://localhost:3000/cdn/p_1/vid_1.mp4",
+            },
+          ],
+          usage: { usedBytes: 0, limitBytes: null },
+        },
+      }),
+    ),
+  );
+}
+
+describe("OverridesSection — video override fields (asset picker)", () => {
+  it("fills the url override from a picked asset, scoped to kind=video", async () => {
+    mockVideoAsset();
+    const { vm } = await renderHarness("v1");
+
+    const [browseUrlLight] = screen.getAllByRole("button", { name: /browse assets/i });
+    fireEvent.click(browseUrlLight!);
+    fireEvent.click(await screen.findByText("hero-video"));
+
+    const node = findNode(vm.config.root, "v1") as VideoNode;
+    expect(node.overrides?.[0]?.props.url).toEqual({
+      light: "http://localhost:3000/cdn/p_1/vid_1.mp4",
+    });
   });
 });
 

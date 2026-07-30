@@ -333,3 +333,76 @@ describe("AssetPickerDialog", () => {
     expect((light as HTMLInputElement).value).toBe("https://cdn.example.com/hand-typed.png");
   });
 });
+
+// =============================================================
+// End-to-end (within jsdom): upload through AssetLibrary, confirm the
+// SAME asset is subsequently selectable in AssetPickerDialog. This is
+// the actual claim task-11-brief makes about the two components —
+// proven here by sharing one QueryClient (and therefore one
+// `["assets", projectId]` cache entry) across both, the same way a
+// real settings-tab upload and a real builder-inspector picker would
+// share it in the app (React Query is a module-level singleton client
+// there too). The GET handler is re-armed with the "post-upload" list
+// right after the mock upload resolves, standing in for the real
+// server now having the row — `useUploadAsset`'s `onSuccess` then
+// invalidates the shared query and the picker's own `useAssets` call
+// picks up the refetch with no wiring specific to this test.
+// =============================================================
+
+describe("AssetLibrary + AssetPickerDialog — shared query cache", () => {
+  beforeEach(() => {
+    MockXHR.instances = [];
+    vi.stubGlobal("XMLHttpRequest", MockXHR as unknown as typeof XMLHttpRequest);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("an asset uploaded through the library is immediately selectable in the picker", async () => {
+    mockAssets([], { usedBytes: 0, limitBytes: null });
+    const onSelect = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AssetLibrary projectId={PROJECT_ID} />
+        <AssetPickerDialog
+          projectId={PROJECT_ID}
+          kind="image"
+          open
+          onClose={() => undefined}
+          onSelect={onSelect}
+        />
+      </QueryClientProvider>,
+    );
+
+    // Nothing uploaded yet — the picker starts empty.
+    expect(await screen.findByText(/no image assets uploaded yet/i)).toBeInTheDocument();
+
+    const input = await screen.findByTestId("asset-upload-input-image");
+    const file = new File(["x"], "photo.png", { type: "image/png" });
+    await act(async () => {
+      selectFile(input, file);
+    });
+
+    const uploaded = makeAsset({
+      id: "new_1",
+      kind: "image",
+      name: "photo",
+      url: `${BASE}/cdn/${PROJECT_ID}/new_1.webp`,
+    });
+    await act(async () => {
+      latestXhr().respondSuccess(uploaded);
+      // Stand in for the server now having the row, ahead of the
+      // invalidated query's refetch (see the describe-block comment).
+      mockAssets([uploaded], { usedBytes: uploaded.byteSize, limitBytes: null });
+    });
+
+    // The picker's row is a <button> whose accessible name is its own
+    // text — scoped this way because AssetLibrary's own list also
+    // renders "photo" (in a <div>, not a <button>), so a bare
+    // `getByText` would be ambiguous between the two components.
+    const pickerRow = await screen.findByRole("button", { name: /photo/i });
+    fireEvent.click(pickerRow);
+    expect(onSelect).toHaveBeenCalledWith(uploaded.url);
+  });
+});
