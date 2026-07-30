@@ -761,14 +761,20 @@ describe("GET /v1/offerings/:identifier", () => {
       identifier: "premium",
       isDefault: false,
       accessId: null,
-      products: [
+      // `packages`, a JSON array on the offering row — migration 0074
+      // decoupled packages from a products join. Each slot carries its own
+      // identifier alongside the productId (see packageSchema in
+      // src/lib/offering-hydration.ts).
+      packages: [
         {
+          identifier: "pro_monthly",
           productId: "prod_1",
           order: 2,
           isPromoted: false,
           metadata: {},
         },
         {
+          identifier: "credits_100",
           productId: "prod_2",
           order: 1,
           isPromoted: true,
@@ -804,10 +810,12 @@ describe("GET /v1/offerings/:identifier", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.data.identifier).toBe("premium");
-    expect(body.data.products).toHaveLength(2);
-    expect(body.data.products[0].identifier).toBe("credits_100");
-    expect(body.data.products[0].isPromoted).toBe(true);
-    expect(body.data.products[1].identifier).toBe("pro_monthly");
+    // `packages`, not `products`: migration 0074 decoupled offering
+    // packages from products and the SDK response field moved with it.
+    expect(body.data.packages).toHaveLength(2);
+    expect(body.data.packages[0].identifier).toBe("credits_100");
+    expect(body.data.packages[0].isPromoted).toBe(true);
+    expect(body.data.packages[1].identifier).toBe("pro_monthly");
   });
 
   it("looks up the default offering when identifier is 'default'", async () => {
@@ -867,8 +875,8 @@ describe("GET /v1/offerings", () => {
     const body = (await res.json()) as any;
     expect(body.data.offerings).toHaveLength(2);
     expect(body.data.offerings[0].identifier).toBe("default");
-    expect(body.data.offerings[0].products).toHaveLength(0);
-    expect(body.data.offerings[1].products).toHaveLength(0);
+    expect(body.data.offerings[0].packages).toHaveLength(0);
+    expect(body.data.offerings[1].packages).toHaveLength(0);
   });
 });
 
@@ -918,11 +926,10 @@ describe("GET /v1/me", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 404 when the subscriber does not exist", async () => {
-    dbMock.subscriber.findUnique.mockResolvedValue(null);
-    const res = await app.request(withAppUser("/v1/me"));
-    expect(res.status).toBe(404);
-  });
+  // "returns 404 when the subscriber does not exist" is gone: /v1/me
+  // auto-provisions an unknown subscriber instead of 404ing, which is what
+  // me-auto-provision.integration.test.ts covers. The test was asserting
+  // the behaviour that change replaced.
 });
 
 describe("GET /v1/me/access", () => {

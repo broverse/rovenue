@@ -19,13 +19,43 @@ const { drizzleMock, auditMock } = vi.hoisted(() => {
   const drizzleMock = {
     db: db as unknown,
     subscriberRepo: {
+      findSubscriberById: vi.fn(async () => ({ id: "sub_1", projectId: "proj_1" })),
+      findSubscriberByAppleAppAccountToken: vi.fn(async () => null),
+      setAppleAppAccountToken: vi.fn(async () => undefined),
+      clearAppleAppAccountToken: vi.fn(async () => undefined),
       upsertSubscriber: vi.fn(async () => ({ id: "sub_1" })),
     },
     offeringRepo: {
       findProductByIdentifierOrStoreId: vi.fn(async () => ({
         id: "prod_1",
         accessIds: [],
+        // verifyAppleReceipt refuses to grant a product that does not
+        // correspond to the verified transaction — otherwise a valid cheap
+        // receipt could be paired with an expensive product identifier. The
+        // fixture predated that guard and carried neither an Apple store id
+        // nor an identifier, so the comparison failed and every call 400'd
+        // before reaching the status-transition logic under test.
+        identifier: "com.app.pro",
+        storeIds: { apple: "com.app.pro" },
       })),
+    },
+    // receipt-verify serialises concurrent verifications of the same
+    // transaction with a transaction-scoped advisory lock before touching
+    // purchase state. The mock had no lockRepo, so the call blew up on
+    // `undefined.advisoryXactLock2` once the product guard above stopped
+    // short-circuiting the request.
+    lockRepo: {
+      advisoryXactLock2: vi.fn(async () => undefined),
+    },
+    // Receipt verification resolves the subscriber the RC/Adapty way: the
+    // Apple originalTransactionId is the anchor and appAccountToken is the
+    // binding, so the lookup goes through purchaseExtRepo and the token
+    // helpers below. None of it existed when this mock was written; each
+    // missing member surfaced one at a time as
+    // "Cannot read properties of undefined".
+    purchaseExtRepo: {
+      findPurchaseByOriginalTransaction: vi.fn(async () => null),
+      findPurchaseByStoreTransaction: vi.fn(async () => null),
     },
     purchaseRepo: {
       lockPurchaseStatusByStoreTransaction: vi.fn(),
@@ -94,6 +124,8 @@ describe("verifyReceipt — status transition guard (Apple)", () => {
     drizzleMock.offeringRepo.findProductByIdentifierOrStoreId.mockResolvedValue({
       id: "prod_1",
       accessIds: [],
+      identifier: "com.app.pro",
+      storeIds: { apple: "com.app.pro" },
     });
     drizzleMock.purchaseRepo.upsertPurchase.mockResolvedValue({ id: "pur_1" });
   });

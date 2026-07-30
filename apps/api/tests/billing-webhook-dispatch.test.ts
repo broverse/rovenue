@@ -137,11 +137,14 @@ describe("dispatchStripeBillingEvent", () => {
   });
 
   it("returns 'duplicate' when the atomic claim returns null and skips the handler", async () => {
-    // null = another worker already holds (PROCESSING) or finished
-    // (PROCESSED) this event id; the single-flight claim is what makes
+    // claimWebhookEvent returns a tagged ClaimResult — it used to signal a
+    // duplicate by returning null, and this mock still did, so the dispatcher
+    // read `.outcome` off null and threw a TypeError instead of returning
+    // "duplicate". `{ outcome: "duplicate" }` means another worker already
+    // finished this event id; the single-flight claim is what makes
     // concurrent duplicate deliveries collapse to one effect.
     findByCustomer.mockResolvedValueOnce({ projectId: "proj_1" });
-    claimWh.mockResolvedValueOnce(null);
+    claimWh.mockResolvedValueOnce({ outcome: "duplicate" });
 
     const event = makeEvent(
       "customer.subscription.updated",
@@ -158,8 +161,12 @@ describe("dispatchStripeBillingEvent", () => {
 
   it("happy path: runs handler in tx and marks webhook_events PROCESSED", async () => {
     findByCustomer.mockResolvedValueOnce({ projectId: "proj_42" });
-    // The claim sets PROCESSING itself and returns the claimed row.
-    claimWh.mockResolvedValueOnce({ id: "wh_42", status: "PROCESSING" });
+    // The claim sets PROCESSING itself and returns the claimed row — now
+    // wrapped in the tagged ClaimResult rather than returned bare.
+    claimWh.mockResolvedValueOnce({
+      outcome: "claimed",
+      row: { id: "wh_42", status: "PROCESSING" },
+    });
     updateWh.mockResolvedValueOnce(undefined);
 
     const event = makeEvent(

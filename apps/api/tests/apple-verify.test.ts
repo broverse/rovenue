@@ -132,10 +132,19 @@ describe("createAppleVerifier — production safety", () => {
       NODE_ENV: process.env.NODE_ENV,
       APPLE_ROOT_CERTS_DIR: process.env.APPLE_ROOT_CERTS_DIR,
       PUBSUB_PUSH_AUDIENCE: process.env.PUBSUB_PUSH_AUDIENCE,
+      HOST_MODE: process.env.HOST_MODE,
     };
     process.env.NODE_ENV = "production";
     process.env.APPLE_ROOT_CERTS_DIR = dir;
     process.env.PUBSUB_PUSH_AUDIENCE = "test-audience";
+    // Re-importing under NODE_ENV=production re-parses the whole env schema.
+    // The test environment defaults to HOST_MODE=cloud, which in production
+    // demands the full Stripe billing set (secret key, webhook secret, price
+    // ids) — none of which this test is about, and whose absence fails the
+    // import with a ZodError before the Apple guard is ever reached.
+    // Self-host is the mode where billing is disabled entirely, so it is the
+    // honest way to say "production, but not the billing product".
+    process.env.HOST_MODE = "self";
     try {
       vi.resetModules();
       const { createAppleVerifier } = await import(

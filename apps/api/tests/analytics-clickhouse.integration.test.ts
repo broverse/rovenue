@@ -25,7 +25,7 @@
 //
 // Setup mirrors mrr-clickhouse-only.integration.test.ts (Redpanda is
 // required only so the Kafka-Engine migration tables apply cleanly;
-// the test body seeds raw_revenue_events / sdk_sessions_daily_tbl by
+// the test body seeds raw_revenue_events / raw_sdk_session_events by
 // DIRECT INSERT, not via the Kafka path — the read views are
 // query-time so inserts are visible immediately).
 //
@@ -315,19 +315,41 @@ beforeAll(async () => {
     format: "JSONEachRow",
   });
 
+  // Seed the RAW table, not a daily rollup: migration 0016 dropped
+  // sdk_sessions_daily_tbl (a SummingMergeTree, which double-counted
+  // at-least-once replays) and replaced it with v_sdk_sessions_daily, a
+  // query-time VIEW that dedups via FINAL over raw_sdk_session_events. The
+  // view only counts 'background' and 'close' events, so the per-day totals
+  // below are expressed as the individual sessions that add up to them:
+  // subA 2026-03-01 = 4 sessions / 120s, subA 2026-03-02 = 2 / 60s,
+  // subB 2026-03-01 = 1 / 30s — the same numbers the old rollup was given.
+  const session = (
+    subscriberId: string,
+    day: string,
+    idx: number,
+    durationMs: number,
+  ) => ({
+    eventId: `sess_${subscriberId}_${day}_${idx}`,
+    projectId: PROJECT,
+    subscriberId,
+    eventType: "close",
+    occurredAt: `${day} 12:00:0${idx}.000`,
+    durationMs,
+    appVersion: "1.0.0",
+    sdkVersion: "1.0.0",
+    ingestedAt: `${day} 12:00:0${idx}.000`,
+    _version: 1,
+  });
+
   await ch.insert({
-    table: "rovenue.sdk_sessions_daily_tbl",
+    table: "rovenue.raw_sdk_session_events",
     values: [
-      { projectId: PROJECT, subscriberId: "subA", day: "2026-03-01", session_ms: 120000, session_count: 4 },
-      { projectId: PROJECT, subscriberId: "subA", day: "2026-03-02", session_ms: 60000, session_count: 2 },
-      { projectId: PROJECT, subscriberId: "subB", day: "2026-03-01", session_ms: 30000, session_count: 1 },
+      ...[0, 1, 2, 3].map((i) => session("subA", "2026-03-01", i, 30000)),
+      ...[0, 1].map((i) => session("subA", "2026-03-02", i, 30000)),
+      session("subB", "2026-03-01", 0, 30000),
     ],
     format: "JSONEachRow",
   });
-
-  // Direct inserts are synchronous for the query-time read views, but
-  // sdk_sessions_daily_tbl is a SummingMergeTree — give the part a beat.
-  await new Promise((r) => setTimeout(r, 500));
 }, 300_000);
 
 afterAll(async () => {
@@ -402,9 +424,13 @@ describe("analytics CH services (real ClickHouse)", () => {
     const dist = await getLtvDistribution(PROJECT);
     // net lifetime per sub: A=30, B=10, C=0, D=8 -> 4 subscribers
     expect(dist.totalSubscribers).toBe(4);
-    // REACTIVATION is NOT in the lifetime "purchased" bucket (migration
-    // 0011), so subD's $8 doesn't count: nets are 30, 10, 0, 0 -> avg 10.
-    expect(Number(dist.avgUsd)).toBeCloseTo((30 + 10 + 0 + 0) / 4, 2);
+    // REACTIVATION *is* in the lifetime "purchased" bucket. It was excluded
+    // when migration 0011 defined the view, but 0013 and 0014 both list it
+    // alongside INITIAL / RENEWAL / TRIAL_CONVERSION / CREDIT_PURCHASE —
+    // 0014 because a REFUND_REVERSED emits a positive REACTIVATION
+    // counterpart, which has to land on the purchase side to cancel the
+    // refund out. So subD's $8 counts: nets are 30, 10, 0, 8 -> avg 12.
+    expect(Number(dist.avgUsd)).toBeCloseTo((30 + 10 + 0 + 8) / 4, 2);
     expect(dist.histogram).toHaveLength(9);
     const total = dist.histogram.reduce((a, b) => a + b.count, 0);
     expect(total).toBe(4);
@@ -472,8 +498,9 @@ describe("analytics CH services (real ClickHouse)", () => {
       params,
     );
     expect(Number(ltvRows[0]!.subscribers)).toBe(4);
-    // nets 30,10,0,0 (REACTIVATION excluded from lifetime purchased) -> 10
-    expect(Number(ltvRows[0]!.avg_usd)).toBeCloseTo(10, 2);
+    // nets 30,10,0,8 -> 12. Same reason as getLtvDistribution above:
+    // REACTIVATION belongs to lifetime purchased as of migrations 0013/0014.
+    expect(Number(ltvRows[0]!.avg_usd)).toBeCloseTo(12, 2);
   });
 
   it("getLtvPrediction CH queries (cohort revenue + sizes) run", async () => {
