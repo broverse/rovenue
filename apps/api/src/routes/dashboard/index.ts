@@ -4,6 +4,7 @@ import { usageLockGuard } from "../../middleware/usage-lock";
 import { dashboardUserRateLimit } from "../../middleware/rate-limit";
 import { accessRoute } from "./access";
 import { appsRoute } from "./apps";
+import { assetsRoute } from "./assets";
 import { audiencesRoute } from "./audiences";
 import { auditLogsRoute } from "./audit-logs";
 import { billingSubRouter } from "./billing";
@@ -75,6 +76,7 @@ export const dashboardRoute = new Hono()
   .route("/projects", projectsRoute)
   .route("/projects/:projectId/access", accessRoute)
   .route("/projects/:projectId/apps", appsRoute)
+  .route("/projects/:projectId/assets", assetsRoute)
   .route("/projects/:projectId/billing", billingSubRouter)
   .route("/projects/:projectId/charts", chartsRoute)
   .route("/projects/:projectId/cohorts", cohortsRoute)
