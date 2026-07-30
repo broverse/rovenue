@@ -1,10 +1,22 @@
 import { describe, it, expect } from "vitest";
+import { ASSET_MAX_BYTES } from "./constants";
 import { detectAssetKind } from "./detect";
 
 /** Builds a buffer whose first bytes are `magic`, padded to `length`. */
 function withMagic(magic: number[], length = 64): Uint8Array {
   const b = new Uint8Array(length);
   b.set(magic, 0);
+  return b;
+}
+
+/** A real MP4 `ftyp` box prefix: box size, the `ftyp` marker at offset
+ *  4, and a real major_brand at offset 8 — `brand` defaults to `isom`,
+ *  the brand ffmpeg and most encoders write. */
+function ftypBytes(brand = "isom", length = 64): Uint8Array {
+  const b = new Uint8Array(length);
+  b.set([0x00, 0x00, 0x00, 0x20], 0); // box size
+  b.set([0x66, 0x74, 0x79, 0x70], 4); // "ftyp"
+  for (let i = 0; i < 4; i += 1) b[8 + i] = brand.charCodeAt(i);
   return b;
 }
 
@@ -47,11 +59,45 @@ describe("detectAssetKind", () => {
     expect(detectAssetKind(b)).toBeNull();
   });
 
-  it("detects MP4 by the ftyp box at offset 4", () => {
-    const b = new Uint8Array(64);
-    b.set([0x00, 0x00, 0x00, 0x20], 0); // box size
-    b.set([0x66, 0x74, 0x79, 0x70], 4); // "ftyp"
-    expect(detectAssetKind(b)).toEqual({ kind: "video", sourceFormat: null });
+  it("detects MP4 by the ftyp box at offset 4 with a real major_brand", () => {
+    expect(detectAssetKind(ftypBytes("isom"))).toEqual({
+      kind: "video",
+      sourceFormat: null,
+    });
+  });
+
+  it.each(["iso2", "mp41", "mp42", "avc1", "M4V ", "dash"])(
+    "accepts major_brand %s",
+    (brand) => {
+      expect(detectAssetKind(ftypBytes(brand))).toEqual({
+        kind: "video",
+        sourceFormat: null,
+      });
+    },
+  );
+
+  // Regression test for the brand check (review round: whole-branch
+  // final review, finding 3c). Before the fix, ANY ISO-BMFF container —
+  // not just MP4 — passed as MP4 because only the `ftyp` marker was
+  // checked, not the major_brand that follows it. HEIC is the concrete
+  // case from the finding: an iPhone photo uploaded to `.../assets/video`
+  // would have been accepted, stored, and served as `video/mp4`, then
+  // rendered as a broken video on every platform.
+  it.each([
+    ["heic", "HEIC photo"],
+    ["heix", "HEIF photo"],
+    ["mif1", "HEIF image sequence"],
+    ["avif", "AVIF image"],
+    ["qt  ", "QuickTime .mov"],
+    ["3gp4", "3GPP video"],
+  ])("rejects an ftyp box whose major_brand is %s (%s), not MP4", (brand) => {
+    expect(detectAssetKind(ftypBytes(brand))).toBeNull();
+  });
+
+  it("rejects an ftyp box too short to carry a major_brand", () => {
+    const b = new Uint8Array(10); // ends mid-brand
+    b.set([0x66, 0x74, 0x79, 0x70], 4);
+    expect(detectAssetKind(b)).toBeNull();
   });
 
   it("detects Lottie JSON carrying both v and layers", () => {
@@ -65,6 +111,22 @@ describe("detectAssetKind", () => {
   it("rejects JSON that parses but is not Lottie", () => {
     const json = JSON.stringify({ hello: "world" });
     expect(detectAssetKind(new TextEncoder().encode(json))).toBeNull();
+  });
+
+  // Review finding (final whole-branch review, finding 4): a body over
+  // the Lottie cap can never be accepted as Lottie regardless of what
+  // it parses as — the lottie route's own bodyLimit already rejects it
+  // — so this bound must reject BEFORE the decode+parse, not after. A
+  // status-quo-shaped body (real Lottie JSON, just oversized) is what
+  // proves the bound is actually checked rather than merely documented:
+  // before the fix this returned `{ kind: "lottie", ... }` for a body
+  // no lottie route would ever accept.
+  it("does not detect Lottie JSON larger than the Lottie cap", () => {
+    const padding = "x".repeat(ASSET_MAX_BYTES.lottie + 1);
+    const json = JSON.stringify({ v: "5.7.4", layers: [], padding });
+    const bytes = new TextEncoder().encode(json);
+    expect(bytes.length).toBeGreaterThan(ASSET_MAX_BYTES.lottie);
+    expect(detectAssetKind(bytes)).toBeNull();
   });
 
   it("rejects SVG — it is not an accepted format", () => {

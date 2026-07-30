@@ -349,6 +349,9 @@ describe("asset upload against real storage", () => {
         const chunk = new Uint8Array(size);
         if (!wroteHeader) {
           chunk.set([0x66, 0x74, 0x79, 0x70], 4); // "ftyp" at offset 4
+          chunk.set([0x69, 0x73, 0x6f, 0x6d], 8); // "isom" major_brand — see
+          // detect.test.ts's finding-3c regression tests: detectAssetKind
+          // now checks this, not just the "ftyp" marker.
           chunk[12] = salt; // keeps warm-up/measured content hashes distinct
           wroteHeader = true;
         }

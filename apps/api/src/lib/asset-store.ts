@@ -119,13 +119,49 @@ function s3(): S3Client {
   return client;
 }
 
+/** S3's `Metadata` becomes `x-amz-meta-*` response headers on GET — it
+ *  is the only free-form per-object slot `PutObjectRequest` exposes.
+ *  It is NOT the same thing as a literal `X-Content-Type-Options`
+ *  header or a native `ETag`: neither S3 nor any S3-compatible
+ *  protocol (MinIO, R2) lets a client set those directly — `ETag` is
+ *  always server-computed from the bytes, and `PutObjectRequest` has
+ *  no field for an arbitrary response header name (confirmed against
+ *  `@aws-sdk/client-s3`'s own `PutObjectRequest` type: `CacheControl`,
+ *  `ContentType` etc. are each their own named field; there is no
+ *  general-purpose header field). So this is the most this function
+ *  can deliver toward design spec §6's "nosniff + ETag carries
+ *  contentHash" on its own — the literal headers require a CDN/reverse
+ *  proxy in front of the bucket (a Cloudflare Transform Rule, or a
+ *  Caddy `header` directive) to project `x-amz-meta-content-type-
+ *  options` / `x-amz-meta-content-hash` onto the real response
+ *  headers. No such proxy sits in front of the asset domain today
+ *  (deploy/caddy/Caddyfile has no block for it) — that proxy is out of
+ *  scope for this fix and is the residual gap. */
+const ASSET_OBJECT_STATIC_METADATA: Readonly<Record<string, string>> = {
+  "content-type-options": "nosniff",
+};
+
+/** The `Metadata` key callers pass `contentHash` under — named here so
+ *  the producer (`routes/dashboard/assets.ts`) and any future consumer
+ *  can't drift on the literal string, the same lesson `publicUrl` /
+ *  `parseAssetUrl` being kept together documents at the top of this
+ *  file. */
+export const ASSET_CONTENT_HASH_METADATA_KEY = "content-hash";
+
 /** `Upload` rather than `PutObjectCommand`: it accepts a stream and
  *  drives S3 multipart itself, which is what keeps a 50 MB video from
- *  ever being fully resident (design spec §3.1). */
+ *  ever being fully resident (design spec §3.1).
+ *
+ *  `metadata` is merged over {@link ASSET_OBJECT_STATIC_METADATA} — see
+ *  its comment for what this can and cannot deliver. Callers pass
+ *  `{ "content-hash": contentHash }` when the hash is already known
+ *  (every path except streamed video, whose hash is only known once
+ *  this call's own Promise resolves). */
 export async function putObject(
   key: string,
   body: Readable | Buffer,
   contentType: string,
+  metadata?: Record<string, string>,
 ): Promise<void> {
   await new Upload({
     client: s3(),
@@ -135,6 +171,7 @@ export async function putObject(
       Body: body,
       ContentType: contentType,
       CacheControl: `public, max-age=${ASSET_CACHE_MAX_AGE_SECONDS}, immutable`,
+      Metadata: { ...ASSET_OBJECT_STATIC_METADATA, ...metadata },
     },
   }).done();
 }

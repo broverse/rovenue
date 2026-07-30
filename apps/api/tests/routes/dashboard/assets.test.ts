@@ -120,6 +120,10 @@ vi.mock("../../../src/lib/asset-store", () => ({
   putObject: (...args: unknown[]) => putObject(...args),
   deleteObject: (...args: unknown[]) => deleteObject(...args),
   isStorageConfigured: () => isStorageConfigured(),
+  // Not a function to mock — a named-string-constant contract between
+  // this route and asset-store.ts (see asset-store.ts's own comment on
+  // it), so the real value is used here rather than a stub.
+  ASSET_CONTENT_HASH_METADATA_KEY: "content-hash",
 }));
 
 const normalizeImage = vi.hoisted(() => vi.fn());
@@ -258,10 +262,15 @@ function pngBytes(padTo = 16): Uint8Array {
   return bytes;
 }
 
-/** A minimal, but real, MP4-shaped prefix ("ftyp" at byte offset 4). */
+/** A minimal, but real, MP4-shaped prefix — "ftyp" at byte offset 4,
+ *  PLUS a real major_brand ("isom") at offset 8. The brand is required
+ *  since the whole-branch final review (finding 3c): `detectAssetKind`
+ *  now checks it, not just the "ftyp" marker every ISO-BMFF container
+ *  shares. */
 function mp4Bytes(padTo = 16): Uint8Array {
   const bytes = new Uint8Array(Math.max(padTo, 12));
   bytes.set([0x66, 0x74, 0x79, 0x70], 4);
+  bytes.set([0x69, 0x73, 0x6f, 0x6d], 8); // "isom"
   return bytes;
 }
 
@@ -761,6 +770,248 @@ describe("POST /dashboard/projects/:projectId/assets/:kind", () => {
         contentHash: createHash("sha256").update(expected).digest("hex"),
       }),
     );
+  });
+
+  // -----------------------------------------------------------
+  // Final whole-branch review, finding 3 (a)/(b): contentHash is
+  // carried as S3 object metadata to `putObject` wherever it's known
+  // BEFORE the put — every path except streamed video, whose hash IS
+  // the upload and so isn't known until `putObject`'s own Promise
+  // resolves (see asset-store.ts's `putObject` comment for what this
+  // metadata can and can't deliver toward design spec §6's nosniff/
+  // ETag promise — a real per-object marker, not a literal browser-
+  // enforced header, which the S3 PutObject API has no field for).
+  // -----------------------------------------------------------
+
+  it("passes the content hash as object metadata for the buffered image path", async () => {
+    const bytes = pngBytes();
+    const contentHash = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+    const res = await upload("image", bytes);
+    expect(res.status).toBe(201);
+    expect(putObject).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      "image/webp",
+      expect.objectContaining({ "content-hash": contentHash }),
+    );
+  });
+
+  it("passes the content hash as object metadata for the buffered-fallback video path", async () => {
+    const bytes = mp4Bytes(2048);
+    const contentHash = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+    const res = await uploadWithHeaders("video", bytes as BlobPart, {}, {});
+    expect(res.status).toBe(201);
+    expect(putObject).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      "video/mp4",
+      expect.objectContaining({ "content-hash": contentHash }),
+    );
+  });
+
+  it("does not pass content-hash metadata for the streamed video path — the hash is unknown until the put resolves", async () => {
+    const res = await upload("video", mp4Bytes(1024));
+    expect(res.status).toBe(201);
+    const metadataArg = putObject.mock.calls[0]?.[3] as Record<string, string> | undefined;
+    expect(metadataArg === undefined || !("content-hash" in metadataArg)).toBe(true);
+  });
+
+  // -----------------------------------------------------------
+  // Final whole-branch review, Important finding 2: any storage or
+  // database failure on the upload path must release the reservation
+  // it took, not leave it to the sweeper's ~30h backstop (6h grace on a
+  // 24h cadence) — a leaked reservation counts against the cap exactly
+  // as a committed row would, on a project that owns zero assets.
+  // Exercised on ALL THREE upload paths deliberately: a fix applied to
+  // two of three and missed on the third is the exact defect shape this
+  // plan has already hit once (see final-review.md's own framing).
+  // -----------------------------------------------------------
+
+  describe("releases the reservation on upload failure (finding 2)", () => {
+    it("releases the reservation and returns 503 when putObject fails (buffered image)", async () => {
+      putObject.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+      const res = await upload("image", pngBytes());
+      expect(res.status).toBe(503);
+      expect((await res.json()).error.code).toBe("ASSET_STORAGE_UNAVAILABLE");
+      expect(releaseReservation).toHaveBeenCalledWith(expect.anything(), "res_1");
+      expect(releaseReservation).toHaveBeenCalledTimes(1);
+      // No tx was ever opened — the put failed before the row's
+      // transaction ran, so no row (and no audit entry) exists.
+      expect(createAsset).not.toHaveBeenCalled();
+      expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it("releases the reservation and returns 503 when putObject fails (buffered-fallback video)", async () => {
+      putObject.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+      const res = await uploadWithHeaders("video", mp4Bytes(2048) as BlobPart, {}, {});
+      expect(res.status).toBe(503);
+      expect((await res.json()).error.code).toBe("ASSET_STORAGE_UNAVAILABLE");
+      expect(releaseReservation).toHaveBeenCalledWith(expect.anything(), "res_1");
+      expect(releaseReservation).toHaveBeenCalledTimes(1);
+      expect(createAsset).not.toHaveBeenCalled();
+    });
+
+    it("releases the reservation and returns 503 when putObject fails (streamed video)", async () => {
+      putObject.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+      const res = await upload("video", mp4Bytes(1024));
+      expect(res.status).toBe(503);
+      expect((await res.json()).error.code).toBe("ASSET_STORAGE_UNAVAILABLE");
+      expect(releaseReservation).toHaveBeenCalledWith(expect.anything(), "res_1");
+      expect(releaseReservation).toHaveBeenCalledTimes(1);
+      expect(createAsset).not.toHaveBeenCalled();
+    });
+
+    it("releases the reservation (without deleting the object) when the row transaction fails for a reason OTHER than the duplicate race (buffered image)", async () => {
+      // A DB error unrelated to the unique index — connection drop,
+      // deadlock, whatever. Not the finding-1 race: the object this
+      // upload already wrote is deliberately LEFT for the orphan
+      // sweeper to reclaim (module comment in assets.ts: row-missing/
+      // object-present is exactly the case it exists for), and the
+      // original error still surfaces as a 500 — only the reservation
+      // leak is what this fix closes.
+      transaction.mockRejectedValueOnce(new Error("connection terminated unexpectedly"));
+      const res = await upload("image", pngBytes());
+      expect(res.status).toBe(500);
+      expect(releaseReservation).toHaveBeenCalledWith(expect.anything(), "res_1");
+      expect(releaseReservation).toHaveBeenCalledTimes(1);
+      // Released OUTSIDE the rolled-back transaction — the tx object
+      // itself is gone, calling releaseReservation(tx, ...) on it would
+      // be a no-op against a transaction that never committed.
+      expect(releaseReservation.mock.calls[0]?.[0]).not.toBe(TX_SENTINEL);
+      expect(deleteObject).not.toHaveBeenCalled();
+    });
+
+    it("releases the reservation when the row transaction fails for a reason OTHER than the duplicate race (streamed video)", async () => {
+      transaction.mockRejectedValueOnce(new Error("connection terminated unexpectedly"));
+      const res = await upload("video", mp4Bytes(1024));
+      expect(res.status).toBe(500);
+      expect(releaseReservation).toHaveBeenCalledWith(expect.anything(), "res_1");
+      expect(releaseReservation).toHaveBeenCalledTimes(1);
+      expect(deleteObject).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------
+  // Final whole-branch review, Important finding 1: a concurrent
+  // duplicate upload — two requests for byte-identical content, both
+  // past their own pre-put `findLiveAssetByHash` check before either
+  // commits — must resolve to the SAME outcome design spec §4.2
+  // promises for the sequential case (the existing row, HTTP 200), not
+  // the unhandled 500 an uncaught `paywall_assets_project_hash_key`
+  // violation produced before this fix. Exercised on all three upload
+  // paths for the same reason as finding 2 above.
+  // -----------------------------------------------------------
+
+  describe("resolves a concurrent duplicate upload to the winner's row (finding 1)", () => {
+    /** A real `pg` unique-violation error, wrapped the way Drizzle
+     *  0.45.2 actually throws it (see lib/pg-errors.ts's own module
+     *  comment) — reconstructed rather than imported so this still
+     *  fails loudly if drizzle's wrapping ever changes shape. */
+    function pgUniqueViolationError(constraint: string): Error {
+      const inner = new Error(
+        `duplicate key value violates unique constraint "${constraint}"`,
+      ) as Error & { code?: string; constraint?: string };
+      inner.code = "23505";
+      inner.constraint = constraint;
+      return new Error("Failed query: insert into \"paywall_assets\" ...", {
+        cause: inner,
+      });
+    }
+
+    /** Makes `findLiveAssetByHash` return null on its first call (the
+     *  pre-put pre-check, which must miss for this race to even reach
+     *  `createAsset`) and `winner` on every call after (the post-
+     *  conflict re-query inside `commitAssetRow`'s catch block). */
+    function mockFindMissesOnceThenReturns(winner: unknown) {
+      let calls = 0;
+      findLiveAssetByHash.mockImplementation(async () => {
+        calls += 1;
+        return calls === 1 ? null : winner;
+      });
+      return () => calls;
+    }
+
+    it("buffered image", async () => {
+      const bytes = pngBytes();
+      const contentHash = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+      const winner = assetFixture({
+        id: "asset_winner",
+        kind: "image",
+        contentHash,
+        storageKey: "p1/asset_winner.webp",
+      });
+      const callCount = mockFindMissesOnceThenReturns(winner);
+      createAsset.mockRejectedValueOnce(
+        pgUniqueViolationError("paywall_assets_project_hash_key"),
+      );
+
+      const res = await upload("image", bytes);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string } };
+      expect(body.data.id).toBe("asset_winner");
+      expect(callCount()).toBe(2);
+      // Released OUTSIDE the rolled-back tx, exactly once.
+      expect(releaseReservation).toHaveBeenCalledWith(expect.anything(), "res_1");
+      expect(releaseReservation).toHaveBeenCalledTimes(1);
+      expect(releaseReservation.mock.calls[0]?.[0]).not.toBe(TX_SENTINEL);
+      // The redundant object THIS request already wrote is cleaned up
+      // rather than left for the sweeper — this is the ordinary,
+      // expected shape of the race, not a rare failure.
+      expect(deleteObject).toHaveBeenCalledWith(expect.stringMatching(/^p1\/.*\.webp$/));
+    });
+
+    it("buffered-fallback video", async () => {
+      const bytes = mp4Bytes(2048);
+      const contentHash = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+      const winner = assetFixture({
+        id: "asset_winner_video",
+        kind: "video",
+        contentHash,
+        storageKey: "p1/asset_winner_video.mp4",
+      });
+      const callCount = mockFindMissesOnceThenReturns(winner);
+      createAsset.mockRejectedValueOnce(
+        pgUniqueViolationError("paywall_assets_project_hash_key"),
+      );
+
+      const res = await uploadWithHeaders("video", bytes as BlobPart, {}, {});
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string } };
+      expect(body.data.id).toBe("asset_winner_video");
+      expect(callCount()).toBe(2);
+      expect(releaseReservation).toHaveBeenCalledTimes(1);
+      expect(releaseReservation.mock.calls[0]?.[0]).not.toBe(TX_SENTINEL);
+      expect(deleteObject).toHaveBeenCalledWith(expect.stringMatching(/^p1\/.*\.mp4$/));
+    });
+
+    it("streamed video", async () => {
+      const bytes = mp4Bytes(1024);
+      // The streamed path's contentHash is computed FROM THE STREAM by
+      // the route itself (HashCountingTransform), not from `bytes`
+      // directly — the draining mock forwards `bytes` through unchanged,
+      // so hashing the same bytes here gives the same value the route
+      // will compute.
+      const contentHash = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+      const winner = assetFixture({
+        id: "asset_winner_stream",
+        kind: "video",
+        contentHash,
+        storageKey: "p1/asset_winner_stream.mp4",
+      });
+      const callCount = mockFindMissesOnceThenReturns(winner);
+      createAsset.mockRejectedValueOnce(
+        pgUniqueViolationError("paywall_assets_project_hash_key"),
+      );
+
+      const res = await upload("video", bytes);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string } };
+      expect(body.data.id).toBe("asset_winner_stream");
+      expect(callCount()).toBe(2);
+      expect(releaseReservation).toHaveBeenCalledTimes(1);
+      expect(releaseReservation.mock.calls[0]?.[0]).not.toBe(TX_SENTINEL);
+      expect(deleteObject).toHaveBeenCalledWith(expect.stringMatching(/^p1\/.*\.mp4$/));
+    });
   });
 });
 

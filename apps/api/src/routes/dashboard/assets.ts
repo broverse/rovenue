@@ -14,6 +14,7 @@ import {
   detectAssetKind,
   isValidAssetName,
   type AssetKind,
+  type ImageSourceFormat,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { endpointRateLimit } from "../../middleware/rate-limit";
@@ -22,6 +23,7 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { fail, ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
+import { isUniqueViolationOf } from "../../lib/pg-errors";
 import * as store from "../../lib/asset-store";
 import { normalizeImage, AssetProcessingError } from "../../services/assets/normalize";
 import {
@@ -178,6 +180,166 @@ async function peekPrefix(
 }
 
 // =============================================================
+// Shared upload finalisation — object write, then the row
+// =============================================================
+//
+// Both steps below run at the end of all THREE upload paths (buffered
+// image/lottie, buffered video, streamed video) and both can fail in a
+// way that must not leak the quota reservation `reserveStorage` already
+// committed (review finding 2). Factored into two functions rather than
+// left inline at each call site specifically because a fix applied at
+// two of three call sites and missed at the third is exactly the defect
+// shape this plan has already hit once — one function fixed once closes
+// it for all three by construction.
+
+/** Matches `paywall_assets_project_hash_key` (migration 0099:35-37) —
+ *  the partial unique index `createAsset` can violate when two
+ *  concurrent uploads of byte-identical content both pass their own
+ *  pre-put `findLiveAssetByHash` check (review finding 1; no pre-check
+ *  can close that window, only handling the resulting 23505 can). Named
+ *  here rather than inlined at the `isUniqueViolationOf` call site so a
+ *  future index rename can't drift the two apart silently. */
+const PAYWALL_ASSETS_PROJECT_HASH_KEY = "paywall_assets_project_hash_key";
+
+/**
+ * Writes the object, releasing the just-taken reservation and returning
+ * a 503 response if the write fails — rather than letting a storage
+ * outage leak the reservation until the sweeper's ~30h backstop
+ * (6h grace, 24h cadence) clears it. Returns `null` on success, meaning
+ * "keep going"; returns a `Response` to short-circuit the caller with
+ * otherwise.
+ */
+async function putObjectOrReleaseReservation(
+  c: Context,
+  storageKey: string,
+  body: Readable | Buffer,
+  contentType: string,
+  reservationId: string,
+  metadata?: Record<string, string>,
+): Promise<Response | null> {
+  try {
+    await store.putObject(storageKey, body, contentType, metadata);
+    return null;
+  } catch (err) {
+    await releaseReservation(drizzle.db, reservationId);
+    logger.error("asset upload: storage write failed; reservation released", {
+      storageKey,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return c.json(
+      fail(ERROR_CODE.ASSET_STORAGE_UNAVAILABLE, "Asset storage is unreachable"),
+      503,
+    );
+  }
+}
+
+/** The fields that vary by kind in `CreateAssetInput` — everything else
+ *  (`id`, `projectId`, `storageKey`, `contentHash`) is supplied by
+ *  {@link commitAssetRow} itself from its own parameters, so a caller
+ *  can't pass a mismatched pair (see `CreateAssetInput.id`'s own doc
+ *  comment in the repository for what that mismatch breaks). */
+interface UploadRowFields {
+  kind: AssetKind;
+  name: string;
+  contentType: string;
+  byteSize: number;
+  width: number | null;
+  height: number | null;
+  sourceFormat: ImageSourceFormat | null;
+  sourceWidth: number | null;
+  sourceHeight: number | null;
+  policyVersion: number;
+}
+
+type AssetRow = Awaited<ReturnType<typeof drizzle.assetRepo.createAsset>>;
+
+/**
+ * Commits the asset row (+ audit entry + reservation release) inside
+ * one transaction, exactly as before — but now catches the two ways
+ * that transaction can fail instead of letting either leak the
+ * reservation or 500 (review findings 1 and 2):
+ *
+ * - A concurrent duplicate upload's row commits first, and our own
+ *   INSERT loses the race against `paywall_assets_project_hash_key`.
+ *   Resolved to the SAME outcome design spec §4.2 promises for the
+ *   sequential case: the winner's row, HTTP 200 — plus releasing our
+ *   reservation (never became a committed row; the transaction that
+ *   would have released it rolled back) and best-effort deleting our
+ *   own now-redundant object, mirroring what the streamed-video path
+ *   already does for its post-put dedup hit.
+ * - Any other failure (a DB error unrelated to the race): the
+ *   reservation is released and the error rethrown unchanged — the
+ *   object is deliberately left for the orphan sweeper, exactly the
+ *   row-missing/object-present case it exists to reclaim (module
+ *   comment above).
+ */
+async function commitAssetRow(
+  c: Context,
+  params: {
+    projectId: string;
+    userId: string;
+    reservationId: string;
+    assetId: string;
+    storageKey: string;
+    contentHash: string;
+    row: UploadRowFields;
+  },
+): Promise<{ asset: AssetRow; status: 200 | 201 }> {
+  try {
+    const asset = await drizzle.db.transaction(async (tx) => {
+      const row = await drizzle.assetRepo.createAsset(tx, {
+        id: params.assetId,
+        projectId: params.projectId,
+        storageKey: params.storageKey,
+        contentHash: params.contentHash,
+        ...params.row,
+      });
+      await audit(
+        {
+          projectId: params.projectId,
+          userId: params.userId,
+          action: "asset.uploaded",
+          resource: "paywall_asset",
+          resourceId: row.id,
+          after: {
+            kind: params.row.kind,
+            name: params.row.name,
+            byteSize: row.byteSize,
+            contentHash: row.contentHash,
+          },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+      // Same transaction as the insert, deliberately — see module comment.
+      await releaseReservation(tx, params.reservationId);
+      return row;
+    });
+    return { asset, status: 201 };
+  } catch (err) {
+    if (isUniqueViolationOf(err, PAYWALL_ASSETS_PROJECT_HASH_KEY)) {
+      const existing = await drizzle.assetRepo.findLiveAssetByHash(
+        drizzle.db,
+        params.projectId,
+        params.contentHash,
+      );
+      await releaseReservation(drizzle.db, params.reservationId);
+      await store.deleteObject(params.storageKey).catch(() => {});
+      if (existing) {
+        return { asset: existing, status: 200 };
+      }
+      // The row we collided with existed a moment ago — soft-delete
+      // only tombstones, it doesn't free the hash — so it cannot be
+      // gone here. Falling through to the generic rethrow below is
+      // defensive, not a path this should ever actually take.
+    } else {
+      await releaseReservation(drizzle.db, params.reservationId);
+    }
+    throw err;
+  }
+}
+
+// =============================================================
 // Buffered path — image and lottie
 // =============================================================
 
@@ -264,20 +426,35 @@ async function handleBuffered(
   const assetId = createId();
   const storageKey = store.buildStorageKey(projectId, assetId, kind);
 
-  // Object FIRST, row second — see the module comment.
-  await store.putObject(storageKey, bytes, ASSET_CONTENT_TYPES[kind]);
+  // Object FIRST, row second — see the module comment. On failure,
+  // `putObjectOrReleaseReservation` releases the reservation this
+  // upload took before returning a 503 (review finding 2) — contentHash
+  // is already known here, so it's carried as object metadata (see
+  // asset-store.ts's `putObject` comment for what that can and can't
+  // deliver toward design spec §6).
+  const putFailure = await putObjectOrReleaseReservation(
+    c,
+    storageKey,
+    bytes,
+    ASSET_CONTENT_TYPES[kind],
+    reservationId,
+    { [store.ASSET_CONTENT_HASH_METADATA_KEY]: contentHash },
+  );
+  if (putFailure) return putFailure;
 
-  const asset = await drizzle.db.transaction(async (tx) => {
-    const row = await drizzle.assetRepo.createAsset(tx, {
-      // MUST match the id already baked into `storageKey` above (see
-      // CreateAssetInput.id's doc comment) — otherwise this row's real
-      // id silently diverges from the id its own public URL resolves to.
-      id: assetId,
-      projectId,
+  // MUST match the id already baked into `storageKey` above (see
+  // CreateAssetInput.id's doc comment) — otherwise this row's real id
+  // silently diverges from the id its own public URL resolves to.
+  const { asset, status } = await commitAssetRow(c, {
+    projectId,
+    userId,
+    reservationId,
+    assetId,
+    storageKey,
+    contentHash,
+    row: {
       kind,
       name,
-      storageKey,
-      contentHash,
       contentType: ASSET_CONTENT_TYPES[kind],
       byteSize: bytes.byteLength,
       width,
@@ -286,25 +463,10 @@ async function handleBuffered(
       sourceWidth,
       sourceHeight,
       policyVersion,
-    });
-    await audit(
-      {
-        projectId,
-        userId,
-        action: "asset.uploaded",
-        resource: "paywall_asset",
-        resourceId: row.id,
-        after: { kind, name, byteSize: row.byteSize, contentHash: row.contentHash },
-        ...extractRequestContext(c),
-      },
-      tx,
-    );
-    // Same transaction as the insert, deliberately — see module comment.
-    await releaseReservation(tx, reservationId);
-    return row;
+    },
   });
 
-  return c.json(ok(toDto(asset)), 201);
+  return c.json(ok(toDto(asset)), status);
 }
 
 // =============================================================
@@ -392,15 +554,27 @@ async function handleBufferedVideo(
   }
   const assetId = createId();
   const storageKey = store.buildStorageKey(projectId, assetId, "video");
-  await store.putObject(storageKey, raw, ASSET_CONTENT_TYPES.video);
-  const asset = await drizzle.db.transaction(async (tx) => {
-    const row = await drizzle.assetRepo.createAsset(tx, {
-      id: assetId,
-      projectId,
+
+  const putFailure = await putObjectOrReleaseReservation(
+    c,
+    storageKey,
+    raw,
+    ASSET_CONTENT_TYPES.video,
+    reservationId,
+    { [store.ASSET_CONTENT_HASH_METADATA_KEY]: contentHash },
+  );
+  if (putFailure) return putFailure;
+
+  const { asset, status } = await commitAssetRow(c, {
+    projectId,
+    userId,
+    reservationId,
+    assetId,
+    storageKey,
+    contentHash,
+    row: {
       kind: "video",
       name,
-      storageKey,
-      contentHash,
       contentType: ASSET_CONTENT_TYPES.video,
       byteSize: raw.byteLength,
       width: null,
@@ -409,23 +583,9 @@ async function handleBufferedVideo(
       sourceWidth: null,
       sourceHeight: null,
       policyVersion: 0,
-    });
-    await audit(
-      {
-        projectId,
-        userId,
-        action: "asset.uploaded",
-        resource: "paywall_asset",
-        resourceId: row.id,
-        after: { kind: "video", name, byteSize: row.byteSize, contentHash: row.contentHash },
-        ...extractRequestContext(c),
-      },
-      tx,
-    );
-    await releaseReservation(tx, reservationId);
-    return row;
+    },
   });
-  return c.json(ok(toDto(asset)), 201);
+  return c.json(ok(toDto(asset)), status);
 }
 
 async function streamVideo(
@@ -482,10 +642,21 @@ async function streamVideo(
 
   // Object FIRST, row second — see the module comment. The bytes are
   // never fully resident: `counter` forwards each chunk to `putObject`
-  // as it arrives while accumulating the hash and byte count.
+  // as it arrives while accumulating the hash and byte count. No
+  // content-hash metadata here (unlike the other two paths) — the hash
+  // IS the upload for a streamed body, so it isn't known until this
+  // call's own Promise resolves; see asset-store.ts's `putObject`
+  // comment for that gap.
   const counter = new HashCountingTransform();
   reassembled.pipe(counter);
-  await store.putObject(storageKey, counter, ASSET_CONTENT_TYPES.video);
+  const putFailure = await putObjectOrReleaseReservation(
+    c,
+    storageKey,
+    counter,
+    ASSET_CONTENT_TYPES.video,
+    reservationId,
+  );
+  if (putFailure) return putFailure;
 
   const contentHash = counter.digestHex();
   const byteSize = counter.bytes;
@@ -506,14 +677,16 @@ async function streamVideo(
     return c.json(ok(toDto(existing)));
   }
 
-  const asset = await drizzle.db.transaction(async (tx) => {
-    const row = await drizzle.assetRepo.createAsset(tx, {
-      id: assetId,
-      projectId,
+  const { asset, status } = await commitAssetRow(c, {
+    projectId,
+    userId,
+    reservationId,
+    assetId,
+    storageKey,
+    contentHash,
+    row: {
       kind: "video",
       name,
-      storageKey,
-      contentHash,
       contentType: ASSET_CONTENT_TYPES.video,
       byteSize,
       width: null,
@@ -522,25 +695,10 @@ async function streamVideo(
       sourceWidth: null,
       sourceHeight: null,
       policyVersion: 0,
-    });
-    await audit(
-      {
-        projectId,
-        userId,
-        action: "asset.uploaded",
-        resource: "paywall_asset",
-        resourceId: row.id,
-        after: { kind: "video", name, byteSize: row.byteSize, contentHash: row.contentHash },
-        ...extractRequestContext(c),
-      },
-      tx,
-    );
-    // Same transaction as the insert, deliberately — see module comment.
-    await releaseReservation(tx, reservationId);
-    return row;
+    },
   });
 
-  return c.json(ok(toDto(asset)), 201);
+  return c.json(ok(toDto(asset)), status);
 }
 
 // =============================================================
