@@ -349,9 +349,21 @@ Devices fetch from the bucket/CDN directly. The API is not involved.
 - **No signed or expiring URLs.** A URL frozen into a bundled fallback-export file has to still resolve
   months later; an expiry would break it silently. Security rests on the unguessable cuid2 in the key.
 - **`Cache-Control: public, max-age=31536000, immutable`**, which is honest here because §4.1 makes a
-  key's bytes permanent. `ETag` carries `contentHash`.
-- **Explicit `Content-Type` on every object, plus `X-Content-Type-Options: nosniff`** — notably so
-  Lottie's `application/json` is never sniffed as HTML.
+  key's bytes permanent. This one *is* settable on `PutObject`.
+- **Explicit `Content-Type` on every object.** Also settable on `PutObject`.
+- **`X-Content-Type-Options: nosniff` and an `ETag` carrying `contentHash` are edge-layer concerns,
+  not storage-layer ones.** An earlier draft of this section listed them here as if `PutObject`
+  could set them. It cannot: the S3 API has no field for arbitrary response headers, and `ETag` is
+  computed by the store itself (a content MD5, or a composite for multipart uploads) and is not
+  caller-settable. Writing them as object *metadata* surfaces them as `x-amz-meta-*`, which no
+  browser treats as the real header — so doing that and calling it done would be worse than not
+  doing it.
+
+  They are still required; they just belong one layer out, where response headers are actually
+  ours to set: a Cloudflare Transform Rule on the custom domain in cloud, and a header directive
+  in the Caddy config for self-hosted. Until that layer exists, `nosniff` is **not** in force —
+  which matters most for Lottie's `application/json`, the one served type a browser could be
+  talked into sniffing as something else. Tracked as a follow-up, not delivered.
 - **The asset domain must sit outside the session cookie's scope.** OWASP's highest-priority storage
   rule is "different host", which serving from the CDN satisfies — but a Better Auth cookie written to
   `.rovenue.app` would also be sent to `cdn.rovenue.app`. Deployment must keep the cookie domain
@@ -529,6 +541,9 @@ Recorded so they read as decisions rather than oversights.
 
 ## 14. Follow-ups, explicitly out of scope
 
+- **`X-Content-Type-Options: nosniff` and `ETag: contentHash` at the edge** (§6) — a Cloudflare
+  Transform Rule on the custom domain, and a Caddy header directive for self-hosted. Not
+  deliverable from the storage layer; until this lands, `nosniff` is not in force.
 - Responsive variants — needs the tree to carry a candidate set, i.e. a schema change and a
   three-platform decoder change.
 - Video transcoding and poster-frame extraction — needs `ffmpeg`.
