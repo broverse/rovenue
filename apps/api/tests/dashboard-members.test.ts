@@ -42,10 +42,23 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   // Drizzle read paths delegate to the dbMock spies so existing
   // `dbMock.projectMember.findUnique.mockResolvedValue(...)` test
   // setup keeps driving the assertions 1:1.
+  // The PATCH/DELETE handlers build a notification context inside their
+  // transaction with a raw `tx.select(...).from(...).where(...).limit(1)`
+  // (loadEmitContext in the route). The object handed to that callback is
+  // this one, so without a select chain the handler dies with "tx.select is
+  // not a function" and the route answers 500 — which reads like a
+  // permissions failure and is not one. Resolving to [] is the right stub:
+  // the route already falls back to the project id and "Someone".
+  const emptyChain: Record<string, unknown> = {};
+  emptyChain.from = () => emptyChain;
+  emptyChain.where = () => emptyChain;
+  emptyChain.limit = async () => [];
+
   const drizzleDb = {
     transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
       fn(drizzleDb),
     ),
+    select: vi.fn(() => emptyChain),
   };
   const drizzleMock = {
     db: drizzleDb,
@@ -132,10 +145,23 @@ vi.mock("@rovenue/db", async () => {
     // src/lib/audit.ts destructures `drizzle.schema` at module scope, so a
     // drizzle mock without it fails collection before any test runs.
     drizzle: { ...drizzleMock, schema: actual.drizzle.schema },
-    MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
+    // MemberRole is NOT overridden: it used to be stubbed as
+    // OWNER/ADMIN/VIEWER, and VIEWER was dropped from the enum in
+    // "feat(db): drop VIEWER from MemberRole enum". A stub that keeps a
+    // retired role alive lets these tests assert against a permission model
+    // the product no longer has, which is exactly what happened — the real
+    // enum is OWNER/ADMIN/DEVELOPER/GROWTH/CUSTOMER_SUPPORT and comes from
+    // `...actual`.
   };
 });
 vi.mock("../src/lib/auth", () => ({ auth: authMock }));
+
+// Member changes emit a team notification. That pipeline has its own tests
+// (notifier.integration.test.ts); here it is an unrelated dependency whose
+// real implementation writes to tables this file does not model.
+vi.mock("../src/services/notifications/emit", () => ({
+  emitNotification: vi.fn(async () => undefined),
+}));
 
 import { app } from "../src/app";
 
@@ -157,7 +183,7 @@ describe("GET /dashboard/projects/:projectId/members", () => {
 
   test("returns list with user fields", async () => {
     signedIn("user_1");
-    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "CUSTOMER_SUPPORT" });
     dbMock.projectMember.findMany.mockResolvedValue([
       {
         id: "pm_owner",
@@ -186,84 +212,11 @@ describe("GET /dashboard/projects/:projectId/members", () => {
   });
 });
 
-describe("POST /dashboard/projects/:projectId/members", () => {
-  test("requires OWNER — ADMIN gets 403", async () => {
-    signedIn("admin");
-    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "ADMIN" });
-    const res = await app.request("/dashboard/projects/proj_1/members", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "new@x.com", role: "ADMIN" }),
-    });
-    expect(res.status).toBe(403);
-  });
-
-  test("404 when email doesn't match any registered user", async () => {
-    signedIn("owner");
-    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
-    dbMock.user.findUnique.mockResolvedValue(null);
-    const res = await app.request("/dashboard/projects/proj_1/members", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "nobody@x.com", role: "ADMIN" }),
-    });
-    expect(res.status).toBe(404);
-  });
-
-  test("409 when user is already a member", async () => {
-    signedIn("owner");
-    dbMock.projectMember.findUnique
-      .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" }) // assertProjectAccess
-      .mockResolvedValueOnce({ id: "pm_existing", role: "ADMIN" }); // existing membership
-    dbMock.user.findUnique.mockResolvedValue({
-      id: "u2",
-      email: "admin@x.com",
-      name: "A",
-      image: null,
-    });
-    const res = await app.request("/dashboard/projects/proj_1/members", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "admin@x.com", role: "ADMIN" }),
-    });
-    expect(res.status).toBe(409);
-  });
-
-  test("OWNER adds member with audit", async () => {
-    signedIn("owner");
-    dbMock.projectMember.findUnique
-      .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" })
-      .mockResolvedValueOnce(null);
-    dbMock.user.findUnique.mockResolvedValue({
-      id: "u_new",
-      email: "new@x.com",
-      name: "New",
-      image: null,
-    });
-    dbMock.projectMember.create.mockResolvedValue({
-      id: "pm_new",
-      userId: "u_new",
-      role: "ADMIN",
-      createdAt: new Date("2026-04-20"),
-    });
-
-    const res = await app.request("/dashboard/projects/proj_1/members", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "new@x.com", role: "ADMIN" }),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: { member: { email: string; role: string } };
-    };
-    expect(body.data.member).toMatchObject({ email: "new@x.com", role: "ADMIN" });
-    expect(auditMock.audit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "member.invited" }),
-      expect.anything(),
-    );
-  });
-});
-
+// The POST /members endpoint that used to live here is gone: adding someone
+// by email became an invitation flow (src/routes/dashboard/invitations.ts,
+// covered by invitations.integration.test.ts). The three tests that
+// exercised it were left behind and had been hitting an unmatched route,
+// so Hono answered 404 and they read as authorization failures.
 describe("PATCH /dashboard/projects/:projectId/members/:userId", () => {
   test("OWNER changes role with audit", async () => {
     signedIn("owner");
@@ -273,7 +226,7 @@ describe("PATCH /dashboard/projects/:projectId/members/:userId", () => {
     dbMock.projectMember.update.mockResolvedValue({
       id: "pm_target",
       userId: "u2",
-      role: "VIEWER",
+      role: "DEVELOPER",
       createdAt: new Date("2026-04-10"),
       user: { email: "a@x", name: null, image: null },
     });
@@ -281,7 +234,7 @@ describe("PATCH /dashboard/projects/:projectId/members/:userId", () => {
     const res = await app.request("/dashboard/projects/proj_1/members/u2", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role: "VIEWER" }),
+      body: JSON.stringify({ role: "CUSTOMER_SUPPORT" }),
     });
     expect(res.status).toBe(200);
     expect(auditMock.audit).toHaveBeenCalledWith(
@@ -300,7 +253,7 @@ describe("PATCH /dashboard/projects/:projectId/members/:userId", () => {
     const res = await app.request("/dashboard/projects/proj_1/members/u1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role: "VIEWER" }),
+      body: JSON.stringify({ role: "CUSTOMER_SUPPORT" }),
     });
     expect(res.status).toBe(400);
     expect(dbMock.projectMember.update).not.toHaveBeenCalled();
@@ -312,7 +265,7 @@ describe("DELETE /dashboard/projects/:projectId/members/:userId", () => {
     signedIn("owner");
     dbMock.projectMember.findUnique
       .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" })
-      .mockResolvedValueOnce({ id: "pm_target", role: "VIEWER" });
+      .mockResolvedValueOnce({ id: "pm_target", role: "CUSTOMER_SUPPORT" });
 
     const res = await app.request("/dashboard/projects/proj_1/members/u2", {
       method: "DELETE",

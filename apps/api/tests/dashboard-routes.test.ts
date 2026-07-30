@@ -62,7 +62,16 @@ const { dbMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted(() =>
   // Drizzle reads delegate to the dbMock spies so the dashboard
   // smoke tests keep asserting the same behaviours.
   const drizzleMock = {
-    db: {} as unknown,
+    // Stopping an experiment writes through `drizzle.db.transaction(...)`.
+    // An empty object left that as `undefined`, so the handler died with
+    // "drizzle.db.transaction is not a function" and answered 500. The
+    // callback gets this same object back, which is what the repo stubs
+    // below already expect as their `tx`.
+    db: {
+      transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
+        fn(dbMock),
+      ),
+    } as unknown,
     projectRepo: {
       findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
         dbMock.projectMember.findUnique({

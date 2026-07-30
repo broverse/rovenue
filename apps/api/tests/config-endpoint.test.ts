@@ -32,7 +32,12 @@ const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
       upsert: vi.fn(),
       findUnique: vi.fn(async () => null),
     },
-    productGroup: {
+    // Named `offering` because that is what the repo stubs below and the
+    // test bodies both reach for. It was still `productGroup` here after the
+    // product-group → offering rename, so every offering lookup resolved
+    // against `undefined` and failed with "Cannot read properties of
+    // undefined (reading 'findUnique')".
+    offering: {
       findUnique: vi.fn(async () => null),
       findFirst: vi.fn(async () => null),
     },
@@ -48,14 +53,19 @@ const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
   const drizzleMock = {
     db: {} as unknown,
     subscriberRepo: {
-      findSubscriberAttributes: vi.fn(async () => null),
-      findSubscriberByAppUserId: vi.fn(
-        async (_db: unknown, args: { projectId: string; appUserId: string }) =>
+      // Names follow the real repository. They were the pre-rovenue_id ones
+      // (`findSubscriberAttributes` / `findSubscriberByAppUserId`) long after
+      // the server started resolving all inbound identity as a rovenueId, so
+      // the routes called methods this mock did not define and every request
+      // died with "… is not a function" — surfacing as a bare 500.
+      findSubscriberAttributesByRovenueId: vi.fn(async () => null),
+      resolveSubscriberByRovenueIdOrLegacy: vi.fn(
+        async (_db: unknown, args: { projectId: string; key: string }) =>
           dbMock.subscriber.findUnique({
             where: {
-              projectId_appUserId: {
+              projectId_rovenueId: {
                 projectId: args.projectId,
-                appUserId: args.appUserId,
+                rovenueId: args.key,
               },
             },
           }),
@@ -65,21 +75,21 @@ const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
           _tx: unknown,
           input: {
             projectId: string;
-            appUserId: string;
+            rovenueId: string;
             createAttributes?: unknown;
             updateAttributes?: unknown;
           },
         ) =>
           dbMock.subscriber.upsert({
             where: {
-              projectId_appUserId: {
+              projectId_rovenueId: {
                 projectId: input.projectId,
-                appUserId: input.appUserId,
+                rovenueId: input.rovenueId,
               },
             },
             create: {
               projectId: input.projectId,
-              appUserId: input.appUserId,
+              rovenueId: input.rovenueId,
               attributes: input.createAttributes ?? {},
             },
             update: {
@@ -92,13 +102,13 @@ const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
       ),
     },
     offeringRepo: {
-      listProductGroups: vi.fn(async () => []),
-      findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
+      listOfferings: vi.fn(async () => []),
+      findDefaultOffering: vi.fn(async (_db: unknown, projectId: string) =>
         dbMock.offering.findFirst({
           where: { projectId, isDefault: true },
         }),
       ),
-      findProductGroupByIdentifier: vi.fn(
+      findOfferingByIdentifier: vi.fn(
         async (_db: unknown, projectId: string, identifier: string) =>
           dbMock.offering.findUnique({
             where: { projectId_identifier: { projectId, identifier } },
@@ -363,9 +373,9 @@ describe("GET /v1/config", () => {
     expect(dbMock.subscriber.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          projectId_appUserId: {
+          projectId_rovenueId: {
             projectId: "proj_test",
-            appUserId: "user_abc",
+            rovenueId: "user_abc",
           },
         },
       }),
@@ -401,7 +411,7 @@ describe("GET /v1/config", () => {
 describe("POST /v1/config", () => {
   it("merges request attributes with DB-stored attributes (request wins)", async () => {
     // Phase 5: the attributes read is Drizzle-only now.
-    drizzleMock.subscriberRepo.findSubscriberAttributes.mockResolvedValue({
+    drizzleMock.subscriberRepo.findSubscriberAttributesByRovenueId.mockResolvedValue({
       attributes: { plan: "free", totalRevenue: 0 },
     } as any);
     dbMock.subscriber.upsert.mockResolvedValue({
@@ -433,11 +443,15 @@ describe("POST /v1/config", () => {
       "proj_test",
       "PROD",
       "sub_internal_1",
+      // `"0"`, not `0`: since the nested-attributes work the engines get a
+      // flat projection typed `AttributeMap = Record<string, string>`
+      // (flattenAttributes in @rovenue/shared), so every value is a string.
+      // The numeric expectation here predated that.
       expect.objectContaining({
         country: "TR",
         platform: "ios",
         plan: "pro",
-        totalRevenue: 0,
+        totalRevenue: "0",
       }),
     );
   });
@@ -522,10 +536,10 @@ describe("POST /v1/experiments/track", () => {
 });
 
 // =============================================================
-// GET /v1/product-groups/:identifier — experiment override
+// GET /v1/offerings/:identifier — experiment override
 // =============================================================
 
-describe("GET /v1/product-groups/:identifier with subscriberId", () => {
+describe("GET /v1/offerings/:identifier with subscriberId", () => {
   it("applies OFFERING experiment override and sets X-Rovenue-Experiment header", async () => {
     dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_internal_1",
@@ -554,7 +568,7 @@ describe("GET /v1/product-groups/:identifier with subscriberId", () => {
 
     const res = await app.request(
       withAuth(
-        "/v1/product-groups/default?subscriberId=user_abc",
+        "/v1/offerings/default?subscriberId=user_abc",
       ),
     );
 
@@ -575,7 +589,7 @@ describe("GET /v1/product-groups/:identifier with subscriberId", () => {
       metadata: {},
     });
 
-    const res = await app.request(withAuth("/v1/product-groups/default"));
+    const res = await app.request(withAuth("/v1/offerings/default"));
 
     expect(res.status).toBe(200);
     expect(engineMock.resolveProductGroup).not.toHaveBeenCalled();

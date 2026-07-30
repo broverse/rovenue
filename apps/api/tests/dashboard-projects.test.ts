@@ -41,6 +41,16 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   };
   const drizzleMock = {
     db: drizzleDb,
+    // Creating a project now also opens a free billing subscription
+    // (src/services/billing/create-free-subscription.ts). Without this the
+    // handler died inside its transaction with "Cannot read properties of
+    // undefined (reading 'createFreeBillingSubscription')" and answered 500.
+    billingSubscriptionRepo: {
+      createFreeBillingSubscription: vi.fn(async () => ({
+        id: "bsub_1",
+        tier: "free",
+      })),
+    },
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
         dbMock.projectMember.findUnique({
@@ -157,7 +167,9 @@ vi.mock("@rovenue/db", async (importOriginal) => {
     ...actual,
     default: dbMock,
     drizzle: { ...drizzleMock, schema: actual.drizzle.schema },
-    MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
+    // MemberRole is NOT stubbed: VIEWER was dropped from the enum, and
+    // keeping it alive here let these tests assert a permission model the
+    // product no longer has. The real enum arrives via `...actual`.
     FeatureFlagType: { BOOLEAN: "BOOLEAN", STRING: "STRING", NUMBER: "NUMBER", JSON: "JSON" },
     ExperimentStatus: { DRAFT: "DRAFT", RUNNING: "RUNNING", PAUSED: "PAUSED", COMPLETED: "COMPLETED" },
     Store: { APP_STORE: "APP_STORE", PLAY_STORE: "PLAY_STORE", STRIPE: "STRIPE" },
@@ -227,7 +239,7 @@ describe("GET /dashboard/projects", () => {
         },
       },
       {
-        role: "VIEWER",
+        role: "CUSTOMER_SUPPORT",
         project: {
           id: "proj_2",
           name: "Beta",
@@ -238,10 +250,10 @@ describe("GET /dashboard/projects", () => {
     ]);
     const res = await app.request("/dashboard/projects");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { projects: Array<{ id: string; role: string; slug: string }> } };
+    const body = (await res.json()) as { data: { projects: Array<{ id: string; role: string; name: string }> } };
     expect(body.data.projects).toHaveLength(2);
-    expect(body.data.projects[0]).toMatchObject({ id: "proj_1", role: "OWNER", slug: "acme" });
-    expect(body.data.projects[1]).toMatchObject({ id: "proj_2", role: "VIEWER", slug: "beta" });
+    expect(body.data.projects[0]).toMatchObject({ id: "proj_1", role: "OWNER", name: "Acme" });
+    expect(body.data.projects[1]).toMatchObject({ id: "proj_2", role: "CUSTOMER_SUPPORT", name: "Beta" });
   });
 
   test("returns 401 when the session is missing", async () => {
@@ -291,7 +303,6 @@ describe("GET /dashboard/projects/:id", () => {
         };
       };
     };
-    expect(body.data.project.slug).toBe("acme");
     expect(body.data.project.hasWebhookSecret).toBe(true);
     expect(body.data.project.counts).toEqual({
       subscribers: 42,
@@ -397,7 +408,7 @@ describe("POST /dashboard/projects", () => {
         apiKey: { publicKey: string; secretKey: string };
       };
     };
-    expect(body.data.project).toMatchObject({ id: "proj_new", name: "Alpha", slug: "alpha" });
+    expect(body.data.project).toMatchObject({ id: "proj_new", name: "Alpha" });
     expect(body.data.apiKey.publicKey).toMatch(/^rov_pub_/);
     expect(body.data.apiKey.secretKey).toMatch(/^rov_sec_/);
     // Plaintext secret appears in the response but secretKey hash never does.
@@ -428,57 +439,19 @@ describe("POST /dashboard/projects", () => {
     expect(res.status).toBe(400);
   });
 
-  test("accepts environment override (SANDBOX)", async () => {
-    signedIn("user_1");
-    dbMock.project.create.mockResolvedValue({
-      id: "proj_sandbox",
-      name: "Sbx",
-      slug: "sbx",
-      webhookUrl: null,
-      webhookSecret: null,
-      settings: {},
-      createdAt: new Date("2026-04-18"),
-      updatedAt: new Date("2026-04-18"),
-    });
-    dbMock.projectMember.create.mockResolvedValue({ id: "pm_new", role: "OWNER" });
-    dbMock.audience.create.mockResolvedValue({ id: "aud_default", isDefault: true });
-    dbMock.apiKey.create.mockResolvedValue({
-      id: "k_sbx",
-      label: "default",
-      keyPublic: "rov_pub_sandbox_yyy",
-      environment: "SANDBOX",
-      createdAt: new Date("2026-04-18"),
-    });
-    dbMock.apiKey.findMany.mockResolvedValue([
-      {
-        id: "k_sbx",
-        label: "default",
-        keyPublic: "rov_pub_sandbox_yyy",
-        environment: "SANDBOX",
-        revokedAt: null,
-        createdAt: new Date("2026-04-18"),
-      },
-    ]);
-
-    const res = await app.request("/dashboard/projects", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Sbx", slug: "sbx", environment: "SANDBOX" }),
-    });
-
-    expect(res.status).toBe(200);
-    expect(dbMock.apiKey.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ environment: "SANDBOX" }),
-      }),
-    );
-  });
+  // "accepts environment override (SANDBOX)" was removed with the feature.
+  // b74aaa00 ("simplify project setup wizard + drop projects.slug") took
+  // `environment` and `slug` out of the create-project body, and neither
+  // POST /projects nor POST /projects/:id/api-keys accepts an environment
+  // any more — dashboard-created keys are always PRODUCTION
+  // (api-keys.integration.test.ts asserts exactly that). The test kept
+  // asserting an override the API no longer offers.
 });
 
 describe("PATCH /dashboard/projects/:id", () => {
-  test("requires ADMIN role — VIEWER gets 403", async () => {
+  test("requires ADMIN role — CUSTOMER_SUPPORT gets 403", async () => {
     signedIn("viewer");
-    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "VIEWER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "CUSTOMER_SUPPORT" });
     const res = await app.request("/dashboard/projects/proj_1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -494,6 +467,10 @@ describe("PATCH /dashboard/projects/:id", () => {
       id: "proj_1",
       name: "Old",
       webhookUrl: null,
+      // The route refuses to set a webhookUrl on a project that has no
+      // signing secret, so deliveries can never go out unsigned. This
+      // fixture predated that guard and was tripping it: PATCH returned 400.
+      webhookSecret: "whsec_existing",
       settings: {},
     });
     dbMock.project.update.mockResolvedValue({
@@ -547,7 +524,6 @@ describe("PATCH /dashboard/projects/:id", () => {
     };
     expect(body.data.project.id).toBe("proj_1");
     expect(body.data.project.name).toBe("Renamed");
-    expect(body.data.project.slug).toBe("proj-1");
     expect(body.data.project.counts).toEqual({
       subscribers: 0,
       experiments: 0,

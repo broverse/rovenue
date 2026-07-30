@@ -4,12 +4,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Dashboard webhook retry/dismiss age guard (Task 6.1 follow-up)
 // =============================================================
 //
-// Migration 0006 adds a compression policy on outgoing_webhooks
-// (rows older than 7 days are compressed). Dashboard manual-retry
-// and dismiss endpoints must reject such rows because an UPDATE on
-// a compressed chunk forces a decompress and permanently bloats
-// disk until the next compression pass. The route returns 410 Gone
-// when the row's createdAt is beyond the cutoff.
+// This file used to assert a 410 Gone for rows older than 7 days. The
+// reason was TimescaleDB: migration 0006 put a compression policy on
+// outgoing_webhooks, and an UPDATE on a compressed chunk forces a
+// decompress that permanently bloats disk until the next pass.
+//
+// Migration 0018 dropped the TimescaleDB extension and 0017 replaced the
+// hypertable with native range partitioning, which has no compressed-chunk
+// immutability problem — so the guard was removed from the route along
+// with the constraint that motivated it. The two age tests went with it;
+// what remains is the behaviour that still holds: retry/dismiss act on
+// DEAD webhooks regardless of age, and reject any other status with 400.
 
 const auditMock = vi.hoisted(() => ({
   audit: vi.fn(async () => undefined),
@@ -180,30 +185,7 @@ beforeEach(() => {
 // POST /dashboard/webhooks/:id/retry
 // =============================================================
 
-describe("POST /dashboard/webhooks/:id/retry — compression chunk guard", () => {
-  it("returns 410 when the webhook is older than 7 days", async () => {
-    const stale = {
-      id: "webhook_stale",
-      projectId: "proj_1",
-      status: "DEAD",
-      createdAt: new Date(Date.now() - 10 * DAY_MS),
-    };
-    drizzleMock.outgoingWebhookRepo.findOutgoingWebhookById.mockResolvedValue(
-      stale,
-    );
-
-    const res = await app.request(
-      "http://localhost/dashboard/webhooks/webhook_stale/retry",
-      { method: "POST", headers: authedHeaders() },
-    );
-
-    expect(res.status).toBe(410);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toMatch(/10 days/);
-    expect(
-      drizzleMock.outgoingWebhookRepo.resetWebhookForRetry,
-    ).not.toHaveBeenCalled();
-  });
+describe("POST /dashboard/webhooks/:id/retry — age is not a guard", () => {
 
   it("proceeds normally when the webhook is within the 7-day window", async () => {
     const fresh = {
@@ -260,30 +242,7 @@ describe("POST /dashboard/webhooks/:id/retry — compression chunk guard", () =>
 // POST /dashboard/webhooks/:id/dismiss
 // =============================================================
 
-describe("POST /dashboard/webhooks/:id/dismiss — compression chunk guard", () => {
-  it("returns 410 when the webhook is older than 7 days", async () => {
-    const stale = {
-      id: "webhook_stale",
-      projectId: "proj_1",
-      status: "DEAD",
-      createdAt: new Date(Date.now() - 10 * DAY_MS),
-    };
-    drizzleMock.outgoingWebhookRepo.findOutgoingWebhookById.mockResolvedValue(
-      stale,
-    );
-
-    const res = await app.request(
-      "http://localhost/dashboard/webhooks/webhook_stale/dismiss",
-      { method: "POST", headers: authedHeaders() },
-    );
-
-    expect(res.status).toBe(410);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toMatch(/10 days/);
-    expect(
-      drizzleMock.outgoingWebhookRepo.markWebhookDismissed,
-    ).not.toHaveBeenCalled();
-  });
+describe("POST /dashboard/webhooks/:id/dismiss — age is not a guard", () => {
 
   it("proceeds normally when the webhook is within the 7-day window", async () => {
     const fresh = {
