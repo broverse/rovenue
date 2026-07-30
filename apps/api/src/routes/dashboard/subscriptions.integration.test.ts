@@ -22,6 +22,7 @@ import {
   products,
   purchases,
   drizzle,
+  type MemberRole,
 } from "@rovenue/db";
 import { auth } from "../../lib/auth";
 import { subscriptionsRoute } from "./subscriptions";
@@ -102,7 +103,11 @@ async function seedMember({
 }: {
   projectId: string;
   userId: string;
-  role: "OWNER" | "ADMIN" | "CUSTOMER_SUPPORT";
+  // The full ladder, not a hand-picked subset: the denial tests below need
+  // GROWTH, which is the role `subscribers:write` does NOT grant, and a
+  // narrower union here is how those tests ended up seeding a role that
+  // could never produce the 403 they asserted.
+  role: MemberRole;
 }) {
   const db = getDb();
   await db.insert(drizzle.schema.projectMembers).values({
@@ -436,11 +441,21 @@ describe("GET /projects/:projectId/subscriptions/scope-counts", () => {
 });
 
 describe("POST /projects/:projectId/subscriptions (grant)", () => {
-  it("returns 403 when the authenticated user has VIEWER role", async () => {
+  // Was "VIEWER role" — a role that does not exist (the ladder is OWNER /
+  // ADMIN / DEVELOPER / GROWTH / CUSTOMER_SUPPORT), and the body seeded
+  // CUSTOMER_SUPPORT, which `subscribers:write` deliberately grants. So the
+  // test asserted a denial the policy does not make, and had done since the
+  // role model changed.
+  //
+  // Granting comp access IS available to Customer Support by decision — the
+  // capability that gates it is `subscribers:write`, and CS holds it. GROWTH
+  // is the role on that ladder which does NOT, so it is what keeps this an
+  // authorization test rather than a formality.
+  it("returns 403 when the authenticated user's role lacks subscribers:write (GROWTH)", async () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("viewer");
     const project = await seedProject("viewer");
-    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
+    await seedMember({ projectId: project.id, userId, role: "GROWTH" });
     const sub = await seedSubscriber({ projectId: project.id, suffix: "viewer" });
     const prod = await seedProduct({ projectId: project.id, suffix: "viewer" });
 
@@ -507,11 +522,14 @@ describe("POST /projects/:projectId/subscriptions (grant)", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /projects/:projectId/subscriptions/:purchaseId/schedule", () => {
-  it("returns 403 when the authenticated user has VIEWER role", async () => {
+  // Same stale "VIEWER" framing as the grant test above: the body seeded
+  // CUSTOMER_SUPPORT, which `subscribers:write` grants by decision. GROWTH
+  // is the role that lacks it, so it is what makes this a real denial.
+  it("returns 403 when the authenticated user's role lacks subscribers:write (GROWTH)", async () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("schedviewer");
     const project = await seedProject("schedviewer");
-    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
+    await seedMember({ projectId: project.id, userId, role: "GROWTH" });
     const purchase = await seedManualPurchase({ projectId: project.id, suffix: "sv" });
 
     const res = await app.request(
@@ -643,11 +661,14 @@ describe("GET /projects/:projectId/subscriptions/scheduled", () => {
 // ---------------------------------------------------------------------------
 
 describe("DELETE /projects/:projectId/subscriptions/scheduled/:id", () => {
-  it("returns 403 when the authenticated user has VIEWER role", async () => {
+  // Same stale "VIEWER" framing as the grant test above: the body seeded
+  // CUSTOMER_SUPPORT, which `subscribers:write` grants by decision. GROWTH
+  // is the role that lacks it, so it is what makes this a real denial.
+  it("returns 403 when the authenticated user's role lacks subscribers:write (GROWTH)", async () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("delviewer");
     const project = await seedProject("delviewer");
-    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
+    await seedMember({ projectId: project.id, userId, role: "GROWTH" });
 
     const res = await app.request(
       `/projects/${project.id}/subscriptions/scheduled/nonexistent-id`,

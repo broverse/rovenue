@@ -57,9 +57,14 @@ vi.mock("../src/services/experiment-engine", () => ({
 
 import { Hono } from "hono";
 import { experimentsRoute } from "../src/routes/v1/experiments";
+import { errorHandler } from "../src/middleware/error";
 
 function buildApp() {
-  return new Hono()
+  // The real app registers `errorHandler`, and without it a Zod validation
+  // failure escapes as an unhandled 500 instead of the typed 400 envelope —
+  // which made the "rejects missing variantId with 400" case look like a
+  // route bug when the route was fine and the harness was incomplete.
+  const app = new Hono()
     .use("*", async (c, next) => {
       c.set("project", {
         id: "proj_test",
@@ -71,6 +76,8 @@ function buildApp() {
       await next();
     })
     .route("/v1/experiments", experimentsRoute);
+  app.onError(errorHandler);
+  return app;
 }
 
 describe("POST /v1/experiments/:id/expose", () => {

@@ -264,8 +264,16 @@ describe("verifyGoogleWebhook", () => {
     expect(res.status).toBe(401);
   });
 
-  test("passthrough when PUBSUB_PUSH_AUDIENCE is not configured (dev mode)", async () => {
+  test("passthrough only when ALLOW_UNVERIFIED_WEBHOOKS opts in and no audience is set", async () => {
+    // An unset audience alone no longer means "dev mode". The middleware
+    // fails CLOSED by default and the bypass is an explicit opt-in
+    // (`ALLOW_UNVERIFIED_WEBHOOKS`) — see the fail-closed suite in
+    // src/middleware/webhook-verify.test.ts, which pins the 401 side of
+    // that same gate. These tests predate the hardening and asserted the
+    // pre-hardening passthrough, so they were failing against a stricter
+    // default rather than against a bug.
     mocks.env.PUBSUB_PUSH_AUDIENCE = "";
+    mocks.env.ALLOW_UNVERIFIED_WEBHOOKS = true;
 
     const app = makeApp(verifyGoogleWebhook);
     const res = await app.request("/proj_a", {
@@ -321,8 +329,9 @@ describe("verifyGoogleWebhook", () => {
     expect(body.error).toContain("not valid JSON");
   });
 
-  test("dev-mode passthrough still stashes event id + timestamp", async () => {
+  test("opted-in passthrough still stashes event id + timestamp", async () => {
     mocks.env.PUBSUB_PUSH_AUDIENCE = undefined;
+    mocks.env.ALLOW_UNVERIFIED_WEBHOOKS = true;
     const app = makeApp(verifyGoogleWebhook);
     const res = await app.request("/proj_a", {
       method: "POST",
