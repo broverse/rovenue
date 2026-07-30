@@ -67,3 +67,19 @@ UPDATE "billing_tier_limits" SET "asset_storage_bytes_limit" = 5368709120
 UPDATE "billing_tier_limits" SET "asset_storage_bytes_limit" = 53687091200
   WHERE "tier" = 'studio';                                  -- 50 GB
 -- enterprise stays NULL (unlimited).
+
+-- Short-lived rows holding bytes an in-flight upload has claimed but
+-- not yet committed. Without them two concurrent uploads both measure
+-- a pre-upload total and both fit. `id` has no DB-level default, same
+-- as `paywall_assets` above: ids are cuid2, assigned by the app.
+CREATE TABLE "paywall_asset_reservations" (
+  "id"        text PRIMARY KEY NOT NULL,
+  "projectId" text NOT NULL REFERENCES "projects"("id") ON DELETE CASCADE,
+  "bytes"     integer NOT NULL,
+  "createdAt" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE INDEX "paywall_asset_reservations_project_idx"
+  ON "paywall_asset_reservations" ("projectId");
+CREATE INDEX "paywall_asset_reservations_created_at_idx"
+  ON "paywall_asset_reservations" ("createdAt");

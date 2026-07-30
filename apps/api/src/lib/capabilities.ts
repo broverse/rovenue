@@ -19,7 +19,8 @@ export type Capability =
   | "credits:write"
   | "virtual-currency:manage"
   | "refunds:write"
-  | "fonts:write";
+  | "fonts:write"
+  | "assets:write";
 
 const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
   "project:read":           ["OWNER", "ADMIN", "DEVELOPER", "GROWTH", "CUSTOMER_SUPPORT"],
@@ -48,6 +49,9 @@ const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
   // above, not GROWTH (matches products:write / sdk:write, not the
   // marketing-tooling row below it).
   "fonts:write":            ["OWNER", "ADMIN", "DEVELOPER"],
+  // Asset uploads are a project asset like fonts and products —
+  // DEVELOPER and above, not GROWTH.
+  "assets:write":           ["OWNER", "ADMIN", "DEVELOPER"],
 };
 
 export function roleHasCapability(role: MemberRole, cap: Capability): boolean {

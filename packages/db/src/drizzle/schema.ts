@@ -3097,3 +3097,27 @@ export const paywallAssetUsages = pgTable(
 );
 
 export type PaywallAssetUsage = typeof paywallAssetUsages.$inferSelect;
+
+// Short-lived rows holding bytes an in-flight upload has claimed but
+// not yet committed against the project's storage cap (Task 5). Without
+// them, two concurrent uploads would both measure a pre-upload total
+// against `paywall_assets` and both fit under the cap.
+export const paywallAssetReservations = pgTable(
+  "paywall_asset_reservations",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    bytes: integer("bytes").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    projectIdx: index("paywall_asset_reservations_project_idx").on(t.projectId),
+    // The sweeper scans by age across all projects.
+    createdAtIdx: index("paywall_asset_reservations_created_at_idx").on(t.createdAt),
+  }),
+);
+
+export type PaywallAssetReservation = typeof paywallAssetReservations.$inferSelect;
+export type NewPaywallAssetReservation = typeof paywallAssetReservations.$inferInsert;

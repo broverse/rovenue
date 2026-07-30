@@ -243,6 +243,8 @@ export {
   funnels,
   customDomains,
   refundShieldResponses,
+  billingSubscriptions,
+  billingTierLimits,
 } from "./drizzle/schema";
 
 export type {
