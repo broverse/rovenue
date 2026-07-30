@@ -196,6 +196,11 @@ beforeAll(async () => {
   await db.insert(subscribers).values({
     id: SUBSCRIBER_ID,
     projectId: PROJECT_ID,
+    // rovenueId is the wire identity and NOT NULL: the server resolves all
+    // inbound identity through it, with appUserId kept only as the legacy
+    // alias. This fixture predated that and inserted appUserId alone, so the
+    // whole suite died in setup on a not-null violation.
+    rovenueId: `app_rse2e_${RUN_ID}`,
     appUserId: `app_rse2e_${RUN_ID}`,
     appleAppAccountToken: APP_ACCOUNT_TOKEN,
   });

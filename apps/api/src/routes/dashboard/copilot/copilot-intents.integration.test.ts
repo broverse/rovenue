@@ -152,7 +152,11 @@ describe("POST /projects/:projectId/copilot/intents/:id/execute (integration)", 
       userId,
       threadId,
       messageId,
-      toolName: "action.audiences.create",
+      // Underscores, not dots: the registry keys are
+      // action_audiences_create and friends (intent-handlers.ts). A
+      // dotted name resolves to no handler and the execute endpoint
+      // answers 500 "No handler registered".
+      toolName: "action_audiences_create",
       payload: {
         name: `Rovi Test Audience ${RUN_ID}`,
         description: "from integration test",

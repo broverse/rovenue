@@ -41,6 +41,7 @@ import {
   queryAnalytics,
 } from "../src/lib/clickhouse";
 import { listDailyMrr } from "../src/services/metrics/mrr";
+import { env } from "../src/lib/env";
 
 let network: StartedNetwork;
 let redpanda: StartedTestContainer;
@@ -127,9 +128,22 @@ beforeAll(async () => {
   chUrl = `http://localhost:${CH_HOST_PORT}`;
 
   // Bind the production code path to this testcontainer.
+  //
+  // Setting process.env alone is not enough and was the reason this suite
+  // timed out: src/lib/clickhouse.ts builds its client from the `env` object,
+  // which is `envSchema.parse(process.env)` evaluated once at import. By the
+  // time this runs that parse has already happened, so a later process.env
+  // write is invisible to it — __resetClickHouseForTests() drops the memoised
+  // client, and the next call rebuilds it against the SAME stale env, still
+  // pointing at whatever ClickHouse the runner was started with. The
+  // pipeline was fine; queryAnalytics was simply asking a different server,
+  // which has no rows for this project, so waitFor sat there for 90s.
   process.env.CLICKHOUSE_URL = chUrl;
   process.env.CLICKHOUSE_USER = "rovenue";
   process.env.CLICKHOUSE_PASSWORD = "rovenue_test";
+  env.CLICKHOUSE_URL = chUrl;
+  env.CLICKHOUSE_USER = "rovenue";
+  env.CLICKHOUSE_PASSWORD = "rovenue_test";
   __resetClickHouseForTests();
 
   // Stabilise CH HTTP (3 consecutive auth'd successes — same pattern as

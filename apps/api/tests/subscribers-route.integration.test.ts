@@ -202,9 +202,14 @@ describe("POST /v1/subscribers/:appUserId/attributes", () => {
     const upsertArgs =
       drizzleMock.subscriberRepo.upsertSubscriber.mock.calls[0]![1];
     expect(upsertArgs.rovenueId).toBe("rov_device_42");
-    expect(upsertArgs.updateAttributes).toEqual({
-      country: "TR",
-      tier: "pro",
+    // What gets PERSISTED is the nested set — each key an
+    // { value, source, updatedAt } entry, so a later write can tell an
+    // SDK-set value from a dashboard-set one. Only the response projects it
+    // flat (asserted above). This expectation was written against the flat
+    // shape and matched neither after the nested-attributes change.
+    expect(upsertArgs.updateAttributes).toMatchObject({
+      country: { value: "TR" },
+      tier: { value: "pro" },
     });
   });
 });

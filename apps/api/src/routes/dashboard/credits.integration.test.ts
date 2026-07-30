@@ -30,6 +30,7 @@ async function seedCurrency(projectId: string, suffix = "") {
 }
 
 const RUN_ID = Date.now();
+let idempotencyCounter = 0;
 
 function buildApp() {
   const app = new Hono().route(
@@ -133,7 +134,15 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
       `/projects/${project.id}/credits`,
       {
         method: "POST",
-        headers: { "content-type": "application/json", cookie },
+        // Granting credits is money-equivalent, so the route requires an
+        // Idempotency-Key and 400s without one. These requests predated
+        // that rule; each needs its own key so retries are the only
+        // thing that ever collapses.
+        headers: {
+          "content-type": "application/json",
+          cookie,
+          "idempotency-key": `test-${RUN_ID}-${idempotencyCounter++}`,
+        },
         body: JSON.stringify({
           subscriberId: sub.id,
           currencyId: currency.id,
@@ -177,7 +186,15 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
       `/projects/${project.id}/credits`,
       {
         method: "POST",
-        headers: { "content-type": "application/json", cookie },
+        // Granting credits is money-equivalent, so the route requires an
+        // Idempotency-Key and 400s without one. These requests predated
+        // that rule; each needs its own key so retries are the only
+        // thing that ever collapses.
+        headers: {
+          "content-type": "application/json",
+          cookie,
+          "idempotency-key": `test-${RUN_ID}-${idempotencyCounter++}`,
+        },
         body: JSON.stringify({ subscriberId: sub.id, currencyId: currency.id, amount: 100 }),
       },
     );
@@ -200,7 +217,15 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
       `/projects/${projectA.id}/credits`,
       {
         method: "POST",
-        headers: { "content-type": "application/json", cookie },
+        // Granting credits is money-equivalent, so the route requires an
+        // Idempotency-Key and 400s without one. These requests predated
+        // that rule; each needs its own key so retries are the only
+        // thing that ever collapses.
+        headers: {
+          "content-type": "application/json",
+          cookie,
+          "idempotency-key": `test-${RUN_ID}-${idempotencyCounter++}`,
+        },
         body: JSON.stringify({ subscriberId: subB.id, currencyId: currency.id, amount: 50 }),
       },
     );
@@ -220,7 +245,15 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
       `/projects/${project.id}/credits`,
       {
         method: "POST",
-        headers: { "content-type": "application/json", cookie },
+        // Granting credits is money-equivalent, so the route requires an
+        // Idempotency-Key and 400s without one. These requests predated
+        // that rule; each needs its own key so retries are the only
+        // thing that ever collapses.
+        headers: {
+          "content-type": "application/json",
+          cookie,
+          "idempotency-key": `test-${RUN_ID}-${idempotencyCounter++}`,
+        },
         body: JSON.stringify({ subscriberId: sub.id, amount: 0 }),
       },
     );

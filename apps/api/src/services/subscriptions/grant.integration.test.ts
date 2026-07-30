@@ -15,7 +15,7 @@
 // =============================================================
 
 import { afterAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   access,
   getDb,
@@ -112,25 +112,28 @@ async function seedProduct({
 
 afterAll(async () => {
   const db = getDb();
-  // Delete projects (cascades to subscribers, products, purchases, etc.)
-  await db
-    .delete(projects)
-    .where(eq(projects.id, `prj_granttest_${RUN_ID}`));
-  await db
-    .delete(projects)
-    .where(eq(projects.id, `prj_granttest_${RUN_ID}A`));
-  await db
-    .delete(projects)
-    .where(eq(projects.id, `prj_granttest_${RUN_ID}B`));
-  await db
-    .delete(projects)
-    .where(eq(projects.id, `prj_granttest_${RUN_ID}C`));
-  await db
-    .delete(projects)
-    .where(eq(projects.id, `prj_granttest_${RUN_ID}D`));
-  await db
-    .delete(projects)
-    .where(eq(projects.id, `prj_granttest_${RUN_ID}custom`));
+  const projectIds = ["", "A", "B", "C", "D", "custom"].map(
+    (suffix) => `prj_granttest_${RUN_ID}${suffix}`,
+  );
+
+  for (const projectId of projectIds) {
+    // subscriber_access must go first. Deleting the project cascades to both
+    // `subscribers` and `access`, but subscriber_access.accessId -> access.id
+    // has no cascade of its own, so the cascade trips over its own foreign
+    // key: "update or delete on table access violates foreign key constraint
+    // subscriber_access_accessId_access_id_fk". That aborted the teardown and
+    // left rows behind, and the failure surfaced as a suite-level error.
+    await db.delete(subscriberAccess).where(
+      inArray(
+        subscriberAccess.subscriberId,
+        db
+          .select({ id: subscribers.id })
+          .from(subscribers)
+          .where(eq(subscribers.projectId, projectId)),
+      ),
+    );
+    await db.delete(projects).where(eq(projects.id, projectId));
+  }
 });
 
 // ---------------------------------------------------------------------------
