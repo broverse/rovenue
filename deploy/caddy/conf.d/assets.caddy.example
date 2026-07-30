@@ -1,0 +1,73 @@
+# =============================================================
+# Paywall asset origin — self-hosted (design spec §6)
+# =============================================================
+#
+# ENABLING THIS FILE
+#
+#   cp assets.caddy.example assets.caddy      # in deploy/caddy/conf.d/
+#   # edit the hostname on the site line below, then:
+#   docker compose restart caddy
+#
+# Only files ending in `.caddy` are imported (see the glob in
+# ../Caddyfile), so this file stays inert until you copy it. The
+# hostname cannot be shipped as a default: naming a site in a Caddyfile
+# makes Caddy solicit an ACME certificate for it at startup, and a
+# placeholder hostname would mean a failing challenge — and repeated
+# failures against a rate-limited CA — on every install that never
+# intended to serve assets through Caddy.
+#
+# WHAT THIS IS FOR
+#
+# `docker compose up` publishes MinIO on host port 9002 and that is
+# enough for local development. A production self-host puts a real
+# hostname in front of it, which is what this block is. Point
+# ASSET_PUBLIC_BASE_URL at the same origin, including the bucket
+# segment, because the S3 API is path-style here:
+#
+#   ASSET_PUBLIC_BASE_URL=https://assets.example.com/rovenue-assets
+#
+# The host MUST be outside the session cookie's scope (spec §6): a
+# cookie written to `.example.com` would also be sent to
+# `assets.example.com`. Keep the cookie domain narrower than the
+# asset domain — that is the whole reason assets get their own host.
+
+assets.example.com {
+	encode zstd gzip
+
+	# Assets are world-readable by design (unguessable cuid2 keys, no
+	# signed URLs) but they are strictly read-only over HTTP. The bucket
+	# policy already grants nothing but s3:GetObject, so an anonymous
+	# PUT/DELETE would be refused by MinIO anyway; refusing it here means
+	# a policy mistake downstream is not immediately reachable from the
+	# internet.
+	@mutating not method GET HEAD OPTIONS
+	respond @mutating 405
+
+	header {
+		# The header this block exists to add. Lottie assets are served
+		# as application/json, the one accepted type a browser could be
+		# talked into sniffing as something else.
+		#
+		# MinIO already sets this itself on object responses, so on a
+		# stock self-host it is belt-and-braces. It stops being redundant
+		# the moment the origin is anything else — R2, a plain S3 bucket,
+		# or a cache in between — none of which add it.
+		X-Content-Type-Options nosniff
+
+		# Assets are immutable (spec §4.1: a key's bytes never change), so
+		# nothing here should ever be framed or referrer-leaked either.
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+
+		# Not ours to advertise.
+		-Server
+	}
+
+	# Cache-Control and Content-Type are set on the object at PutObject
+	# time and pass through untouched, as does the store's ETag — a
+	# strong content hash that makes conditional requests work without
+	# anything being rewritten here.
+	reverse_proxy minio:9000 {
+		header_up Host {upstream_hostport}
+	}
+}

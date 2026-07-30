@@ -48,6 +48,18 @@
 }
 
 # -------------------------------------------------------------
+# Operator drop-ins. Anything in conf.d/*.caddy is imported here;
+# a glob that matches nothing is valid, so the default install
+# imports nothing and this line is a no-op.
+#
+# conf.d/assets.caddy.example is the paywall asset origin (design
+# spec §6) — it ships disabled because enabling a site block makes
+# Caddy request a certificate for the hostname named in it, and only
+# the operator knows that hostname.
+# -------------------------------------------------------------
+import /etc/caddy/conf.d/*.caddy
+
+# -------------------------------------------------------------
 # Dashboard SPA — explicit host, proxied to the static-serving
 # dashboard container. Must precede the *.rovenue.io wildcard
 # (which targets the api); most-specific host wins in Caddy.

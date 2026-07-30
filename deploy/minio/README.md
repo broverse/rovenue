@@ -130,6 +130,15 @@ reverse proxy) and set:
 ASSET_PUBLIC_BASE_URL=https://assets.<your-domain>/rovenue-assets
 ```
 
+A ready-made Caddy block for exactly this is shipped, disabled, at
+`deploy/caddy/conf.d/assets.caddy.example` — copy it to `assets.caddy`,
+put your hostname on the site line, and restart Caddy. Besides TLS it
+adds `X-Content-Type-Options: nosniff` and refuses every method other
+than `GET`/`HEAD`/`OPTIONS`, so a mistake in the bucket policy is not
+directly reachable from the internet. (MinIO sets `nosniff` on object
+responses itself, so that part is defence in depth here; it is not, in
+front of R2 or plain S3.)
+
 `ASSET_STORAGE_ENDPOINT` can stay `http://minio:9000` (docker-network
 internal) — only `api` and `dispatcher` ever call the write API, and both
 already run inside the same compose network.

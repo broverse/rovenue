@@ -361,9 +361,28 @@ Devices fetch from the bucket/CDN directly. The API is not involved.
 
   They are still required; they just belong one layer out, where response headers are actually
   ours to set: a Cloudflare Transform Rule on the custom domain in cloud, and a header directive
-  in the Caddy config for self-hosted. Until that layer exists, `nosniff` is **not** in force —
-  which matters most for Lottie's `application/json`, the one served type a browser could be
-  talked into sniffing as something else. Tracked as a follow-up, not delivered.
+  in the Caddy config for self-hosted. **Both now exist** —
+  `deploy/cloudflare/asset-headers/README.md` and `deploy/caddy/conf.d/assets.caddy.example`.
+
+  Two corrections to what this section assumed, both established by measuring a running MinIO
+  rather than reasoning about the S3 API:
+
+  - **MinIO already sets `X-Content-Type-Options: nosniff` itself** on object responses. So on a
+    stock self-hosted install `nosniff` was in force the whole time, contrary to the claim above.
+    The Caddy block sets it anyway: it stops being redundant the moment the origin is anything
+    else (R2, plain S3, a cache in between), and an edge that only works against one origin is
+    not much of a control.
+  - **`ETag` was never missing.** MinIO returns a strong `ETag`, and a conditional request against
+    it answers `304`. R2 and S3 behave the same way. The store's `ETag` *is* a content hash — a
+    different algorithm than the `contentHash` column, serving the identical purpose, and unlike a
+    rewritten one it stays correct for multipart uploads, where the value is a composite rather
+    than a plain digest. Since §4.1 makes a key's bytes permanent, any correct validator is as
+    good as any other, so `ETag: contentHash` specifically buys nothing and is dropped as a
+    requirement.
+
+  What the edge layer genuinely adds for self-hosted, beyond re-asserting `nosniff`: it refuses
+  every non-`GET`/`HEAD`/`OPTIONS` method at the door, so a future mistake in the bucket policy is
+  not immediately reachable from the internet.
 - **The asset domain must sit outside the session cookie's scope.** OWASP's highest-priority storage
   rule is "different host", which serving from the CDN satisfies — but a Better Auth cookie written to
   `.rovenue.app` would also be sent to `cdn.rovenue.app`. Deployment must keep the cookie domain
@@ -541,9 +560,10 @@ Recorded so they read as decisions rather than oversights.
 
 ## 14. Follow-ups, explicitly out of scope
 
-- **`X-Content-Type-Options: nosniff` and `ETag: contentHash` at the edge** (§6) — a Cloudflare
-  Transform Rule on the custom domain, and a Caddy header directive for self-hosted. Not
-  deliverable from the storage layer; until this lands, `nosniff` is not in force.
+- ~~**`X-Content-Type-Options: nosniff` and `ETag: contentHash` at the edge** (§6)~~ — **done.**
+  Cloudflare Transform Rule in `deploy/cloudflare/asset-headers/README.md`; Caddy drop-in in
+  `deploy/caddy/conf.d/assets.caddy.example`. The `ETag: contentHash` half was withdrawn rather
+  than built: the store already returns a strong `ETag` that revalidates correctly (§6).
 - Responsive variants — needs the tree to carry a candidate set, i.e. a schema change and a
   three-platform decoder change.
 - Video transcoding and poster-frame extraction — needs `ffmpeg`.
