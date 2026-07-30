@@ -15,7 +15,7 @@
 // =============================================================
 
 import { afterAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   access,
   getDb,
@@ -154,9 +154,22 @@ async function seedManualPurchase({
 afterAll(async () => {
   const db = getDb();
   for (const suffix of ["C1", "C2", "C3"]) {
-    await db
-      .delete(projects)
-      .where(eq(projects.id, `prj_swp_${RUN_ID}${suffix}`));
+    const projectId = `prj_swp_${RUN_ID}${suffix}`;
+    // subscriber_access first. Deleting the project cascades to both
+    // `subscribers` and `access`, but subscriber_access.accessId -> access.id
+    // has no cascade of its own, so the cascade trips over its own foreign
+    // key and the teardown aborts. The tests themselves pass; the failure
+    // lands as a suite-level error after the fact.
+    await db.delete(subscriberAccess).where(
+      inArray(
+        subscriberAccess.subscriberId,
+        db
+          .select({ id: subscribers.id })
+          .from(subscribers)
+          .where(eq(subscribers.projectId, projectId)),
+      ),
+    );
+    await db.delete(projects).where(eq(projects.id, projectId));
   }
 });
 
