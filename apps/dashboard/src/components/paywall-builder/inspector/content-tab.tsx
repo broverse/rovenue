@@ -103,22 +103,20 @@ function ImageContent({ node }: { node: ImageNode }) {
 
   return (
     <Section title={t("paywalls.builder.properties.image", "Image")} defaultOpen>
-      <Field label={t("paywalls.builder.properties.urlLight", "URL (light)")}>
-        <input
-          value={node.url.light}
-          onChange={(e) => set({ url: { ...node.url, light: e.currentTarget.value } })}
-          placeholder="https://cdn.example.com/photo.png"
-          className={INPUT_CLASS}
-        />
-      </Field>
-      <Field className="mt-3" label={t("paywalls.builder.properties.urlDark", "URL (dark)")}>
-        <input
-          value={node.url.dark ?? ""}
-          onChange={(e) => set({ url: { ...node.url, dark: e.currentTarget.value || undefined } })}
-          placeholder="https://cdn.example.com/photo-dark.png"
-          className={INPUT_CLASS}
-        />
-      </Field>
+      <ThemeUrlField
+        labelLight={t("paywalls.builder.properties.urlLight", "URL (light)")}
+        labelDark={t("paywalls.builder.properties.urlDark", "URL (dark)")}
+        // `image.url` is REQUIRED (unlike video's optional `posterUrl`) —
+        // collapsing to `undefined` on a fully-cleared field isn't a valid
+        // ImageNode, so an emptied field maps back to `{ light: "" }`
+        // rather than `undefined` (see ThemeUrlField's own doc comment).
+        value={node.url}
+        onChange={(v) => set({ url: v ?? { light: "" } })}
+        placeholderLight="https://cdn.example.com/photo.png"
+        placeholderDark="https://cdn.example.com/photo-dark.png"
+        kind="image"
+        projectId={vm.projectId}
+      />
       <Field className="mt-3" label={t("paywalls.builder.properties.alt", "Alt text")}>
         <input
           value={node.alt ?? ""}
@@ -476,22 +474,17 @@ function VideoContent({ node }: { node: VideoNode }) {
 
   return (
     <Section title={t("paywalls.builder.properties.video", "Video")} defaultOpen>
-      <Field label={t("paywalls.builder.properties.urlLight", "URL (light)")}>
-        <input
-          value={node.url.light}
-          onChange={(e) => set({ url: { ...node.url, light: e.currentTarget.value } })}
-          placeholder="https://cdn.example.com/video.mp4"
-          className={INPUT_CLASS}
-        />
-      </Field>
-      <Field className="mt-3" label={t("paywalls.builder.properties.urlDark", "URL (dark)")}>
-        <input
-          value={node.url.dark ?? ""}
-          onChange={(e) => set({ url: { ...node.url, dark: e.currentTarget.value || undefined } })}
-          placeholder="https://cdn.example.com/video-dark.mp4"
-          className={INPUT_CLASS}
-        />
-      </Field>
+      <ThemeUrlField
+        labelLight={t("paywalls.builder.properties.urlLight", "URL (light)")}
+        labelDark={t("paywalls.builder.properties.urlDark", "URL (dark)")}
+        // `video.url` is required — see ImageContent's identical note.
+        value={node.url}
+        onChange={(v) => set({ url: v ?? { light: "" } })}
+        placeholderLight="https://cdn.example.com/video.mp4"
+        placeholderDark="https://cdn.example.com/video-dark.mp4"
+        kind="video"
+        projectId={vm.projectId}
+      />
       <ThemeUrlField
         className="mt-3"
         labelLight={t("paywalls.builder.properties.videoPosterUrlLight", "Poster URL (light)")}
@@ -500,6 +493,8 @@ function VideoContent({ node }: { node: VideoNode }) {
         onChange={(v) => set({ posterUrl: v })}
         placeholderLight="https://cdn.example.com/poster.png"
         placeholderDark="https://cdn.example.com/poster-dark.png"
+        kind="image"
+        projectId={vm.projectId}
       />
       <label className="mt-3 flex items-center gap-1.5 text-[11px] text-foreground">
         <input
@@ -565,22 +560,17 @@ function LottieContent({ node }: { node: LottieNode }) {
 
   return (
     <Section title={t("paywalls.builder.properties.lottie", "Lottie")} defaultOpen>
-      <Field label={t("paywalls.builder.properties.urlLight", "URL (light)")}>
-        <input
-          value={node.url.light}
-          onChange={(e) => set({ url: { ...node.url, light: e.currentTarget.value } })}
-          placeholder="https://cdn.example.com/animation.json"
-          className={INPUT_CLASS}
-        />
-      </Field>
-      <Field className="mt-3" label={t("paywalls.builder.properties.urlDark", "URL (dark)")}>
-        <input
-          value={node.url.dark ?? ""}
-          onChange={(e) => set({ url: { ...node.url, dark: e.currentTarget.value || undefined } })}
-          placeholder="https://cdn.example.com/animation-dark.json"
-          className={INPUT_CLASS}
-        />
-      </Field>
+      <ThemeUrlField
+        labelLight={t("paywalls.builder.properties.urlLight", "URL (light)")}
+        labelDark={t("paywalls.builder.properties.urlDark", "URL (dark)")}
+        // `lottie.url` is required — see ImageContent's identical note.
+        value={node.url}
+        onChange={(v) => set({ url: v ?? { light: "" } })}
+        placeholderLight="https://cdn.example.com/animation.json"
+        placeholderDark="https://cdn.example.com/animation-dark.json"
+        kind="lottie"
+        projectId={vm.projectId}
+      />
       <label className="mt-3 flex items-center gap-1.5 text-[11px] text-foreground">
         <input
           type="checkbox"

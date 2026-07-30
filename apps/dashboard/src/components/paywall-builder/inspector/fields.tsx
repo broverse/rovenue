@@ -1,10 +1,12 @@
 import { component, useService } from "impair";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Languages } from "lucide-react";
+import { FolderOpen, Languages } from "lucide-react";
+import type { AssetKind } from "@rovenue/shared";
 import type { NodeBorder, NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
 import { cn } from "../../../lib/cn";
 import { ColorSwatchInput } from "../../funnel-builder/color-swatch-input";
+import { AssetPickerDialog } from "../../assets/asset-picker-dialog";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { Field, INPUT_CLASS, Segmented } from "./primitives";
 
@@ -283,6 +285,17 @@ export function BorderField({
  * Collapses to `undefined` when both rows are emptied — correct for the
  * OPTIONAL uses (`posterUrl`, and every use inside the overrides panel):
  * an empty `posterUrl` means "no poster", not a `{ light: "" }` object.
+ *
+ * `kind`/`projectId` are both optional and BOTH are required together to
+ * turn on the asset picker — the overrides panel's calls (`overrides.tsx`)
+ * pass neither and get the plain text field they always have, since that
+ * surface has no natural single `kind` to hand down for every combo it
+ * renders. When both are supplied (content-tab.tsx's image/video/lottie
+ * fields), each row gets a "Browse" button that opens `AssetPickerDialog`
+ * filtered to `kind`; picking an asset there calls the EXACT SAME
+ * `setLight`/`setDark` a keystroke would, so a hand-typed external URL is
+ * never a degraded path — uploading is only ever an alternative to typing,
+ * never a replacement for it (task-11-brief constraint 3).
  */
 export function ThemeUrlField({
   labelLight,
@@ -292,6 +305,8 @@ export function ThemeUrlField({
   placeholderLight,
   placeholderDark,
   className,
+  kind,
+  projectId,
 }: {
   labelLight: string;
   labelDark: string;
@@ -300,7 +315,13 @@ export function ThemeUrlField({
   placeholderLight?: string;
   placeholderDark?: string;
   className?: string;
+  kind?: AssetKind;
+  projectId?: string;
 }) {
+  const { t } = useTranslation();
+  const [pickerTarget, setPickerTarget] = useState<"light" | "dark" | null>(null);
+  const canBrowse = Boolean(kind && projectId);
+
   const setLight = (v: string) => {
     const dark = value?.dark;
     if (!v && !dark) {
@@ -318,24 +339,65 @@ export function ThemeUrlField({
     onChange({ light, dark: v || undefined });
   };
 
+  const browseTitle = t("paywalls.builder.properties.browseAssets", "Browse assets");
+
   return (
     <>
       <Field label={labelLight} className={className}>
-        <input
-          value={value?.light ?? ""}
-          onChange={(e) => setLight(e.currentTarget.value)}
-          placeholder={placeholderLight}
-          className={INPUT_CLASS}
-        />
+        <div className="flex items-center gap-1.5">
+          <input
+            value={value?.light ?? ""}
+            onChange={(e) => setLight(e.currentTarget.value)}
+            placeholder={placeholderLight}
+            className={cn(INPUT_CLASS, "flex-1")}
+          />
+          {canBrowse && (
+            <button
+              type="button"
+              title={browseTitle}
+              aria-label={browseTitle}
+              onClick={() => setPickerTarget("light")}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-500 transition hover:border-rv-accent-500 hover:text-foreground"
+            >
+              <FolderOpen size={13} />
+            </button>
+          )}
+        </div>
       </Field>
       <Field className="mt-3" label={labelDark}>
-        <input
-          value={value?.dark ?? ""}
-          onChange={(e) => setDark(e.currentTarget.value)}
-          placeholder={placeholderDark}
-          className={INPUT_CLASS}
-        />
+        <div className="flex items-center gap-1.5">
+          <input
+            value={value?.dark ?? ""}
+            onChange={(e) => setDark(e.currentTarget.value)}
+            placeholder={placeholderDark}
+            className={cn(INPUT_CLASS, "flex-1")}
+          />
+          {canBrowse && (
+            <button
+              type="button"
+              title={browseTitle}
+              aria-label={browseTitle}
+              onClick={() => setPickerTarget("dark")}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-500 transition hover:border-rv-accent-500 hover:text-foreground"
+            >
+              <FolderOpen size={13} />
+            </button>
+          )}
+        </div>
       </Field>
+      {canBrowse && pickerTarget && (
+        <AssetPickerDialog
+          projectId={projectId!}
+          kind={kind!}
+          open
+          onClose={() => setPickerTarget(null)}
+          onSelect={(url) => {
+            if (pickerTarget === "light") setLight(url);
+            else setDark(url);
+            setPickerTarget(null);
+          }}
+        />
+      )}
     </>
   );
 }

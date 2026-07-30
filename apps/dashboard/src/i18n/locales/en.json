@@ -639,6 +639,57 @@
           "generic": "Could not upload the font. Please try again."
         }
       }
+    },
+    "assets": {
+      "title": "Assets",
+      "subtitle": "Upload images, videos, and Lottie animations for paywalls. Assets are shared across every paywall in this project.",
+      "empty": {
+        "title": "No assets yet",
+        "description": "Upload an image, video, or Lottie file to make it available to every paywall in this project."
+      },
+      "kind": {
+        "image": "Image",
+        "video": "Video",
+        "lottie": "Lottie"
+      },
+      "dimensions": "{{width}} × {{height}}",
+      "usage": {
+        "used": "{{used}} of {{limit}} used",
+        "unlimited": "Unlimited storage"
+      },
+      "upload": {
+        "image": "Upload image",
+        "video": "Upload video",
+        "lottie": "Upload Lottie",
+        "progress": "Uploading… {{percent}}%",
+        "errors": {
+          "formatUnsupported": "This file isn't a supported {{kind}} format.",
+          "fileTooLarge": "This {{kind}} file is too large.",
+          "quotaExceeded": "This project has reached its storage limit.",
+          "invalidName": "That name isn't valid. Use letters, numbers, spaces, periods, hyphens, or underscores.",
+          "processingFailed": "This file couldn't be processed. Try a different file.",
+          "storageUnavailable": "Asset storage isn't configured for this environment.",
+          "generic": "Could not upload this asset. Please try again."
+        }
+      },
+      "delete": {
+        "trigger": "Delete",
+        "title": "Delete {{name}}?",
+        "confirm": "Delete asset",
+        "failedTitle": "Couldn't delete the asset",
+        "usageLoading": "Checking which published paywalls use this asset…",
+        "usageZero": "0 published paywalls currently reference this asset. Drafts aren't checked here, so an unpublished draft could still depend on it.",
+        "usageSome_one": "{{count}} published paywall uses this asset: {{names}}. Deleting it will break that paywall immediately.",
+        "usageSome_other": "{{count}} published paywalls use this asset: {{names}}. Deleting it will break those paywalls immediately.",
+        "errors": {
+          "generic": "Could not delete the asset. Please try again."
+        }
+      },
+      "picker": {
+        "title": "Choose an asset",
+        "empty": "No {{kind}} assets uploaded yet. Upload one from the asset library, or type a URL directly.",
+        "select": "Use this asset"
+      }
     }
   },
   "notifications": {
@@ -1449,6 +1500,7 @@
         "image": "Image",
         "urlLight": "URL (light)",
         "urlDark": "URL (dark)",
+        "browseAssets": "Browse assets",
         "alt": "Alt text",
         "label": "Label",
         "editTranslations": "Edit translations",
