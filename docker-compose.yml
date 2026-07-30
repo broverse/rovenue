@@ -22,6 +22,18 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       CLICKHOUSE_URL: http://clickhouse:8123
+      # The SCHEMA OWNER, not the reader. `rovenue_reader` runs under a
+      # readonly=2 profile (deploy/clickhouse/users.d/rovenue.xml) and cannot
+      # execute DDL — and it is what .env ships as CLICKHOUSE_USER, because
+      # that is the right default for the API. Without this override the
+      # service inherited it through env_file and every ClickHouse migration
+      # died with "Cannot execute query in readonly mode", so a fresh install
+      # got a migrated Postgres and an empty ClickHouse.
+      #
+      # The password must match CLICKHOUSE_PASSWORD_SHA256 on the clickhouse
+      # service below; both default to "rovenue".
+      CLICKHOUSE_USER: rovenue
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_WRITE_PASSWORD:-rovenue}
     # The runtime image is a `pnpm deploy` of @rovenue/api ALONE: /app is
     # that package, there is no pnpm-workspace.yaml, and so
     # `pnpm --filter @rovenue/db …` exits with "No projects matched the
@@ -491,6 +503,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+      # First boot on an empty volume initialises the store before the HTTP
+      # port answers, and every probe until then counts against `retries` —
+      # so a cold `docker compose up` could exhaust them and take `migrate`
+      # down with "dependency failed to start" on a machine where nothing is
+      # actually wrong. During start_period failures don't count.
+      start_period: 60s
     expose:
       # Prometheus metrics endpoint — scraped by Grafana Alloy on the
       # docker network. NOT published to the host.
