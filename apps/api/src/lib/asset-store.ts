@@ -3,6 +3,7 @@ import {
   S3Client,
   DeleteObjectCommand,
   ListObjectsV2Command,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import {
@@ -142,6 +143,24 @@ export async function deleteObject(key: string): Promise<void> {
   await s3().send(
     new DeleteObjectCommand({ Bucket: env.ASSET_STORAGE_BUCKET!, Key: key }),
   );
+}
+
+/** Used only by the orphan sweeper. An orphan by definition may have no
+ *  `paywall_assets` row to read a timestamp from, so the object's own
+ *  `LastModified` is the only place its age can come from. Returns null
+ *  if the object no longer exists (e.g. it raced with a concurrent
+ *  delete between `listAllKeys()` and this call) — the sweeper treats
+ *  that as "nothing to reclaim" rather than an error. */
+export async function getObjectLastModified(key: string): Promise<Date | null> {
+  try {
+    const res = await s3().send(
+      new HeadObjectCommand({ Bucket: env.ASSET_STORAGE_BUCKET!, Key: key }),
+    );
+    return res.LastModified ?? null;
+  } catch (err) {
+    if (err instanceof Error && err.name === "NotFound") return null;
+    throw err;
+  }
 }
 
 /** Used only by the orphan sweeper. Paginates — a project with many
