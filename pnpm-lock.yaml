@@ -135,6 +135,9 @@ importers:
       stripe:
         specifier: ^15.0.0
         version: 15.12.0
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
       undici:
         specifier: ^6.27.0
         version: 6.27.0
@@ -166,9 +169,6 @@ importers:
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(@swc/core@1.15.40(@swc/helpers@0.5.21))(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)(yaml@2.8.3)
-      tsx:
-        specifier: ^4.22.4
-        version: 4.22.4
       typescript:
         specifier: ^5.4.0
         version: 5.9.3

@@ -22,12 +22,23 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       CLICKHOUSE_URL: http://clickhouse:8123
+    # The runtime image is a `pnpm deploy` of @rovenue/api ALONE: /app is
+    # that package, there is no pnpm-workspace.yaml, and so
+    # `pnpm --filter @rovenue/db …` exits with "No projects matched the
+    # filters in /app" before a single migration runs. Workspace packages
+    # arrive as real directories under /app/node_modules/@rovenue/*, so we
+    # invoke the scripts by path instead.
+    #
+    # tsx, not node: tsup bundles only src/index.ts, and the tsc-built
+    # dist/ of @rovenue/db uses extensionless relative imports that Node's
+    # ESM loader refuses (see the noExternal note in apps/api/tsup.config.ts).
+    # The .ts sources ship in the image and tsx is a runtime dependency.
     command:
       - sh
       - -c
       - >
-        pnpm --filter @rovenue/db db:migrate &&
-        pnpm --filter @rovenue/db db:clickhouse:migrate
+        node_modules/.bin/tsx node_modules/@rovenue/db/src/migrate.ts &&
+        node_modules/.bin/tsx node_modules/@rovenue/db/src/clickhouse-migrate.ts
     depends_on:
       db:
         condition: service_healthy
@@ -100,7 +111,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/outbox-dispatcher-process.ts"]
+    command: ["node_modules/.bin/tsx", "src/workers/outbox-dispatcher-process.ts"]
     env_file:
       - .env
     environment:
@@ -148,6 +159,9 @@ services:
       - "443:443"
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Operator drop-ins, imported by the glob in Caddyfile. Ships with
+      # only assets.caddy.example inside, which the glob does not match.
+      - ./deploy/caddy/conf.d:/etc/caddy/conf.d:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
@@ -202,7 +216,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/notifier-process.ts"]
+    command: ["node_modules/.bin/tsx", "src/workers/notifier-process.ts"]
     env_file:
       - .env
     environment:
@@ -228,7 +242,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/digest-scheduler-process.ts"]
+    command: ["node_modules/.bin/tsx", "src/workers/digest-scheduler-process.ts"]
     env_file:
       - .env
     environment:
@@ -257,7 +271,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/send-email-process.ts"]
+    command: ["node_modules/.bin/tsx", "src/workers/send-email-process.ts"]
     env_file:
       - .env
     environment:
@@ -278,7 +292,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/send-push-process.ts"]
+    command: ["node_modules/.bin/tsx", "src/workers/send-push-process.ts"]
     env_file:
       - .env
     environment:

@@ -95,8 +95,13 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
             /app/prod/node_modules/.pnpm/vitest@* 2>/dev/null || true
 
 # =============================================================
-# Runtime — minimal image: prod node_modules + compiled JS only.
-# tsx / vitest / testcontainers are NOT present (F12).
+# Runtime — minimal image: prod node_modules + compiled JS.
+# vitest / testcontainers are NOT present (F12). tsx IS, and is a
+# runtime dependency of @rovenue/api rather than a dev one: tsup
+# bundles only src/index.ts, so the worker entrypoints and the
+# @rovenue/db migration scripts ship as .ts and are executed with tsx
+# by the `migrate`, `dispatcher`, and notifier/email/push services in
+# docker-compose.yml.
 # =============================================================
 FROM base AS runtime
 
