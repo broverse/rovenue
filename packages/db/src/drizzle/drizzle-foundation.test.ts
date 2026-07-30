@@ -414,11 +414,17 @@ describe("billing enums", () => {
     ]);
   });
   it("billingTier lists every tier in the ladder", () => {
+    // Order matters: this is the pgEnum's declared order, not a set.
+    // `studio` was added by the ladder consolidation (2dd0bb84,
+    // 2026-07-21) between `scale` and `growth`. The public ladder is
+    // free/indie/studio/enterprise; pro/scale/growth remain in the enum
+    // because existing rows reference them.
     expect(billingTier).toEqual([
       "free",
       "indie",
       "pro",
       "scale",
+      "studio",
       "growth",
       "enterprise",
     ]);

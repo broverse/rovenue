@@ -113,12 +113,16 @@ async function seedTierLimits() {
 // ---------------------------------------------------------------------------
 
 describe("findByTierAndCycle", () => {
-  it("returns the indie/monthly row with priceUsdCents=2900", async () => {
+  // The price moved from $29 to $49 when the ladder consolidated to
+  // free/indie/studio/enterprise (2dd0bb84, 2026-07-21). The figure lives
+  // in the test name as well as the assertion, so both move together —
+  // a name that still says 2900 is how a stale expectation hides.
+  it("returns the indie/monthly row with priceUsdCents=4900", async () => {
     const row = await findByTierAndCycle(db, "indie", "monthly");
     expect(row).not.toBeNull();
     expect(row!.tier).toBe("indie");
     expect(row!.cycle).toBe("monthly");
-    expect(row!.priceUsdCents).toBe(2900);
+    expect(row!.priceUsdCents).toBe(4900);
   });
 
   it("returns null for (free, annual) — no such pairing exists", async () => {

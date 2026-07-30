@@ -11,7 +11,32 @@
     },
     "lint": {},
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      // Turbo sanitises the environment by default, so a var not declared
+      // here never reaches the task. Without DATABASE_URL the Drizzle pool
+      // throws at resolveConnectionString and EVERY database-backed suite
+      // fails or skips — which is why `pnpm test` from the root behaved
+      // differently from `pnpm --filter <pkg> test`, where the ambient
+      // shell env is visible.
+      //
+      // These are `env`, not `passThroughEnv`, on purpose: they are part of
+      // the cache key, so pointing the tests at a different database
+      // invalidates the cached result instead of replaying a pass recorded
+      // against a different one.
+      "env": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "CLICKHOUSE_URL",
+        "CLICKHOUSE_USER",
+        "CLICKHOUSE_PASSWORD",
+        "KAFKA_BROKERS",
+        "ASSET_STORAGE_ENDPOINT",
+        "ASSET_STORAGE_REGION",
+        "ASSET_STORAGE_BUCKET",
+        "ASSET_STORAGE_ACCESS_KEY_ID",
+        "ASSET_STORAGE_SECRET_ACCESS_KEY",
+        "ASSET_PUBLIC_BASE_URL"
+      ]
     },
     "//#cargo:test": {
       "cache": false,

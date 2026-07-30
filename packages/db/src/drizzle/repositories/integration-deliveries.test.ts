@@ -93,49 +93,54 @@ describe("insertPendingDelivery", () => {
     expect(row?.outboxEventId).toBe(outboxEventId);
   });
 
-  it("returns undefined on dedupe conflict", async () => {
-    // The unique index is (connection_id, outbox_event_id, created_at).
+  it("does NOT dedupe at the database level — idempotency is the provider's job", async () => {
+    // This replaces a test that asserted the opposite, and the reason is
+    // worth keeping.
     //
-    // Strategy: supply an explicit, millisecond-aligned createdAt for BOTH
-    // inserts.  Postgres stores timestamps at microsecond precision, so a
-    // server-generated NOW() (e.g. .674476) truncated by JS Date to .674 ms
-    // and fed back as the second row's createdAt becomes .674000 — a different
-    // value, so the constraint is NOT triggered.  By pinning both rows to the
-    // same JS Date (zero sub-ms digits), both land as .674000 and the unique
-    // index correctly fires on the second insert.
+    // `integration_deliveries` is PARTITION BY RANGE (created_at), and the
+    // old "dedupe" unique index was (connection_id, outbox_event_id,
+    // created_at). Because every real insert gets a fresh now(), that
+    // index could never enforce two-column dedupe — the conflict never
+    // fired in production. The old test only went green because it pinned
+    // BOTH inserts to the same hand-written millisecond, manufacturing a
+    // collision that production cannot produce. Its own comment said so.
+    //
+    // The dead `onConflictDoNothing()`-returned-undefined branch was
+    // masking a real duplicate-delivery bug: on BullMQ retry-after-success
+    // or with concurrent workers, Meta CAPI / TikTok deliver() ran twice
+    // and double-sent conversions. Commit 3064f2ce (2026-06-16) dropped
+    // the index and moved to provider-native idempotency — both adapters
+    // put event_id = outboxEventId in the payload, so the ad platform
+    // dedupes server-side.
+    //
+    // So this asserts the decision, not an accident: a second delivery row
+    // for the same (connection, outboxEvent) DOES insert. If someone
+    // re-adds a unique index here, this goes red and they have to come
+    // read this comment first.
     const projectId = await seedProject();
     const connectionId = await seedConnection(projectId);
     const outboxEventId = createId();
-    // Pin to a specific ms-aligned timestamp so both inserts share it exactly.
-    const fixedCreatedAt = new Date("2025-01-01T00:00:00.000Z");
+    const sharedCreatedAt = new Date("2025-01-01T00:00:00.000Z");
 
-    const first = await insertPendingDelivery(db, {
-      id: createId(),
+    const base = {
       connectionId,
       projectId,
-      providerId: "META_CAPI",
+      providerId: "META_CAPI" as const,
       outboxEventId,
       eventKey: "revenue.RENEWAL",
-      status: "pending",
+      status: "pending" as const,
       attempt: 0,
-      createdAt: fixedCreatedAt,
-    });
-    if (!first) throw new Error("seed failed: first insert returned undefined");
+      createdAt: sharedCreatedAt,
+    };
 
-    // Second insert with the exact same (connectionId, outboxEventId, createdAt)
-    // must be silently ignored and return undefined.
-    const second = await insertPendingDelivery(db, {
-      id: createId(),
-      connectionId,
-      projectId,
-      providerId: "META_CAPI",
-      outboxEventId,
-      eventKey: "revenue.RENEWAL",
-      status: "pending",
-      attempt: 0,
-      createdAt: fixedCreatedAt,
-    });
-    expect(second).toBeUndefined();
+    const first = await insertPendingDelivery(db, { id: createId(), ...base });
+    const second = await insertPendingDelivery(db, { id: createId(), ...base });
+
+    // Even with an identical createdAt — the only shape under which the old
+    // index could ever have fired — both rows land.
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(second!.id).not.toBe(first!.id);
   });
 });
 
