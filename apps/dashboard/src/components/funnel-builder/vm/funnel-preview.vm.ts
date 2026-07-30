@@ -75,13 +75,22 @@ export class FunnelPreviewViewModel {
       this.currentPageId = null;
       return;
     }
+    // `evaluateNext` only returns the bare "paywall" literal when the funnel
+    // has NO paywall page to resolve it to (evaluator.ts:178) — otherwise it
+    // hands back the resolved page id like any other goto. So this branch is
+    // the dead-end case, not the success case.
     if (result.next === "paywall") {
       this.reachedPaywall = true;
-      const paywall = this.props.pages.find((p) => p.type === "paywall");
-      this.currentPageId = paywall?.id ?? null;
-      this.finished = !paywall;
+      this.currentPageId = null;
+      this.finished = true;
       return;
     }
     this.currentPageId = result.pageId;
+    // Set the flag on the ordinary path too, or the name lies: a run that
+    // routes to a real paywall page is exactly what "reached the paywall"
+    // means, and that path never passes through the branch above.
+    if (this.currentPage?.type === "paywall") {
+      this.reachedPaywall = true;
+    }
   }
 }

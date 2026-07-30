@@ -12,19 +12,19 @@ describe("IntegrationDrawer — M6.16 e2e happy path", () => {
     const onClose = vi.fn();
 
     server.use(
-      http.post(
-        "http://localhost:3000/dashboard/projects/p1/integrations/validate",
-        () => HttpResponse.json({ data: { ok: true } }),
+      http.post("http://localhost:3000/dashboard/projects/p1/integrations/validate", () =>
+        HttpResponse.json({ data: { ok: true } }),
       ),
       http.post(
         "http://localhost:3000/dashboard/projects/p1/integrations",
-        () => HttpResponse.json({ data: { id: "new1" } }, { status: 201 }),
+        // Both routes wrap the row: `ok({ connection: row })` —
+        // apps/api/src/routes/dashboard/integrations.ts:289 and :545.
+        () => HttpResponse.json({ data: { connection: { id: "new1" } } }, { status: 201 }),
       ),
-      http.patch(
-        "http://localhost:3000/dashboard/projects/p1/integrations/new1",
-        () =>
-          HttpResponse.json({
-            data: {
+      http.patch("http://localhost:3000/dashboard/projects/p1/integrations/new1", () =>
+        HttpResponse.json({
+          data: {
+            connection: {
               id: "new1",
               providerId: "META_CAPI",
               displayName: "Meta Conversions API",
@@ -40,7 +40,8 @@ describe("IntegrationDrawer — M6.16 e2e happy path", () => {
               createdAt: "2026-05-28T00:00:00Z",
               updatedAt: "2026-05-28T00:00:00Z",
             },
-          }),
+          },
+        }),
       ),
     );
 

@@ -1,5 +1,12 @@
 import "reflect-metadata";
 import "@testing-library/jest-dom/vitest";
+// Same side-effect import `main.tsx` does. Without it react-i18next has no
+// instance in tests, `useTranslation()` warns NO_I18NEXT_INSTANCE, and every
+// `t()` renders its raw key — so any assertion written against real copy
+// fails while the component is in fact fine. Loading the real config also
+// means tests assert against the shipped en.json rather than a fixture that
+// can drift from it.
+import "../src/i18n/config";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { server } from "./msw/server";
 

@@ -65,7 +65,13 @@ describe("useProjectIntegrations", () => {
   test("returns META_CAPI row from GET /integrations", async () => {
     server.use(
       http.get(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
-        HttpResponse.json({ data: [mockConnection] }),
+        // The real route returns `ok({ connections: rows })`
+        // (apps/api/src/routes/dashboard/integrations.ts:197), so after
+        // `api()` unwraps the envelope the hook reads `.connections`.
+        // Mocking a bare array made the hook read `.connections` off an
+        // array and get undefined — the mock described a response the
+        // server has never produced.
+        HttpResponse.json({ data: { connections: [mockConnection] } }),
       ),
     );
 
@@ -87,10 +93,13 @@ describe("useCreateIntegration", () => {
   test("POST create returns id", async () => {
     server.use(
       http.post(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
-        HttpResponse.json({ data: { id: "conn_new" } }),
+        // `ok({ connection: row })` — integrations.ts:289.
+        HttpResponse.json({
+          data: { connection: { ...mockConnection, id: "conn_new" } },
+        }),
       ),
       http.get(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
-        HttpResponse.json({ data: [] }),
+        HttpResponse.json({ data: { connections: [] } }),
       ),
     );
 
@@ -117,13 +126,19 @@ describe("useUpdateIntegration", () => {
         `${BASE}/dashboard/projects/:projectId/integrations/:id`,
         async ({ request }) => {
           const body = (await request.json()) as { isEnabled?: boolean };
+          // `ok({ connection: updated })` — integrations.ts:545.
           return HttpResponse.json({
-            data: { ...mockConnection, isEnabled: body.isEnabled ?? false },
+            data: {
+              connection: {
+                ...mockConnection,
+                isEnabled: body.isEnabled ?? false,
+              },
+            },
           });
         },
       ),
       http.get(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
-        HttpResponse.json({ data: [] }),
+        HttpResponse.json({ data: { connections: [] } }),
       ),
     );
 
@@ -147,7 +162,7 @@ describe("useDeleteIntegration", () => {
         () => HttpResponse.json({ data: { deleted: true } }),
       ),
       http.get(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
-        HttpResponse.json({ data: [] }),
+        HttpResponse.json({ data: { connections: [] } }),
       ),
     );
 

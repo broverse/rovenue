@@ -49,7 +49,12 @@ describe("StepActivate", () => {
         async ({ request }) => {
           const body = await request.json();
           postSpy(body);
-          return HttpResponse.json({ data: { id: "new1" } });
+          // The route returns `ok({ connection: row })`
+          // (apps/api/src/routes/dashboard/integrations.ts:289), so the
+          // unwrapped body is `{ connection: … }`, not the row itself.
+          return HttpResponse.json({
+            data: { connection: { ...EXISTING_CONNECTION, id: "new1" } },
+          });
         },
       ),
       http.patch(
@@ -58,7 +63,9 @@ describe("StepActivate", () => {
           const body = await request.json();
           patchSpy(body);
           return HttpResponse.json({
-            data: { ...EXISTING_CONNECTION, id: "new1", isEnabled: true },
+            data: {
+              connection: { ...EXISTING_CONNECTION, id: "new1", isEnabled: true },
+            },
           });
         },
       ),
@@ -97,7 +104,7 @@ describe("StepActivate", () => {
           const body = await request.json();
           patchSpy(body);
           return HttpResponse.json({
-            data: { ...EXISTING_CONNECTION, isEnabled: true },
+            data: { connection: { ...EXISTING_CONNECTION, isEnabled: true } },
           });
         },
       ),
