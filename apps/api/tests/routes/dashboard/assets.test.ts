@@ -889,6 +889,46 @@ describe("POST /dashboard/projects/:projectId/assets/:kind", () => {
       expect(releaseReservation).toHaveBeenCalledTimes(1);
       expect(deleteObject).not.toHaveBeenCalled();
     });
+
+    // Residual finding 1: `releaseReservation` running inside these same
+    // catch blocks must not let ITS OWN failure replace the error that's
+    // already propagating — a dropped pool connection during an
+    // already-failing request is the realistic trigger. Covers both
+    // catch blocks the finding named: `putObjectOrReleaseReservation`
+    // (storage failure) and `commitAssetRow` (row-transaction failure).
+    it("still returns the storage error, not an unhandled exception, when releaseReservation ALSO rejects (putObjectOrReleaseReservation)", async () => {
+      putObject.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+      releaseReservation.mockRejectedValueOnce(new Error("pool connection dropped"));
+      const res = await upload("image", pngBytes());
+      expect(res.status).toBe(503);
+      expect((await res.json()).error.code).toBe("ASSET_STORAGE_UNAVAILABLE");
+      // The release failure was logged and swallowed, not thrown — the
+      // route's own log call (message first, this repo's logger order),
+      // distinct from the generic "unhandled error" the error handler
+      // would have logged had the release's exception escaped instead.
+      expect(loggerError).toHaveBeenCalledWith(
+        "asset upload: failed to release quota reservation; leaving for orphan sweeper",
+        expect.objectContaining({ reservationId: "res_1" }),
+      );
+    });
+
+    it("still returns the original transaction error, not an unhandled exception, when releaseReservation ALSO rejects (commitAssetRow)", async () => {
+      transaction.mockRejectedValueOnce(new Error("connection terminated unexpectedly"));
+      releaseReservation.mockRejectedValueOnce(new Error("pool connection dropped"));
+      const res = await upload("image", pngBytes());
+      expect(res.status).toBe(500);
+      expect((await res.json()).error.code).toBe("INTERNAL_ERROR");
+      expect(loggerError).toHaveBeenCalledWith(
+        "asset upload: failed to release quota reservation; leaving for orphan sweeper",
+        expect.objectContaining({ reservationId: "res_1" }),
+      );
+      // The ORIGINAL transaction error is what reached the error handler
+      // — not the release failure replacing it.
+      expect(loggerError).toHaveBeenCalledWith(
+        "unhandled error",
+        expect.objectContaining({ err: "connection terminated unexpectedly" }),
+      );
+    });
   });
 
   // -----------------------------------------------------------

@@ -5,7 +5,7 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { createId } from "@paralleldrive/cuid2";
-import { drizzle, MemberRole } from "@rovenue/db";
+import { drizzle, MemberRole, type Db } from "@rovenue/db";
 import {
   ERROR_CODE,
   ASSET_MAX_BYTES,
@@ -202,6 +202,37 @@ async function peekPrefix(
 const PAYWALL_ASSETS_PROJECT_HASH_KEY = "paywall_assets_project_hash_key";
 
 /**
+ * Releases a quota reservation from inside a catch block, WITHOUT letting
+ * a failure in the release itself replace the error that's already
+ * propagating (residual finding 1). Both call sites below are already
+ * reacting to a failure — a storage error, a failed row transaction — and
+ * `releaseReservation` running unguarded there means a second failure (a
+ * dropped pool connection is the realistic case, since the request is
+ * already in a bad way) would throw OUT of the catch block and replace
+ * the original error, so the caller sees an unhandled exception instead
+ * of the intended 503/`ASSET_STORAGE_UNAVAILABLE` and the logs point at
+ * the cleanup instead of the cause.
+ *
+ * If release fails, the reservation is simply left behind — that is an
+ * accepted, non-permanent leak: the orphan sweeper (Task 9) clears
+ * reservations older than its grace window regardless of why they were
+ * never released, which is exactly the backstop it exists for.
+ */
+async function releaseReservationOrLog(db: Db, reservationId: string): Promise<void> {
+  try {
+    await releaseReservation(db, reservationId);
+  } catch (err) {
+    logger.error(
+      "asset upload: failed to release quota reservation; leaving for orphan sweeper",
+      {
+        reservationId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+    );
+  }
+}
+
+/**
  * Writes the object, releasing the just-taken reservation and returning
  * a 503 response if the write fails — rather than letting a storage
  * outage leak the reservation until the sweeper's ~30h backstop
@@ -221,7 +252,7 @@ async function putObjectOrReleaseReservation(
     await store.putObject(storageKey, body, contentType, metadata);
     return null;
   } catch (err) {
-    await releaseReservation(drizzle.db, reservationId);
+    await releaseReservationOrLog(drizzle.db, reservationId);
     logger.error("asset upload: storage write failed; reservation released", {
       storageKey,
       err: err instanceof Error ? err.message : String(err),
@@ -323,7 +354,7 @@ async function commitAssetRow(
         params.projectId,
         params.contentHash,
       );
-      await releaseReservation(drizzle.db, params.reservationId);
+      await releaseReservationOrLog(drizzle.db, params.reservationId);
       await store.deleteObject(params.storageKey).catch(() => {});
       if (existing) {
         return { asset: existing, status: 200 };
@@ -333,7 +364,7 @@ async function commitAssetRow(
       // gone here. Falling through to the generic rethrow below is
       // defensive, not a path this should ever actually take.
     } else {
-      await releaseReservation(drizzle.db, params.reservationId);
+      await releaseReservationOrLog(drizzle.db, params.reservationId);
     }
     throw err;
   }
