@@ -21,6 +21,21 @@ import type { AssetKind, ImageSourceFormat } from "@rovenue/shared";
 // burn that hash for the project the moment the first row was deleted.
 
 export interface CreateAssetInput {
+  /**
+   * Optional explicit id. `paywall_assets.id` defaults via `$defaultFn`
+   * (a fresh cuid2) when omitted — but the upload routes need the id
+   * BEFORE the row exists, to embed it in the storage key/public URL
+   * (`buildStorageKey(projectId, assetId, kind)`) so the object can be
+   * written to the bucket before the row is inserted ("object first, row
+   * second"). A caller that pre-generates that id and does NOT also pass
+   * it here gets a row whose real `id` silently diverges from the id
+   * baked into its own public URL — `parseAssetUrl` on that URL then
+   * resolves to an id that matches no row, which breaks the asset usage
+   * index (Task 10) at best and violates `paywall_asset_usages`' FK to
+   * `paywall_assets.id` at worst. Every upload route MUST pass the same
+   * id it used to build the storage key.
+   */
+  id?: string;
   projectId: string;
   kind: AssetKind;
   name: string;

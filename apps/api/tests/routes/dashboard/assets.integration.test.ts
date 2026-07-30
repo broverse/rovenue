@@ -53,7 +53,7 @@ import {
 } from "@rovenue/db";
 import { ASSET_MAX_BYTES } from "@rovenue/shared";
 import { startMinio } from "../../helpers";
-import { listAllKeys, putObject } from "../../../src/lib/asset-store";
+import { listAllKeys, parseAssetUrl, putObject } from "../../../src/lib/asset-store";
 import { getStorageUsage } from "../../../src/services/assets/quota";
 
 // ---- Auth/RBAC bypass (not this task's concern — see module comment) ----
@@ -253,6 +253,17 @@ describe("asset upload against real storage", () => {
     const row = await drizzle.assetRepo.findAssetById(getDb(), projectId, body.data.id);
     expect(row).not.toBeNull();
     expect(row?.contentType).toBe("image/webp");
+
+    // The id embedded in the asset's own public URL must be the SAME id
+    // as the row it names — the route pre-generates an id to build the
+    // storage key before the row exists ("object first, row second"),
+    // and passes that same id through to createAsset. If a future change
+    // regresses that (e.g. reverting `id: assetId` on the createAsset
+    // call and letting `paywall_assets.id`'s $defaultFn mint a DIFFERENT
+    // one), the asset usage index (Task 10) silently resolves every real
+    // upload's URL to an id that matches no row — and any publish that
+    // references this asset 500s on the paywall_asset_usages FK instead.
+    expect(parseAssetUrl(body.data.url)).toEqual({ projectId, assetId: body.data.id });
 
     // The public URL actually serves real WebP bytes back — through a
     // real MinIO GET, not a mock's opinion of one.

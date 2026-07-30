@@ -269,6 +269,10 @@ async function handleBuffered(
 
   const asset = await drizzle.db.transaction(async (tx) => {
     const row = await drizzle.assetRepo.createAsset(tx, {
+      // MUST match the id already baked into `storageKey` above (see
+      // CreateAssetInput.id's doc comment) — otherwise this row's real
+      // id silently diverges from the id its own public URL resolves to.
+      id: assetId,
       projectId,
       kind,
       name,
@@ -391,6 +395,7 @@ async function handleBufferedVideo(
   await store.putObject(storageKey, raw, ASSET_CONTENT_TYPES.video);
   const asset = await drizzle.db.transaction(async (tx) => {
     const row = await drizzle.assetRepo.createAsset(tx, {
+      id: assetId,
       projectId,
       kind: "video",
       name,
@@ -503,6 +508,7 @@ async function streamVideo(
 
   const asset = await drizzle.db.transaction(async (tx) => {
     const row = await drizzle.assetRepo.createAsset(tx, {
+      id: assetId,
       projectId,
       kind: "video",
       name,

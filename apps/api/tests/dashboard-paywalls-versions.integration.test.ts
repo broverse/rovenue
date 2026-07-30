@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
+import { createId } from "@paralleldrive/cuid2";
 import { getDb, projects, offerings, drizzle } from "@rovenue/db";
 import { auth } from "../src/lib/auth";
 import { errorHandler } from "../src/middleware/error";
@@ -19,7 +20,22 @@ vi.mock("../src/lib/edge-cache", () => ({
   purgeProjectCatalogCache: (projectId: string) => purgeSpy(projectId),
 }));
 
+// `lib/env.ts` parses `process.env` at import time (see MEMORY:
+// vitest_env_import_hoisting_footgun / apps/api/tests/lib/asset-store.test.ts)
+// — a plain top-of-file assignment below the imports would be dead code,
+// because the static imports above (which pull in the publish route ->
+// lib/asset-store.ts -> lib/env.ts) already run before any non-hoisted
+// statement. `vi.hoisted` runs before every import in the file, so this is
+// the only place this actually takes effect. Without it, `parseAssetUrl`
+// returns null for every URL, and the asset-usage-index tests below would
+// pass for the wrong reason: not because the resolver correctly rejects
+// external/cross-project URLs, but because it's a no-op for everything.
+vi.hoisted(() => {
+  process.env.ASSET_PUBLIC_BASE_URL ??= "https://cdn.pwver.test";
+});
+
 const { paywallsDashboardRoute } = await import("../src/routes/dashboard/paywalls");
+const { buildStorageKey, publicUrl } = await import("../src/lib/asset-store");
 
 const RUN_ID = Date.now();
 const db = getDb();
@@ -34,6 +50,11 @@ let projectId: string;
 let offeringId: string;
 let cookie: string;
 let userId: string;
+/** A second, unrelated project — exists only so the asset-usage-index
+ *  tests below can seed an asset that is real (resolves via
+ *  `parseAssetUrl`) but NOT owned by `projectId`, to prove the
+ *  cross-project guard in the publish route's `resolveAssetUrl`. */
+let otherProjectId: string;
 
 const VALID_CONFIG = {
   formatVersion: 2,
@@ -98,10 +119,17 @@ beforeAll(async () => {
     })
     .returning();
   offeringId = offering!.id;
+
+  const [otherProject] = await db
+    .insert(projects)
+    .values({ name: `pwver-other-${RUN_ID}` })
+    .returning();
+  otherProjectId = otherProject!.id;
 });
 
 afterAll(async () => {
   await db.delete(projects).where(eq(projects.id, projectId));
+  await db.delete(projects).where(eq(projects.id, otherProjectId));
 });
 
 async function createPaywall(suffix: string, builderConfig: unknown) {
@@ -121,6 +149,122 @@ async function createPaywall(suffix: string, builderConfig: unknown) {
   const body = await res.json();
   return body.data.paywall;
 }
+
+// =============================================================
+// Asset usage index (Task 10) — the composed resolver, end to end
+// =============================================================
+//
+// `parseAssetUrl` has its own unit tests, and `setPublishedVersion` is
+// tested with a stand-in resolver (packages/db/.../assets.integration.
+// test.ts) — but the lambda in the publish route that JOINS the two
+// (`apps/api/src/routes/dashboard/paywalls.ts`'s `resolveAssetUrl`,
+// including the cross-project guard) is what actually runs in
+// production, and neither of those suites exercises it. These tests go
+// through the REAL publish route with a REAL `ASSET_PUBLIC_BASE_URL`
+// and REAL asset rows (via `assetRepo.createAsset`, mirroring exactly
+// how the upload route builds a storage key: pre-generate the id,
+// build the key from it, pass the SAME id through — see
+// `CreateAssetInput.id`'s doc comment for why that pairing matters).
+
+/** Seeds a real `paywall_assets` row under `ownerProjectId` and returns
+ *  its id and public URL, built the same way the real upload route
+ *  does (`buildStorageKey` from a pre-generated id, `publicUrl` from
+ *  the resulting key) — NOT a hand-rolled URL shape. */
+async function seedAsset(ownerProjectId: string): Promise<{ assetId: string; url: string }> {
+  const assetId = createId();
+  const storageKey = buildStorageKey(ownerProjectId, assetId, "image");
+  await drizzle.assetRepo.createAsset(db, {
+    id: assetId,
+    projectId: ownerProjectId,
+    kind: "image",
+    name: "usage-index-seed.webp",
+    storageKey,
+    contentHash: createId().padEnd(64, "u"),
+    contentType: "image/webp",
+    byteSize: 100,
+    width: 10,
+    height: 10,
+    sourceFormat: null,
+    sourceWidth: null,
+    sourceHeight: null,
+    policyVersion: 1,
+  });
+  return { assetId, url: publicUrl(storageKey) };
+}
+
+function configWithImageUrl(url: string) {
+  return {
+    ...VALID_CONFIG,
+    root: {
+      ...VALID_CONFIG.root,
+      children: [
+        { type: "image", id: "img", url: { light: url } },
+        ...VALID_CONFIG.root.children,
+      ],
+    },
+  };
+}
+
+async function usageAssetIdsFor(versionId: string): Promise<string[]> {
+  const rows = await db
+    .select({ assetId: drizzle.schema.paywallAssetUsages.assetId })
+    .from(drizzle.schema.paywallAssetUsages)
+    .where(eq(drizzle.schema.paywallAssetUsages.versionId, versionId));
+  return rows.map((r) => r.assetId);
+}
+
+describe("POST /paywalls/:id/publish — asset usage index (Task 10)", () => {
+  it("writes a usage row for a real asset URL owned by this project", async () => {
+    const app = buildApp();
+    const { assetId, url } = await seedAsset(projectId);
+    const paywall = await createPaywall("asset-own", configWithImageUrl(url));
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/publish`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+
+    expect(await usageAssetIdsFor(data.version.id)).toEqual([assetId]);
+  });
+
+  it("does not record usage for an asset URL owned by a different project", async () => {
+    const app = buildApp();
+    // A REAL asset row — `parseAssetUrl` resolves this URL to a real
+    // assetId — just not one this project owns. Proves the
+    // `resolved.projectId !== projectId` guard, not merely that
+    // `parseAssetUrl` can fail to parse.
+    const { url } = await seedAsset(otherProjectId);
+    const paywall = await createPaywall("asset-cross", configWithImageUrl(url));
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/publish`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+
+    expect(await usageAssetIdsFor(data.version.id)).toEqual([]);
+  });
+
+  it("does not record usage for a plain external URL", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall(
+      "asset-ext",
+      configWithImageUrl("https://not-ours.example/hero.png"),
+    );
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/publish`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+
+    expect(await usageAssetIdsFor(data.version.id)).toEqual([]);
+  });
+});
 
 describe("POST /paywalls/:id/publish", () => {
   it("snapshots the draft, points the paywall at it, and purges the cache", async () => {
