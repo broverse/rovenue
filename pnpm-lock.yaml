@@ -6,6 +6,7 @@ settings:
 
 overrides:
   vitest: ^3.2.6
+  '@smithy/core': ^3.31.1
 
 importers:
 
