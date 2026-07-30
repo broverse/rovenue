@@ -2723,7 +2723,11 @@ git commit -m "feat(dashboard): asset library and paywall builder asset picker"
 
 - [ ] **Step 1: Add MinIO to compose (self-hosted only)**
 
-A `minio` service with a persistent volume, plus a one-shot `mc` init container that creates the bucket, sets **anonymous read on objects** and leaves **listing disabled**.
+A `minio` service with a persistent volume, plus a one-shot `mc` init container that creates the bucket and grants **only `s3:GetObject`** via a hand-authored bucket policy.
+
+**Do not use `mc anonymous set download` for this.** It reads like exactly what we want, and it is not: on the MinIO release used here it also grants public `s3:ListBucket`, verified live — an anonymous `?list-type=2` returned 200 with the object key visible. That silently voids the entire access-control story for every asset in the product, because the security of an unguessable, non-expiring cuid2 key rests on an attacker having to guess rather than enumerate.
+
+Grant `s3:GetObject` on `arn:aws:s3:::<bucket>/*` and nothing else, and verify **both directions live**: anonymous listing must 403, anonymous GetObject must 200. Verify separately that the sweeper's *authenticated* `listAllKeys` still works — a policy that restricted the authenticated path too would leave the sweeper seeing an empty bucket and reclaiming nothing.
 
 This is the **self-hosted** path. The cloud deployment uses R2, and the two are not configured the same way even though they run identical code — see Step 1b.
 
