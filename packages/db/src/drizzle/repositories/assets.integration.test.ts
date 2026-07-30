@@ -24,7 +24,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { eq } from "drizzle-orm";
 import { getDb } from "../client";
 import * as drizzleRepos from "../index";
-import { projects } from "../schema";
+import { offerings, paywallAssetUsages, paywalls, projects } from "../schema";
 import type { CreateAssetInput } from "./assets";
 
 const RUN_ID = Date.now();
@@ -135,5 +135,126 @@ describe("assetRepo", () => {
     expect(
       await drizzleRepos.assetRepo.findAssetById(db, OTHER_PROJECT_ID, created.id),
     ).toBeNull();
+  });
+});
+
+// =============================================================
+// listPublishedUsage (Task 7) — the honest boundary (design spec §7)
+// =============================================================
+//
+// The route mocks this repo function (apps/api/tests/routes/dashboard/
+// assets.test.ts), so it has no coverage of the actual JOIN or its
+// column names against a real schema — a mistake here (e.g. joining on
+// a paywall's id instead of its CURRENT publishedVersionId, or a wrong
+// column-name guess in the mixed camelCase/snake_case schema, see the
+// task brief) would pass every mocked test while silently reporting
+// nothing for every asset. `paywall_asset_usages` rows are written at
+// publish time by Task 10, which hasn't shipped yet, so these tests
+// insert the rows directly to exercise the query ahead of that.
+describe("listPublishedUsage", () => {
+  let usagePaywallId: string;
+  let publishedVersionId: string;
+  let draftVersionId: string;
+  let usageAssetId: string;
+
+  beforeAll(async () => {
+    const [offering] = await db
+      .insert(offerings)
+      .values({
+        projectId: PROJECT_ID,
+        identifier: `off-usage-${RUN_ID}`,
+        packages: [{ identifier: "monthly", productId: null }],
+      })
+      .returning();
+
+    const [paywall] = await db
+      .insert(paywalls)
+      .values({
+        projectId: PROJECT_ID,
+        identifier: `pw-usage-${RUN_ID}`,
+        name: "Usage paywall",
+        offeringId: offering!.id,
+        remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      })
+      .returning();
+    usagePaywallId = paywall!.id;
+
+    const published = await drizzleRepos.paywallVersionRepo.insert(db, {
+      paywallId: usagePaywallId,
+      versionNo: 1,
+      builderConfig: null,
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      offeringId: offering!.id,
+      configFormatVersion: 1,
+    });
+    publishedVersionId = published.id;
+
+    const draft = await drizzleRepos.paywallVersionRepo.insert(db, {
+      paywallId: usagePaywallId,
+      versionNo: 2,
+      builderConfig: null,
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      offeringId: offering!.id,
+      configFormatVersion: 1,
+    });
+    draftVersionId = draft.id;
+
+    // Points the paywall's CURRENT publishedVersionId at version 1 —
+    // version 2 stays a draft (no paywall ever points at it).
+    await drizzleRepos.paywallRepo.setPublishedVersion(
+      db,
+      PROJECT_ID,
+      usagePaywallId,
+      publishedVersionId,
+    );
+
+    const created = await drizzleRepos.assetRepo.createAsset(
+      db,
+      input({ contentHash: createId().padEnd(64, "f") }),
+    );
+    usageAssetId = created.id;
+  });
+
+  it("returns the paywall when a usage row references the CURRENT published version", async () => {
+    await db.insert(paywallAssetUsages).values({
+      assetId: usageAssetId,
+      paywallId: usagePaywallId,
+      versionId: publishedVersionId,
+    });
+
+    const rows = await drizzleRepos.assetRepo.listPublishedUsage(db, usageAssetId);
+    expect(rows).toEqual([{ id: usagePaywallId, name: "Usage paywall" }]);
+  });
+
+  it("returns an empty list when the only usage row references a draft (non-published) version", async () => {
+    // A fresh asset with no usage against the published version at
+    // all — only the draft. This is the deliberate boundary: the row
+    // genuinely exists, it just does not satisfy the JOIN's
+    // publishedVersionId predicate, so it must not appear.
+    const draftOnlyAsset = await drizzleRepos.assetRepo.createAsset(
+      db,
+      input({ contentHash: createId().padEnd(64, "g") }),
+    );
+    await db.insert(paywallAssetUsages).values({
+      assetId: draftOnlyAsset.id,
+      paywallId: usagePaywallId,
+      versionId: draftVersionId,
+    });
+
+    const rows = await drizzleRepos.assetRepo.listPublishedUsage(
+      db,
+      draftOnlyAsset.id,
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("returns an empty list for an asset with no usage rows at all", async () => {
+    const created = await drizzleRepos.assetRepo.createAsset(
+      db,
+      input({ contentHash: createId().padEnd(64, "h") }),
+    );
+    expect(await drizzleRepos.assetRepo.listPublishedUsage(db, created.id)).toEqual(
+      [],
+    );
   });
 });

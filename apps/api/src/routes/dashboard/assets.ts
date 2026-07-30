@@ -5,7 +5,7 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { createId } from "@paralleldrive/cuid2";
-import { drizzle } from "@rovenue/db";
+import { drizzle, MemberRole } from "@rovenue/db";
 import {
   ERROR_CODE,
   ASSET_MAX_BYTES,
@@ -18,6 +18,7 @@ import {
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { assertProjectCapability } from "../../lib/capabilities";
+import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { fail, ok } from "../../lib/response";
 import * as store from "../../lib/asset-store";
@@ -604,3 +605,102 @@ for (const kind of ["image", "video", "lottie"] as const) {
     uploadHandler(kind),
   );
 }
+
+// =============================================================
+// Dashboard: paywall assets — list, usage lookup, delete
+// =============================================================
+//
+// Both GETs use `assertProjectAccess` (any project member, no write
+// capability required) — same convention as fonts.ts's GET route.
+// DELETE is gated on `assets:write` ALONE (matching fonts.ts's DELETE
+// and the sibling virtual-currencies.ts convention noted there): the
+// codebase does not stack assertProjectAccess + assertProjectCapability
+// on one write route.
+//
+// Delete ordering is the one behaviour in this file that must not be
+// got backwards. The row is soft-deleted FIRST, inside a transaction
+// with the audit entry, and the bucket object is deleted AFTER,
+// outside that transaction (an S3 delete cannot participate in a
+// Postgres tx). If the object delete then fails, the row is already
+// gone — the sweeper (Task 9) reclaims the orphaned object later, a
+// fully recoverable state. The reverse order is not recoverable: a
+// row commit failing after the object was already deleted leaves a
+// LIVE row pointing at bytes that no longer exist, which is a 404 for
+// every published paywall using that asset, with no automated fix.
+assetsRoute
+  // ----- GET /dashboard/projects/:projectId/assets -----
+  .get("/", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const [assets, usage] = await Promise.all([
+      drizzle.assetRepo.listAssets(drizzle.db, projectId),
+      getStorageUsage(drizzle.db, projectId),
+    ]);
+    return c.json(ok({ assets: assets.map(toDto), usage }));
+  })
+  // ----- GET /dashboard/projects/:projectId/assets/:id/usage -----
+  //
+  // See `listPublishedUsage`'s own comment (assets repository) for the
+  // honest boundary this reports: only paywalls whose CURRENT published
+  // version references the asset, not every version that ever did.
+  .get("/:id/usage", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing projectId or id" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const asset = await drizzle.assetRepo.findAssetById(drizzle.db, projectId, id);
+    if (!asset) {
+      return c.json(fail(ERROR_CODE.NOT_FOUND, "Asset not found"), 404);
+    }
+    const publishedPaywalls = await drizzle.assetRepo.listPublishedUsage(
+      drizzle.db,
+      id,
+    );
+    return c.json(ok({ publishedPaywalls }));
+  })
+  // ----- DELETE /dashboard/projects/:projectId/assets/:id -----
+  .delete("/:id", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing projectId or id" });
+    }
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "assets:write");
+
+    const asset = await drizzle.assetRepo.findAssetById(drizzle.db, projectId, id);
+    if (!asset) {
+      return c.json(fail(ERROR_CODE.NOT_FOUND, "Asset not found"), 404);
+    }
+
+    // Row first, object second (design spec §5.8) — see the module
+    // comment above. A failed object delete leaves an orphan the
+    // sweeper reclaims; the reverse order would leave a live row
+    // pointing at nothing.
+    await drizzle.db.transaction(async (tx) => {
+      await drizzle.assetRepo.softDeleteAsset(tx, projectId, id);
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "asset.deleted",
+          resource: "paywall_asset",
+          resourceId: id,
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+    });
+    await store.deleteObject(asset.storageKey);
+
+    return c.json(ok({ deleted: true }));
+  });

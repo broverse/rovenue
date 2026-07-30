@@ -47,6 +47,17 @@ vi.mock("../../../src/lib/capabilities", async (importOriginal) => ({
     assertProjectCapability(...args),
 }));
 
+// Task 7: a bare membership gate, deliberately distinct from
+// `assertProjectCapability` above — the list/usage GET routes only
+// require the caller to belong to the project named in the URL, not
+// the `assets:write` capability DELETE requires (mirrors fonts.test.ts's
+// convention for the same split).
+const assertProjectAccess = vi.hoisted(() => vi.fn());
+vi.mock("../../../src/lib/project-access", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  assertProjectAccess: (...args: unknown[]) => assertProjectAccess(...args),
+}));
+
 vi.mock("../../../src/middleware/dashboard-auth", () => ({
   requireDashboardAuth: (
     c: { set: (k: string, v: unknown) => void },
@@ -107,6 +118,10 @@ vi.mock("../../../src/services/assets/quota", () => ({
 
 const createAsset = vi.hoisted(() => vi.fn());
 const findLiveAssetByHash = vi.hoisted(() => vi.fn());
+const listAssets = vi.hoisted(() => vi.fn());
+const findAssetById = vi.hoisted(() => vi.fn());
+const softDeleteAsset = vi.hoisted(() => vi.fn());
+const listPublishedUsage = vi.hoisted(() => vi.fn());
 const transaction = vi.hoisted(() => vi.fn());
 
 vi.mock("@rovenue/db", async (importOriginal) => {
@@ -119,6 +134,10 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         ...actual.drizzle.assetRepo,
         createAsset,
         findLiveAssetByHash,
+        listAssets,
+        findAssetById,
+        softDeleteAsset,
+        listPublishedUsage,
       },
       db: { ...actual.drizzle.db, transaction },
     },
@@ -253,6 +272,9 @@ beforeEach(() => {
   assertProjectCapability
     .mockReset()
     .mockResolvedValue({ id: "m1", role: "OWNER" });
+  assertProjectAccess
+    .mockReset()
+    .mockResolvedValue({ id: "m1", role: "OWNER" });
   auditMock.mockReset().mockResolvedValue(undefined);
 
   buildStorageKey
@@ -313,6 +335,10 @@ beforeEach(() => {
     }),
   );
   findLiveAssetByHash.mockReset().mockResolvedValue(null);
+  listAssets.mockReset().mockResolvedValue([]);
+  findAssetById.mockReset().mockResolvedValue(null);
+  softDeleteAsset.mockReset().mockResolvedValue(undefined);
+  listPublishedUsage.mockReset().mockResolvedValue([]);
   transaction
     .mockReset()
     .mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) =>
@@ -708,6 +734,232 @@ describe("POST /dashboard/projects/:projectId/assets/:kind", () => {
         byteSize: expected.byteLength,
         contentHash: createHash("sha256").update(expected).digest("hex"),
       }),
+    );
+  });
+});
+
+// =============================================================
+// GET/DELETE (Task 7): list, usage lookup, delete
+// =============================================================
+
+/** Minimal, but complete, `paywallAssets` row shape — same fields the
+ *  "returns the existing asset for a byte-identical re-upload" test
+ *  above builds by hand, factored out for reuse here. */
+function assetFixture(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "asset_1",
+    projectId: "p1",
+    kind: "image",
+    name: "hero",
+    storageKey: "p1/asset_1.webp",
+    contentHash: "a".repeat(64),
+    contentType: "image/webp",
+    byteSize: 1234,
+    width: 10,
+    height: 10,
+    sourceFormat: "png",
+    sourceWidth: 10,
+    sourceHeight: 10,
+    policyVersion: 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function listAssetsRes(projectId = "p1") {
+  return app().request(`/dashboard/projects/${projectId}/assets`);
+}
+
+function assetUsageRes(id: string, projectId = "p1") {
+  return app().request(`/dashboard/projects/${projectId}/assets/${id}/usage`);
+}
+
+function deleteAssetRes(id: string, projectId = "p1") {
+  return app().request(`/dashboard/projects/${projectId}/assets/${id}`, {
+    method: "DELETE",
+  });
+}
+
+describe("GET /dashboard/projects/:projectId/assets", () => {
+  it("lists live assets with their public URLs and the project's usage", async () => {
+    listAssets.mockResolvedValue([assetFixture()]);
+    getStorageUsage.mockResolvedValue({ usedBytes: 1234, limitBytes: 5000 });
+
+    const res = await listAssetsRes();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        assets: Array<{ id: string; url: string } & Record<string, unknown>>;
+        usage: { usedBytes: number; limitBytes: number | null };
+      };
+    };
+    expect(body.data.assets).toHaveLength(1);
+    expect(body.data.assets[0].id).toBe("asset_1");
+    // The DTO substitutes `url` for the raw `storageKey` (never leaked
+    // to a dashboard client) — same mapping `toDto` performs for the
+    // upload routes.
+    expect(body.data.assets[0].url).toBe("https://cdn.test/p1/asset_1.webp");
+    expect(body.data.assets[0]).not.toHaveProperty("storageKey");
+    expect(body.data.usage).toEqual({ usedBytes: 1234, limitBytes: 5000 });
+    expect(listAssets).toHaveBeenCalledWith(expect.anything(), "p1");
+    expect(assertProjectAccess).toHaveBeenCalledWith(
+      "p1",
+      "u1",
+      expect.anything(),
+    );
+  });
+
+  it("omits soft-deleted assets", async () => {
+    // The repo call itself already filters `deletedAt is null` (pinned
+    // in assets.integration.test.ts); this test pins that the route
+    // passes the repo's result straight through rather than
+    // re-including anything.
+    listAssets.mockResolvedValue([]);
+    const res = await listAssetsRes();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { assets: unknown[] } };
+    expect(body.data.assets).toEqual([]);
+  });
+
+  it("does not leak another project's assets", async () => {
+    // listAssets is scoped by the projectId argument the route passes
+    // it — this pins that the URL's projectId, not some other value,
+    // is what reaches the repo call.
+    listAssets.mockImplementation(async (_db: unknown, projectId: string) =>
+      projectId === "p1" ? [assetFixture()] : [],
+    );
+    const res = await listAssetsRes("p2");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { assets: unknown[] } };
+    expect(body.data.assets).toEqual([]);
+    expect(listAssets).toHaveBeenCalledWith(expect.anything(), "p2");
+  });
+});
+
+describe("GET /dashboard/projects/:projectId/assets/:id/usage", () => {
+  it("returns the published paywalls referencing the asset", async () => {
+    findAssetById.mockResolvedValue(assetFixture());
+    listPublishedUsage.mockResolvedValue([
+      { id: "pw_1", name: "Onboarding paywall" },
+    ]);
+
+    const res = await assetUsageRes("asset_1");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { publishedPaywalls: Array<{ id: string; name: string }> };
+    };
+    expect(body.data.publishedPaywalls).toEqual([
+      { id: "pw_1", name: "Onboarding paywall" },
+    ]);
+    expect(listPublishedUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      "asset_1",
+    );
+  });
+
+  it("returns an empty list for an asset only a draft references", async () => {
+    // The index covers published versions only (design spec §7): a
+    // `paywall_asset_usages` row can exist for a paywall's draft (or an
+    // older, no-longer-published version) and still correctly produce
+    // an empty list here, because `listPublishedUsage` joins on the
+    // paywall's CURRENT `publishedVersionId`. This pins that the ROUTE
+    // surfaces exactly what the repo returns — the boundary itself is
+    // pinned against real Postgres in assets.integration.test.ts, where
+    // it's exercised with an actually-inserted row that fails this
+    // join on purpose. An empty array here must read as "correctly
+    // reports nothing live", not as a bug.
+    findAssetById.mockResolvedValue(assetFixture());
+    listPublishedUsage.mockResolvedValue([]);
+
+    const res = await assetUsageRes("asset_1");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { publishedPaywalls: unknown[] };
+    };
+    expect(body.data.publishedPaywalls).toEqual([]);
+  });
+
+  it("returns 404 for an asset that does not exist (or belongs to another project)", async () => {
+    findAssetById.mockResolvedValue(null);
+    const res = await assetUsageRes("nope");
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("NOT_FOUND");
+    expect(listPublishedUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /dashboard/projects/:projectId/assets/:id", () => {
+  // -----------------------------------------------------------
+  // The one behaviour in this file that must not be got backwards
+  // (design spec §5.8): the row is soft-deleted FIRST, inside the same
+  // transaction as the audit entry, and the bucket object is deleted
+  // SECOND, after that transaction commits. A status-code-only
+  // assertion ("both eventually ran") would still pass if the order
+  // were reversed, so this test records the actual call order via a
+  // shared array and asserts on it directly.
+  // -----------------------------------------------------------
+  it("soft-deletes the row and then deletes the object, in that order", async () => {
+    findAssetById.mockResolvedValue(assetFixture({ storageKey: "p1/asset_1.webp" }));
+    const order: string[] = [];
+    softDeleteAsset.mockImplementation(async () => {
+      order.push("softDeleteAsset");
+    });
+    deleteObject.mockImplementation(async () => {
+      order.push("deleteObject");
+    });
+
+    const res = await deleteAssetRes("asset_1");
+    expect(res.status).toBe(200);
+    expect((await res.json())).toEqual({ data: { deleted: true } });
+
+    expect(order).toEqual(["softDeleteAsset", "deleteObject"]);
+    expect(softDeleteAsset).toHaveBeenCalledWith(TX_SENTINEL, "p1", "asset_1");
+    expect(deleteObject).toHaveBeenCalledWith("p1/asset_1.webp");
+  });
+
+  it("returns 404 for another project's asset", async () => {
+    // findAssetById is scoped by (projectId, id) in the repo (pinned in
+    // assets.integration.test.ts); mocked here to reflect that scoping
+    // so this test pins the route's REACTION to "not found" — a 404,
+    // not a 403 (which would confirm to a caller who cannot have it
+    // that the asset exists somewhere).
+    findAssetById.mockResolvedValue(null);
+    const res = await deleteAssetRes("asset_1", "p2");
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("NOT_FOUND");
+    expect(softDeleteAsset).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
+  it("requires assets:write", async () => {
+    assertProjectCapability.mockRejectedValue(
+      new HTTPException(403, {
+        message: "Role CUSTOMER_SUPPORT lacks capability assets:write",
+      }),
+    );
+    const res = await deleteAssetRes("asset_1");
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    expect(findAssetById).not.toHaveBeenCalled();
+    expect(softDeleteAsset).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
+  it("writes an audit entry", async () => {
+    findAssetById.mockResolvedValue(assetFixture());
+    const res = await deleteAssetRes("asset_1");
+    expect(res.status).toBe(200);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "p1",
+        userId: "u1",
+        action: "asset.deleted",
+        resource: "paywall_asset",
+        resourceId: "asset_1",
+      }),
+      TX_SENTINEL,
     );
   });
 });

@@ -132,7 +132,8 @@ export type AuditAction =
   | "font.uploaded"
   | "font.deleted"
   // --- paywall assets (CDN) ---
-  | "asset.uploaded";
+  | "asset.uploaded"
+  | "asset.deleted";
 
 export type AuditResource =
   | "audience"

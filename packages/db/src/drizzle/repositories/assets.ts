@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { paywallAssets, type PaywallAsset } from "../schema";
 import type { AssetKind, ImageSourceFormat } from "@rovenue/shared";
@@ -112,6 +112,33 @@ export async function softDeleteAsset(
     )
     .returning();
   return row ?? null;
+}
+
+/**
+ * Published paywalls referencing this asset — the honest boundary
+ * (design spec §7) is that this joins on a paywall's CURRENT
+ * `publishedVersionId`, not every version that ever referenced the
+ * asset. A paywall whose published version no longer references this
+ * asset (rolled back, or the asset was only ever used in a draft)
+ * correctly returns nothing here, even though a `paywall_asset_usages`
+ * row for an older/draft version still exists — the warning this
+ * powers is "does deleting this asset break something LIVE right now",
+ * not "was this asset ever used". Rows are written at publish time
+ * (Task 10); before that ships, this always returns [].
+ */
+export async function listPublishedUsage(
+  db: Db,
+  assetId: string,
+): Promise<{ id: string; name: string }[]> {
+  const rows = await db.execute(sql`
+    SELECT DISTINCT "paywalls"."id" AS id, "paywalls"."name" AS name
+    FROM "paywall_asset_usages"
+    JOIN "paywalls"
+      ON "paywalls"."id" = "paywall_asset_usages"."paywallId"
+     AND "paywalls"."publishedVersionId" = "paywall_asset_usages"."versionId"
+    WHERE "paywall_asset_usages"."assetId" = ${assetId}
+  `);
+  return (rows as unknown as { rows: { id: string; name: string }[] }).rows;
 }
 
 // The sweeper (Task 9) reads live storage keys with its own query
