@@ -68,9 +68,57 @@ process.env.GITHUB_CLIENT_SECRET ??= "test-github-secret";
 process.env.GOOGLE_CLIENT_ID ??= "test-google-id";
 process.env.GOOGLE_CLIENT_SECRET ??= "test-google-secret";
 // Match docker-compose.yml host port mappings (5433/6380/19092/8124) and
-// the default rovenue/rovenue credentials. Tests that need an isolated
-// DB (e.g. outbox-dispatcher.integration) override DATABASE_URL inline.
+// the default rovenue/rovenue credentials.
 process.env.DATABASE_URL ??= "postgresql://rovenue:rovenue@localhost:5433/rovenue";
+
+// -------------------------------------------------------------------
+// Per-worker database isolation
+// -------------------------------------------------------------------
+//
+// Repoint DATABASE_URL at a database owned by THIS vitest worker, cloned
+// from the migrated template that global-setup.ts built. Everything above
+// stays as it is — this only swaps which database the URL names, so the
+// credentials and host still come from the same place.
+//
+// This runs before any pool exists: `getDb()` is lazy and nothing in the
+// setup file above touches it, so the first connection a test opens already
+// points at the worker's own database.
+//
+// The guard is on globalThis rather than a module-level flag because
+// setupFiles execute once PER TEST FILE while the worker (and its pool
+// singleton) is reused across files. Creating the database once per worker
+// is the point: files sharing a worker run sequentially, so they can safely
+// share a database — it is the parallel workers that were clobbering each
+// other.
+{
+  const g = globalThis as unknown as { __rovenueWorkerDbReady?: Promise<void> };
+  if (!g.__rovenueWorkerDbReady) {
+    g.__rovenueWorkerDbReady = (async () => {
+      const { Client } = await import("pg");
+      const { TEMPLATE_DB, WORKER_DB_PREFIX, adminUrl, databaseUrlFor, dropDatabase } =
+        await import("./global-setup");
+
+      const poolId = process.env.VITEST_POOL_ID ?? "1";
+      const dbName = `${WORKER_DB_PREFIX}${poolId}`;
+
+      const admin = new Client({ connectionString: adminUrl() });
+      await admin.connect();
+      try {
+        // Drop first: a crashed previous run can leave this behind, and
+        // CREATE ... TEMPLATE onto an existing name fails.
+        await dropDatabase(admin, dbName);
+        await admin.query(
+          `CREATE DATABASE "${dbName}" TEMPLATE "${TEMPLATE_DB}"`,
+        );
+      } finally {
+        await admin.end();
+      }
+
+      process.env.DATABASE_URL = databaseUrlFor(dbName);
+    })();
+  }
+  await g.__rovenueWorkerDbReady;
+}
 process.env.REDIS_URL ??= "redis://localhost:6380";
 process.env.KAFKA_BROKERS ??= "localhost:19092";
 process.env.CLICKHOUSE_URL ??= "http://localhost:8124";
