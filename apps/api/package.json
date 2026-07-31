@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "apple-pay:backfill": "tsx --env-file-if-exists=../../.env src/scripts/backfill-apple-pay-domains.ts",
-    "test": "vitest run"
+    "test": "vitest run && VITEST_CONTAINER_PASS=1 vitest run"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.80",
