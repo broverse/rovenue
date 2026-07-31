@@ -172,6 +172,25 @@ async function seedProjectAndUser(): Promise<void> {
 }
 
 beforeAll(async () => {
+  // lib/redis is lazyConnect + enableOfflineQueue:false, so the first
+  // command issued before the socket is ready fails outright with "Stream
+  // isn't writeable and enableOfflineQueue options is false" rather than
+  // waiting. The rate-limit middleware in front of these routes is that
+  // first command, so under a loaded full-suite run the connect lost the
+  // race and the route answered 500 where the test expected a 302 redirect
+  // — an infrastructure blip wearing the costume of a broken OAuth flow.
+  // Forcing the connection up front is the same guard
+  // host-resolver.integration.test.ts already uses for this exact reason.
+  // Imported here, not at the top: ESM hoists imports above the
+  // `process.env.STRIPE_CONNECT_*` assignments at the head of this file, and
+  // lib/redis pulls in lib/env, which parses process.env once at import. A
+  // static import would therefore freeze env before those vars exist and the
+  // route would 503 with "Stripe Connect live mode is not configured".
+  const { redis } = await import("../src/lib/redis");
+  if (redis.status !== "ready" && redis.status !== "connecting") {
+    await redis.connect();
+  }
+
   pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await seedProjectAndUser();
   app = await buildApp();

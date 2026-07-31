@@ -249,8 +249,6 @@ describe.sequential("send-email-worker (integration)", () => {
   it("already-terminal 'sent' → job exits without calling mailer (idempotent retry guard)", async () => {
     mailer.failWith = null;
     mailer.failureBudget = 0;
-    const sentBefore = mailer.sent.length;
-
     // Seed a delivery that's already marked 'sent' (simulating a crash
     // after the provider call but before BullMQ ACK on a previous attempt).
     const { deliveryId, email } = await seedDelivery();
@@ -275,7 +273,15 @@ describe.sequential("send-email-worker (integration)", () => {
 
     // Give the worker time to process.
     await new Promise((r) => setTimeout(r, 1_500));
-    expect(mailer.sent.length).toBe(sentBefore); // no new send
+    // Assert on THIS delivery's address rather than on a global counter.
+    // The counter version compared mailer.sent.length against a snapshot
+    // taken before the enqueue, with a fixed 1.5s sleep in between — so a
+    // job from an earlier test in this file that was still in flight landed
+    // inside the window and showed up as "expected 5 to be 4", blaming the
+    // idempotency guard for someone else's send. seedDelivery() gives every
+    // delivery a unique address, so identity is both stricter and immune to
+    // whatever else the shared worker happens to be draining.
+    expect(mailer.sent.filter((m) => m.to === email)).toEqual([]);
     // Row should still be 'sent' (not regressed to queued or failed).
     const row = await readDelivery(deliveryId);
     expect(row?.status).toBe("sent");
@@ -284,8 +290,6 @@ describe.sequential("send-email-worker (integration)", () => {
   it("already-terminal 'suppressed' → job exits without calling mailer", async () => {
     mailer.failWith = null;
     mailer.failureBudget = 0;
-    const sentBefore = mailer.sent.length;
-
     const { deliveryId, email } = await seedDelivery();
     await db
       .update(schema.notificationDeliveries)
@@ -306,7 +310,15 @@ describe.sequential("send-email-worker (integration)", () => {
     );
 
     await new Promise((r) => setTimeout(r, 1_500));
-    expect(mailer.sent.length).toBe(sentBefore);
+    // Assert on THIS delivery's address rather than on a global counter.
+    // The counter version compared mailer.sent.length against a snapshot
+    // taken before the enqueue, with a fixed 1.5s sleep in between — so a
+    // job from an earlier test in this file that was still in flight landed
+    // inside the window and showed up as "expected 5 to be 4", blaming the
+    // idempotency guard for someone else's send. seedDelivery() gives every
+    // delivery a unique address, so identity is both stricter and immune to
+    // whatever else the shared worker happens to be draining.
+    expect(mailer.sent.filter((m) => m.to === email)).toEqual([]);
     const row = await readDelivery(deliveryId);
     expect(row?.status).toBe("suppressed");
   });
