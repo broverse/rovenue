@@ -1,4 +1,4 @@
-// NOT parallel-safe: binds host port 19094. Mirrors the dual-listener
+// NOT parallel-safe: binds host port 19102. Mirrors the dual-listener
 // dance in outbox-dispatcher.integration.test.ts — see commentary there.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
@@ -14,7 +14,7 @@ import {
 
 let redpanda: StartedTestContainer;
 let brokerUrl: string;
-const externalPort = 19094;
+const externalPort = 19102;
 
 beforeAll(async () => {
   redpanda = await new GenericContainer("redpandadata/redpanda:v24.2.13")

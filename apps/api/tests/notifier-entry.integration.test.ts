@@ -1,5 +1,5 @@
-// NOT parallel-safe: binds host port 19095 (separate from the bare
-// notifier transport test on 19094 so the two suites can run in
+// NOT parallel-safe: binds host port 19103 (separate from the bare
+// notifier transport test on 19102 so the two suites can run in
 // the same shard). Mirrors the dual-listener dance from
 // outbox-dispatcher.integration.test.ts.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -25,7 +25,7 @@ process.env.DATABASE_URL ??=
 
 let redpanda: StartedTestContainer;
 let brokerUrl: string;
-const externalPort = 19095;
+const externalPort = 19103;
 
 const db = getDb();
 const schema = drizzleNs.schema;
