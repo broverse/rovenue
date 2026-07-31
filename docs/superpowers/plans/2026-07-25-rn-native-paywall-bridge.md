@@ -1066,9 +1066,16 @@ Expected: all green. The RN suite drops by the six deleted test files; the share
 
 - [ ] **Step 5: Bump and document**
 
-In `packages/sdk-rn/package.json`, bump **0.16.0 → 0.17.0**. Removing three public exports
-is breaking, and for a `0.x` package the minor is where breaking changes go — do NOT jump to
-`1.0.0`, which would signal a stability commitment this SDK has not made.
+**Do NOT bump the version here.** `0.16.0` is a coordinated release number across the whole
+SDK family — the root `Cargo.toml` workspace version, `sdk-kotlin/build.gradle.kts`,
+`sdk-swift/Rovenue.podspec`, `sdk-rn/package.json` and `sdk-rn/src/version.ts` all carry it,
+and `src/__tests__/version.test.ts` asserts that `SDK_VERSION` equals **both** the root
+Cargo workspace version **and** `package.json`. Bumping `package.json` alone turns that suite
+red; bumping `SDK_VERSION` too just moves the failure to the Cargo assertion.
+
+Removing three public exports is genuinely breaking and does need a version signal, but that
+is a coordinated release across Rust, Swift, Kotlin and React Native — its own task, not a
+line in this one. Record it as a release-time follow-up and leave every version file alone.
 
 In `apps/docs/content/docs/platforms/react-native.mdx`, add a short section stating that `RovenuePaywallView` renders through the platform's native paywall view, that its props are unchanged, and that `decodeBuilderConfig` / `BuilderConfigModel` / `BuilderNode` are no longer exported.
 
