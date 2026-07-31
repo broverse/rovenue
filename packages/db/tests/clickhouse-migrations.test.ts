@@ -71,4 +71,47 @@ describe("ClickHouse migrations", () => {
       }
     }
   });
+
+  // A Kafka engine table with no `kafka_flush_interval_ms` silently inherits
+  // `stream_flush_interval_ms`, whose default is 7500ms. That interval is the
+  // dominant term in ingestion freshness — it is what put end-to-end p95 at
+  // 6.06s against a 5s budget before 0021 set it explicitly. The omission is
+  // invisible in review and in the schema; nothing fails, data just arrives
+  // late. So it is asserted here instead.
+  //
+  // The check looks at the LAST definition of each table across the migration
+  // chain, because a later migration recreating a queue table is exactly how
+  // the setting gets applied (Kafka tables reject ALTER ... MODIFY SETTING).
+  it("every Kafka engine table sets kafka_flush_interval_ms", async () => {
+    const files = (await readdir(migrationsDir))
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+
+    /** table name -> whether its most recent CREATE declares the setting */
+    const declared = new Map<string, boolean>();
+
+    for (const file of files) {
+      const sql = await readFile(join(migrationsDir, file), "utf8");
+      for (const stmt of sql.split(/;\s*$/m)) {
+        // Strip comment lines so a setting named only in prose never counts.
+        const body = stmt
+          .split("\n")
+          .filter((l) => !l.trim().startsWith("--"))
+          .join("\n");
+        if (!/ENGINE\s*=\s*Kafka/i.test(body)) continue;
+        const name = /CREATE TABLE (?:IF NOT EXISTS )?(\S+)/i.exec(body)?.[1];
+        if (!name) continue;
+        declared.set(name, /kafka_flush_interval_ms\s*=/i.test(body));
+      }
+    }
+
+    expect(declared.size, "no Kafka engine tables found — check the parser")
+      .toBeGreaterThanOrEqual(5);
+
+    const missing = [...declared]
+      .filter(([, hasSetting]) => !hasSetting)
+      .map(([name]) => name);
+    expect(missing, `Kafka tables without kafka_flush_interval_ms: ${missing.join(", ")}`)
+      .toEqual([]);
+  });
 });
