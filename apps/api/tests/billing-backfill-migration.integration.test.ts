@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GenericContainer } from "testcontainers";
+import { GenericContainer, Wait } from "testcontainers";
 import { Pool } from "pg";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -48,6 +48,17 @@ describe("backfill migration 0042", () => {
         POSTGRES_DB: "test",
       })
       .withExposedPorts(5432)
+      // start() resolves when the CONTAINER is running, which is not when
+      // Postgres is accepting connections. The official image starts a
+      // temporary server to run initdb, logs "ready to accept connections",
+      // shuts it down, then starts the real one and logs it again — so a pool
+      // built the moment start() returns lands in that gap and every query
+      // fails with "the database system is starting up". Waiting for the
+      // SECOND occurrence is what distinguishes the real server from the
+      // init-time one.
+      .withWaitStrategy(
+        Wait.forLogMessage(/database system is ready to accept connections/, 2),
+      )
       .start();
 
     pool = new Pool({
