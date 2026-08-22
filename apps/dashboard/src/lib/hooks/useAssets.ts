@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ASSET_MAX_BYTES, ERROR_CODE } from "@rovenue/shared";
 import type { AssetKind, ImageSourceFormat } from "@rovenue/shared";
 import { API_BASE_URL, ApiError, api } from "../api";
 
@@ -129,8 +130,38 @@ interface UploadEnvelope {
 
 const PERCENT_MAX = 100;
 
+/** Mirrors the status the server's own per-kind `bodyLimit` returns, so
+ *  a locally-rejected upload and a server-rejected one carry the same
+ *  `{ code, status }` pair to every caller. */
+const STATUS_PAYLOAD_TOO_LARGE = 413;
+
 function uploadAssetXhr(projectId: string, input: UploadAssetInput): Promise<Asset> {
   return new Promise((resolve, reject) => {
+    // Size is checked HERE, before a byte leaves the browser, and not
+    // left to the server's 413. The server enforces the same cap (a
+    // per-kind `bodyLimit`, apps/api/src/routes/dashboard/assets.ts) and
+    // must keep enforcing it — a client check is not a security control.
+    // But its rejection is unreadable to this code: `bodyLimit` answers
+    // off the Content-Length header without reading the body, so the
+    // response arrives — and the socket closes — while the upload is
+    // still in flight, and the browser reports that as a bare `error`
+    // event with `status === 0` rather than as the 413 it was. Sending
+    // first would therefore trade an exact "this file is too large" for
+    // a misleading "network error", after uploading as much of a 60 MB
+    // file as the connection managed. The pre-check is the only way the
+    // author gets the real reason.
+    const maxBytes = ASSET_MAX_BYTES[input.kind];
+    if (input.file.size > maxBytes) {
+      reject(
+        new ApiError(
+          ERROR_CODE.ASSET_FILE_TOO_LARGE,
+          `File exceeds the ${maxBytes}-byte ${input.kind} limit`,
+          STATUS_PAYLOAD_TOO_LARGE,
+        ),
+      );
+      return;
+    }
+
     const xhr = new XMLHttpRequest();
     const url = `${API_BASE_URL}${base(projectId)}/${input.kind}?name=${encodeURIComponent(input.name)}`;
     xhr.open("POST", url, true);
