@@ -49,6 +49,14 @@ export const ERROR_CODE = {
   ASSET_STORAGE_UNAVAILABLE: "ASSET_STORAGE_UNAVAILABLE",
   ASSET_INVALID_NAME: "ASSET_INVALID_NAME",
   ASSET_PROCESSING_FAILED: "ASSET_PROCESSING_FAILED",
+  // The root app's global request-body ceiling (apps/api/src/app.ts).
+  // Distinct from the per-route *_FILE_TOO_LARGE codes above: those mean
+  // "this upload is bigger than its own kind allows", this one means
+  // "this endpoint accepts no body remotely this large at all". Without
+  // it a breach surfaced as HTTP_ERROR with an EMPTY message, because
+  // hono's `bodyLimit` throws an HTTPException carrying its text in a
+  // `res` the error handler replaces rather than in `.message`.
+  PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
 } as const;
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];
 

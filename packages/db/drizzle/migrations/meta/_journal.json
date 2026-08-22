@@ -708,6 +708,13 @@
       "when": 1785293060000,
       "tag": "0100_seed_billing_tier_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1785293120000,
+      "tag": "0101_seed_asset_storage_limits",
+      "breakpoints": true
     }
   ]
 }
