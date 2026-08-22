@@ -239,6 +239,7 @@
       "flags": "Remote Config",
       "audiences": "Audiences",
       "cohorts": "Cohorts",
+      "assets": "Assets",
       "currencies": "Currencies",
       "credits": "Credits",
       "charts": "Charts",
@@ -583,8 +584,7 @@
       "invoices": "Invoices",
       "members": "Members",
       "auditLogs": "Audit log",
-      "fonts": "Fonts",
-      "assets": "Assets"
+      "fonts": "Fonts"
     },
     "fonts": {
       "title": "Fonts",

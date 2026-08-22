@@ -5,6 +5,7 @@ import {
   Flag,
   FlaskConical,
   Funnel,
+  Images,
   KeyRound,
   LayoutGrid,
   LayoutTemplate,
@@ -128,6 +129,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
         to: "/projects/$projectId/audiences",
       },
       { id: "cohorts", labelKey: "sidebar.items.cohorts", icon: Users2, to: "/projects/$projectId/cohorts" },
+      {
+        id: "assets",
+        labelKey: "sidebar.items.assets",
+        icon: Images,
+        to: "/projects/$projectId/assets",
+      },
       {
         id: "refundShield",
         labelKey: "sidebar.items.refundShield",

@@ -10,7 +10,6 @@ import {
   CreditCard,
   FileText,
   History,
-  Image as ImageIcon,
   Receipt,
   Settings as SettingsIcon,
   Sparkles,
@@ -79,14 +78,6 @@ const ALL_TABS = [
     icon: Type,
     to: "/projects/$projectId/settings/fonts" as const,
     match: (id: string) => id.endsWith("/settings/fonts"),
-    billingOnly: false,
-  },
-  {
-    id: "assets",
-    labelKey: "settings.tabs.assets",
-    icon: ImageIcon,
-    to: "/projects/$projectId/settings/assets" as const,
-    match: (id: string) => id.endsWith("/settings/assets"),
     billingOnly: false,
   },
   {
