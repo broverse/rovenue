@@ -224,7 +224,7 @@ async function renderHarness(id: string) {
 
   // `video.url`/`video.posterUrl`/`lottie.url` now render a `ThemeUrlField`
   // with `kind`+`projectId` set (asset-picker wiring, task 11), so
-  // `AssetPickerDialog` — and the `useAssets` query it calls once opened —
+  // `AssetLibraryModal` — and the `useAssets` query it calls once opened —
   // needs a real `QueryClientProvider` ancestor, same as
   // `asset-library.test.tsx`'s own `wrap()` helper.
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });

@@ -6,7 +6,7 @@ import type { AssetKind } from "@rovenue/shared";
 import type { NodeBorder, NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
 import { cn } from "../../../lib/cn";
 import { ColorSwatchInput } from "../../funnel-builder/color-swatch-input";
-import { AssetPickerDialog } from "../../assets/asset-picker-dialog";
+import { AssetLibraryModal } from "../../assets/asset-library-modal";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { Field, INPUT_CLASS, Segmented } from "./primitives";
 
@@ -296,7 +296,7 @@ export function BorderField({
  * this codebase that currently does that on purpose, but the fallback
  * exists so a future caller with no natural project id in scope isn't
  * forced to fake one. When both are supplied, each row gets a "Browse"
- * button that opens `AssetPickerDialog` filtered to `kind`; picking an
+ * button that opens `AssetLibraryModal` filtered to `kind`; picking an
  * asset there calls the EXACT SAME `setLight`/`setDark` a keystroke would,
  * so a hand-typed external URL is never a degraded path — uploading is
  * only ever an alternative to typing, never a replacement for it
@@ -391,9 +391,10 @@ export function ThemeUrlField({
         </div>
       </Field>
       {canBrowse && pickerTarget && (
-        <AssetPickerDialog
+        <AssetLibraryModal
           projectId={projectId!}
           kind={kind!}
+          currentUrl={pickerTarget === "light" ? value?.light : value?.dark}
           open
           onClose={() => setPickerTarget(null)}
           onSelect={(url) => {

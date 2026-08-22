@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { ImageIcon, Trash2, UploadCloud } from "lucide-react";
+import { Film, ImageIcon, Sparkles, Trash2, TriangleAlert, UploadCloud } from "lucide-react";
 import {
   ASSET_KINDS,
   ASSET_NAME_MAX_LENGTH,
@@ -11,6 +11,7 @@ import {
 import { Button } from "../../ui/button";
 import { ConfirmDialog } from "../../ui/confirm-dialog";
 import { EmptyStateCard, LoadingState } from "../dashboard";
+import { cn } from "../../lib/cn";
 import { ApiError } from "../../lib/api";
 import {
   useAssets,
@@ -21,12 +22,30 @@ import {
   type PublishedPaywallRef,
   type StorageUsage,
 } from "../../lib/hooks/useAssets";
+import { billingEnabled } from "../../lib/host-mode";
 import { formatAssetByteSize } from "./byte-size";
 import { kindLabel } from "./kind-label";
+import { storageNoticeFor, type StorageNotice } from "./storage-notice";
 
 // =============================================================
-// AssetLibrary — the dashboard's project-scoped asset CDN screen
+// AssetLibrary — the dashboard's project-scoped asset CDN surface
 // =============================================================
+//
+// ONE component serves two surfaces: the full-screen route
+// (/projects/:projectId/assets) and the dialog a builder field's
+// "Browse" button opens (`AssetLibraryModal`). There is deliberately no
+// separate read-only "picker" component — an author who opens Browse
+// and finds the image they wanted missing must be able to upload it
+// right there instead of leaving the builder, and a second component
+// would mean a second upload path, a second progress affordance and a
+// second copy of the delete warning below to keep in sync.
+//
+// Two optional props turn on select mode and nothing else:
+//   - `selectKind` filters the grid to one kind AND restricts the
+//     upload triggers to it (an image field that let you upload a video
+//     would list an asset it then refuses to render).
+//   - `onSelect` makes each tile a button returning `asset.url`.
+// With neither, this is exactly the screen it has always been.
 //
 // Every t() key below is a static string literal, never a template
 // literal built from `kind` — this repo has been bitten by
@@ -51,6 +70,12 @@ const ASSET_ACCEPT: Record<AssetKind, string> = {
   video: "video/*",
   lottie: "application/json,.json",
 };
+
+/** Grid geometry. Hoisted because the tile width and the modal width
+ *  (asset-library-modal.tsx) are one decision, not two: the modal is
+ *  sized to fit a whole number of these columns. */
+const TILE_MIN_WIDTH_PX = 150;
+const TILE_PREVIEW_HEIGHT_PX = 96;
 
 function stripExtension(fileName: string): string {
   const dot = fileName.lastIndexOf(".");
@@ -123,6 +148,11 @@ function describeUploadError(t: TFunction, kind: AssetKind, err: unknown): strin
  * in-progress draft still needs. Both branches below say "published
  * paywalls", never bare "paywalls", and the zero-case spells out the
  * draft blind spot explicitly rather than leaving it implicit.
+ *
+ * This warning is the ONLY guard on deletion, and it is now reachable
+ * from inside a builder as well as from the library route — deleting
+ * mid-build is exactly as consequential as deleting from the route, so
+ * the same copy is shown in both, never a shortened one.
  */
 function buildUsageDescription(t: TFunction, paywalls: PublishedPaywallRef[]): string {
   if (paywalls.length === 0) {
@@ -142,7 +172,21 @@ function buildUsageDescription(t: TFunction, paywalls: PublishedPaywallRef[]): s
   });
 }
 
-export function AssetLibrary({ projectId }: { projectId: string }) {
+export function AssetLibrary({
+  projectId,
+  variant = "page",
+  selectKind,
+  onSelect,
+  currentUrl,
+}: {
+  projectId: string;
+  /** "modal" drops the page heading — the dialog supplies its own title. */
+  variant?: "page" | "modal";
+  selectKind?: AssetKind;
+  onSelect?: (url: string) => void;
+  /** The URL the field that opened this already holds — marks its tile. */
+  currentUrl?: string;
+}) {
   const { t } = useTranslation();
   const assetsQuery = useAssets(projectId);
   const uploadAsset = useUploadAsset(projectId);
@@ -165,8 +209,17 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const usageQuery = useAssetUsage(projectId, pendingDelete?.id ?? null);
 
-  const assets = assetsQuery.data?.assets ?? [];
+  const uploadableKinds = selectKind ? [selectKind] : ASSET_KINDS;
+  const assets = (assetsQuery.data?.assets ?? []).filter(
+    (a) => !selectKind || a.kind === selectKind,
+  );
   const usage = assetsQuery.data?.usage;
+  const storageNotice = storageNoticeFor(usage);
+  // A full project cannot accept a single further byte: the server's
+  // reservation refuses anything that would take the total past the cap.
+  // Disabling the trigger states that up front instead of letting the
+  // author pick a file and collect a 402 for it.
+  const storageFull = storageNotice === "full";
 
   async function startUpload(kind: AssetKind, file: File) {
     setUploadError(null);
@@ -184,23 +237,25 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="max-w-2xl">
-          <h1 className="m-0 text-[22px] font-semibold leading-7">
-            {t("settings.assets.title", "Assets")}
-          </h1>
-          <p className="mt-1 text-[13px] text-rv-mute-500">
-            {t(
-              "settings.assets.subtitle",
-              "Upload images, videos, and Lottie animations for paywalls. Assets are shared across every paywall in this project.",
-            )}
-          </p>
-        </div>
-        {usage && <StorageUsageBar usage={usage} />}
-      </header>
+      {variant === "page" && (
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-2xl">
+            <h1 className="m-0 text-[22px] font-semibold leading-7">
+              {t("settings.assets.title", "Assets")}
+            </h1>
+            <p className="mt-1 text-[13px] text-rv-mute-500">
+              {t(
+                "settings.assets.subtitle",
+                "Upload images, videos, and Lottie animations for paywalls. Assets are shared across every paywall in this project.",
+              )}
+            </p>
+          </div>
+          {usage && <StorageUsageBar usage={usage} />}
+        </header>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
-        {ASSET_KINDS.map((kind) => (
+        {uploadableKinds.map((kind) => (
           <div key={kind}>
             <input
               ref={fileInputRefs[kind]}
@@ -217,7 +272,7 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
             <Button
               variant="flat"
               size="sm"
-              disabled={uploadingKind !== null}
+              disabled={uploadingKind !== null || storageFull}
               onClick={() => fileInputRefs[kind].current?.click()}
             >
               <UploadCloud size={13} />
@@ -225,6 +280,11 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
             </Button>
           </div>
         ))}
+        {variant === "modal" && usage && (
+          <div className="ml-auto">
+            <StorageUsageBar usage={usage} compact />
+          </div>
+        )}
         {uploadingKind && (
           <div className="flex items-center gap-2 text-[12px] text-rv-mute-500">
             <span>
@@ -249,6 +309,10 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
         )}
       </div>
 
+      {usage && storageNotice !== "none" && (
+        <StorageQuotaNotice notice={storageNotice} usage={usage} projectId={projectId} />
+      )}
+
       {uploadError && (
         <div className="rounded-md border border-rv-danger/30 bg-rv-danger/10 px-3 py-2 text-[12px] text-rv-danger">
           {uploadError}
@@ -258,18 +322,37 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
       {assetsQuery.isLoading ? (
         <LoadingState />
       ) : assets.length === 0 ? (
-        <EmptyStateCard
-          icon={ImageIcon}
-          title={t("settings.assets.empty.title", "No assets yet")}
-          description={t(
-            "settings.assets.empty.description",
-            "Upload an image, video, or Lottie file to make it available to every paywall in this project.",
-          )}
-        />
+        selectKind ? (
+          <p className="text-[12px] text-rv-mute-500">
+            {t("settings.assets.picker.empty", {
+              defaultValue:
+                "No {{kind}} assets yet. Upload one above, or close this and type a URL directly.",
+              kind: kindLabel(t, selectKind),
+            })}
+          </p>
+        ) : (
+          <EmptyStateCard
+            icon={ImageIcon}
+            title={t("settings.assets.empty.title", "No assets yet")}
+            description={t(
+              "settings.assets.empty.description",
+              "Upload an image, video, or Lottie file to make it available to every paywall in this project.",
+            )}
+          />
+        )
       ) : (
-        <div className="flex flex-col gap-2">
+        <div
+          className="grid gap-2"
+          style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_MIN_WIDTH_PX}px, 1fr))` }}
+        >
           {assets.map((asset) => (
-            <AssetRow key={asset.id} asset={asset} onDelete={() => setPendingDelete(asset)} />
+            <AssetTile
+              key={asset.id}
+              asset={asset}
+              inUse={Boolean(currentUrl) && asset.url === currentUrl}
+              onSelect={onSelect ? () => onSelect(asset.url) : undefined}
+              onDelete={() => setPendingDelete(asset)}
+            />
           ))}
         </div>
       )}
@@ -287,8 +370,18 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
                 "settings.assets.delete.usageLoading",
                 "Checking which published paywalls use this asset…",
               )
-            : buildUsageDescription(t, usageQuery.data?.publishedPaywalls ?? [])
+            : usageQuery.isError
+              ? t(
+                  "settings.assets.delete.usageFailed",
+                  "Couldn't check which published paywalls use this asset. Deleting it now could break a live paywall with no warning.",
+                )
+              : buildUsageDescription(t, usageQuery.data?.publishedPaywalls ?? [])
         }
+        /* Fails closed. An empty `data` looks the same whether the answer
+           was "nothing uses it" or the request never landed, and only one
+           of those is safe to act on — so an unverified delete is not
+           offered at all rather than offered with a caveat. */
+        confirmDisabled={usageQuery.isLoading || usageQuery.isError}
         confirmLabel={t("settings.assets.delete.confirm", "Delete asset")}
         onConfirm={async () => {
           if (!pendingDelete) return;
@@ -319,7 +412,89 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
   );
 }
 
-function StorageUsageBar({ usage }: { usage: StorageUsage }) {
+/** Bar fill and notice text share one colour scale, so "the bar went
+ *  red" and "uploads stopped" read as the same fact. */
+const NOTICE_FILL_CLASS: Record<StorageNotice, string> = {
+  none: "bg-rv-c4",
+  warning: "bg-rv-warning",
+  critical: "bg-rv-danger",
+  full: "bg-rv-danger",
+};
+
+const NOTICE_BOX_CLASS: Record<Exclude<StorageNotice, "none">, string> = {
+  warning: "border-rv-warning/30 bg-rv-warning/[0.08] text-rv-warning",
+  critical: "border-rv-danger/30 bg-rv-danger/10 text-rv-danger",
+  full: "border-rv-danger/30 bg-rv-danger/10 text-rv-danger",
+};
+
+/**
+ * The banner an author sees before — and instead of — a failed upload.
+ *
+ * `role="status"`, not `alert`: this is a standing condition of the
+ * project rather than an event that just happened, and it is already on
+ * screen at first render for a project that is full.
+ *
+ * The upgrade link is cloud-only. A self-hosted deployment has no tiers
+ * to move between — `quotasUnlimited()` means it never reaches this
+ * state at all — so offering an upgrade there would advertise a product
+ * the operator cannot buy.
+ */
+function StorageQuotaNotice({
+  notice,
+  usage,
+  projectId,
+}: {
+  notice: Exclude<StorageNotice, "none">;
+  usage: StorageUsage;
+  projectId: string;
+}) {
+  const { t } = useTranslation();
+  const used = formatAssetByteSize(usage.usedBytes);
+  const limit = formatAssetByteSize(usage.limitBytes ?? 0);
+
+  return (
+    <div
+      role="status"
+      className={cn(
+        "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-[12px]",
+        NOTICE_BOX_CLASS[notice],
+      )}
+    >
+      <TriangleAlert size={14} className="flex-shrink-0" />
+      <span>
+        {notice === "full"
+          ? t("settings.assets.usage.full", {
+              defaultValue:
+                "Storage is full — {{used}} of {{limit}} used. Delete an asset to make room, or move to a bigger plan.",
+              used,
+              limit,
+            })
+          : t("settings.assets.usage.low", {
+              defaultValue: "Storage is running low — {{used}} of {{limit}} used.",
+              used,
+              limit,
+            })}
+      </span>
+        {/* A plain <a>, not a router <Link>: this notice now renders
+            inside `AssetLibraryModal` too, and that modal is opened from
+            both builders' inspectors — subtrees whose own tests (and the
+            dialog portal) carry no router context, where `useLinkProps`
+            throws on a null router. A full page load to billing is the
+            right outcome for a "leave what you are doing and upgrade"
+            link anyway. */}
+      {billingEnabled && (
+        <a
+          href={`/projects/${projectId}/settings/billing`}
+          className="font-medium underline underline-offset-2"
+        >
+          {t("settings.assets.usage.upgrade", "Upgrade for more storage")}
+        </a>
+      )}
+    </div>
+  );
+}
+
+function StorageUsageBar({ usage, compact = false }: { usage: StorageUsage; compact?: boolean }) {
   const { t } = useTranslation();
   if (usage.limitBytes === null) {
     return (
@@ -330,15 +505,19 @@ function StorageUsageBar({ usage }: { usage: StorageUsage }) {
   }
   const pct =
     usage.limitBytes > 0 ? Math.min(100, Math.round((usage.usedBytes / usage.limitBytes) * 100)) : 0;
+  const label = t("settings.assets.usage.used", {
+    defaultValue: "{{used}} of {{limit}} used",
+    used: formatAssetByteSize(usage.usedBytes),
+    limit: formatAssetByteSize(usage.limitBytes),
+  });
+  if (compact) {
+    // In a dialog the bar is chrome competing with the grid; the figure
+    // it labels is the part an author acts on before uploading.
+    return <span className="text-[11px] text-rv-mute-500">{label}</span>;
+  }
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[12px] text-rv-mute-500">
-        {t("settings.assets.usage.used", {
-          defaultValue: "{{used}} of {{limit}} used",
-          used: formatAssetByteSize(usage.usedBytes),
-          limit: formatAssetByteSize(usage.limitBytes),
-        })}
-      </span>
+      <span className="text-[12px] text-rv-mute-500">{label}</span>
       <div
         role="progressbar"
         aria-valuenow={pct}
@@ -346,20 +525,63 @@ function StorageUsageBar({ usage }: { usage: StorageUsage }) {
         aria-valuemax={100}
         className="h-1.5 w-full max-w-[220px] overflow-hidden rounded-full bg-rv-c2"
       >
-        <div className="h-full bg-rv-c4" style={{ width: `${pct}%` }} />
+        <div
+          className={cn("h-full", NOTICE_FILL_CLASS[storageNoticeFor(usage)])}
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </div>
   );
 }
 
-function AssetRow({ asset, onDelete }: { asset: Asset; onDelete: () => void }) {
+/**
+ * A tile, not a row: picking an image is a decision made by eye, and a
+ * list of file names makes it blind. Only images get a real preview —
+ * a video would have to load and decode to show a frame, and a Lottie
+ * would need its player, so both get their kind's icon rather than an
+ * autoplaying thumbnail inside a picker.
+ *
+ * The select target and the delete button are SIBLINGS, never nested:
+ * a <button> inside a <button> is invalid, and in select mode the whole
+ * body is the select target.
+ */
+function AssetTile({
+  asset,
+  inUse,
+  onSelect,
+  onDelete,
+}: {
+  asset: Asset;
+  /** This asset is the one the field that opened the library holds. */
+  inUse: boolean;
+  onSelect?: () => void;
+  onDelete: () => void;
+}) {
   const { t } = useTranslation();
   const hasDimensions = asset.width !== null && asset.height !== null;
-  return (
-    <div className="flex items-center justify-between rounded-md border border-rv-divider bg-rv-c2 px-3 py-2 text-[12px]">
-      <div className="flex min-w-0 flex-col">
-        <span className="truncate font-medium text-foreground">{asset.name}</span>
-        <span className="text-rv-mute-500">
+
+  const body = (
+    <>
+      <div
+        className="flex w-full items-center justify-center overflow-hidden rounded-t-md bg-rv-c3"
+        style={{ height: TILE_PREVIEW_HEIGHT_PX }}
+      >
+        <AssetPreview asset={asset} />
+      </div>
+      <div className="flex min-w-0 flex-col px-2 py-1.5 text-left text-[11px]">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-medium text-foreground">{asset.name}</span>
+          {/* `listPublishedUsage` is blind to drafts, so the delete
+              warning cannot see the very node being edited. This marker
+              is the only thing standing between "Browse, spot the image,
+              delete the duplicate" and a silently 404'd field. */}
+          {inUse && (
+            <span className="shrink-0 rounded bg-rv-accent-500/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-rv-accent-600">
+              {t("settings.assets.picker.inUse", "In use")}
+            </span>
+          )}
+        </span>
+        <span className="truncate text-rv-mute-500">
           {kindLabel(t, asset.kind)}
           {hasDimensions &&
             ` · ${t("settings.assets.dimensions", {
@@ -370,10 +592,55 @@ function AssetRow({ asset, onDelete }: { asset: Asset; onDelete: () => void }) {
           {` · ${formatAssetByteSize(asset.byteSize)}`}
         </span>
       </div>
-      <Button variant="light" size="sm" onClick={onDelete}>
-        <Trash2 size={13} />
-        {t("settings.assets.delete.trigger", "Delete")}
-      </Button>
+    </>
+  );
+
+  return (
+    <div className="group relative overflow-hidden rounded-md border border-rv-divider bg-rv-c2">
+      {onSelect ? (
+        <button
+          type="button"
+          onClick={onSelect}
+          className={cn(
+            "flex w-full flex-col transition",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-rv-accent-500",
+          )}
+        >
+          {body}
+          {/* Nothing else marks a tile as clickable — the grid looks
+              identical on the manage-only route. `pointer-events-none`
+              keeps it from swallowing the click it advertises. */}
+          <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-rv-accent-500/90 py-1 text-center text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+            {t("settings.assets.picker.select", "Use this asset")}
+          </span>
+        </button>
+      ) : (
+        <div className="flex w-full flex-col">{body}</div>
+      )}
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={t("settings.assets.delete.trigger", "Delete")}
+        title={t("settings.assets.delete.trigger", "Delete")}
+        className="absolute right-1.5 top-1.5 rounded bg-rv-c1/85 p-1 text-rv-mute-500 opacity-0 transition hover:text-rv-danger focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-rv-accent-500 group-hover:opacity-100"
+      >
+        <Trash2 size={12} />
+      </button>
     </div>
   );
+}
+
+function AssetPreview({ asset }: { asset: Asset }) {
+  if (asset.kind === "image") {
+    return (
+      <img
+        src={asset.url}
+        alt=""
+        loading="lazy"
+        className="h-full w-full object-cover"
+      />
+    );
+  }
+  const Icon = asset.kind === "video" ? Film : Sparkles;
+  return <Icon size={20} className="text-rv-mute-500" />;
 }

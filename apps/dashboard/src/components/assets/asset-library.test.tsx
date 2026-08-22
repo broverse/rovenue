@@ -1,13 +1,25 @@
 import { useState } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { http, HttpResponse } from "msw";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ASSET_MAX_BYTES, ASSET_STORAGE_WARN_RATIO } from "@rovenue/shared";
 import type { ThemeUrl } from "@rovenue/shared/paywall";
 import "../../i18n/config";
 import { server } from "../../../tests/msw/server";
+
+// The upgrade CTA is cloud-only (`billingEnabled`, lib/host-mode.ts) and
+// the test build leaves VITE_HOST_MODE unset, which resolves to
+// self-hosted — so the branch worth asserting would never render. Forced
+// on here; lib/host-mode.test.ts owns the derivation itself, and the
+// guard is the same one-line pattern billing.tsx and payment-methods.tsx
+// already use.
+vi.mock("../../lib/host-mode", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  billingEnabled: true,
+}));
 import { AssetLibrary } from "./asset-library";
-import { AssetPickerDialog } from "./asset-picker-dialog";
+import { AssetLibraryModal } from "./asset-library-modal";
 import { ThemeUrlField } from "../paywall-builder/inspector/fields";
 import type { Asset } from "../../lib/hooks/useAssets";
 
@@ -42,6 +54,20 @@ import type { Asset } from "../../lib/hooks/useAssets";
 const BASE = "http://localhost:3000";
 const PROJECT_ID = "p_1";
 
+/**
+ * Deliberately NO router in context.
+ *
+ * The over-quota notice links to billing, and that link must stay a
+ * plain `<a href>`: `AssetLibrary` now renders inside `AssetLibraryModal`,
+ * which both builders open from a `Dialog.Portal` in subtrees that carry
+ * no router (see `overrides.test.tsx` and
+ * `funnel-builder/properties-panel.media-picker.test.tsx`, neither of
+ * which mounts one). A TanStack `<Link>` there throws on a null router.
+ *
+ * Rendering every test in this file without a router is what keeps that
+ * true — reintroduce `<Link>` and the whole suite goes red rather than
+ * only the two real callers' suites.
+ */
 function wrap(ui: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
@@ -234,6 +260,88 @@ describe("AssetLibrary", () => {
     expect(quota.textContent).not.toBe(unsupported.textContent);
   });
 
+  it("rejects an oversize file locally rather than uploading it first", async () => {
+    // Regression: the server DOES reject this (a per-kind `bodyLimit`),
+    // but it answers off the Content-Length header before reading the
+    // body, so the response races the still-in-flight upload and the
+    // browser surfaces it as a bare `error` event with no status — which
+    // the dashboard could only report as "network error". The author has
+    // to get the real reason, and without spending the upload.
+    mockAssets([], { usedBytes: 0, limitBytes: null });
+    wrap(<AssetLibrary projectId={PROJECT_ID} />);
+
+    const input = await screen.findByTestId("asset-upload-input-image");
+    const file = new File(["x"], "huge.png", { type: "image/png" });
+    Object.defineProperty(file, "size", { value: ASSET_MAX_BYTES.image + 1 });
+    await act(async () => {
+      selectFile(input, file);
+    });
+
+    expect(await screen.findByText(/too large/i)).toBeInTheDocument();
+    expect(MockXHR.instances).toHaveLength(0);
+  });
+
+  it("warns before the cap is reached, without blocking uploads", async () => {
+    const limitBytes = 1000;
+    mockAssets([], {
+      usedBytes: Math.ceil(limitBytes * ASSET_STORAGE_WARN_RATIO),
+      limitBytes,
+    });
+    wrap(<AssetLibrary projectId={PROJECT_ID} />);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/running low/i);
+    // Still under the cap: the author can keep working.
+    expect(screen.getByRole("button", { name: /upload image/i })).toBeEnabled();
+  });
+
+  it("blocks uploading once the cap is reached and offers the way out", async () => {
+    mockAssets([], { usedBytes: 1000, limitBytes: 1000 });
+    wrap(<AssetLibrary projectId={PROJECT_ID} />);
+
+    // Exactly at the cap, not over it: the server's reservation refuses
+    // anything that would take the total past the limit, so nothing more
+    // fits and a live upload button could only produce a 402.
+    expect(await screen.findByRole("status")).toHaveTextContent(/storage is full/i);
+    expect(screen.getByRole("button", { name: /upload image/i })).toBeDisabled();
+    expect(screen.getByRole("link", { name: /upgrade/i })).toHaveAttribute(
+      "href",
+      `/projects/${PROJECT_ID}/settings/billing`,
+    );
+  });
+
+  it("says nothing about storage on an unlimited project", async () => {
+    mockAssets([], { usedBytes: 10 ** 9, limitBytes: null });
+    wrap(<AssetLibrary projectId={PROJECT_ID} />);
+
+    expect(await screen.findByText(/unlimited storage/i)).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /upload image/i })).toBeEnabled();
+  });
+
+  it("never reports a FAILED usage check as zero paywalls", async () => {
+    // The zero-case copy is reassuring by design, and `useAssetUsage`
+    // returning nothing looks identical whether the answer was "none"
+    // or the request never landed. Rendering the reassuring sentence for
+    // a failed check tells an author nothing depends on an asset that
+    // live paywalls may well serve — and delete is irreversible, with
+    // this dialog as its only guard. It now also fires from inside both
+    // builders' Browse modals, so the failure path is a common one.
+    mockAssets([makeAsset({ id: "a_x" })], { usedBytes: 0, limitBytes: null });
+    server.use(
+      http.get(`${BASE}/dashboard/projects/${PROJECT_ID}/assets/a_x/usage`, () =>
+        HttpResponse.json({ error: { code: "INTERNAL", message: "boom" } }, { status: 500 }),
+      ),
+    );
+    wrap(<AssetLibrary projectId={PROJECT_ID} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /delete/i }));
+
+    expect(await screen.findByText(/couldn't check/i)).toBeInTheDocument();
+    expect(screen.queryByText(/0 published paywalls/i)).not.toBeInTheDocument();
+    // Fails closed: an unverified delete is not offered at all.
+    expect(screen.getByRole("button", { name: /delete asset/i })).toBeDisabled();
+  });
+
   it("warns with the published-paywall count before deleting", async () => {
     mockAssets([makeAsset({ id: "a_used" })], { usedBytes: 0, limitBytes: null });
     mockUsage("a_used", [{ id: "pw_1", name: "Main paywall" }]);
@@ -261,7 +369,33 @@ describe("AssetLibrary", () => {
   });
 });
 
-describe("AssetPickerDialog", () => {
+
+// =============================================================
+// AssetLibraryModal — the SAME AssetLibrary, in a dialog
+// =============================================================
+//
+// There is no second "picker" component any more. A field's Browse
+// button opens the library itself with `kind` set, which turns on two
+// things and nothing else: the grid filters to that kind, and each tile
+// becomes selectable. Upload and delete are NOT modal-mode extras
+// bolted on — they are the library's own affordances, reachable
+// wherever the library is, which is the whole point of making it a
+// modal (an author who opens Browse and finds the image missing must be
+// able to add it right there instead of leaving the builder).
+//
+// Restricting the upload triggers to `kind` is deliberate: an image
+// field that let you upload a video would list an asset it then
+// refuses to show.
+
+describe("AssetLibraryModal", () => {
+  beforeEach(() => {
+    MockXHR.instances = [];
+    vi.stubGlobal("XMLHttpRequest", MockXHR as unknown as typeof XMLHttpRequest);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("lists only assets matching the field's kind", async () => {
     mockAssets(
       [
@@ -271,7 +405,7 @@ describe("AssetPickerDialog", () => {
       { usedBytes: 0, limitBytes: null },
     );
     wrap(
-      <AssetPickerDialog
+      <AssetLibraryModal
         projectId={PROJECT_ID}
         kind="video"
         open
@@ -289,11 +423,99 @@ describe("AssetPickerDialog", () => {
     mockAssets([asset], { usedBytes: 0, limitBytes: null });
     const onSelect = vi.fn();
     wrap(
-      <AssetPickerDialog projectId={PROJECT_ID} kind="video" open onClose={() => undefined} onSelect={onSelect} />,
+      <AssetLibraryModal projectId={PROJECT_ID} kind="video" open onClose={() => undefined} onSelect={onSelect} />,
     );
 
     fireEvent.click(await screen.findByText("hero-video"));
     expect(onSelect).toHaveBeenCalledWith(asset.url);
+  });
+
+  it("offers an upload trigger for the field's kind and no other", async () => {
+    mockAssets([], { usedBytes: 0, limitBytes: null });
+    wrap(
+      <AssetLibraryModal
+        projectId={PROJECT_ID}
+        kind="image"
+        open
+        onClose={() => undefined}
+        onSelect={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByTestId("asset-upload-input-image")).toBeInTheDocument();
+    expect(screen.queryByTestId("asset-upload-input-video")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("asset-upload-input-lottie")).not.toBeInTheDocument();
+  });
+
+  it("makes an asset uploaded from inside the modal immediately selectable", async () => {
+    mockAssets([], { usedBytes: 0, limitBytes: null });
+    const onSelect = vi.fn();
+    wrap(
+      <AssetLibraryModal projectId={PROJECT_ID} kind="image" open onClose={() => undefined} onSelect={onSelect} />,
+    );
+
+    const input = await screen.findByTestId("asset-upload-input-image");
+    const file = new File(["x"], "photo.png", { type: "image/png" });
+    await act(async () => {
+      selectFile(input, file);
+    });
+
+    const uploaded = makeAsset({ id: "new_1", kind: "image", name: "photo", url: `${BASE}/cdn/new_1.webp` });
+    await act(async () => {
+      latestXhr().respondSuccess(uploaded);
+      // Stands in for the server now having the row, ahead of the
+      // invalidated query's refetch.
+      mockAssets([uploaded], { usedBytes: uploaded.byteSize, limitBytes: null });
+    });
+
+    fireEvent.click(await screen.findByText("photo"));
+    expect(onSelect).toHaveBeenCalledWith(uploaded.url);
+  });
+
+  it("marks the asset the field is currently pointed at", async () => {
+    // `listPublishedUsage` cannot see drafts, so the delete warning is
+    // blind to the very node the author is editing: without this marker
+    // the obvious move — Browse, spot the image, delete the duplicate —
+    // can silently 404 the field it was opened from.
+    const inUse = makeAsset({ id: "a_used", name: "current-hero" });
+    const other = makeAsset({ id: "a_other", name: "other-hero", url: `${BASE}/cdn/other.webp` });
+    mockAssets([inUse, other], { usedBytes: 0, limitBytes: null });
+    wrap(
+      <AssetLibraryModal
+        projectId={PROJECT_ID}
+        kind="image"
+        currentUrl={inUse.url}
+        open
+        onClose={() => undefined}
+        onSelect={() => undefined}
+      />,
+    );
+
+    const usedTile = await screen.findByRole("button", { name: /current-hero/i });
+    expect(within(usedTile).getByText(/in use/i)).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("button", { name: /other-hero/i })).queryByText(/in use/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("warns with the published-paywall count before deleting from inside the modal", async () => {
+    mockAssets([makeAsset({ id: "a_used", kind: "image", name: "hero" })], { usedBytes: 0, limitBytes: null });
+    mockUsage("a_used", [{ id: "pw_1", name: "Main paywall" }]);
+    wrap(
+      <AssetLibraryModal
+        projectId={PROJECT_ID}
+        kind="image"
+        open
+        onClose={() => undefined}
+        onSelect={() => undefined}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /delete/i }));
+
+    expect(
+      await screen.findByText(/1 published paywall uses this asset: Main paywall/i),
+    ).toBeInTheDocument();
   });
 
   it("leaves a hand-typed external URL working", async () => {
@@ -318,11 +540,13 @@ describe("AssetPickerDialog", () => {
     }
     wrap(<Harness />);
 
-    const [light] = screen.getAllByRole("textbox");
+    // `findAll`, not `getAll`: `wrap` mounts a router, whose first render
+    // resolves a tick after render() returns.
+    const [light] = await screen.findAllByRole("textbox");
     fireEvent.change(light!, { target: { value: "https://cdn.example.com/hand-typed.png" } });
     expect((light as HTMLInputElement).value).toBe("https://cdn.example.com/hand-typed.png");
 
-    // Opening (and cancelling) the asset picker must not clobber the
+    // Opening (and cancelling) the asset library must not clobber the
     // hand-typed value — uploading is an alternative, never a
     // replacement, for a plain URL string.
     const [browseLight] = screen.getAllByRole("button", { name: /browse assets/i });
@@ -335,21 +559,19 @@ describe("AssetPickerDialog", () => {
 });
 
 // =============================================================
-// End-to-end (within jsdom): upload through AssetLibrary, confirm the
-// SAME asset is subsequently selectable in AssetPickerDialog. This is
-// the actual claim task-11-brief makes about the two components —
-// proven here by sharing one QueryClient (and therefore one
-// `["assets", projectId]` cache entry) across both, the same way a
-// real settings-tab upload and a real builder-inspector picker would
-// share it in the app (React Query is a module-level singleton client
-// there too). The GET handler is re-armed with the "post-upload" list
-// right after the mock upload resolves, standing in for the real
+// End-to-end (within jsdom): upload on the full-screen library route,
+// confirm the SAME asset is subsequently selectable in a builder's
+// modal. Proven by sharing one QueryClient (and therefore one
+// `["assets", projectId]` cache entry) across both, the same way the
+// real route and the real builder share React Query's module-level
+// singleton client. The GET handler is re-armed with the "post-upload"
+// list right after the mock upload resolves, standing in for the real
 // server now having the row — `useUploadAsset`'s `onSuccess` then
-// invalidates the shared query and the picker's own `useAssets` call
+// invalidates the shared query and the modal's own `useAssets` call
 // picks up the refetch with no wiring specific to this test.
 // =============================================================
 
-describe("AssetLibrary + AssetPickerDialog — shared query cache", () => {
+describe("AssetLibrary + AssetLibraryModal — shared query cache", () => {
   beforeEach(() => {
     MockXHR.instances = [];
     vi.stubGlobal("XMLHttpRequest", MockXHR as unknown as typeof XMLHttpRequest);
@@ -358,14 +580,14 @@ describe("AssetLibrary + AssetPickerDialog — shared query cache", () => {
     vi.unstubAllGlobals();
   });
 
-  it("an asset uploaded through the library is immediately selectable in the picker", async () => {
+  it("an asset uploaded on the library route is immediately selectable in the modal", async () => {
     mockAssets([], { usedBytes: 0, limitBytes: null });
     const onSelect = vi.fn();
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     render(
       <QueryClientProvider client={qc}>
         <AssetLibrary projectId={PROJECT_ID} />
-        <AssetPickerDialog
+        <AssetLibraryModal
           projectId={PROJECT_ID}
           kind="image"
           open
@@ -375,13 +597,13 @@ describe("AssetLibrary + AssetPickerDialog — shared query cache", () => {
       </QueryClientProvider>,
     );
 
-    // Nothing uploaded yet — the picker starts empty.
-    expect(await screen.findByText(/no image assets uploaded yet/i)).toBeInTheDocument();
+    // Nothing uploaded yet — the modal starts empty.
+    expect(await screen.findByText(/no image assets yet/i)).toBeInTheDocument();
 
-    const input = await screen.findByTestId("asset-upload-input-image");
+    const [input] = await screen.findAllByTestId("asset-upload-input-image");
     const file = new File(["x"], "photo.png", { type: "image/png" });
     await act(async () => {
-      selectFile(input, file);
+      selectFile(input!, file);
     });
 
     const uploaded = makeAsset({
@@ -392,17 +614,15 @@ describe("AssetLibrary + AssetPickerDialog — shared query cache", () => {
     });
     await act(async () => {
       latestXhr().respondSuccess(uploaded);
-      // Stand in for the server now having the row, ahead of the
-      // invalidated query's refetch (see the describe-block comment).
       mockAssets([uploaded], { usedBytes: uploaded.byteSize, limitBytes: null });
     });
 
-    // The picker's row is a <button> whose accessible name is its own
-    // text — scoped this way because AssetLibrary's own list also
+    // The modal's tile is a <button> whose accessible name is its own
+    // text — scoped this way because AssetLibrary's own grid also
     // renders "photo" (in a <div>, not a <button>), so a bare
     // `getByText` would be ambiguous between the two components.
-    const pickerRow = await screen.findByRole("button", { name: /photo/i });
-    fireEvent.click(pickerRow);
+    const tile = await screen.findByRole("button", { name: /photo/i });
+    fireEvent.click(tile);
     expect(onSelect).toHaveBeenCalledWith(uploaded.url);
   });
 });

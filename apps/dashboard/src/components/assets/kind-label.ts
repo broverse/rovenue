@@ -1,7 +1,7 @@
 import type { TFunction } from "i18next";
 import type { AssetKind } from "@rovenue/shared";
 
-// Shared by asset-library.tsx and asset-picker-dialog.tsx. A `switch`
+// Shared by asset-library.tsx and asset-library-modal.tsx. A `switch`
 // over the (narrow, exhaustive) AssetKind union rather than
 // `t(\`settings.assets.kind.${kind}\`)` — every t() key in this repo
 // must be a static string literal so it stays greppable; a

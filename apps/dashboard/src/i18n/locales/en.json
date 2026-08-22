@@ -656,7 +656,10 @@
       "dimensions": "{{width}} × {{height}}",
       "usage": {
         "used": "{{used}} of {{limit}} used",
-        "unlimited": "Unlimited storage"
+        "unlimited": "Unlimited storage",
+        "low": "Storage is running low — {{used}} of {{limit}} used.",
+        "full": "Storage is full — {{used}} of {{limit}} used. Delete an asset to make room, or move to a bigger plan.",
+        "upgrade": "Upgrade for more storage"
       },
       "upload": {
         "image": "Upload image",
@@ -684,12 +687,14 @@
         "usageSome_other": "{{count}} published paywalls use this asset: {{names}}. Deleting it will break those paywalls immediately.",
         "errors": {
           "generic": "Could not delete the asset. Please try again."
-        }
+        },
+        "usageFailed": "Couldn't check which published paywalls use this asset. Deleting it now could break a live paywall with no warning."
       },
       "picker": {
         "title": "Choose an asset",
-        "empty": "No {{kind}} assets uploaded yet. Upload one from the asset library, or type a URL directly.",
-        "select": "Use this asset"
+        "empty": "No {{kind}} assets yet. Upload one above, or close this and type a URL directly.",
+        "select": "Use this asset",
+        "inUse": "In use"
       }
     }
   },

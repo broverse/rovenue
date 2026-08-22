@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronLeft,
   Code,
+  FolderOpen,
   Image as ImageIcon,
   Play,
   Plus,
@@ -30,6 +31,7 @@ import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { RuleEditor, branchableQuestionIds } from "./rule-editor";
 import { ColorSwatchInput } from "./color-swatch-input";
 import { useProjectPaywalls } from "../../lib/hooks/useProjectPaywalls";
+import { AssetLibraryModal } from "../assets/asset-library-modal";
 
 const PROGRESS_STYLES: ReadonlyArray<{ value: ProgressStyle; label: string }> = [
   { value: "solid", label: "Solid" },
@@ -160,18 +162,12 @@ export const PropertiesPanel = component(({ editLocale, defaultLocale }: Propert
             ]}
           />
           {(page.mediaKind === "image" || page.mediaKind === "video") && (
-            <Field label="Media URL" className="mt-3">
-              <input
-                value={page.mediaUrl ?? ""}
-                onChange={(e) => set({ mediaUrl: e.currentTarget.value })}
-                placeholder={
-                  page.mediaKind === "image"
-                    ? "https://cdn.example.com/photo.jpg"
-                    : "https://cdn.example.com/clip.mp4"
-                }
-                className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
-              />
-            </Field>
+            <MediaUrlField
+              projectId={vm.projectId}
+              mediaKind={page.mediaKind}
+              value={page.mediaUrl ?? ""}
+              onChange={(next) => set({ mediaUrl: next })}
+            />
           )}
         </Section>
 
@@ -1314,5 +1310,77 @@ function ProgressPreview({
     <div className={`${height} overflow-hidden rounded-full`} style={{ background: inactive }}>
       <span className="block h-full w-[60%] rounded-full" style={{ background: active }} />
     </div>
+  );
+}
+
+/**
+ * The page's media URL, with a Browse button onto the project's asset
+ * library — the SAME library and the SAME modal the paywall builder's
+ * inspector browses (components/assets/asset-library-modal.tsx).
+ *
+ * Before this, an uploaded image could only reach a funnel page by
+ * leaving the builder for the asset library route, copying the URL and
+ * coming back. Picking here writes through the EXACT SAME `onChange` a
+ * keystroke does, so a hand-typed external URL is never a degraded
+ * path: the text input is not replaced by a select-only control, and
+ * there is no way (or need) to tell an uploaded asset's URL apart from
+ * an external one once it is in `mediaUrl`.
+ *
+ * The library is filtered to the page's own `mediaKind` — offering a
+ * video asset for a page rendering an <img> would list a URL the
+ * preview then refuses to show.
+ */
+const MEDIA_URL_PLACEHOLDER: Record<"image" | "video", string> = {
+  image: "https://cdn.example.com/photo.jpg",
+  video: "https://cdn.example.com/clip.mp4",
+};
+
+const BROWSE_ASSETS_LABEL = "Browse assets";
+
+function MediaUrlField({
+  projectId,
+  mediaKind,
+  value,
+  onChange,
+}: {
+  projectId: string;
+  mediaKind: "image" | "video";
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const [browsing, setBrowsing] = useState(false);
+  return (
+    <Field label="Media URL" className="mt-3">
+      <div className="flex items-center gap-1.5">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.currentTarget.value)}
+          placeholder={MEDIA_URL_PLACEHOLDER[mediaKind]}
+          className="h-8 min-w-0 flex-1 rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+        />
+        <button
+          type="button"
+          title={BROWSE_ASSETS_LABEL}
+          aria-label={BROWSE_ASSETS_LABEL}
+          onClick={() => setBrowsing(true)}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-foreground"
+        >
+          <FolderOpen size={13} />
+        </button>
+      </div>
+      {browsing && (
+        <AssetLibraryModal
+          projectId={projectId}
+          kind={mediaKind}
+          currentUrl={value}
+          open
+          onClose={() => setBrowsing(false)}
+          onSelect={(url) => {
+            onChange(url);
+            setBrowsing(false);
+          }}
+        />
+      )}
+    </Field>
   );
 }

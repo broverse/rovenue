@@ -25,6 +25,13 @@ export type ConfirmDialogProps = {
   /** `danger` shows the warning icon + red confirm button. */
   tone?: ConfirmTone;
   /**
+   * Blocks confirming while something the decision depends on is missing
+   * — a precondition still loading, or a check that failed. Use it when
+   * proceeding uninformed is worse than not proceeding: the description
+   * should say WHY, since a disabled button with no reason reads as a bug.
+   */
+  confirmDisabled?: boolean;
+  /**
    * Runs when the user confirms. If it returns a promise the dialog shows a
    * busy state and only closes once it resolves; a rejection keeps it open so
    * the caller can surface the error.
@@ -47,6 +54,7 @@ export function ConfirmDialog({
   cancelLabel,
   hideCancel = false,
   tone = "default",
+  confirmDisabled = false,
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
@@ -119,7 +127,7 @@ export function ConfirmDialog({
               variant="solid-primary"
               size="sm"
               onClick={handleConfirm}
-              disabled={busy}
+              disabled={busy || confirmDisabled}
               className={cn(
                 isDanger &&
                   "!bg-rv-danger !text-white hover:!bg-rv-danger/90 focus-visible:!ring-rv-danger",
