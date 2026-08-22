@@ -36,37 +36,172 @@ import { db } from "./src/drizzle/client";
 // Every insert uses `ON CONFLICT DO NOTHING` so re-running the
 // script against a seeded DB is a no-op.
 
-const DEMO_USER_ID = "usr_demo";
-const DEMO_USER_EMAIL = "demo@rovenue.io";
-const DEMO_PROJECT_ID = "proj_demo_seed";
-const DEMO_PROJECT_SLUG = "demo";
-const DEMO_PUBLIC_KEY = "rov_pub_demo_production";
-const DEMO_API_KEY_ID = "apkdemoseedkey";
-const DEMO_SECRET_PLAINTEXT = `rov_sec_${DEMO_API_KEY_ID}_demosecret123456789`;
+// -------- Seed target --------
+//
+// With no env vars set the seed owns its data end to end: it creates the demo
+// user and demo project, then fills them. To load the same fixture set into an
+// account that already exists instead:
+//
+//   SEED_PROJECT_NAME="my project" SEED_USER_EMAIL=me@example.com pnpm db:seed
+//
+// (or SEED_PROJECT_ID=<id> to skip the name lookup). In that mode the seed
+// never creates a user or a project — it resolves them and fails loudly if
+// they are missing, ambiguous, or the user is not a member of the project.
+const TARGET_PROJECT_ID = process.env.SEED_PROJECT_ID ?? null;
+const TARGET_PROJECT_NAME = process.env.SEED_PROJECT_NAME ?? null;
+const TARGET_USER_EMAIL = process.env.SEED_USER_EMAIL ?? null;
+
+const DEFAULT_USER_ID = "usr_demo";
+const DEFAULT_USER_EMAIL = "demo@rovenue.io";
+const DEFAULT_PROJECT_ID = "proj_demo_seed";
+const DEFAULT_PROJECT_NAME = "Demo Project";
+// Namespace stamped into every primary key the seed mints, so two projects can
+// hold the same fixtures side by side. Most of the natural keys here are
+// unique per project, but three are unique GLOBALLY and would otherwise
+// collide across projects: api_keys.keyPublic, purchases (store,
+// storeTransactionId) and webhook_events (source, storeEventId). The "demo"
+// namespace reproduces the historical ids byte for byte, so re-running against
+// an already-seeded demo project stays the no-op it has always been.
+const DEFAULT_NS = "demo";
+
 const PRODUCT_PRO_MONTHLY = "pro_monthly";
 const PRODUCT_CREDITS_100 = "credits_100";
-const DEMO_PRODUCT_PRO_ID = "prd_demo_pro_monthly";
-const DEMO_PRODUCT_CREDITS_ID = "prd_demo_credits_100";
-const DEMO_OFFERING_ID = "ofr_demo_default";
-const DEMO_ACCESS_PREMIUM_ID = "acs_demo_premium000000000";
-const DEMO_ACCESS_ANALYTICS_ID = "acs_demo_analytics0000000";
-const DEMO_AUDIENCE_ALL_ID = "aud_demo_all";
-const DEMO_AUDIENCE_TR_ID = "aud_demo_tr";
 const DEMO_PACKAGE_PRO = "pro_monthly";
 const DEMO_PACKAGE_CREDITS = "credits_100";
-const DEMO_PAYWALL_DEFAULT_ID = "pwl_demo_default";
-const DEMO_PAYWALL_PROMO_ID = "pwl_demo_promo";
-const DEMO_PLACEMENT_ID = "plc_demo_onboarding";
-const DEMO_FLAG_ID = "ff_demo_onboarding";
-const DEMO_EXPERIMENT_ID = "exp_demo_paywall";
-const DEMO_CURRENCY_GOLD_ID = "vc_demo_gold";
-const DEMO_CURRENCY_GEM_ID = "vc_demo_gem";
 const DEFAULT_OFFERING = "default";
 const SUBSCRIBER_COUNT = 20;
 const COUNTRIES = ["TR", "US", "DE", "GB", "BR", "JP", "IN", "FR"];
 const PLATFORMS = ["ios", "android", "web"];
 
+/** Every id the seed mints, derived from the target's key namespace. */
+function seedIds(ns: string) {
+  const apiKeyId = `apk${ns}seedkey`;
+  return {
+    DEMO_PUBLIC_KEY: `rov_pub_${ns}_production`,
+    DEMO_API_KEY_ID: apiKeyId,
+    DEMO_SECRET_PLAINTEXT: `rov_sec_${apiKeyId}_${ns}secret123456789`,
+    DEMO_PRODUCT_PRO_ID: `prd_${ns}_pro_monthly`,
+    DEMO_PRODUCT_CREDITS_ID: `prd_${ns}_credits_100`,
+    DEMO_OFFERING_ID: `ofr_${ns}_default`,
+    DEMO_ACCESS_PREMIUM_ID: `acs_${ns}_premium000000000`,
+    DEMO_ACCESS_ANALYTICS_ID: `acs_${ns}_analytics0000000`,
+    DEMO_AUDIENCE_ALL_ID: `aud_${ns}_all`,
+    DEMO_AUDIENCE_TR_ID: `aud_${ns}_tr`,
+    DEMO_PAYWALL_DEFAULT_ID: `pwl_${ns}_default`,
+    DEMO_PAYWALL_PROMO_ID: `pwl_${ns}_promo`,
+    DEMO_PLACEMENT_ID: `plc_${ns}_onboarding`,
+    DEMO_FLAG_ID: `ff_${ns}_onboarding`,
+    DEMO_EXPERIMENT_ID: `exp_${ns}_paywall`,
+    DEMO_CURRENCY_GOLD_ID: `vc_${ns}_gold`,
+    DEMO_CURRENCY_GEM_ID: `vc_${ns}_gem`,
+  };
+}
+
+interface SeedTarget {
+  ns: string;
+  projectId: string;
+  projectName: string;
+  userEmail: string | null;
+  /** Demo path only: the seed owns the account, so it creates it. */
+  createsAccount: boolean;
+}
+
+async function resolveTarget(): Promise<SeedTarget> {
+  if (!TARGET_PROJECT_ID && !TARGET_PROJECT_NAME) {
+    return {
+      ns: DEFAULT_NS,
+      projectId: DEFAULT_PROJECT_ID,
+      projectName: DEFAULT_PROJECT_NAME,
+      userEmail: DEFAULT_USER_EMAIL,
+      createsAccount: true,
+    };
+  }
+
+  const matches = await db
+    .select({ id: projects.id, name: projects.name })
+    .from(projects)
+    .where(
+      TARGET_PROJECT_ID
+        ? eq(projects.id, TARGET_PROJECT_ID)
+        : eq(projects.name, TARGET_PROJECT_NAME!),
+    );
+
+  const wanted = TARGET_PROJECT_ID
+    ? `SEED_PROJECT_ID=${TARGET_PROJECT_ID}`
+    : `SEED_PROJECT_NAME=${TARGET_PROJECT_NAME}`;
+  if (matches.length === 0) {
+    throw new Error(`${wanted} matches no project.`);
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `${wanted} matches ${matches.length} projects (${matches
+        .map((p) => p.id)
+        .join(", ")}). Re-run with SEED_PROJECT_ID.`,
+    );
+  }
+  const project = matches[0]!;
+
+  if (TARGET_USER_EMAIL) {
+    const [owner] = await db
+      .select({ id: userTable.id })
+      .from(userTable)
+      .where(eq(userTable.email, TARGET_USER_EMAIL))
+      .limit(1);
+    if (!owner) {
+      throw new Error(`SEED_USER_EMAIL=${TARGET_USER_EMAIL} matches no user.`);
+    }
+    // Guard against seeding someone else's project by mistyping either half.
+    const [membership] = await db
+      .select({ role: projectMembers.role })
+      .from(projectMembers)
+      .where(
+        and(
+          eq(projectMembers.projectId, project.id),
+          eq(projectMembers.userId, owner.id),
+        ),
+      )
+      .limit(1);
+    if (!membership) {
+      throw new Error(
+        `${TARGET_USER_EMAIL} is not a member of project "${project.name}" (${project.id}).`,
+      );
+    }
+  }
+
+  return {
+    // The project id itself: unique by construction, so no chance of two
+    // seeded projects sharing a namespace.
+    ns: project.id,
+    projectId: project.id,
+    projectName: project.name,
+    userEmail: TARGET_USER_EMAIL,
+    createsAccount: false,
+  };
+}
+
 async function main() {
+  const target = await resolveTarget();
+  const DEMO_PROJECT_ID = target.projectId;
+  const {
+    DEMO_PUBLIC_KEY,
+    DEMO_API_KEY_ID,
+    DEMO_SECRET_PLAINTEXT,
+    DEMO_PRODUCT_PRO_ID,
+    DEMO_PRODUCT_CREDITS_ID,
+    DEMO_OFFERING_ID,
+    DEMO_ACCESS_PREMIUM_ID,
+    DEMO_ACCESS_ANALYTICS_ID,
+    DEMO_AUDIENCE_ALL_ID,
+    DEMO_AUDIENCE_TR_ID,
+    DEMO_PAYWALL_DEFAULT_ID,
+    DEMO_PAYWALL_PROMO_ID,
+    DEMO_PLACEMENT_ID,
+    DEMO_FLAG_ID,
+    DEMO_EXPERIMENT_ID,
+    DEMO_CURRENCY_GOLD_ID,
+    DEMO_CURRENCY_GEM_ID,
+  } = seedIds(target.ns);
+
   console.log("Seeding database...");
   const now = new Date();
 
@@ -78,19 +213,24 @@ async function main() {
   // prices change; never patch the seed in place — production-seeded
   // rows would not pick up the change.
 
+  // Byte units for the storage column, so the ladder below reads as the
+  // ladder rather than as nine-digit constants. `null` = unlimited.
+  const MB = 1024 * 1024;
+  const GB = 1024 * MB;
+
   const TIER_LIMITS = [
     // Free
-    { tier: "free",       cycle: "monthly", priceCents:      0, mtrMin:      0, mtrMax:   5000, events:     5_000_000, sql:  100, retention:   30, audit:    7 },
-    { tier: "free",       cycle: "annual",  priceCents:      0, mtrMin:      0, mtrMax:   5000, events:     5_000_000, sql:  100, retention:   30, audit:    7 },
+    { tier: "free",       cycle: "monthly", priceCents:      0, mtrMin:      0, mtrMax:   5000, events:     5_000_000, sql:  100, retention:   30, audit:    7, storage:      250 * MB },
+    { tier: "free",       cycle: "annual",  priceCents:      0, mtrMin:      0, mtrMax:   5000, events:     5_000_000, sql:  100, retention:   30, audit:    7, storage:      250 * MB },
     // Indie (merged former indie+pro band)
-    { tier: "indie",      cycle: "monthly", priceCents:   4900, mtrMin:   5000, mtrMax:  50000, events:    50_000_000, sql: 2500, retention:  180, audit:   90 },
-    { tier: "indie",      cycle: "annual",  priceCents:  49000, mtrMin:   5000, mtrMax:  50000, events:    50_000_000, sql: 2500, retention:  180, audit:   90 },
+    { tier: "indie",      cycle: "monthly", priceCents:   4900, mtrMin:   5000, mtrMax:  50000, events:    50_000_000, sql: 2500, retention:  180, audit:   90, storage:        5 * GB },
+    { tier: "indie",      cycle: "annual",  priceCents:  49000, mtrMin:   5000, mtrMax:  50000, events:    50_000_000, sql: 2500, retention:  180, audit:   90, storage:        5 * GB },
     // Studio (former scale bracket)
-    { tier: "studio",     cycle: "monthly", priceCents:  39900, mtrMin:  50000, mtrMax: 250000, events:   250_000_000, sql: null, retention:  365, audit:  365 },
-    { tier: "studio",     cycle: "annual",  priceCents: 399000, mtrMin:  50000, mtrMax: 250000, events:   250_000_000, sql: null, retention:  365, audit:  365 },
+    { tier: "studio",     cycle: "monthly", priceCents:  39900, mtrMin:  50000, mtrMax: 250000, events:   250_000_000, sql: null, retention:  365, audit:  365, storage:       50 * GB },
+    { tier: "studio",     cycle: "annual",  priceCents: 399000, mtrMin:  50000, mtrMax: 250000, events:   250_000_000, sql: null, retention:  365, audit:  365, storage:       50 * GB },
     // Enterprise
-    { tier: "enterprise", cycle: "monthly", priceCents:      0, mtrMin: 250000, mtrMax:   null, events:          null, sql: null, retention: 1825, audit: 1825 },
-    { tier: "enterprise", cycle: "annual",  priceCents:      0, mtrMin: 250000, mtrMax:   null, events:          null, sql: null, retention: 1825, audit: 1825 },
+    { tier: "enterprise", cycle: "monthly", priceCents:      0, mtrMin: 250000, mtrMax:   null, events:          null, sql: null, retention: 1825, audit: 1825, storage:      null     },
+    { tier: "enterprise", cycle: "annual",  priceCents:      0, mtrMin: 250000, mtrMax:   null, events:          null, sql: null, retention: 1825, audit: 1825, storage:      null     },
   ] as const;
 
   const indieMonthlyPriceId =
@@ -113,6 +253,10 @@ async function main() {
         sqlLimit: r.sql,
         retentionDays: r.retention,
         auditLogDays: r.audit,
+        // Migration 0101 repairs this on databases seeded before the
+        // column existed; it is listed here so a fresh `db:seed` never
+        // needs the repair in the first place. NULL would mean unlimited.
+        assetStorageBytesLimit: r.storage,
       })),
     )
     .onConflictDoNothing();
@@ -134,36 +278,39 @@ async function main() {
       );
   }
 
-  await db
-    .insert(userTable)
-    .values({
-      id: DEMO_USER_ID,
-      name: "Demo User",
-      email: DEMO_USER_EMAIL,
-      emailVerified: true,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoNothing();
+  // Only the demo path mints an account; a targeted run seeds into a user and
+  // project that already exist and leaves both untouched.
+  if (target.createsAccount) {
+    await db
+      .insert(userTable)
+      .values({
+        id: DEFAULT_USER_ID,
+        name: "Demo User",
+        email: DEFAULT_USER_EMAIL,
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing();
 
-  await db
-    .insert(projects)
-    .values({
-      id: DEMO_PROJECT_ID,
-      name: "Demo Project",
-      slug: DEMO_PROJECT_SLUG,
-      settings: {},
-    })
-    .onConflictDoNothing();
+    await db
+      .insert(projects)
+      .values({
+        id: DEMO_PROJECT_ID,
+        name: DEFAULT_PROJECT_NAME,
+        settings: {},
+      })
+      .onConflictDoNothing();
 
-  await db
-    .insert(projectMembers)
-    .values({
-      projectId: DEMO_PROJECT_ID,
-      userId: DEMO_USER_ID,
-      role: "OWNER",
-    })
-    .onConflictDoNothing();
+    await db
+      .insert(projectMembers)
+      .values({
+        projectId: DEMO_PROJECT_ID,
+        userId: DEFAULT_USER_ID,
+        role: "OWNER",
+      })
+      .onConflictDoNothing();
+  }
 
   await db
     .insert(apiKeys)
@@ -488,12 +635,12 @@ async function main() {
   }
   const demoSubscribers: DemoSub[] = [];
   for (let i = 0; i < SUBSCRIBER_COUNT; i++) {
-    const appUserId = `demo_user_${String(i + 1).padStart(3, "0")}`;
+    const appUserId = `${target.ns}_user_${String(i + 1).padStart(3, "0")}`;
     const country = COUNTRIES[i % COUNTRIES.length]!;
     const platform = PLATFORMS[i % PLATFORMS.length]!;
     const firstSeen = new Date(now.getTime() - (60 - i) * 86_400_000);
     const lastSeen = new Date(now.getTime() - (i % 10) * 86_400_000);
-    const subId = `sub_demo_${String(i + 1).padStart(3, "0")}`;
+    const subId = `sub_${target.ns}_${String(i + 1).padStart(3, "0")}`;
 
     await db
       .insert(subscribers)
@@ -515,8 +662,10 @@ async function main() {
 
     // ~60% of subscribers have an active pro_monthly purchase
     if (i % 5 !== 0 && i % 7 !== 0) {
-      const txId = `demo_tx_${i + 1}`;
-      const purId = `pur_demo_${i + 1}`;
+      // (store, storeTransactionId) is unique across the whole table, not per
+      // project, so txId has to carry the namespace.
+      const txId = `${target.ns}_tx_${i + 1}`;
+      const purId = `pur_${target.ns}_${i + 1}`;
       const purchasedAt = new Date(firstSeen.getTime() + 86_400_000);
       const expiresAt = new Date(purchasedAt.getTime() + 30 * 86_400_000);
       const status =
@@ -771,7 +920,8 @@ async function main() {
         subscriberId: subForEvent.id,
         source: "APPLE",
         eventType: "DID_RENEW",
-        storeEventId: "demo_evt_1",
+        // Also globally unique, paired with `source`.
+        storeEventId: `${target.ns}_evt_1`,
         status: "PROCESSED",
         payload: { demo: true },
         processedAt: new Date(now.getTime() - 86_400_000),
@@ -782,8 +932,8 @@ async function main() {
   }
 
   console.log("Seed complete");
-  console.log(`  user:        ${DEMO_USER_EMAIL}`);
-  console.log(`  project:     ${DEMO_PROJECT_SLUG} (${DEMO_PROJECT_ID})`);
+  console.log(`  user:        ${target.userEmail ?? "(existing members)"}`);
+  console.log(`  project:     ${target.projectName} (${DEMO_PROJECT_ID})`);
   console.log(`  public key:  ${DEMO_PUBLIC_KEY}`);
   console.log(`  secret key:  ${DEMO_SECRET_PLAINTEXT} (DEV ONLY)`);
   console.log(`  subscribers: ${SUBSCRIBER_COUNT}`);
