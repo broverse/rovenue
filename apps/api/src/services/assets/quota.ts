@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { drizzle, type Db } from "@rovenue/db";
+import { assetStorageFallbackLimitBytes } from "@rovenue/shared";
 import { quotasUnlimited } from "../../lib/host-mode";
 
 // =============================================================
@@ -45,14 +46,44 @@ const QUOTA_LOCK_PREFIX = "paywall-asset-quota:";
 const FALLBACK_CYCLE = "monthly";
 
 interface TierLimitRow {
+  tier: string;
   limit_bytes: string | null;
+}
+
+/** The tier a project with no `billing_subscriptions` row is entitled to
+ *  — every project starts life without one. */
+const FALLBACK_TIER = "free";
+
+/**
+ * `asset_storage_bytes_limit` spells "unlimited" and "nobody ever put a
+ * number here" with the same value: NULL. Reading the second as the
+ * first fails OPEN on a paid limit, and it did — see migration 0101 and
+ * `ASSET_STORAGE_TIER_LIMIT_BYTES`. So NULL is only honoured as
+ * unlimited for the tier that is genuinely unlimited; every other tier
+ * falls back to the shipped ladder rather than to no cap at all.
+ *
+ * Enterprise is recognised by the ladder returning `null` FOR that tier,
+ * not by a tier name spelled out here a second time.
+ *
+ * That would leave "unlimited" inexpressible for a tier the ladder caps,
+ * which is a capability the column used to have and an operator may
+ * legitimately want (a cloud deployment granting one customer unmetered
+ * storage). A NEGATIVE byte count is meaningless as a cap and cannot be
+ * confused with an unfilled row, so it carries that intent instead —
+ * `ASSET_STORAGE_UNLIMITED_LIMIT_BYTES`.
+ */
+function resolveLimitBytes(tier: string, limitBytes: string | null): number | null {
+  if (limitBytes === null) return assetStorageFallbackLimitBytes(tier);
+  const bytes = Number(limitBytes);
+  return bytes < 0 ? null : bytes;
 }
 
 async function tierLimitBytes(db: Db, projectId: string): Promise<number | null> {
   if (quotasUnlimited()) return null;
 
   const rows = await db.execute(sql`
-    SELECT "billing_tier_limits"."asset_storage_bytes_limit" AS limit_bytes
+    SELECT "billing_subscriptions"."tier" AS tier,
+           "billing_tier_limits"."asset_storage_bytes_limit" AS limit_bytes
     FROM "billing_subscriptions"
     JOIN "billing_tier_limits"
       ON "billing_tier_limits"."tier" = "billing_subscriptions"."tier"
@@ -65,22 +96,22 @@ async function tierLimitBytes(db: Db, projectId: string): Promise<number | null>
   // No subscription row must NOT mean unlimited — that fails OPEN on a
   // paid limit, and every project starts life without one. Fall back to
   // the free tier's cap, which is what such a project is entitled to.
+  // (A legacy tier — pro/scale/growth — has no ladder row either, so it
+  // lands here too and gets the same conservative answer.)
   if (!row) return freeTierLimitBytes(db);
-  if (row.limit_bytes === null) return null; // enterprise: genuinely unlimited
-  return Number(row.limit_bytes);
+  return resolveLimitBytes(row.tier, row.limit_bytes);
 }
 
 async function freeTierLimitBytes(db: Db): Promise<number | null> {
   const rows = await db.execute(sql`
     SELECT "billing_tier_limits"."asset_storage_bytes_limit" AS limit_bytes
     FROM "billing_tier_limits"
-    WHERE "billing_tier_limits"."tier" = 'free'
+    WHERE "billing_tier_limits"."tier" = ${FALLBACK_TIER}
       AND "billing_tier_limits"."cycle" = ${FALLBACK_CYCLE}
     LIMIT 1
   `);
-  const row = (rows as unknown as { rows: TierLimitRow[] }).rows[0];
-  if (!row || row.limit_bytes === null) return null;
-  return Number(row.limit_bytes);
+  const row = (rows as unknown as { rows: Pick<TierLimitRow, "limit_bytes">[] }).rows[0];
+  return resolveLimitBytes(FALLBACK_TIER, row?.limit_bytes ?? null);
 }
 
 async function usedBytes(db: Db, projectId: string): Promise<number> {

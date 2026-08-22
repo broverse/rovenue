@@ -22,6 +22,10 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import {
+  ASSET_STORAGE_TIER_LIMIT_BYTES,
+  ASSET_STORAGE_UNLIMITED_LIMIT_BYTES,
+} from "@rovenue/shared";
 import { getDb, projects, billingSubscriptions, billingTierLimits } from "@rovenue/db";
 import {
   reserveStorage,
@@ -138,6 +142,60 @@ describe("storage quota", () => {
     // Must NOT be unlimited: failing open here would hand every
     // brand-new project unmetered storage.
     expect(await reserveStorage(db, projectId, 2000)).toBeNull();
+  });
+
+  // ----- NULL means "unseeded", not "free" -----
+  //
+  // `asset_storage_bytes_limit` spells both "unlimited" and "nobody ever
+  // put a number here" as NULL, and reading the second as the first
+  // fails open on a paid limit. Migrations did exactly that: 0099 filled
+  // the column with an UPDATE, 0100 then seeded the ladder with an
+  // INSERT that never listed it — so a database built from migrations
+  // alone had NULL on every tier and no quota at all.
+
+  it("does not treat an unseeded free-tier cap as unlimited", async () => {
+    const projectId = await seedProject({ tier: "free" });
+    await setTierLimit("free", null);
+
+    const usage = await getStorageUsage(db, projectId);
+    expect(usage.limitBytes).toBe(ASSET_STORAGE_TIER_LIMIT_BYTES.free);
+    // One byte over the fallback cap, not an astronomical number:
+    // `paywall_asset_reservations.bytes` is an integer column, so a
+    // 10^12 probe would fail on the type rather than on the quota.
+    expect(
+      await reserveStorage(db, projectId, ASSET_STORAGE_TIER_LIMIT_BYTES.free + 1),
+    ).toBeNull();
+  });
+
+  it("falls back to the tier's OWN cap, not the free one", async () => {
+    const projectId = await seedProject({ tier: "indie" });
+    await setTierLimit("indie", null);
+
+    // An indie project with an unseeded row must not be squeezed into
+    // the free band it is paying to leave.
+    const usage = await getStorageUsage(db, projectId);
+    expect(usage.limitBytes).toBe(ASSET_STORAGE_TIER_LIMIT_BYTES.indie);
+  });
+
+  it("honours a negative cap as an explicit, deliberate unlimited", async () => {
+    // Narrowing NULL to "unseeded" costs the column its way of saying
+    // "this capped tier is unlimited here" — a thing a cloud operator
+    // may legitimately want for one customer. The sentinel gives it
+    // back, unambiguously.
+    const projectId = await seedProject({ tier: "indie" });
+    await setTierLimit("indie", ASSET_STORAGE_UNLIMITED_LIMIT_BYTES);
+
+    expect((await getStorageUsage(db, projectId)).limitBytes).toBeNull();
+    expect(await reserveStorage(db, projectId, 10 ** 9)).toBe(UNLIMITED_RESERVATION);
+  });
+
+  it("does not treat an unseeded free-tier cap as unlimited for an unsubscribed project", async () => {
+    const projectId = await seedProject({ withSubscription: false });
+    await setTierLimit("free", null);
+
+    expect((await getStorageUsage(db, projectId)).limitBytes).toBe(
+      ASSET_STORAGE_TIER_LIMIT_BYTES.free,
+    );
   });
 
   // This is the whole point of the task. A read-then-write check lets

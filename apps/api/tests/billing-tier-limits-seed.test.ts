@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { ASSET_STORAGE_TIER_LIMIT_BYTES } from "@rovenue/shared";
 import { db } from "../../packages/db/src/drizzle/client";
 import { billingTierLimits } from "../../packages/db/src/drizzle/schema";
 
@@ -15,6 +16,33 @@ describe("billing_tier_limits seed", () => {
     expect(new Set(rows.map((r) => r.tier))).toEqual(
       new Set(["free", "indie", "studio", "enterprise"]),
     );
+  });
+
+  // The template this runs against is built from migrations + seed.ts
+  // alone (tests/global-setup.ts), which is precisely the fresh-install
+  // path where the storage caps went missing: 0099 added the column with
+  // an UPDATE, and 0100 seeded the ladder with an INSERT that never
+  // listed it, so every row landed NULL — i.e. unlimited storage on
+  // every tier of every new deployment. Asserting the numbers here is
+  // what keeps a future ladder migration from dropping them again.
+  it("carries an asset storage cap on every tier that has one", async () => {
+    const rows = await db.select().from(billingTierLimits);
+
+    for (const row of rows) {
+      const expected =
+        ASSET_STORAGE_TIER_LIMIT_BYTES[
+          row.tier as keyof typeof ASSET_STORAGE_TIER_LIMIT_BYTES
+        ];
+      expect(
+        { tier: row.tier, cycle: row.cycle, limit: row.assetStorageBytesLimit },
+      ).toEqual({ tier: row.tier, cycle: row.cycle, limit: expected });
+    }
+  });
+
+  it("leaves only enterprise unlimited", async () => {
+    const rows = await db.select().from(billingTierLimits);
+    const unlimited = rows.filter((r) => r.assetStorageBytesLimit === null);
+    expect(new Set(unlimited.map((r) => r.tier))).toEqual(new Set(["enterprise"]));
   });
 
   it("Free tier is $0 both cycles", async () => {
