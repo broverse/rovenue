@@ -1,7 +1,10 @@
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import { ERROR_CODE } from "@rovenue/shared";
 import { env } from "./lib/env";
+import { fail } from "./lib/response";
 import { errorHandler } from "./middleware/error";
 import { globalIpRateLimit } from "./middleware/rate-limit";
 import { metricsMiddleware } from "./middleware/metrics";
@@ -27,6 +30,67 @@ import { stripeOAuthRoute } from "./routes/stripe-oauth";
 import { registerAllIntentHandlers } from "./services/copilot/intent-handlers";
 
 registerAllIntentHandlers();
+
+// =============================================================
+// Global request-body ceiling
+// =============================================================
+//
+// Defense-in-depth against oversized/hostile bodies (whole-phase review
+// follow-up). 1 MiB comfortably clears every legitimate payload — the
+// largest are Apple JWS receipt chains (tens of KB) and builder configs
+// (bounded to 500 nodes well below this) — while capping memory per
+// request. 413 on breach.
+const GLOBAL_BODY_LIMIT_BYTES = 1024 * 1024;
+
+/**
+ * The upload routes bind their OWN, deliberately larger, `bodyLimit`:
+ * assets is 10 MiB image / 50 MiB video / 2 MiB Lottie (three
+ * registrations precisely because `maxSize` is fixed per registration —
+ * routes/dashboard/assets.ts), fonts is 2 MiB plus a multipart framing
+ * allowance. A `*` middleware on the ROOT app runs before a sub-route's
+ * own, so a global cap applied to those paths does not additionally
+ * protect them — it SHADOWS them, and every upload over 1 MiB dies here
+ * with hono's default plain-text "Payload Too Large" instead of ever
+ * reaching the route that has a real cap and a real error envelope.
+ *
+ * That failure also misreports itself in the browser: `bodyLimit`
+ * rejects off the Content-Length header before reading a byte, so the
+ * response (and the closed socket) arrive while the client is still
+ * sending the body — XHR then fires `error`, not `load`, and the
+ * dashboard can only say "network error" because it never gets a status
+ * at all. So the shadowing was invisible from the client and from the
+ * route's own tests, which mount `assetsRoute` on a bare Hono app.
+ *
+ * Matched paths are exactly the two upload endpoints, and only for the
+ * POST that uploads. The method is part of the match rather than left
+ * implicit in "the siblings carry no body": a body-carrying verb added
+ * at one of these paths later would otherwise inherit an exemption
+ * nobody wrote for it, silently and with no compile-time signal.
+ */
+const ROUTE_OWNED_BODY_LIMIT_PATH =
+  /^\/dashboard\/projects\/[^/]+\/(?:assets\/(?:image|video|lottie)|fonts)$/;
+
+const globalBodyLimit = bodyLimit({
+  maxSize: GLOBAL_BODY_LIMIT_BYTES,
+  // Hono's default `onError` throws an HTTPException whose text lives in
+  // a `res` that `errorHandler` replaces with its own envelope, so a
+  // breach reached the client as HTTP_ERROR with an empty message. Every
+  // other rejection in this codebase is a `{ error: { code, message } }`
+  // a caller can act on; this one is too.
+  onError: (c) =>
+    c.json(
+      fail(
+        ERROR_CODE.PAYLOAD_TOO_LARGE,
+        `Request body exceeds the ${GLOBAL_BODY_LIMIT_BYTES}-byte limit`,
+      ),
+      413,
+    ),
+});
+
+const scopedGlobalBodyLimit: MiddlewareHandler = (c, next) =>
+  c.req.method === "POST" && ROUTE_OWNED_BODY_LIMIT_PATH.test(c.req.path)
+    ? next()
+    : globalBodyLimit(c, next);
 
 // =============================================================
 // Hono app + RPC-ready AppType export
@@ -76,12 +140,7 @@ export function createApp() {
   const app = new Hono()
     .use("*", requestIdMiddleware)
     .use("*", requestLoggerMiddleware)
-    // Defense-in-depth against oversized/hostile bodies (whole-phase review
-    // follow-up). 1 MiB comfortably clears every legitimate payload — the
-    // largest are Apple JWS receipt chains (tens of KB) and builder
-    // configs (bounded to 500 nodes well below this) — while capping
-    // memory per request. 413 on breach.
-    .use("*", bodyLimit({ maxSize: 1024 * 1024 }))
+    .use("*", scopedGlobalBodyLimit)
     .use(
       "*",
       cors({
