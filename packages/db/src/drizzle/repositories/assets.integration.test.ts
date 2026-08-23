@@ -457,3 +457,120 @@ describe("setPublishedVersion — asset usage index (Task 10)", () => {
     expect(await usageRowsFor(version.id)).toEqual([assetA]);
   });
 });
+
+// =============================================================
+// Task 9 (2026-08-23 store-billing correctness plan) — the two reads
+// the asset referential guard is built on: `findLiveAssetIds` backs
+// the publish-time existence check (publish route), and
+// `listDraftBuilderConfigs` backs the DELETE route's draft-usage walk.
+// =============================================================
+
+describe("findLiveAssetIds (Task 9)", () => {
+  it("returns only the live ids among the requested set, scoped to the project", async () => {
+    const live = await drizzleRepos.assetRepo.createAsset(
+      db,
+      input({ contentHash: createId().padEnd(64, "k") }),
+    );
+    const deleted = await drizzleRepos.assetRepo.createAsset(
+      db,
+      input({ contentHash: createId().padEnd(64, "l") }),
+    );
+    await drizzleRepos.assetRepo.softDeleteAsset(db, PROJECT_ID, deleted.id);
+    const foreignId = createId();
+    await drizzleRepos.assetRepo.createAsset(
+      db,
+      input({
+        projectId: OTHER_PROJECT_ID,
+        id: foreignId,
+        storageKey: `${OTHER_PROJECT_ID}/${foreignId}.webp`,
+        contentHash: createId().padEnd(64, "m"),
+      }),
+    );
+
+    const found = await drizzleRepos.assetRepo.findLiveAssetIds(db, PROJECT_ID, [
+      live.id,
+      deleted.id,
+      foreignId,
+      createId(), // never existed anywhere
+    ]);
+    expect(found).toEqual(new Set([live.id]));
+  });
+
+  it("returns an empty set for an empty id list without querying", async () => {
+    expect(await drizzleRepos.assetRepo.findLiveAssetIds(db, PROJECT_ID, [])).toEqual(
+      new Set(),
+    );
+  });
+});
+
+describe("listDraftBuilderConfigs (Task 9)", () => {
+  it("returns id/name/builderConfig for this project's paywalls with a draft config, and nothing else", async () => {
+    const [offering] = await db
+      .insert(offerings)
+      .values({
+        projectId: PROJECT_ID,
+        identifier: `off-draft-cfg-${RUN_ID}`,
+        packages: [{ identifier: "monthly", productId: null }],
+      })
+      .returning();
+    const draftConfig = {
+      formatVersion: 2,
+      root: { type: "image", id: "img", url: { light: "https://cdn.test/x.webp" } },
+    };
+    const [withConfig] = await db
+      .insert(paywalls)
+      .values({
+        projectId: PROJECT_ID,
+        identifier: `pw-draft-cfg-${RUN_ID}`,
+        name: "Draft-config paywall",
+        offeringId: offering!.id,
+        remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+        builderConfig: draftConfig,
+      })
+      .returning();
+    const [withoutConfig] = await db
+      .insert(paywalls)
+      .values({
+        projectId: PROJECT_ID,
+        identifier: `pw-no-cfg-${RUN_ID}`,
+        name: "Remote-config-only paywall",
+        offeringId: offering!.id,
+        remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      })
+      .returning();
+    const [otherOffering] = await db
+      .insert(offerings)
+      .values({
+        projectId: OTHER_PROJECT_ID,
+        identifier: `off-draft-cfg-other-${RUN_ID}`,
+        packages: [{ identifier: "monthly", productId: null }],
+      })
+      .returning();
+    const [foreign] = await db
+      .insert(paywalls)
+      .values({
+        projectId: OTHER_PROJECT_ID,
+        identifier: `pw-draft-cfg-other-${RUN_ID}`,
+        name: "Other project's paywall",
+        offeringId: otherOffering!.id,
+        remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+        builderConfig: draftConfig,
+      })
+      .returning();
+
+    const rows = await drizzleRepos.paywallRepo.listDraftBuilderConfigs(
+      db,
+      PROJECT_ID,
+    );
+    expect(rows).toContainEqual({
+      id: withConfig!.id,
+      name: "Draft-config paywall",
+      builderConfig: draftConfig,
+    });
+    const ids = rows.map((r) => r.id);
+    // A null draft is dead weight to the guard's walk — filtered in SQL,
+    // not in JS.
+    expect(ids).not.toContain(withoutConfig!.id);
+    expect(ids).not.toContain(foreign!.id);
+  });
+});

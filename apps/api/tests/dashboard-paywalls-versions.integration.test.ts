@@ -266,6 +266,76 @@ describe("POST /paywalls/:id/publish — asset usage index (Task 10)", () => {
   });
 });
 
+// =============================================================
+// Publish-time asset existence check (Task 9, 2026-08-23 store-billing
+// correctness plan). The usage index above records what a published
+// version references — this check REJECTS the publish outright when
+// the tree references one of THIS project's asset URLs whose row is
+// soft-deleted or was never created: the S3 object behind such a URL
+// is gone (asset delete hard-deletes the object), so publishing would
+// ship a tree that 404s on device. External URLs and other projects'
+// asset URLs pass untouched — same boundary as the usage resolver.
+// =============================================================
+
+describe("POST /paywalls/:id/publish — asset existence check (Task 9)", () => {
+  async function publish(paywallId: string) {
+    const app = buildApp();
+    return app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+  }
+
+  it("400s with asset_missing when the tree references a soft-deleted asset", async () => {
+    const { assetId, url } = await seedAsset(projectId);
+    const paywall = await createPaywall("asset-deleted", configWithImageUrl(url));
+    await drizzle.assetRepo.softDeleteAsset(db, projectId, assetId);
+
+    const res = await publish(paywall.id);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(body.error.code).toBe("asset_missing");
+    // The message names the offending URL so the caller can find the
+    // node to fix.
+    expect(body.error.message).toContain(url);
+
+    // Nothing was published: no version row, paywall still a draft.
+    const [row] = await db
+      .select()
+      .from(drizzle.schema.paywalls)
+      .where(eq(drizzle.schema.paywalls.id, paywall.id));
+    expect(row!.publishedVersionId).toBeNull();
+    expect(row!.status).toBe("draft");
+  });
+
+  it("400s with asset_missing for an asset URL of this project that never existed", async () => {
+    const bogusUrl = publicUrl(buildStorageKey(projectId, createId(), "image"));
+    const paywall = await createPaywall("asset-bogus", configWithImageUrl(bogusUrl));
+
+    const res = await publish(paywall.id);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(body.error.code).toBe("asset_missing");
+    expect(body.error.message).toContain(bogusUrl);
+  });
+
+  it("publishes untouched when the only media URL is external", async () => {
+    const paywall = await createPaywall(
+      "asset-ext-ok",
+      configWithImageUrl("https://elsewhere.example/pic.png"),
+    );
+
+    const res = await publish(paywall.id);
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data.version.id).toBeTruthy();
+  });
+});
+
 describe("POST /paywalls/:id/publish", () => {
   it("snapshots the draft, points the paywall at it, and purges the cache", async () => {
     const app = buildApp();

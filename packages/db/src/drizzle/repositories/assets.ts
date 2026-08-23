@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { paywallAssets, type PaywallAsset } from "../schema";
 import type { AssetKind, ImageSourceFormat } from "@rovenue/shared";
@@ -95,6 +95,34 @@ export async function findLiveAssetByHash(
     )
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * The subset of `ids` that exist as LIVE (not soft-deleted) assets of
+ * `projectId` — the publish-time existence check (2026-08-23 Task 9):
+ * the publish route resolves every asset URL in the tree being
+ * published to an id and refuses to publish when any id is missing
+ * from this set, because the S3 object behind a soft-deleted row is
+ * already gone. Returned as a Set for O(1) membership tests against
+ * the (URL, assetId) pairs the caller holds.
+ */
+export async function findLiveAssetIds(
+  db: Db,
+  projectId: string,
+  ids: string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await db
+    .select({ id: paywallAssets.id })
+    .from(paywallAssets)
+    .where(
+      and(
+        eq(paywallAssets.projectId, projectId),
+        inArray(paywallAssets.id, ids),
+        isNull(paywallAssets.deletedAt),
+      ),
+    );
+  return new Set(rows.map((row) => row.id));
 }
 
 export async function listAssets(

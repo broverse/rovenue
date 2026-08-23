@@ -49,6 +49,17 @@ export const ERROR_CODE = {
   ASSET_STORAGE_UNAVAILABLE: "ASSET_STORAGE_UNAVAILABLE",
   ASSET_INVALID_NAME: "ASSET_INVALID_NAME",
   ASSET_PROCESSING_FAILED: "ASSET_PROCESSING_FAILED",
+  // Asset referential integrity (2026-08-23 store-billing correctness,
+  // Task 9). ASSET_IN_USE: DELETE refuses (409) to remove an asset still
+  // referenced by a published paywall version or a draft builderConfig
+  // unless `?force=true` — the S3 object is hard-deleted, so a stale
+  // reference becomes a device-visible 404. ASSET_MISSING: publish
+  // refuses (400) a tree referencing one of this project's asset URLs
+  // whose row is soft-deleted or nonexistent; external URLs pass
+  // untouched. Lowercase like PURCHASE_NOT_PAID — both ride
+  // HTTPException.cause through middleware/error.ts.
+  ASSET_IN_USE: "asset_in_use",
+  ASSET_MISSING: "asset_missing",
   // Google Play receipt for a purchase the user has not (yet) paid for —
   // subscriptionState PENDING on subscriptions, purchaseState PENDING on
   // one-time products. The purchase may still complete: the client should

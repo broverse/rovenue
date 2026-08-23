@@ -116,7 +116,16 @@ const isStorageConfigured = vi.hoisted(() => vi.fn());
 vi.mock("../../../src/lib/asset-store", () => ({
   buildStorageKey: (...args: unknown[]) => buildStorageKey(...args),
   publicUrl: (...args: unknown[]) => publicUrl(...args),
-  parseAssetUrl: () => null,
+  // The exact inverse of the `publicUrl` mock above ("https://cdn.test/
+  // {projectId}/{assetId}.{ext}") — the real module keeps the producer
+  // and parser together for the same reason (see asset-store.ts's
+  // module comment). The Task 9 in-use guard tests below depend on a
+  // draft's media URL round-tripping back to its assetId; a bare
+  // `() => null` stub would make every draft look reference-free.
+  parseAssetUrl: (url: string) => {
+    const match = /^https:\/\/cdn\.test\/([^/]+)\/([^/.]+)\.\w+$/.exec(url);
+    return match ? { projectId: match[1], assetId: match[2] } : null;
+  },
   putObject: (...args: unknown[]) => putObject(...args),
   deleteObject: (...args: unknown[]) => deleteObject(...args),
   isStorageConfigured: () => isStorageConfigured(),
@@ -151,6 +160,7 @@ const listAssets = vi.hoisted(() => vi.fn());
 const findAssetById = vi.hoisted(() => vi.fn());
 const softDeleteAsset = vi.hoisted(() => vi.fn());
 const listPublishedUsage = vi.hoisted(() => vi.fn());
+const listDraftBuilderConfigs = vi.hoisted(() => vi.fn());
 const transaction = vi.hoisted(() => vi.fn());
 
 vi.mock("@rovenue/db", async (importOriginal) => {
@@ -167,6 +177,10 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         findAssetById,
         softDeleteAsset,
         listPublishedUsage,
+      },
+      paywallRepo: {
+        ...actual.drizzle.paywallRepo,
+        listDraftBuilderConfigs,
       },
       db: { ...actual.drizzle.db, transaction },
     },
@@ -374,6 +388,7 @@ beforeEach(() => {
   findAssetById.mockReset().mockResolvedValue(null);
   softDeleteAsset.mockReset().mockResolvedValue(undefined);
   listPublishedUsage.mockReset().mockResolvedValue([]);
+  listDraftBuilderConfigs.mockReset().mockResolvedValue([]);
   transaction
     .mockReset()
     .mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) =>
@@ -1093,8 +1108,8 @@ function assetUsageRes(id: string, projectId = "p1") {
   return app().request(`/dashboard/projects/${projectId}/assets/${id}/usage`);
 }
 
-function deleteAssetRes(id: string, projectId = "p1") {
-  return app().request(`/dashboard/projects/${projectId}/assets/${id}`, {
+function deleteAssetRes(id: string, projectId = "p1", query = "") {
+  return app().request(`/dashboard/projects/${projectId}/assets/${id}${query}`, {
     method: "DELETE",
   });
 }
@@ -1310,5 +1325,137 @@ describe("DELETE /dashboard/projects/:projectId/assets/:id", () => {
       }),
       TX_SENTINEL,
     );
+  });
+
+  // -----------------------------------------------------------
+  // Task 9 (2026-08-23 store-billing correctness plan): referential
+  // guard. The S3 delete below the tombstone is a HARD delete — a
+  // reference left behind in a published version or a draft turns
+  // into a device-visible 404 the moment the object is gone. So an
+  // in-use asset must 409 unless the caller explicitly passes
+  // `?force=true` (the dashboard's confirm dialog). Usage is the
+  // UNION of the published usage index (rows written at publish
+  // time) and a walk of every current draft builderConfig — drafts
+  // have no usage rows until published, so the index alone would let
+  // a delete strand a draft one click away from going live.
+  // -----------------------------------------------------------
+  describe("in-use guard (Task 9)", () => {
+    /** A minimal draft builderConfig whose tree references asset_1 via
+     *  the same public-URL shape the `publicUrl`/`parseAssetUrl` mock
+     *  pair round-trips. */
+    function draftConfigReferencing(url: string) {
+      return {
+        formatVersion: 2,
+        defaultLocale: "en",
+        localizations: { en: {} },
+        root: { type: "image", id: "img", url: { light: url } },
+      };
+    }
+
+    it("409s with asset_in_use when a published version references the asset", async () => {
+      findAssetById.mockResolvedValue(assetFixture());
+      listPublishedUsage.mockResolvedValue([
+        { id: "pw_1", name: "Onboarding paywall" },
+      ]);
+
+      const res = await deleteAssetRes("asset_1");
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as {
+        error: { code: string; message: string };
+      };
+      expect(body.error.code).toBe("asset_in_use");
+      // The message names the referencing paywalls so the raw-API
+      // caller (no dashboard dialog) can act on it.
+      expect(body.error.message).toContain("Onboarding paywall");
+      expect(body.error.message).toContain("pw_1");
+      expect(softDeleteAsset).not.toHaveBeenCalled();
+      expect(deleteObject).not.toHaveBeenCalled();
+    });
+
+    it("409s when only a DRAFT builder config references the asset", async () => {
+      findAssetById.mockResolvedValue(assetFixture());
+      listPublishedUsage.mockResolvedValue([]);
+      listDraftBuilderConfigs.mockResolvedValue([
+        {
+          id: "pw_draft",
+          name: "Draft paywall",
+          builderConfig: draftConfigReferencing(
+            "https://cdn.test/p1/asset_1.webp",
+          ),
+        },
+      ]);
+
+      const res = await deleteAssetRes("asset_1");
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as {
+        error: { code: string; message: string };
+      };
+      expect(body.error.code).toBe("asset_in_use");
+      expect(body.error.message).toContain("Draft paywall");
+      expect(softDeleteAsset).not.toHaveBeenCalled();
+      expect(deleteObject).not.toHaveBeenCalled();
+    });
+
+    it("does not block when drafts reference only OTHER assets", async () => {
+      // Proves the guard matches THIS assetId, not merely "the draft
+      // contains some asset URL".
+      findAssetById.mockResolvedValue(assetFixture());
+      listDraftBuilderConfigs.mockResolvedValue([
+        {
+          id: "pw_draft",
+          name: "Draft paywall",
+          builderConfig: draftConfigReferencing(
+            "https://cdn.test/p1/asset_other.webp",
+          ),
+        },
+      ]);
+
+      const res = await deleteAssetRes("asset_1");
+      expect(res.status).toBe(200);
+      expect(softDeleteAsset).toHaveBeenCalledWith(TX_SENTINEL, "p1", "asset_1");
+      expect(deleteObject).toHaveBeenCalledWith("p1/asset_1.webp");
+    });
+
+    it("force=true deletes an in-use asset exactly as before, without querying usage", async () => {
+      findAssetById.mockResolvedValue(assetFixture());
+      listPublishedUsage.mockResolvedValue([
+        { id: "pw_1", name: "Onboarding paywall" },
+      ]);
+
+      const res = await deleteAssetRes("asset_1", "p1", "?force=true");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ data: { deleted: true } });
+      expect(softDeleteAsset).toHaveBeenCalledWith(TX_SENTINEL, "p1", "asset_1");
+      expect(deleteObject).toHaveBeenCalledWith("p1/asset_1.webp");
+      // force skips the usage computation entirely — "proceed exactly
+      // as today", not "compute then ignore".
+      expect(listPublishedUsage).not.toHaveBeenCalled();
+      expect(listDraftBuilderConfigs).not.toHaveBeenCalled();
+    });
+
+    it("deletes an unreferenced asset without force, after actually checking both usage sources", async () => {
+      findAssetById.mockResolvedValue(assetFixture());
+
+      const res = await deleteAssetRes("asset_1");
+      expect(res.status).toBe(200);
+      expect(listPublishedUsage).toHaveBeenCalledWith(
+        expect.anything(),
+        "asset_1",
+      );
+      expect(listDraftBuilderConfigs).toHaveBeenCalledWith(
+        expect.anything(),
+        "p1",
+      );
+      expect(softDeleteAsset).toHaveBeenCalledWith(TX_SENTINEL, "p1", "asset_1");
+    });
+
+    it("rejects a malformed force value with VALIDATION_ERROR", async () => {
+      findAssetById.mockResolvedValue(assetFixture());
+      const res = await deleteAssetRes("asset_1", "p1", "?force=yes");
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
+      expect(softDeleteAsset).not.toHaveBeenCalled();
+      expect(deleteObject).not.toHaveBeenCalled();
+    });
   });
 });

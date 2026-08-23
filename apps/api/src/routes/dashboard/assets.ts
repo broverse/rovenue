@@ -4,8 +4,10 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
+import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { drizzle, MemberRole, type Db } from "@rovenue/db";
+import { collectMediaUrls, type BuilderConfig } from "@rovenue/shared/paywall";
 import {
   ERROR_CODE,
   ASSET_MAX_BYTES,
@@ -17,6 +19,7 @@ import {
   type ImageSourceFormat,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
+import { validate } from "../../lib/validate";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -813,6 +816,14 @@ for (const kind of ["image", "video", "lottie"] as const) {
 // codebase does not stack assertProjectAccess + assertProjectCapability
 // on one write route.
 //
+// Deleting is guarded by a REFERENCE CHECK first (Task 9 of the
+// 2026-08-23 store-billing correctness plan): the object delete below
+// is a HARD delete, so an asset still referenced by a published
+// version or a draft builderConfig would 404 on device the moment the
+// bytes are gone. `?force=true` (the dashboard's confirm dialog, or a
+// deliberate API caller) skips the check entirely and proceeds exactly
+// as before.
+//
 // Delete ordering is the one behaviour in this file that must not be
 // got backwards. The row is soft-deleted FIRST, inside a transaction
 // with the audit entry, and the bucket object is deleted AFTER,
@@ -823,6 +834,54 @@ for (const kind of ["image", "video", "lottie"] as const) {
 // row commit failing after the object was already deleted leaves a
 // LIVE row pointing at bytes that no longer exist, which is a 404 for
 // every published paywall using that asset, with no automated fix.
+/** DELETE `?force=` — the explicit opt-out of the in-use guard. An
+ *  enum-then-transform rather than `z.coerce.boolean()`, because coerce
+ *  treats ANY non-empty string ("false" included) as true. */
+const deleteAssetQuerySchema = z.object({
+  force: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+});
+
+/**
+ * Every paywall of `projectId` still referencing `assetId`: the UNION
+ * of the published usage index (`listPublishedUsage` — rows written at
+ * publish time, published versions only by design) and a walk of every
+ * current draft `builderConfig` (drafts have no usage rows until they
+ * are published, so the index alone would let a delete strand a draft
+ * one click away from going live). Deduped by paywall id — a paywall
+ * whose published version AND draft both reference the asset appears
+ * once. The draft configs were schema-validated when PATCH stored
+ * them, so `collectMediaUrls`' typed walk is safe on them.
+ */
+async function findReferencingPaywalls(
+  projectId: string,
+  assetId: string,
+): Promise<{ id: string; name: string }[]> {
+  const [published, drafts] = await Promise.all([
+    drizzle.assetRepo.listPublishedUsage(drizzle.db, assetId),
+    drizzle.paywallRepo.listDraftBuilderConfigs(drizzle.db, projectId),
+  ]);
+  const referencing = new Map<string, { id: string; name: string }>();
+  for (const paywall of published) referencing.set(paywall.id, paywall);
+  for (const draft of drafts) {
+    if (referencing.has(draft.id)) continue;
+    const referenced = collectMediaUrls(draft.builderConfig as BuilderConfig).some(
+      (url) => {
+        const resolved = store.parseAssetUrl(url);
+        return (
+          resolved !== null &&
+          resolved.projectId === projectId &&
+          resolved.assetId === assetId
+        );
+      },
+    );
+    if (referenced) referencing.set(draft.id, { id: draft.id, name: draft.name });
+  }
+  return [...referencing.values()];
+}
+
 assetsRoute
   // ----- GET /dashboard/projects/:projectId/assets -----
   .get("/", async (c) => {
@@ -864,18 +923,35 @@ assetsRoute
     return c.json(ok({ publishedPaywalls }));
   })
   // ----- DELETE /dashboard/projects/:projectId/assets/:id -----
-  .delete("/:id", async (c) => {
+  .delete("/:id", validate("query", deleteAssetQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");
     const id = c.req.param("id");
     if (!projectId || !id) {
       throw new HTTPException(400, { message: "Missing projectId or id" });
     }
     const user = c.get("user");
+    const { force } = c.req.valid("query");
     await assertProjectCapability(projectId, user.id, "assets:write");
 
     const asset = await drizzle.assetRepo.findAssetById(drizzle.db, projectId, id);
     if (!asset) {
       return c.json(fail(ERROR_CODE.NOT_FOUND, "Asset not found"), 404);
+    }
+
+    // Referential guard (Task 9) — see the section comment above.
+    // Skipped entirely under force: "proceed exactly as before", not
+    // "compute the usage and ignore it".
+    if (!force) {
+      const referencing = await findReferencingPaywalls(projectId, id);
+      if (referencing.length > 0) {
+        const refs = referencing
+          .map((paywall) => `"${paywall.name}" (${paywall.id})`)
+          .join(", ");
+        throw new HTTPException(409, {
+          message: `Asset is referenced by ${referencing.length} paywall(s): ${refs}. Re-run with force=true to delete it anyway.`,
+          cause: ERROR_CODE.ASSET_IN_USE,
+        });
+      }
     }
 
     // Row first, object second (design spec §5.8) — see the module

@@ -15,13 +15,14 @@ import {
   MAX_BUILDER_DEPTH,
   MAX_BUILDER_NODES,
   builderConfigSchema,
+  collectMediaUrls,
   diffBuilderConfigs,
   isBlockingIssue,
   isPublishBlockingIssue,
   measureNodeTree,
   validateBuilderConfig,
 } from "@rovenue/shared/paywall";
-import { placementRowsSchema, type PlacementRow } from "@rovenue/shared";
+import { ERROR_CODE, placementRowsSchema, type PlacementRow } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { roviQuotaGuard } from "../../middleware/rovi-quota-guard";
 import {
@@ -729,6 +730,42 @@ export const paywallsDashboardRoute = new Hono()
       });
     }
 
+    // Asset existence check (Task 9, 2026-08-23 store-billing plan):
+    // any of THIS project's asset URLs whose row is soft-deleted or
+    // nonexistent would 404 on device — the asset DELETE route hard-
+    // deletes the S3 object — so refuse to publish the tree at all.
+    // External URLs and other projects' asset URLs pass untouched (the
+    // same boundary the usage resolver below always had). ONE walk of
+    // the tree: the (url -> assetId) map built here is also what the
+    // usage-recording resolver reads, so `parseAssetUrl` runs once per
+    // URL, not once per consumer.
+    const assetIdByUrl = new Map<string, string>();
+    for (const url of collectMediaUrls(parsed.data)) {
+      const resolved = parseAssetUrl(url);
+      // A URL that parses but names another project's asset is just as
+      // "not ours" here as an external URL — never check or record
+      // usage against an asset this project doesn't own.
+      if (resolved && resolved.projectId === projectId) {
+        assetIdByUrl.set(url, resolved.assetId);
+      }
+    }
+    if (assetIdByUrl.size > 0) {
+      const liveIds = await drizzle.assetRepo.findLiveAssetIds(
+        drizzle.db,
+        projectId,
+        [...new Set(assetIdByUrl.values())],
+      );
+      const missingUrls = [...assetIdByUrl.entries()]
+        .filter(([, assetId]) => !liveIds.has(assetId))
+        .map(([url]) => url);
+      if (missingUrls.length > 0) {
+        throw new HTTPException(400, {
+          message: `Builder config references deleted or unknown asset(s): ${missingUrls.join(", ")}`,
+          cause: ERROR_CODE.ASSET_MISSING,
+        });
+      }
+    }
+
     const result = await drizzle.db.transaction(async (tx) => {
       // Serialize concurrent publishes of THIS paywall. nextVersionNo is
       // read-then-insert, so without this two publishes could read the same
@@ -755,14 +792,12 @@ export const paywallsDashboardRoute = new Hono()
         version.id,
         {
           config: parsed.data,
-          resolveAssetUrl: (url) => {
-            const resolved = parseAssetUrl(url);
-            // A URL that parses but names another project's asset is just
-            // as "not ours" here as an external URL — never record usage
-            // against an asset this project doesn't own.
-            if (!resolved || resolved.projectId !== projectId) return null;
-            return resolved.assetId;
-          },
+          // Reads the pre-checked map built above — same cross-project
+          // guard as before (foreign/external URLs never entered the
+          // map), and every id it can return has just been verified
+          // live, so a usage row can no longer violate the FK to
+          // `paywall_assets.id` on a never-existed asset URL.
+          resolveAssetUrl: (url) => assetIdByUrl.get(url) ?? null,
         },
       );
       await audit(

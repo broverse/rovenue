@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { collectMediaUrls, type BuilderConfig } from "@rovenue/shared/paywall";
 import type { Db } from "../client";
 import {
@@ -55,6 +55,36 @@ export async function findPaywallsByIds(
     .select()
     .from(paywalls)
     .where(and(eq(paywalls.projectId, projectId), inArray(paywalls.id, ids)));
+}
+
+/**
+ * Every paywall of `projectId` that has a current DRAFT builder config
+ * (`paywalls.builderConfig` IS the draft — see the publish route's
+ * versioning comment), projected down to the three columns the asset
+ * DELETE route's in-use guard (2026-08-23 Task 9) actually walks.
+ * Drafts have no `paywall_asset_usages` rows until they are published,
+ * so `listPublishedUsage` alone cannot see them — the guard collects
+ * each draft's media URLs itself. Null-config paywalls (remote-config-
+ * only) are filtered in SQL: they cannot reference an asset and their
+ * configs are the bulk of the payload this projection avoids.
+ */
+export async function listDraftBuilderConfigs(
+  db: Db,
+  projectId: string,
+): Promise<{ id: string; name: string; builderConfig: unknown }[]> {
+  return db
+    .select({
+      id: paywalls.id,
+      name: paywalls.name,
+      builderConfig: paywalls.builderConfig,
+    })
+    .from(paywalls)
+    .where(
+      and(
+        eq(paywalls.projectId, projectId),
+        isNotNull(paywalls.builderConfig),
+      ),
+    );
 }
 
 export async function findPaywallByIdentifier(
