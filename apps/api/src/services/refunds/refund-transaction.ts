@@ -1,8 +1,14 @@
 import { google } from "googleapis";
-import { PurchaseStatus, Store, drizzle, type Purchase } from "@rovenue/db";
+import { ProductType, PurchaseStatus, Store, drizzle, type Purchase } from "@rovenue/db";
 import { getConnectedStripe } from "../../lib/stripe-platform";
 import { loadGoogleCredentials } from "../../lib/project-credentials";
 import { getGoogleAccessToken } from "../google/google-auth";
+import {
+  verifyGoogleSubscription,
+  verifyGoogleProductPurchase,
+  type GoogleVerifyConfig,
+} from "../google/google-verify";
+import { effectiveGoogleOrderId } from "../google/google-mappers";
 import { guardStatusWrite } from "../subscription-transition-guard";
 import { logger } from "../../lib/logger";
 
@@ -86,9 +92,49 @@ async function revokeAccessAfterRefund(input: {
  *     surfaces here as `store_error` (502) rather than refunding twice.
  * Neither store can double-refund; the asymmetry is only in the error surface.
  */
+/**
+ * Resolve the `GPA.…` order id Google's `orders.refund` requires. For
+ * PLAY_STORE rows `storeTransactionId` is ALWAYS the opaque purchase token
+ * (see google-webhook.ts / receipt-verify.ts — both persist the token), and
+ * the order id is never stored on the purchase row, so it must be fetched
+ * from Google at refund time: `subscriptionsv2.get` for subscriptions
+ * (newest renewal's order id), `products.get` for one-time products.
+ */
+async function resolveGoogleOrderId(input: {
+  config: GoogleVerifyConfig;
+  projectId: string;
+  productId: string;
+  purchaseToken: string;
+}): Promise<string | null> {
+  const product = await drizzle.productRepo.findProductById(
+    drizzle.db,
+    input.projectId,
+    input.productId,
+  );
+  if (product?.type === ProductType.SUBSCRIPTION) {
+    const sub = await verifyGoogleSubscription(input.config, input.purchaseToken);
+    return (
+      effectiveGoogleOrderId(sub, sub.lineItems?.[0]) ?? null
+    );
+  }
+  const googleStoreId = (
+    product?.storeIds as Record<string, string> | undefined
+  )?.google;
+  if (!googleStoreId) return null;
+  const oneTime = await verifyGoogleProductPurchase(
+    input.config,
+    googleStoreId,
+    input.purchaseToken,
+  );
+  return oneTime.orderId ?? null;
+}
+
 export async function refundTransaction(input: {
   projectId: string;
-  purchase: Pick<Purchase, "id" | "store" | "storeTransactionId" | "status">;
+  purchase: Pick<
+    Purchase,
+    "id" | "productId" | "store" | "storeTransactionId" | "status"
+  >;
 }): Promise<RefundResult> {
   const { projectId, purchase } = input;
 
@@ -147,6 +193,26 @@ export async function refundTransaction(input: {
           message: "Google Play credentials not configured for this project.",
         };
       }
+      // `ref` is the purchase token — orders.refund requires the GPA order
+      // id, a different identifier space entirely. Passing the token was
+      // rejected by Google and broke every merchant-initiated Play refund.
+      const orderId = await resolveGoogleOrderId({
+        config: {
+          credentials: creds.serviceAccount,
+          packageName: creds.packageName,
+        },
+        projectId,
+        productId: purchase.productId,
+        purchaseToken: ref,
+      });
+      if (!orderId) {
+        return {
+          ok: false,
+          code: "store_error",
+          message:
+            "Could not resolve the Google order id for this purchase token.",
+        };
+      }
       const token = await getGoogleAccessToken(creds.serviceAccount);
       const publisher = google.androidpublisher({
         version: "v3",
@@ -154,10 +220,10 @@ export async function refundTransaction(input: {
       });
       await publisher.orders.refund({
         packageName: creds.packageName,
-        orderId: ref,
+        orderId,
         revoke: true,
       });
-      success = { ok: true, store: "play", reference: ref };
+      success = { ok: true, store: "play", reference: orderId };
     } else {
       return {
         ok: false,

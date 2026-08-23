@@ -10,11 +10,41 @@ const ordersRefund = vi.fn();
 vi.mock("googleapis", () => ({ google: { androidpublisher: () => ({ orders: { refund: ordersRefund } }) } }));
 vi.mock("../google/google-auth", () => ({ getGoogleAccessToken: vi.fn(async () => "tok") }));
 
+const verifyGoogleSubscription = vi.hoisted(() => vi.fn());
+const verifyGoogleProductPurchase = vi.hoisted(() => vi.fn());
+vi.mock("../google/google-verify", () => ({
+  verifyGoogleSubscription,
+  verifyGoogleProductPurchase,
+}));
+
+const findProductById = vi.hoisted(() => vi.fn());
+vi.mock("@rovenue/db", async () => {
+  const actual = await vi.importActual<typeof import("@rovenue/db")>("@rovenue/db");
+  return {
+    ...actual,
+    drizzle: {
+      ...actual.drizzle,
+      productRepo: { ...actual.drizzle.productRepo, findProductById },
+    },
+  };
+});
+
 import { refundTransaction } from "./refund-transaction";
+
+// A realistic Play purchase row: `storeTransactionId` is ALWAYS the opaque
+// purchase token (see google-webhook.ts / receipt-verify.ts) — never a
+// `GPA.…` order id. The previous fixture hand-fed a "GPA.1"-shaped id and
+// self-confirmed the broken code path that passed the token to
+// `orders.refund`'s orderId parameter.
+const PLAY_TOKEN =
+  "opjcmghekkcbdapmneljecap.AO-J1OxWabcdefGHIJKLmnopQRstuVWxyz0123456789";
 
 beforeEach(() => {
   refundsCreate.mockReset();
   ordersRefund.mockReset();
+  verifyGoogleSubscription.mockReset();
+  verifyGoogleProductPurchase.mockReset();
+  findProductById.mockReset();
   getConnectedStripe.mockReset();
   getConnectedStripe.mockResolvedValue({
     account: { refunds: { create: refundsCreate } },
@@ -73,11 +103,77 @@ it("issues the refund against the connected account", async () => {
   );
 });
 
-it("refunds a Play order", async () => {
+it("refunds a Play subscription by resolving the real order id from the token", async () => {
   ordersRefund.mockResolvedValue({});
-  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "PLAY_STORE", storeTransactionId: "GPA.1", status: "ACTIVE" } as any });
-  expect(ordersRefund).toHaveBeenCalledWith({ packageName: "com.app", orderId: "GPA.1", revoke: true });
-  expect(r).toEqual({ ok: true, store: "play", reference: "GPA.1" });
+  findProductById.mockResolvedValue({
+    id: "prod_1",
+    type: "SUBSCRIPTION",
+    storeIds: { google: "pro_sub" },
+  });
+  verifyGoogleSubscription.mockResolvedValue({
+    latestOrderId: "GPA.3333-1111-2222-44444",
+    lineItems: [{ latestSuccessfulOrderId: "GPA.3333-1111-2222-44444..2" }],
+  });
+
+  const r = await refundTransaction({
+    projectId: "p",
+    purchase: { id: "pu", productId: "prod_1", store: "PLAY_STORE", storeTransactionId: PLAY_TOKEN, status: "ACTIVE" } as any,
+  });
+
+  expect(verifyGoogleSubscription).toHaveBeenCalledWith(
+    { credentials: expect.objectContaining({ client_email: "a@b.com" }), packageName: "com.app" },
+    PLAY_TOKEN,
+  );
+  expect(ordersRefund).toHaveBeenCalledWith({
+    packageName: "com.app",
+    orderId: "GPA.3333-1111-2222-44444..2",
+    revoke: true,
+  });
+  expect(r).toEqual({ ok: true, store: "play", reference: "GPA.3333-1111-2222-44444..2" });
+});
+
+it("refunds a Play one-time product via purchases.products.get orderId", async () => {
+  ordersRefund.mockResolvedValue({});
+  findProductById.mockResolvedValue({
+    id: "prod_2",
+    type: "CONSUMABLE",
+    storeIds: { google: "coins_100" },
+  });
+  verifyGoogleProductPurchase.mockResolvedValue({ orderId: "GPA.9999-8888-7777-66666" });
+
+  const r = await refundTransaction({
+    projectId: "p",
+    purchase: { id: "pu2", productId: "prod_2", store: "PLAY_STORE", storeTransactionId: PLAY_TOKEN, status: "ACTIVE" } as any,
+  });
+
+  expect(verifyGoogleProductPurchase).toHaveBeenCalledWith(
+    { credentials: expect.objectContaining({ client_email: "a@b.com" }), packageName: "com.app" },
+    "coins_100",
+    PLAY_TOKEN,
+  );
+  expect(ordersRefund).toHaveBeenCalledWith({
+    packageName: "com.app",
+    orderId: "GPA.9999-8888-7777-66666",
+    revoke: true,
+  });
+  expect(r).toEqual({ ok: true, store: "play", reference: "GPA.9999-8888-7777-66666" });
+});
+
+it("returns store_error when no order id can be resolved for the token", async () => {
+  findProductById.mockResolvedValue({
+    id: "prod_1",
+    type: "SUBSCRIPTION",
+    storeIds: { google: "pro_sub" },
+  });
+  verifyGoogleSubscription.mockResolvedValue({ lineItems: [{}] }); // no order ids
+
+  const r = await refundTransaction({
+    projectId: "p",
+    purchase: { id: "pu", productId: "prod_1", store: "PLAY_STORE", storeTransactionId: PLAY_TOKEN, status: "ACTIVE" } as any,
+  });
+
+  expect(ordersRefund).not.toHaveBeenCalled();
+  expect(r).toMatchObject({ ok: false, code: "store_error" });
 });
 
 it("maps store SDK errors to store_error", async () => {
@@ -100,7 +196,7 @@ it("returns store_error when the project has no Stripe connection", async () => 
 
 it("returns store_error when Google credentials are null", async () => {
   (loadGoogleCredentials as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
-  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "PLAY_STORE", storeTransactionId: "GPA.2", status: "ACTIVE" } as any });
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", productId: "prod_1", store: "PLAY_STORE", storeTransactionId: PLAY_TOKEN, status: "ACTIVE" } as any });
   expect(r).toEqual({ ok: false, code: "store_error", message: expect.any(String) });
 });
 
