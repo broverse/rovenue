@@ -539,10 +539,19 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
         storeTransactionId: ctx.transaction.transactionId,
         to: PurchaseStatus.REFUNDED,
         source: `apple:${ctx.notification.notificationType}`,
+        eventTime: appleNotificationEventTime(ctx),
       });
       await drizzle.purchaseRepo.updatePurchase(dbTx, found.id, {
-        ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
-        refundDate,
+        // refundDate rides with the guarded status: a withheld transition
+        // (row already REVOKED) must not leave a REVOKED row carrying a
+        // refundDate that disagrees with its status.
+        ...(guard.apply
+          ? {
+              status: PurchaseStatus.REFUNDED,
+              refundDate,
+              lastStoreEventAt: appleNotificationEventTime(ctx),
+            }
+          : {}),
       });
     });
     // Scope the access revoke to the refunded transaction only. The status
@@ -673,12 +682,18 @@ async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
       to: restoredStatus,
       source: `apple:${ctx.notification.notificationType}`,
       allowFrom: [PurchaseStatus.REFUNDED],
+      eventTime: appleNotificationEventTime(ctx),
     });
     await drizzle.purchaseRepo.updatePurchase(
       dbTx,
       purchase.id,
       {
-        ...(guard.apply ? { status: restoredStatus } : {}),
+        ...(guard.apply
+          ? {
+              status: restoredStatus,
+              lastStoreEventAt: appleNotificationEventTime(ctx),
+            }
+          : {}),
         // The refund no longer stands — clear its timestamp so reads
         // (and a later re-refund) start from a clean slate.
         refundDate: null,
@@ -911,6 +926,15 @@ interface UpsertPurchaseArgs {
   autoRenewStatus: boolean;
 }
 
+/**
+ * The store-side timestamp of this notification, for the guard's
+ * event-time ordering: `signedDate` on the envelope is when Apple signed
+ * (i.e. generated) the notification.
+ */
+function appleNotificationEventTime(ctx: DispatchContext): Date {
+  return new Date(ctx.notification.signedDate);
+}
+
 async function upsertPurchase(args: UpsertPurchaseArgs) {
   const { ctx, subscriberId, status, autoRenewStatus } = args;
   const tx = ctx.transaction;
@@ -932,6 +956,7 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
   // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
   // is held across the write (mechanism (a)); upsertPurchase also
   // CASE-guards the terminal status at SQL level (mechanism (b)).
+  const eventTime = appleNotificationEventTime(ctx);
   const { purchase, statusApplied } = await drizzle.db.transaction(
     async (dbTx) => {
       const guard = await guardStatusWrite({
@@ -941,6 +966,7 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
         storeTransactionId: tx.transactionId,
         to: status,
         source: `apple:${ctx.notification.notificationType}`,
+        eventTime,
       });
 
       const persisted = await drizzle.purchaseRepo.upsertPurchase(dbTx, {
@@ -968,9 +994,10 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           autoRenewStatus,
           ownershipType: tx.inAppOwnershipType,
           verifiedAt: new Date(),
+          lastStoreEventAt: eventTime,
         },
         update: {
-          ...(guard.apply ? { status } : {}),
+          ...(guard.apply ? { status, lastStoreEventAt: eventTime } : {}),
           autoRenewStatus,
           expiresDate: tx.expiresDate ? new Date(tx.expiresDate) : null,
           verifiedAt: new Date(),

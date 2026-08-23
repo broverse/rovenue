@@ -221,6 +221,14 @@ async function verifyAppleReceipt(
   // `FOR UPDATE` lock from guardStatusWrite is held across the write
   // (mechanism (a)); upsertPurchase additionally CASE-guards the
   // terminal status at SQL level (mechanism (b)).
+  // Event-time ordering: the JWS's signedDate is when Apple attested this
+  // transaction state — a receipt carrying an OLDER attestation than the
+  // last applied store event (e.g. a restore replayed after a newer
+  // webhook) must not regress status. signedDate is always present on a
+  // real JWS; fall back to verification time defensively.
+  const appleEventTime = Number.isFinite(transaction.signedDate)
+    ? new Date(transaction.signedDate)
+    : new Date();
   const purchase = (await drizzle.db.transaction(async (tx) => {
     const guard = await guardStatusWrite({
       db: tx,
@@ -229,6 +237,7 @@ async function verifyAppleReceipt(
       storeTransactionId: transaction.transactionId,
       to: status,
       source: "receipt-verify",
+      eventTime: appleEventTime,
     });
 
     return drizzle.purchaseRepo.upsertPurchase(tx, {
@@ -259,10 +268,13 @@ async function verifyAppleReceipt(
         priceCurrency: transaction.currency ?? null,
         ownershipType: transaction.inAppOwnershipType,
         verifiedAt: new Date(),
+        lastStoreEventAt: appleEventTime,
         presentedContext: args.presentedContext ?? null,
       },
       update: {
-        ...(guard.apply ? { status } : {}),
+        ...(guard.apply
+          ? { status, lastStoreEventAt: appleEventTime }
+          : {}),
         expiresDate: transaction.expiresDate
           ? new Date(transaction.expiresDate)
           : null,
@@ -469,6 +481,10 @@ async function verifyGoogleSubscriptionReceipt(
 
   // FINDING 1: guarded read + upsert in one tx (mechanism (a)); the
   // upsert also CASE-guards the terminal status at SQL level (b).
+  //
+  // Event-time ordering: the status comes from a LIVE subscriptionsv2.get,
+  // so the fetch moment is when this state was true at the store.
+  const googleEventTime = new Date();
   const purchase = (await drizzle.db.transaction(async (tx) => {
     const guard = await guardStatusWrite({
       db: tx,
@@ -477,6 +493,7 @@ async function verifyGoogleSubscriptionReceipt(
       storeTransactionId: args.receipt,
       to: status,
       source: "receipt-verify",
+      eventTime: googleEventTime,
     });
 
     return drizzle.purchaseRepo.upsertPurchase(tx, {
@@ -501,10 +518,13 @@ async function verifyGoogleSubscriptionReceipt(
         priceAmount: pricing != null ? pricing.amount.toString() : null,
         priceCurrency: pricing?.currency ?? null,
         verifiedAt: new Date(),
+        lastStoreEventAt: googleEventTime,
         presentedContext: args.presentedContext ?? null,
       },
       update: {
-        ...(guard.apply ? { status } : {}),
+        ...(guard.apply
+          ? { status, lastStoreEventAt: googleEventTime }
+          : {}),
         expiresDate,
         autoRenewStatus:
           lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,

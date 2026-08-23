@@ -283,6 +283,11 @@ async function processSubscriptionNotification(
   // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
   // is held across the write (mechanism (a)); upsertPurchase also
   // CASE-guards the terminal status at SQL level (mechanism (b)).
+  //
+  // Event-time ordering: the status derives from the LIVE
+  // subscriptionsv2.get above, so the fetch moment is when this state was
+  // true at the store — a retry-reordered older tick can't regress it.
+  const eventTime = new Date();
   const { persisted, guard } = await drizzle.db.transaction(async (dbTx) => {
     const decided = await guardStatusWrite({
       db: dbTx,
@@ -291,6 +296,7 @@ async function processSubscriptionNotification(
       storeTransactionId: ctx.notification.purchaseToken,
       to: status,
       source: `google:${ctx.notification.notificationType}`,
+      eventTime,
     });
 
     const row = await drizzle.purchaseRepo.upsertPurchase(dbTx, {
@@ -315,9 +321,10 @@ async function processSubscriptionNotification(
         priceAmount: pricing?.amount != null ? pricing.amount.toString() : null,
         priceCurrency: pricing?.currency ?? null,
         verifiedAt: new Date(),
+        lastStoreEventAt: eventTime,
       },
       update: {
-        ...(decided.apply ? { status } : {}),
+        ...(decided.apply ? { status, lastStoreEventAt: eventTime } : {}),
         expiresDate,
         autoRenewStatus,
         cancellationDate,
@@ -538,6 +545,7 @@ async function processVoidedPurchase(
   if (purchase) {
     // FINDING 1: guarded read + status write in one tx (a); the
     // updatePurchase also CASE-guards the terminal status (b).
+    const voidEventTime = new Date();
     const guard = await drizzle.db.transaction(async (dbTx) => {
       const decided = await guardStatusWrite({
         db: dbTx,
@@ -546,6 +554,7 @@ async function processVoidedPurchase(
         storeTransactionId: args.purchaseToken,
         to: PurchaseStatus.REFUNDED,
         source: "google:VOIDED_PURCHASE",
+        eventTime: voidEventTime,
       });
       await drizzle.purchaseRepo.updatePurchase(dbTx, purchase.id, {
         // Only stamp the refund when the transition actually applies. A
@@ -553,7 +562,11 @@ async function processVoidedPurchase(
         // SUBSCRIPTION_REVOKED) must not overwrite refundDate or re-record
         // the refund, which previously double-counted REVOKE+VOID pairs.
         ...(decided.apply
-          ? { status: PurchaseStatus.REFUNDED, refundDate: new Date() }
+          ? {
+              status: PurchaseStatus.REFUNDED,
+              refundDate: voidEventTime,
+              lastStoreEventAt: voidEventTime,
+            }
           : {}),
       });
       return decided;

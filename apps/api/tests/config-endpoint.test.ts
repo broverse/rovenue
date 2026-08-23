@@ -59,6 +59,12 @@ const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
       // the routes called methods this mock did not define and every request
       // died with "… is not a function" — surfacing as a bare 500.
       findSubscriberAttributesByRovenueId: vi.fn(async () => null),
+      // Merge-aware write resolution (resolveSubscriberForWrite): resolve
+      // the live row first, check for a dead row, only then create via
+      // upsert. Defaults model a brand-new rovenueId.
+      resolveSubscriberByRovenueId: vi.fn(async () => null),
+      findSubscriberByRovenueId: vi.fn(async () => null),
+      updateSubscriberAttributesById: vi.fn(async () => undefined),
       resolveSubscriberByRovenueIdOrLegacy: vi.fn(
         async (_db: unknown, args: { projectId: string; key: string }) =>
           dbMock.subscriber.findUnique({
@@ -410,20 +416,19 @@ describe("GET /v1/config", () => {
 
 describe("POST /v1/config", () => {
   it("merges request attributes with DB-stored attributes (request wins)", async () => {
-    // Phase 5: the attributes read is Drizzle-only now.
-    drizzleMock.subscriberRepo.findSubscriberAttributesByRovenueId.mockResolvedValue({
-      attributes: { plan: "free", totalRevenue: 0 },
-    } as any);
-    dbMock.subscriber.upsert.mockResolvedValue({
+    // The merge base comes off the merge-aware-RESOLVED row (not a bare
+    // rovenueId attributes read) since the retired-row fork fix.
+    drizzleMock.subscriberRepo.resolveSubscriberByRovenueId.mockResolvedValue({
       id: "sub_internal_1",
       projectId: "proj_test",
       appUserId: "user_abc",
-      attributes: { plan: "pro", totalRevenue: 0, country: "TR", platform: "ios" },
+      deletedAt: null,
+      attributes: { plan: "free", totalRevenue: 0 },
       firstSeenAt: new Date(),
       lastSeenAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
+    } as any);
 
     await app.request(
       withAuth("/v1/config?subscriberId=user_abc", {

@@ -166,6 +166,8 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
           select: { projectId: true },
         }),
       ),
+      findSubscriberByRovenueId: vi.fn(async () => null),
+      updateSubscriberAttributesById: vi.fn(async () => undefined),
       upsertSubscriber: vi.fn(
         async (
           _db: unknown,
@@ -744,8 +746,14 @@ describe("POST /v1/subscribers/:appUserId/attributes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.data.subscriber.attributes.locale).toBe("tr");
-    // New flow collapses upsert-then-update into a single upsert.
-    expect(dbMock.subscriber.upsert).toHaveBeenCalled();
+    expect(body.data.subscriber.attributes.timezone).toBe("Europe/Istanbul");
+    // Merge-aware flow: the resolved live row is updated by id — never an
+    // upsert through the rovenueId conflict target, which could land on a
+    // soft-deleted (transfer-retired) row.
+    expect(
+      drizzleMock.subscriberRepo.updateSubscriberAttributesById,
+    ).toHaveBeenCalled();
+    expect(dbMock.subscriber.upsert).not.toHaveBeenCalled();
   });
 });
 

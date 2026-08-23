@@ -126,9 +126,17 @@ export async function lockPurchaseStatusByStoreTransaction(
   db: DbOrTx,
   store: Store,
   storeTransactionId: string,
-): Promise<{ id: string; status: PurchaseStatus } | null> {
+): Promise<{
+  id: string;
+  status: PurchaseStatus;
+  lastStoreEventAt: Date | null;
+} | null> {
   const rows = await db
-    .select({ id: purchases.id, status: purchases.status })
+    .select({
+      id: purchases.id,
+      status: purchases.status,
+      lastStoreEventAt: purchases.lastStoreEventAt,
+    })
     .from(purchases)
     .where(
       and(

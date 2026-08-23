@@ -86,6 +86,7 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
           attributes: input.updateAttributes,
         }),
       ),
+      updateSubscriberAttributesById: vi.fn(async () => undefined),
     },
     lockRepo: {
       advisoryXactLock: vi.fn(async () => undefined),
@@ -168,11 +169,15 @@ beforeEach(() => {
 
 describe("POST /v1/subscribers/:appUserId/attributes", () => {
   it("preserves previously-stored attributes for a rovenueId-keyed (null appUserId) subscriber", async () => {
-    // SDK-only subscriber: rovenueId set, appUserId null. The merge
-    // base is read by rovenueId so existing keys aren't dropped.
-    drizzleMock.subscriberRepo.findSubscriberAttributesByRovenueId.mockResolvedValue(
-      { attributes: { country: "TR", tier: "free" } },
-    );
+    // SDK-only subscriber: rovenueId set, appUserId null. The route
+    // resolves the live row merge-aware (mergedInto redirects) and reads
+    // the merge base off THAT row, so existing keys aren't dropped.
+    drizzleMock.subscriberRepo.resolveSubscriberByRovenueId.mockResolvedValue({
+      id: "sub_sdk",
+      appUserId: null,
+      deletedAt: null,
+      attributes: { country: "TR", tier: "free" },
+    });
 
     const res = await app.request(
       withAuth("/v1/subscribers/rov_device_42/attributes", {
@@ -190,24 +195,26 @@ describe("POST /v1/subscribers/:appUserId/attributes", () => {
     expect(body.data.subscriber.attributes.country).toBe("TR");
     expect(body.data.subscriber.attributes.tier).toBe("pro");
 
-    // The merge base was read by rovenueId from the path param.
+    // The merge base was resolved merge-aware by the path param's
+    // rovenueId (following mergedInto redirects).
     expect(
-      drizzleMock.subscriberRepo.findSubscriberAttributesByRovenueId,
+      drizzleMock.subscriberRepo.resolveSubscriberByRovenueId,
     ).toHaveBeenCalledWith(expect.anything(), {
       projectId: "proj_test",
       rovenueId: "rov_device_42",
     });
+    // A resolved live row means NO upsert — writing through the rovenueId
+    // conflict target could land on a soft-deleted row.
+    expect(drizzleMock.subscriberRepo.upsertSubscriber).not.toHaveBeenCalled();
 
-    // The upsert merged old + new attributes and keyed on the rovenueId.
-    const upsertArgs =
-      drizzleMock.subscriberRepo.upsertSubscriber.mock.calls[0]![1];
-    expect(upsertArgs.rovenueId).toBe("rov_device_42");
-    // What gets PERSISTED is the nested set — each key an
-    // { value, source, updatedAt } entry, so a later write can tell an
-    // SDK-set value from a dashboard-set one. Only the response projects it
-    // flat (asserted above). This expectation was written against the flat
-    // shape and matched neither after the nested-attributes change.
-    expect(upsertArgs.updateAttributes).toMatchObject({
+    // The merged attributes were written to the RESOLVED row by id, as the
+    // nested set — each key an { value, source, updatedAt } entry, so a
+    // later write can tell an SDK-set value from a dashboard-set one. Only
+    // the response projects it flat (asserted above).
+    const updateCall =
+      drizzleMock.subscriberRepo.updateSubscriberAttributesById.mock.calls[0]!;
+    expect(updateCall[1]).toBe("sub_sdk");
+    expect(updateCall[2]).toMatchObject({
       country: { value: "TR" },
       tier: { value: "pro" },
     });

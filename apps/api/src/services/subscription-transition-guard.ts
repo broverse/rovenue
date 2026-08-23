@@ -40,6 +40,22 @@ export interface GuardStatusWriteArgs {
    * ordinary rejected transition.
    */
   allowFrom?: readonly PurchaseStatus[];
+  /**
+   * The STORE's own timestamp for the event driving this write (Stripe
+   * `event.created`, Apple `signedDate`, Google RTDN `eventTimeMillis`;
+   * receipt fetches pass fetch time — the fetched state is the truth as
+   * of now). When provided and STRICTLY older than the row's
+   * `lastStoreEventAt`, the status write is withheld even if the
+   * transition is state-machine-legal: stores don't guarantee in-order
+   * delivery, and our own retry backoff can reorder processing — a stale
+   * ACTIVE landing after a newer GRACE_PERIOD must not regress state.
+   * Equal timestamps still apply (Stripe's 1s resolution can tie two
+   * legitimate successive events). Callers that pass this MUST also
+   * stamp `lastStoreEventAt: eventTime` in the same guarded write when
+   * `apply` is true. Omitted → ordering is not enforced (legacy rows
+   * with NULL behave the same).
+   */
+  eventTime?: Date;
 }
 
 export interface GuardStatusWriteResult {
@@ -72,6 +88,53 @@ export async function guardStatusWrite(
       args.store,
       args.storeTransactionId,
     );
+
+  // Event-time ordering: a status write carried by an event OLDER than the
+  // last applied one is stale regardless of state-machine legality (see
+  // `eventTime` docs). Checked before the transition decision so even an
+  // allowFrom-sanctioned exception can't be replayed out of order.
+  if (
+    args.eventTime &&
+    current?.lastStoreEventAt &&
+    args.eventTime.getTime() < current.lastStoreEventAt.getTime()
+  ) {
+    log.warn("withheld stale status write (event older than last applied)", {
+      projectId: args.projectId,
+      store: args.store,
+      storeTransactionId: args.storeTransactionId,
+      from: current.status,
+      to: args.to,
+      eventTime: args.eventTime.toISOString(),
+      lastStoreEventAt: current.lastStoreEventAt.toISOString(),
+      source: args.source,
+    });
+    await audit(
+      {
+        projectId: args.projectId,
+        userId: "system",
+        action: "subscription.transition_rejected",
+        resource: "purchase",
+        resourceId: current.id,
+        before: { status: current.status },
+        after: {
+          status: args.to,
+          reason: "stale_event",
+          eventTime: args.eventTime.toISOString(),
+          lastStoreEventAt: current.lastStoreEventAt.toISOString(),
+        },
+        ipAddress: null,
+        userAgent: null,
+      },
+      args.db as unknown as AuditTx,
+    );
+    return {
+      apply: false,
+      purchaseId: current.id,
+      from: current.status,
+      to: args.to,
+    };
+  }
+
   const decision = decideTransition(current?.status ?? null, args.to);
 
   if (!decision.apply && current && args.allowFrom?.includes(current.status)) {

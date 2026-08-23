@@ -658,6 +658,15 @@ async function writeConfirmedCardOntoSubscription(
 // Per-event handlers
 // =============================================================
 
+/**
+ * The store-side timestamp of this delivery, for the guard's event-time
+ * ordering (Stripe does NOT guarantee in-order webhook delivery, and our
+ * retry backoff can reorder processing on top of that).
+ */
+function stripeEventTime(ctx: DispatchContext): Date | undefined {
+  return ctx.event.created ? new Date(ctx.event.created * 1000) : undefined;
+}
+
 async function syncSubscription(ctx: DispatchContext): Promise<void> {
   const subscription = ctx.event.data.object as Stripe.Subscription;
   const subscriber = await resolveSubscriber(ctx, subscription);
@@ -681,6 +690,7 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
         storeTransactionId: subscription.id,
         to: status,
         source: `stripe:${ctx.event.type}`,
+        eventTime: stripeEventTime(ctx),
       });
 
       const result = await upsertPurchaseFromSubscription(
@@ -690,6 +700,7 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
         subscriber.id,
         status,
         guard.apply,
+        stripeEventTime(ctx),
       );
       return { ...result, statusApplied: guard.apply };
     },
@@ -752,6 +763,7 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
   // FINDING 1: guarded read + status write in one tx (a); the
   // updatePurchase also CASE-guards the terminal status (b).
   const statusApplied = await drizzle.db.transaction(async (dbTx) => {
+    const eventTime = stripeEventTime(ctx);
     const guard = await guardStatusWrite({
       db: dbTx,
       projectId: ctx.projectId,
@@ -759,10 +771,16 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
       storeTransactionId: subscription.id,
       to: PurchaseStatus.EXPIRED,
       source: `stripe:${ctx.event.type}`,
+      eventTime,
     });
 
     await drizzle.purchaseRepo.updatePurchase(dbTx, purchase.id, {
-      ...(guard.apply ? { status: PurchaseStatus.EXPIRED } : {}),
+      ...(guard.apply
+        ? {
+            status: PurchaseStatus.EXPIRED,
+            ...(eventTime && { lastStoreEventAt: eventTime }),
+          }
+        : {}),
       cancellationDate: subscription.canceled_at
         ? new Date(subscription.canceled_at * 1000)
         : new Date(),
@@ -924,6 +942,7 @@ async function applyInvoicePaymentFailed(
       : invoice.subscription?.id;
   if (!subscriptionId) return;
 
+  const eventTime = stripeEventTime(ctx);
   const guard = await guardStatusWrite({
     db: drizzle.db,
     projectId: ctx.projectId,
@@ -931,6 +950,7 @@ async function applyInvoicePaymentFailed(
     storeTransactionId: subscriptionId,
     to: PurchaseStatus.GRACE_PERIOD,
     source: `stripe:${ctx.event.type}`,
+    eventTime,
   });
   if (!guard.apply) return;
 
@@ -938,7 +958,10 @@ async function applyInvoicePaymentFailed(
     drizzle.db,
     Store.STRIPE,
     subscriptionId,
-    { status: PurchaseStatus.GRACE_PERIOD },
+    {
+      status: PurchaseStatus.GRACE_PERIOD,
+      ...(eventTime && { lastStoreEventAt: eventTime }),
+    },
   );
 
   log.info("moved purchase to grace period after invoice payment failure", {
@@ -1002,6 +1025,7 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
   // refund still records the refunded amount below but must not strip the
   // subscriber's access or mark the purchase terminal.
   if (isFullRefund) {
+    const eventTime = stripeEventTime(ctx);
     const guard = await guardStatusWrite({
       db: drizzle.db,
       projectId: ctx.projectId,
@@ -1009,11 +1033,16 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
       storeTransactionId: subscriptionId,
       to: PurchaseStatus.REFUNDED,
       source: `stripe:${ctx.event.type}`,
+      eventTime,
     });
 
     await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
       ...(guard.apply
-        ? { status: PurchaseStatus.REFUNDED, refundDate: eventDate }
+        ? {
+            status: PurchaseStatus.REFUNDED,
+            refundDate: eventDate,
+            ...(eventTime && { lastStoreEventAt: eventTime }),
+          }
         : {}),
     });
 
@@ -1166,6 +1195,7 @@ async function upsertPurchaseFromSubscription(
   subscriberId: string,
   status: PurchaseStatus,
   applyStatus: boolean,
+  eventTime?: Date,
 ) {
   const item = subscription.items.data[0];
   if (!item) {
@@ -1226,9 +1256,11 @@ async function upsertPurchaseFromSubscription(
       autoRenewStatus: !subscription.cancel_at_period_end,
       cancellationDate,
       verifiedAt: new Date(),
+      ...(eventTime && { lastStoreEventAt: eventTime }),
       presentedContext,
     },
     update: {
+      ...(applyStatus && eventTime ? { lastStoreEventAt: eventTime } : {}),
       ...(applyStatus ? { status } : {}),
       isTrial,
       expiresDate,

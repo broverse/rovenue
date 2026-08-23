@@ -921,6 +921,15 @@ export const purchases = pgTable(
     }),
     ownershipType: text("ownershipType"),
     verifiedAt: timestamp("verifiedAt", { withTimezone: true }),
+    // Store-side timestamp of the last event whose STATUS write applied to
+    // this row (Stripe event.created, Apple signedDate, Google RTDN
+    // eventTimeMillis; receipt fetches stamp fetch time). The transition
+    // guard withholds a status write whose event timestamp is OLDER than
+    // this, so a retry-reordered older event (e.g. a stale ACTIVE after a
+    // newer GRACE_PERIOD) can't regress state even when the transition
+    // itself is state-machine-legal. NULL on legacy rows = no ordering
+    // information, guard behaves as before.
+    lastStoreEventAt: timestamp("lastStoreEventAt", { withTimezone: true }),
     // Opaque paywall-attribution snapshot the SDK/webhook supplied at
     // purchase time: { placementId, paywallId, variantId?, experimentKey? }.
     // Never validated against live placement/paywall/experiment rows —

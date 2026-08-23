@@ -48,6 +48,9 @@ async function revokeAccessAfterRefund(input: {
   const { projectId, purchase } = input;
   if (!purchase.storeTransactionId) return;
   try {
+    // Operator action executed just now — its event time is now, so a
+    // stale replayed store webhook can't later flip the refund back.
+    const now = new Date();
     const guard = await guardStatusWrite({
       db: drizzle.db,
       projectId,
@@ -55,11 +58,13 @@ async function revokeAccessAfterRefund(input: {
       storeTransactionId: purchase.storeTransactionId,
       to: PurchaseStatus.REFUNDED,
       source: "operator-refund",
+      eventTime: now,
     });
     if (guard.apply) {
       await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
         status: PurchaseStatus.REFUNDED,
-        refundDate: new Date(),
+        refundDate: now,
+        lastStoreEventAt: now,
       });
       await drizzle.accessRepo.revokeAccessByPurchaseId(
         drizzle.db,

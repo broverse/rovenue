@@ -37,7 +37,11 @@ vi.mock("@rovenue/db", () => ({
       })),
     },
     subscriberRepo: {
-      // Resolves the client-supplied id to a project-owned subscriber.
+      // Resolves the client-supplied id to a project-owned subscriber —
+      // merge-aware: resolve (null → unknown id), then a direct find
+      // (null → no dead row), then upsert creates.
+      resolveSubscriberByRovenueId: vi.fn(async () => null),
+      findSubscriberByRovenueId: vi.fn(async () => null),
       upsertSubscriber: vi.fn(async () => ({ id: "sub_stub" })),
     },
     outboxRepo: { insert: vi.fn(async () => undefined) },

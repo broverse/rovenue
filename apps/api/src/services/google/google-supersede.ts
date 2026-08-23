@@ -55,12 +55,14 @@ export async function expireSupersededGooglePurchase(args: {
     storeTransactionId: supersededToken,
     to: PurchaseStatus.EXPIRED,
     source: `${source}:linked_token_supersede`,
+    eventTime: now,
   });
   if (guard.apply) {
     await drizzle.purchaseRepo.updatePurchase(drizzle.db, old.id, {
       status: PurchaseStatus.EXPIRED,
       expiresDate: now,
       autoRenewStatus: false,
+      lastStoreEventAt: now,
     });
     log.info("expired superseded purchase", {
       projectId,
