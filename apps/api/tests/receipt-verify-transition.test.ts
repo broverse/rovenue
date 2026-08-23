@@ -298,6 +298,93 @@ describe("verifyReceipt — Google subscription paid-state gate", () => {
   });
 });
 
+// =============================================================
+// Google subscription product binding (ports the Apple check)
+//
+// `subscriptionsv2.get` is token-only: a valid cheap-subscription
+// token paired with an expensive product's id would otherwise
+// resolve — and grant — the expensive product. The verified
+// `lineItems[].productId` must cover the resolved product, and the
+// MATCHING line item (not blindly `lineItems[0]`) must drive
+// expiry/autorenew extraction.
+// =============================================================
+
+const EXPENSIVE_SUBSCRIPTION_PRODUCT_FIXTURE = {
+  id: "prod_gsub_premium",
+  type: "SUBSCRIPTION",
+  identifier: "com.app.premium",
+  storeIds: { google: "com.app.premium" },
+  accessIds: [],
+};
+
+describe("verifyReceipt — Google subscription product binding", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    googleMocks.loadGoogleCredentials.mockResolvedValue(GOOGLE_CREDS_FIXTURE);
+    drizzleMock.subscriberRepo.upsertSubscriber.mockResolvedValue({
+      id: "sub_1",
+    });
+    drizzleMock.purchaseRepo.lockPurchaseStatusByStoreTransaction.mockResolvedValue(
+      null,
+    );
+    drizzleMock.purchaseRepo.upsertPurchase.mockResolvedValue({ id: "pur_1" });
+  });
+
+  it("rejects a token whose lineItems do not cover the claimed product — 400, nothing persisted", async () => {
+    // The token's lineItems name the cheap sub; the client claimed the
+    // expensive one, and the lookup resolved it.
+    drizzleMock.offeringRepo.findProductByIdentifierOrStoreId.mockResolvedValue(
+      EXPENSIVE_SUBSCRIPTION_PRODUCT_FIXTURE,
+    );
+    googleMocks.verifyGoogleSubscription.mockResolvedValue(
+      googleSubscriptionFixture("SUBSCRIPTION_STATE_ACTIVE"),
+    );
+
+    await expect(verifyGoogle("com.app.premium")).rejects.toMatchObject({
+      status: 400,
+      message: "productId does not match the verified transaction",
+    });
+    expect(drizzleMock.purchaseRepo.upsertPurchase).not.toHaveBeenCalled();
+    expect(drizzleMock.subscriberRepo.upsertSubscriber).not.toHaveBeenCalled();
+  });
+
+  it("uses the MATCHING line item, not lineItems[0], for expiry/autorenew", async () => {
+    drizzleMock.offeringRepo.findProductByIdentifierOrStoreId.mockResolvedValue(
+      SUBSCRIPTION_PRODUCT_FIXTURE,
+    );
+    googleMocks.verifyGoogleSubscription.mockResolvedValue({
+      subscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
+      startTime: "2026-01-01T00:00:00Z",
+      lineItems: [
+        {
+          // Some other line of a multi-line subscription — must NOT drive
+          // the resolved product's expiry/autorenew.
+          productId: "com.app.addon",
+          expiryTime: "2027-06-01T00:00:00Z",
+          autoRenewingPlan: { autoRenewEnabled: false },
+        },
+        {
+          productId: "com.app.sub",
+          expiryTime: "2030-01-01T00:00:00Z",
+          autoRenewingPlan: { autoRenewEnabled: true },
+        },
+      ],
+      acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+    });
+
+    await verifyGoogle("com.app.sub");
+
+    const call = drizzleMock.purchaseRepo.upsertPurchase.mock.calls[0];
+    expect(call).toBeDefined();
+    const create = call?.[1]?.create as Record<string, unknown>;
+    expect(create).toHaveProperty(
+      "expiresDate",
+      new Date("2030-01-01T00:00:00Z"),
+    );
+    expect(create).toHaveProperty("autoRenewStatus", true);
+  });
+});
+
 describe("verifyReceipt — Google one-time purchaseState gate", () => {
   beforeEach(() => {
     vi.clearAllMocks();

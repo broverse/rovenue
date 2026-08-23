@@ -397,6 +397,27 @@ async function verifyGoogleSubscriptionReceipt(
     );
   }
 
+  // Security: the client supplies `args.productId`, but the resolved product
+  // MUST correspond to a `subscriptionsv2.get`-verified line item.
+  // `subscriptionsv2.get` is token-only, so a valid cheap-subscription token
+  // paired with an expensive product's identifier would otherwise resolve —
+  // and grant — the expensive product (the exact Apple check ported here).
+  // A product corresponds when its Google store id equals a verified
+  // `lineItems[].productId`, or (for products with no explicit Google store
+  // id) its identifier does. The matching line item — never blindly
+  // `lineItems[0]` — then drives expiry/autorenew extraction below.
+  const googleStoreProductId =
+    (product.storeIds as { google?: string } | null)?.google ??
+    product.identifier;
+  const lineItem = subscription.lineItems?.find(
+    (item) => item.productId === googleStoreProductId,
+  );
+  if (!lineItem) {
+    throw new HTTPException(400, {
+      message: "productId does not match the verified transaction",
+    });
+  }
+
   // Entitlement gate: a fetchable token only proves the purchase exists —
   // `subscriptionState` decides access. PENDING means the user has not
   // completed payment, so nothing is persisted and the client retries after
@@ -421,8 +442,7 @@ async function verifyGoogleSubscriptionReceipt(
     purchaseToken: args.receipt,
   });
 
-  const lineItem = subscription.lineItems?.[0];
-  const expiresDate = lineItem?.expiryTime
+  const expiresDate = lineItem.expiryTime
     ? new Date(lineItem.expiryTime)
     : null;
   const startTime = subscription.startTime
