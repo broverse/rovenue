@@ -151,7 +151,10 @@ export async function lockPurchaseStatusByStoreTransaction(
  * purchases.status ELSE <new status> END` so a terminal row's status
  * is never overwritten, while non-status fields (refundDate,
  * cancellationDate, …) still apply unconditionally. Pass
- * `guardTerminalStatus: false` to opt out (none today).
+ * `guardTerminalStatus: false` to opt out — sole caller today is
+ * Apple REFUND_REVERSED (`applyRefundReversed`), the one path
+ * allowed to restore a REFUNDED row after the store itself reverses
+ * the refund (paired with the guard's `allowFrom` exception).
  */
 export async function updatePurchase(
   db: DbOrTx,

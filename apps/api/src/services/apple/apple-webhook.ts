@@ -568,6 +568,50 @@ async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
     return;
   }
 
+  // Restore the purchase itself. The prior REFUND put this row into
+  // REFUNDED (terminal — no TRANSITIONS edge leaves it) and revoked
+  // its access; REFUND_REVERSED means Apple undid that refund, so the
+  // customer keeps the charge AND the entitlement. Invariant: REFUNDED
+  // is absorbing for every other path — this is the ONLY code path
+  // allowed to exit it, and only because the store itself reversed the
+  // terminal event. Both guard layers are bypassed explicitly and
+  // narrowly: `allowFrom: [REFUNDED]` for the state machine (REVOKED
+  // stays unresurrectable) and `guardTerminalStatus: false` for the
+  // SQL CASE backstop in `updatePurchase`. Access is NOT granted here:
+  // post-processing runs `syncAccess(subscriberId)` after every
+  // webhook, and the access engine re-grants for ACTIVE on its own.
+  // Consumable credits are never clawed back on REFUND, so there is
+  // nothing to re-grant on reversal.
+  const restoredStatus =
+    ctx.transaction.expiresDate === undefined ||
+    ctx.transaction.expiresDate > Date.now()
+      ? PurchaseStatus.ACTIVE // still in-term, or lifetime (no expiry)
+      : PurchaseStatus.EXPIRED; // term already over — no access returns
+  await drizzle.db.transaction(async (dbTx) => {
+    const guard = await guardStatusWrite({
+      db: dbTx,
+      projectId: ctx.projectId,
+      store: Store.APP_STORE,
+      storeTransactionId: ctx.transaction.transactionId,
+      to: restoredStatus,
+      source: `apple:${ctx.notification.notificationType}`,
+      allowFrom: [PurchaseStatus.REFUNDED],
+    });
+    await drizzle.purchaseRepo.updatePurchase(
+      dbTx,
+      purchase.id,
+      {
+        ...(guard.apply ? { status: restoredStatus } : {}),
+        // The refund no longer stands — clear its timestamp so reads
+        // (and a later re-refund) start from a clean slate.
+        refundDate: null,
+      },
+      // No-op when the guard withheld the status (patch then carries
+      // no `status` field for the CASE backstop to act on).
+      { guardTerminalStatus: false },
+    );
+  });
+
   const subscriber = await drizzle.subscriberRepo.findSubscriberById(
     drizzle.db,
     purchase.subscriberId,

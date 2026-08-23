@@ -25,6 +25,21 @@ export interface GuardStatusWriteArgs {
   to: PurchaseStatus;
   /** Source label for the audit metadata (e.g. webhook type). */
   source: string;
+  /**
+   * Narrow, explicit exception to the state machine: when
+   * `decideTransition` rejects the write but the row's CURRENT status
+   * is listed here, the write is allowed anyway (and no
+   * `subscription.transition_rejected` audit row is written).
+   *
+   * Invariant: REFUNDED / REVOKED are absorbing states — no ordinary
+   * ingestion path may leave them. The ONLY legitimate exit is the
+   * store itself telling us the terminal event was undone. Sole
+   * caller today: Apple REFUND_REVERSED (`applyRefundReversed` in
+   * apple-webhook.ts), which restores a REFUNDED purchase after
+   * Apple reverses the refund. Never pass this to work around an
+   * ordinary rejected transition.
+   */
+  allowFrom?: readonly PurchaseStatus[];
 }
 
 export interface GuardStatusWriteResult {
@@ -58,6 +73,25 @@ export async function guardStatusWrite(
       args.storeTransactionId,
     );
   const decision = decideTransition(current?.status ?? null, args.to);
+
+  if (!decision.apply && current && args.allowFrom?.includes(current.status)) {
+    // Explicitly-sanctioned exception (see `allowFrom` docs) — apply
+    // the write and log it so the exceptional exit stays observable.
+    log.info("applying allow-listed exceptional status transition", {
+      projectId: args.projectId,
+      store: args.store,
+      storeTransactionId: args.storeTransactionId,
+      from: decision.from,
+      to: decision.to,
+      source: args.source,
+    });
+    return {
+      apply: true,
+      purchaseId: current.id,
+      from: decision.from,
+      to: decision.to,
+    };
+  }
 
   if (!decision.apply) {
     log.warn("rejected illegal status transition", {
