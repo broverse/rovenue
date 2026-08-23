@@ -945,6 +945,16 @@ export const purchases = pgTable(
       t.status,
     ),
     expiresDateIdx: index("purchases_expiresDate_idx").on(t.expiresDate),
+    // Expiry sweeper scan (`findOverduePurchases`): status-bounded, so
+    // partial on the sweepable (non-terminal) statuses — rows leave the
+    // index the moment the sweeper moves them to EXPIRED. Keep the
+    // status list in sync with EXPIRY_SWEEP_STATUSES in the api
+    // expiry-checker worker. Migration 0102.
+    statusExpiresDateIdx: index("purchases_status_expiresDate_idx")
+      .on(t.status, t.expiresDate)
+      .where(
+        sql`${t.status} IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')`,
+      ),
   }),
 );
 

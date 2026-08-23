@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { products, purchases, subscribers, type Purchase } from "../schema";
 
@@ -200,10 +200,17 @@ export async function findPurchasesForSubscriberWithAccess(
 }
 
 /**
- * Expiry sweeper helper — pulls purchases with an expiresDate in
- * the `(lookback, now]` window whose status is one of the supplied
- * candidates. Caller picks the selection list based on its
- * sweeper policy (e.g. ACTIVE + GRACE_PERIOD + TRIAL).
+ * Expiry sweeper helper — pulls every purchase whose expiresDate has
+ * passed and whose status is one of the supplied candidates, oldest
+ * expiry first, capped at `limit`. The scan is bounded by STATUS, not
+ * by a time window: a purchase the sweeper missed (worker downtime, a
+ * per-candidate error on an earlier run) stays in a sweepable status
+ * and is picked up by the next run, however long ago it expired.
+ * Caller picks the selection list based on its sweeper policy (e.g.
+ * ACTIVE + GRACE_PERIOD + TRIAL) and pages a backlog across runs via
+ * `limit` — processed rows leave the sweepable statuses, so each run
+ * naturally consumes the next slice.
+ * Served by the partial index purchases_status_expiresDate_idx.
  */
 export interface ExpiryCandidate {
   id: string;
@@ -218,18 +225,14 @@ export interface ExpiryCandidate {
   priceCurrency: string | null;
 }
 
-export async function findPurchasesNearExpiry(
+export async function findOverduePurchases(
   db: Db,
   args: {
     now: Date;
-    lookback: Date;
     statuses: Array<Purchase["status"]>;
+    limit: number;
   },
 ): Promise<ExpiryCandidate[]> {
-  const statusClause =
-    args.statuses.length === 1
-      ? eq(purchases.status, args.statuses[0]!)
-      : or(...args.statuses.map((s) => eq(purchases.status, s)))!;
   const rows = await db
     .select({
       id: purchases.id,
@@ -246,12 +249,14 @@ export async function findPurchasesNearExpiry(
     .from(purchases)
     .where(
       and(
-        statusClause,
+        inArray(purchases.status, args.statuses),
+        // NULL expiresDate (lifetime) never satisfies <=, so those rows
+        // are excluded without an explicit IS NOT NULL.
         lte(purchases.expiresDate, args.now),
-        sql`${purchases.expiresDate} > ${args.lookback}`,
       ),
     )
-    .orderBy(asc(purchases.expiresDate));
+    .orderBy(asc(purchases.expiresDate))
+    .limit(args.limit);
   return rows as ExpiryCandidate[];
 }
 

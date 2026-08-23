@@ -28,16 +28,17 @@ const { dbMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
   const drizzleMock = {
     db: {} as unknown,
     purchaseExtRepo: {
-      findPurchasesNearExpiry: vi.fn(
+      findOverduePurchases: vi.fn(
         async (
           _db: unknown,
-          args: { now: Date; lookback: Date; statuses: string[] },
+          args: { now: Date; statuses: string[]; limit: number },
         ) => {
           const rows = await dbMock.purchase.findMany({
             where: {
               status: { in: args.statuses },
-              expiresDate: { lt: args.now, gt: args.lookback },
+              expiresDate: { lt: args.now },
             },
+            take: args.limit,
           });
           return Array.isArray(rows) ? rows : [];
         },
@@ -219,25 +220,28 @@ beforeEach(() => {
 // Tests
 // =============================================================
 
-describe("runExpiryCheck — query window", () => {
-  test("queries purchases expired in the last 24h across TRIAL/ACTIVE/GRACE_PERIOD", async () => {
+describe("runExpiryCheck — query scope", () => {
+  test("queries ALL overdue purchases across TRIAL/ACTIVE/GRACE_PERIOD/PAUSED with no lower time bound", async () => {
     await runExpiryCheck(NOW);
 
     expect(dbMock.purchase.findMany).toHaveBeenCalledOnce();
     const args = dbMock.purchase.findMany.mock.calls[0]![0] as {
       where: {
         status: { in: string[] };
-        expiresDate: { lt: Date; gt: Date };
+        expiresDate: { lt: Date; gt?: Date };
       };
+      take: number;
     };
     expect(new Set(args.where.status.in)).toEqual(
       // PAUSED is included so a lapsed paused subscription reaches EXPIRED.
       new Set(["ACTIVE", "GRACE_PERIOD", "TRIAL", "PAUSED"]),
     );
     expect(args.where.expiresDate.lt.getTime()).toBe(NOW.getTime());
-    expect(args.where.expiresDate.gt.getTime()).toBe(
-      NOW.getTime() - 24 * 60 * 60 * 1000,
-    );
+    // No lookback window: the sweep is status-bounded, so a purchase
+    // that expired arbitrarily long ago is still picked up.
+    expect(args.where.expiresDate.gt).toBeUndefined();
+    // Backlogs drain across runs via the per-run batch cap.
+    expect(args.take).toBeGreaterThan(0);
   });
 
   test("returns zero-count result when no candidates found", async () => {

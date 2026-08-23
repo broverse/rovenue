@@ -15,9 +15,11 @@ import { syncAccess } from "../services/access-engine";
 // =============================================================
 //
 // Runs every 5 minutes via a BullMQ repeatable job. Queries any
-// purchases that have slipped past their expiresDate in the last
-// 24h (wide enough to catch anything missed during a deploy) and
-// transitions them through the state machine:
+// purchase in a sweepable (non-terminal) status that has slipped past
+// its expiresDate — bounded by STATUS, not by a time window, so a
+// purchase missed by an earlier run (worker downtime, a per-candidate
+// error) is retried on the next run instead of staying ACTIVE forever —
+// and transitions them through the state machine:
 //
 //   ACTIVE/TRIAL + gracePeriodExpires in the future → GRACE_PERIOD
 //   ACTIVE/TRIAL/GRACE_PERIOD otherwise               → EXPIRED
@@ -32,7 +34,22 @@ export const EXPIRY_QUEUE_NAME = "rovenue-expiry-check";
 export const EXPIRATION_EVENT_TYPE = "EXPIRATION";
 
 const REPEAT_EVERY_MS = 5 * 60 * 1000;
-const LOOKBACK_MS = 24 * 60 * 60 * 1000;
+// Per-run batch cap: keeps one 5-minute run from grabbing an unbounded
+// backlog. Processed rows leave the sweepable statuses, so successive
+// runs naturally drain whatever remains, oldest expiries first.
+const MAX_CANDIDATES_PER_RUN = 500;
+// Every non-terminal status that can lapse. Keep in sync with the
+// partial index purchases_status_expiresDate_idx (migration 0102).
+const EXPIRY_SWEEP_STATUSES: PurchaseStatus[] = [
+  PurchaseStatus.ACTIVE,
+  PurchaseStatus.GRACE_PERIOD,
+  PurchaseStatus.TRIAL,
+  // PAUSED is included so a paused subscription whose period lapses
+  // reaches the terminal EXPIRED state (and emits a cancellation
+  // event) instead of lingering as PAUSED forever. The state machine
+  // allows PAUSED → EXPIRED.
+  PurchaseStatus.PAUSED,
+];
 const REPEATABLE_JOB_NAME = "expiry:check";
 const REPEATABLE_JOB_ID = "expiry-checker-repeatable";
 
@@ -65,23 +82,12 @@ type Outcome = "EXPIRED" | "GRACE_PERIOD" | "SKIPPED";
 export async function runExpiryCheck(
   now: Date = new Date(),
 ): Promise<ExpiryCheckResult> {
-  const lookback = new Date(now.getTime() - LOOKBACK_MS);
-
-  const candidates = (await drizzle.purchaseExtRepo.findPurchasesNearExpiry(
+  const candidates = (await drizzle.purchaseExtRepo.findOverduePurchases(
     drizzle.db,
     {
       now,
-      lookback,
-      statuses: [
-        PurchaseStatus.ACTIVE,
-        PurchaseStatus.GRACE_PERIOD,
-        PurchaseStatus.TRIAL,
-        // PAUSED is included so a paused subscription whose period lapses
-        // reaches the terminal EXPIRED state (and emits a cancellation
-        // event) instead of lingering as PAUSED forever. The state machine
-        // allows PAUSED → EXPIRED.
-        PurchaseStatus.PAUSED,
-      ],
+      statuses: EXPIRY_SWEEP_STATUSES,
+      limit: MAX_CANDIDATES_PER_RUN,
     },
   )) as unknown as Candidate[];
 
