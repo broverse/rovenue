@@ -49,6 +49,14 @@ export async function enqueueInvitationEmail(
  * Pure worker entrypoint, exported so unit tests can call it without
  * spinning up a real BullMQ worker.
  */
+/**
+ * A send claim younger than this is treated as another in-flight send of
+ * the same invitation (BullMQ stall redelivery / concurrent duplicate) and
+ * skipped. Must stay below the dashboard resend cooldown (60s) so a
+ * legitimate operator resend is never swallowed by a stale claim.
+ */
+const SEND_CLAIM_STALE_MS = 30_000;
+
 export async function runInvitationEmailJob(args: {
   invitationId: string;
   inviteUrl: string;
@@ -58,6 +66,19 @@ export async function runInvitationEmailJob(args: {
     args.invitationId,
   );
   if (!load) return { skipped: "not_pending" };
+
+  // Atomic single-flight claim BEFORE the provider send: if the process
+  // dies between `mailer().send()` succeeding and `patchSendResult`
+  // committing, BullMQ's stalled-job redelivery re-runs this job — without
+  // the claim, the invitee got the email twice. A concurrent duplicate job
+  // (double-fired resend) hits the same gate.
+  const now = new Date();
+  const claimed = await drizzle.invitationRepo.claimInvitationForSend(
+    drizzle.db,
+    args.invitationId,
+    { now, staleBefore: new Date(now.getTime() - SEND_CLAIM_STALE_MS) },
+  );
+  if (!claimed) return { skipped: "claimed_by_inflight_send" };
 
   const { subject, html, text } = await renderTemplate({
     eventKey: "team.member.invited",
@@ -73,13 +94,25 @@ export async function runInvitationEmailJob(args: {
     managePreferencesUrl: `${env.DASHBOARD_URL}/account/notifications`,
   });
 
-  const result = await mailer().send({
-    to: load.invitation.email,
-    subject,
-    html,
-    text,
-    correlationId: args.invitationId,
-  });
+  let result: Awaited<ReturnType<ReturnType<typeof mailer>["send"]>>;
+  try {
+    result = await mailer().send({
+      to: load.invitation.email,
+      subject,
+      html,
+      text,
+      correlationId: args.invitationId,
+    });
+  } catch (sendErr) {
+    // The email never went out — release the claim synchronously so the
+    // BullMQ retry can re-claim immediately instead of waiting out the
+    // stale window, then rethrow as the retry signal.
+    await drizzle.invitationRepo.releaseInvitationSendClaim(
+      drizzle.db,
+      args.invitationId,
+    );
+    throw sendErr;
+  }
 
   await drizzle.invitationRepo.patchSendResult(drizzle.db, args.invitationId, {
     sesMessageId: result.messageId,

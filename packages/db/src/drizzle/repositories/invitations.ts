@@ -147,6 +147,59 @@ export async function updateTokenHash(
     .where(eq(projectInvitations.id, id));
 }
 
+/**
+ * Atomic single-flight claim before an invitation email send. Stamps
+ * `lastSentAt` up front so a BullMQ stalled-job redelivery — or a
+ * concurrent duplicate job — of the SAME send sees a fresh claim and
+ * skips, closing the "provider send succeeded but the ack/patch was
+ * lost" double-email window (same model as
+ * notificationDeliveryRepo.claimDeliveryForSend). A claim older than
+ * `staleBefore` is considered abandoned and re-claimable, so legitimate
+ * operator resends (route-cooldown 60s) are never blocked.
+ *
+ * Returns false when the row is missing, terminal (accepted/revoked), or
+ * freshly claimed by another in-flight send.
+ */
+export async function claimInvitationForSend(
+  db: DbOrTx,
+  id: string,
+  args: { now: Date; staleBefore: Date },
+): Promise<boolean> {
+  const rows = await db
+    .update(projectInvitations)
+    .set({ lastSentAt: args.now, updatedAt: new Date() })
+    .where(
+      and(
+        eq(projectInvitations.id, id),
+        isNull(projectInvitations.acceptedAt),
+        isNull(projectInvitations.revokedAt),
+        or(
+          isNull(projectInvitations.lastSentAt),
+          sql`${projectInvitations.lastSentAt} < ${args.staleBefore}`,
+        ),
+      ),
+    )
+    .returning({ id: projectInvitations.id });
+  return rows.length > 0;
+}
+
+/**
+ * Release a send claim after the provider send FAILED — the email never
+ * went out, so the row must be immediately re-claimable by the BullMQ
+ * retry instead of waiting out the stale window. Clears `lastSentAt`
+ * (the claim marker); a successful send overwrites it via
+ * `patchSendResult` instead.
+ */
+export async function releaseInvitationSendClaim(
+  db: DbOrTx,
+  id: string,
+): Promise<void> {
+  await db
+    .update(projectInvitations)
+    .set({ lastSentAt: null, updatedAt: new Date() })
+    .where(eq(projectInvitations.id, id));
+}
+
 export async function patchSendResult(
   db: DbOrTx,
   id: string,
