@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
 import { type Db, CreditLedgerType, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
 import { syncAccess } from "./access-engine";
-import { getConnectedStripe } from "../lib/stripe-platform";
 
 // =============================================================
 // Subscriber account lifecycle — merge + anonymize
@@ -14,10 +12,10 @@ import { getConnectedStripe } from "../lib/stripe-platform";
 // source subscriber is soft-deleted afterward so it never
 // surfaces in future evaluations or config calls.
 //
-// `anonymizeSubscriber` is the KVKK / GDPR "right to erasure"
-// counterpart: PII (`appUserId`, `attributes`) is replaced with a
-// deterministic anonymous token while purchase/credit history is
-// kept intact for financial compliance.
+// KVKK / GDPR "right to erasure" lives in
+// services/gdpr/anonymize-subscriber.ts (HMAC-keyed token + Stripe
+// subscription cancellation) — the unkeyed sha256 variant that used to
+// live here was never wired and was removed so it can't be.
 
 const log = logger.child("subscriber-transfer");
 
@@ -41,18 +39,6 @@ export async function safeSyncAccessAfterMerge(
       err: err instanceof Error ? err.message : String(err),
     });
   }
-}
-
-const ANON_PREFIX = "anon:";
-
-function deriveAnonymousId(projectId: string, appUserId: string): string {
-  const h = createHash("sha256")
-    .update(`${projectId}|${appUserId}`)
-    .digest("hex");
-  // First 32 chars keep uniqueness at the project scale while
-  // staying readable in the dashboard — full 64-char hexes are
-  // noisy in the UI and don't buy additional collision safety.
-  return `${ANON_PREFIX}${h.slice(0, 32)}`;
 }
 
 /**
@@ -237,171 +223,3 @@ export async function transferSubscriber(
   return result;
 }
 
-// =============================================================
-// anonymizeSubscriber — GDPR / KVKK right to erasure
-// =============================================================
-//
-// Keeps the subscriber row (so foreign-key references from
-// purchases, credit_ledger, and revenue_events stay valid) but
-// replaces every PII field with a deterministic anonymous token.
-// The token is derived from `sha256(projectId|appUserId)` so
-// repeat requests are idempotent AND re-ingestion of the same
-// real appUserId after anonymization can be detected.
-//
-// Financial history (purchases, credit_ledger, revenue_events)
-// is preserved — those tables back SOC 2 compliance and do not
-// themselves carry PII beyond the (now anonymous) subscriberId.
-
-export interface AnonymizeResult {
-  subscriberId: string;
-  anonymousId: string;
-  alreadyAnonymized: boolean;
-}
-
-/**
- * @param appUserId Either a customer `appUserId` OR a `rovenueId`.
- *   SDK-only subscribers have a null appUserId, so GDPR/KVKK erasure
- *   requested by device id must fall back to a rovenueId lookup.
- */
-export async function anonymizeSubscriber(
-  projectId: string,
-  appUserId: string,
-  userId?: string,
-): Promise<AnonymizeResult> {
-  if (appUserId.startsWith(ANON_PREFIX)) {
-    throw new Error(
-      "Refusing to anonymize an already-anonymized appUserId",
-    );
-  }
-
-  // Filled inside the transaction, cancelled after it commits — Stripe
-  // calls must not run inside a DB transaction. A forgotten customer must
-  // stop being billed, so their live funnel subscriptions are cancelled on
-  // the connected account.
-  let stripeSubscriptionIds: string[] = [];
-
-  const result = await drizzle.db.transaction(async (tx) => {
-    // Advisory lock scoped to (project, appUserId) serialises
-    // concurrent anonymize calls for the same user so the find →
-    // update sequence can't race with a transfer in flight.
-    await drizzle.lockRepo.advisoryXactLock(
-      tx,
-      `anon:${projectId}:${appUserId}`,
-    );
-
-    // The identifier may be a customer appUserId or a rovenueId (SDK-only
-    // subscribers have a null appUserId). Try the appUserId column first,
-    // then fall back to a rovenueId lookup.
-    const subscriber =
-      (await drizzle.subscriberRepo.findSubscriberByAppUserId(tx, {
-        projectId,
-        appUserId,
-      })) ??
-      (await drizzle.subscriberRepo.findSubscriberByRovenueId(tx, {
-        projectId,
-        rovenueId: appUserId,
-      }));
-    if (!subscriber) {
-      throw new Error(`Subscriber '${appUserId}' not found`);
-    }
-
-    const anonymousId = deriveAnonymousId(projectId, appUserId);
-
-    // Idempotency — if the row was already anonymized through an
-    // earlier request the appUserId is already the anonymous token.
-    // We return the existing state instead of double-writing so the
-    // audit trail doesn't grow a dupe entry per retry.
-    if (subscriber.appUserId === anonymousId) {
-      return {
-        subscriberId: subscriber.id,
-        anonymousId,
-        alreadyAnonymized: true,
-      };
-    }
-
-    // Read the live Stripe subscription ids before the row is anonymized,
-    // inside the lock so a concurrent renewal can't slip a new one past us.
-    // Cancelled after commit (see below), not here.
-    stripeSubscriptionIds =
-      await drizzle.purchaseRepo.findActiveStripeSubscriptionIds(
-        tx,
-        subscriber.id,
-      );
-
-    await drizzle.subscriberRepo.anonymizeSubscriberRow(
-      tx,
-      subscriber.id,
-      anonymousId,
-      new Date(),
-    );
-
-    log.info("subscriber anonymized", {
-      projectId,
-      subscriberId: subscriber.id,
-    });
-
-    // Audit entry carries the anonymous token, not the original
-    // appUserId — the audit log itself must not retain PII post
-    // erasure. `before` keeps the fact that PII existed; the
-    // content of that PII is redacted.
-    if (userId) {
-      await audit(
-        {
-          projectId,
-          userId,
-          action: "subscriber.anonymized",
-          resource: "subscriber",
-          resourceId: subscriber.id,
-          before: { appUserId: "[REDACTED]" },
-          after: { appUserId: anonymousId, anonymizedAt: new Date().toISOString() },
-        },
-        tx,
-      );
-    }
-
-    return {
-      subscriberId: subscriber.id,
-      anonymousId,
-      alreadyAnonymized: false,
-    };
-  });
-
-  // Post-commit, best-effort: cancel the forgotten customer's live funnel
-  // subscriptions on the connected account so they are not billed again.
-  // A failure here must not undo the erasure (the row is already
-  // anonymized) — log it for follow-up. If the project has no connection
-  // any subscription is already unreachable, so there is nothing to do.
-  if (!result.alreadyAnonymized && stripeSubscriptionIds.length > 0) {
-    const connected = await getConnectedStripe(projectId).catch(() => null);
-    if (connected) {
-      for (const subscriptionId of stripeSubscriptionIds) {
-        try {
-          await connected.account.subscriptions.cancel(subscriptionId);
-          log.info("cancelled a forgotten customer's stripe subscription", {
-            projectId,
-            subscriberId: result.subscriberId,
-            subscriptionId,
-          });
-        } catch (err) {
-          log.error("could not cancel a forgotten customer's subscription", {
-            projectId,
-            subscriberId: result.subscriberId,
-            subscriptionId,
-            err: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    } else {
-      log.warn(
-        "erased subscriber has stripe subscriptions but no live connection to cancel them",
-        {
-          projectId,
-          subscriberId: result.subscriberId,
-          count: stripeSubscriptionIds.length,
-        },
-      );
-    }
-  }
-
-  return result;
-}

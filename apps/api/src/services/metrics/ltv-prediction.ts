@@ -36,7 +36,14 @@ interface ChSizeRow {
   size: string;
 }
 
+// Bound every scan: these were the last unbounded raw_revenue_events reads
+// in metrics (every sibling clamps to a MAX_DAYS window). 36 months covers
+// any realistic LTV horizon while keeping long-history projects from
+// full-table-scanning on each dashboard load.
+const MAX_LOOKBACK_MONTHS = 36;
+
 export async function getLtvPrediction(input: GetLtvPredictionInput) {
+  const lookback = `toStartOfMonth(now() - INTERVAL ${MAX_LOOKBACK_MONTHS} MONTH)`;
   const joinsCte = `
     joins AS (
       SELECT
@@ -47,6 +54,7 @@ export async function getLtvPrediction(input: GetLtvPredictionInput) {
       FROM rovenue.raw_revenue_events FINAL
       WHERE projectId = {projectId:String}
         AND type IN ('INITIAL','TRIAL_CONVERSION')
+        AND eventDate >= ${lookback}
       GROUP BY subscriberId
     )`;
 
@@ -67,6 +75,7 @@ export async function getLtvPrediction(input: GetLtvPredictionInput) {
         FROM rovenue.raw_revenue_events AS e FINAL
         INNER JOIN joins AS j ON e.subscriberId = j.subscriberId
         WHERE e.projectId = {projectId:String}
+          AND e.eventDate >= ${lookback}
         GROUP BY cohort_month, store, product_id, age_month
       `,
     ),

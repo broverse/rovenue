@@ -5,6 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import { audit } from "../../lib/audit";
 import { logger } from "../../lib/logger";
 import { env } from "../../lib/env";
+import { getConnectedStripe } from "../../lib/stripe-platform";
 
 // =============================================================
 // GDPR / KVKK right-to-erasure — subscriber anonymization
@@ -83,7 +84,18 @@ export async function anonymizeSubscriber(
   const anonymousId = deriveAnonymousId(input.subscriberId);
   const deletedAt = new Date();
 
+  // Read the live Stripe subscription ids INSIDE the transaction (before
+  // the row flips), cancelled after commit — Stripe roundtrips must not
+  // run while a DB transaction is open.
+  let stripeSubscriptionIds: string[] = [];
+
   await drizzle.db.transaction(async (tx) => {
+    stripeSubscriptionIds =
+      await drizzle.purchaseRepo.findActiveStripeSubscriptionIds(
+        tx,
+        input.subscriberId,
+      );
+
     await drizzle.subscriberRepo.anonymizeSubscriberRow(
       tx,
       input.subscriberId,
@@ -113,6 +125,45 @@ export async function anonymizeSubscriber(
     projectId: input.projectId,
     reason: input.reason,
   });
+
+  // Post-commit, best-effort: cancel the forgotten customer's live funnel
+  // subscriptions on the connected account so they are not billed again —
+  // erasure that keeps charging the customer isn't erasure. A failure here
+  // must not undo the anonymization (the row is already flipped); log for
+  // follow-up. No connection → the subscriptions are unreachable anyway.
+  if (stripeSubscriptionIds.length > 0) {
+    const connected = await getConnectedStripe(input.projectId).catch(
+      () => null,
+    );
+    if (connected) {
+      for (const subscriptionId of stripeSubscriptionIds) {
+        try {
+          await connected.account.subscriptions.cancel(subscriptionId);
+          log.info("cancelled a forgotten customer's stripe subscription", {
+            projectId: input.projectId,
+            subscriberId: input.subscriberId,
+            subscriptionId,
+          });
+        } catch (err) {
+          log.error("could not cancel a forgotten customer's subscription", {
+            projectId: input.projectId,
+            subscriberId: input.subscriberId,
+            subscriptionId,
+            err: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    } else {
+      log.warn(
+        "erased subscriber has stripe subscriptions but no live connection to cancel them",
+        {
+          projectId: input.projectId,
+          subscriberId: input.subscriberId,
+          count: stripeSubscriptionIds.length,
+        },
+      );
+    }
+  }
 
   return { anonymousId, deletedAt };
 }

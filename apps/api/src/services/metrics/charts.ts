@@ -526,7 +526,7 @@ async function readPaywallPurchasers(
       SELECT
         toString(toDate(eventDate))       AS day,
         toString(uniq(subscriberId))      AS n
-      FROM rovenue.raw_revenue_events
+      FROM rovenue.raw_revenue_events FINAL
       WHERE projectId = {projectId:String}
         AND toDate(eventDate) >= {from:Date}
         AND toDate(eventDate) <= {to:Date}
