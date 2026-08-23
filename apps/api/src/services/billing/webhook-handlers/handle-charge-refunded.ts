@@ -20,7 +20,17 @@ export async function handleChargeRefunded(
   }
   const stripeInvoiceId =
     typeof charge.invoice === "string" ? charge.invoice : charge.invoice.id;
-  const delta = (charge.amount_refunded / 100).toFixed(4);
+  // `amount_refunded` is the charge's CUMULATIVE refunded total — one
+  // `charge.refunded` event fires per refund, each carrying the growing
+  // cumulative, so summing it across serial partial refunds over-counts.
+  // Record this refund's own amount from the newest refund object (Stripe
+  // orders `refunds.data` most-recent-first); fall back to the cumulative
+  // only when the sub-list is absent. Mirrors applyChargeRefunded in
+  // services/stripe/stripe-webhook.ts.
+  const cumulativeRefunded = charge.amount_refunded ?? 0;
+  const latestRefund = charge.refunds?.data?.[0];
+  const refundedMinor = latestRefund?.amount ?? cumulativeRefunded;
+  const delta = (refundedMinor / 100).toFixed(4);
   await drizzle.billingInvoiceRepo.incrementRefundedAmount(
     ctx.tx,
     stripeInvoiceId,
