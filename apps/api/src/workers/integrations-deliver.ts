@@ -305,6 +305,59 @@ export async function runDeliverStep(
     return { outcome: "dead_letter", deliveryId: rowId };
   }
 
+  // Retriable failure on the FINAL attempt — there is no retry coming, so
+  // "failed" would rot invisibly forever. BullMQ increments `attemptsMade`
+  // only AFTER deciding whether to retry, so the processor is invoked with
+  // attempt = attempts-1 on its last run and must finalize here itself: a
+  // post-hoc `attempt >= attempts` check (or one in the `failed` handler
+  // alone) never sees the exhausted value. Mirror the non-retriable
+  // dead-letter branch: terminal status + audit + Sentry + live event, and
+  // return instead of throwing.
+  if (deps.attempt >= INTEGRATIONS_DELIVER_ATTEMPTS - 1) {
+    await deps.updateDeliveryStatus({
+      id: rowId,
+      createdAt: rowCreatedAt,
+      status: "dead_letter",
+      httpStatus: result.httpStatus,
+      responseBody: result.responseBody,
+      errorMessage: result.errorMessage,
+      providerEvent: payload.providerEvent,
+      attempt: deps.attempt,
+    });
+    if (deps.publishLiveEvent) {
+      await deps.publishLiveEvent({
+        projectId: conn.projectId,
+        connectionId: conn.id,
+        providerId: conn.providerId as ProviderId,
+        eventKey: payload.eventKey,
+        status: "dead_letter",
+      });
+    }
+    if (deps.auditDeadLetter) {
+      await deps.auditDeadLetter({
+        projectId: conn.projectId,
+        connectionId: conn.id,
+        outboxEventId: job.envelope.outboxEventId,
+        providerId: conn.providerId as ProviderId,
+        errorMessage: result.errorMessage,
+      });
+    }
+    if (deps.captureSentry) {
+      deps.captureSentry({
+        connectionId: conn.id,
+        providerId: conn.providerId as ProviderId,
+        outboxEventId: job.envelope.outboxEventId,
+        errorMessage: result.errorMessage,
+      });
+    }
+    log.warn("dead_letter_attempts_exhausted", {
+      connectionId: conn.id,
+      httpStatus: result.httpStatus,
+      attempt: deps.attempt,
+    });
+    return { outcome: "dead_letter", deliveryId: rowId };
+  }
+
   // Retriable failure — update status to failed so the row is visible,
   // then throw so BullMQ applies the backoff and retries.
   await deps.updateDeliveryStatus({

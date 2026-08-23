@@ -209,6 +209,95 @@ describe("runDeliverStep", () => {
     );
   });
 
+  it("throws on a retriable failure with attempts remaining (BullMQ retry signal)", async () => {
+    const deliveryRow = makeDelivery("d1");
+    const deps: DeliverStepDeps = {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: vi.fn().mockReturnValue({ accessToken: "tok" }),
+      insertPendingDelivery: vi.fn().mockResolvedValue(deliveryRow),
+      updateDeliveryStatus: vi.fn().mockResolvedValue(deliveryRow),
+      provider: {
+        id: "META_CAPI",
+        defaultEventMapping: {},
+        validateCredentials: vi.fn(),
+        mapEvent: vi.fn().mockReturnValue({
+          eventKey: "revenue.event.recorded",
+          providerEvent: "Purchase",
+          body: { data: [] },
+        }),
+        deliver: vi.fn().mockResolvedValue({
+          ok: false,
+          httpStatus: 503,
+          responseBody: "upstream down",
+          errorMessage: "service unavailable",
+          retriable: true,
+        }),
+      },
+      http: { request: vi.fn() },
+      attempt: 0,
+    };
+
+    await expect(runDeliverStep(makeJob(), deps)).rejects.toThrow(
+      "service unavailable",
+    );
+    expect(deps.updateDeliveryStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("finalizes as dead_letter (audit + sentry, no throw) when a retriable failure lands on the FINAL attempt", async () => {
+    // BullMQ increments attemptsMade only AFTER deciding whether to retry,
+    // so the processor sees attempt = attempts-1 on its last invocation and
+    // a pre-call `attempt >= attempts` check can never fire. The retriable
+    // branch itself must detect the final attempt — otherwise deliveries
+    // that exhaust their retries rot as status "failed" with no dead-letter
+    // row, audit, or alert, and nobody learns conversions stopped flowing.
+    const deliveryRow = makeDelivery("d1");
+    const auditDeadLetter = vi.fn().mockResolvedValue(undefined);
+    const captureSentry = vi.fn();
+    const publishLiveEvent = vi.fn().mockResolvedValue(undefined);
+    const deps: DeliverStepDeps = {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: vi.fn().mockReturnValue({ accessToken: "tok" }),
+      insertPendingDelivery: vi.fn().mockResolvedValue(deliveryRow),
+      updateDeliveryStatus: vi.fn().mockResolvedValue(deliveryRow),
+      provider: {
+        id: "META_CAPI",
+        defaultEventMapping: {},
+        validateCredentials: vi.fn(),
+        mapEvent: vi.fn().mockReturnValue({
+          eventKey: "revenue.event.recorded",
+          providerEvent: "Purchase",
+          body: { data: [] },
+        }),
+        deliver: vi.fn().mockResolvedValue({
+          ok: false,
+          httpStatus: 503,
+          responseBody: "upstream down",
+          errorMessage: "service unavailable",
+          retriable: true,
+        }),
+      },
+      http: { request: vi.fn() },
+      attempt: 4, // INTEGRATIONS_DELIVER_ATTEMPTS - 1: the last invocation
+      auditDeadLetter,
+      captureSentry,
+      publishLiveEvent,
+    };
+
+    const result = await runDeliverStep(makeJob(), deps);
+
+    expect(result.outcome).toBe("dead_letter");
+    expect(deps.updateDeliveryStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "dead_letter", httpStatus: 503 }),
+    );
+    expect(auditDeadLetter).toHaveBeenCalledTimes(1);
+    expect(captureSentry).toHaveBeenCalledTimes(1);
+    expect(publishLiveEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "dead_letter" }),
+    );
+  });
+
   it("publishes live event + skips audit on success", async () => {
     const deliveryRow = makeDelivery("d1");
     const updatedRow = { ...deliveryRow, status: "succeeded" as const };
