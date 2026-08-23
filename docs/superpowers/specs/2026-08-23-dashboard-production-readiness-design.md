@@ -494,3 +494,49 @@ Everything else in this spec was verified against the tree: endpoints against
 `apps/api/src/routes`, search params against each route's `validateSearch`, SDK versions against
 their manifests, docs targets against `apps/docs/content`, and translation keys against `en.json`
 including plural forms.
+
+---
+
+## 11. Addendum — independent verification pass (2026-08-23, second session)
+
+An adversarial re-verification sampled every claim class against the tree. Verdict: **sound to
+execute as-is**, with the corrections below. Outside §7.1, zero false claims were found — the
+dead-control inventory (~26 of 31 sampled), wire/remove/replace splits, endpoint existence for every
+spot-checked wire target, orphan pages, org links, hardcoded origin, and missing boundaries all
+held.
+
+**§10 open item — CLOSED.** Anonymous `GET api.github.com/repos/broverse/rovenue` returns 200: the
+repository is publicly readable. §5.1 can proceed as written.
+
+**§7.1 correction (the one bad section).** The list contains 21 keys, not sixteen, and all 21 are
+missing from `en.json` — but 14 of the 21 call sites pass `{ defaultValue: ... }` and render English
+fallback, not raw identifiers. The flagship examples (`subscriptions.term.trial/.ends/.recurring`,
+`subscriptions.tsx:209-217`) are among the 14 (an authoring-time error — git blame dates those lines
+to May 2026). Only **7 keys genuinely reach the screen raw**: `products.stats.entitlements`
+(products.tsx:407), `account.api.revoke` (api-key-row.tsx:23), `common.unknownError`
+(cohort-form.tsx:71), `common.notFound` (refund-shield responses:46), `cohorts.retention.retry`
+(retention-heatmap.tsx:92), `experiments.new.offering.notEnough` and `.inUse` (new.tsx:776, 1322).
+Consequences: (a) the other 14 keys join the §7.2 fold-in rather than the urgent list; (b) the §7.2
+count undercounts — the audit recognized only the two-arg `t("k","text")` form and is blind to the
+options-object `defaultValue` form (~54 occurrences repo-wide); (c) the proposed guard test MUST
+parse both fallback forms or it will misreport.
+
+**Small corrections.**
+- `window.alert` call sites: 10 in the two named files (6 in experiment-hero, 4 in
+  experiments/new), not seven.
+- §8's "no `href="#"`" acceptance scan needs an allowlist: `funnel-builder/settings-tab.tsx:61` and
+  `funnel-builder/properties-panel.tsx:668` (declared out of scope) and `login.tsx:215` (legitimate
+  `preventDefault` link) all trip it.
+
+**Additions found during verification.**
+- `sdk-content.ts:117,130,143` `repoLabel` strings also name the dead org; they render as plain text
+  (`sdk-package-card.tsx:68`), not links — sweep them in the §5.1 pass.
+- A second `posely.app` leftover in mock data: `components/products/product-drawer.tsx:569`
+  (`by furkan@posely.app`) — add to the §6 mock-data cleanup.
+
+**Relationship to the backend fix set.** The server-side production blockers verified the same day
+(Google RTDN/entitlement/revenue, Apple refund reversal, expiry sweep, webhook durability, paywall
+view counts, asset deletion) live in a separate plan:
+`docs/superpowers/plans/2026-08-23-store-billing-correctness.md`. The two work streams are
+independent; only the asset-library UI (`force` param wiring after the server-side 409 lands) needs
+coordination with this spec's owner because that file carries in-progress edits.
