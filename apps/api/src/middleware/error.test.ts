@@ -16,7 +16,9 @@ process.env.REDIS_URL = "redis://localhost:6379";
 
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { ERROR_CODE } from "@rovenue/shared";
 import { errorHandler } from "./error";
 
 const testSchema = z.object({
@@ -92,5 +94,42 @@ describe("W4.4: ZodError does not leak field names / schema shape", () => {
     // Must not contain full Zod error shape.
     expect(text).not.toContain("issues");
     expect(text).not.toContain("ZodError");
+  });
+});
+
+// =============================================================
+// HTTPException `cause` as machine-readable error code
+//
+// Services throw HTTPException without access to `c`, so a specific
+// envelope code (e.g. purchase_not_paid) rides on `cause`. The
+// handler honors it only when it names a known ERROR_CODE; anything
+// else falls back to the status→code mapping.
+// =============================================================
+
+describe("HTTPException cause carries the envelope error code", () => {
+  function buildThrowingApp(cause: unknown) {
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.get("/boom", () => {
+      throw new HTTPException(400, { message: "boom", cause });
+    });
+    return app;
+  }
+
+  it("uses the cause when it names a known ERROR_CODE", async () => {
+    const app = buildThrowingApp(ERROR_CODE.PURCHASE_NOT_PAID);
+    const res = await app.request("/boom");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("purchase_not_paid");
+    expect(body.error.message).toBe("boom");
+  });
+
+  it("falls back to the status mapping for a non-code cause", async () => {
+    const app = buildThrowingApp(new Error("internal detail"));
+    const res = await app.request("/boom");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 });

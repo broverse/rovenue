@@ -7,6 +7,21 @@ import { logger } from "../lib/logger";
 
 const log = logger.child("error-handler");
 
+// Services throw HTTPException without access to `c`, so a specific envelope
+// code (e.g. PURCHASE_NOT_PAID) rides on the exception's `cause`. Only causes
+// that name a known ERROR_CODE are honored — anything else (an Error object,
+// an arbitrary string) falls back to the status→code mapping below.
+const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set(
+  Object.values(ERROR_CODE),
+);
+
+function resolveErrorCode(err: HTTPException): ErrorCode {
+  if (typeof err.cause === "string" && KNOWN_ERROR_CODES.has(err.cause)) {
+    return err.cause as ErrorCode;
+  }
+  return mapHttpStatus(err.status);
+}
+
 function mapHttpStatus(status: number): ErrorCode {
   switch (status) {
     case 400:
@@ -28,8 +43,7 @@ function mapHttpStatus(status: number): ErrorCode {
 
 export const errorHandler: ErrorHandler = (err, c) => {
   if (err instanceof HTTPException) {
-    const code = mapHttpStatus(err.status);
-    return c.json(fail(code, err.message), err.status);
+    return c.json(fail(resolveErrorCode(err), err.message), err.status);
   }
 
   if (err instanceof ZodError) {

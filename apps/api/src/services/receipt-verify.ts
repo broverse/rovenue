@@ -29,6 +29,7 @@ import {
   type AppleEnvironment,
   type AppleJwsTransactionPayload,
 } from "./apple/apple-types";
+import { ERROR_CODE } from "@rovenue/shared";
 import {
   verifyGoogleProductPurchase,
   verifyGoogleSubscription,
@@ -37,6 +38,12 @@ import type {
   GoogleServiceAccountCredentials,
   GoogleVerifyConfig,
 } from "./google";
+import {
+  GOOGLE_PRODUCT_PURCHASE_STATE,
+  GOOGLE_SUBSCRIPTION_STATE,
+  type GoogleSubscriptionState,
+} from "./google/google-types";
+import { mapSubscriptionStateToStatus } from "./google/google-mappers";
 import { guardStatusWrite } from "./subscription-transition-guard";
 import { convertToUsd } from "./fx";
 import { reassignAllAssets, safeSyncAccessAfterMerge } from "./subscriber-transfer";
@@ -303,6 +310,32 @@ async function verifyAppleReceipt(
 // Google receipt (purchaseToken)
 // =============================================================
 
+// Google subscription states that leave the purchase access-granting on the
+// receipt path: ACTIVE and IN_GRACE_PERIOD are paid (or paid-through);
+// CANCELED means auto-renew off with access running until expiry. Everything
+// else is either unpaid (PENDING → rejected with PURCHASE_NOT_PAID) or lapsed
+// (ON_HOLD / PAUSED / EXPIRED / unknown → mapped to its non-access status via
+// the shared RTDN mapper, never hardcoded ACTIVE).
+const GOOGLE_ACCESS_ELIGIBLE_SUBSCRIPTION_STATES: ReadonlySet<GoogleSubscriptionState> =
+  new Set<GoogleSubscriptionState>([
+    GOOGLE_SUBSCRIPTION_STATE.ACTIVE,
+    GOOGLE_SUBSCRIPTION_STATE.IN_GRACE_PERIOD,
+    GOOGLE_SUBSCRIPTION_STATE.CANCELED,
+  ]);
+
+// Shared 400 body for a receipt whose purchase the user has not paid for yet
+// (subscription PENDING / one-time purchaseState PENDING). The purchase may
+// still complete, so the client retries verification after payment.
+const PURCHASE_NOT_PAID_MESSAGE =
+  "Google purchase has not been paid yet; retry verification after payment completes";
+
+function purchaseNotPaidError(): HTTPException {
+  return new HTTPException(400, {
+    message: PURCHASE_NOT_PAID_MESSAGE,
+    cause: ERROR_CODE.PURCHASE_NOT_PAID,
+  });
+}
+
 async function loadGoogleConfig(
   projectId: string,
 ): Promise<GoogleVerifyConfig> {
@@ -364,6 +397,24 @@ async function verifyGoogleSubscriptionReceipt(
     );
   }
 
+  // Entitlement gate: a fetchable token only proves the purchase exists —
+  // `subscriptionState` decides access. PENDING means the user has not
+  // completed payment, so nothing is persisted and the client retries after
+  // payment. Every other state maps through the same mapper the RTDN webhook
+  // uses, so the two paths can never disagree on what a state grants.
+  const subscriptionState = subscription.subscriptionState;
+  if (subscriptionState === GOOGLE_SUBSCRIPTION_STATE.PENDING) {
+    throw purchaseNotPaidError();
+  }
+  const status = mapSubscriptionStateToStatus(subscriptionState);
+  if (!GOOGLE_ACCESS_ELIGIBLE_SUBSCRIPTION_STATES.has(subscriptionState)) {
+    log.warn("google subscription receipt in non-access state", {
+      projectId: args.projectId,
+      state: subscriptionState,
+      status,
+    });
+  }
+
   const subscriber = await reconcileGoogleReceiptSubscriber({
     projectId: args.projectId,
     appUserId: args.appUserId,
@@ -386,7 +437,7 @@ async function verifyGoogleSubscriptionReceipt(
       projectId: args.projectId,
       store: Store.PLAY_STORE,
       storeTransactionId: args.receipt,
-      to: PurchaseStatus.ACTIVE,
+      to: status,
       source: "receipt-verify",
     });
 
@@ -401,7 +452,7 @@ async function verifyGoogleSubscriptionReceipt(
         storeTransactionId: args.receipt,
         originalTransactionId:
           subscription.linkedPurchaseToken ?? args.receipt,
-        status: PurchaseStatus.ACTIVE,
+        status,
         purchaseDate: startTime,
         originalPurchaseDate: startTime,
         expiresDate,
@@ -412,7 +463,7 @@ async function verifyGoogleSubscriptionReceipt(
         presentedContext: args.presentedContext ?? null,
       },
       update: {
-        ...(guard.apply ? { status: PurchaseStatus.ACTIVE } : {}),
+        ...(guard.apply ? { status } : {}),
         expiresDate,
         autoRenewStatus:
           lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
@@ -448,6 +499,20 @@ async function verifyGoogleProductReceipt(
       googleCircuit.state === "OPEN" ? 503 : 400,
       { message: "Google receipt verification failed" },
     );
+  }
+
+  // Credit-grant gate: only purchaseState PURCHASED is money in the bank.
+  // CANCELED is an invalid receipt; PENDING — and anything unrecognized —
+  // is not paid, so nothing is persisted (and the route's consumable credit
+  // grant never runs) until a paid re-verify.
+  const purchaseState = productPurchase.purchaseState;
+  if (purchaseState === GOOGLE_PRODUCT_PURCHASE_STATE.CANCELED) {
+    throw new HTTPException(400, {
+      message: "Google purchase is canceled",
+    });
+  }
+  if (purchaseState !== GOOGLE_PRODUCT_PURCHASE_STATE.PURCHASED) {
+    throw purchaseNotPaidError();
   }
 
   const subscriber = await reconcileGoogleReceiptSubscriber({

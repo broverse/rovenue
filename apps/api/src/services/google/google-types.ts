@@ -61,6 +61,16 @@ export const GOOGLE_SUBSCRIPTION_STATE = {
 export type GoogleSubscriptionState =
   (typeof GOOGLE_SUBSCRIPTION_STATE)[keyof typeof GOOGLE_SUBSCRIPTION_STATE];
 
+// purchases.products.get — ProductPurchase.purchaseState
+// https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.products
+export const GOOGLE_PRODUCT_PURCHASE_STATE = {
+  PURCHASED: 0,
+  CANCELED: 1,
+  PENDING: 2,
+} as const;
+export type GoogleProductPurchaseState =
+  (typeof GOOGLE_PRODUCT_PURCHASE_STATE)[keyof typeof GOOGLE_PRODUCT_PURCHASE_STATE];
+
 export const GOOGLE_ACKNOWLEDGEMENT_STATE = {
   UNSPECIFIED: "ACKNOWLEDGEMENT_STATE_UNSPECIFIED",
   PENDING: "ACKNOWLEDGEMENT_STATE_PENDING",

@@ -49,6 +49,12 @@ export const ERROR_CODE = {
   ASSET_STORAGE_UNAVAILABLE: "ASSET_STORAGE_UNAVAILABLE",
   ASSET_INVALID_NAME: "ASSET_INVALID_NAME",
   ASSET_PROCESSING_FAILED: "ASSET_PROCESSING_FAILED",
+  // Google Play receipt for a purchase the user has not (yet) paid for —
+  // subscriptionState PENDING on subscriptions, purchaseState PENDING on
+  // one-time products. The purchase may still complete: the client should
+  // retry verification after payment finishes, so this is machine-readable
+  // rather than folded into the generic 400 VALIDATION_ERROR.
+  PURCHASE_NOT_PAID: "purchase_not_paid",
   // The root app's global request-body ceiling (apps/api/src/app.ts).
   // Distinct from the per-route *_FILE_TOO_LARGE codes above: those mean
   // "this upload is bigger than its own kind allows", this one means

@@ -1,4 +1,5 @@
 import type { PurchaseStatus, RevenueEventType } from "@rovenue/db";
+import { logger } from "../../lib/logger";
 import {
   GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE,
   GOOGLE_SUBSCRIPTION_STATE,
@@ -8,6 +9,8 @@ import {
   type GoogleSubscriptionPurchaseV2,
   type GoogleSubscriptionState,
 } from "./google-types";
+
+const log = logger.child("google-mappers");
 
 // Pure transform functions used by the webhook handler. Split
 // into its own module so tests can load them without pulling the
@@ -64,18 +67,15 @@ export function classifyNotification(payload: GoogleRtdnPayload): string {
 // Subscription state / revenue event mappers
 // =============================================================
 
-export function mapStatus(
+/**
+ * Map a Google `subscriptionState` alone to a purchase status. Shared by the
+ * RTDN webhook ({@link mapStatus}, which layers the REVOKED override on top)
+ * and the receipt-verify path, so both paths agree on which store states
+ * grant access.
+ */
+export function mapSubscriptionStateToStatus(
   state: GoogleSubscriptionState,
-  type: GoogleSubscriptionNotificationType,
 ): PurchaseStatus {
-  // A revoke is a distinct terminal state from a natural expiry. Google's
-  // subscriptionsv2.get usually returns state=EXPIRED for a revoked
-  // subscription, which would otherwise collapse REVOKED into EXPIRED and
-  // lose the chargeback/policy distinction in analytics. Honor the
-  // notification type first.
-  if (type === GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_REVOKED) {
-    return PURCHASE_STATUS.REVOKED;
-  }
   switch (state) {
     case GOOGLE_SUBSCRIPTION_STATE.ACTIVE:
     case GOOGLE_SUBSCRIPTION_STATE.CANCELED:
@@ -90,12 +90,32 @@ export function mapStatus(
       return PURCHASE_STATUS.EXPIRED;
     case GOOGLE_SUBSCRIPTION_STATE.PENDING:
     case GOOGLE_SUBSCRIPTION_STATE.PENDING_PURCHASE_CANCELED:
-      return PURCHASE_STATUS.TRIAL;
+      // Payment has not completed — never access-granting. When (if) the
+      // user pays, Google emits a fresh RTDN in a paid state, which
+      // re-activates the row.
+      return PURCHASE_STATUS.EXPIRED;
     default:
-      // SUBSCRIPTION_REVOKED is handled up-front (it can surface with an
-      // EXPIRED state); any other unrecognized state defaults to ACTIVE.
-      return PURCHASE_STATUS.ACTIVE;
+      // Fail closed: an unrecognized state must never grant access.
+      log.warn("unrecognized Google subscription state; defaulting to EXPIRED", {
+        state,
+      });
+      return PURCHASE_STATUS.EXPIRED;
   }
+}
+
+export function mapStatus(
+  state: GoogleSubscriptionState,
+  type: GoogleSubscriptionNotificationType,
+): PurchaseStatus {
+  // A revoke is a distinct terminal state from a natural expiry. Google's
+  // subscriptionsv2.get usually returns state=EXPIRED for a revoked
+  // subscription, which would otherwise collapse REVOKED into EXPIRED and
+  // lose the chargeback/policy distinction in analytics. Honor the
+  // notification type first.
+  if (type === GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_REVOKED) {
+    return PURCHASE_STATUS.REVOKED;
+  }
+  return mapSubscriptionStateToStatus(state);
 }
 
 export function mapRevenueEventType(

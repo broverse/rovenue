@@ -12,6 +12,7 @@ import {
   GOOGLE_VOIDED_PURCHASE_PRODUCT_TYPE,
   GOOGLE_VOIDED_PURCHASE_REFUND_TYPE,
   type GoogleRtdnPayload,
+  type GoogleSubscriptionState,
 } from "../src/services/google/google-types";
 
 // Note: PurchaseStatus / RevenueEventType are compared as string
@@ -152,19 +153,37 @@ describe("mapStatus", () => {
     ).toBe("PAUSED");
   });
 
-  it("maps PENDING states to TRIAL (provisional access)", () => {
+  it("maps PENDING states to EXPIRED — an unpaid purchase never grants access", () => {
+    // The user has not completed payment: neither state may map to an
+    // access-granting status. When payment completes Google sends a fresh
+    // paid-state RTDN, which re-activates the row.
     expect(
       mapStatus(
         GOOGLE_SUBSCRIPTION_STATE.PENDING,
         GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_PURCHASED,
       ),
-    ).toBe("TRIAL");
+    ).toBe("EXPIRED");
     expect(
       mapStatus(
         GOOGLE_SUBSCRIPTION_STATE.PENDING_PURCHASE_CANCELED,
         GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_PENDING_PURCHASE_CANCELED,
       ),
-    ).toBe("TRIAL");
+    ).toBe("EXPIRED");
+  });
+
+  it("defaults unrecognized states to EXPIRED (fail closed), never ACTIVE", () => {
+    expect(
+      mapStatus(
+        "SUBSCRIPTION_STATE_SOMETHING_NEW" as GoogleSubscriptionState,
+        GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_RENEWED,
+      ),
+    ).toBe("EXPIRED");
+    expect(
+      mapStatus(
+        GOOGLE_SUBSCRIPTION_STATE.UNSPECIFIED,
+        GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_RENEWED,
+      ),
+    ).toBe("EXPIRED");
   });
 
   it("falls back to REVOKED when the type is SUBSCRIPTION_REVOKED", () => {
