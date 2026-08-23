@@ -63,8 +63,18 @@ function extractCustomerId(event: Stripe.Event): string | null {
   const obj = event.data.object as {
     customer?: string | { id: string } | null;
   };
-  if (!obj.customer) return null;
-  return typeof obj.customer === "string" ? obj.customer : obj.customer.id;
+  // Stripe nulls `PaymentMethod.customer` as part of the detach operation,
+  // so `payment_method.detached` events only carry the customer in
+  // `previous_attributes`. Without this fallback the detach handler was
+  // unreachable (`project_not_found` on every delivery).
+  const prev = (
+    event.data.previous_attributes as
+      | { customer?: string | { id: string } | null }
+      | undefined
+  )?.customer;
+  const customer = obj.customer ?? prev ?? null;
+  if (!customer) return null;
+  return typeof customer === "string" ? customer : customer.id;
 }
 
 export async function dispatchStripeBillingEvent(
