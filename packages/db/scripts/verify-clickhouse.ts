@@ -70,8 +70,8 @@ const EXPECTED_TABLES: ReadonlyArray<{ name: string; engine: string }> = [
   { name: "exposures_queue", engine: "Kafka" },
   { name: "raw_exposures", engine: "ReplacingMergeTree" },
   { name: "mv_exposures_to_raw", engine: "MaterializedView" },
-  { name: "mv_experiment_daily", engine: "MaterializedView" },
-  { name: "mv_experiment_daily_target", engine: "SummingMergeTree" },
+  // mv_experiment_daily / mv_experiment_daily_target (0003) were dropped
+  // by 0022 — unread rollup; experiment reads go to raw_exposures.
   // Plan 2 — revenue Kafka chain
   { name: "revenue_queue", engine: "Kafka" },
   { name: "raw_revenue_events", engine: "ReplacingMergeTree" },

@@ -1930,8 +1930,10 @@ export interface DashboardPlacementUpdateInput {
 }
 
 /**
- * `GET /dashboard/projects/:projectId/placements/:id/metrics` — daily
- * paywall-view rollup (`mv_paywall_daily_target`) plus a query-time
+ * `GET /dashboard/projects/:projectId/placements/:id/metrics` —
+ * replay-safe view count (uniqExact over `raw_paywall_events`), the
+ * unique-viewer HLL from the daily rollup (`mv_paywall_daily_target`),
+ * plus a query-time
  * purchase join (subscriber's first placement view -> their next
  * purchase-class revenue event), mirroring the exposure->conversion
  * join `analytics-router.ts` already runs for experiment results.

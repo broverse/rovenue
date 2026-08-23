@@ -202,7 +202,8 @@ export const placementsDashboardRoute = new Hono()
   })
   // ----- GET /dashboard/projects/:projectId/placements/:id/metrics -----
   //
-  // Views/unique-views (mv_paywall_daily_target) + a query-time purchase
+  // Views (replay-safe uniqExact over raw_paywall_events) +
+  // unique-views (mv_paywall_daily_target HLL) + a query-time purchase
   // join — see services/placement-metrics.ts. Degrades to all-zero (not
   // a 5xx) when ClickHouse is unconfigured, matching the analytics-router
   // convention local dev relies on.

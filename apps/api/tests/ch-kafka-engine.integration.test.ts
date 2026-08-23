@@ -16,19 +16,19 @@
 //   4. Shell out to the CH migration runner (not exported as a
 //      library — see plan G.1 note, Option A). This creates
 //      `exposures_queue` (Kafka Engine), `raw_exposures`
-//      (ReplacingMergeTree), `mv_exposures_to_raw`, and the
-//      `mv_experiment_daily` → `mv_experiment_daily_target`
-//      SummingMergeTree rollup.
+//      (ReplacingMergeTree) and `mv_exposures_to_raw` (the
+//      experiment daily SummingMergeTree rollup was dropped by
+//      0022 — reads are query-time over raw_exposures).
 //   5. Insert an outbox row via the shared dev Postgres (same
 //      pattern as the Phase D integration test — we reuse the
 //      local dev DB rather than spinning a testcontainers
 //      Postgres to keep runtime under 2 min).
 //   6. Run the dispatcher in the background. It picks up the
 //      outbox row, publishes to `rovenue.exposures`, CH consumes
-//      via the Kafka Engine, the MV inserts into raw_exposures,
-//      and the second MV rolls up into mv_experiment_daily_target.
+//      via the Kafka Engine, and the MV inserts into raw_exposures.
 //   7. Poll `raw_exposures FINAL` until the row shows up, then
-//      assert the rollup has exactly one exposure.
+//      assert the query-time exposure count (uniqExact over raw,
+//      as the experiments/results endpoint reads) is exactly one.
 //
 // NOT parallel-safe: binds host port 19094 (broker) — do not run
 // alongside the Phase D outbox-dispatcher integration test (which
@@ -222,7 +222,7 @@ afterAll(async () => {
 });
 
 describe("CH Kafka Engine parity", () => {
-  it("raw_exposures and mv_experiment_daily_target receive outbox events", async () => {
+  it("raw_exposures receives outbox events and the query-time exposure count sees them", async () => {
     // Prove the dispatcher under test is going to hit our
     // testcontainer broker, not a stale .env value.
     expect(getResolvedBrokers()).toBe(brokerUrl);
@@ -275,15 +275,18 @@ describe("CH Kafka Engine parity", () => {
       return Number(rows[0]?.c ?? 0) === 1;
     }, 90_000);
 
-    // Rollup assertion. SummingMergeTree may not have merged yet,
-    // so sum() across parts is how we read — exactly like the
-    // experiments/results endpoint does.
-    const rollup = await ch.query({
-      query: `SELECT sum(exposures) AS e FROM rovenue.mv_experiment_daily_target WHERE projectId = '${projectId}'`,
+    // Query-time exposure count over raw — exactly like the
+    // experiments/results endpoint reads (uniqExact(eventId), the
+    // replay-safe 0012/0016 pattern; the SummingMergeTree rollup
+    // was dropped by CH migration 0022).
+    const exposureCount = await ch.query({
+      query: `SELECT uniqExact(eventId) AS e FROM rovenue.raw_exposures WHERE projectId = '${projectId}'`,
       format: "JSONEachRow",
     });
-    const rollupRows = (await rollup.json()) as Array<{ e: string | number }>;
-    expect(Number(rollupRows[0]?.e ?? 0)).toBe(1);
+    const exposureRows = (await exposureCount.json()) as Array<{
+      e: string | number;
+    }>;
+    expect(Number(exposureRows[0]?.e ?? 0)).toBe(1);
 
     await ch.close();
   }, 180_000);

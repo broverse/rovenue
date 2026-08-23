@@ -153,32 +153,49 @@ export async function runAnalyticsQuery(
         },
       );
     case "placement_metrics":
-      // views/unique_views come from the mv_paywall_daily_target rollup
-      // (0018_mv_paywall_daily.sql). purchases is PRECISE attribution:
+      // views is a query-time idempotent count over the deduped raw table
+      // (the 0012/0016 pattern): uniqExact(eventId) collapses outbox/Kafka
+      // replays of the same eventId BEFORE counting. The former
+      // `sum(views)` read of mv_paywall_daily_target (SummingMergeTree,
+      // 0018) counted every INSERT — raw_paywall_events is
+      // ReplacingMergeTree so the raw table dedupes eventually, but the
+      // rollup had already summed the duplicate, permanently inflating the
+      // counter on every at-least-once replay. kind = 'view' mirrors the
+      // rollup's own filter (0020) so close events are excluded.
+      // unique_views stays on the rollup's HLL state — uniqMerge over
+      // uniqState is replay-safe by construction (same distinct set), and
+      // charts.ts reads the same target, so the MV survives.
+      // purchases is PRECISE attribution:
       // raw_revenue_events carries the purchase's presentedContext
       // (placementId column, 0019_revenue_presented_context.sql), so we
       // count unique converting subscribers attributed to THIS placement
       // directly — no viewer-overlap heuristic. Rows ingested before 0019
-      // carry '' and simply don't match. `v` and `c` are each a plain
+      // carry '' and simply don't match. `v`, `u` and `c` are each a plain
       // (non-GROUP BY) scalar aggregate — deliberately, since GROUP BY on
       // a constant emits ZERO rows for zero matching input rows, whereas a
       // bare aggregate always emits exactly one row of zeros (see
-      // summary.ts). Cross-joined (both are always single-row).
+      // summary.ts). Cross-joined (all are always single-row).
       return queryAnalytics<PlacementMetricsRow>(
         q.projectId,
         `
           SELECT
             toString(v.views)                AS views,
-            toString(v.unique_views)          AS unique_views,
+            toString(u.unique_views)          AS unique_views,
             toString(c.purchases)             AS purchases
           FROM (
+            SELECT uniqExact(eventId) AS views
+            FROM rovenue.raw_paywall_events
+            WHERE projectId = {projectId:String}
+              AND placementId = {placementId:String}
+              AND kind = 'view'
+          ) v
+          CROSS JOIN (
             SELECT
-              sum(views)                 AS views,
               uniqMerge(subscribersHll)  AS unique_views
             FROM rovenue.mv_paywall_daily_target
             WHERE projectId = {projectId:String}
               AND placementId = {placementId:String}
-          ) v
+          ) u
           CROSS JOIN (
             SELECT uniq(subscriberId) AS purchases
             FROM rovenue.raw_revenue_events

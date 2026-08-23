@@ -68,3 +68,40 @@ describe("runAnalyticsQuery — experiment_results", () => {
     expect(queryAnalyticsMock).not.toHaveBeenCalled();
   });
 });
+
+describe("runAnalyticsQuery — placement_metrics", () => {
+  beforeEach(() => {
+    isClickHouseConfiguredMock.mockReset().mockReturnValue(true);
+    queryAnalyticsMock.mockReset().mockResolvedValue([]);
+  });
+
+  it("counts views replay-safely (uniqExact over raw, kind='view'), not via the SummingMergeTree rollup", async () => {
+    await runAnalyticsQuery({
+      kind: "placement_metrics",
+      placementId: "plc_1",
+      projectId: "proj_1",
+    });
+
+    expect(queryAnalyticsMock).toHaveBeenCalledTimes(1);
+    const call = queryAnalyticsMock.mock.calls[0] as [string, string, unknown];
+    const [projectId, sql, params] = call;
+    expect(projectId).toBe("proj_1");
+    expect(params).toEqual({ projectId: "proj_1", placementId: "plc_1" });
+
+    const sqlText = sql as string;
+    // views = query-time idempotent count over the deduped raw table
+    // (0012/0016 pattern): an outbox/Kafka replay of the same eventId
+    // must collapse BEFORE counting.
+    expect(sqlText).toMatch(
+      /uniqExact\(eventId\) AS views\s+FROM rovenue\.raw_paywall_events\s+WHERE projectId = \{projectId:String\}\s+AND placementId = \{placementId:String\}\s+AND kind = 'view'/,
+    );
+    // The inflating SummingMergeTree read must be gone.
+    expect(sqlText).not.toContain("sum(views)");
+    // unique_views stays on the replay-safe HLL from the rollup target.
+    expect(sqlText).toMatch(
+      /uniqMerge\(subscribersHll\)\s+AS unique_views\s+FROM rovenue\.mv_paywall_daily_target/,
+    );
+    // purchases attribution over raw_revenue_events is untouched.
+    expect(sqlText).toContain("uniq(subscriberId) AS purchases");
+  });
+});
