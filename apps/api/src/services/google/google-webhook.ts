@@ -26,6 +26,7 @@ import {
   mapStatus,
   parsePushBody,
 } from "./google-mappers";
+import { expireSupersededGooglePurchase } from "./google-supersede";
 import {
   acknowledgeGoogleSubscription,
   verifyGoogleSubscription,
@@ -329,6 +330,19 @@ async function processSubscriptionNotification(
     });
     return { persisted: row, guard: decided };
   });
+
+  // Upgrade/downgrade replacement: Google points at the retired token via
+  // linkedPurchaseToken and sends no independent RTDN for it — expire that
+  // row (and revoke its access) or the old tier stays granted until its
+  // frozen expiresDate lapses.
+  if (purchase.linkedPurchaseToken) {
+    await expireSupersededGooglePurchase({
+      projectId: ctx.projectId,
+      supersededToken: purchase.linkedPurchaseToken,
+      currentToken: ctx.notification.purchaseToken,
+      source: `google:${ctx.notification.notificationType}`,
+    });
+  }
 
   // When the status write was withheld (illegal transition from a
   // terminal state), don't grant access either — the row keeps its

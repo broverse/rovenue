@@ -53,6 +53,7 @@ import {
   resolveOneTimeProductPricing,
   resolveSubscriptionPricing,
 } from "./google/google-pricing";
+import { expireSupersededGooglePurchase } from "./google/google-supersede";
 import { guardStatusWrite } from "./subscription-transition-guard";
 import { convertToUsd } from "./fx";
 import { reassignAllAssets, safeSyncAccessAfterMerge } from "./subscriber-transfer";
@@ -516,6 +517,18 @@ async function verifyGoogleSubscriptionReceipt(
       },
     });
   })) as unknown as Purchase;
+
+  // Upgrade/downgrade replacement (mirrors the RTDN webhook): expire the
+  // linkedPurchaseToken predecessor so the old tier's access can't outlive
+  // the replacement.
+  if (subscription.linkedPurchaseToken) {
+    await expireSupersededGooglePurchase({
+      projectId: args.projectId,
+      supersededToken: subscription.linkedPurchaseToken,
+      currentToken: args.receipt,
+      source: "receipt-verify",
+    });
+  }
 
   // R6 (Google): record revenue on the receipt path too, mirroring the Apple
   // block above. The dedupe key converges on the SAME shape the RTDN webhook
