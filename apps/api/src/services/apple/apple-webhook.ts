@@ -323,6 +323,8 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
       return applySubscribed(ctx);
     case APPLE_NOTIFICATION_TYPE.DID_RENEW:
       return applyRenewal(ctx);
+    case APPLE_NOTIFICATION_TYPE.DID_CHANGE_RENEWAL_PREF:
+      return applyRenewalPrefChange(ctx);
     case APPLE_NOTIFICATION_TYPE.DID_CHANGE_RENEWAL_STATUS:
       return applyRenewalStatusChange(ctx);
     case APPLE_NOTIFICATION_TYPE.DID_FAIL_TO_RENEW:
@@ -399,6 +401,54 @@ async function applyRenewal(ctx: DispatchContext): Promise<void> {
     purchaseId: purchase.id,
     productId: product.id,
     type: RevenueEventType.RENEWAL,
+  });
+}
+
+/**
+ * DID_CHANGE_RENEWAL_PREF: the subscriber changed which product renews.
+ *
+ * Subtype UPGRADE is the only variant with an IMMEDIATE money/entitlement
+ * effect: Apple charges the user right away and `signedTransactionInfo`
+ * carries the NEW transaction (new productId / transactionId / price).
+ * Ignoring it left the subscriber paying for the higher tier while still
+ * entitled to the old one until the next DID_RENEW — weeks of misgranted
+ * entitlement and uncounted upgrade revenue. Handle it exactly like a
+ * SUBSCRIBED/DID_RENEW for the new transaction; the shared dedupe key on
+ * the new transactionId makes replays no-ops.
+ *
+ * Subtype DOWNGRADE and the no-subtype "reverted the pending change" case
+ * take effect at the NEXT renewal (that DID_RENEW carries the new
+ * product), so they intentionally change nothing now.
+ */
+async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
+  if (ctx.notification.subtype !== APPLE_NOTIFICATION_SUBTYPE.UPGRADE) {
+    log.debug("renewal pref change with no immediate effect", {
+      subtype: ctx.notification.subtype ?? null,
+    });
+    return;
+  }
+
+  const subscriber = await resolveSubscriber(ctx);
+  const { product, purchase, statusApplied } = await upsertPurchase({
+    ctx,
+    subscriberId: subscriber.id,
+    status: PurchaseStatus.ACTIVE,
+    autoRenewStatus: ctx.renewalInfo?.autoRenewStatus === 1,
+  });
+  ctx.outcome.subscriberId = subscriber.id;
+  ctx.outcome.purchaseId = purchase.id;
+  // Rejected transition = the row is already terminal (REFUNDED/REVOKED);
+  // a late/replayed upgrade must not re-grant access or re-add revenue.
+  if (!statusApplied) return;
+  await grantAccess({ subscriber, purchase, product, ctx });
+  await emitRevenueEvent({
+    ctx,
+    subscriberId: subscriber.id,
+    purchaseId: purchase.id,
+    productId: product.id,
+    // First charge for the upgraded product — INITIAL keeps it in the
+    // purchased-revenue bucket every analytics view already sums.
+    type: RevenueEventType.INITIAL,
   });
 }
 
