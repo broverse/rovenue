@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { eq } from "drizzle-orm";
 import { OutgoingWebhookStatus, drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
@@ -297,19 +297,12 @@ async function safeEmitWebhookFailing(
 // BullMQ queue + worker
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getDeliveryQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(DELIVERY_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("webhook-delivery"),
     defaultJobOptions: {
       removeOnComplete: { count: 100, age: 24 * 60 * 60 },
       removeOnFail: { count: 500, age: 7 * 24 * 60 * 60 },
@@ -340,7 +333,7 @@ export function createDeliveryWorker(): Worker {
     DELIVERY_QUEUE_NAME,
     async (_job: Job) => deliverWebhooks(),
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("webhook-delivery"),
       concurrency: 1,
     },
   );

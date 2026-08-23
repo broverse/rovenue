@@ -1,5 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { sql } from "drizzle-orm";
 import { drizzle, getDb } from "@rovenue/db";
 import { env } from "../lib/env";
@@ -105,19 +105,12 @@ async function createOutgoingWebhooksPartition(): Promise<number> {
   return created;
 }
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getPartitionMaintenanceQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(PARTITION_MAINTENANCE_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("partition-maintenance"),
     defaultJobOptions: {
       removeOnComplete: { count: 30, age: 30 * 24 * 60 * 60 },
       removeOnFail: { count: 100, age: 30 * 24 * 60 * 60 },
@@ -158,7 +151,7 @@ export function createPartitionMaintenanceWorker(): Worker {
     PARTITION_MAINTENANCE_QUEUE_NAME,
     async (_job: Job) => runPartitionMaintenance(),
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("partition-maintenance"),
       concurrency: 1,
     },
   );

@@ -1,5 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { eq } from "drizzle-orm";
 import {
   drizzle,
@@ -261,19 +261,12 @@ async function executeAction(
 // BullMQ queue + worker + scheduling
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getScheduledActionsQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(SCHEDULED_ACTIONS_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("scheduled-actions"),
     defaultJobOptions: {
       removeOnComplete: { count: 100, age: 24 * 60 * 60 },
       removeOnFail: { count: 500, age: 7 * 24 * 60 * 60 },
@@ -312,7 +305,7 @@ export function getScheduledActionsWorker(): Worker {
       return runScheduledActionsSweep();
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("scheduled-actions"),
       concurrency: 1,
     },
   );

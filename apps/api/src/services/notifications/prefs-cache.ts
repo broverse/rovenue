@@ -1,5 +1,6 @@
 import { LRUCache } from "lru-cache";
 import type { Redis } from "ioredis";
+import { attachRedisErrorLogger } from "../../lib/redis";
 import { logger } from "../../lib/logger";
 
 // =============================================================
@@ -70,7 +71,7 @@ export function createPrefsCache(
   // and enableOfflineQueue:false in this codebase), so we explicitly
   // open the connection before SUBSCRIBE to avoid the SUBSCRIBE being
   // rejected against an unconnected client.
-  const sub = redis.duplicate();
+  const sub = attachRedisErrorLogger(redis.duplicate(), "notification-prefs-subscriber");
   void (async () => {
     try {
       if (sub.status !== "ready" && sub.status !== "connecting") {

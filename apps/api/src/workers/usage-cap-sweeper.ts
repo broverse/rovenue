@@ -1,5 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { isBillingEnabled } from "../lib/host-mode";
@@ -103,19 +103,12 @@ export async function sweepUsageCaps(now = new Date()): Promise<void> {
 // BullMQ queue + worker + scheduling
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getUsageCapSweepQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(USAGE_CAP_SWEEP_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("usage-cap-sweeper"),
     defaultJobOptions: {
       removeOnComplete: { count: 30, age: 7 * 24 * 60 * 60 },
       removeOnFail: { count: 100, age: 30 * 24 * 60 * 60 },
@@ -154,7 +147,7 @@ export function createUsageCapSweeperWorker(): Worker {
       return sweepUsageCaps();
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("usage-cap-sweeper"),
       concurrency: 1,
     },
   );

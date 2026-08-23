@@ -4,6 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { Redis } from "ioredis";
 import { MemberRole } from "@rovenue/db";
 import { env } from "../../lib/env";
+import { attachRedisErrorLogger } from "../../lib/redis";
 import { logger } from "../../lib/logger";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -67,10 +68,13 @@ export const eventsStreamRoute = new Hono()
       });
 
       const channel = liveEventsChannelFor(projectId);
-      const subscriber = new Redis(env.REDIS_URL, {
-        lazyConnect: false,
-        maxRetriesPerRequest: 3,
-      });
+      const subscriber = attachRedisErrorLogger(
+        new Redis(env.REDIS_URL, {
+          lazyConnect: false,
+          maxRetriesPerRequest: 3,
+        }),
+        "events-stream-subscriber",
+      );
       await subscriber.subscribe(channel);
 
       const onMessage = async (_chan: string, payload: string): Promise<void> => {

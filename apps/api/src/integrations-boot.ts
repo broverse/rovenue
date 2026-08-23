@@ -14,6 +14,7 @@ import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { getDb, drizzle } from "@rovenue/db";
 import { env } from "./lib/env";
+import { attachRedisErrorLogger } from "./lib/redis";
 import { startIntegrationsFanout } from "./services/integrations-fanout/consumer";
 import { createConnectionCache } from "./services/integrations-fanout/connection-cache";
 import { ensureIntegrationsDeliverWorker } from "./workers/integrations-deliver";
@@ -36,7 +37,10 @@ export async function bootIntegrations(
 
   const workerHandle = await ensureIntegrationsDeliverWorker({ autoStart: true });
 
-  const connection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+  const connection = attachRedisErrorLogger(
+    new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }),
+    "integrations-boot-queue",
+  );
 
   const queue = new Queue<IntegrationsDeliverJob>(
     INTEGRATIONS_DELIVER_QUEUE_NAME,

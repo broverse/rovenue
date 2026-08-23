@@ -13,6 +13,7 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import { audit } from "../../lib/audit";
 import { env } from "../../lib/env";
+import { attachRedisErrorLogger } from "../../lib/redis";
 import { getProvider } from "../../services/integrations/registry";
 import { createUndiciHttpClient } from "../../services/integrations/http-client";
 import {
@@ -482,10 +483,13 @@ export const integrationsRoute = new Hono()
     if (!wasEnabled && willBeEnabled) {
       // Best-effort: don't fail PATCH if Redis is unavailable
       void (async () => {
-        const redisConn = new Redis(env.REDIS_URL, {
-          maxRetriesPerRequest: null,
-          enableOfflineQueue: false,
-        });
+        const redisConn = attachRedisErrorLogger(
+          new Redis(env.REDIS_URL, {
+            maxRetriesPerRequest: null,
+            enableOfflineQueue: false,
+          }),
+          "integrations-backfill-queue",
+        );
         const queue = new Queue<IntegrationsDeliverJob>(
           INTEGRATIONS_DELIVER_QUEUE_NAME,
           { connection: redisConn },

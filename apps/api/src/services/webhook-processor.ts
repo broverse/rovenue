@@ -1,5 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import type Stripe from "stripe";
 import {
   ProductType,
@@ -83,13 +84,6 @@ export type WebhookPostProcess = (ctx: {
 // BullMQ connection + queue
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 // -------------------------------------------------------------
 // Retry/lease invariant: total retry span > claim lease.
 //
@@ -125,7 +119,7 @@ export function getWebhookQueue(): Queue<WebhookJobData, WebhookJobResult> {
   cachedQueue = new Queue<WebhookJobData, WebhookJobResult>(
     WEBHOOK_QUEUE_NAME,
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("webhook-processor"),
       defaultJobOptions: {
         attempts: WEBHOOK_JOB_ATTEMPTS,
         backoff: { type: "exponential", delay: WEBHOOK_JOB_BACKOFF_INITIAL_MS },
@@ -392,7 +386,7 @@ export function createWebhookWorker(): Worker<
     WEBHOOK_QUEUE_NAME,
     async (job) => processWebhookEvent(job.data),
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("webhook-processor"),
       concurrency: 8,
     },
   );

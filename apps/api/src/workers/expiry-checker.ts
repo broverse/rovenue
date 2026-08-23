@@ -1,5 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import {
   PurchaseStatus,
   RevenueEventType,
@@ -247,19 +247,12 @@ async function recordCancellationRevenue(
 // BullMQ queue + worker + scheduling
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getExpiryQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(EXPIRY_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("expiry-checker"),
     defaultJobOptions: {
       removeOnComplete: { count: 100, age: 24 * 60 * 60 },
       removeOnFail: { count: 500, age: 7 * 24 * 60 * 60 },
@@ -296,7 +289,7 @@ export function createExpiryWorker(): Worker {
       return runExpiryCheck();
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("expiry-checker"),
       concurrency: 1,
     },
   );

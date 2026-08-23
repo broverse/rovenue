@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { drizzle } from "@rovenue/db";
 import { ASSET_ORPHAN_GRACE_HOURS } from "@rovenue/shared";
 import { env } from "../lib/env";
@@ -98,13 +98,6 @@ export async function sweepOrphanedAssets(
 // jobId-idempotent registration, concurrency 1.
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 export const ASSET_ORPHAN_SWEEP_QUEUE_NAME = "rovenue-asset-orphan-sweep";
 const REPEATABLE_JOB_NAME = "asset-orphan:sweep";
 const REPEATABLE_JOB_ID = "asset-orphan:sweep:repeatable";
@@ -115,7 +108,7 @@ let cachedQueue: Queue | undefined;
 export function getAssetOrphanSweepQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(ASSET_ORPHAN_SWEEP_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("asset-orphan-sweeper"),
     defaultJobOptions: {
       removeOnComplete: { count: 30, age: 7 * 24 * 60 * 60 },
       removeOnFail: { count: 100, age: 30 * 24 * 60 * 60 },
@@ -154,7 +147,7 @@ export function createAssetOrphanSweeperWorker(): Worker {
       return sweepOrphanedAssets();
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("asset-orphan-sweeper"),
       concurrency: 1,
     },
   );

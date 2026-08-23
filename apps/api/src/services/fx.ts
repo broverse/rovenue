@@ -1,7 +1,7 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
 import { drizzle, type Db } from "@rovenue/db";
-import { redis } from "../lib/redis";
+import { redis, createBullConnection } from "../lib/redis";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 
@@ -290,19 +290,12 @@ export async function isFxStale(now: Date = new Date()): Promise<boolean> {
 
 export const FX_QUEUE_NAME = "rovenue-fx-rates";
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getFxQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(FX_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("fx"),
     defaultJobOptions: {
       removeOnComplete: { count: 30, age: 7 * 24 * 60 * 60 },
       removeOnFail: { count: 100, age: 30 * 24 * 60 * 60 },
@@ -336,7 +329,7 @@ export function createFxWorker(): Worker {
       await fetchAndCacheRates(today);
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("fx"),
       concurrency: 1,
     },
   );

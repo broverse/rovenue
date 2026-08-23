@@ -23,7 +23,7 @@
 // persist.
 
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { drizzle, type Db } from "@rovenue/db";
 import { audit, type AuditTx } from "../lib/audit";
 import { env } from "../lib/env";
@@ -449,19 +449,12 @@ async function loadAppleContextForProject(
 // concurrency stays at 1 because the heavy lifting happens inside
 // the SKIP LOCKED tx, not in the Worker.
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getRefundShieldResponderQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(REFUND_SHIELD_RESPONDER_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("refund-shield-responder"),
     defaultJobOptions: {
       removeOnComplete: { count: 100, age: 24 * 60 * 60 },
       removeOnFail: { count: 500, age: 7 * 24 * 60 * 60 },
@@ -494,7 +487,7 @@ export function createRefundShieldResponderWorker(): Worker {
     REFUND_SHIELD_RESPONDER_QUEUE_NAME,
     async (_job: Job) => runRefundShieldResponderTick({ now: new Date() }),
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("refund-shield-responder"),
       concurrency: 1,
     },
   );

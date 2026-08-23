@@ -23,6 +23,7 @@
 
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import type Stripe from "stripe";
 import { drizzle, type WebhookEvent } from "@rovenue/db";
 import { env } from "../lib/env";
@@ -192,19 +193,12 @@ export async function runWebhookReaper(
 // BullMQ queue + worker + scheduling
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getWebhookReaperQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(WEBHOOK_REAPER_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("webhook-reaper"),
     defaultJobOptions: {
       removeOnComplete: { count: 100, age: 24 * 60 * 60 },
       removeOnFail: { count: 500, age: 7 * 24 * 60 * 60 },
@@ -239,7 +233,7 @@ export function createWebhookReaperWorker(): Worker {
     WEBHOOK_REAPER_QUEUE_NAME,
     async (_job: Job): Promise<WebhookReaperResult> => runWebhookReaper(),
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("webhook-reaper"),
       concurrency: 1,
     },
   );

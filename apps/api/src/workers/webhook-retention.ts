@@ -1,5 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
@@ -46,19 +46,12 @@ export async function runWebhookRetention(
   return { deleted, cutoff: cutoff.toISOString() };
 }
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getWebhookRetentionQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(WEBHOOK_RETENTION_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("webhook-retention"),
     defaultJobOptions: {
       removeOnComplete: { count: 30, age: 30 * 24 * 60 * 60 },
       removeOnFail: { count: 100, age: 30 * 24 * 60 * 60 },
@@ -95,7 +88,7 @@ export function createWebhookRetentionWorker(): Worker {
       return runWebhookRetention();
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("webhook-retention"),
       concurrency: 1,
     },
   );

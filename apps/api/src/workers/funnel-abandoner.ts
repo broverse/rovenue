@@ -10,7 +10,7 @@
 // flight.
 
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
@@ -44,19 +44,12 @@ export async function runFunnelAbandonerSweep(
 // BullMQ queue + worker + scheduling
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getFunnelAbandonerQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(FUNNEL_ABANDONER_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("funnel-abandoner"),
     defaultJobOptions: {
       removeOnComplete: { count: 100, age: 24 * 60 * 60 },
       removeOnFail: { count: 500, age: 7 * 24 * 60 * 60 },
@@ -93,7 +86,7 @@ export function createFunnelAbandonerWorker(): Worker {
       return runFunnelAbandonerSweep();
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("funnel-abandoner"),
       concurrency: 1,
     },
   );

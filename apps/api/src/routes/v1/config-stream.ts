@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 import { Redis } from "ioredis";
 import { env } from "../../lib/env";
+import { attachRedisErrorLogger } from "../../lib/redis";
 import { apiKeyAuth } from "../../middleware/api-key-auth";
 import {
   CONFIG_INVALIDATE_CHANNEL,
@@ -65,7 +66,10 @@ export const configStreamRoute = new Hono().get(
 
       // Dedicated subscriber connection — ioredis requires a separate client
       // for pub/sub because the connection transitions to subscribe-only mode.
-      const subscriber = new Redis(env.REDIS_URL, { lazyConnect: false });
+      const subscriber = attachRedisErrorLogger(
+        new Redis(env.REDIS_URL, { lazyConnect: false }),
+        "config-stream-subscriber",
+      );
       await subscriber.subscribe(CONFIG_INVALIDATE_CHANNEL);
 
       const onMessage = async (_channel: string, payload: string) => {

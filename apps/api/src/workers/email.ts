@@ -1,5 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { drizzle } from "@rovenue/db";
 import { renderTemplate } from "@rovenue/email-templates";
 import { env } from "../lib/env";
@@ -17,18 +17,11 @@ export interface InvitationEmailJobData {
   inviteUrl: string;
 }
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 export function getEmailQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(EMAIL_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("email"),
     defaultJobOptions: {
       attempts: 5,
       backoff: { type: "exponential", delay: 30_000 },
@@ -109,7 +102,7 @@ export function createEmailWorker(): Worker {
       });
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("email"),
       concurrency: 5,
     },
   );

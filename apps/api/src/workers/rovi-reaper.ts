@@ -8,7 +8,7 @@
 // zombie rows that were never acted upon.
 
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
@@ -34,19 +34,12 @@ export async function reapStaleIntents(): Promise<number> {
 // BullMQ queue + worker + scheduling
 // =============================================================
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getRoviReaperQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(ROVI_REAPER_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("rovi-reaper"),
     defaultJobOptions: {
       removeOnComplete: { count: 100, age: 24 * 60 * 60 },
       removeOnFail: { count: 500, age: 7 * 24 * 60 * 60 },
@@ -80,7 +73,7 @@ export function createRoviReaperWorker(): Worker {
       return { expired };
     },
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("rovi-reaper"),
       concurrency: 1,
     },
   );

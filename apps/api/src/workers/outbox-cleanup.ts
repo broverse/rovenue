@@ -1,5 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
+import { createBullConnection } from "../lib/redis";
 import { drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
@@ -69,19 +69,12 @@ export async function runOutboxCleanup(
   return { deleted, batches, cutoff: cutoff.toISOString(), truncated };
 }
 
-function createBullConnection(): Redis {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    lazyConnect: false,
-  });
-}
-
 let cachedQueue: Queue | undefined;
 
 export function getOutboxCleanupQueue(): Queue {
   if (cachedQueue) return cachedQueue;
   cachedQueue = new Queue(OUTBOX_CLEANUP_QUEUE_NAME, {
-    connection: createBullConnection(),
+    connection: createBullConnection("outbox-cleanup"),
     defaultJobOptions: {
       removeOnComplete: { count: 30, age: 7 * 24 * 60 * 60 },
       removeOnFail: { count: 100, age: 30 * 24 * 60 * 60 },
@@ -112,7 +105,7 @@ export function createOutboxCleanupWorker(): Worker {
     OUTBOX_CLEANUP_QUEUE_NAME,
     async (_job: Job) => runOutboxCleanup(),
     {
-      connection: createBullConnection(),
+      connection: createBullConnection("outbox-cleanup"),
       concurrency: 1,
     },
   );

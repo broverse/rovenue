@@ -18,6 +18,7 @@ import { Redis } from "ioredis";
 import { getDb, drizzle } from "@rovenue/db";
 import { decrypt } from "@rovenue/shared/crypto";
 import { env } from "../lib/env";
+import { attachRedisErrorLogger } from "../lib/redis";
 import { logger } from "../lib/logger";
 import {
   INTEGRATIONS_DELIVER_ATTEMPTS,
@@ -377,7 +378,10 @@ export async function ensureIntegrationsDeliverWorker(
   });
 
   // Separate Redis connection for pub/sub — must not share with BullMQ connection
-  const livePublisher = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+  const livePublisher = attachRedisErrorLogger(
+    new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }),
+    "integrations-deliver-live-publisher",
+  );
 
   const http = createUndiciHttpClient();
 
