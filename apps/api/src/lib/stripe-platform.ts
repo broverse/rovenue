@@ -21,6 +21,9 @@ import { withAccount, type AccountScopedStripe } from "./stripe-account-scoped";
 
 const log = logger.child("stripe-platform");
 
+// Ceiling for a single Stripe API request (Stripe SDK default is 80s).
+const STRIPE_REQUEST_TIMEOUT_MS = 20_000;
+
 export type ConnectMode = "live" | "test";
 
 const cached: { live: Stripe | null; test: Stripe | null } = {
@@ -91,6 +94,10 @@ export function getConnectPlatformStripe(livemode: boolean): Stripe | null {
     apiVersion: "2024-12-18.acacia" as Stripe.LatestApiVersion,
     typescript: true,
     appInfo: { name: "rovenue-connect", version: "0.1.0" },
+    // Stripe's default is 80s. Background workers hold a Postgres
+    // connection (and sometimes row locks) across these calls, so a hung
+    // request must fail fast instead of pinning resources for a minute+.
+    timeout: STRIPE_REQUEST_TIMEOUT_MS,
   });
   cached[slot] = client;
   return client;

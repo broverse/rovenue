@@ -76,7 +76,6 @@ vi.mock("../lib/audit", () => ({
 }));
 
 import {
-  BATCH_SIZE,
   MAX_RETRIES,
   runRefundShieldResponderTick,
 } from "./refund-shield-responder";
@@ -148,6 +147,10 @@ beforeEach(() => {
   dbTransactionMock.mockImplementation(
     async (fn: (tx: typeof FAKE_TX) => Promise<void>) => fn(FAKE_TX),
   );
+  // The worker claims ONE row per transaction and loops until the queue
+  // drains, so after the per-test `mockResolvedValueOnce(...)` fixtures are
+  // consumed the next claim must see an empty batch, not undefined.
+  claimPendingResponsesMock.mockResolvedValue([]);
   // Default: ClickHouse returns a stub object.
   getClickHouseClientMock.mockReturnValue({ __ch: true });
   // Default: Apple creds present.
@@ -424,13 +427,13 @@ describe("runRefundShieldResponderTick", () => {
     expect(callArgs.ctx.environment).toBe("PRODUCTION");
   });
 
-  it("claims pending rows with FOR UPDATE SKIP LOCKED semantics + bounded batch", async () => {
+  it("claims ONE row per transaction with FOR UPDATE SKIP LOCKED semantics", async () => {
     // Structural concurrency check: the worker must call
     // claimPendingResponses (which the repo implements with
-    // FOR UPDATE SKIP LOCKED) inside a db.transaction with the
-    // configured batch + retry caps. Two parallel ticks against
-    // the same backlog rely on this; a per-row mocked behavioural
-    // test would just re-test the mock.
+    // FOR UPDATE SKIP LOCKED) inside a db.transaction. Batch size is
+    // pinned to 1 — the claim's row lock (and its pooled connection)
+    // must only span that row's own Apple HTTP call, never a whole
+    // batch; the tick loop, not the claim, is what BATCH_SIZE bounds.
     claimPendingResponsesMock.mockResolvedValueOnce([]);
 
     await runRefundShieldResponderTick({ now: NOW });
@@ -440,9 +443,28 @@ describe("runRefundShieldResponderTick", () => {
       FAKE_TX,
       expect.objectContaining({
         now: NOW,
-        batchSize: BATCH_SIZE,
+        batchSize: 1,
         maxRetries: MAX_RETRIES,
       }),
     );
+  });
+
+  it("processes rows across per-row transactions until the queue drains", async () => {
+    claimPendingResponsesMock
+      .mockResolvedValueOnce([makeRow({ id: "row_1" })])
+      .mockResolvedValueOnce([makeRow({ id: "row_2" })]);
+    findProjectByIdMock.mockResolvedValue(makeProject());
+    processRefundShieldResponseMock.mockResolvedValue({
+      status: "SENT",
+      payload: FAKE_PAYLOAD,
+      httpStatus: 202,
+    });
+
+    const result = await runRefundShieldResponderTick({ now: NOW });
+
+    // Two claimed rows + the final empty claim that ends the loop —
+    // each in its own transaction.
+    expect(dbTransactionMock).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ claimed: 2, sent: 2 });
   });
 });

@@ -17,9 +17,13 @@ type ScheduledActionRow =
 // Scheduled-actions sweep worker
 // =============================================================
 //
-// Runs every 60 seconds via a BullMQ repeatable job. Claims up to
-// BATCH_SIZE PENDING rows whose dueAt <= NOW() using SELECT … FOR
-// UPDATE SKIP LOCKED, then executes each action inside the same tx.
+// Runs every 60 seconds via a BullMQ repeatable job. Processes up to
+// BATCH_SIZE due PENDING rows per tick, ONE row per short transaction:
+// claim a single row with SELECT … FOR UPDATE SKIP LOCKED, execute its
+// action (which may include a live Stripe call), finalize its status,
+// commit. Claiming a whole batch in one tx held FOR UPDATE locks on up
+// to 200 rows — plus a pooled connection — across every sequential
+// store HTTP call in the loop; one slow Stripe request pinned them all.
 
 const log = logger.child("scheduled-actions");
 
@@ -40,20 +44,30 @@ export async function runScheduledActionsSweep(): Promise<SweepResult> {
   let executed = 0;
   let failed = 0;
 
-  await drizzle.db.transaction(async (tx) => {
-    const rows = await drizzle.scheduledActionsRepo.claimDueBatch(
-      tx as unknown as typeof drizzle.db,
-      BATCH_SIZE,
-    );
+  for (let i = 0; i < BATCH_SIZE; i++) {
+    const outcome = await drizzle.db.transaction(async (tx) => {
+      const [row] = await drizzle.scheduledActionsRepo.claimDueBatch(
+        tx as unknown as typeof drizzle.db,
+        1,
+      );
+      if (!row) return "drained" as const;
 
-    for (const row of rows) {
       try {
-        await executeAction(tx as unknown as typeof drizzle.db, row);
-        await drizzle.scheduledActionsRepo.markExecuted(
-          tx as unknown as typeof drizzle.db,
-          row.id,
+        // Savepoint around the action so a mid-action failure rolls back
+        // its partial writes (the old batch loop committed them alongside
+        // the FAILED status) while the outer tx keeps the row lock, so the
+        // FAILED mark below can't race a concurrent sweep re-claiming the
+        // row.
+        await (tx as unknown as typeof drizzle.db).transaction(
+          async (inner) => {
+            await executeAction(inner as unknown as typeof drizzle.db, row);
+            await drizzle.scheduledActionsRepo.markExecuted(
+              inner as unknown as typeof drizzle.db,
+              row.id,
+            );
+          },
         );
-        executed += 1;
+        return "executed" as const;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("scheduled action failed", {
@@ -66,10 +80,14 @@ export async function runScheduledActionsSweep(): Promise<SweepResult> {
           row.id,
           message,
         );
-        failed += 1;
+        return "failed" as const;
       }
-    }
-  });
+    });
+
+    if (outcome === "drained") break;
+    if (outcome === "executed") executed += 1;
+    else failed += 1;
+  }
 
   log.info("scheduled actions sweep complete", { executed, failed });
   return { executed, failed };

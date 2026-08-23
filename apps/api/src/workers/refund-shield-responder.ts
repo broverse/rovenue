@@ -100,10 +100,13 @@ export const POLL_INTERVAL_MS = 30_000;
 // Tick body
 // =============================================================
 //
-// One transaction per tick — the FOR UPDATE locks are released
-// when the tx commits. Per-row failures inside the loop log and
-// continue so a single poison row can't starve the rest of the
-// batch (the row's status is updated either way).
+// ONE row per short transaction: claim a single row with FOR UPDATE
+// SKIP LOCKED, process it (which POSTs to Apple's Server API), commit.
+// Claiming the whole batch in one tick-wide tx held row locks — and a
+// pooled Postgres connection — across every sequential Apple HTTP call
+// in the loop; one slow request pinned them all. Per-row failures log,
+// mark FAILED, and continue so a single poison row can't starve the
+// rest of the tick.
 
 export interface TickInput {
   now: Date;
@@ -124,35 +127,30 @@ export async function runRefundShieldResponderTick(
   let failed = 0;
   let skipped = 0;
 
-  await drizzle.db.transaction(async (tx) => {
-    const due = await drizzle.refundShieldResponseRepo.claimPendingResponses(
-      tx as unknown as Db,
-      {
-        now: input.now,
-        batchSize: BATCH_SIZE,
-        maxRetries: MAX_RETRIES,
-      },
-    );
-    claimed = due.length;
+  for (let i = 0; i < BATCH_SIZE; i++) {
+    const outcome = await drizzle.db.transaction(async (tx) => {
+      const [row] = await drizzle.refundShieldResponseRepo.claimPendingResponses(
+        tx as unknown as Db,
+        {
+          now: input.now,
+          batchSize: 1,
+          maxRetries: MAX_RETRIES,
+        },
+      );
+      if (!row) return "drained" as const;
 
-    for (const row of due) {
       try {
-        const result = await processOneRow({
+        return await processOneRow({
           row,
           tx: tx as unknown as Db,
           now: input.now,
         });
-        if (result === "SENT") sent += 1;
-        else if (result === "RETRY") retried += 1;
-        else if (result === "FAILED") failed += 1;
-        else skipped += 1;
       } catch (err) {
         // Defensive: anything thrown from processOneRow that isn't
         // an outcome-bearing return path means we couldn't even
         // persist a status — mark FAILED so we don't re-claim the
-        // row in a tight loop. The catch here keeps one bad row
-        // from rolling back the whole batch.
-        failed += 1;
+        // row in a tight loop. The row lock is still held here, so
+        // the mark can't race a concurrent tick.
         log.error("refund-shield responder row processing threw", {
           rowId: row.id,
           err: err instanceof Error ? err.message : String(err),
@@ -173,9 +171,17 @@ export async function runRefundShieldResponderTick(
               markErr instanceof Error ? markErr.message : String(markErr),
           });
         }
+        return "FAILED" as const;
       }
-    }
-  });
+    });
+
+    if (outcome === "drained") break;
+    claimed += 1;
+    if (outcome === "SENT") sent += 1;
+    else if (outcome === "RETRY") retried += 1;
+    else if (outcome === "FAILED") failed += 1;
+    else skipped += 1;
+  }
 
   if (claimed > 0) {
     log.info("refund-shield responder tick complete", {
