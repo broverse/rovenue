@@ -31,9 +31,18 @@ const { drizzleMock, auditMock, testEncryptionKey } = vi.hoisted(() => {
     subscriberRepo: {
       anonymizeSubscriberRow: vi.fn(async () => undefined),
     },
+    purchaseRepo: {
+      findActiveStripeSubscriptionIds: vi.fn(async () => [] as string[]),
+    },
   };
   return { drizzleMock, auditMock, testEncryptionKey };
 });
+
+const { getConnectedStripe, cancelSubscription } = vi.hoisted(() => ({
+  getConnectedStripe: vi.fn(),
+  cancelSubscription: vi.fn(async () => undefined),
+}));
+vi.mock("../src/lib/stripe-platform", () => ({ getConnectedStripe }));
 
 vi.mock("@rovenue/db", () => ({
   default: {},
@@ -58,6 +67,8 @@ beforeEach(() => {
     }),
   } as never);
   drizzleMock.db.transaction.mockImplementation(async (cb) => cb({}));
+  drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockResolvedValue([]);
+  getConnectedStripe.mockResolvedValue(null);
 });
 
 describe("anonymizeSubscriber", () => {
@@ -179,5 +190,56 @@ describe("anonymizeSubscriber", () => {
     expect(
       drizzleMock.subscriberRepo.anonymizeSubscriberRow,
     ).not.toHaveBeenCalled();
+  });
+
+  test("cancels the forgotten customer's live stripe subscriptions", async () => {
+    // Erasure that keeps charging the customer isn't erasure: the live
+    // funnel subscriptions on the connected account must be cancelled
+    // post-commit.
+    drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockResolvedValue([
+      "sub_stripe_1",
+      "sub_stripe_2",
+    ]);
+    getConnectedStripe.mockResolvedValue({
+      account: { subscriptions: { cancel: cancelSubscription } },
+      accountId: "acct_1",
+      livemode: true,
+    });
+
+    await anonymizeSubscriber({
+      subscriberId: "default",
+      projectId: "proj_1",
+      actorUserId: "user_actor",
+      reason: "gdpr_request",
+    });
+
+    expect(cancelSubscription).toHaveBeenCalledWith("sub_stripe_1");
+    expect(cancelSubscription).toHaveBeenCalledWith("sub_stripe_2");
+  });
+
+  test("erasure still succeeds when a subscription cancel fails", async () => {
+    drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockResolvedValue([
+      "sub_stripe_1",
+    ]);
+    cancelSubscription.mockRejectedValueOnce(new Error("stripe down"));
+    getConnectedStripe.mockResolvedValue({
+      account: { subscriptions: { cancel: cancelSubscription } },
+      accountId: "acct_1",
+      livemode: true,
+    });
+
+    // The row is already anonymized when the cancel runs; a cancel
+    // failure must not undo (or fail) the erasure.
+    const result = await anonymizeSubscriber({
+      subscriberId: "default",
+      projectId: "proj_1",
+      actorUserId: "user_actor",
+      reason: "gdpr_request",
+    });
+
+    expect(result.anonymousId).toMatch(/^anon_/);
+    expect(
+      drizzleMock.subscriberRepo.anonymizeSubscriberRow,
+    ).toHaveBeenCalled();
   });
 });

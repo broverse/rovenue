@@ -177,7 +177,6 @@ vi.mock("@rovenue/db", () => ({
 // =============================================================
 
 import {
-  anonymizeSubscriber,
   reassignAllAssets,
   transferSubscriber,
 } from "../src/services/subscriber-transfer";
@@ -369,129 +368,6 @@ describe("transferSubscriber", () => {
       toSubscriberId: "sub_to",
       creditsTransferred: 100,
     });
-  });
-});
-
-// =============================================================
-// anonymizeSubscriber
-// =============================================================
-
-describe("anonymizeSubscriber", () => {
-  test("replaces appUserId with an anon: token and clears attributes", async () => {
-    subscriberStore["sub_1"] = {
-      id: "sub_1",
-      projectId: "proj_a",
-      appUserId: "alice@example.com",
-      attributes: { email: "alice@example.com", country: "TR" },
-      deletedAt: null,
-    };
-
-    const result = await anonymizeSubscriber(
-      "proj_a",
-      "alice@example.com",
-      "user_admin",
-    );
-
-    expect(result.alreadyAnonymized).toBe(false);
-    expect(result.subscriberId).toBe("sub_1");
-    expect(result.anonymousId).toMatch(/^anon:[a-f0-9]{32}$/);
-
-    const call =
-      drizzleMock.subscriberRepo.anonymizeSubscriberRow.mock.calls[0]!;
-    expect(call[1]).toBe("sub_1");
-    expect(call[2]).toBe(result.anonymousId);
-    expect(call[3]).toBeInstanceOf(Date);
-  });
-
-  test("anonymizes an SDK-only subscriber (null appUserId) looked up by rovenueId", async () => {
-    subscriberStore["sub_sdk"] = {
-      id: "sub_sdk",
-      projectId: "proj_a",
-      rovenueId: "rov_device_99",
-      appUserId: null,
-      attributes: { country: "TR" },
-      deletedAt: null,
-    };
-
-    const result = await anonymizeSubscriber(
-      "proj_a",
-      "rov_device_99",
-      "user_admin",
-    );
-
-    expect(result.alreadyAnonymized).toBe(false);
-    expect(result.subscriberId).toBe("sub_sdk");
-    expect(result.anonymousId).toMatch(/^anon:[a-f0-9]{32}$/);
-
-    const call =
-      drizzleMock.subscriberRepo.anonymizeSubscriberRow.mock.calls[0]!;
-    expect(call[1]).toBe("sub_sdk");
-  });
-
-  test("rejects already-anonymized input to prevent double-hashing", async () => {
-    await expect(
-      anonymizeSubscriber("proj_a", "anon:abc123", "user_admin"),
-    ).rejects.toThrow(/already-anonymized/);
-  });
-
-  test("throws when the subscriber does not exist", async () => {
-    await expect(
-      anonymizeSubscriber("proj_a", "missing@example.com", "user_admin"),
-    ).rejects.toThrow(/not found/);
-  });
-
-  test("cancels the forgotten customer's live stripe subscriptions", async () => {
-    subscriberStore["sub_1"] = {
-      id: "sub_1",
-      projectId: "proj_a",
-      appUserId: "alice@example.com",
-      attributes: {},
-      deletedAt: null,
-    };
-    drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockResolvedValue([
-      "sub_stripe_1",
-      "sub_stripe_2",
-    ]);
-    getConnectedStripe.mockResolvedValue({
-      account: { subscriptions: { cancel: cancelSubscription } },
-      accountId: "acct_1",
-      livemode: true,
-    });
-
-    await anonymizeSubscriber("proj_a", "alice@example.com", "user_admin");
-
-    expect(cancelSubscription).toHaveBeenCalledWith("sub_stripe_1");
-    expect(cancelSubscription).toHaveBeenCalledWith("sub_stripe_2");
-  });
-
-  test("erasure still succeeds when a subscription cancel fails", async () => {
-    subscriberStore["sub_1"] = {
-      id: "sub_1",
-      projectId: "proj_a",
-      appUserId: "alice@example.com",
-      attributes: {},
-      deletedAt: null,
-    };
-    drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockResolvedValue([
-      "sub_stripe_1",
-    ]);
-    cancelSubscription.mockRejectedValueOnce(new Error("stripe down"));
-    getConnectedStripe.mockResolvedValue({
-      account: { subscriptions: { cancel: cancelSubscription } },
-      accountId: "acct_1",
-      livemode: true,
-    });
-
-    // The row is already anonymized; a cancel failure must not undo it.
-    const result = await anonymizeSubscriber(
-      "proj_a",
-      "alice@example.com",
-      "user_admin",
-    );
-    expect(result.alreadyAnonymized).toBe(false);
-    expect(
-      drizzleMock.subscriberRepo.anonymizeSubscriberRow,
-    ).toHaveBeenCalled();
   });
 });
 
