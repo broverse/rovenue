@@ -82,11 +82,14 @@ export async function handleGoogleNotification(
     return { status: "test" };
   }
 
-  const storeEventId =
-    payload.subscriptionNotification?.purchaseToken ??
-    payload.oneTimeProductNotification?.purchaseToken ??
-    payload.voidedPurchaseNotification?.purchaseToken ??
-    opts.pushBody.message.messageId;
+  // Dedup key = Pub/Sub messageId: stable across redeliveries of the
+  // same message, unique across distinct notifications — the exact
+  // analog of Apple's notificationUUID. NEVER the purchaseToken:
+  // Google reuses one token for every lifecycle RTDN of a subscription
+  // (RENEWED, CANCELED, IN_GRACE_PERIOD, EXPIRED, REVOKED, voided), so
+  // keying on it silently dropped every event after the first
+  // PROCESSED one. The token still drives purchase lookup below.
+  const storeEventId = opts.pushBody.message.messageId;
 
   const kind = classifyNotification(payload);
 

@@ -5,7 +5,10 @@
 // Proves the atomic `claimWebhookEvent` swap closes the
 // double-dispatch race the old non-atomic `upsertWebhookEvent` +
 // `status === PROCESSED` guard left open. Two concurrent deliveries
-// of the SAME purchaseToken (= storeEventId) must result in exactly
+// (Pub/Sub redeliveries) of the SAME messageId (= storeEventId — the
+// dedup key; the purchaseToken is deliberately NOT the key because
+// Google reuses it across a subscription's whole lifecycle) must
+// result in exactly
 // ONE successful "processed" and the other either returning "duplicate"
 // (if the first fully completed first) or throwing with
 // "claim in progress; retry" (if both raced and the second hit the
@@ -52,6 +55,9 @@ const PRODUCT_ID = `prod_gwhrace_${RUN_ID}`;
 const PURCHASE_TOKEN = `tok_gwhrace_${RUN_ID}`;
 const GOOGLE_PRODUCT_ID = `pro_sub_${RUN_ID}`;
 const SUBSCRIPTION_ID = `sub_id_${RUN_ID}`;
+// The dedup key: both racing deliveries carry the SAME Pub/Sub
+// messageId (a redelivery), which is what `storeEventId` is keyed on.
+const MESSAGE_ID = `msg_${RUN_ID}`;
 const EXTERNAL_ACCOUNT_ID = `ext_acct_${RUN_ID}`;
 
 // A short artificial delay inside the (post-claim) verify call widens
@@ -124,7 +130,7 @@ function makePushBody(): GooglePubSubPushBody {
   return {
     message: {
       data: Buffer.from(JSON.stringify(rtdn)).toString("base64"),
-      messageId: `msg_${RUN_ID}`,
+      messageId: MESSAGE_ID,
       publishTime: new Date().toISOString(),
     },
     subscription: "projects/x/subscriptions/y",
@@ -215,7 +221,7 @@ describe("handleGoogleNotification — concurrent single-flight claim", () => {
       .where(
         and(
           eq(webhookEvents.projectId, PROJECT_ID),
-          eq(webhookEvents.storeEventId, PURCHASE_TOKEN),
+          eq(webhookEvents.storeEventId, MESSAGE_ID),
         ),
       );
     expect(whRows).toHaveLength(1);
