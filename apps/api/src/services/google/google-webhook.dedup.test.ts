@@ -33,17 +33,23 @@ const state = vi.hoisted(() => {
   }
   const events = new Map<string, StoredEvent>();
   const claimedStoreEventIds: string[] = [];
-  const revenueEvents: Array<{ dedupeKey: string }> = [];
+  const revenueEvents: Array<{ dedupeKey: string; amount: string }> = [];
+  const DEFAULT_PRICING = { amount: 9.99, currency: "USD" };
   let seq = 0;
   return {
     events,
     claimedStoreEventIds,
     revenueEvents,
+    DEFAULT_PRICING,
+    // Configurable base-plan pricing served by the mocked google-verify —
+    // the 0-USD regression test sets it to null (unresolvable).
+    pricing: DEFAULT_PRICING as { amount: number; currency: string } | null,
     nextId: () => `wh_${++seq}`,
     reset() {
       events.clear();
       claimedStoreEventIds.length = 0;
       revenueEvents.length = 0;
+      this.pricing = DEFAULT_PRICING;
       seq = 0;
     },
   };
@@ -116,8 +122,14 @@ vi.mock("@rovenue/db", async (importOriginal) => {
       },
       revenueEventRepo: {
         createRevenueEvent: vi.fn(
-          async (_db: unknown, input: { dedupeKey: string }) => {
-            state.revenueEvents.push({ dedupeKey: input.dedupeKey });
+          async (
+            _db: unknown,
+            input: { dedupeKey: string; amount: string },
+          ) => {
+            state.revenueEvents.push({
+              dedupeKey: input.dedupeKey,
+              amount: input.amount,
+            });
           },
         ),
       },
@@ -131,20 +143,21 @@ vi.mock("./google-verify", () => ({
     subscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
     acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
     startTime: new Date(1_700_000_000_000).toISOString(),
+    // Deprecated top-level order id + v2 line-item order id: the revenue
+    // dedupe key must prefer the line item's latestSuccessfulOrderId.
+    latestOrderId: "GPA.TOP-LEVEL",
     lineItems: [
       {
         productId: "pro_sub",
         expiryTime: new Date(1_705_000_000_000).toISOString(),
         autoRenewingPlan: { autoRenewEnabled: true },
         offerDetails: { basePlanId: "monthly" },
+        latestSuccessfulOrderId: "GPA.LINE-ITEM",
       },
     ],
   })),
   acknowledgeGoogleSubscription: vi.fn(async () => undefined),
-  getSubscriptionBasePlanPricing: vi.fn(async () => ({
-    amount: 9.99,
-    currency: "USD",
-  })),
+  getSubscriptionBasePlanPricing: vi.fn(async () => state.pricing),
 }));
 
 vi.mock("../subscription-transition-guard", () => ({
@@ -257,5 +270,45 @@ describe("handleGoogleNotification — storeEventId is the Pub/Sub messageId", (
     expect(redelivery.status).toBe("duplicate");
     // Dispatch ran exactly once: one revenue event.
     expect(state.revenueEvents).toHaveLength(1);
+  });
+});
+
+describe("handleGoogleNotification — revenue correctness", () => {
+  beforeEach(() => state.reset());
+
+  it("keys revenue on the line item's latestSuccessfulOrderId, not the deprecated top-level latestOrderId", async () => {
+    const res = await handleGoogleNotification({
+      projectId: PROJECT_ID,
+      pushBody: makePushBody({
+        messageId: "msg_orderid_pref",
+        notificationType:
+          GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_PURCHASED,
+      }),
+      verifyConfig: fakeVerifyConfig,
+    });
+
+    expect(res.status).toBe("processed");
+    expect(state.revenueEvents).toEqual([
+      { dedupeKey: "google:GPA.LINE-ITEM:purchase", amount: "9.99" },
+    ]);
+  });
+
+  it("never writes a 0-USD revenue row: an unresolvable price skips the emission", async () => {
+    state.pricing = null;
+
+    const res = await handleGoogleNotification({
+      projectId: PROJECT_ID,
+      pushBody: makePushBody({
+        messageId: "msg_pricing_miss",
+        notificationType:
+          GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_PURCHASED,
+      }),
+      verifyConfig: fakeVerifyConfig,
+    });
+
+    // The purchase/entitlement side still processes; only the revenue
+    // emission is skipped (pre-fix this wrote amount "0" / USD).
+    expect(res.status).toBe("processed");
+    expect(state.revenueEvents).toHaveLength(0);
   });
 });

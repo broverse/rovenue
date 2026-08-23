@@ -3,6 +3,7 @@ import {
   Environment,
   ProductType,
   PurchaseStatus,
+  RevenueEventType,
   Store,
   drizzle,
   revenueDedupeKind,
@@ -43,7 +44,15 @@ import {
   GOOGLE_SUBSCRIPTION_STATE,
   type GoogleSubscriptionState,
 } from "./google/google-types";
-import { mapSubscriptionStateToStatus } from "./google/google-mappers";
+import {
+  effectiveGoogleOrderId,
+  isGoogleRenewalOrderId,
+  mapSubscriptionStateToStatus,
+} from "./google/google-mappers";
+import {
+  resolveOneTimeProductPricing,
+  resolveSubscriptionPricing,
+} from "./google/google-pricing";
 import { guardStatusWrite } from "./subscription-transition-guard";
 import { convertToUsd } from "./fx";
 import { reassignAllAssets, safeSyncAccessAfterMerge } from "./subscriber-transfer";
@@ -449,6 +458,14 @@ async function verifyGoogleSubscriptionReceipt(
     ? new Date(subscription.startTime)
     : new Date();
 
+  // Same pricing machinery the RTDN webhook uses (list price of the base
+  // plan; charged-amount via orders.get is deferred — plan Task 10.2).
+  const pricing = await resolveSubscriptionPricing(verifyConfig, {
+    productId: googleStoreProductId,
+    basePlanId: lineItem.offerDetails?.basePlanId,
+    regionCode: subscription.regionCode,
+  });
+
   // FINDING 1: guarded read + upsert in one tx (mechanism (a)); the
   // upsert also CASE-guards the terminal status at SQL level (b).
   const purchase = (await drizzle.db.transaction(async (tx) => {
@@ -479,6 +496,9 @@ async function verifyGoogleSubscriptionReceipt(
         environment: Environment.PRODUCTION,
         autoRenewStatus:
           lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
+        // Drizzle decimal columns round-trip as strings.
+        priceAmount: pricing != null ? pricing.amount.toString() : null,
+        priceCurrency: pricing?.currency ?? null,
         verifiedAt: new Date(),
         presentedContext: args.presentedContext ?? null,
       },
@@ -487,11 +507,62 @@ async function verifyGoogleSubscriptionReceipt(
         expiresDate,
         autoRenewStatus:
           lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
+        ...(pricing != null && {
+          priceAmount: pricing.amount.toString(),
+          priceCurrency: pricing.currency,
+        }),
         verifiedAt: new Date(),
         ...(args.presentedContext && { presentedContext: args.presentedContext }),
       },
     });
   })) as unknown as Purchase;
+
+  // R6 (Google): record revenue on the receipt path too, mirroring the Apple
+  // block above. The dedupe key converges on the SAME shape the RTDN webhook
+  // uses — `google:<orderId ?? purchaseToken>:<kind>` — so whichever path
+  // lands first records the row and the other is a no-op. Only paid /
+  // paid-through states record revenue, and a pricing miss NEVER falls back
+  // to a 0-USD row.
+  if (GOOGLE_ACCESS_ELIGIBLE_SUBSCRIPTION_STATES.has(subscriptionState)) {
+    if (!pricing) {
+      log.error(
+        "google subscription pricing unresolvable; skipping receipt revenue event",
+        {
+          projectId: args.projectId,
+          tokenPrefix: args.receipt.slice(0, 12),
+          productId: googleStoreProductId,
+          basePlanId: lineItem.offerDetails?.basePlanId,
+        },
+      );
+    } else {
+      const orderId = effectiveGoogleOrderId(subscription, lineItem);
+      // No RTDN notificationType here — classify from the order id: Google
+      // suffixes renewal orders with `..N`, the bare id is the first order.
+      const type =
+        orderId != null && isGoogleRenewalOrderId(orderId)
+          ? RevenueEventType.RENEWAL
+          : RevenueEventType.INITIAL;
+      const amountUsd = await convertToUsd(pricing.amount, pricing.currency);
+      await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+        projectId: args.projectId,
+        subscriberId: subscriber.id,
+        purchaseId: purchase.id,
+        productId: product.id,
+        type,
+        amount: pricing.amount.toString(),
+        currency: pricing.currency,
+        amountUsd: amountUsd.toString(),
+        store: Store.PLAY_STORE,
+        metadata: args.presentedContext
+          ? { presentedContext: args.presentedContext }
+          : undefined,
+        // Processing time, matching the webhook (partition-safe; replay
+        // dedup is enforced by the revenue_event_dedupe table).
+        eventDate: new Date(),
+        dedupeKey: `google:${orderId ?? args.receipt}:${revenueDedupeKind(type)}`,
+      });
+    }
+  }
 
   return { subscriber, product, purchase };
 }
@@ -545,6 +616,13 @@ async function verifyGoogleProductReceipt(
     ? Number(productPurchase.purchaseTimeMillis)
     : Date.now();
 
+  // List price of the managed product (same deferral as subscriptions:
+  // charged-amount via orders.get is plan Task 10.2).
+  const pricing = await resolveOneTimeProductPricing(verifyConfig, {
+    productId: storeProductId,
+    regionCode: productPurchase.regionCode ?? undefined,
+  });
+
   const purchase = (await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
     store: Store.PLAY_STORE,
     storeTransactionId: args.receipt,
@@ -559,14 +637,56 @@ async function verifyGoogleProductReceipt(
       purchaseDate: new Date(purchaseTimeMs),
       originalPurchaseDate: new Date(purchaseTimeMs),
       environment: Environment.PRODUCTION,
+      // Drizzle decimal columns round-trip as strings.
+      priceAmount: pricing != null ? pricing.amount.toString() : null,
+      priceCurrency: pricing?.currency ?? null,
       verifiedAt: new Date(),
       presentedContext: args.presentedContext ?? null,
     },
     update: {
       verifiedAt: new Date(),
+      ...(pricing != null && {
+        priceAmount: pricing.amount.toString(),
+        priceCurrency: pricing.currency,
+      }),
       ...(args.presentedContext && { presentedContext: args.presentedContext }),
     },
   })) as unknown as Purchase;
+
+  // R6 (Google one-time): this is the ONLY revenue path for Google one-time
+  // purchases — the one-time RTDN branch is persist-only. Key on the order
+  // id (ProductPurchase.orderId) with the purchaseToken fallback, in the
+  // same webhook-converged `google:<id>:<kind>` shape. A pricing miss
+  // NEVER falls back to a 0-USD row.
+  if (!pricing) {
+    log.error(
+      "google one-time pricing unresolvable; skipping receipt revenue event",
+      {
+        projectId: args.projectId,
+        tokenPrefix: args.receipt.slice(0, 12),
+        productId: storeProductId,
+      },
+    );
+  } else {
+    const type = RevenueEventType.INITIAL;
+    const amountUsd = await convertToUsd(pricing.amount, pricing.currency);
+    await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+      projectId: args.projectId,
+      subscriberId: subscriber.id,
+      purchaseId: purchase.id,
+      productId: product.id,
+      type,
+      amount: pricing.amount.toString(),
+      currency: pricing.currency,
+      amountUsd: amountUsd.toString(),
+      store: Store.PLAY_STORE,
+      metadata: args.presentedContext
+        ? { presentedContext: args.presentedContext }
+        : undefined,
+      eventDate: new Date(purchaseTimeMs),
+      dedupeKey: `google:${productPurchase.orderId ?? args.receipt}:${revenueDedupeKind(type)}`,
+    });
+  }
 
   return { subscriber, product, purchase };
 }

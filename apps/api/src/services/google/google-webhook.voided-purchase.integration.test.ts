@@ -47,6 +47,10 @@ const SUBSCRIBER_ID = `sub_gwhvoid_${RUN_ID}`;
 const PURCHASE_ID = `pur_gwhvoid_${RUN_ID}`;
 const PURCHASE_TOKEN = `tok_gwhvoid_${RUN_ID}`;
 const ORDER_ID = `GPA.${RUN_ID}`;
+// Second purchase with NO stored price — a void for it must never write a
+// 0-USD REFUND revenue row.
+const NO_PRICE_PURCHASE_ID = `pur_gwhvoid_noprice_${RUN_ID}`;
+const NO_PRICE_PURCHASE_TOKEN = `tok_gwhvoid_noprice_${RUN_ID}`;
 
 // verifyGoogleSubscription is never reached on the voided-purchase path;
 // the module is mocked only to keep imports off the network.
@@ -68,13 +72,16 @@ vi.mock("../notifications/refund-emit", () => ({
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 const { handleGoogleNotification } = await import("./google-webhook");
 
-function makeVoidedPushBody(): GooglePubSubPushBody {
+function makeVoidedPushBody(
+  purchaseToken: string = PURCHASE_TOKEN,
+  messageId: string = `msg_void_${RUN_ID}`,
+): GooglePubSubPushBody {
   const rtdn = {
     version: "1.0",
     packageName: "com.rovenue.test",
     eventTimeMillis: String(1_700_000_000_000),
     voidedPurchaseNotification: {
-      purchaseToken: PURCHASE_TOKEN,
+      purchaseToken,
       orderId: ORDER_ID,
       productType: GOOGLE_VOIDED_PURCHASE_PRODUCT_TYPE.PRODUCT_TYPE_SUBSCRIPTION,
       refundType: GOOGLE_VOIDED_PURCHASE_REFUND_TYPE.REFUND_TYPE_FULL_REFUND,
@@ -83,7 +90,7 @@ function makeVoidedPushBody(): GooglePubSubPushBody {
   return {
     message: {
       data: Buffer.from(JSON.stringify(rtdn)).toString("base64"),
-      messageId: `msg_void_${RUN_ID}`,
+      messageId,
       publishTime: new Date().toISOString(),
     },
     subscription: "projects/x/subscriptions/y",
@@ -128,6 +135,20 @@ describe("handleGoogleNotification — VOIDED_PURCHASE inbound refund", () => {
       originalPurchaseDate: new Date(1_700_000_000_000),
       priceAmount: "9.99",
       priceCurrency: "USD",
+      environment: Environment.PRODUCTION,
+    });
+    await db.insert(purchases).values({
+      id: NO_PRICE_PURCHASE_ID,
+      projectId: PROJECT_ID,
+      subscriberId: SUBSCRIBER_ID,
+      productId: PRODUCT_ID,
+      store: Store.PLAY_STORE,
+      storeTransactionId: NO_PRICE_PURCHASE_TOKEN,
+      originalTransactionId: NO_PRICE_PURCHASE_TOKEN,
+      status: PurchaseStatus.ACTIVE,
+      purchaseDate: new Date(1_700_000_000_000),
+      originalPurchaseDate: new Date(1_700_000_000_000),
+      // No priceAmount/priceCurrency: the refund amount is underivable.
       environment: Environment.PRODUCTION,
     });
   });
@@ -180,5 +201,44 @@ describe("handleGoogleNotification — VOIDED_PURCHASE inbound refund", () => {
     };
     expect(emitArg.purchaseId).toBe(PURCHASE_ID);
     expect(emitArg.amountUsdCents).toBe(999);
+  });
+
+  it("still marks REFUNDED but writes NO refund revenue row when the purchase has no stored price (never 0-USD)", async () => {
+    const emit = vi.mocked(maybeEmitRefundDetected);
+    emit.mockClear();
+
+    const res = await handleGoogleNotification({
+      projectId: PROJECT_ID,
+      pushBody: makeVoidedPushBody(
+        NO_PRICE_PURCHASE_TOKEN,
+        `msg_void_noprice_${RUN_ID}`,
+      ),
+      verifyConfig: fakeVerifyConfig,
+    });
+
+    expect(res.status).toBe("processed");
+
+    const db = getDb();
+
+    // Status transition still applies — the refund is real even if the
+    // amount is unknown.
+    const [purchase] = await db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.id, NO_PRICE_PURCHASE_ID));
+    expect(purchase?.status).toBe(PurchaseStatus.REFUNDED);
+
+    // But no revenue row: pre-fix this wrote a 0-USD REFUND event.
+    const revRows = await db
+      .select()
+      .from(revenueEvents)
+      .where(
+        and(
+          eq(revenueEvents.projectId, PROJECT_ID),
+          eq(revenueEvents.purchaseId, NO_PRICE_PURCHASE_ID),
+        ),
+      );
+    expect(revRows).toHaveLength(0);
+    expect(emit).not.toHaveBeenCalled();
   });
 });

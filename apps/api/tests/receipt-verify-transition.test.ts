@@ -9,14 +9,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // All `@rovenue/db` repo calls are mocked — no Postgres needed.
 // =============================================================
 
-const { drizzleMock, auditMock, googleMocks } = vi.hoisted(() => {
+const { drizzleMock, auditMock, googleMocks, loggerSpies } = vi.hoisted(() => {
   const auditMock = vi.fn(async () => undefined);
   // Google paid-state gate: the verifier + credential loader are swapped for
   // configurable fns so each test can serve a fixture in any purchase state.
+  // The pricing lookups default to null (unresolvable) so pre-existing tests
+  // exercise the skip-emission path without extra setup.
   const googleMocks = {
     verifyGoogleSubscription: vi.fn(),
     verifyGoogleProductPurchase: vi.fn(),
     loadGoogleCredentials: vi.fn(async (): Promise<unknown> => null),
+    getSubscriptionBasePlanPricing: vi.fn(async (): Promise<unknown> => null),
+    getOneTimeProductPricing: vi.fn(async (): Promise<unknown> => null),
+  };
+  // Child-logger spies so tests can assert the pricing-miss error log.
+  const loggerSpies = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
   };
   // FINDING 1: verifyReceipt runs the guard + upsert inside
   // db.transaction(...). Run the callback inline with the same stub.
@@ -73,7 +84,7 @@ const { drizzleMock, auditMock, googleMocks } = vi.hoisted(() => {
       createRevenueEvent: vi.fn(async () => ({ id: "rev_1" })),
     },
   };
-  return { drizzleMock, auditMock, googleMocks };
+  return { drizzleMock, auditMock, googleMocks, loggerSpies };
 });
 
 vi.mock("@rovenue/db", async () => {
@@ -118,7 +129,19 @@ vi.mock("../src/lib/project-credentials", () => ({
 vi.mock("../src/services/google/google-verify", () => ({
   verifyGoogleSubscription: googleMocks.verifyGoogleSubscription,
   verifyGoogleProductPurchase: googleMocks.verifyGoogleProductPurchase,
+  getSubscriptionBasePlanPricing: googleMocks.getSubscriptionBasePlanPricing,
+  getOneTimeProductPricing: googleMocks.getOneTimeProductPricing,
 }));
+
+// Spyable child loggers — the Google revenue-emission tests assert that a
+// pricing miss logs an error instead of writing a 0-USD revenue row.
+vi.mock("../src/lib/logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/logger")>();
+  return {
+    ...actual,
+    logger: { ...loggerSpies, child: () => loggerSpies },
+  };
+});
 
 vi.mock("../src/lib/circuit-breaker", () => ({
   appleCircuit: { exec: (fn: () => unknown) => fn(), state: "CLOSED" },
@@ -435,5 +458,183 @@ describe("verifyReceipt — Google one-time purchaseState gate", () => {
     expect(call).toBeDefined();
     const create = call?.[1]?.create as Record<string, unknown>;
     expect(create).toHaveProperty("status", "ACTIVE");
+  });
+});
+
+// =============================================================
+// Google revenue emission (receipt path)
+//
+// The receipt path must record revenue like Apple's R6 block does,
+// converging on the SAME `google:<orderId ?? token>:<kind>` dedupe
+// key the RTDN webhook uses (whichever path lands first records the
+// row; the other dedups). The order id prefers the line item's
+// `latestSuccessfulOrderId` over the deprecated top-level
+// `latestOrderId`, and an unresolvable price NEVER writes a
+// 0-USD row — it skips the emission and logs an error.
+// =============================================================
+
+const SUBSCRIPTION_PRICING_FIXTURE = { amount: 9.99, currency: "USD" };
+const ONE_TIME_PRICING_FIXTURE = { amount: 4.99, currency: "USD" };
+
+function googleSubscriptionRevenueFixture(args: {
+  latestOrderId?: string;
+  latestSuccessfulOrderId?: string;
+}) {
+  return {
+    subscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
+    startTime: "2026-01-01T00:00:00Z",
+    regionCode: "US",
+    latestOrderId: args.latestOrderId,
+    lineItems: [
+      {
+        productId: "com.app.sub",
+        expiryTime: "2030-01-01T00:00:00Z",
+        autoRenewingPlan: { autoRenewEnabled: true },
+        offerDetails: { basePlanId: "monthly" },
+        latestSuccessfulOrderId: args.latestSuccessfulOrderId,
+      },
+    ],
+    acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+  };
+}
+
+describe("verifyReceipt — Google subscription revenue emission", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    googleMocks.loadGoogleCredentials.mockResolvedValue(GOOGLE_CREDS_FIXTURE);
+    googleMocks.getSubscriptionBasePlanPricing.mockResolvedValue(
+      SUBSCRIPTION_PRICING_FIXTURE,
+    );
+    drizzleMock.subscriberRepo.upsertSubscriber.mockResolvedValue({
+      id: "sub_1",
+    });
+    drizzleMock.offeringRepo.findProductByIdentifierOrStoreId.mockResolvedValue(
+      SUBSCRIPTION_PRODUCT_FIXTURE,
+    );
+    drizzleMock.purchaseRepo.lockPurchaseStatusByStoreTransaction.mockResolvedValue(
+      null,
+    );
+    drizzleMock.purchaseRepo.upsertPurchase.mockResolvedValue({ id: "pur_1" });
+  });
+
+  it("emits INITIAL revenue keyed on the line item's latestSuccessfulOrderId (webhook-converged key shape)", async () => {
+    googleMocks.verifyGoogleSubscription.mockResolvedValue(
+      googleSubscriptionRevenueFixture({
+        latestOrderId: "GPA.TOP-LEVEL",
+        latestSuccessfulOrderId: "GPA.LINE-ITEM",
+      }),
+    );
+
+    await verifyGoogle("com.app.sub");
+
+    const revenueCall =
+      drizzleMock.revenueEventRepo.createRevenueEvent.mock.calls[0];
+    expect(revenueCall).toBeDefined();
+    expect(revenueCall?.[1]).toMatchObject({
+      type: "INITIAL",
+      amount: "9.99",
+      currency: "USD",
+      store: "PLAY_STORE",
+      dedupeKey: "google:GPA.LINE-ITEM:purchase",
+    });
+  });
+
+  it("falls back to the deprecated top-level latestOrderId and classifies a `..N`-suffixed order as RENEWAL", async () => {
+    googleMocks.verifyGoogleSubscription.mockResolvedValue(
+      googleSubscriptionRevenueFixture({ latestOrderId: "GPA.TOP-LEVEL..1" }),
+    );
+
+    await verifyGoogle("com.app.sub");
+
+    const revenueCall =
+      drizzleMock.revenueEventRepo.createRevenueEvent.mock.calls[0];
+    expect(revenueCall).toBeDefined();
+    expect(revenueCall?.[1]).toMatchObject({
+      type: "RENEWAL",
+      dedupeKey: "google:GPA.TOP-LEVEL..1:purchase",
+    });
+  });
+
+  it("skips the revenue event and logs an error when pricing is unresolvable (never a 0-USD row)", async () => {
+    googleMocks.getSubscriptionBasePlanPricing.mockResolvedValue(null);
+    googleMocks.verifyGoogleSubscription.mockResolvedValue(
+      googleSubscriptionRevenueFixture({ latestOrderId: "GPA.TOP-LEVEL" }),
+    );
+
+    await verifyGoogle("com.app.sub");
+
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).not.toHaveBeenCalled();
+    expect(loggerSpies.error).toHaveBeenCalled();
+  });
+
+  it("does not emit purchase revenue for a non-access state (EXPIRED) verify", async () => {
+    googleMocks.verifyGoogleSubscription.mockResolvedValue({
+      ...googleSubscriptionRevenueFixture({ latestOrderId: "GPA.TOP-LEVEL" }),
+      subscriptionState: "SUBSCRIPTION_STATE_EXPIRED",
+    });
+
+    await verifyGoogle("com.app.sub");
+
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).not.toHaveBeenCalled();
+  });
+});
+
+describe("verifyReceipt — Google one-time revenue emission", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    googleMocks.loadGoogleCredentials.mockResolvedValue(GOOGLE_CREDS_FIXTURE);
+    googleMocks.getOneTimeProductPricing.mockResolvedValue(
+      ONE_TIME_PRICING_FIXTURE,
+    );
+    drizzleMock.subscriberRepo.upsertSubscriber.mockResolvedValue({
+      id: "sub_1",
+    });
+    drizzleMock.offeringRepo.findProductByIdentifierOrStoreId.mockResolvedValue(
+      CONSUMABLE_PRODUCT_FIXTURE,
+    );
+    drizzleMock.purchaseRepo.upsertPurchase.mockResolvedValue({ id: "pur_1" });
+  });
+
+  it("emits an INITIAL revenue event keyed google:<orderId>:purchase", async () => {
+    googleMocks.verifyGoogleProductPurchase.mockResolvedValue({
+      purchaseState: 0,
+      purchaseTimeMillis: "1700000000000",
+      orderId: "GPA.ONE-TIME-1",
+      regionCode: "US",
+    });
+
+    await verifyGoogle("com.app.coins");
+
+    const revenueCall =
+      drizzleMock.revenueEventRepo.createRevenueEvent.mock.calls[0];
+    expect(revenueCall).toBeDefined();
+    expect(revenueCall?.[1]).toMatchObject({
+      type: "INITIAL",
+      amount: "4.99",
+      currency: "USD",
+      store: "PLAY_STORE",
+      dedupeKey: "google:GPA.ONE-TIME-1:purchase",
+    });
+  });
+
+  it("skips the revenue event and logs an error when one-time pricing is unresolvable", async () => {
+    googleMocks.getOneTimeProductPricing.mockResolvedValue(null);
+    googleMocks.verifyGoogleProductPurchase.mockResolvedValue({
+      purchaseState: 0,
+      purchaseTimeMillis: "1700000000000",
+      orderId: "GPA.ONE-TIME-2",
+      regionCode: "US",
+    });
+
+    await verifyGoogle("com.app.coins");
+
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).not.toHaveBeenCalled();
+    expect(loggerSpies.error).toHaveBeenCalled();
   });
 });

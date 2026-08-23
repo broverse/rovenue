@@ -158,6 +158,12 @@ export interface GoogleRtdnPayload {
 export interface GoogleSubscriptionPurchaseLineItem {
   productId: string;
   expiryTime: string;
+  /**
+   * Order id of the latest successfully-charged order for THIS line item —
+   * the SubscriptionPurchaseV2 replacement for the deprecated top-level
+   * `latestOrderId`. Extract via `effectiveGoogleOrderId`, never directly.
+   */
+  latestSuccessfulOrderId?: string;
   autoRenewingPlan?: {
     autoRenewEnabled?: boolean;
   };

@@ -171,3 +171,71 @@ export async function getSubscriptionBasePlanPricing(
 
   return pricing;
 }
+
+// =============================================================
+// One-time product pricing (inappproducts.get)
+// =============================================================
+
+const MICROS_PER_UNIT = 1_000_000;
+const oneTimePricingCache = new Map<string, CachedPricing>();
+
+/**
+ * Look up the list price for a one-time (managed) product via
+ * {@link https://developers.google.com/android-publisher/api-ref/rest/v3/inappproducts/get
+ * inappproducts.get}: the region-specific price when present, else the
+ * product's default price. Cached in-process like the base-plan pricing.
+ *
+ * NOTE: this is the LIST price, not the charged amount — actual
+ * charged-amount resolution via orders.get is deferred (plan Task 10.2).
+ *
+ * Returns `null` when the product or a usable price cannot be resolved —
+ * callers must SKIP revenue emission, never fall back to 0/USD.
+ */
+export async function getOneTimeProductPricing(
+  config: GoogleVerifyConfig,
+  productId: string,
+  regionCode: string,
+): Promise<BasePlanPricing | null> {
+  const cacheKey = `${config.packageName}:${productId}:${regionCode}`;
+  const now = Date.now();
+  const cached = oneTimePricingCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return { amount: cached.amount, currency: cached.currency };
+  }
+
+  const client = androidPublisher(config.credentials);
+  const response = await client.inappproducts.get({
+    packageName: config.packageName,
+    sku: productId,
+  });
+
+  const price =
+    response.data.prices?.[regionCode] ?? response.data.defaultPrice;
+  if (!price?.priceMicros || !price.currency) {
+    log.warn("one-time product pricing lookup returned no price", {
+      packageName: config.packageName,
+      productId,
+      regionCode,
+    });
+    return null;
+  }
+
+  const pricing: BasePlanPricing = {
+    amount: Number(price.priceMicros) / MICROS_PER_UNIT,
+    currency: price.currency,
+  };
+
+  oneTimePricingCache.set(cacheKey, {
+    ...pricing,
+    expiresAt: now + PRICING_CACHE_TTL_MS,
+  });
+
+  log.debug("fetched one-time product pricing", {
+    productId,
+    regionCode,
+    amount: pricing.amount,
+    currency: pricing.currency,
+  });
+
+  return pricing;
+}

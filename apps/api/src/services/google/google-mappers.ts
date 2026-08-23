@@ -6,6 +6,7 @@ import {
   type GooglePubSubPushBody,
   type GoogleRtdnPayload,
   type GoogleSubscriptionNotificationType,
+  type GoogleSubscriptionPurchaseLineItem,
   type GoogleSubscriptionPurchaseV2,
   type GoogleSubscriptionState,
 } from "./google-types";
@@ -155,4 +156,38 @@ export function extractCancelTime(
   const cancelTime =
     purchase.canceledStateContext?.userInitiatedCancellation?.cancelTime;
   return cancelTime ? new Date(cancelTime) : null;
+}
+
+// =============================================================
+// Order id extraction
+// =============================================================
+
+/**
+ * The ONE place an order id is extracted from a SubscriptionPurchaseV2.
+ * The v2 response carries it per line item as `latestSuccessfulOrderId`;
+ * the top-level `latestOrderId` is deprecated but still populated on
+ * older responses, so it remains the fallback. Returns `undefined` when
+ * Google sent neither — callers fall back to the purchaseToken when
+ * building revenue dedupe keys.
+ */
+export function effectiveGoogleOrderId(
+  purchase: Pick<GoogleSubscriptionPurchaseV2, "latestOrderId">,
+  lineItem:
+    | Pick<GoogleSubscriptionPurchaseLineItem, "latestSuccessfulOrderId">
+    | undefined,
+): string | undefined {
+  return lineItem?.latestSuccessfulOrderId ?? purchase.latestOrderId;
+}
+
+/**
+ * Google appends a `..N` suffix to a subscription's order id for each
+ * renewal period (`GPA.xxxx-xxxx-xxxx-xxxxx..0` is the first renewal);
+ * the bare id is the initial order. Lets the receipt-verify path — which
+ * has no RTDN notificationType to classify from — label a revenue event
+ * INITIAL vs RENEWAL from the order id alone.
+ */
+const GOOGLE_RENEWAL_ORDER_ID_SUFFIX = /\.\.\d+$/;
+
+export function isGoogleRenewalOrderId(orderId: string): boolean {
+  return GOOGLE_RENEWAL_ORDER_ID_SUFFIX.test(orderId);
 }

@@ -19,6 +19,7 @@ import {
 } from "./google-types";
 import {
   classifyNotification,
+  effectiveGoogleOrderId,
   extractCancelTime,
   isAccessGranting,
   mapRevenueEventType,
@@ -27,11 +28,10 @@ import {
 } from "./google-mappers";
 import {
   acknowledgeGoogleSubscription,
-  getSubscriptionBasePlanPricing,
   verifyGoogleSubscription,
-  type BasePlanPricing,
   type GoogleVerifyConfig,
 } from "./google-verify";
+import { resolveSubscriptionPricing } from "./google-pricing";
 import { guardStatusWrite } from "../subscription-transition-guard";
 
 const log = logger.child("google-webhook");
@@ -151,9 +151,16 @@ export async function handleGoogleNotification(
           purchaseToken: payload.voidedPurchaseNotification.purchaseToken,
         })) ?? {};
     } else if (payload.oneTimeProductNotification) {
-      log.info("one-time product notification, acknowledging", {
-        sku: payload.oneTimeProductNotification.sku,
-      });
+      // One-time purchases are processed (verified, upserted, revenue
+      // recorded) by the receipt-verify path, which the SDK calls right
+      // after purchase. Wiring the RTDN into that verification/upsert
+      // pipeline is deferred — this branch records the event row above
+      // and nothing else. NOTE: no server-side acknowledge happens here
+      // either (one-time acks are the client SDK's job via BillingClient).
+      log.warn(
+        "one-time product notification persisted only; processing is deferred to the receipt-verify path",
+        { sku: payload.oneTimeProductNotification.sku },
+      );
     }
 
     await drizzle.webhookEventRepo.updateWebhookEvent(
@@ -239,8 +246,7 @@ async function processSubscriptionNotification(
   const autoRenewStatus = lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null;
   const cancellationDate = extractCancelTime(purchase);
 
-  const pricing = await resolvePricing({
-    verifyConfig: ctx.verifyConfig,
+  const pricing = await resolveSubscriptionPricing(ctx.verifyConfig, {
     productId,
     basePlanId: lineItem?.offerDetails?.basePlanId,
     regionCode: purchase.regionCode,
@@ -321,73 +327,57 @@ async function processSubscriptionNotification(
   // guard-rejected (out-of-order / replayed-after-terminal) notification
   // must not emit phantom RENEWAL/REACTIVATION/REFUND revenue.
   if (guard.apply && revenueEventType) {
-    const amount = pricing?.amount ?? 0;
-    const currency = pricing?.currency ?? "USD";
-    const amountUsd = await convertToUsd(amount, currency);
-    // eventDate uses processing time (partition-safe). Replay dedup no longer
-    // depends on it — it is enforced by the revenue_event_dedupe table.
-    const eventDate = new Date();
-    await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
-      projectId: ctx.projectId,
-      subscriberId: subscriber.id,
-      purchaseId: persisted.id,
-      productId: product.id,
-      type: revenueEventType,
-      amount: amount.toString(),
-      currency,
-      amountUsd: amountUsd.toString(),
-      store: Store.PLAY_STORE,
-      eventDate,
-      // latestOrderId is period-specific (it increments per renewal, e.g.
-      // `…0`, `…1`), unlike purchaseToken which is stable across renewals.
-      // Keying on it makes each renewal a distinct economic event while a
-      // replay of the same notification dedups, and the coarse kind lets the
-      // receipt-verify path converge on the same key for the same order.
-      dedupeKey: `google:${purchase.latestOrderId ?? ctx.notification.purchaseToken}:${revenueDedupeKind(revenueEventType)}`,
-    });
-
-    if (revenueEventType === RevenueEventType.REFUND) {
-      await maybeEmitRefundDetected(drizzle.db, {
+    if (!pricing) {
+      // NEVER fall back to a 0-USD row — a zero-amount event silently
+      // corrupts MRR/LTV rollups. Skip the emission and surface the miss;
+      // the durable BullMQ job already succeeded on the entitlement side.
+      log.error("pricing unresolvable; skipping revenue event", {
         projectId: ctx.projectId,
+        tokenPrefix: ctx.notification.purchaseToken.slice(0, 12),
+        productId,
+        basePlanId: lineItem?.offerDetails?.basePlanId,
+        notificationType: ctx.notification.notificationType,
+        revenueEventType,
+      });
+    } else {
+      const { amount, currency } = pricing;
+      const amountUsd = await convertToUsd(amount, currency);
+      // eventDate uses processing time (partition-safe). Replay dedup no longer
+      // depends on it — it is enforced by the revenue_event_dedupe table.
+      const eventDate = new Date();
+      // The order id is period-specific (it gains a `..N` suffix per renewal),
+      // unlike purchaseToken which is stable across renewals. Keying on it
+      // makes each renewal a distinct economic event while a replay of the
+      // same notification dedups, and the coarse kind lets the receipt-verify
+      // path converge on the same key for the same order.
+      const orderId = effectiveGoogleOrderId(purchase, lineItem);
+      await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+        projectId: ctx.projectId,
+        subscriberId: subscriber.id,
         purchaseId: persisted.id,
         productId: product.id,
-        amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
+        type: revenueEventType,
+        amount: amount.toString(),
         currency,
+        amountUsd: amountUsd.toString(),
+        store: Store.PLAY_STORE,
+        eventDate,
+        dedupeKey: `google:${orderId ?? ctx.notification.purchaseToken}:${revenueDedupeKind(revenueEventType)}`,
       });
+
+      if (revenueEventType === RevenueEventType.REFUND) {
+        await maybeEmitRefundDetected(drizzle.db, {
+          projectId: ctx.projectId,
+          purchaseId: persisted.id,
+          productId: product.id,
+          amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
+          currency,
+        });
+      }
     }
   }
 
   return { subscriberId: subscriber.id, purchaseId: persisted.id };
-}
-
-interface ResolvePricingArgs {
-  verifyConfig: GoogleVerifyConfig;
-  productId: string;
-  basePlanId: string | undefined;
-  regionCode: string | undefined;
-}
-
-async function resolvePricing(
-  args: ResolvePricingArgs,
-): Promise<BasePlanPricing | null> {
-  if (!args.basePlanId) return null;
-
-  try {
-    return await getSubscriptionBasePlanPricing(
-      args.verifyConfig,
-      args.productId,
-      args.basePlanId,
-      args.regionCode ?? "US",
-    );
-  } catch (err) {
-    log.warn("basePlan pricing lookup failed", {
-      productId: args.productId,
-      basePlanId: args.basePlanId,
-      regionCode: args.regionCode,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
 }
 
 async function ensureAcknowledged(
@@ -536,33 +526,47 @@ async function processVoidedPurchase(
     // from the stored purchase price. Positive magnitude per platform
     // convention (analytics net via `gross - refunds`).
     if (guard.apply) {
-      const amount =
-        purchase.priceAmount != null ? Number(purchase.priceAmount) : 0;
-      const currency = purchase.priceCurrency ?? "USD";
-      const amountUsd = await convertToUsd(amount, currency);
-      const eventDate = new Date();
-      await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
-        projectId: args.projectId,
-        subscriberId: purchase.subscriberId,
-        purchaseId: purchase.id,
-        productId: purchase.productId,
-        type: RevenueEventType.REFUND,
-        amount: amount.toString(),
-        currency,
-        amountUsd: amountUsd.toString(),
-        store: Store.PLAY_STORE,
-        eventDate,
-        // A void is terminal/once-per-purchase; key on the token. A
-        // REVOKE+VOID race is additionally prevented by the guard.apply gate.
-        dedupeKey: `google:${args.purchaseToken}:refund`,
-      });
-      await maybeEmitRefundDetected(drizzle.db, {
-        projectId: args.projectId,
-        purchaseId: purchase.id,
-        productId: purchase.productId,
-        amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
-        currency,
-      });
+      if (purchase.priceAmount == null || purchase.priceCurrency == null) {
+        // No stored price to derive the refund magnitude from — NEVER write
+        // a 0-USD REFUND row (it would silently under-count refunds while
+        // pretending one was recorded). The status transition above stands.
+        log.error(
+          "voided purchase has no stored price; skipping refund revenue event",
+          {
+            projectId: args.projectId,
+            tokenPrefix: args.purchaseToken.slice(0, 12),
+            purchaseId: purchase.id,
+            productId: purchase.productId,
+          },
+        );
+      } else {
+        const amount = Number(purchase.priceAmount);
+        const currency = purchase.priceCurrency;
+        const amountUsd = await convertToUsd(amount, currency);
+        const eventDate = new Date();
+        await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+          projectId: args.projectId,
+          subscriberId: purchase.subscriberId,
+          purchaseId: purchase.id,
+          productId: purchase.productId,
+          type: RevenueEventType.REFUND,
+          amount: amount.toString(),
+          currency,
+          amountUsd: amountUsd.toString(),
+          store: Store.PLAY_STORE,
+          eventDate,
+          // A void is terminal/once-per-purchase; key on the token. A
+          // REVOKE+VOID race is additionally prevented by the guard.apply gate.
+          dedupeKey: `google:${args.purchaseToken}:refund`,
+        });
+        await maybeEmitRefundDetected(drizzle.db, {
+          projectId: args.projectId,
+          purchaseId: purchase.id,
+          productId: purchase.productId,
+          amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
+          currency,
+        });
+      }
     }
   }
 
