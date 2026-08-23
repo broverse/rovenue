@@ -223,6 +223,38 @@ describe("audit() — chained writes", () => {
     expect(r2!.prevHash).toBe(r1!.rowHash);
   });
 
+  it("same-millisecond writes still chain: createdAt is forced strictly monotonic", async () => {
+    // The chain is ordered by createdAt (verifyAuditChain walks it asc), the
+    // clock has millisecond resolution, and the advisory lock serialises but
+    // doesn't space writes apart — so a frozen clock reproduces the burst
+    // case where two entries would tie and a later lookup could pick the
+    // wrong tip. The writer must bump createdAt past the current tip.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
+      for (let i = 0; i < 3; i++) {
+        await audit({
+          projectId: "proj_a",
+          userId: "user_1",
+          action: "create",
+          resource: "audience",
+          resourceId: `aud_tie_${i}`,
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const [r0, r1, r2] = auditStore;
+    expect(r1!.createdAt.getTime()).toBeGreaterThan(r0!.createdAt.getTime());
+    expect(r2!.createdAt.getTime()).toBeGreaterThan(r1!.createdAt.getTime());
+    expect(r1!.prevHash).toBe(r0!.rowHash);
+    expect(r2!.prevHash).toBe(r1!.rowHash);
+
+    const result = await verifyAuditChain("proj_a");
+    expect(result.errors).toEqual([]);
+  });
+
   it("takes a per-project advisory lock before reading prevHash", async () => {
     await audit({
       projectId: "proj_a",

@@ -310,7 +310,7 @@ async function writeChained(
   );
 
   const latestRows = await tx
-    .select({ rowHash: auditLogs.rowHash })
+    .select({ rowHash: auditLogs.rowHash, createdAt: auditLogs.createdAt })
     .from(auditLogs)
     .where(
       and(
@@ -318,11 +318,26 @@ async function writeChained(
         isNotNull(auditLogs.rowHash),
       ),
     )
-    .orderBy(desc(auditLogs.createdAt))
+    // The id tiebreak keeps the tip lookup deterministic should legacy rows
+    // tie on createdAt (ids are random cuid2s, so it is deterministic, not
+    // chronological — the strictly-monotonic createdAt below is what makes
+    // ties impossible for rows written from here on).
+    .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
     .limit(1);
-  const prevHash = latestRows[0]?.rowHash ?? null;
+  const tip = latestRows[0];
+  const prevHash = tip?.rowHash ?? null;
 
-  const createdAt = new Date();
+  // `createdAt` orders the chain (verifyAuditChain walks createdAt asc), but
+  // it has millisecond resolution and the advisory lock only serialises
+  // writes — it doesn't space them apart in time. Two same-millisecond
+  // entries would tie, and with random cuid2 ids the tie order need not
+  // match link order, surfacing as a false `broken_link`. Under the lock we
+  // can simply force strict monotonicity per project: never stamp a time at
+  // or before the current tip's.
+  const now = Date.now();
+  const createdAt = new Date(
+    tip ? Math.max(now, tip.createdAt.getTime() + 1) : now,
+  );
   const canonical = canonicalJSON(
     buildCanonicalPayload(entry, createdAt, prevHash),
   );
