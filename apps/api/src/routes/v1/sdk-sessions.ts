@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { API_KEY_KIND } from "@rovenue/shared";
 import { HTTPException } from "hono/http-exception";
 import { drizzle } from "@rovenue/db";
+import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscriber";
 import { getProducer } from "../../lib/kafka";
 import { logger } from "../../lib/logger";
 
@@ -103,14 +104,11 @@ export const sdkSessionsRoute = new Hono().post(
     // Tenant ownership: resolve the client-supplied id to a project-owned
     // subscriber so the Kafka key + payload always carry an id we own
     // (mirrors /me, /track). A raw foreign id would otherwise corrupt the
-    // engagement aggregates feeding Refund Shield.
-    const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
-      drizzle.db,
-      {
-        projectId: project.id,
-        rovenueId: rawSubscriberId,
-        createAttributes: {},
-      },
+    // engagement aggregates feeding Refund Shield. Merge-aware — a bare
+    // upsert would attribute post-transfer sessions to the retired row.
+    const subscriber = await resolveOrCreateSubscriber(
+      project.id,
+      rawSubscriberId,
     );
     const subscriberId = subscriber.id;
 

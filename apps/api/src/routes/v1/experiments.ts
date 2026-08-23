@@ -4,6 +4,7 @@ import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { drizzle, getDb } from "@rovenue/db";
 import { recordEvent } from "../../services/experiment-engine";
+import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscriber";
 import { eventBus } from "../../services/event-bus";
 import { computeExperimentResults } from "../../services/experiment-results";
 import { ok } from "../../lib/response";
@@ -90,13 +91,11 @@ export const experimentsRoute = new Hono()
 
       const body = c.req.valid("json");
 
-      const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
-        drizzle.db,
-        {
-          projectId: project.id,
-          rovenueId: appUserId,
-          createAttributes: {},
-        },
+      // Merge-aware — a bare upsert would record post-transfer conversions
+      // against the retired row, corrupting per-variant stats.
+      const subscriber = await resolveOrCreateSubscriber(
+        project.id,
+        appUserId,
       );
 
       for (const event of body.events) {
@@ -174,13 +173,10 @@ export const experimentsRoute = new Hono()
 
       // Resolve the client-supplied id to a project-owned subscriber so
       // the exposure is always stamped with an id we own (mirrors /track).
-      const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
-        drizzle.db,
-        {
-          projectId: project.id,
-          rovenueId: input.subscriberId,
-          createAttributes: {},
-        },
+      // Merge-aware — exposures must follow the transfer survivor.
+      const subscriber = await resolveOrCreateSubscriber(
+        project.id,
+        input.subscriberId,
       );
 
       // Client-side draw: persist the assignment lazily so results/assignment

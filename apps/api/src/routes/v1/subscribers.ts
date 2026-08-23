@@ -16,6 +16,7 @@ import { transferSubscriber } from "../../services/subscriber-transfer";
 import { requireSecretKey } from "../../middleware/api-key-auth";
 import { buildAccessResponse } from "../../lib/access-response";
 import { resolveSubscriber } from "../../lib/resolve-subscriber";
+import { resolveSubscriberForWrite } from "../../lib/resolve-or-create-subscriber";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -135,16 +136,18 @@ export const subscribersRoute = new Hono()
       const appUserId = c.req.param("appUserId");
       const body = c.req.valid("json");
 
-      // Read existing attributes so we can compute the merge. The path
-      // param is the device key (rovenueId); read the merge base from
-      // the rovenueId-keyed row so it matches the upsert target below.
-      // A missing subscriber is treated as "no attributes yet".
-      const existing =
-        await drizzle.subscriberRepo.findSubscriberAttributesByRovenueId(
-          drizzle.db,
-          { projectId: project.id, rovenueId: appUserId },
-        );
-      const current = normalizeStored(existing?.attributes);
+      // Merge-aware: the path param is the device key (rovenueId), and
+      // after a /transfer merge that key still names the retired row —
+      // reading/writing it directly would silently land the update on a
+      // soft-deleted subscriber, invisible to /v1/me and /v1/placements.
+      // Resolve the live survivor first; a missing subscriber is treated
+      // as "no attributes yet" and created.
+      const now = new Date().toISOString();
+      const { subscriber, deadEnded } = await resolveSubscriberForWrite(
+        project.id,
+        appUserId,
+      );
+      const current = normalizeStored(subscriber.attributes);
       const errors = validateAttributeInput(body.attributes, current);
       if (errors.length > 0) {
         throw new HTTPException(400, {
@@ -152,25 +155,24 @@ export const subscribersRoute = new Hono()
         });
       }
 
-      const now = new Date().toISOString();
       const merged = applyMutations(current, body.attributes, "sdk", now);
 
-      const updated = await drizzle.subscriberRepo.upsertSubscriber(
-        drizzle.db,
-        {
-          projectId: project.id,
-          rovenueId: appUserId,
-          createAttributes: merged,
-          updateAttributes: merged,
-        },
-      );
+      // A dead-ended row (e.g. GDPR-erased) must never be re-populated;
+      // report the row untouched instead of resurrecting it.
+      if (!deadEnded) {
+        await drizzle.subscriberRepo.updateSubscriberAttributesById(
+          drizzle.db,
+          subscriber.id,
+          merged,
+        );
+      }
 
       return c.json(
         ok({
           subscriber: {
-            id: updated.id,
-            appUserId: updated.appUserId,
-            attributes: flattenAttributes(updated.attributes),
+            id: subscriber.id,
+            appUserId: subscriber.appUserId,
+            attributes: flattenAttributes(deadEnded ? subscriber.attributes : merged),
           },
         }),
       );

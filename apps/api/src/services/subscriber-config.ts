@@ -4,6 +4,7 @@ import {
   flattenAttributes,
   normalizeStored,
 } from "@rovenue/shared";
+import { resolveSubscriberForWrite } from "../lib/resolve-or-create-subscriber";
 import { evaluateAllFlags } from "./flag-engine";
 import { evaluateExperiments } from "./experiment-engine";
 
@@ -31,14 +32,21 @@ export async function evaluateSubscriberConfig(args: {
 }): Promise<SubscriberConfig> {
   const { projectId, appUserId, env, requestAttributes } = args;
 
-  const existing =
-    await drizzle.subscriberRepo.findSubscriberAttributesByRovenueId(
-      drizzle.db,
-      { projectId, rovenueId: appUserId },
-    );
-  const currentNested = normalizeStored(existing?.attributes);
-  const hasNewAttributes = Object.keys(requestAttributes).length > 0;
+  // Merge-aware: after a /v1/subscribers/transfer the device's rovenueId
+  // still names the retired row, so a bare rovenueId read/upsert would fork
+  // this device's attributes AND its flag/experiment assignments onto the
+  // dead row forever. Resolve the live survivor first.
   const now = new Date().toISOString();
+  const { subscriber, deadEnded } = await resolveSubscriberForWrite(
+    projectId,
+    appUserId,
+    // Applied only when no row exists yet (fresh device): merge the request
+    // attributes into an empty base at create time.
+    applyMutations({}, requestAttributes, "sdk", now),
+  );
+
+  const currentNested = normalizeStored(subscriber.attributes);
+  const hasNewAttributes = Object.keys(requestAttributes).length > 0;
   const mergedNested = applyMutations(
     currentNested,
     requestAttributes,
@@ -47,12 +55,15 @@ export async function evaluateSubscriberConfig(args: {
   );
   const evalAttributes = flattenAttributes(mergedNested);
 
-  const subscriber = await drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
-    projectId,
-    rovenueId: appUserId,
-    createAttributes: mergedNested,
-    ...(hasNewAttributes && { updateAttributes: mergedNested }),
-  });
+  // Never write onto a dead-ended (e.g. GDPR-erased) row — evaluation still
+  // proceeds with the in-memory merge so the device keeps working.
+  if (hasNewAttributes && !deadEnded) {
+    await drizzle.subscriberRepo.updateSubscriberAttributesById(
+      drizzle.db,
+      subscriber.id,
+      mergedNested,
+    );
+  }
 
   const [flags, experiments] = await Promise.all([
     evaluateAllFlags(projectId, env, subscriber.id, evalAttributes),

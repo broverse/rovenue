@@ -221,6 +221,29 @@ export async function setAppUserId(
 }
 
 /**
+ * Replace a subscriber's stored attributes by row id. Merge-aware SDK
+ * write paths use this to land attribute updates on the RESOLVED (live,
+ * post-merge) row — `upsertSubscriber`'s ON CONFLICT target is the full
+ * (projectId, rovenueId) unique index, which resolves to whichever row
+ * currently holds the rovenueId, soft-deleted or not.
+ */
+export async function updateSubscriberAttributesById(
+  db: DbOrTx,
+  id: string,
+  attributes: unknown,
+): Promise<void> {
+  const now = new Date();
+  await db
+    .update(subscribers)
+    .set({
+      attributes: attributes as typeof subscribers.$inferInsert.attributes,
+      lastSeenAt: now,
+      updatedAt: now,
+    })
+    .where(eq(subscribers.id, id));
+}
+
+/**
  * Bind (or rebind) the Apple `appAccountToken` onto a subscriber row.
  * The JWS-decoded token is authoritative, so this overwrites. Constrained
  * by the partial unique index (projectId, appleAppAccountToken) — the

@@ -34,6 +34,10 @@ vi.mock("@rovenue/db", () => ({
   drizzle: {
     db: {},
     subscriberRepo: {
+      // The route resolves merge-aware: resolve (null → unknown id), then a
+      // direct find (null → no dead row), then upsert creates.
+      resolveSubscriberByRovenueId: async () => null,
+      findSubscriberByRovenueId: async () => null,
       upsertSubscriber: (...args: unknown[]) => upsertSubscriberMock(...args),
     },
   },

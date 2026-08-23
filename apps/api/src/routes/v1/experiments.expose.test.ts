@@ -35,6 +35,10 @@ vi.mock("@rovenue/db", () => ({
       findByIdInProject: (...args: unknown[]) => findByIdInProjectMock(...args),
     },
     subscriberRepo: {
+      // The route resolves merge-aware: resolve (null → unknown id), then a
+      // direct find (null → no dead row), then upsert creates.
+      resolveSubscriberByRovenueId: async () => null,
+      findSubscriberByRovenueId: async () => null,
       upsertSubscriber: (...args: unknown[]) => upsertSubscriberMock(...args),
     },
     // Lazy assignment persist (Task 5) — the expose handler calls this

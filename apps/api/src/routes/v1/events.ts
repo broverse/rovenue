@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { drizzle } from "@rovenue/db";
 import { API_KEY_KIND } from "@rovenue/shared";
+import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscriber";
 
 // =============================================================
 // POST /v1/events — public ingest with identityContext forwarding
@@ -149,11 +150,14 @@ export const eventsRoute = new Hono()
       // identity untouched.
       let payload: Record<string, unknown> = body as Record<string, unknown>;
       if (body.eventType.startsWith("paywall_") && body.subscriberId) {
-        const subscriber = await drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
-          projectId: project.id,
-          rovenueId: body.subscriberId,
-          createAttributes: {},
-        });
+        // Merge-aware (NOT a bare upsert): after a subscriber transfer the
+        // device's rovenueId still names the retired row, and attributing
+        // paywall telemetry there permanently orphans it from the
+        // subscriber's revenue events.
+        const subscriber = await resolveOrCreateSubscriber(
+          project.id,
+          body.subscriberId,
+        );
         payload = { ...payload, subscriberId: subscriber.id };
       }
 
