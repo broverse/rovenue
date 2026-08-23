@@ -3,7 +3,7 @@ import {
   ASSET_STORAGE_CRITICAL_RATIO,
   ASSET_STORAGE_WARN_RATIO,
 } from "@rovenue/shared";
-import { storageNoticeFor } from "./storage-notice";
+import { noticeSeverity, storageNoticeFor } from "./storage-notice";
 
 const LIMIT = 1000;
 const at = (ratio: number) => ({ usedBytes: LIMIT * ratio, limitBytes: LIMIT });
@@ -31,5 +31,21 @@ describe("storageNoticeFor", () => {
   it("has nothing to say about an unlimited or unloaded project", () => {
     expect(storageNoticeFor({ usedBytes: 10 ** 9, limitBytes: null })).toBe("none");
     expect(storageNoticeFor(undefined)).toBe("none");
+  });
+});
+
+describe("noticeSeverity", () => {
+  it("reserves the blocked severity for the one state that stops an upload", () => {
+    // Colour is keyed off this, and the colour has to answer "does the
+    // upload button still work?" — not "how alarming is the number?".
+    // At the critical ratio there is still real headroom, and a small
+    // file uploads exactly as it did at the warn ratio, so the two share
+    // a severity. What makes `critical` critical is its copy, which
+    // names the room left; only `full` refuses bytes, and only `full`
+    // gets the colour that says so.
+    expect(noticeSeverity("none")).toBe("idle");
+    expect(noticeSeverity("warning")).toBe("attention");
+    expect(noticeSeverity("critical")).toBe("attention");
+    expect(noticeSeverity("full")).toBe("blocked");
   });
 });

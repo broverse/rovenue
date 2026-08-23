@@ -3,7 +3,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { http, HttpResponse } from "msw";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ASSET_MAX_BYTES, ASSET_STORAGE_WARN_RATIO } from "@rovenue/shared";
+import {
+  ASSET_MAX_BYTES,
+  ASSET_STORAGE_CRITICAL_RATIO,
+  ASSET_STORAGE_WARN_RATIO,
+} from "@rovenue/shared";
 import type { ThemeUrl } from "@rovenue/shared/paywall";
 import "../../i18n/config";
 import { server } from "../../../tests/msw/server";
@@ -291,6 +295,29 @@ describe("AssetLibrary", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent(/running low/i);
     // Still under the cap: the author can keep working.
+    expect(screen.getByRole("button", { name: /upload image/i })).toBeEnabled();
+  });
+
+  it("names the room left once storage is critical, and still lets an upload through", async () => {
+    // The band between the critical ratio and the cap used to render the
+    // full danger-red box while saying the warn band's sentence and
+    // leaving upload enabled — three signals telling an author three
+    // different things. Red is now the colour of "refused" alone, and
+    // the band earns its own copy: the one figure someone about to pick
+    // a file needs is how much room is actually left. It is NOT blocked
+    // here — 5 KB of headroom still takes a 4 KB file, and the server
+    // checks images AFTER normalisation shrinks them, so a raw-size
+    // block in the browser would refuse uploads that would have fit.
+    const limitBytes = 100 * 1024;
+    mockAssets([], {
+      usedBytes: Math.ceil(limitBytes * ASSET_STORAGE_CRITICAL_RATIO),
+      limitBytes,
+    });
+    wrap(<AssetLibrary projectId={PROJECT_ID} />);
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent(/5\.0 KB left/);
+    expect(notice).not.toHaveTextContent(/running low/i);
     expect(screen.getByRole("button", { name: /upload image/i })).toBeEnabled();
   });
 

@@ -658,6 +658,7 @@
         "used": "{{used}} of {{limit}} used",
         "unlimited": "Unlimited storage",
         "low": "Storage is running low — {{used}} of {{limit}} used.",
+        "critical": "Almost out of storage — only {{remaining}} left of {{limit}}. Delete an asset, or move to a bigger plan.",
         "full": "Storage is full — {{used}} of {{limit}} used. Delete an asset to make room, or move to a bigger plan.",
         "upgrade": "Upgrade for more storage"
       },

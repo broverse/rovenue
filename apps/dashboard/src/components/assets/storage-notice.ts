@@ -32,3 +32,32 @@ export function storageNoticeFor(usage: StorageUsage | undefined): StorageNotice
   if (ratio >= ASSET_STORAGE_WARN_RATIO) return "warning";
   return "none";
 }
+
+/**
+ * How loud the notice is allowed to be.
+ *
+ * Colour is keyed off this rather than off the band directly, because
+ * the question colour answers is "does the upload button still work?",
+ * not "how big is the number?". `blocked` — red — is the one state where
+ * bytes are refused. `critical` sits at 95% with real headroom left: a
+ * small file still uploads there exactly as it does at 80%, so painting
+ * it red would report a stop that has not happened, and the storage bar
+ * would go red while uploads carried on. What separates `critical` from
+ * `warning` is its copy, which names the room left, not its colour.
+ */
+export type NoticeSeverity = "idle" | "attention" | "blocked";
+
+const SEVERITY = {
+  none: "idle",
+  warning: "attention",
+  critical: "attention",
+  full: "blocked",
+} as const satisfies Record<StorageNotice, NoticeSeverity>;
+
+/** Generic over the band so the mapping stays exact: a caller that has
+ *  already ruled out `none` — the notice box, which only renders for a
+ *  band — gets back a severity with `idle` ruled out too, and can index
+ *  a map that has no `idle` entry without a cast. */
+export function noticeSeverity<N extends StorageNotice>(notice: N): (typeof SEVERITY)[N] {
+  return SEVERITY[notice];
+}

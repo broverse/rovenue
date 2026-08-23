@@ -25,7 +25,12 @@ import {
 import { billingEnabled } from "../../lib/host-mode";
 import { formatAssetByteSize } from "./byte-size";
 import { kindLabel } from "./kind-label";
-import { storageNoticeFor, type StorageNotice } from "./storage-notice";
+import {
+  noticeSeverity,
+  storageNoticeFor,
+  type NoticeSeverity,
+  type StorageNotice,
+} from "./storage-notice";
 
 // =============================================================
 // AssetLibrary — the dashboard's project-scoped asset CDN surface
@@ -412,20 +417,66 @@ export function AssetLibrary({
   );
 }
 
-/** Bar fill and notice text share one colour scale, so "the bar went
- *  red" and "uploads stopped" read as the same fact. */
-const NOTICE_FILL_CLASS: Record<StorageNotice, string> = {
-  none: "bg-rv-c4",
-  warning: "bg-rv-warning",
-  critical: "bg-rv-danger",
-  full: "bg-rv-danger",
+/** Bar fill and notice box share one colour scale, so "the bar went
+ *  red" and "uploads stopped" read as the same fact. Both key off the
+ *  SEVERITY, not the band — see `noticeSeverity` for why `critical`
+ *  stays amber while saying something sharper than `warning` does. */
+const SEVERITY_FILL_CLASS: Record<NoticeSeverity, string> = {
+  idle: "bg-rv-c4",
+  attention: "bg-rv-warning",
+  blocked: "bg-rv-danger",
 };
 
-const NOTICE_BOX_CLASS: Record<Exclude<StorageNotice, "none">, string> = {
-  warning: "border-rv-warning/30 bg-rv-warning/[0.08] text-rv-warning",
-  critical: "border-rv-danger/30 bg-rv-danger/10 text-rv-danger",
-  full: "border-rv-danger/30 bg-rv-danger/10 text-rv-danger",
+const SEVERITY_BOX_CLASS: Record<Exclude<NoticeSeverity, "idle">, string> = {
+  attention: "border-rv-warning/30 bg-rv-warning/[0.08] text-rv-warning",
+  blocked: "border-rv-danger/30 bg-rv-danger/10 text-rv-danger",
 };
+
+/**
+ * One sentence per band, and each band earns its own by saying something
+ * the previous one did not.
+ *
+ * `critical` is the interesting case. It used to share `warning`'s
+ * sentence, which made the band pure decoration: the same words, a
+ * louder colour, and an upload button that still worked. What actually
+ * changes at 95% is that the next file might not fit — so the figure
+ * that matters stops being "how much have I used" (the usage bar, which
+ * is on screen anyway) and becomes "how much room is left", the number
+ * an author can weigh a file against before picking it. It is stated
+ * rather than enforced: a client-side block on raw file size would
+ * refuse images that fit, because the server checks its cap AFTER
+ * normalisation shrinks them.
+ */
+function noticeText(
+  t: TFunction,
+  notice: Exclude<StorageNotice, "none">,
+  usage: StorageUsage,
+): string {
+  const used = formatAssetByteSize(usage.usedBytes);
+  const limit = formatAssetByteSize(usage.limitBytes ?? 0);
+
+  if (notice === "full") {
+    return t("settings.assets.usage.full", {
+      defaultValue:
+        "Storage is full — {{used}} of {{limit}} used. Delete an asset to make room, or move to a bigger plan.",
+      used,
+      limit,
+    });
+  }
+  if (notice === "critical") {
+    return t("settings.assets.usage.critical", {
+      defaultValue:
+        "Almost out of storage — only {{remaining}} left of {{limit}}. Delete an asset, or move to a bigger plan.",
+      remaining: formatAssetByteSize(Math.max(0, (usage.limitBytes ?? 0) - usage.usedBytes)),
+      limit,
+    });
+  }
+  return t("settings.assets.usage.low", {
+    defaultValue: "Storage is running low — {{used}} of {{limit}} used.",
+    used,
+    limit,
+  });
+}
 
 /**
  * The banner an author sees before — and instead of — a failed upload.
@@ -449,32 +500,17 @@ function StorageQuotaNotice({
   projectId: string;
 }) {
   const { t } = useTranslation();
-  const used = formatAssetByteSize(usage.usedBytes);
-  const limit = formatAssetByteSize(usage.limitBytes ?? 0);
 
   return (
     <div
       role="status"
       className={cn(
         "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-[12px]",
-        NOTICE_BOX_CLASS[notice],
+        SEVERITY_BOX_CLASS[noticeSeverity(notice)],
       )}
     >
       <TriangleAlert size={14} className="flex-shrink-0" />
-      <span>
-        {notice === "full"
-          ? t("settings.assets.usage.full", {
-              defaultValue:
-                "Storage is full — {{used}} of {{limit}} used. Delete an asset to make room, or move to a bigger plan.",
-              used,
-              limit,
-            })
-          : t("settings.assets.usage.low", {
-              defaultValue: "Storage is running low — {{used}} of {{limit}} used.",
-              used,
-              limit,
-            })}
-      </span>
+      <span>{noticeText(t, notice, usage)}</span>
         {/* A plain <a>, not a router <Link>: this notice now renders
             inside `AssetLibraryModal` too, and that modal is opened from
             both builders' inspectors — subtrees whose own tests (and the
@@ -526,7 +562,7 @@ function StorageUsageBar({ usage, compact = false }: { usage: StorageUsage; comp
         className="h-1.5 w-full max-w-[220px] overflow-hidden rounded-full bg-rv-c2"
       >
         <div
-          className={cn("h-full", NOTICE_FILL_CLASS[storageNoticeFor(usage)])}
+          className={cn("h-full", SEVERITY_FILL_CLASS[noticeSeverity(storageNoticeFor(usage))])}
           style={{ width: `${pct}%` }}
         />
       </div>
