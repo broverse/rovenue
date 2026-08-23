@@ -16,6 +16,9 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import { redis } from "../../lib/redis";
+import { logger } from "../../lib/logger";
+
+const log = logger.child("host-resolver");
 
 const PREFIX = "custom_domain:host:";
 const TTL_POSITIVE = 300;
@@ -39,7 +42,18 @@ export async function resolveHost(host: string): Promise<ResolvedHost | null> {
   if (!key) return null;
   const cacheKey = PREFIX + key;
 
-  const cached = await redis.get(cacheKey);
+  // A Redis error must behave like a miss — the Postgres lookup below is
+  // the source of truth and must still answer during a Redis blip (this is
+  // the public funnel edge; throwing here 500s every custom-domain page).
+  let cached: string | null = null;
+  try {
+    cached = await redis.get(cacheKey);
+  } catch (err) {
+    log.warn("cache read failed — falling through to Postgres", {
+      host: key,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
   if (cached === NEGATIVE_MARKER) return null;
   if (cached) {
     const idx = cached.indexOf(":");
@@ -53,7 +67,7 @@ export async function resolveHost(host: string): Promise<ResolvedHost | null> {
   // Anything else (pending verify, cert still issuing, cert failed) is a
   // negative result.
   if (!row || !row.verifiedAt || row.certStatus !== "issued") {
-    await redis.set(cacheKey, NEGATIVE_MARKER, "EX", TTL_NEGATIVE);
+    await cacheSet(cacheKey, NEGATIVE_MARKER, TTL_NEGATIVE);
     return null;
   }
 
@@ -65,13 +79,25 @@ export async function resolveHost(host: string): Promise<ResolvedHost | null> {
     .then((rows) => rows[0]);
   if (!funnel || funnel.status !== "published") {
     // Funnel is gone or not yet published — don't serve the hostname.
-    await redis.set(cacheKey, NEGATIVE_MARKER, "EX", TTL_NEGATIVE);
+    await cacheSet(cacheKey, NEGATIVE_MARKER, TTL_NEGATIVE);
     return null;
   }
 
   const resolved: ResolvedHost = { funnelId: row.funnelId, slug: funnel.slug };
-  await redis.set(cacheKey, `${resolved.funnelId}:${resolved.slug}`, "EX", TTL_POSITIVE);
+  await cacheSet(cacheKey, `${resolved.funnelId}:${resolved.slug}`, TTL_POSITIVE);
   return resolved;
+}
+
+/** Best-effort cache write — a Redis error must never fail the request. */
+async function cacheSet(key: string, value: string, ttlSeconds: number): Promise<void> {
+  try {
+    await redis.set(key, value, "EX", ttlSeconds);
+  } catch (err) {
+    log.warn("cache write failed — serving from Postgres until Redis returns", {
+      key,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**
@@ -82,5 +108,14 @@ export async function resolveHost(host: string): Promise<ResolvedHost | null> {
 export async function invalidateHost(host: string): Promise<void> {
   const key = normalize(host);
   if (!key) return;
-  await redis.del(PREFIX + key);
+  try {
+    await redis.del(PREFIX + key);
+  } catch (err) {
+    // TTLs (300s/60s) bound staleness if this delete is lost; failing the
+    // dashboard mutation over a cache delete would be strictly worse.
+    log.warn("cache invalidation failed — TTL bounds staleness", {
+      host: key,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
