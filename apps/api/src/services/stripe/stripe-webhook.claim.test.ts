@@ -183,3 +183,90 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
     expect(retrieve).toHaveBeenCalledWith("in_123");
   });
 });
+
+// =============================================================
+// processStripeEvent — post-processing ordering (Task 7 durability)
+// =============================================================
+//
+// The processor's side effects (access sync, consumable credit,
+// outgoing webhook) run via the injected `postProcess` callback, which
+// MUST run BEFORE the row is marked PROCESSED. If it fails, the row is
+// marked FAILED (re-claimable) and the job throws so BullMQ retries —
+// a PROCESSED row would make the redelivery dedupe to `duplicate` and
+// lose the side effect permanently.
+describe("processStripeEvent — post-processing ordering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mockHappyDispatch(rowId: string) {
+    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce({
+      outcome: "claimed",
+      row: { id: rowId, status: "PROCESSING" },
+    });
+    drizzleMock.subscriberRepo.upsertSubscriber.mockResolvedValueOnce({
+      id: "sub_row_1",
+    });
+    drizzleMock.offeringRepo.findProductByStoreId.mockResolvedValueOnce({
+      id: "prod_1",
+      accessIds: [],
+    });
+    drizzleMock.purchaseRepo.upsertPurchase.mockResolvedValueOnce({
+      id: "pur_1",
+      expiresDate: null,
+    });
+  }
+
+  test("a postProcess failure marks the row FAILED — never PROCESSED — and rejects", async () => {
+    mockHappyDispatch("whe_pp_fail");
+    const postProcess = vi.fn(async () => {
+      throw new Error("side effect down");
+    });
+
+    await expect(
+      processStripeEvent({
+        projectId: "prj_test",
+        event: makeSubscriptionCreatedEvent(),
+        account: {} as never,
+        postProcess,
+      }),
+    ).rejects.toThrow("side effect down");
+
+    const statusWrites = (
+      drizzleMock.webhookEventRepo.updateWebhookEvent.mock
+        .calls as unknown as Array<[unknown, unknown, { status?: string }]>
+    ).map(([, , patch]) => patch.status);
+    expect(statusWrites).not.toContain("PROCESSED");
+    expect(statusWrites).toContain("FAILED");
+  });
+
+  test("postProcess runs BEFORE the PROCESSED write and receives the dispatch outcome", async () => {
+    mockHappyDispatch("whe_pp_ok");
+    const order: string[] = [];
+    const postProcess = vi.fn(async () => {
+      order.push("postProcess");
+    });
+    drizzleMock.webhookEventRepo.updateWebhookEvent.mockImplementation(
+      (async (_db: unknown, _id: unknown, patch: { status?: string }) => {
+        order.push(`update:${patch.status}`);
+      }) as unknown as () => Promise<undefined>,
+    );
+
+    const event = makeSubscriptionCreatedEvent();
+    const result = await processStripeEvent({
+      projectId: "prj_test",
+      event,
+      account: {} as never,
+      postProcess,
+    });
+
+    expect(result.status).toBe("processed");
+    expect(order).toEqual(["postProcess", "update:PROCESSED"]);
+    expect(postProcess).toHaveBeenCalledWith({
+      webhookEventId: "whe_pp_ok",
+      eventType: event.type,
+      subscriberId: "sub_row_1",
+      purchaseId: "pur_1",
+    });
+  });
+});

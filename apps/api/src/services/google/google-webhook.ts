@@ -33,6 +33,8 @@ import {
 } from "./google-verify";
 import { resolveSubscriptionPricing } from "./google-pricing";
 import { guardStatusWrite } from "../subscription-transition-guard";
+// Type-only: no runtime cycle with webhook-processor (which imports us).
+import type { WebhookPostProcess } from "../webhook-processor";
 
 const log = logger.child("google-webhook");
 
@@ -50,6 +52,15 @@ export interface HandleGoogleNotificationOptions {
    * configured).
    */
   verifyConfig?: GoogleVerifyConfig;
+  /**
+   * Side effects (access sync, consumable credit, outgoing webhook),
+   * injected by webhook-processor. Runs AFTER dispatch but BEFORE the
+   * row is marked PROCESSED: a failure lands in the catch below
+   * (row → FAILED, re-claimable) and rethrows so BullMQ retries —
+   * marking PROCESSED first would dedupe the retry to `duplicate` and
+   * lose the side effect permanently.
+   */
+  postProcess?: WebhookPostProcess;
 }
 
 export type HandleGoogleNotificationResult =
@@ -99,7 +110,13 @@ export async function handleGoogleNotification(
     source: WebhookSource.GOOGLE,
     eventType: kind,
     storeEventId,
-    payload: JSON.parse(JSON.stringify(payload)),
+    // The raw Pub/Sub push body is stored alongside the decoded
+    // notification so the webhook reaper can rebuild and re-enqueue the
+    // processing job for a stranded row.
+    payload: {
+      pushBody: opts.pushBody,
+      notification: JSON.parse(JSON.stringify(payload)),
+    },
   });
 
   if (claim.outcome === "duplicate") {
@@ -161,6 +178,16 @@ export async function handleGoogleNotification(
         "one-time product notification persisted only; processing is deferred to the receipt-verify path",
         { sku: payload.oneTimeProductNotification.sku },
       );
+    }
+
+    // Side effects BEFORE the PROCESSED mark — see postProcess docs.
+    if (opts.postProcess) {
+      await opts.postProcess({
+        webhookEventId: webhookEvent.id,
+        eventType: kind,
+        subscriberId: outcome.subscriberId,
+        purchaseId: outcome.purchaseId,
+      });
     }
 
     await drizzle.webhookEventRepo.updateWebhookEvent(

@@ -20,7 +20,15 @@ import { runWebhookReaper } from "./webhook-reaper";
 const RUN_ID = Date.now();
 const PROJECT_ID = `prj_whreap_inb_${RUN_ID}`;
 const STALE_ID = `whe_inb_stale_${RUN_ID}`;
+const STALE_LEGACY_ID = `whe_inb_legacy_${RUN_ID}`;
+const STALE_CAPPED_ID = `whe_inb_capped_${RUN_ID}`;
 const FRESH_ID = `whe_inb_fresh_${RUN_ID}`;
+
+// Past the MAX_REAPER_REQUEUES cap — such a row must stay FAILED
+// without being re-enqueued.
+const CAPPED_RETRY_COUNT = 99;
+
+const STALE_STRIPE_EVENT = { id: `evt_${RUN_ID}`, type: "invoice.paid" };
 
 async function seed(): Promise<void> {
   const db = getDb();
@@ -31,16 +39,42 @@ async function seed(): Promise<void> {
   });
 
   const now = Date.now();
-  // Stale: claimed 10 minutes ago (well past the 5m lease).
+  const pastLease = new Date(now - 10 * 60_000);
+  // Stale replayable row: claimed 10 minutes ago (well past the 5m
+  // lease), Stripe payload IS the original event → re-enqueued.
   await db.insert(webhookEvents).values({
     id: STALE_ID,
+    projectId: PROJECT_ID,
+    source: "STRIPE",
+    eventType: "invoice.paid",
+    storeEventId: `stripe_stale_${RUN_ID}`,
+    payload: STALE_STRIPE_EVENT,
+    status: "PROCESSING",
+    claimedAt: pastLease,
+  });
+  // Stale legacy row: pre-Task-7 Apple payload (bare decoded
+  // notification, no signedPayload) → reclaimed but NOT re-enqueued.
+  await db.insert(webhookEvents).values({
+    id: STALE_LEGACY_ID,
     projectId: PROJECT_ID,
     source: "APPLE",
     eventType: "SUBSCRIPTIONS_SUBSCRIBED",
     storeEventId: `apple_stale_${RUN_ID}`,
     payload: {},
     status: "PROCESSING",
-    claimedAt: new Date(now - 10 * 60_000),
+    claimedAt: pastLease,
+  });
+  // Stale but past the requeue cap → reclaimed, NOT re-enqueued.
+  await db.insert(webhookEvents).values({
+    id: STALE_CAPPED_ID,
+    projectId: PROJECT_ID,
+    source: "STRIPE",
+    eventType: "invoice.paid",
+    storeEventId: `stripe_capped_${RUN_ID}`,
+    payload: STALE_STRIPE_EVENT,
+    status: "PROCESSING",
+    claimedAt: pastLease,
+    retryCount: CAPPED_RETRY_COUNT,
   });
   // Fresh: claimed 30 seconds ago (inside the lease).
   await db.insert(webhookEvents).values({
@@ -62,20 +96,45 @@ afterAll(async () => {
 });
 
 describe("runWebhookReaper", () => {
-  it("reclaims a stale PROCESSING row and leaves a fresh one untouched", async () => {
+  it("reclaims stale PROCESSING rows, re-enqueues replayable ones, leaves fresh ones untouched", async () => {
     const db = getDb();
     await seed();
 
-    const result = await runWebhookReaper(new Date());
-    expect(result).toEqual({ reclaimed: 1 });
+    // Collect re-enqueues instead of touching a real BullMQ queue.
+    const enqueued: Array<{ data: unknown; jobId: string }> = [];
+    const result = await runWebhookReaper(new Date(), async (data, opts) => {
+      enqueued.push({ data, jobId: opts.jobId });
+    });
 
-    // Stale row must be FAILED with incremented retryCount.
-    const [stale] = await db
+    expect(result).toEqual({ reclaimed: 3, requeued: 1 });
+
+    // All three stale rows must be FAILED with incremented retryCount.
+    for (const id of [STALE_ID, STALE_LEGACY_ID, STALE_CAPPED_ID]) {
+      const [stale] = await db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.id, id));
+      expect(stale?.status).toBe("FAILED");
+      expect(stale?.errorMessage).toMatch(/reclaimed/);
+    }
+    const [staleReplayable] = await db
       .select()
       .from(webhookEvents)
       .where(eq(webhookEvents.id, STALE_ID));
-    expect(stale?.status).toBe("FAILED");
-    expect(stale?.errorMessage).toMatch(/reclaimed/);
+    expect(staleReplayable?.retryCount).toBe(1);
+
+    // Only the replayable, under-cap row is re-enqueued, with the
+    // deterministic jobId (event id + post-reclaim retryCount).
+    expect(enqueued).toEqual([
+      {
+        data: {
+          source: "STRIPE",
+          projectId: PROJECT_ID,
+          event: STALE_STRIPE_EVENT,
+        },
+        jobId: `webhook-replay:${STALE_ID}:1`,
+      },
+    ]);
 
     // Fresh row must remain PROCESSING.
     const [fresh] = await db

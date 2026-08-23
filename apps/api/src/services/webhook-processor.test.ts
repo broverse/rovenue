@@ -3,12 +3,21 @@ import { drizzle, ProductType } from "@rovenue/db";
 import {
   __test_enqueueOutgoingWebhook as enqueueOutgoingWebhook,
   __test_maybeCreditConsumablePurchase as maybeCreditConsumablePurchase,
+  __test_runPostProcessing as runPostProcessing,
+  WEBHOOK_JOB_ATTEMPTS,
+  WEBHOOK_JOB_BACKOFF_INITIAL_MS,
+  webhookRetrySpanMs,
 } from "./webhook-processor";
 
 vi.mock("./purchase-credits", () => ({
   grantPurchaseCurrencies: vi.fn().mockResolvedValue(undefined),
 }));
 import { grantPurchaseCurrencies } from "./purchase-credits";
+
+vi.mock("./access-engine", () => ({
+  syncAccess: vi.fn().mockResolvedValue(undefined),
+}));
+import { syncAccess } from "./access-engine";
 
 vi.mock("@rovenue/db", async (orig) => {
   const actual = await orig<typeof import("@rovenue/db")>();
@@ -20,6 +29,7 @@ vi.mock("@rovenue/db", async (orig) => {
       projectRepo: { findProjectWebhookConfig: vi.fn() },
       outgoingWebhookRepo: {
         findRecentOutgoingByPurchaseAndType: vi.fn().mockResolvedValue(null),
+        findOutgoingByWebhookEvent: vi.fn().mockResolvedValue(null),
         enqueueOutgoingWebhook: vi.fn().mockResolvedValue(undefined),
       },
       purchaseExtRepo: {
@@ -99,6 +109,7 @@ describe("enqueueOutgoingWebhook category filter", () => {
     await enqueueOutgoingWebhook({
       projectId: "p1",
       subscriberId: "s1",
+      webhookEventId: "whe_test",
       eventType: "DID_RENEW",
     });
     expect(enqueueSpy()).toHaveBeenCalledTimes(1);
@@ -109,6 +120,7 @@ describe("enqueueOutgoingWebhook category filter", () => {
     await enqueueOutgoingWebhook({
       projectId: "p1",
       subscriberId: "s1",
+      webhookEventId: "whe_test",
       eventType: "DID_RENEW",
     });
     expect(enqueueSpy()).toHaveBeenCalledTimes(1);
@@ -119,6 +131,7 @@ describe("enqueueOutgoingWebhook category filter", () => {
     await enqueueOutgoingWebhook({
       projectId: "p1",
       subscriberId: "s1",
+      webhookEventId: "whe_test",
       eventType: "DID_RENEW",
     });
     expect(enqueueSpy()).not.toHaveBeenCalled();
@@ -129,6 +142,7 @@ describe("enqueueOutgoingWebhook category filter", () => {
     await enqueueOutgoingWebhook({
       projectId: "p1",
       subscriberId: "s1",
+      webhookEventId: "whe_test",
       eventType: "CONSUMPTION_REQUEST",
     });
     expect(enqueueSpy()).toHaveBeenCalledTimes(1);
@@ -142,8 +156,127 @@ describe("enqueueOutgoingWebhook category filter", () => {
     await enqueueOutgoingWebhook({
       projectId: "p1",
       subscriberId: "s1",
+      webhookEventId: "whe_test",
       eventType: "DID_RENEW",
     });
     expect(enqueueSpy()).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// enqueueOutgoingWebhook — idempotency on job retry (Task 7)
+// =============================================================
+//
+// A BullMQ retry re-runs the whole post-processing block, so a second
+// enqueue for the SAME inbound webhook event must be a no-op. Purchase
+// events were already deduped on (project, subscriber, eventType,
+// purchaseId); purchase-less events dedupe on the inbound
+// webhookEventId stamped into the outgoing payload.
+describe("enqueueOutgoingWebhook idempotency", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("stamps the inbound webhookEventId into the outgoing payload", async () => {
+    cfg([]);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_stamp",
+      eventType: "DID_RENEW",
+    });
+    expect(enqueueSpy()).toHaveBeenCalledTimes(1);
+    const input = enqueueSpy().mock.calls[0]?.[1] as {
+      payload: { webhookEventId?: string };
+    };
+    expect(input.payload.webhookEventId).toBe("whe_stamp");
+  });
+
+  it("skips a purchase-less event already enqueued for this inbound webhook event", async () => {
+    cfg([]);
+    vi.mocked(
+      drizzle.outgoingWebhookRepo.findOutgoingByWebhookEvent,
+    ).mockResolvedValue({ id: "ow_existing" } as never);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_dup",
+      eventType: "DID_RENEW",
+    });
+    expect(enqueueSpy()).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// runPostProcessing — failures must PROPAGATE (Task 7)
+// =============================================================
+//
+// Before the durability fix each side effect was swallowed into a
+// log.warn, the job completed, the row was already PROCESSED, and any
+// redelivery hit the `duplicate` gate — a failed webhook-only
+// consumable credit grant was lost permanently. Now a side-effect
+// failure throws so the handler marks the row FAILED (re-claimable)
+// and BullMQ retries; all three effects are idempotent on re-run.
+describe("runPostProcessing durability", () => {
+  const args = {
+    projectId: "p1",
+    subscriberId: "s1",
+    purchaseId: "pur_1",
+    eventType: "DID_RENEW",
+    webhookEventId: "whe_pp",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(syncAccess).mockResolvedValue(undefined);
+    mockFindPurchase().mockResolvedValue(null);
+    cfg([]);
+  });
+
+  it("rethrows when syncAccess fails", async () => {
+    vi.mocked(syncAccess).mockRejectedValue(new Error("access engine down"));
+    await expect(runPostProcessing(args)).rejects.toThrow("access engine down");
+  });
+
+  it("rethrows when the consumable credit grant fails", async () => {
+    mockFindPurchase().mockResolvedValue({
+      id: "pur_1",
+      subscriberId: "s1",
+      product: {
+        id: "product-1",
+        identifier: "com.example.coins100",
+        type: ProductType.CONSUMABLE,
+      },
+    });
+    mockGrant().mockRejectedValue(new Error("ledger down"));
+    await expect(runPostProcessing(args)).rejects.toThrow("ledger down");
+  });
+
+  it("rethrows when the outgoing webhook enqueue fails", async () => {
+    vi.mocked(
+      drizzle.projectRepo.findProjectWebhookConfig,
+    ).mockRejectedValue(new Error("config read down"));
+    await expect(runPostProcessing(args)).rejects.toThrow("config read down");
+  });
+
+  it("resolves when all three side effects succeed", async () => {
+    await expect(runPostProcessing(args)).resolves.toBeUndefined();
+    expect(vi.mocked(syncAccess)).toHaveBeenCalledWith("s1");
+    expect(enqueueSpy()).toHaveBeenCalledTimes(1);
+  });
+});
+
+// =============================================================
+// Retry span vs claim lease invariant (Task 7)
+// =============================================================
+//
+// A worker that dies mid-claim leaves the row PROCESSING with a live
+// lease; retries inside the lease see "in_progress" and throw. At
+// least one BullMQ retry MUST land after the lease expires, or every
+// attempt burns on the stale claim and the event strands until the
+// reaper. Invariant: total retry span > WEBHOOK_CLAIM_LEASE_MS.
+describe("retry span exceeds the claim lease", () => {
+  it("total BullMQ backoff span is longer than WEBHOOK_CLAIM_LEASE_MS", () => {
+    expect(
+      webhookRetrySpanMs(WEBHOOK_JOB_ATTEMPTS, WEBHOOK_JOB_BACKOFF_INITIAL_MS),
+    ).toBeGreaterThan(drizzle.webhookEventRepo.WEBHOOK_CLAIM_LEASE_MS);
   });
 });

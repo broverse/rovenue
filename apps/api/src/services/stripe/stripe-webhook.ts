@@ -26,6 +26,8 @@ import {
 } from "./stripe-types";
 import { hasPaidOrAttachedACard } from "./payment-settled";
 import { guardStatusWrite } from "../subscription-transition-guard";
+// Type-only: no runtime cycle with webhook-processor (which imports us).
+import type { WebhookPostProcess } from "../webhook-processor";
 
 const log = logger.child("stripe-webhook");
 
@@ -61,6 +63,15 @@ export interface ProcessStripeEventOptions {
    * that mistake. See lib/stripe-account-scoped.ts.
    */
   account: AccountScopedStripe;
+  /**
+   * Side effects (access sync, consumable credit, outgoing webhook),
+   * injected by webhook-processor. Runs AFTER dispatch but BEFORE the
+   * row is marked PROCESSED: a failure lands in the catch below
+   * (row → FAILED, re-claimable) and rethrows so BullMQ retries —
+   * marking PROCESSED first would dedupe the retry to `duplicate` and
+   * lose the side effect permanently.
+   */
+  postProcess?: WebhookPostProcess;
 }
 
 /**
@@ -100,6 +111,16 @@ export async function processStripeEvent(
   try {
     const outcome: StripeDispatchOutcome = {};
     await dispatch({ projectId, event, account, outcome });
+
+    // Side effects BEFORE the PROCESSED mark — see postProcess docs.
+    if (opts.postProcess) {
+      await opts.postProcess({
+        webhookEventId: webhookEvent.id,
+        eventType: event.type,
+        subscriberId: outcome.subscriberId,
+        purchaseId: outcome.purchaseId,
+      });
+    }
 
     await drizzle.webhookEventRepo.updateWebhookEvent(
       drizzle.db,

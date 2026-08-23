@@ -39,6 +39,8 @@ import {
 } from "./apple-verify";
 import { guardStatusWrite } from "../subscription-transition-guard";
 import { audit } from "../../lib/audit";
+// Type-only: no runtime cycle with webhook-processor (which imports us).
+import type { WebhookPostProcess } from "../webhook-processor";
 
 const log = logger.child("apple-webhook");
 
@@ -118,6 +120,15 @@ export interface HandleAppleNotificationOptions {
    */
   verifier?: AppleNotificationVerifier;
   keyLookup?: AppleKeyLookup;
+  /**
+   * Side effects (access sync, consumable credit, outgoing webhook),
+   * injected by webhook-processor. Runs AFTER dispatch but BEFORE the
+   * row is marked PROCESSED: a failure lands in the catch below
+   * (row → FAILED, re-claimable) and rethrows so BullMQ retries —
+   * marking PROCESSED first would dedupe the retry to `duplicate` and
+   * lose the side effect permanently.
+   */
+  postProcess?: WebhookPostProcess;
 }
 
 export type HandleAppleNotificationResult =
@@ -162,7 +173,13 @@ export async function handleAppleNotification(
     source: WebhookSource.APPLE,
     eventType: notification.notificationType,
     storeEventId: notification.notificationUUID,
-    payload: JSON.parse(JSON.stringify(notification)),
+    // signedPayload is stored alongside the decoded notification so the
+    // webhook reaper can rebuild and re-enqueue the processing job for
+    // a stranded row (the replay re-verifies the JWS like any delivery).
+    payload: {
+      signedPayload: opts.signedPayload,
+      notification: JSON.parse(JSON.stringify(notification)),
+    },
   });
 
   if (claim.outcome === "duplicate") {
@@ -208,6 +225,16 @@ export async function handleAppleNotification(
       log.info("notification without transaction info, acknowledging", {
         uuid: notification.notificationUUID,
         type: notification.notificationType,
+      });
+    }
+
+    // Side effects BEFORE the PROCESSED mark — see postProcess docs.
+    if (opts.postProcess) {
+      await opts.postProcess({
+        webhookEventId: webhookEvent.id,
+        eventType: notification.notificationType,
+        subscriberId: outcome.subscriberId,
+        purchaseId: outcome.purchaseId,
       });
     }
 

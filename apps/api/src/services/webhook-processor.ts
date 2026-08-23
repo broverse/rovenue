@@ -61,6 +61,24 @@ export type WebhookJobResult =
   | HandleGoogleNotificationResult
   | HandleStripeNotificationResult;
 
+/**
+ * Side-effect hook the processor injects into every handler. Handlers
+ * call it AFTER their domain writes but BEFORE marking the
+ * webhook_events row PROCESSED: if a side effect fails, the handler's
+ * catch marks the row FAILED (re-claimable) and rethrows so BullMQ
+ * retries — marking PROCESSED first would make the retry dedupe to
+ * `duplicate` and lose the side effect permanently (e.g. a
+ * webhook-only consumable credit grant). All side effects are
+ * idempotent on re-run (`guardStatusWrite`, addCredits' purchase
+ * dedupe, the outgoing enqueue's webhookEventId dedupe).
+ */
+export type WebhookPostProcess = (ctx: {
+  webhookEventId: string;
+  eventType: string;
+  subscriberId?: string;
+  purchaseId?: string;
+}) => Promise<void>;
+
 // =============================================================
 // BullMQ connection + queue
 // =============================================================
@@ -72,6 +90,34 @@ function createBullConnection(): Redis {
   });
 }
 
+// -------------------------------------------------------------
+// Retry/lease invariant: total retry span > claim lease.
+//
+// A worker that dies mid-claim leaves the webhook_events row
+// PROCESSING with a live lease (WEBHOOK_CLAIM_LEASE_MS = 5 min,
+// packages/db webhook-events repo); every BullMQ retry inside that
+// lease sees claimWebhookEvent → "in_progress" and throws, so at
+// least one retry MUST land after the lease expires or all attempts
+// burn on the stale claim and the event strands until the reaper.
+// Exponential backoff from 5s over 8 attempts spans
+// 5+10+20+40+80+160+320 = 635s > 300s. The invariant is asserted by
+// webhook-processor.test.ts against the exported lease constant.
+// -------------------------------------------------------------
+export const WEBHOOK_JOB_ATTEMPTS = 8;
+export const WEBHOOK_JOB_BACKOFF_INITIAL_MS = 5_000;
+
+/** Sum of BullMQ exponential-backoff delays across all retries. */
+export function webhookRetrySpanMs(
+  attempts: number,
+  initialDelayMs: number,
+): number {
+  let span = 0;
+  for (let retry = 0; retry < attempts - 1; retry++) {
+    span += initialDelayMs * 2 ** retry;
+  }
+  return span;
+}
+
 let cachedQueue: Queue<WebhookJobData, WebhookJobResult> | undefined;
 
 export function getWebhookQueue(): Queue<WebhookJobData, WebhookJobResult> {
@@ -81,8 +127,8 @@ export function getWebhookQueue(): Queue<WebhookJobData, WebhookJobResult> {
     {
       connection: createBullConnection(),
       defaultJobOptions: {
-        attempts: 5,
-        backoff: { type: "exponential", delay: 1000 },
+        attempts: WEBHOOK_JOB_ATTEMPTS,
+        backoff: { type: "exponential", delay: WEBHOOK_JOB_BACKOFF_INITIAL_MS },
         removeOnComplete: { count: 1000, age: 24 * 60 * 60 },
         removeOnFail: { count: 1000, age: 7 * 24 * 60 * 60 },
       },
@@ -110,28 +156,33 @@ export async function processWebhookEvent(
     projectId: data.projectId,
   });
 
-  const result = await dispatchToHandler(data);
-
-  if (result.status === "processed" && result.subscriberId) {
+  // Handlers invoke this between their domain writes and the PROCESSED
+  // mark (see WebhookPostProcess). A throw here surfaces through the
+  // handler's catch: row → FAILED, job → retry.
+  const postProcess: WebhookPostProcess = async (ctx) => {
+    if (!ctx.subscriberId) return;
     await runPostProcessing({
       projectId: data.projectId,
-      subscriberId: result.subscriberId,
-      purchaseId: result.purchaseId,
-      eventType: extractEventType(result),
+      subscriberId: ctx.subscriberId,
+      purchaseId: ctx.purchaseId,
+      eventType: ctx.eventType,
+      webhookEventId: ctx.webhookEventId,
     });
-  }
+  };
 
-  return result;
+  return dispatchToHandler(data, postProcess);
 }
 
 async function dispatchToHandler(
   data: WebhookJobData,
+  postProcess: WebhookPostProcess,
 ): Promise<WebhookJobResult> {
   switch (data.source) {
     case "APPLE":
       return handleAppleNotification({
         projectId: data.projectId,
         signedPayload: data.signedPayload,
+        postProcess,
       });
     case "GOOGLE": {
       const verifyConfig = await resolveGoogleVerifyConfig(data.projectId);
@@ -139,6 +190,7 @@ async function dispatchToHandler(
         projectId: data.projectId,
         pushBody: data.pushBody,
         verifyConfig,
+        postProcess,
       });
     }
     case "STRIPE": {
@@ -152,6 +204,7 @@ async function dispatchToHandler(
         // Already bound to the customer's connected account, so nothing
         // dispatch does can reach Rovenue's own Stripe account.
         account: connected.account,
+        postProcess,
       });
     }
   }
@@ -168,13 +221,6 @@ async function resolveGoogleVerifyConfig(
   };
 }
 
-function extractEventType(result: WebhookJobResult): string {
-  if ("notificationType" in result) return String(result.notificationType);
-  if ("kind" in result) return result.kind;
-  if ("eventType" in result) return result.eventType;
-  return "unknown";
-}
-
 // =============================================================
 // Post-processing: access sync + credit add + outgoing webhook
 // =============================================================
@@ -184,27 +230,38 @@ interface PostProcessingArgs {
   subscriberId: string;
   purchaseId?: string;
   eventType: string;
+  webhookEventId: string;
 }
 
+/**
+ * Runs the three side effects, in order, and PROPAGATES the first
+ * failure. The handler then marks the webhook_events row FAILED and
+ * rethrows so BullMQ retries the whole job — every step here is
+ * idempotent on re-run, so a partial success simply replays. Never
+ * swallow these: with the row already PROCESSED a swallowed failure
+ * was permanently lost (redeliveries dedupe to `duplicate`).
+ */
 async function runPostProcessing(args: PostProcessingArgs): Promise<void> {
   try {
     await syncAccess(args.subscriberId);
   } catch (err) {
-    log.warn("access sync failed", {
+    log.error("access sync failed; failing job for retry", {
       subscriberId: args.subscriberId,
       err: err instanceof Error ? err.message : String(err),
     });
+    throw err;
   }
 
   if (args.purchaseId) {
     try {
       await maybeCreditConsumablePurchase(args.subscriberId, args.purchaseId);
     } catch (err) {
-      log.warn("consumable credit add failed", {
+      log.error("consumable credit add failed; failing job for retry", {
         subscriberId: args.subscriberId,
         purchaseId: args.purchaseId,
         err: err instanceof Error ? err.message : String(err),
       });
+      throw err;
     }
   }
 
@@ -214,13 +271,15 @@ async function runPostProcessing(args: PostProcessingArgs): Promise<void> {
       subscriberId: args.subscriberId,
       purchaseId: args.purchaseId,
       eventType: args.eventType,
+      webhookEventId: args.webhookEventId,
     });
   } catch (err) {
-    log.warn("outgoing webhook enqueue failed", {
+    log.error("outgoing webhook enqueue failed; failing job for retry", {
       projectId: args.projectId,
       eventType: args.eventType,
       err: err instanceof Error ? err.message : String(err),
     });
+    throw err;
   }
 }
 
@@ -250,6 +309,8 @@ interface EnqueueOutgoingWebhookArgs {
   subscriberId: string;
   purchaseId?: string;
   eventType: string;
+  /** Inbound webhook_events row id — the retry-safe dedup key. */
+  webhookEventId: string;
 }
 
 async function enqueueOutgoingWebhook(
@@ -271,6 +332,10 @@ async function enqueueOutgoingWebhook(
     }
   }
 
+  // Idempotency across BullMQ retries (post-processing re-runs whole):
+  // purchase events dedupe on (project, subscriber, type, purchase);
+  // purchase-less events dedupe on the inbound webhookEventId stamped
+  // into the outgoing payload below.
   if (args.purchaseId) {
     const existing =
       await drizzle.outgoingWebhookRepo.findRecentOutgoingByPurchaseAndType(
@@ -281,12 +346,23 @@ async function enqueueOutgoingWebhook(
         args.purchaseId,
       );
     if (existing) return;
+  } else {
+    const existing =
+      await drizzle.outgoingWebhookRepo.findOutgoingByWebhookEvent(
+        drizzle.db,
+        args.projectId,
+        args.subscriberId,
+        args.eventType,
+        args.webhookEventId,
+      );
+    if (existing) return;
   }
 
   const payload = {
     eventType: args.eventType,
     subscriberId: args.subscriberId,
     purchaseId: args.purchaseId ?? null,
+    webhookEventId: args.webhookEventId,
     timestamp: new Date().toISOString(),
   };
 
@@ -340,4 +416,5 @@ export function createWebhookWorker(): Worker<
 export {
   enqueueOutgoingWebhook as __test_enqueueOutgoingWebhook,
   maybeCreditConsumablePurchase as __test_maybeCreditConsumablePurchase,
+  runPostProcessing as __test_runPostProcessing,
 };

@@ -34,6 +34,38 @@ export async function findRecentOutgoingByPurchaseAndType(
   return rows[0] ?? null;
 }
 
+/**
+ * Dedup check keyed on the INBOUND webhook event that produced the
+ * outgoing delivery. Purchase-less events can't use the purchase-keyed
+ * check above, and a BullMQ retry of the processing job re-runs the
+ * whole post-processing block — without this, every retry after a
+ * partial failure would fan out another delivery. The inbound event id
+ * is stamped into the outgoing payload by webhook-processor's
+ * enqueueOutgoingWebhook. (jsonb ->> lookup, scoped by the same
+ * project/subscriber/eventType clauses the purchase-keyed check uses.)
+ */
+export async function findOutgoingByWebhookEvent(
+  db: Db,
+  projectId: string,
+  subscriberId: string,
+  eventType: string,
+  webhookEventId: string,
+): Promise<OutgoingWebhook | null> {
+  const rows = await db
+    .select()
+    .from(outgoingWebhooks)
+    .where(
+      and(
+        eq(outgoingWebhooks.projectId, projectId),
+        eq(outgoingWebhooks.subscriberId, subscriberId),
+        eq(outgoingWebhooks.eventType, eventType),
+        sql`"outgoing_webhooks"."payload" ->> 'webhookEventId' = ${webhookEventId}`,
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 // =============================================================
 // Outgoing webhook reads — Drizzle repository
 // =============================================================

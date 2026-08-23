@@ -121,7 +121,10 @@ export interface ClaimWebhookEventInput {
 // claimedAt predates this window is assumed orphaned (the worker that
 // claimed it crashed) and is re-claimable. Must exceed the slowest
 // realistic handler run (store API verify + dispatch) by a wide margin.
-const WEBHOOK_CLAIM_LEASE_MS = 5 * 60_000;
+// Exported: the webhook-processor's BullMQ retry config must keep its
+// total retry span LONGER than this lease (invariant asserted there),
+// otherwise every retry of a crashed attempt burns on the stale claim.
+export const WEBHOOK_CLAIM_LEASE_MS = 5 * 60_000;
 
 export type ClaimResult =
   | { outcome: "claimed"; row: WebhookEvent }
@@ -183,24 +186,36 @@ export async function claimWebhookEvent(
   return { outcome: "in_progress" };
 }
 
+const RECLAIM_ERROR_MESSAGE = "reclaimed: orphaned PROCESSING past lease";
+
 /**
  * Reset orphaned PROCESSING rows (claimedAt past the lease) back to
  * FAILED so they become re-claimable and visible to alerting. Returns
- * the count reclaimed. Called at the top of the reaper tick.
+ * the reclaimed ROWS (with the post-increment retryCount) so the
+ * reaper can re-enqueue a processing job for each from the stored
+ * payload — without that re-enqueue nothing ever retries these events:
+ * providers never redeliver (the route acked with a 202) and BullMQ's
+ * attempts are long exhausted by the time the lease expires.
  */
 export async function reclaimStaleWebhookEvents(
   db: DbOrTx,
   now: Date = new Date(),
-): Promise<number> {
+): Promise<WebhookEvent[]> {
   const cutoff = new Date(now.getTime() - WEBHOOK_CLAIM_LEASE_MS);
-  const result = await db.execute(sql`
-    UPDATE ${webhookEvents}
-    SET status = 'FAILED',
-        "errorMessage" = 'reclaimed: orphaned PROCESSING past lease',
-        "retryCount" = "retryCount" + 1
-    WHERE status = 'PROCESSING' AND "claimedAt" < ${cutoff}
-  `);
-  return (result as unknown as { rowCount?: number }).rowCount ?? 0;
+  return db
+    .update(webhookEvents)
+    .set({
+      status: "FAILED",
+      errorMessage: RECLAIM_ERROR_MESSAGE,
+      retryCount: sql`${webhookEvents.retryCount} + 1`,
+    })
+    .where(
+      and(
+        eq(webhookEvents.status, "PROCESSING"),
+        lt(webhookEvents.claimedAt, cutoff),
+      ),
+    )
+    .returning();
 }
 
 export interface UpdateWebhookEventInput {
