@@ -78,6 +78,14 @@ describe("buildUsageReport", () => {
     expect(byKey.mtr).toMatchObject({ current: 4210.5, limit: 50000, cap: "soft", unit: "usd", available: true });
     expect(byKey.events).toMatchObject({ current: 1000, limit: 50000000, cap: "hard", available: true }); // 200 + 800
     expect(byKey.sql_queries).toMatchObject({ current: 5, limit: 100, cap: "hard", available: true });
+
+    // Regression: the MTR meter must read the query-time view. Its rollup
+    // predecessor (mv_mrr_daily_target) was dropped in CH migration 0012;
+    // querying it throws, 500-ing the usage route and silencing the
+    // usage-cap sweeper.
+    const mtrSql = mocks.queryAnalytics.mock.calls[0]?.[1] as string;
+    expect(mtrSql).toContain("rovenue.v_mrr_daily");
+    expect(mtrSql).not.toContain("mv_mrr_daily_target");
   });
 
   it("degrades when ClickHouse is unavailable (request still succeeds)", async () => {

@@ -80,12 +80,14 @@ export async function buildUsageReport(
   const isoEnd = periodEnd.toISOString().slice(0, 19).replace("T", " ");
 
   // --- MTR (ClickHouse) ---
-  // Table is prefixed with the rovenue schema (matches existing analytics reads
-  // in this codebase, e.g. rovenue.raw_revenue_events in leaderboards.ts).
+  // v_mrr_daily is the replay-safe query-time view that replaced the
+  // mv_mrr_daily_target rollup in CH migration 0012 (the rollup table was
+  // dropped there — reading it throws, which 500'd this endpoint and left the
+  // usage-cap sweeper inert).
   const mtrCurrent = await chScalar(
     projectId,
     `SELECT toFloat64(sum(net_usd)) AS v
-       FROM rovenue.mv_mrr_daily_target
+       FROM rovenue.v_mrr_daily
       WHERE projectId = {projectId:String}
         AND day >= toDate({start:String}) AND day < toDate({end:String})`,
     { start: isoStart, end: isoEnd },
