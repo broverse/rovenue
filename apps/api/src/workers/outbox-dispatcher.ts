@@ -104,7 +104,7 @@ const AGGREGATE_TO_TOPIC: Record<OutboxEvent["aggregateType"], string> = {
   PAYWALL_EVENT: "rovenue.paywall_events",
   // Wired for the migration-0104 aggregate_type value; no producer emits
   // SUBSCRIPTION outbox rows yet (that's Task 6 of the integrations plan).
-  SUBSCRIPTION: "rovenue.subscriptions",
+  SUBSCRIPTION: "rovenue.subscription",
 };
 
 // =============================================================
