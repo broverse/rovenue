@@ -113,6 +113,8 @@ export type AuditAction =
   | "integration.connection.updated"
   | "integration.connection.deleted"
   | "integration.credentials.rotated"
+  | "integration.webhook.secret.rotated"
+  | "integration.webhook.secret.revealed"
   | "integration.delivery.dead_letter"
   | "integration.test_event.sent"
   | "integration.backfill.started"

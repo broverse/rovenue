@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
@@ -22,6 +22,13 @@ import {
 import {
   handleConnectionEnableTransition,
 } from "../../services/integrations/connection-events";
+import {
+  parseWebhookCredentials,
+  type WebhookSecretEntry,
+} from "../../services/integrations/providers/custom-webhook";
+import { generateWebhookSecret } from "../../lib/svix-sign";
+import { assertPublicWebhookUrl, WebhookUrlError } from "../../lib/ssrf-guard";
+import { isUniqueViolationOf } from "../../lib/pg-errors";
 import {
   enqueueBackfillForConnection,
   type BackfillAuditInput,
@@ -93,6 +100,33 @@ function getEncryptionKey(): string {
   }
   return env.ENCRYPTION_KEY;
 }
+
+// =============================================================
+// Webhook (CUSTOM_WEBHOOK) constants
+// =============================================================
+//
+// CUSTOM_WEBHOOK is the one provider with `allowMultipleConnections: true`
+// (migration 0104's partial unique index exempts it) — a project can add
+// several endpoints, so a project-wide cap replaces the DB-enforced
+// one-per-provider uniqueness that every other provider still gets for
+// free from the index.
+export const MAX_WEBHOOK_ENDPOINTS_PER_PROJECT = 10;
+
+// Rotation keeps the newest secret plus anything not yet past this age, so
+// a receiver mid-rotation has a window to pick up the new key before the
+// old one stops verifying.
+export const WEBHOOK_SECRET_GRACE_MS = 24 * 60 * 60 * 1000;
+
+// The unique index from migration 0104 — matched by name (not by code
+// alone) so a 23505 raised by some other constraint on this table doesn't
+// get misreported as "connection already exists".
+const PROJECT_PROVIDER_UNIQUE_INDEX = "integration_connections_project_provider_uidx";
+
+// Client input for CUSTOM_WEBHOOK create — deliberately NOT the provider's
+// stored-credentials schema ({ url, secrets }): the server generates the
+// secret, so a client-supplied "secrets" field is rejected outright rather
+// than silently ignored.
+const webhookCreateCredentialsBody = z.object({ url: z.string().min(1) }).strict();
 
 // =============================================================
 // Zod schemas
@@ -170,6 +204,142 @@ function connectionSelect() {
 }
 
 // =============================================================
+// Webhook (CUSTOM_WEBHOOK) create — multi-connection branch
+// =============================================================
+//
+// CUSTOM_WEBHOOK is exempt from the DB-enforced one-per-provider unique
+// index (migration 0104), so uniqueness isn't the concern here — an
+// unbounded endpoint count is. The cap check and insert share one
+// transaction with a `FOR UPDATE` row lock on the project's existing
+// webhook connections, so two concurrent creates at the cap can't both
+// read "9 of 10" and both insert a 10th and an 11th.
+//
+// Unlike the generic path, this does NOT call `provider.validateCredentials`
+// — that function requires a non-empty `secrets` array, which doesn't exist
+// yet for a brand-new connection (the server is about to generate it). URL
+// validity is checked directly via `assertPublicWebhookUrl`, the same sync,
+// offline check `validateCredentials` would have delegated to anyway.
+async function createWebhookConnection(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  c: Context<any>,
+  projectId: string,
+  user: { id: string },
+  body: z.infer<typeof createConnectionBody>,
+) {
+  const provider = getProvider(body.providerId as ProviderId);
+
+  const credsParse = webhookCreateCredentialsBody.safeParse(body.credentials);
+  if (!credsParse.success) {
+    return c.json(
+      { error: { code: "VALIDATION_ERROR", message: credsParse.error.message } },
+      400,
+    );
+  }
+  const { url } = credsParse.data;
+
+  try {
+    assertPublicWebhookUrl(url);
+  } catch (err) {
+    if (err instanceof WebhookUrlError) {
+      return c.json({ error: { code: "invalid_credentials", message: err.reason } }, 400);
+    }
+    throw err;
+  }
+
+  const encKey = getEncryptionKey();
+  const id = createId();
+  const now = new Date();
+  const secretEntry: WebhookSecretEntry = {
+    id: createId(),
+    key: generateWebhookSecret(),
+    createdAt: now.toISOString(),
+  };
+  const credsObj = { url, secrets: JSON.stringify([secretEntry]) };
+  const credentialsCipher = encrypt(JSON.stringify(credsObj), encKey);
+  const credentialsHint = provider.buildCredentialsHint
+    ? provider.buildCredentialsHint(credsObj)
+    : buildCredentialsHint(body.providerId, credsObj);
+
+  const { integrationConnections } = drizzle.schema;
+
+  let capReached = false;
+  await drizzle.db.transaction(async (tx) => {
+    const existing = await tx
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.projectId, projectId),
+          eq(integrationConnections.providerId, "CUSTOM_WEBHOOK"),
+          isNull(integrationConnections.deletedAt),
+        ),
+      )
+      .for("update");
+
+    if (existing.length >= MAX_WEBHOOK_ENDPOINTS_PER_PROJECT) {
+      capReached = true;
+      return;
+    }
+
+    const values: NewIntegrationConnection = {
+      id,
+      projectId,
+      providerId: body.providerId as ProviderId,
+      displayName: body.displayName,
+      credentialsCipher,
+      credentialsHint,
+      enabledEvents: (body.enabledEvents ?? []) as string[],
+      eventMapping: body.eventMapping ?? {},
+      actionSource: body.actionSource ?? "app",
+      testEventCode: body.testEventCode ?? null,
+      isEnabled: false,
+      lastValidatedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await tx.insert(integrationConnections).values(values);
+
+    await audit(
+      {
+        projectId,
+        userId: user.id,
+        action: "integration.connection.created",
+        resource: "integration_connection",
+        resourceId: id,
+        after: {
+          providerId: body.providerId,
+          displayName: body.displayName,
+          credentialsHint,
+          enabledEvents: body.enabledEvents ?? [],
+          actionSource: body.actionSource ?? "app",
+          testEventCode: body.testEventCode ?? null,
+        },
+      },
+      tx as unknown as AuditTx,
+    );
+  });
+
+  if (capReached) {
+    return c.json(
+      {
+        error: {
+          code: "endpoint_limit_reached",
+          message: `A project may have at most ${MAX_WEBHOOK_ENDPOINTS_PER_PROJECT} webhook endpoints`,
+        },
+      },
+      409,
+    );
+  }
+
+  const [row] = await drizzle.db
+    .select(connectionSelect())
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, id));
+
+  return c.json(ok({ connection: row, secret: secretEntry.key }), 201);
+}
+
+// =============================================================
 // Route
 // =============================================================
 
@@ -222,8 +392,15 @@ export const integrationsRoute = new Hono()
     }
     const body = parse.data;
 
-    // Validate credentials BEFORE any DB write
+    // CUSTOM_WEBHOOK (and any future allowMultipleConnections provider)
+    // branches entirely: server-generated secret, endpoint cap instead of
+    // DB uniqueness, no generic validateCredentials network path.
     const provider = getProvider(body.providerId as ProviderId);
+    if (provider.allowMultipleConnections) {
+      return createWebhookConnection(c, projectId, user, body);
+    }
+
+    // Validate credentials BEFORE any DB write
     const credsParse = provider.credentialsSchema.safeParse(body.credentials);
     if (!credsParse.success) {
       return c.json(
@@ -252,46 +429,66 @@ export const integrationsRoute = new Hono()
     const id = createId();
     const now = new Date();
 
-    await drizzle.db.transaction(async (tx) => {
-      const values: NewIntegrationConnection = {
-        id,
-        projectId,
-        providerId: body.providerId as ProviderId,
-        displayName: body.displayName,
-        credentialsCipher,
-        credentialsHint,
-        enabledEvents: (body.enabledEvents ?? []) as string[],
-        eventMapping: body.eventMapping ?? {},
-        actionSource: body.actionSource ?? "app",
-        testEventCode: body.testEventCode ?? null,
-        isEnabled: false,
-        lastValidatedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await tx
-        .insert(drizzle.schema.integrationConnections)
-        .values(values);
-
-      await audit(
-        {
+    try {
+      await drizzle.db.transaction(async (tx) => {
+        const values: NewIntegrationConnection = {
+          id,
           projectId,
-          userId: user.id,
-          action: "integration.connection.created",
-          resource: "integration_connection",
-          resourceId: id,
-          after: {
-            providerId: body.providerId,
-            displayName: body.displayName,
-            credentialsHint,
-            enabledEvents: body.enabledEvents ?? [],
-            actionSource: body.actionSource ?? "app",
-            testEventCode: body.testEventCode ?? null,
+          providerId: body.providerId as ProviderId,
+          displayName: body.displayName,
+          credentialsCipher,
+          credentialsHint,
+          enabledEvents: (body.enabledEvents ?? []) as string[],
+          eventMapping: body.eventMapping ?? {},
+          actionSource: body.actionSource ?? "app",
+          testEventCode: body.testEventCode ?? null,
+          isEnabled: false,
+          lastValidatedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await tx
+          .insert(drizzle.schema.integrationConnections)
+          .values(values);
+
+        await audit(
+          {
+            projectId,
+            userId: user.id,
+            action: "integration.connection.created",
+            resource: "integration_connection",
+            resourceId: id,
+            after: {
+              providerId: body.providerId,
+              displayName: body.displayName,
+              credentialsHint,
+              enabledEvents: body.enabledEvents ?? [],
+              actionSource: body.actionSource ?? "app",
+              testEventCode: body.testEventCode ?? null,
+            },
           },
-        },
-        tx as unknown as AuditTx,
-      );
-    });
+          tx as unknown as AuditTx,
+        );
+      });
+    } catch (err) {
+      // A concurrent create beat us to the punch on the partial unique
+      // index (migration 0104) — every non-webhook provider allows at
+      // most one connection per project. Drizzle wraps the driver error
+      // (see lib/pg-errors), so this must be matched by constraint name,
+      // not a bare top-level `.code` read.
+      if (isUniqueViolationOf(err, PROJECT_PROVIDER_UNIQUE_INDEX)) {
+        return c.json(
+          {
+            error: {
+              code: "connection_exists",
+              message: "a connection for this provider already exists",
+            },
+          },
+          409,
+        );
+      }
+      throw err;
+    }
 
     const [row] = await drizzle.db
       .select(connectionSelect())
@@ -351,6 +548,164 @@ export const integrationsRoute = new Hono()
       );
     },
   )
+
+  // =============================================================
+  // POST /dashboard/projects/:projectId/integrations/:id/rotate-secret
+  // Webhook secret rotation — registered BEFORE /:id (same reasoning as
+  // /validate above: a literal path segment after :id doesn't collide
+  // with the bare PATCH/DELETE /:id routes, but keeping every named
+  // sub-route grouped ahead of them avoids re-litigating the ordering
+  // question later).
+  // =============================================================
+  .post("/:id/rotate-secret", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing path parameters" });
+    }
+
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+
+    const db = getDb();
+    const [existing] = await db
+      .select()
+      .from(drizzle.schema.integrationConnections)
+      .where(
+        and(
+          eq(drizzle.schema.integrationConnections.id, id),
+          eq(drizzle.schema.integrationConnections.projectId, projectId),
+          isNull(drizzle.schema.integrationConnections.deletedAt),
+        ),
+      );
+    if (!existing) {
+      throw new HTTPException(404, { message: "Integration connection not found" });
+    }
+    if (existing.providerId !== "CUSTOM_WEBHOOK") {
+      return c.json(
+        {
+          error: {
+            code: "not_a_webhook_connection",
+            message: "secret rotation only applies to CUSTOM_WEBHOOK connections",
+          },
+        },
+        400,
+      );
+    }
+
+    const encKey = getEncryptionKey();
+    const existingCreds = JSON.parse(
+      decrypt(existing.credentialsCipher, encKey),
+    ) as Record<string, string>;
+    const { url, secrets } = parseWebhookCredentials(existingCreds);
+
+    const now = new Date();
+    const newEntry: WebhookSecretEntry = {
+      id: createId(),
+      key: generateWebhookSecret(),
+      createdAt: now.toISOString(),
+    };
+    // Always keep the newest entry; prune everything else once it's aged
+    // past the grace window so a rotation window can't grow unbounded.
+    const keptSecrets = [
+      newEntry,
+      ...secrets.filter(
+        (s) => now.getTime() - new Date(s.createdAt).getTime() < WEBHOOK_SECRET_GRACE_MS,
+      ),
+    ];
+    const newCredsObj = { url, secrets: JSON.stringify(keptSecrets) };
+    const newCipher = encrypt(JSON.stringify(newCredsObj), encKey);
+    const provider = getProvider("CUSTOM_WEBHOOK" as ProviderId);
+    const newHint = provider.buildCredentialsHint
+      ? provider.buildCredentialsHint(newCredsObj)
+      : existing.credentialsHint;
+
+    await drizzle.db.transaction(async (tx) => {
+      await tx
+        .update(drizzle.schema.integrationConnections)
+        .set({
+          credentialsCipher: newCipher,
+          credentialsHint: newHint,
+          lastValidatedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(drizzle.schema.integrationConnections.id, id));
+
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "integration.webhook.secret.rotated",
+          resource: "integration_connection",
+          resourceId: id,
+          before: { credentialsHint: existing.credentialsHint },
+          after: { credentialsHint: newHint },
+        },
+        tx as unknown as AuditTx,
+      );
+    });
+
+    return c.json(ok({ secret: newEntry.key }));
+  })
+
+  // =============================================================
+  // GET /dashboard/projects/:projectId/integrations/:id/secret
+  // Reveal the newest active webhook secret. GET, but still audited —
+  // this exposes a live signing key, not just metadata.
+  // =============================================================
+  .get("/:id/secret", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing path parameters" });
+    }
+
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+
+    const db = getDb();
+    const [existing] = await db
+      .select()
+      .from(drizzle.schema.integrationConnections)
+      .where(
+        and(
+          eq(drizzle.schema.integrationConnections.id, id),
+          eq(drizzle.schema.integrationConnections.projectId, projectId),
+          isNull(drizzle.schema.integrationConnections.deletedAt),
+        ),
+      );
+    if (!existing) {
+      throw new HTTPException(404, { message: "Integration connection not found" });
+    }
+    if (existing.providerId !== "CUSTOM_WEBHOOK") {
+      return c.json(
+        {
+          error: {
+            code: "not_a_webhook_connection",
+            message: "secret reveal only applies to CUSTOM_WEBHOOK connections",
+          },
+        },
+        400,
+      );
+    }
+
+    const encKey = getEncryptionKey();
+    const creds = JSON.parse(
+      decrypt(existing.credentialsCipher, encKey),
+    ) as Record<string, string>;
+    const { secrets } = parseWebhookCredentials(creds);
+    const newest = [...secrets].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+
+    await audit({
+      projectId,
+      userId: user.id,
+      action: "integration.webhook.secret.revealed",
+      resource: "integration_connection",
+      resourceId: id,
+    });
+
+    return c.json(ok({ secret: newest?.key ?? null }));
+  })
 
   // =============================================================
   // PATCH /dashboard/projects/:projectId/integrations/:id
