@@ -1,0 +1,235 @@
+---
+title: Outbound Webhooks
+description: Receive Rovenue subscription, revenue, and paywall events on your own HTTPS endpoint — payload shape, signature verification, retries, and idempotency.
+---
+
+# Outbound Webhooks
+
+The **Custom Webhook** integration POSTs a JSON event to an HTTPS endpoint you control whenever a subscription, revenue, paywall, or credit-ledger event happens in your project. It is signed with the same scheme [Svix](https://www.svix.com) uses, so most existing Svix-compatible webhook libraries verify it without modification.
+
+---
+
+## 1. Add a webhook endpoint
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Custom Webhook** in the integrations grid and click it.
+3. Enter your endpoint **URL** (must be `https://` in production) and choose which events to receive.
+4. Click **Save**. The response includes a **signing secret** in the form `whsec_...` — copy it now. It is shown once, at creation time; Rovenue only stores it encrypted and later shows a truncated hint (e.g. `example.com · …ab12`).
+5. Use the **Delivery Log** on the connection to inspect past attempts, HTTP status codes, and response bodies, and to manually **redeliver** a specific past event.
+
+---
+
+## 2. Payload envelope
+
+Every delivery body is JSON with this shape:
+
+```json
+{
+  "id": "cksubEvt1a2b3c4d5e6f7g8h9",
+  "type": "revenue.RENEWAL",
+  "created": "2026-08-24T12:00:00.000Z",
+  "apiVersion": "2026-08-24",
+  "projectId": "ckprojectAbCdEfGhIjKlMn",
+  "data": { }
+}
+```
+
+| Field | Description |
+|---|---|
+| `id` | The originating event's stable identifier. Use this for [idempotency](#idempotency--at-least-once-delivery) — see below for how it behaves on retries and manual redeliver. |
+| `type` | One of the [event keys](#event-catalog) below. |
+| `created` | ISO-8601 timestamp of when the underlying event occurred (not when it was delivered). |
+| `apiVersion` | A date-versioned string identifying the payload schema, currently `2026-08-24`. Bump only accompanies a documented breaking change to the envelope or `data` shape. |
+| `projectId` | The Rovenue project the event belongs to. |
+| `data` | Event-specific payload — see below. |
+
+### `data` shape
+
+For revenue events (`revenue.*`), `data` is a fixed shape:
+
+```json
+{
+  "kind": "RENEWAL",
+  "amount": "9.99",
+  "currency": "USD",
+  "subscriberId": "cksubscriber1a2b3c4d5e6f7g",
+  "productId": "com.example.app.monthly",
+  "externalId": "your-app-user-id"
+}
+```
+
+- `amount` is a decimal string in the major currency unit (e.g. `"9.99"`, not cents).
+- `currency` is the ISO 4217 code.
+- `externalId` is the `externalId` you passed to the SDK's identify call, if any — no other PII (email, phone, IP, etc.) is ever included in a webhook payload.
+
+For every other event type (`subscription.*`, `subscriber.identified`, `paywall.*`, `credit.ledger.appended`), `data` is that event's domain payload passed through as-is.
+
+---
+
+## 3. Event catalog
+
+> Kept in sync with `ROVENUE_EVENT_KEYS` in `packages/shared/src/integrations.ts` — that file is the source of truth if this list and the code ever drift.
+
+| Event key | Fires when |
+|---|---|
+| `revenue.INITIAL` | The first paid transaction for a subscriber (new subscription or one-time purchase). |
+| `revenue.TRIAL_CONVERSION` | A trial converts to a paid subscription. |
+| `revenue.RENEWAL` | A recurring subscription renews for another billing period. |
+| `revenue.CREDIT_PURCHASE` | A virtual-currency / credit pack is purchased. |
+| `revenue.REFUND` | A refund is recorded (`data.amount` is always a positive value). |
+| `revenue.CANCELLATION` | A cancellation is recorded as a revenue-affecting event. |
+| `subscription.trial.started` | A new trial period begins. |
+| `subscriber.identified` | An SDK `identify()` call binds a Rovenue subscriber to your app-user id. |
+| `subscription.cancel_requested` | A subscriber requests cancellation (the subscription may still be active until period end). |
+| `subscription.expired` | A subscription reaches the `EXPIRED` state. |
+| `paywall.view` | A paywall is shown to a user. |
+| `paywall.close` | A paywall is dismissed or closed. |
+| `credit.ledger.appended` | A row is appended to the append-only credit ledger (a grant or a spend). |
+
+You choose which of these keys are delivered to a given endpoint when you configure the connection.
+
+---
+
+## 4. Verifying signatures
+
+Every delivery carries both a `webhook-*` and a Svix-compatible `svix-*` alias for the same three headers, so you can use whichever your HTTP library or an existing Svix SDK expects:
+
+| Header | Alias | Description |
+|---|---|---|
+| `webhook-id` | `svix-id` | The event id — same value as the payload's `id` field. |
+| `webhook-timestamp` | `svix-timestamp` | Unix seconds (as a string) when the request was signed. |
+| `webhook-signature` | `svix-signature` | One or more space-separated `v1,<base64>` signatures — see [rotation](#secret-rotation) below. |
+
+### Signature scheme
+
+```
+toSign   = `${webhook-id}.${webhook-timestamp}.${rawRequestBody}`
+secret   = base64decode(whsecValue without the "whsec_" prefix)
+signature = base64( HMAC-SHA256(secret, toSign) )
+header   = `v1,${signature}`
+```
+
+Notes:
+- `rawRequestBody` is the exact bytes received on the wire — parse it for verification only *after* checking the signature, since re-serializing JSON can change byte-for-byte content.
+- During a secret rotation, `webhook-signature` (and `svix-signature`) carry **one `v1,...` candidate per currently active secret**, space-separated. Verification passes if **any** candidate matches — try each one.
+- Reject requests whose `webhook-timestamp` is too far from your own clock (5 minutes is a reasonable tolerance) to defend against replay of an intercepted request.
+
+### Node.js
+
+```js
+const crypto = require("node:crypto");
+
+function verifyRovenueWebhook({ id, timestamp, signatureHeader, rawBody, secrets, toleranceSeconds = 300 }) {
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - Number(timestamp)) > toleranceSeconds) {
+    throw new Error("timestamp outside tolerance");
+  }
+
+  const toSign = `${id}.${timestamp}.${rawBody}`;
+  const candidates = signatureHeader.split(" ");
+
+  for (const secret of secrets) {
+    const encoded = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret;
+    const key = Buffer.from(encoded, "base64");
+    const expected = crypto.createHmac("sha256", key).update(toSign).digest();
+
+    for (const part of candidates) {
+      const [version, sig] = part.split(",");
+      if (version !== "v1" || !sig) continue;
+      const candidate = Buffer.from(sig, "base64");
+      if (candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected)) {
+        return true;
+      }
+    }
+  }
+  throw new Error("no matching signature");
+}
+
+module.exports = { verifyRovenueWebhook };
+```
+
+Pass every secret you currently have on file for the endpoint (typically one, or two during a rotation window) as the `secrets` array.
+
+### Python
+
+```python
+import hashlib
+import hmac
+import base64
+import time
+
+def verify_rovenue_webhook(id_, timestamp, signature_header, raw_body, secrets, tolerance_seconds=300):
+    now = int(time.time())
+    if abs(now - int(timestamp)) > tolerance_seconds:
+        raise ValueError("timestamp outside tolerance")
+
+    to_sign = f"{id_}.{timestamp}.{raw_body}".encode()
+    candidates = signature_header.split(" ")
+
+    for secret in secrets:
+        encoded = secret[len("whsec_"):] if secret.startswith("whsec_") else secret
+        key = base64.b64decode(encoded)
+        expected = hmac.new(key, to_sign, hashlib.sha256).digest()
+
+        for part in candidates:
+            version, _, sig = part.partition(",")
+            if version != "v1" or not sig:
+                continue
+            candidate = base64.b64decode(sig)
+            if hmac.compare_digest(candidate, expected):
+                return True
+    raise ValueError("no matching signature")
+```
+
+---
+
+## 5. Secret rotation
+
+- Rotating an endpoint's secret mints a brand-new `whsec_...` value and returns it once, the same as at creation.
+- The **previous** secret stays valid for **24 hours** after rotation. During that grace window, `webhook-signature` contains a `v1,...` entry signed with each active secret, so a receiver that hasn't picked up the new value yet can still verify.
+- After 24 hours the old secret is dropped from the header entirely — update your stored secret before then.
+
+---
+
+## 6. Delivery, retries & timeouts
+
+- Delivery is **at-least-once** — always design your handler to be safe to run more than once for the same event (see [idempotency](#idempotency--at-least-once-delivery)).
+- A response is read for up to **15 seconds**; anything slower is treated as a failed attempt and retried per the schedule below.
+- **2xx** — delivery is marked successful, no retry.
+- **3xx** — redirects are never followed; treated as a permanent failure (no retry).
+- **408, 425, 429** — treated as "try again": retried.
+- Other **4xx** — treated as a permanent rejection: sent straight to the dead-letter state, no further attempts.
+- **5xx** (or any other unexpected status) — retried.
+
+### Retry schedule
+
+Up to 8 attempts total (the first attempt plus 7 retries), spread over roughly 31 hours:
+
+| Attempt | Wait since previous attempt | Elapsed since first attempt |
+|---|---|---|
+| 1 | — | 0s |
+| 2 | 30s | 30s |
+| 3 | 2m | 2m 30s |
+| 4 | 10m | 12m 30s |
+| 5 | 1h | 1h 12m 30s |
+| 6 | 6h | 7h 12m 30s |
+| 7 | 12h | 19h 12m 30s |
+| 8 | 12h | ≈31h 12m 30s |
+
+If attempt 8 still fails (or a non-retriable status is returned earlier), the delivery moves to a **dead-letter** state and is shown as failed in the Delivery Log. You can manually **redeliver** it from there at any time — redelivery is not limited by the retry schedule, only by how long the originating event is retained.
+
+---
+
+## 7. Idempotency & at-least-once delivery
+
+Dedupe on the `webhook-id` header (equivalently, the payload's `id` field): store it once you've successfully processed a delivery, and skip any delivery whose id you've already seen.
+
+`webhook-id` is stable for a given underlying event — it does not change across automatic retries, and it also does **not** change when you manually redeliver that same past event from the Delivery Log, since redelivery replays the original stored event rather than minting a new one. A manual redeliver should therefore be treated by your handler exactly like a very late retry of the same event, not as a new occurrence.
+
+---
+
+## 8. Endpoint requirements
+
+- The URL must use `https://`. Plain `http://` is only accepted against a non-production Rovenue deployment (self-hosted local/dev), never in production.
+- The URL may not embed userinfo (`https://user:pass@host/...`).
+- The target host must resolve to a publicly routable address — loopback, private (RFC 1918), link-local (including the `169.254.169.254` cloud metadata address), unique-local, and carrier-grade-NAT ranges are all rejected, both at save time and at delivery time (so a hostname that starts resolving privately after being saved still gets blocked).
