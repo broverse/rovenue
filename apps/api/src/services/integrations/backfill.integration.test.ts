@@ -531,7 +531,7 @@ describe("backfill integration — Task 11: widened aggregate types", () => {
     });
 
     // An unmappable row: SUBSCRIPTION aggregate, but a raw store-native
-    // notification type (not one of SUBSCRIPTION_EVENT_TYPES in
+    // notification type (not one of SUBSCRIPTION_BRIDGE_EVENT_KEYS in
     // integrations-fanout/consumer.ts) — payload still carries projectId
     // (so it passes the SQL filter) but toSubscriptionEnvelope returns null
     // for it, exactly like the live consumer would drop it.

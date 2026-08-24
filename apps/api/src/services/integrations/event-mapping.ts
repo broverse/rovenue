@@ -68,9 +68,8 @@ function ga4SubscriptionEventName(key: RovenueEventKey): string {
 // which is the desired behavior — not a gap. Refund handling on ad platforms
 // (e.g. value-based deletion of a prior Purchase) is a separate, provider-
 // specific feature, not a default conversion mapping.
-export const DEFAULT_EVENT_MAPPING: Record<
-  IntegrationProviderId,
-  Partial<Record<RovenueEventKey, string>>
+export const DEFAULT_EVENT_MAPPING: Readonly<
+  Record<IntegrationProviderId, Readonly<Partial<Record<RovenueEventKey, string>>>>
 > = {
   META_CAPI: {
     "revenue.INITIAL": "Subscribe",

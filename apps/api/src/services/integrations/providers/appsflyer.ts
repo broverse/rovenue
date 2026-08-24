@@ -13,7 +13,7 @@ import type {
 import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
-  WAVE1_PROVIDER_EVENT_KEYS,
+  STANDARD_PROVIDER_EVENT_KEYS,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -56,7 +56,7 @@ function deriveEventKey(
 // (unlike AMPLITUDE/MIXPANEL, which have no reserved event-name vocabulary of
 // their own); the table lives in event-mapping.ts's DEFAULT_EVENT_MAPPING,
 // the one copy applyEventMapping reads. The offered key set comes from
-// @rovenue/shared's WAVE1_PROVIDER_EVENT_KEYS, which the dashboard drawer's
+// @rovenue/shared's STANDARD_PROVIDER_EVENT_KEYS, which the dashboard drawer's
 // event picker reads too.
 // ---------------------------------------------------------------------------
 
@@ -199,7 +199,7 @@ export const appsflyerProvider: IntegrationProvider = {
   id: "APPSFLYER",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
+  eventCatalog: STANDARD_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 

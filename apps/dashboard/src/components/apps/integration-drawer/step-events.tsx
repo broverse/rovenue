@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { IntegrationProviderId } from "@rovenue/shared";
-import { ROVENUE_EVENT_KEYS, WAVE1_PROVIDER_EVENT_KEYS } from "@rovenue/shared";
+import { ROVENUE_EVENT_KEYS, STANDARD_PROVIDER_EVENT_KEYS } from "@rovenue/shared";
 import { cn } from "../../../lib/cn";
 import {
   useRevealWebhookSecret,
@@ -66,12 +66,12 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   META_CAPI: ALL_EVENT_KEYS,
   TIKTOK_EVENTS: ALL_EVENT_KEYS,
   CUSTOM_WEBHOOK: ROVENUE_EVENT_KEYS,
-  AMPLITUDE: WAVE1_PROVIDER_EVENT_KEYS,
-  MIXPANEL: WAVE1_PROVIDER_EVENT_KEYS,
-  APPSFLYER: WAVE1_PROVIDER_EVENT_KEYS,
-  ADJUST: WAVE1_PROVIDER_EVENT_KEYS,
+  AMPLITUDE: STANDARD_PROVIDER_EVENT_KEYS,
+  MIXPANEL: STANDARD_PROVIDER_EVENT_KEYS,
+  APPSFLYER: STANDARD_PROVIDER_EVENT_KEYS,
+  ADJUST: STANDARD_PROVIDER_EVENT_KEYS,
   SLACK: ROVENUE_EVENT_KEYS,
-  FIREBASE_GA4: WAVE1_PROVIDER_EVENT_KEYS,
+  FIREBASE_GA4: STANDARD_PROVIDER_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

@@ -91,7 +91,7 @@ export const SUBSCRIPTION_LIFECYCLE_KEYS = [
  * providers, and only the catch-all providers (CUSTOM_WEBHOOK, SLACK) offer
  * the complete set.
  */
-export const WAVE1_PROVIDER_EVENT_KEYS = [
+export const STANDARD_PROVIDER_EVENT_KEYS = [
   ...REVENUE_EVENT_KEYS,
   ...SUBSCRIPTION_LIFECYCLE_KEYS,
 ] as const satisfies readonly RovenueEventKey[];

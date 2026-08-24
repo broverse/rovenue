@@ -13,7 +13,7 @@ import type {
 import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
-  WAVE1_PROVIDER_EVENT_KEYS,
+  STANDARD_PROVIDER_EVENT_KEYS,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -164,7 +164,7 @@ export const adjustProvider: IntegrationProvider = {
   id: "ADJUST",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
+  eventCatalog: STANDARD_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 

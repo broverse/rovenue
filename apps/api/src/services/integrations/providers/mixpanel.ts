@@ -13,7 +13,7 @@ import type {
 import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
-  WAVE1_PROVIDER_EVENT_KEYS,
+  STANDARD_PROVIDER_EVENT_KEYS,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -29,7 +29,7 @@ import {
 // the seven `subscription.*` RovenueEventType values are already spelled
 // identically to their RovenueEventKey counterparts, so only revenue.* goes
 // through the shared `deriveRevenueEventKey` helper. See amplitude.ts for
-// the fuller rationale — kept in sync deliberately.
+// the fuller rationale.
 // ---------------------------------------------------------------------------
 
 // Typing the Set as RovenueEventType while seeding it from the shared
@@ -67,16 +67,6 @@ function resolveDistinctId(envelope: RovenueEventEnvelope): string | undefined {
   const attrs = envelope.subscriberAttributes;
   return attrs?.["$mixpanelDistinctId"] ?? attrs?.["appUserId"] ?? envelope.subscriberId;
 }
-
-// ---------------------------------------------------------------------------
-// Default event mapping
-// ---------------------------------------------------------------------------
-//
-// Identical vendor event names to AMPLITUDE (Task 6 brief: "Topics/catalog/
-// mapping keys identical to Amplitude") — Mixpanel has no reserved/standard
-// event-name vocabulary of its own for these, so the same snake_case names
-// are used as sensible, consistent defaults across both analytics providers.
-// ---------------------------------------------------------------------------
 
 // Field ids mirror apps/dashboard's PROVIDER_CREDENTIAL_FIELDS.MIXPANEL
 // (step-credentials.tsx) — the backend contract those inputs submit
@@ -145,7 +135,7 @@ export const mixpanelProvider: IntegrationProvider = {
   id: "MIXPANEL",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
+  eventCatalog: STANDARD_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 

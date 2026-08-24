@@ -370,7 +370,8 @@ async function enqueueOutgoingWebhook(
       // every later one of those was silently dropped forever — while v1,
       // which dedupes per inbound event id, still delivered them. Purchase
       // keying stays only as the fallback for a producer that carries no
-      // inbound webhook event.
+      // inbound webhook event — no live caller reaches the purchase-keyed
+      // branch today, webhookEventId is required on the only production path.
       const alreadyBridged = args.webhookEventId
         ? await drizzle.outboxRepo.findByWebhookEventAndType(
             tx,

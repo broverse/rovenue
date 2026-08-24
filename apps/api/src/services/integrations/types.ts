@@ -155,7 +155,7 @@ export interface IntegrationProvider {
   /** undefined → DEFAULT_RETRY_POLICY (wired in Task 9). */
   retryPolicy?: RetryPolicy;
   buildCredentialsHint?(creds: ProviderCredentials): string;
-  defaultEventMapping: Partial<Record<RovenueEventKey, string>>;
+  defaultEventMapping: Readonly<Partial<Record<RovenueEventKey, string>>>;
   validateCredentials(
     creds: ProviderCredentials,
     http: HttpClient,

@@ -13,7 +13,7 @@ import type {
 import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
-  WAVE1_PROVIDER_EVENT_KEYS,
+  STANDARD_PROVIDER_EVENT_KEYS,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -80,7 +80,7 @@ function resolveDeviceId(envelope: RovenueEventEnvelope): string | undefined {
 // Both come from single sources rather than a per-provider copy: the vendor
 // event names from event-mapping.ts's DEFAULT_EVENT_MAPPING (the ONLY copy
 // any runtime path — applyEventMapping — has ever read), and the offered key
-// set from @rovenue/shared's WAVE1_PROVIDER_EVENT_KEYS, which the dashboard
+// set from @rovenue/shared's STANDARD_PROVIDER_EVENT_KEYS, which the dashboard
 // drawer's event picker reads too. The names' per-key rationale lives with
 // the mapping table in event-mapping.ts.
 
@@ -135,7 +135,7 @@ export const amplitudeProvider: IntegrationProvider = {
   id: "AMPLITUDE",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
+  eventCatalog: STANDARD_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 

@@ -78,7 +78,8 @@ function buildUser(envelope: RovenueEventEnvelope): TikTokUser | undefined {
 // Default event mapping
 // ---------------------------------------------------------------------------
 
-// eventCatalog = exactly the keys of defaultEventMapping above.
+// eventCatalog = exactly the keys of defaultEventMapping in
+// event-mapping.ts's DEFAULT_EVENT_MAPPING.
 const eventCatalog: readonly RovenueEventKey[] = [
   "revenue.INITIAL",
   "revenue.TRIAL_CONVERSION",
