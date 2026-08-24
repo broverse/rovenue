@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import { EVENT_CATALOG, getEvent, listEventKeysByCategory } from "./event-catalog";
 
 describe("event catalog", () => {
-  it("has exactly 16 events in v1", () => {
-    expect(Object.keys(EVENT_CATALOG)).toHaveLength(16);
+  it("has exactly 17 events in v1", () => {
+    // 16 + integration.delivery.dead_letter (integrations-foundation Task 11)
+    expect(Object.keys(EVENT_CATALOG)).toHaveLength(17);
   });
 
   it("every event's forcedChannels is a subset of defaultChannels", () => {

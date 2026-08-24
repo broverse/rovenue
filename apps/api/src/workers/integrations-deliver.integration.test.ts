@@ -300,6 +300,66 @@ describe("integrations-deliver worker (e2e)", () => {
     expect(row!.httpStatus).toBe(401);
   }, 30_000);
 
+  it("dead_letter: 401 response also writes a dead-letter project notification to the outbox", async () => {
+    const outboxEventId = `e2e-dead-notify-${createId()}`;
+    const jobId = buildIntegrationsDeliverJobId(CONNECTION_ID, outboxEventId);
+    const job: IntegrationsDeliverJob = {
+      connectionId: CONNECTION_ID,
+      projectId: PROJECT_ID,
+      providerId: "META_CAPI",
+      envelope: buildEnvelope(outboxEventId, true),
+    };
+
+    // Stub Meta CAPI → 401 (non-retriable) so the job dead-letters
+    metaPool
+      .intercept({
+        path: (p) => p.startsWith(`/v18.0/${PIXEL_ID}/events`),
+        method: "POST",
+      })
+      .reply(401, JSON.stringify({ error: { message: "Invalid token" } }), {
+        headers: { "content-type": "application/json" },
+      });
+
+    await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId));
+
+    const deliveryRow = await pollDelivery(CONNECTION_ID, outboxEventId);
+    expect(deliveryRow).toBeDefined();
+    expect(deliveryRow!.status).toBe("dead_letter");
+
+    // Poll for the NOTIFICATION outbox row emitted alongside the audit write.
+    const start = Date.now();
+    let hit: (typeof schema.outboxEvents)["$inferSelect"] | undefined;
+    while (Date.now() - start < 10_000) {
+      const rows = await testDb
+        .select()
+        .from(schema.outboxEvents)
+        .where(eq(schema.outboxEvents.eventType, "integration.delivery.dead_letter"))
+        .orderBy(desc(schema.outboxEvents.createdAt))
+        .limit(10);
+      hit = rows.find(
+        (r) =>
+          r.aggregateType === "NOTIFICATION" &&
+          (r.payload as { context?: { connectionId?: string } } | null)?.context
+            ?.connectionId === CONNECTION_ID,
+      );
+      if (hit) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    expect(hit).toBeDefined();
+    expect(hit!.aggregateType).toBe("NOTIFICATION");
+    expect(hit!.aggregateId).toBe(PROJECT_ID);
+    expect(hit!.payload).toMatchObject({
+      eventKey: "integration.delivery.dead_letter",
+      context: {
+        projectId: PROJECT_ID,
+        connectionId: CONNECTION_ID,
+        providerId: "META_CAPI",
+        displayName: "Test Meta CAPI",
+      },
+    });
+  }, 30_000);
+
   it("dead_letter case writes an audit_logs row", async () => {
     const outboxEventId = `e2e-audit-dead-${createId()}`;
     const jobId = buildIntegrationsDeliverJobId(CONNECTION_ID, outboxEventId);

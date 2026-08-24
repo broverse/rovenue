@@ -15,6 +15,7 @@
 import { createId } from "@paralleldrive/cuid2";
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
+import { and, eq } from "drizzle-orm";
 import { getDb, drizzle } from "@rovenue/db";
 import { decrypt } from "@rovenue/shared/crypto";
 import { env } from "../lib/env";
@@ -29,6 +30,7 @@ import { getProvider } from "../services/integrations/registry";
 import { createUndiciHttpClient } from "../services/integrations/http-client";
 import { audit } from "../lib/audit";
 import { captureNotifierError } from "../lib/sentry-notifications";
+import { emitNotification } from "../services/notifications/emit";
 import { publishIntegrationDeliveryLiveEvent } from "../services/integrations/live-events";
 import { reportDeadLetterToSentry } from "../services/integrations/sentry-bridge";
 import type {
@@ -404,6 +406,75 @@ export async function recordDeadLetterAudit(params: {
 }
 
 // =============================================================
+// emitDeadLetterNotification — project-facing dead-letter alert (Task 11)
+// =============================================================
+//
+// Fired from the same auditDeadLetter wiring as recordDeadLetterAudit
+// (all three runDeliverStep dead-letter exits that reach it — see the
+// call site in ensureIntegrationsDeliverWorker). Dedup is consumer-side:
+// the eventId is scoped per connection per day, so a burst of dead
+// letters for the same connection on the same day collapses to a single
+// notifier-side delivery even though this function is called on every
+// dead-letter occurrence. Best-effort — a lookup or emit failure is
+// captured, never thrown, so it can't break the delivery pipeline.
+
+const DEAD_LETTER_NOTIFICATION_EVENT_ID_PREFIX = "dead_letter";
+
+export interface DeadLetterNotificationInput {
+  connectionId: string;
+  projectId: string;
+  providerId: string;
+  errorMessage?: string | null;
+}
+
+export interface DeadLetterNotificationDeps {
+  now: () => Date;
+  lookupProjectAndConnection: (input: {
+    projectId: string;
+    connectionId: string;
+  }) => Promise<{ projectName: string; displayName: string } | undefined>;
+  emit: (input: {
+    eventId: string;
+    projectId: string;
+    context: Record<string, unknown>;
+  }) => Promise<void>;
+  captureError: (
+    err: unknown,
+    ctx: { projectId: string; connectionId: string },
+  ) => void;
+}
+
+export async function emitDeadLetterNotification(
+  input: DeadLetterNotificationInput,
+  deps: DeadLetterNotificationDeps,
+): Promise<void> {
+  try {
+    const lookup = await deps.lookupProjectAndConnection({
+      projectId: input.projectId,
+      connectionId: input.connectionId,
+    });
+    const dayBucket = deps.now().toISOString().slice(0, 10);
+    await deps.emit({
+      eventId: `${DEAD_LETTER_NOTIFICATION_EVENT_ID_PREFIX}:${input.connectionId}:${dayBucket}`,
+      projectId: input.projectId,
+      context: {
+        projectId: input.projectId,
+        projectName: lookup?.projectName ?? input.projectId,
+        connectionId: input.connectionId,
+        providerId: input.providerId,
+        displayName: lookup?.displayName ?? input.connectionId,
+        errorMessage: input.errorMessage ?? null,
+      },
+    });
+  } catch (err) {
+    deps.captureError(err, {
+      projectId: input.projectId,
+      connectionId: input.connectionId,
+    });
+  }
+}
+
+// =============================================================
 // ensureIntegrationsDeliverWorker — BullMQ wiring (M2.5)
 // =============================================================
 
@@ -501,6 +572,60 @@ export async function ensureIntegrationsDeliverWorker(
               });
             },
           });
+
+          await emitDeadLetterNotification(
+            {
+              connectionId: input.connectionId,
+              projectId: input.projectId,
+              providerId: input.providerId,
+              errorMessage: input.errorMessage,
+            },
+            {
+              now: () => new Date(),
+              lookupProjectAndConnection: async ({ projectId, connectionId }) => {
+                const [row] = await db
+                  .select({
+                    projectName: drizzle.schema.projects.name,
+                    displayName: drizzle.schema.integrationConnections.displayName,
+                  })
+                  .from(drizzle.schema.integrationConnections)
+                  .innerJoin(
+                    drizzle.schema.projects,
+                    eq(drizzle.schema.projects.id, drizzle.schema.integrationConnections.projectId),
+                  )
+                  .where(
+                    and(
+                      eq(drizzle.schema.integrationConnections.id, connectionId),
+                      eq(drizzle.schema.integrationConnections.projectId, projectId),
+                    ),
+                  )
+                  .limit(1);
+                if (!row) return undefined;
+                return { projectName: row.projectName, displayName: row.displayName };
+              },
+              emit: async ({ eventId, projectId, context }) => {
+                await db.transaction(async (tx) => {
+                  await emitNotification(tx, {
+                    eventKey: "integration.delivery.dead_letter",
+                    eventId,
+                    projectId,
+                    context,
+                  });
+                });
+              },
+              captureError: (err, ctx) => {
+                log.warn("integration.delivery.dead_letter emit skipped", {
+                  ...ctx,
+                  err: err instanceof Error ? err.message : String(err),
+                });
+                captureNotifierError(err, {
+                  component: "dead-letter-emit",
+                  projectId: ctx.projectId,
+                  reason: "emit_failed",
+                });
+              },
+            },
+          );
         },
         captureSentry: (ctx) => {
           reportDeadLetterToSentry(

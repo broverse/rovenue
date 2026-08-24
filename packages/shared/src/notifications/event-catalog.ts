@@ -188,6 +188,23 @@ export const EVENT_CATALOG: Record<string, NotificationEventDescriptor> = {
       consecutiveFailures: z.number().int(),
     }),
   },
+  "integration.delivery.dead_letter": {
+    key: "integration.delivery.dead_letter",
+    category: "integration",
+    defaultChannels: ["email", "inapp"],
+    forcedChannels: [],
+    defaultEnabled: true,
+    recipientScope: { kind: "project_roles", roles: ["OWNER", "ADMIN", "DEVELOPER"] },
+    pushAllowed: false,
+    contextSchema: z.object({
+      projectId: z.string().min(1),
+      projectName: z.string(),
+      connectionId: z.string().min(1),
+      providerId: z.string().min(1),
+      displayName: z.string(),
+      errorMessage: z.string().nullable(),
+    }),
+  },
   "team.member.invited": {
     key: "team.member.invited",
     category: "team",

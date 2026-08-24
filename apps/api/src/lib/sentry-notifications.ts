@@ -25,7 +25,8 @@ export interface NotifierErrorContext {
     | "send-email"
     | "send-push"
     | "digest"
-    | "webhook-failing-emit";
+    | "webhook-failing-emit"
+    | "dead-letter-emit";
   /** Catalog event key when known. */
   eventKey?: string;
   /** "email" | "push" | "inapp" */
