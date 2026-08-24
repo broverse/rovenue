@@ -1,5 +1,5 @@
 {
   "title": "Integrations",
   "icon": "Blocks",
-  "pages": ["meta-capi", "tiktok-events", "outbound-webhooks"]
+  "pages": ["meta-capi", "tiktok-events", "outbound-webhooks", "subscriber-identity-attributes"]
 }

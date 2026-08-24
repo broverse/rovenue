@@ -291,6 +291,27 @@ export async function findSubscriberById(
 }
 
 /**
+ * Minimal subscriber identity projection: `appUserId` + raw `attributes`
+ * jsonb (which carries the RC-compatible vendor-id reserved keys —
+ * `$appsflyerId`, `$adjustId`, `$firebaseAppInstanceId`,
+ * `$mixpanelDistinctId`, `$amplitudeDeviceId`, `$amplitudeUserId`).
+ * Used by outbound integrations that need to resolve a subscriber's
+ * third-party ids without pulling the full row. Soft-delete-aware:
+ * a soft-deleted subscriber resolves the same as an unknown id.
+ */
+export async function findSubscriberIdentityById(
+  db: Db,
+  id: string,
+): Promise<{ appUserId: string | null; attributes: unknown } | undefined> {
+  const rows = await db
+    .select({ appUserId: subscribers.appUserId, attributes: subscribers.attributes })
+    .from(subscribers)
+    .where(and(eq(subscribers.id, id), isNull(subscribers.deletedAt)))
+    .limit(1);
+  return rows[0];
+}
+
+/**
  * Same lookup, but holding a row lock until the surrounding transaction
  * ends.
  *

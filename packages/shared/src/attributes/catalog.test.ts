@@ -42,4 +42,24 @@ describe("reserved attribute catalog", () => {
       expect(RESERVED_ATTRIBUTES[k]).toBeDefined();
     }
   });
+
+  it("recognises the RC-compatible vendor-id keys and accepts any value", () => {
+    const vendorIdKeys = [
+      "$appsflyerId",
+      "$adjustId",
+      "$firebaseAppInstanceId",
+      "$mixpanelDistinctId",
+      "$amplitudeDeviceId",
+      "$amplitudeUserId",
+    ];
+    for (const k of vendorIdKeys) {
+      expect(RESERVED_ATTRIBUTES[k], `${k} in catalog`).toBeDefined();
+      expect(isReservedKey(k)).toBe(true);
+      expect(validateReservedValue(k, "abc")).toBeNull();
+    }
+  });
+
+  it("rejects over-long values for the vendor-id keys (VALUE_MAX applies via def)", () => {
+    expect(validateReservedValue("$appsflyerId", "x".repeat(501))).toMatch(/500/);
+  });
 });

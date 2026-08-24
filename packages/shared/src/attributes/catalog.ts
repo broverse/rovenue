@@ -48,6 +48,13 @@ export const RESERVED_ATTRIBUTES: Record<string, ReservedAttributeDef> = {
   $gpsAdId: def("$gpsAdId", ok),
   $attConsentStatus: def("$attConsentStatus", (v) =>
     ATT_CONSENT.includes(v) ? null : `must be one of: ${ATT_CONSENT.join(", ")}`),
+  // --- vendor ids (RC-compatible names) ---
+  $appsflyerId: def("$appsflyerId", ok),
+  $adjustId: def("$adjustId", ok),
+  $firebaseAppInstanceId: def("$firebaseAppInstanceId", ok),
+  $mixpanelDistinctId: def("$mixpanelDistinctId", ok),
+  $amplitudeDeviceId: def("$amplitudeDeviceId", ok),
+  $amplitudeUserId: def("$amplitudeUserId", ok),
 };
 
 export function isReservedKey(key: string): boolean {

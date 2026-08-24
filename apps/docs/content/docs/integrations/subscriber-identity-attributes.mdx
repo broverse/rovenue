@@ -1,0 +1,35 @@
+---
+title: Subscriber Identity Attributes
+description: Reserved subscriber attributes for third-party vendor ids (AppsFlyer, Adjust, Firebase, Mixpanel, Amplitude) used to resolve identity across outbound integrations.
+---
+
+# Subscriber Identity Attributes
+
+Rovenue reserves a set of `$`-prefixed subscriber attribute keys for well-known identity and attribution fields. Reserved keys are validated on write (each value is capped at 500 characters) and are available to [outbound integrations](/docs/integrations/outbound-webhooks) for identity resolution.
+
+Set them the same way as any other attribute, via the SDK's `setAttributes` call or by calling `POST /v1/subscribers/:appUserId/attributes` directly.
+
+---
+
+## Vendor-id attributes
+
+These six keys mirror the reserved attribute names used by RevenueCat, so a migration from RevenueCat can carry the same attribute keys over unchanged:
+
+| Key | Purpose |
+|---|---|
+| `$appsflyerId` | AppsFlyer's device-level `appsflyer_id`, used to attribute revenue back to an AppsFlyer campaign. |
+| `$adjustId` | Adjust's `adid` device identifier, used to attribute revenue back to an Adjust campaign. |
+| `$firebaseAppInstanceId` | Firebase/Google Analytics' `app_instance_id`, used to join subscriber events with a Firebase Analytics or BigQuery export. |
+| `$mixpanelDistinctId` | Mixpanel's `distinct_id`, used to associate revenue events with an existing Mixpanel user profile. |
+| `$amplitudeDeviceId` | Amplitude's `device_id`, used to associate revenue events with an anonymous Amplitude device profile. |
+| `$amplitudeUserId` | Amplitude's `user_id`, used to associate revenue events with an identified Amplitude user. |
+
+All six accept any non-empty string value up to 500 characters — Rovenue does not validate vendor-specific id formats.
+
+---
+
+## Notes
+
+- Setting a vendor-id attribute does not, by itself, forward any data anywhere — it only makes the id available for integrations (such as the Wave-1 AppsFlyer/Adjust/Firebase/Mixpanel/Amplitude outbound integrations) to read when resolving a subscriber's identity on the destination platform.
+- An unrecognised `$`-prefixed key is still treated as reserved and rejected, so typos in a vendor-id key name fail the write instead of being silently stored as an unknown attribute.
+- See [Outbound Webhooks](/docs/integrations/outbound-webhooks) for how subscriber attributes surface in webhook payloads.
