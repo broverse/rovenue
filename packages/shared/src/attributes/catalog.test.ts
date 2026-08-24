@@ -62,4 +62,23 @@ describe("reserved attribute catalog", () => {
   it("rejects over-long values for the vendor-id keys (VALUE_MAX applies via def)", () => {
     expect(validateReservedValue("$appsflyerId", "x".repeat(501))).toMatch(/500/);
   });
+
+  it("recognises the Wave-2 vendor-id keys and accepts any value", () => {
+    const wave2VendorIdKeys = [
+      "$onesignalId",
+      "$brazeAliasName",
+      "$iterableUserId",
+      "$airbridgeDeviceId",
+      "$singularDeviceId",
+    ];
+    for (const k of wave2VendorIdKeys) {
+      expect(RESERVED_ATTRIBUTES[k], `${k} in catalog`).toBeDefined();
+      expect(isReservedKey(k)).toBe(true);
+      expect(validateReservedValue(k, "abc")).toBeNull();
+    }
+  });
+
+  it("rejects over-long values for the Wave-2 vendor-id keys (VALUE_MAX applies via def)", () => {
+    expect(validateReservedValue("$onesignalId", "x".repeat(501))).toMatch(/500/);
+  });
 });

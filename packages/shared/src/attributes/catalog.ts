@@ -55,6 +55,11 @@ export const RESERVED_ATTRIBUTES: Record<string, ReservedAttributeDef> = {
   $mixpanelDistinctId: def("$mixpanelDistinctId", ok),
   $amplitudeDeviceId: def("$amplitudeDeviceId", ok),
   $amplitudeUserId: def("$amplitudeUserId", ok),
+  $onesignalId: def("$onesignalId", ok),
+  $brazeAliasName: def("$brazeAliasName", ok),
+  $iterableUserId: def("$iterableUserId", ok),
+  $airbridgeDeviceId: def("$airbridgeDeviceId", ok),
+  $singularDeviceId: def("$singularDeviceId", ok),
 };
 
 export function isReservedKey(key: string): boolean {

@@ -112,6 +112,34 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
     { id: "api_secret", label: "Measurement Protocol API secret", secret: true },
     { id: "firebase_app_id", label: "Firebase app ID", placeholder: "1:1234567890:android:abc123" },
   ],
+  // Wave-2 providers (Task 2): field ids are the fixed backend contract
+  // Tasks 4-9 build their credentialsSchema against — defined here verbatim
+  // per the task-2 brief/context.
+  BRAZE: [
+    { id: "rest_api_key", label: "REST API key", secret: true },
+    { id: "rest_endpoint", label: "REST endpoint", placeholder: "https://rest.iad-01.braze.com" },
+  ],
+  ONESIGNAL: [
+    { id: "app_id", label: "App ID" },
+    { id: "rest_api_key", label: "REST API key", secret: true },
+  ],
+  ITERABLE: [
+    { id: "api_key", label: "API key", secret: true },
+    { id: "region", label: "Region (us or eu)", optional: true, placeholder: "us" },
+  ],
+  AIRBRIDGE: [
+    { id: "app_name", label: "App name" },
+    { id: "api_token", label: "API token", secret: true },
+  ],
+  SINGULAR: [{ id: "sdk_key", label: "SDK key", secret: true }],
+  DISCORD: [
+    {
+      id: "webhook_url",
+      label: "Incoming webhook URL",
+      secret: true,
+      placeholder: "https://discord.com/api/webhooks/...",
+    },
+  ],
 };
 
 // ---------------------------------------------------------------------------

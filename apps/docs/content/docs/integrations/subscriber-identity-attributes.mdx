@@ -1,6 +1,6 @@
 ---
 title: Subscriber Identity Attributes
-description: Reserved subscriber attributes for third-party vendor ids (AppsFlyer, Adjust, Firebase, Mixpanel, Amplitude) used to resolve identity across outbound integrations.
+description: Reserved subscriber attributes for third-party vendor ids (AppsFlyer, Adjust, Firebase, Mixpanel, Amplitude, OneSignal, Braze, Iterable, Airbridge, Singular) used to resolve identity across outbound integrations.
 ---
 
 # Subscriber Identity Attributes
@@ -25,6 +25,18 @@ These six keys mirror the reserved attribute names used by RevenueCat, so a migr
 | `$amplitudeUserId` | Amplitude's `user_id`, used to associate revenue events with an identified Amplitude user. |
 
 All six accept any non-empty string value up to 500 characters — Rovenue does not validate vendor-specific id formats.
+
+These five keys extend the same convention to the Wave-2 outbound integrations (OneSignal, Braze, Iterable, Airbridge, Singular):
+
+| Key | Purpose |
+|---|---|
+| `$onesignalId` | OneSignal's player/subscription id, used to target push notifications for this subscriber. |
+| `$brazeAliasName` | Braze's alias name, used to resolve this subscriber to an existing Braze user profile without an external user id. |
+| `$iterableUserId` | Iterable's `userId`, used to associate revenue events with an existing Iterable user profile. |
+| `$airbridgeDeviceId` | Airbridge's device identifier, used to attribute revenue back to an Airbridge campaign. |
+| `$singularDeviceId` | Singular's device identifier, used to attribute revenue back to a Singular campaign. |
+
+All five accept any non-empty string value up to 500 characters — Rovenue does not validate vendor-specific id formats.
 
 ---
 

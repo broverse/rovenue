@@ -197,6 +197,100 @@ describe("StepCredentials — declarative multi-field providers (MIXPANEL)", () 
 });
 
 // ---------------------------------------------------------------------------
+// Declarative multi-field providers (Task 2: Wave-2 PROVIDER_CREDENTIAL_FIELDS)
+// ---------------------------------------------------------------------------
+
+const BRAZE_STATE: DrawerState = {
+  step: "credentials",
+  credentials: {},
+  validated: false,
+  enabledEvents: [],
+  eventMapping: {},
+  actionSource: "app",
+  testEventCode: "",
+};
+
+/** Stateful wrapper for the BRAZE provider (Wave-2). */
+function BrazeWrapper({ onValidated }: { onValidated: (s: DrawerState) => void }) {
+  const [state, setState] = useState<DrawerState>(BRAZE_STATE);
+  return (
+    <StepCredentials
+      state={state}
+      onChange={(next) => {
+        setState(next);
+        if (next.validated) onValidated(next);
+      }}
+      onNext={vi.fn()}
+      onBack={vi.fn()}
+      existingConnection={null}
+      providerId="BRAZE"
+      projectId="p1"
+    />
+  );
+}
+
+describe("StepCredentials — declarative multi-field providers (BRAZE, Wave-2)", () => {
+  it("renders one labeled input per field in PROVIDER_CREDENTIAL_FIELDS.BRAZE", async () => {
+    renderWithRouter(<BrazeWrapper onValidated={vi.fn()} />);
+
+    const fields = PROVIDER_CREDENTIAL_FIELDS.BRAZE;
+    expect(fields).toHaveLength(2);
+
+    for (const field of fields) {
+      expect(await screen.findByLabelText(new RegExp(escapeRegExp(field.label), "i"))).toBeTruthy();
+    }
+  });
+
+  it("renders rest_api_key with masked (password) treatment, rest_endpoint as plain text", async () => {
+    renderWithRouter(<BrazeWrapper onValidated={vi.fn()} />);
+
+    for (const field of PROVIDER_CREDENTIAL_FIELDS.BRAZE) {
+      const input = (await screen.findByLabelText(
+        new RegExp(escapeRegExp(field.label), "i"),
+      )) as HTMLInputElement;
+      expect(input.type).toBe(field.secret ? "password" : "text");
+    }
+  });
+
+  it("submits credentials keyed by rest_api_key/rest_endpoint on Validate", async () => {
+    const user = userEvent.setup();
+    const postSpy = vi.fn();
+
+    server.use(
+      http.post(
+        "http://localhost:3000/dashboard/projects/p1/integrations/validate",
+        async ({ request }) => {
+          postSpy(await request.json());
+          return HttpResponse.json({ data: { ok: true } });
+        },
+      ),
+    );
+
+    renderWithRouter(<BrazeWrapper onValidated={vi.fn()} />);
+
+    const values: Record<string, string> = {
+      rest_api_key: "key_abcd1234",
+      rest_endpoint: "https://rest.iad-01.braze.com",
+    };
+
+    for (const field of PROVIDER_CREDENTIAL_FIELDS.BRAZE) {
+      const input = await screen.findByLabelText(new RegExp(escapeRegExp(field.label), "i"));
+      await user.type(input, values[field.id]);
+    }
+
+    await user.click(screen.getByRole("button", { name: /validate/i }));
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "BRAZE",
+        credentials: values,
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PROVIDER_VALIDATE_NOTES — validate-time side-effect disclosure
 // (review-fix: a live-write side effect on Validate must be surfaced
 // in-product, not just documented on the public docs site)
