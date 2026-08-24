@@ -122,11 +122,26 @@ connections get an app-level per-project cap instead (named constant
 
 `FANOUT_TOPICS` grows from `[revenue, billing]` to the union of all registry providers'
 `topics`, computed at boot. New envelope builders (`toFanoutEnvelope`) for
-`rovenue.funnel`, `rovenue.paywall_events`, `rovenue.credit`, `rovenue.notifications` —
-each envelope carries a **stable public event key** (e.g. `subscription.renewed`,
-`trial.started`, `paywall.viewed`) that both provider mappers and webhook v2 payloads
-key on. The public event-key catalog lives in `@rovenue/shared` (typed, exported) so
-API, dashboard, and docs share one list.
+`rovenue.subscription` (new topic, below), `rovenue.paywall_events`, and
+`rovenue.credit` — each envelope carries a **stable public event key** (e.g.
+`revenue.RENEWAL`, `subscription.expired`, `paywall.view`) that both provider mappers
+and webhook v2 payloads key on. The public event-key catalog lives in
+`@rovenue/shared` (typed, exported) so API, dashboard, and docs share one list.
+
+**Deliberately excluded topics** (verified against the emit sites 2026-08-24):
+`rovenue.billing` carries Rovenue-cloud's *own* customer-billing events
+(`billing.invoice.paid`, `billing.usage_lock.*`) — internal, never forwarded to
+customer integrations; `rovenue.funnel` is web-funnel internals; the notifications
+topic is notifier plumbing. None are RevenueCat-parity webhook events.
+
+**SUBSCRIPTION outbox bridge (scope addition found during planning):** subscription
+lifecycle events (`subscription.cancel_requested`, `subscription.expired`, and the
+store-webhook-processor's lifecycle emissions) today go *straight into the v1
+`outgoing_webhooks` table and never touch the outbox* — so webhook v2 would silently
+miss RevenueCat's most important event class. Fix: every `enqueueOutgoingWebhook`
+call site also inserts an outbox row (`aggregateType: SUBSCRIPTION`, new enum value,
+new topic `rovenue.subscription`) in the same transaction. v1 behavior unchanged;
+v2's event surface becomes a strict superset of v1's.
 
 Consumer-group offset note: adding topic subscriptions to the existing
 `rovenue-integrations-fanout` group starts those topics at the group's configured reset
