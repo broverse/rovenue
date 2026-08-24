@@ -1,0 +1,91 @@
+---
+title: Adjust
+description: Forward Rovenue revenue and subscription-lifecycle events to Adjust's server-to-server (S2S) event API using your own Adjust event tokens.
+---
+
+# Adjust
+
+The Adjust integration forwards Rovenue revenue events (purchases, trial conversions, renewals, refunds, cancellations) and subscription-lifecycle events (trials, grace period, billing issues, plan changes) to Adjust's server-to-server event API, so subscription revenue is attributed back to the install-time campaign, network, and cohort that drove it.
+
+Unlike Amplitude, Mixpanel, and AppsFlyer, Adjust has **no built-in default event mapping** — every event you want forwarded needs its own Adjust event token, configured in the drawer's mapping step.
+
+---
+
+## 1. Get your credentials from Adjust
+
+1. Open the **Adjust dashboard → App Settings** for the app you want Rovenue events attributed to.
+2. Copy the **App token**.
+3. For each Rovenue event you want to forward, create an **event** in Adjust (Adjust dashboard → Events) and copy its **event token** (a short alphanumeric string, e.g. `f0ob4r`). You'll paste these into Rovenue's mapping step in step 3 below.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Adjust** under **Attribution & MMP** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **App token** — paste the app token from step 1.
+4. Click **Validate**.
+
+> **Validate is shape-only.** Adjust's S2S event API is a write-only ingestion endpoint with no dedicated credential-check probe — there is no way to confirm an app token is *correct* without sending a real event with a real event token. Validate here only confirms the form is well-formed (app token present). The connection's **Delivery Log** (in the drawer's Deliveries tab) is the actual proof: trigger a real event and confirm it shows `succeeded` with an HTTP `200`.
+
+5. Choose which events to forward.
+6. On the **Mapping** step, enter the Adjust **event token** for each event you selected — the value you type there is sent verbatim as `event_token`. An event left blank on this step is never forwarded (skipped with `no_mapping`), since Adjust has no vendor-wide event vocabulary to fall back to.
+
+---
+
+## 3. Event mapping
+
+`eventMapping[key].eventName` **is** the Adjust event token — there's no vendor name translation layer. Rovenue's public event keys are available for mapping, but none of them has a default:
+
+| Rovenue event key | Adjust `event_token` |
+|---|---|
+| `revenue.INITIAL` | *(your own token)* |
+| `revenue.TRIAL_CONVERSION` | *(your own token)* |
+| `revenue.RENEWAL` | *(your own token)* |
+| `revenue.CREDIT_PURCHASE` | *(your own token)* |
+| `revenue.REFUND` | *(your own token)* |
+| `revenue.CANCELLATION` | *(your own token)* |
+| `subscription.trial.started` | *(your own token)* |
+| `subscription.cancel_requested` | *(your own token)* |
+| `subscription.expired` | *(your own token)* |
+| `subscription.billing_issue` | *(your own token)* |
+| `subscription.grace_period` | *(your own token)* |
+| `subscription.uncancelled` | *(your own token)* |
+| `subscription.product_changed` | *(your own token)* |
+
+Every forwarded event carries `deduplication_id` and `callback_params.outbox_event_id` (Rovenue's internal `outboxEventId`, for dedup — see below) and `callback_params.product_id` when known. For the six `revenue.*` keys only, it also carries `revenue`/`currency`; subscription-lifecycle events never carry revenue fields — they represent no money movement.
+
+`revenue` is always sent as a **positive** number, including for `revenue.REFUND` — Adjust's S2S event API documents no convention for representing a refund as negative revenue (same finding as AppsFlyer).
+
+---
+
+## 4. Identity resolution
+
+Every forwarded event requires one advertising/device id. Rovenue resolves it in this order:
+
+1. **`$adjustId`** (Adjust's own `adid`) — sent as `adid`.
+2. **`$idfa`** (iOS advertising identifier) — sent as `idfa`, only if `$adjustId` is absent.
+3. **`$gpsAdId`** (Android advertising identifier) — sent as `gps_adid`, only if both of the above are absent.
+
+If none of the three are set, the event is skipped with reason `no_user_data` (visible in the connection's Delivery Log). Note that Rovenue's App Tracking Transparency consent gate runs upstream of this integration: `$idfa`/`$gpsAdId` are automatically stripped when the subscriber has denied ATT consent, so this fallback naturally narrows to `$adjustId` alone for consent-denied users.
+
+See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference, including `$adjustId`.
+
+---
+
+## 5. Deduplication
+
+Every forwarded event's `deduplication_id` and `callback_params.outbox_event_id` are both set to Rovenue's internal `outboxEventId`. Combined with Adjust's own event-level deduplication, retries after a network failure or an at-least-once outbox replay do not double-count revenue.
+
+---
+
+## 6. Verify events are arriving
+
+1. Open **Apps → Adjust → Delivery Log** in the Rovenue dashboard and check for `succeeded` rows with HTTP `200`.
+2. Cross-check in Adjust's own **raw data exports** or **Datascape**, filtered to one of the event tokens above.
+3. If events are not appearing:
+   - Confirm the event has a token configured in the connection's mapping step — a blank mapping skips with `no_mapping`.
+   - Confirm the subscriber has one of `$adjustId`/`$idfa`/`$gpsAdId` set (missing all three skips with `no_user_data`).
+   - A `401`/`403` response means the app token is wrong or belongs to a different Adjust account.
+   - Ensure the event type you're sending is included in the connection's enabled events.

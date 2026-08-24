@@ -109,6 +109,13 @@ export const DEFAULT_EVENT_MAPPING: Record<
     "subscription.uncancelled": "af_uncancel",
     "subscription.product_changed": "af_product_change",
   },
+  // DELIBERATELY EMPTY — see providers/adjust.ts's `defaultEventMapping`
+  // comment for the full PRE-FLIGHT RULING rationale: Adjust event tokens
+  // are opaque, account-specific ids with no vendor-wide vocabulary to
+  // default to. `applyEventMapping` falls through to `no_mapping` for every
+  // key here unless the connection's own `eventMapping` override supplies
+  // a token.
+  ADJUST: {},
 };
 
 export type ApplyEventMappingInput = {

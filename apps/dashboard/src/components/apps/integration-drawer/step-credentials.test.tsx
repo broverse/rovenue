@@ -252,6 +252,16 @@ describe("StepCredentials — PROVIDER_VALIDATE_NOTES", () => {
       expect(screen.queryByText(note)).toBeNull();
     }
   });
+
+  it("renders no note for ADJUST — shape-only validateCredentials, same deviation as APPSFLYER", async () => {
+    renderWithRouter(<ProviderWrapper providerId="ADJUST" />);
+
+    expect(await screen.findByLabelText(/app token/i)).toBeTruthy();
+    expect(PROVIDER_VALIDATE_NOTES.ADJUST).toBeUndefined();
+    for (const note of Object.values(PROVIDER_VALIDATE_NOTES)) {
+      expect(screen.queryByText(note)).toBeNull();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

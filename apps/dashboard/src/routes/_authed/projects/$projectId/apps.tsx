@@ -48,6 +48,7 @@ const CARD_ID_TO_PROVIDER: Record<
   amplitude: "AMPLITUDE",
   mixpanel: "MIXPANEL",
   appsflyer: "APPSFLYER",
+  adjust: "ADJUST",
 };
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({

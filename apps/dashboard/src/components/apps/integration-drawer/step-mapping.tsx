@@ -25,8 +25,15 @@ interface StepMappingProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function StepMapping({ state, onChange, onNext, onBack }: StepMappingProps) {
+export function StepMapping({ state, onChange, onNext, onBack, providerId }: StepMappingProps) {
   const [accordionOpen, setAccordionOpen] = useState(false);
+  // ADJUST has no vendor event-name vocabulary of its own
+  // (defaultEventMapping is `{}`) — unlike every other provider that
+  // reaches this step, entering a value here isn't an override of a
+  // sensible default, it's the ONLY way an event ever gets forwarded. Call
+  // that out explicitly so a user doesn't leave these blank expecting a
+  // vendor default to apply.
+  const isAdjust = providerId === "ADJUST";
 
   const updateMapping = (eventKey: string, eventName: string) => {
     const next: DrawerState["eventMapping"] = {
@@ -45,6 +52,14 @@ export function StepMapping({ state, onChange, onNext, onBack }: StepMappingProp
         By default the integration uses Rovenue's standard event names. You can
         override them below.
       </p>
+
+      {isAdjust && (
+        <p className="text-[12px] text-rv-warning">
+          Adjust has no default event names — value = Adjust event token. Enter
+          the event token from your Adjust dashboard for each event you want
+          forwarded; events left blank are not sent.
+        </p>
+      )}
 
       {/* Accordion trigger */}
       <button

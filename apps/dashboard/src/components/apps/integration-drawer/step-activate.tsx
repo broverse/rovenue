@@ -29,6 +29,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   AMPLITUDE: "Amplitude",
   MIXPANEL: "Mixpanel",
   APPSFLYER: "AppsFlyer",
+  ADJUST: "Adjust",
 };
 
 // ---------------------------------------------------------------------------

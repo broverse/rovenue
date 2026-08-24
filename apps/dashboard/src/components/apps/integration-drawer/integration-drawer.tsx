@@ -109,11 +109,19 @@ const MIXPANEL_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activ
 // vendor name a user may want to override.
 const APPSFLYER_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// ADJUST has the same shape as AMPLITUDE/MIXPANEL/APPSFLYER: no vendor
+// "Events Manager" test-event tooling. It keeps "mapping" too — unlike
+// those three, ADJUST's mapping step is not optional customization but the
+// ONLY way to configure anything (defaultEventMapping is `{}`; every event
+// token must be entered there or the event is skipped as `no_mapping`).
+const ADJUST_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
   MIXPANEL: MIXPANEL_STEPS,
   APPSFLYER: APPSFLYER_STEPS,
+  ADJUST: ADJUST_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -131,6 +139,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   AMPLITUDE: "Amplitude",
   MIXPANEL: "Mixpanel",
   APPSFLYER: "AppsFlyer",
+  ADJUST: "Adjust",
 };
 
 // ---------------------------------------------------------------------------

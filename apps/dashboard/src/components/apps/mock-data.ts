@@ -99,6 +99,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "adjust",
+    category: "attribution",
+    vendorKey: "adjust",
+    logo: {
+      // Adjust brand red.
+      background: "#EC1C50",
+      glyph: "AJ",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [

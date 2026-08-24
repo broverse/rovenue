@@ -16,7 +16,13 @@ const BASE_STATE: DrawerState = {
   testEventCode: "",
 };
 
-function Wrapper({ onChanged }: { onChanged: (s: DrawerState) => void }) {
+function Wrapper({
+  onChanged,
+  providerId = "META_CAPI",
+}: {
+  onChanged: (s: DrawerState) => void;
+  providerId?: string;
+}) {
   const [state, setState] = useState<DrawerState>(BASE_STATE);
   return (
     <StepMapping
@@ -28,7 +34,7 @@ function Wrapper({ onChanged }: { onChanged: (s: DrawerState) => void }) {
       onNext={vi.fn()}
       onBack={vi.fn()}
       existingConnection={null}
-      providerId="META_CAPI"
+      providerId={providerId}
       projectId="p1"
     />
   );
@@ -59,5 +65,17 @@ describe("StepMapping", () => {
     expect(withMapping?.eventMapping["revenue.RENEWAL"]?.eventName).toBe(
       "CustomPurchase",
     );
+  });
+
+  it("shows the Adjust event-token hint for providerId=ADJUST but not for other providers", async () => {
+    renderWithRouter(<Wrapper onChanged={vi.fn()} providerId="ADJUST" />);
+    expect(
+      await screen.findByText(/adjust has no default event names/i),
+    ).toBeTruthy();
+  });
+
+  it("does not show the Adjust hint for a non-ADJUST provider", () => {
+    renderWithRouter(<Wrapper onChanged={vi.fn()} providerId="META_CAPI" />);
+    expect(screen.queryByText(/adjust has no default event names/i)).toBeNull();
   });
 });

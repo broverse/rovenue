@@ -73,6 +73,14 @@ const MIXPANEL_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
 // just mapped to AppsFlyer's own `af_`-prefixed vendor event names.
 const APPSFLYER_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
 
+// Mirrors apps/api/src/services/integrations/providers/adjust.ts's
+// `eventCatalog` — the same 13-key set as AMPLITUDE/MIXPANEL/APPSFLYER
+// (Task 8 brief). ADJUST has no vendor-wide event-name vocabulary of its
+// own (its `defaultEventMapping` is `{}`), but the picker still offers
+// exactly this set — the value each key maps to is an account-specific
+// Adjust event token configured entirely in the drawer's mapping step.
+const ADJUST_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
+
 // CUSTOM_WEBHOOK has no per-event allowlist on the backend — its
 // `eventCatalog` is `ROVENUE_EVENT_KEYS` in full (custom-webhook.ts) — so
 // the picker offers every public event key rather than the ad-providers'
@@ -84,6 +92,7 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   AMPLITUDE: AMPLITUDE_EVENT_KEYS,
   MIXPANEL: MIXPANEL_EVENT_KEYS,
   APPSFLYER: APPSFLYER_EVENT_KEYS,
+  ADJUST: ADJUST_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

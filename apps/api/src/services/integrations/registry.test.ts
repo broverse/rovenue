@@ -6,12 +6,14 @@ import { customWebhookProvider } from "./providers/custom-webhook";
 import { amplitudeProvider } from "./providers/amplitude";
 import { mixpanelProvider } from "./providers/mixpanel";
 import { appsflyerProvider } from "./providers/appsflyer";
+import { adjustProvider } from "./providers/adjust";
 import type { ProviderId } from "./types";
 
 describe("PROVIDERS registry", () => {
-  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL and APPSFLYER", () => {
+  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER and ADJUST", () => {
     const keys = Object.keys(PROVIDERS).sort();
     expect(keys).toEqual([
+      "ADJUST",
       "AMPLITUDE",
       "APPSFLYER",
       "CUSTOM_WEBHOOK",
@@ -28,6 +30,7 @@ describe("PROVIDERS registry", () => {
     expect(getProvider("AMPLITUDE")).toBe(amplitudeProvider);
     expect(getProvider("MIXPANEL")).toBe(mixpanelProvider);
     expect(getProvider("APPSFLYER")).toBe(appsflyerProvider);
+    expect(getProvider("ADJUST")).toBe(adjustProvider);
   });
 
   it("throws on unknown provider", () => {
@@ -42,7 +45,7 @@ describe("PROVIDERS registry", () => {
 // =============================================================
 
 describe("providerIds()", () => {
-  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL and APPSFLYER", () => {
+  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER and ADJUST", () => {
     const ids = providerIds();
     expect(ids).toContain("META_CAPI");
     expect(ids).toContain("TIKTOK_EVENTS");
@@ -50,6 +53,7 @@ describe("providerIds()", () => {
     expect(ids).toContain("AMPLITUDE");
     expect(ids).toContain("MIXPANEL");
     expect(ids).toContain("APPSFLYER");
+    expect(ids).toContain("ADJUST");
   });
 
   it("returns a non-empty tuple usable by z.enum", () => {

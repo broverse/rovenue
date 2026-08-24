@@ -5,6 +5,7 @@ import { customWebhookProvider } from "./providers/custom-webhook";
 import { amplitudeProvider } from "./providers/amplitude";
 import { mixpanelProvider } from "./providers/mixpanel";
 import { appsflyerProvider } from "./providers/appsflyer";
+import { adjustProvider } from "./providers/adjust";
 
 export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   META_CAPI: metaCapiProvider,
@@ -13,6 +14,7 @@ export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   AMPLITUDE: amplitudeProvider,
   MIXPANEL: mixpanelProvider,
   APPSFLYER: appsflyerProvider,
+  ADJUST: adjustProvider,
 };
 
 export function getProvider(id: ProviderId): IntegrationProvider {

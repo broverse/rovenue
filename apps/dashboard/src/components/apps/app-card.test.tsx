@@ -130,6 +130,33 @@ describe("AppCard — M6.11", () => {
     expect(onOpenIntegration).toHaveBeenCalledWith("appsflyer");
   });
 
+  it("clicking adjust card calls onOpenIntegration with 'adjust'", async () => {
+    const user = userEvent.setup();
+    const onOpenIntegration = vi.fn();
+    const ADJUST_APP: AppDescriptor = {
+      id: "adjust",
+      category: "attribution",
+      vendorKey: "adjust",
+      logo: { background: "#EC1C50", glyph: "AJ" },
+      status: "available",
+    };
+
+    const { container } = renderWithRouter(
+      <AppCard app={ADJUST_APP} onOpenIntegration={onOpenIntegration} />,
+    );
+
+    await waitFor(() => {
+      const article = container.querySelector("article");
+      expect(article).toBeTruthy();
+    });
+
+    const article = container.querySelector("article")!;
+    await user.click(article);
+
+    expect(onOpenIntegration).toHaveBeenCalledOnce();
+    expect(onOpenIntegration).toHaveBeenCalledWith("adjust");
+  });
+
   it("clicking unavailable snapchat-ads card does NOT call onOpenIntegration", async () => {
     const user = userEvent.setup();
     const onOpenIntegration = vi.fn();
