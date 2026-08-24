@@ -5,7 +5,11 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { server } from "../../../../tests/msw/server";
 import { renderWithRouter } from "../../../../tests/render";
-import { StepCredentials, PROVIDER_CREDENTIAL_FIELDS } from "./step-credentials";
+import {
+  StepCredentials,
+  PROVIDER_CREDENTIAL_FIELDS,
+  PROVIDER_VALIDATE_NOTES,
+} from "./step-credentials";
 import type { DrawerState } from "./integration-drawer";
 
 const BASE_STATE: DrawerState = {
@@ -189,5 +193,46 @@ describe("StepCredentials — declarative multi-field providers (MIXPANEL)", () 
         credentials: values,
       }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PROVIDER_VALIDATE_NOTES — validate-time side-effect disclosure
+// (review-fix: a live-write side effect on Validate must be surfaced
+// in-product, not just documented on the public docs site)
+// ---------------------------------------------------------------------------
+
+function ProviderWrapper({ providerId }: { providerId: string }) {
+  const [state, setState] = useState<DrawerState>(BASE_STATE);
+  return (
+    <StepCredentials
+      state={state}
+      onChange={setState}
+      onNext={vi.fn()}
+      onBack={vi.fn()}
+      existingConnection={null}
+      providerId={providerId}
+      projectId="p1"
+    />
+  );
+}
+
+describe("StepCredentials — PROVIDER_VALIDATE_NOTES", () => {
+  it("renders the note near Validate when the provider has one (AMPLITUDE)", async () => {
+    renderWithRouter(<ProviderWrapper providerId="AMPLITUDE" />);
+
+    expect(await screen.findByLabelText(/api key/i)).toBeTruthy();
+    expect(screen.getByText(PROVIDER_VALIDATE_NOTES.AMPLITUDE)).toBeTruthy();
+  });
+
+  it("renders no note for a provider without one (META_CAPI)", async () => {
+    renderWithRouter(<ProviderWrapper providerId="META_CAPI" />);
+
+    expect(await screen.findByLabelText(/pixel id/i)).toBeTruthy();
+    expect(PROVIDER_VALIDATE_NOTES.META_CAPI).toBeUndefined();
+    // No provider-note text node should be present at all for META_CAPI.
+    for (const note of Object.values(PROVIDER_VALIDATE_NOTES)) {
+      expect(screen.queryByText(note)).toBeNull();
+    }
   });
 });

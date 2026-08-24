@@ -94,12 +94,12 @@ describe("amplitudeProvider.mapEvent", () => {
   });
 
   it.each([
-    ["revenue.INITIAL", "RENEWAL_OVERRIDE_UNUSED", "purchase_initial"],
-    ["revenue.TRIAL_CONVERSION", undefined, "trial_conversion"],
-    ["revenue.CREDIT_PURCHASE", undefined, "credit_purchase"],
-    ["revenue.REFUND", undefined, "refund"],
-    ["revenue.CANCELLATION", undefined, "cancellation"],
-  ] as const)("maps %s -> %s", (kind, _unused, expected) => {
+    ["revenue.INITIAL", "purchase_initial"],
+    ["revenue.TRIAL_CONVERSION", "trial_conversion"],
+    ["revenue.CREDIT_PURCHASE", "credit_purchase"],
+    ["revenue.REFUND", "refund"],
+    ["revenue.CANCELLATION", "cancellation"],
+  ] as const)("maps %s -> %s", (kind, expected) => {
     const revenueKind = kind.split(".")[1] as RovenueEventEnvelope["revenueEventKind"];
     const result = amplitudeProvider.mapEvent(
       makeEnvelope({ revenueEventKind: revenueKind }),
@@ -335,6 +335,29 @@ describe("amplitudeProvider.validateCredentials", () => {
       http,
     );
     expect(result).toEqual({ ok: true });
+  });
+
+  it("probe carries a STABLE insert_id so repeat Validate clicks dedupe in Amplitude", async () => {
+    const observedBodies: string[] = [];
+    agent
+      .get("https://api2.amplitude.com")
+      .intercept({ path: "/2/httpapi", method: "POST" })
+      .reply((opts) => {
+        observedBodies.push(opts.body as string);
+        return { statusCode: 200, data: '{"code":200}' };
+      })
+      .times(2);
+    const http = createUndiciHttpClient();
+
+    await amplitudeProvider.validateCredentials({ api_key: "good_key" }, http);
+    await amplitudeProvider.validateCredentials({ api_key: "good_key" }, http);
+
+    expect(observedBodies).toHaveLength(2);
+    const insertIds = observedBodies.map(
+      (raw) => (JSON.parse(raw) as { events: Array<{ insert_id: string }> }).events[0]!.insert_id,
+    );
+    expect(insertIds[0]).toBeTruthy();
+    expect(insertIds[0]).toBe(insertIds[1]);
   });
 });
 

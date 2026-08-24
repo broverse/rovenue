@@ -104,6 +104,39 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
 };
 
 // ---------------------------------------------------------------------------
+// Validate-time side-effect disclosure
+// ---------------------------------------------------------------------------
+
+/**
+ * Some providers' `validateCredentials` has no zero-footprint way to check
+ * a key (no dedicated credential-check endpoint) and instead POSTs a real,
+ * clearly-tagged probe to the destination — a live-write side effect that
+ * would otherwise only be documented on the public docs site, invisible to
+ * someone validating credentials in-product. When a provider id has an
+ * entry here, the note is rendered next to the Validate button so the user
+ * sees the disclosure at the moment it applies, not just in the docs.
+ *
+ * A provider with a genuine zero-footprint validation path (a real
+ * credential-check endpoint, or a request shape verified not to write
+ * anything) needs NO entry — omission is a statement that Validate here is
+ * side-effect-free, not an oversight.
+ *
+ * AMPLITUDE: kept after evaluating the brief's zero-footprint alternative
+ * (`{ api_key, events: [] }`) against the vendor's documented contract —
+ * the docs don't specify whether an empty `events` array is accepted or
+ * rejected before the api_key check runs, so switching would rely on
+ * unverified behavior (see providers/amplitude.ts's validateCredentials
+ * comment). The probe now uses a STABLE insert_id
+ * (AMPLITUDE_VALIDATION_INSERT_ID), so repeat validations dedupe within
+ * Amplitude's 7-day window instead of writing a fresh event each time —
+ * this note communicates that dedup, not an unbounded write.
+ */
+export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
+  AMPLITUDE:
+    "Validate sends a real, clearly-tagged test event to this Amplitude project (deduplicated across repeat clicks).",
+};
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -116,6 +149,7 @@ export function StepCredentials({
 }: StepCredentialsProps) {
   const [error, setError] = useState<string | null>(null);
   const fields = PROVIDER_CREDENTIAL_FIELDS[providerId] ?? [];
+  const validateNote = PROVIDER_VALIDATE_NOTES[providerId];
 
   const validate = useMutation({
     mutationFn: (credentials: Record<string, string>) =>
@@ -192,6 +226,10 @@ export function StepCredentials({
         <p className="text-[12px] text-rv-danger" role="alert">
           {error}
         </p>
+      )}
+
+      {validateNote && (
+        <p className="text-[11px] text-rv-mute-500">{validateNote}</p>
       )}
 
       <div className="flex items-center gap-2">

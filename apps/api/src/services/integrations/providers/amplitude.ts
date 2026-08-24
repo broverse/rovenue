@@ -141,6 +141,10 @@ function resolveRegion(creds: ProviderCredentials): keyof typeof AMPLITUDE_ENDPO
 // subscriber identity).
 const AMPLITUDE_VALIDATION_USER_ID = "rovenue_credential_check";
 const AMPLITUDE_VALIDATION_EVENT_TYPE = "[Rovenue] Credential Check";
+// Stable (not per-call) so repeated "Validate" clicks against the same
+// project dedupe within Amplitude's documented 7-day insert_id window
+// instead of writing a fresh event every time.
+const AMPLITUDE_VALIDATION_INSERT_ID = "rovenue-credential-probe";
 
 const AMPLITUDE_QUANTITY = 1;
 
@@ -166,11 +170,26 @@ export const amplitudeProvider: IntegrationProvider = {
     // (unlike Meta's GET .../{pixel}?access_token= or GA4's /debug/mp/
     // collect). Per the vendor docs, an invalid api_key is rejected with
     // `400 { error: "Invalid API key" }` before any per-event validation
-    // runs, so probing the SAME ingestion endpoint with one minimally
-    // valid synthetic event proves the key either way: 2xx means it was
-    // accepted (and, like Slack's Task 9 "connected" probe, this does
-    // write one real — clearly-tagged — event into the destination
-    // project), any non-2xx means it was rejected.
+    // runs, so probing the SAME ingestion endpoint proves the key either
+    // way: 2xx means it was accepted, any non-2xx means it was rejected.
+    //
+    // Evaluated (post-review) switching to the brief's zero-footprint
+    // alternative — `{ api_key, events: [] }` — against the fetched vendor
+    // contract (https://amplitude.com/docs/apis/analytics/http-v2): the
+    // docs document `events` as a required array but do NOT specify
+    // whether an empty (present, zero-length) array is accepted as a valid
+    // request shape or rejected up-front as `"Request missing required
+    // field"` before the api_key is even checked — that distinction is
+    // exactly what determines whether an empty probe can tell a good key
+    // from a bad one. With no documented answer and no side-effect-free
+    // way to test it against the real API from here, switching would be a
+    // gamble on unverified behavior. Kept the one-event probe instead, but
+    // it now writes to a project-wide STABLE insert_id
+    // (AMPLITUDE_VALIDATION_INSERT_ID) so repeated "Validate" clicks
+    // dedupe within Amplitude's 7-day insert_id window rather than
+    // appending a fresh event on every click — this is disclosed to the
+    // user in the dashboard drawer via PROVIDER_VALIDATE_NOTES.AMPLITUDE
+    // (step-credentials.tsx).
     const apiKey = creds["api_key"] ?? "";
     const url = AMPLITUDE_ENDPOINTS[resolveRegion(creds)];
     const res = await http.request({
@@ -183,6 +202,7 @@ export const amplitudeProvider: IntegrationProvider = {
           {
             user_id: AMPLITUDE_VALIDATION_USER_ID,
             event_type: AMPLITUDE_VALIDATION_EVENT_TYPE,
+            insert_id: AMPLITUDE_VALIDATION_INSERT_ID,
           },
         ],
       }),
