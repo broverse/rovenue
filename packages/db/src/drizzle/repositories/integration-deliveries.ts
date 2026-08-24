@@ -95,6 +95,28 @@ export async function updateDeliveryStatus(
 }
 
 // =============================================================
+// getDeliveryById
+// =============================================================
+//
+// Plain lookup by the cuid2 `id` column alone (not the (id, createdAt)
+// composite primary key) — Postgres can still satisfy this against a
+// partitioned table, it just can't prune partitions on it. Callers that
+// need partition pruning on an update use `updateDeliveryStatus` instead.
+// Used by the manual-redeliver route (Task 10), which only has the
+// delivery id from the URL path.
+
+export async function getDeliveryById(
+  db: Db,
+  id: string,
+): Promise<IntegrationDelivery | undefined> {
+  const [row] = await db
+    .select()
+    .from(integrationDeliveries)
+    .where(eq(integrationDeliveries.id, id));
+  return row;
+}
+
+// =============================================================
 // listDeliveriesForConnection
 // =============================================================
 //

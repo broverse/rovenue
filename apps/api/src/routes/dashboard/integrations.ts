@@ -31,11 +31,14 @@ import { assertPublicWebhookUrl, WebhookUrlError } from "../../lib/ssrf-guard";
 import { isUniqueViolationOf } from "../../lib/pg-errors";
 import {
   enqueueBackfillForConnection,
+  outboxRowToEnvelope,
   type BackfillAuditInput,
   type OutboxRow,
 } from "../../services/integrations/backfill";
 import {
   INTEGRATIONS_DELIVER_QUEUE_NAME,
+  buildRedeliverJobId,
+  deliverJobOptions,
   type IntegrationsDeliverJob,
 } from "../../queues/integrations";
 import type { ProviderId, ProviderPayload } from "../../services/integrations/types";
@@ -72,6 +75,7 @@ import type { NewIntegrationConnection } from "@rovenue/db/src/drizzle/schema";
 // DELETE /:id                       — soft-delete connection
 // POST   /:id/test-event            — synthetic test event
 // GET    /:id/deliveries            — cursor-paginated delivery log
+// POST   /:id/deliveries/:deliveryId/redeliver — manual redeliver
 
 // =============================================================
 // Helpers
@@ -1171,4 +1175,133 @@ export const integrationsRoute = new Hono()
     return c.json(
       ok({ deliveries: page.rows, nextCursor: page.nextCursor ?? null }),
     );
-  });
+  })
+
+  // =============================================================
+  // POST /dashboard/projects/:projectId/integrations/:id/deliveries/:deliveryId/redeliver
+  // Task 10 — manual redeliver of a single past delivery.
+  //
+  // Rebuilds the RovenueEventEnvelope from the delivery's originating
+  // `outbox_events` row (via the same `outboxRowToEnvelope` helper the
+  // backfill loop uses — see services/integrations/backfill.ts) and
+  // re-enqueues it under a fresh `buildRedeliverJobId` job id so it runs
+  // again even if the original realtime/backfill job already completed
+  // and is still retained under BullMQ's removeOnComplete/removeOnFail
+  // window (see deliverJobOptions).
+  //
+  // The redeliver window is bounded by outbox retention, NOT by anything
+  // this route enforces directly: workers/outbox-cleanup.ts prunes
+  // `outbox_events` rows older than its retention window (24h as of this
+  // writing), and once the row is gone this returns 410 event_expired —
+  // the delivery row itself is kept indefinitely as an audit trail, but
+  // there is nothing left to replay.
+  // =============================================================
+  .post(
+    "/:id/deliveries/:deliveryId/redeliver",
+    // Mirrors /validate's rate-limit shape — a manual redeliver also does
+    // real work (a live BullMQ enqueue that will hit a third-party API),
+    // so it gets the same per-user cap rather than the router's default.
+    endpointRateLimit({
+      name: "integrations-redeliver",
+      max: 30,
+      identify: (c) => c.get("user")?.id ?? clientIp(c),
+    }),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      const id = c.req.param("id");
+      const deliveryId = c.req.param("deliveryId");
+      if (!projectId || !id || !deliveryId) {
+        throw new HTTPException(400, { message: "Missing path parameters" });
+      }
+
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+
+      const db = getDb();
+
+      const [conn] = await db
+        .select()
+        .from(drizzle.schema.integrationConnections)
+        .where(
+          and(
+            eq(drizzle.schema.integrationConnections.id, id),
+            eq(drizzle.schema.integrationConnections.projectId, projectId),
+            isNull(drizzle.schema.integrationConnections.deletedAt),
+          ),
+        );
+      if (!conn) {
+        throw new HTTPException(404, { message: "Integration connection not found" });
+      }
+
+      const delivery = await drizzle.integrationDeliveryRepo.getDeliveryById(
+        db,
+        deliveryId,
+      );
+      // The ownership chain: the delivery must belong to THIS connection
+      // AND this project — a delivery id alone isn't enough to authorize
+      // access to it.
+      if (!delivery || delivery.connectionId !== id || delivery.projectId !== projectId) {
+        throw new HTTPException(404, { message: "Delivery not found" });
+      }
+
+      const [outboxRow] = await db
+        .select()
+        .from(drizzle.schema.outboxEvents)
+        .where(eq(drizzle.schema.outboxEvents.id, delivery.outboxEventId));
+
+      if (!outboxRow) {
+        return c.json(
+          {
+            error: {
+              code: "event_expired",
+              message:
+                "The originating outbox event has been pruned and can no longer be redelivered",
+            },
+          },
+          410,
+        );
+      }
+
+      const envelope = outboxRowToEnvelope({ payload: outboxRow.payload });
+      const jobId = buildRedeliverJobId(id, delivery.outboxEventId, createId());
+
+      // Short-lived Queue + Redis connection, same pattern as the
+      // false→true backfill-enqueue path in the PATCH /:id route above —
+      // closed in `finally` regardless of enqueue outcome.
+      const redisConn = attachRedisErrorLogger(
+        new Redis(env.REDIS_URL, {
+          maxRetriesPerRequest: null,
+          enableOfflineQueue: false,
+        }),
+        "integrations-redeliver-queue",
+      );
+      const queue = new Queue<IntegrationsDeliverJob>(
+        INTEGRATIONS_DELIVER_QUEUE_NAME,
+        { connection: redisConn },
+      );
+
+      try {
+        const job: IntegrationsDeliverJob = {
+          connectionId: id,
+          projectId,
+          providerId: conn.providerId as ProviderId,
+          envelope,
+        };
+        await queue.add("deliver", job, deliverJobOptions(conn.providerId, jobId));
+      } finally {
+        await queue.close().catch(() => undefined);
+        await redisConn.quit().catch(() => undefined);
+      }
+
+      await audit({
+        projectId,
+        userId: user.id,
+        action: "integration.delivery.redelivered",
+        resource: "integration_connection",
+        resourceId: id,
+        after: { deliveryId, outboxEventId: delivery.outboxEventId },
+      });
+
+      return c.json(ok({ enqueued: true }), 202);
+    },
+  );

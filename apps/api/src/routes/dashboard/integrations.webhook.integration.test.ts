@@ -12,10 +12,14 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { and, eq, isNull } from "drizzle-orm";
 import { MockAgent, setGlobalDispatcher } from "undici";
+import { createId } from "@paralleldrive/cuid2";
+import { Queue } from "bullmq";
+import { Redis } from "ioredis";
 import { getDb, drizzle, projects } from "@rovenue/db";
 import { decrypt } from "@rovenue/shared/crypto";
 import { auth } from "../../lib/auth";
 import { errorHandler } from "../../middleware/error";
+import { env } from "../../lib/env";
 import {
   integrationsRoute,
   MAX_WEBHOOK_ENDPOINTS_PER_PROJECT,
@@ -23,6 +27,10 @@ import {
 } from "./integrations";
 import { WEBHOOK_SECRET_PREFIX } from "../../lib/svix-sign";
 import { parseWebhookCredentials } from "../../services/integrations/providers/custom-webhook";
+import {
+  INTEGRATIONS_DELIVER_QUEUE_NAME,
+  type IntegrationsDeliverJob,
+} from "../../queues/integrations";
 
 const RUN_ID = Date.now();
 const db = getDb();
@@ -67,7 +75,22 @@ async function addMember(
   await db.insert(drizzle.schema.projectMembers).values({ projectId, userId, role });
 }
 
+// integration_deliveries and outbox_events carry no FK to projects (unlike
+// integration_connections, which cascades) — Task 10's redeliver tests
+// seed both directly, so they need explicit cleanup before the project row
+// goes away.
+const seededDeliveryIds: string[] = [];
+const seededOutboxEventIds: string[] = [];
+
 afterAll(async () => {
+  for (const id of seededDeliveryIds) {
+    await db
+      .delete(drizzle.schema.integrationDeliveries)
+      .where(eq(drizzle.schema.integrationDeliveries.id, id));
+  }
+  for (const id of seededOutboxEventIds) {
+    await db.delete(drizzle.schema.outboxEvents).where(eq(drizzle.schema.outboxEvents.id, id));
+  }
   for (const id of seededProjectIds) {
     // integration_connections cascade off the project FK; audit_logs
     // rows are set-null on delete rather than removed, so they simply
@@ -75,6 +98,70 @@ afterAll(async () => {
     await db.delete(projects).where(eq(projects.id, id));
   }
 });
+
+// =============================================================
+// Task 10 — manual redeliver seeding helpers
+// =============================================================
+
+/** Insert an outbox_events row directly (bypassing POST /v1/events). */
+async function seedOutboxEvent(opts: {
+  id: string;
+  projectId: string;
+  payload: Record<string, unknown>;
+}) {
+  await db.insert(drizzle.schema.outboxEvents).values({
+    id: opts.id,
+    aggregateType: "REVENUE_EVENT",
+    aggregateId: opts.projectId,
+    eventType: "revenue.event.recorded",
+    payload: opts.payload,
+  });
+  seededOutboxEventIds.push(opts.id);
+}
+
+/** Insert an integration_deliveries audit row directly. */
+async function seedDelivery(opts: {
+  id: string;
+  connectionId: string;
+  projectId: string;
+  providerId: string;
+  outboxEventId: string;
+  status?: "succeeded" | "failed" | "pending" | "skipped" | "dead_letter";
+}) {
+  await db.insert(drizzle.schema.integrationDeliveries).values({
+    id: opts.id,
+    connectionId: opts.connectionId,
+    projectId: opts.projectId,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    providerId: opts.providerId as any,
+    outboxEventId: opts.outboxEventId,
+    eventKey: "revenue.INITIAL",
+    status: opts.status ?? "succeeded",
+    attempt: 0,
+  });
+  seededDeliveryIds.push(opts.id);
+}
+
+/** Finds the redeliver job for (connectionId, outboxEventId) on the real
+ * production queue — the route enqueues there (not a per-file test queue),
+ * mirroring the PATCH-route backfill-enqueue path. No worker in this
+ * process (or any other integration test file, which all bind randomized
+ * queue names — see task-1-brief.md) ever consumes from the production
+ * queue name, so the job stays in "waiting" for inspection. */
+async function findRedeliverJob(connectionId: string, outboxEventId: string) {
+  const conn = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+  const queue = new Queue<IntegrationsDeliverJob>(INTEGRATIONS_DELIVER_QUEUE_NAME, {
+    connection: conn,
+  });
+  try {
+    const jobs = await queue.getJobs(["waiting", "delayed", "active", "completed", "failed"]);
+    const prefix = `${connectionId}|${outboxEventId}|rd-`;
+    return jobs.find((j) => typeof j.id === "string" && j.id.startsWith(prefix));
+  } finally {
+    await queue.close().catch(() => undefined);
+    await conn.quit().catch(() => undefined);
+  }
+}
 
 async function createWebhook(
   app: Hono,
@@ -440,3 +527,192 @@ describe.sequential("GET /projects/:projectId/integrations/:id/secret", () => {
     ).toBe(true);
   });
 });
+
+// =============================================================
+// (f) manual redeliver — Task 10
+// =============================================================
+
+describe.sequential(
+  "POST /projects/:projectId/integrations/:id/deliveries/:deliveryId/redeliver",
+  () => {
+    it("enqueues a fresh redeliver job and audits integration.delivery.redelivered", async () => {
+      const { userId, cookie } = await createUserAndSession("redeliver_ok");
+      const projectId = await seedProject("redeliver_ok");
+      await addMember(projectId, userId, "ADMIN");
+
+      const app = buildApp();
+      const created = await createWebhook(app, projectId, cookie, "https://example.com/redeliver-ok");
+      const { data: createData } = (await created.json()) as {
+        data: { connection: { id: string; providerId: string } };
+      };
+      const connectionId = createData.connection.id;
+
+      const outboxEventId = `outbox_${RUN_ID}_redeliver_ok`;
+      await seedOutboxEvent({
+        id: outboxEventId,
+        projectId,
+        payload: {
+          outboxEventId,
+          projectId,
+          eventType: "revenue.event.recorded",
+          revenueEventKind: "INITIAL",
+          occurredAt: new Date().toISOString(),
+          amount: "9.99",
+          currency: "USD",
+          subscriberId: `sub_${RUN_ID}`,
+        },
+      });
+
+      const deliveryId = `del_${RUN_ID}_redeliver_ok`;
+      await seedDelivery({
+        id: deliveryId,
+        connectionId,
+        projectId,
+        providerId: "CUSTOM_WEBHOOK",
+        outboxEventId,
+        status: "succeeded",
+      });
+
+      const res = await app.request(
+        `/projects/${projectId}/integrations/${connectionId}/deliveries/${deliveryId}/redeliver`,
+        { method: "POST", headers: { cookie } },
+      );
+
+      expect(res.status).toBe(202);
+      const body = (await res.json()) as { data: { enqueued: boolean } };
+      expect(body.data.enqueued).toBe(true);
+
+      const job = await findRedeliverJob(connectionId, outboxEventId);
+      expect(job, "a redeliver job should have been enqueued").toBeDefined();
+      expect(job!.data.connectionId).toBe(connectionId);
+      expect(job!.data.projectId).toBe(projectId);
+      expect(job!.data.providerId).toBe("CUSTOM_WEBHOOK");
+      expect(job!.data.envelope.outboxEventId).toBe(outboxEventId);
+      expect(job!.data.envelope.amount).toBe("9.99");
+
+      const auditRows = await db
+        .select()
+        .from(drizzle.schema.auditLogs)
+        .where(eq(drizzle.schema.auditLogs.resourceId, connectionId));
+      const redeliverAudit = auditRows.find(
+        (r) => r.action === "integration.delivery.redelivered",
+      );
+      expect(redeliverAudit).toBeDefined();
+      expect(redeliverAudit!.after).toMatchObject({ deliveryId, outboxEventId });
+    });
+
+    it("410 event_expired when the originating outbox row has been pruned", async () => {
+      const { userId, cookie } = await createUserAndSession("redeliver_expired");
+      const projectId = await seedProject("redeliver_expired");
+      await addMember(projectId, userId, "ADMIN");
+
+      const app = buildApp();
+      const created = await createWebhook(
+        app,
+        projectId,
+        cookie,
+        "https://example.com/redeliver-expired",
+      );
+      const { data: createData } = (await created.json()) as {
+        data: { connection: { id: string } };
+      };
+      const connectionId = createData.connection.id;
+
+      // outboxEventId deliberately points at a row that was never inserted
+      // (simulates outbox-cleanup having pruned it).
+      const outboxEventId = `outbox_${RUN_ID}_redeliver_expired_gone`;
+      const deliveryId = `del_${RUN_ID}_redeliver_expired`;
+      await seedDelivery({
+        id: deliveryId,
+        connectionId,
+        projectId,
+        providerId: "CUSTOM_WEBHOOK",
+        outboxEventId,
+        status: "succeeded",
+      });
+
+      const res = await app.request(
+        `/projects/${projectId}/integrations/${connectionId}/deliveries/${deliveryId}/redeliver`,
+        { method: "POST", headers: { cookie } },
+      );
+
+      expect(res.status).toBe(410);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("event_expired");
+    });
+
+    it("404 when the delivery does not belong to the connection", async () => {
+      const { userId, cookie } = await createUserAndSession("redeliver_mismatch");
+      const projectId = await seedProject("redeliver_mismatch");
+      await addMember(projectId, userId, "ADMIN");
+
+      const app = buildApp();
+      const connA = await createWebhook(app, projectId, cookie, "https://example.com/redeliver-a");
+      const { data: dataA } = (await connA.json()) as { data: { connection: { id: string } } };
+      const connB = await createWebhook(app, projectId, cookie, "https://example.com/redeliver-b");
+      const { data: dataB } = (await connB.json()) as { data: { connection: { id: string } } };
+
+      const outboxEventId = `outbox_${RUN_ID}_redeliver_mismatch`;
+      await seedOutboxEvent({
+        id: outboxEventId,
+        projectId,
+        payload: { outboxEventId, projectId, eventType: "revenue.event.recorded" },
+      });
+
+      // Delivery belongs to connection B, but we call redeliver on A's path.
+      const deliveryId = `del_${RUN_ID}_redeliver_mismatch`;
+      await seedDelivery({
+        id: deliveryId,
+        connectionId: dataB.connection.id,
+        projectId,
+        providerId: "CUSTOM_WEBHOOK",
+        outboxEventId,
+        status: "succeeded",
+      });
+
+      const res = await app.request(
+        `/projects/${projectId}/integrations/${dataA.connection.id}/deliveries/${deliveryId}/redeliver`,
+        { method: "POST", headers: { cookie } },
+      );
+
+      expect(res.status).toBe(404);
+    });
+
+    it("requires DEVELOPER — CUSTOMER_SUPPORT gets 403", async () => {
+      const owner = await createUserAndSession("redeliver_owner");
+      const support = await createUserAndSession("redeliver_support");
+      const projectId = await seedProject("redeliver_role");
+      await addMember(projectId, owner.userId, "ADMIN");
+      await addMember(projectId, support.userId, "CUSTOMER_SUPPORT");
+
+      const app = buildApp();
+      const created = await createWebhook(app, projectId, owner.cookie, "https://example.com/redeliver-role");
+      const { data: createData } = (await created.json()) as {
+        data: { connection: { id: string } };
+      };
+      const connectionId = createData.connection.id;
+
+      const outboxEventId = `outbox_${RUN_ID}_redeliver_role`;
+      await seedOutboxEvent({
+        id: outboxEventId,
+        projectId,
+        payload: { outboxEventId, projectId, eventType: "revenue.event.recorded" },
+      });
+      const deliveryId = `del_${RUN_ID}_redeliver_role`;
+      await seedDelivery({
+        id: deliveryId,
+        connectionId,
+        projectId,
+        providerId: "CUSTOM_WEBHOOK",
+        outboxEventId,
+        status: "succeeded",
+      });
+
+      const res = await app.request(
+        `/projects/${projectId}/integrations/${connectionId}/deliveries/${deliveryId}/redeliver`,
+        { method: "POST", headers: { cookie: support.cookie } },
+      );
+      expect(res.status).toBe(403);
+    });
+  },
+);

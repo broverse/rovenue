@@ -61,3 +61,22 @@ export function buildIntegrationsDeliverJobId(
   // Use `|` as the separator so the id is URL-safe and BullMQ-safe.
   return `${connectionId}|${outboxEventId}`;
 }
+
+/**
+ * Job id for a manual redeliver (Task 10). Deliberately does NOT reuse
+ * `buildIntegrationsDeliverJobId`'s `connectionId|outboxEventId` id — that
+ * id is the realtime/backfill dedup key, and BullMQ keeps a completed (or
+ * failed) job under it for the `removeOnComplete`/`removeOnFail` retention
+ * window (see `deliverJobOptions`). Re-adding the same jobId inside that
+ * window would just return the already-finished job instead of running a
+ * new delivery attempt. Appending `rd-${nonce}` (nonce = a fresh cuid2)
+ * guarantees a brand-new job every time an operator clicks redeliver, same
+ * `|` separator for the same BullMQ v5 reason as above.
+ */
+export function buildRedeliverJobId(
+  connectionId: string,
+  outboxEventId: string,
+  nonce: string,
+): string {
+  return `${connectionId}|${outboxEventId}|rd-${nonce}`;
+}

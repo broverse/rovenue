@@ -116,6 +116,7 @@ export type AuditAction =
   | "integration.webhook.secret.rotated"
   | "integration.webhook.secret.revealed"
   | "integration.delivery.dead_letter"
+  | "integration.delivery.redelivered"
   | "integration.test_event.sent"
   | "integration.backfill.started"
   | "integration.backfill.completed"

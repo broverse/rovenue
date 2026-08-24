@@ -88,6 +88,20 @@ export interface EnqueueBackfillResult {
 }
 
 // =============================================================
+// outboxRowToEnvelope
+// =============================================================
+//
+// The single reuse point for "an outbox_events row IS a RovenueEventEnvelope
+// once you cast its payload column". Both the backfill loop below and the
+// manual-redeliver route (routes/dashboard/integrations.ts, Task 10) go
+// through this instead of duplicating the cast, so if the outbox payload
+// shape ever needs normalization before use, there's exactly one place to
+// change it.
+export function outboxRowToEnvelope(row: Pick<OutboxRow, "payload">): RovenueEventEnvelope {
+  return row.payload as unknown as RovenueEventEnvelope;
+}
+
+// =============================================================
 // Implementation
 // =============================================================
 
@@ -148,7 +162,7 @@ export async function enqueueBackfillForConnection(
     // Enqueue each row as a backfill job
     for (const row of rows) {
       const jobId = buildIntegrationsDeliverJobId(connectionId, row.id);
-      const envelope = row.payload as unknown as RovenueEventEnvelope;
+      const envelope = outboxRowToEnvelope(row);
       await deps.queue.add(
         "deliver",
         {
