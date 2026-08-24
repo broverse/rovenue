@@ -10,7 +10,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 | 3 | Paywall builder & native rendering | 80% | 95% |
 | 4 | A/B testing & experiments | 75% | 90%+ |
 | 5 | Analytics (MRR / LTV / cohorts) | 70% | 95% |
-| 6 | Third-party integrations | 55-60% | 95% |
+| 6 | Third-party integrations | 75% | 95% |
 | 7 | SDK platform coverage | 55% | 95% |
 | 8 | Self-hosting & data ownership | 95% | keep |
 | 9 | GDPR / KVKK tooling | 85% | 95% |
@@ -20,7 +20,8 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 
 ## Priority order (impact / cost)
 
-1. Integrations Wave 1 first-class providers (framework + webhook v2 are done — §6)
+1. Integrations Wave 2 providers (framework + webhook v2 + Wave 1 first-class
+   providers are all done — §6)
 2. Flutter SDK (§7)
 3. RevenueCat / Adapty migration guides + data import tool (§11)
 4. Analytics chart set (§5)
@@ -78,12 +79,22 @@ largely maturity and live production proof.
 - [ ] Country / currency-normalized revenue reports
 - [ ] Metrics export API for customer BI (ClickHouse-backed)
 
-## 6. Third-party integrations (25 → 55-60) — biggest single effort
+## 6. Third-party integrations (25 → 75) — biggest single effort
 
 Framework + webhook v2 shipped 2026-08-24
 (`docs/superpowers/specs/2026-08-24-integrations-foundation-webhook-v2-design.md`).
-Score isn't 95 yet because only two first-class providers exist (Meta CAPI,
-TikTok) — Waves 1/2 below are still open.
+Wave 1 first-class providers + delivery-time identity enrichment + narrow
+store-lifecycle normalization shipped 2026-08-24/25
+(`docs/superpowers/specs/2026-08-24-integrations-wave1-providers-design.md`).
+Score moved from 55-60 to 75: eight first-class providers now exist
+(Meta CAPI, TikTok, Amplitude, Mixpanel, AppsFlyer, Adjust, Slack,
+Firebase/GA4) plus the vendor-agnostic `CUSTOM_WEBHOOK` escape hatch, the
+delivery path now carries vendor identity attributes instead of only
+email/phone hashes, and Google's lifecycle classification bug (RTDN numeric
+codes) is fixed. Not 95 yet: Wave 2's six providers (Braze, OneSignal,
+Iterable, Airbridge, Singular, Discord) are still open, and store-native
+normalization is narrow (4 lifecycle keys) rather than full passthrough of
+every Apple/Google/Stripe event shape.
 
 - [x] Integrations framework (migration 0060, fanout consumer, deliver worker,
       6-step dashboard drawer, Meta CAPI + TikTok providers) — this was already
@@ -109,11 +120,28 @@ TikTok) — Waves 1/2 below are still open.
 - [x] Fixed two pre-existing prod bugs found along the way: dead backoff on
       immediate-retry (`attempts: 5` with no `backoff`), and camelCase drawer
       credentials that broke live Meta/TikTok setup
-- [ ] Wave 1 first-class providers: Amplitude, Mixpanel, AppsFlyer, Adjust,
-      Slack, Firebase/GA4
+- [x] Wave 1 first-class providers: Amplitude, Mixpanel, AppsFlyer, Adjust,
+      Slack, Firebase/GA4 — zero schema migrations, entirely registry-driven
+      as the foundation promised (credential fields, event catalog mapping,
+      dashboard drawer/cards, docs all declarative on top of the existing
+      framework)
+- [x] Delivery-time subscriber identity enrichment: cached, ATT-consent-gated
+      vendor-id attributes (`$appsflyerId`/`$adjustId`/`$firebaseAppInstanceId`/
+      `$mixpanelDistinctId`/`$amplitudeDeviceId`/`$amplitudeUserId`) attached
+      at send time, RC-compatible — closes the standing Meta/TikTok
+      email-match gap too
+- [x] Narrow store-lifecycle normalization: 4 new public keys
+      (`subscription.billing_issue`/`grace_period`/`uncancelled`/
+      `product_changed`) flowing to webhooks + providers; fixed a Google RTDN
+      numeric-classification bug along the way (v1 category filtering now
+      works for Google for the first time)
+- [x] Backfill widened to SUBSCRIPTION + CREDIT_LEDGER aggregates
+      (PAYWALL_EVENT deliberately excluded, rationale verified)
 - [ ] Wave 2: Braze, OneSignal, Iterable, Airbridge, Singular, Discord
-- [ ] Store-native lifecycle event normalization: raw Apple/Google/Stripe event
-      types → the public event-key catalog (currently only partially mapped)
+- [ ] Full store-native lifecycle event normalization: raw Apple/Google/Stripe
+      event types → the public event-key catalog end to end (currently only
+      the 4 keys above are mapped; most raw event shapes still pass through
+      only partially normalized)
 - Architecture note (now implemented, not just planned): the outbox → Kafka
   fanout consumer + deliver worker is the "integration dispatcher"; each
   integration = registry entry (mapping + credential schema) + credential
