@@ -9,9 +9,11 @@
 // `isEnabled = false` to `isEnabled = true`. Queries the
 // `outbox_events` table for rows of every fanout-backed aggregate type
 // (see BACKFILL_AGGREGATE_TYPES below — REVENUE_EVENT / SUBSCRIPTION /
-// CREDIT_LEDGER as of Task 11) from the last `windowDays` days and
-// enqueues each one into the integrations-deliver BullMQ queue tagged
-// `isBackfill: true`.
+// CREDIT_LEDGER as of Task 11) THAT THE CONNECTION'S PROVIDER ACTUALLY
+// SUBSCRIBES TO (backfillAggregateTypesFor — the live fan-out filters by
+// the provider's `topics`, and so must this) from the last `windowDays`
+// days, and enqueues each one into the integrations-deliver BullMQ queue
+// tagged `isBackfill: true`.
 //
 // BILLING is deliberately NOT in that list: `rovenue.billing` carries
 // Rovenue-cloud's own internal billing events and never reaches customer
@@ -29,9 +31,9 @@ import {
   deliverJobOptions,
   type IntegrationsDeliverJob,
 } from "../../queues/integrations";
-import { topicForAggregateType } from "../../lib/outbox-topics";
+import { AGGREGATE_TO_TOPIC, topicForAggregateType } from "../../lib/outbox-topics";
 import { toFanoutEnvelope } from "../integrations-fanout/consumer";
-import { fanoutTopics } from "./registry";
+import { fanoutTopics, PROVIDERS } from "./registry";
 
 // =============================================================
 // Constants
@@ -73,7 +75,37 @@ const DEFAULT_WINDOW_DAYS = 7;
 // `payload->>'projectId'` for that one aggregate — left for a follow-up
 // rather than guessed at here.
 const BACKFILL_AGGREGATE_TYPES = ["REVENUE_EVENT", "SUBSCRIPTION", "CREDIT_LEDGER"] as const;
-const BACKFILL_AGGREGATE_TYPES_SQL = BACKFILL_AGGREGATE_TYPES.map((t) => `'${t}'`).join(", ");
+
+/**
+ * The subset of BACKFILL_AGGREGATE_TYPES whose topic this provider actually
+ * subscribes to — the same filter the LIVE fan-out applies (the consumer only
+ * subscribes a connection to its provider's `topics`).
+ *
+ * Without it, enabling any provider backfilled all three aggregates: five of
+ * the six Wave-1 providers don't subscribe to `rovenue.credit`, so every
+ * credit_ledger row in the window became a delivery job that the worker
+ * immediately skipped as `no_mapping` — Delivery Log pollution, an inflated
+ * `eventCount` in the audit entry, and queue work for nothing.
+ *
+ * An UNKNOWN provider id (nothing in the registry) keeps the full list: the
+ * caller passes a `ProviderId`, so this is unreachable in practice, and
+ * over-fetching is the safe direction — outboxRowToEnvelope still drops
+ * anything the live consumer would drop.
+ */
+function backfillAggregateTypesFor(
+  providerId: ProviderId,
+): readonly string[] {
+  const provider = PROVIDERS[providerId];
+  if (!provider) return BACKFILL_AGGREGATE_TYPES;
+  const topics = new Set<string>(provider.topics);
+  return BACKFILL_AGGREGATE_TYPES.filter((t) =>
+    topics.has(AGGREGATE_TO_TOPIC[t]),
+  );
+}
+
+function aggregateTypesSql(aggregateTypes: readonly string[]): string {
+  return aggregateTypes.map((t) => `'${t}'`).join(", ");
+}
 
 // =============================================================
 // Types
@@ -225,11 +257,16 @@ export async function enqueueBackfillForConnection(
 ): Promise<EnqueueBackfillResult> {
   const { connectionId, projectId, providerId } = args;
   const windowDays = args.windowDays ?? DEFAULT_WINDOW_DAYS;
+  const aggregateTypes = backfillAggregateTypesFor(providerId);
+  const aggregateTypesSqlList = aggregateTypesSql(aggregateTypes);
 
   let eventCount = 0;
   let cursor: string | null = null; // ISO timestamp of last processed row
 
-  while (true) {
+  // A provider subscribing to none of the backfillable aggregates has
+  // nothing to replay — skip straight to the audit entry rather than
+  // emitting `IN ()`, which is a syntax error in Postgres.
+  while (aggregateTypes.length > 0) {
     // Build SQL — raw because Drizzle doesn't support JSONB operator in WHERE
     // easily without extra casting, and a raw sql template keeps the logic clear.
     let sqlStr: string;
@@ -242,7 +279,7 @@ export async function enqueueBackfillForConnection(
         FROM outbox_events
         WHERE payload->>'projectId' = $1
           AND "createdAt" > NOW() - INTERVAL '${windowDays} days'
-          AND "aggregateType" IN (${BACKFILL_AGGREGATE_TYPES_SQL})
+          AND "aggregateType" IN (${aggregateTypesSqlList})
         ORDER BY "createdAt" ASC
         LIMIT ${PAGE_SIZE}
       `;
@@ -255,7 +292,7 @@ export async function enqueueBackfillForConnection(
         WHERE payload->>'projectId' = $1
           AND "createdAt" > NOW() - INTERVAL '${windowDays} days'
           AND "createdAt" > $2::timestamptz
-          AND "aggregateType" IN (${BACKFILL_AGGREGATE_TYPES_SQL})
+          AND "aggregateType" IN (${aggregateTypesSqlList})
         ORDER BY "createdAt" ASC
         LIMIT ${PAGE_SIZE}
       `;

@@ -74,6 +74,12 @@ let testDb: ReturnType<typeof drizzleClient<typeof drizzleNs.schema>>;
 let PROJECT_ID: string;
 let CONNECTION_ID: string;
 let WEBHOOK_CONNECTION_ID: string;
+// Final-review I3: a provider whose topics are revenue + subscription only
+// (no rovenue.credit), on its OWN project so the aggregate-type filter can be
+// asserted against a known-empty starting set.
+let TOPIC_FILTER_PROJECT_ID: string;
+let AMPLITUDE_CONNECTION_ID: string;
+let TOPIC_FILTER_WEBHOOK_CONNECTION_ID: string;
 
 // BullMQ queue + Redis + worker
 let queue: Queue<IntegrationsDeliverJob>;
@@ -271,6 +277,46 @@ beforeAll(async () => {
     providerId: "CUSTOM_WEBHOOK",
     displayName: "Backfill Test Custom Webhook",
     credentialsCipher: webhookCredentialsCipher,
+    credentialsHint: "example.test",
+    isEnabled: true,
+  });
+
+  // Final-review I3 fixture: its own project (so the backfill window starts
+  // empty) carrying one AMPLITUDE connection — amplitudeProvider.topics is
+  // ["rovenue.revenue", "rovenue.subscription"], i.e. NOT rovenue.credit.
+  const [topicFilterProject] = await testDb
+    .insert(schema.projects)
+    .values({ name: `backfill-topics-${createId().slice(0, 8)}` })
+    .returning();
+  if (!topicFilterProject) throw new Error("seed: topic-filter project insert returned no row");
+  TOPIC_FILTER_PROJECT_ID = topicFilterProject.id;
+
+  AMPLITUDE_CONNECTION_ID = createId();
+  await testDb.insert(schema.integrationConnections).values({
+    id: AMPLITUDE_CONNECTION_ID,
+    projectId: TOPIC_FILTER_PROJECT_ID,
+    providerId: "AMPLITUDE",
+    displayName: "Backfill Test Amplitude",
+    credentialsCipher: encrypt(JSON.stringify({ api_key: "amp_test_key" }), ENCRYPTION_KEY),
+    credentialsHint: "amp_...key",
+    enabledEvents: ["subscription.expired"],
+    eventMapping: {},
+    actionSource: "app",
+    isEnabled: true,
+  });
+
+  // …and a CUSTOM_WEBHOOK connection on the SAME project — customWebhook-
+  // Provider does subscribe to rovenue.credit, so it is the control arm.
+  TOPIC_FILTER_WEBHOOK_CONNECTION_ID = createId();
+  await testDb.insert(schema.integrationConnections).values({
+    id: TOPIC_FILTER_WEBHOOK_CONNECTION_ID,
+    projectId: TOPIC_FILTER_PROJECT_ID,
+    providerId: "CUSTOM_WEBHOOK",
+    displayName: "Backfill Topic Filter Custom Webhook",
+    credentialsCipher: encrypt(
+      JSON.stringify({ url: "https://example.test/hook", secrets: "[]" }),
+      ENCRYPTION_KEY,
+    ),
     credentialsHint: "example.test",
     isEnabled: true,
   });
@@ -568,5 +614,114 @@ describe("backfill integration — Task 11: widened aggregate types", () => {
     const jobId = buildIntegrationsDeliverJobId(WEBHOOK_CONNECTION_ID, paywallEventId);
     const job = await queue.getJob(jobId);
     expect(job).toBeUndefined();
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Final-review I3 — backfill honors the provider's topic subscription
+// ---------------------------------------------------------------------------
+//
+// The LIVE fan-out only routes a connection the topics its provider declares.
+// Backfill used to fetch REVENUE_EVENT + SUBSCRIPTION + CREDIT_LEDGER for
+// every provider, so enabling any of the five Wave-1 providers that don't
+// subscribe to `rovenue.credit` replayed every credit_ledger row in the
+// window into delivery jobs the worker instantly skipped as `no_mapping` —
+// Delivery Log pollution and an inflated audit `eventCount`.
+
+describe("backfill integration — I3: aggregate types intersected with provider topics", () => {
+  it("an AMPLITUDE connection skips CREDIT_LEDGER rows while a CUSTOM_WEBHOOK connection on the same project still backfills them", async () => {
+    const subscriptionEventId = `evt-tf-sub-${createId()}`;
+    const creditEventId = `evt-tf-credit-${createId()}`;
+    const subscriberId = `sub_${createId()}`;
+
+    const insertForTopicProject = async (opts: {
+      id: string;
+      aggregateType: string;
+      eventType: string;
+      payload: Record<string, unknown>;
+    }) => {
+      await testDb.insert(schema.outboxEvents).values({
+        id: opts.id,
+        aggregateType: opts.aggregateType as (typeof schema.outboxEvents.$inferInsert)["aggregateType"],
+        aggregateId: TOPIC_FILTER_PROJECT_ID,
+        eventType: opts.eventType,
+        payload: opts.payload,
+        createdAt: new Date(),
+      });
+    };
+
+    await insertForTopicProject({
+      id: subscriptionEventId,
+      aggregateType: "SUBSCRIPTION",
+      eventType: "subscription.expired",
+      payload: {
+        projectId: TOPIC_FILTER_PROJECT_ID,
+        subscriberId,
+        purchaseId: `pur_${createId()}`,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    await insertForTopicProject({
+      id: creditEventId,
+      aggregateType: "CREDIT_LEDGER",
+      eventType: "credit.ledger.appended",
+      payload: {
+        creditLedgerId: `cl_${createId()}`,
+        projectId: TOPIC_FILTER_PROJECT_ID,
+        subscriberId,
+        currencyId: `cur_${createId()}`,
+        type: "GRANT",
+        amount: "10",
+        balance: "10",
+        referenceType: null,
+        referenceId: null,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    const deps = makeBackfillDeps();
+
+    // AMPLITUDE — rovenue.revenue + rovenue.subscription only.
+    const amplitudeResult = await enqueueBackfillForConnection(
+      {
+        connectionId: AMPLITUDE_CONNECTION_ID,
+        projectId: TOPIC_FILTER_PROJECT_ID,
+        providerId: "AMPLITUDE",
+      },
+      deps,
+    );
+    // The project was seeded fresh for this test, so the count is exact:
+    // the subscription row and nothing else.
+    expect(amplitudeResult.eventCount).toBe(1);
+    expect(
+      await queue.getJob(
+        buildIntegrationsDeliverJobId(AMPLITUDE_CONNECTION_ID, subscriptionEventId),
+      ),
+    ).toBeDefined();
+    expect(
+      await queue.getJob(
+        buildIntegrationsDeliverJobId(AMPLITUDE_CONNECTION_ID, creditEventId),
+      ),
+    ).toBeUndefined();
+
+    // CUSTOM_WEBHOOK — subscribes to rovenue.credit too, so both rows go.
+    const webhookResult = await enqueueBackfillForConnection(
+      {
+        connectionId: TOPIC_FILTER_WEBHOOK_CONNECTION_ID,
+        projectId: TOPIC_FILTER_PROJECT_ID,
+        providerId: "CUSTOM_WEBHOOK",
+      },
+      deps,
+    );
+    expect(webhookResult.eventCount).toBe(2);
+    expect(
+      await queue.getJob(
+        buildIntegrationsDeliverJobId(
+          TOPIC_FILTER_WEBHOOK_CONNECTION_ID,
+          creditEventId,
+        ),
+      ),
+    ).toBeDefined();
   }, 30_000);
 });
