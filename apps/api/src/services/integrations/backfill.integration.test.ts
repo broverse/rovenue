@@ -73,6 +73,7 @@ let testDb: ReturnType<typeof drizzleClient<typeof drizzleNs.schema>>;
 // Seeded in beforeAll
 let PROJECT_ID: string;
 let CONNECTION_ID: string;
+let WEBHOOK_CONNECTION_ID: string;
 
 // BullMQ queue + Redis + worker
 let queue: Queue<IntegrationsDeliverJob>;
@@ -145,6 +146,59 @@ async function insertOutboxEvent(opts: {
   });
 }
 
+/** Insert an outbox_events row of an arbitrary aggregate/event type — used by
+ *  Task 11's widened-aggregate coverage (SUBSCRIPTION / CREDIT_LEDGER /
+ *  unmappable rows), unlike insertOutboxEvent above which is pinned to
+ *  REVENUE_EVENT. */
+async function insertOutboxEventOfType(opts: {
+  id: string;
+  aggregateType: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  createdAt?: Date;
+}): Promise<void> {
+  const createdAt = opts.createdAt ?? new Date();
+  await testDb.insert(schema.outboxEvents).values({
+    id: opts.id,
+    aggregateType: opts.aggregateType as (typeof schema.outboxEvents.$inferInsert)["aggregateType"],
+    aggregateId: PROJECT_ID,
+    eventType: opts.eventType,
+    payload: opts.payload,
+    createdAt,
+  });
+}
+
+/** A SUBSCRIPTION outbox row exactly as the webhook-processor/expiry-checker
+ *  bridge writes it — see apps/api/src/workers/expiry-checker.ts:191 and
+ *  services/webhook-processor.ts:372 — flat payload with top-level
+ *  projectId. */
+function buildSubscriptionBridgePayload(subscriberId: string): Record<string, unknown> {
+  return {
+    projectId: PROJECT_ID,
+    subscriberId,
+    purchaseId: `pur_${createId()}`,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** A CREDIT_LEDGER outbox row exactly as insertCreditLedger writes it — see
+ *  packages/db/src/drizzle/repositories/credit-ledger.ts:151 — flat payload
+ *  with top-level projectId. */
+function buildCreditLedgerPayload(subscriberId: string): Record<string, unknown> {
+  return {
+    creditLedgerId: `cl_${createId()}`,
+    projectId: PROJECT_ID,
+    subscriberId,
+    currencyId: `cur_${createId()}`,
+    type: "GRANT",
+    amount: "10",
+    balance: "10",
+    referenceType: null,
+    referenceId: null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 /** Poll integration_deliveries until a row with non-pending status appears. */
 async function pollDeliveries(
   outboxEventIds: string[],
@@ -200,6 +254,24 @@ beforeAll(async () => {
     enabledEvents: ["revenue.RENEWAL", "revenue.INITIAL"],
     eventMapping: {},
     actionSource: "app",
+    isEnabled: true,
+  });
+
+  // Seed a second, CUSTOM_WEBHOOK connection — Task 11 widens backfill to
+  // SUBSCRIPTION/CREDIT_LEDGER, both carried by customWebhookProvider's
+  // topics (rovenue.subscription, rovenue.credit), unlike META_CAPI above.
+  WEBHOOK_CONNECTION_ID = createId();
+  const webhookCredentialsCipher = encrypt(
+    JSON.stringify({ url: "https://example.test/hook", secrets: "[]" }),
+    ENCRYPTION_KEY,
+  );
+  await testDb.insert(schema.integrationConnections).values({
+    id: WEBHOOK_CONNECTION_ID,
+    projectId: PROJECT_ID,
+    providerId: "CUSTOM_WEBHOOK",
+    displayName: "Backfill Test Custom Webhook",
+    credentialsCipher: webhookCredentialsCipher,
+    credentialsHint: "example.test",
     isEnabled: true,
   });
 
@@ -374,4 +446,127 @@ describe("backfill integration — M4.6", () => {
       expect(delivery.connectionId).toBe(CONNECTION_ID);
     }
   }, 45_000);
+});
+
+// ---------------------------------------------------------------------------
+// Task 11 — backfill widened to all fanout-backed aggregates
+// ---------------------------------------------------------------------------
+//
+// SUBSCRIPTION and CREDIT_LEDGER rows carry top-level projectId at rest (the
+// bridge / insertCreditLedger emit sites), so they belong in the backfill
+// IN-list alongside REVENUE_EVENT. An unmappable row (recognized aggregate
+// type, but an eventType outboxRowToEnvelope/toFanoutEnvelope doesn't know
+// how to normalize — e.g. a raw store-native notification type instead of
+// one of the bridged `subscription.*` keys) must still be skipped, exactly
+// as the live fan-out consumer would drop it.
+
+describe("backfill integration — Task 11: widened aggregate types", () => {
+  it("backfills SUBSCRIPTION and CREDIT_LEDGER rows via a CUSTOM_WEBHOOK connection, and skips an unmappable row", async () => {
+    const subscriptionEventId = `evt-sub-${createId()}`;
+    const creditEventId = `evt-credit-${createId()}`;
+    const unmappableEventId = `evt-unmap-${createId()}`;
+    const subscriberId = `sub_${createId()}`;
+
+    // A real bridge-shaped SUBSCRIPTION row — recognized eventType, flat
+    // payload with top-level projectId (see buildSubscriptionBridgePayload).
+    await insertOutboxEventOfType({
+      id: subscriptionEventId,
+      aggregateType: "SUBSCRIPTION",
+      eventType: "subscription.expired",
+      payload: buildSubscriptionBridgePayload(subscriberId),
+    });
+
+    // A real CREDIT_LEDGER row (see buildCreditLedgerPayload).
+    await insertOutboxEventOfType({
+      id: creditEventId,
+      aggregateType: "CREDIT_LEDGER",
+      eventType: "credit.ledger.appended",
+      payload: buildCreditLedgerPayload(subscriberId),
+    });
+
+    // An unmappable row: SUBSCRIPTION aggregate, but a raw store-native
+    // notification type (not one of SUBSCRIPTION_EVENT_TYPES in
+    // integrations-fanout/consumer.ts) — payload still carries projectId
+    // (so it passes the SQL filter) but toSubscriptionEnvelope returns null
+    // for it, exactly like the live consumer would drop it.
+    await insertOutboxEventOfType({
+      id: unmappableEventId,
+      aggregateType: "SUBSCRIPTION",
+      eventType: "DID_RENEW", // raw Apple ASN2 notificationType, not bridged
+      payload: { projectId: PROJECT_ID, subscriberId, raw: true },
+    });
+
+    const deps = makeBackfillDeps();
+    const result = await enqueueBackfillForConnection(
+      {
+        connectionId: WEBHOOK_CONNECTION_ID,
+        projectId: PROJECT_ID,
+        providerId: "CUSTOM_WEBHOOK",
+      },
+      deps,
+    );
+
+    // At least the 2 mappable rows from this test should have been enqueued
+    // (the project may also carry unrelated in-window REVENUE_EVENT rows
+    // from earlier tests in this file — this run reuses PROJECT_ID).
+    expect(result.eventCount).toBeGreaterThanOrEqual(2);
+
+    const subscriptionJobId = buildIntegrationsDeliverJobId(
+      WEBHOOK_CONNECTION_ID,
+      subscriptionEventId,
+    );
+    const creditJobId = buildIntegrationsDeliverJobId(WEBHOOK_CONNECTION_ID, creditEventId);
+    const unmappableJobId = buildIntegrationsDeliverJobId(
+      WEBHOOK_CONNECTION_ID,
+      unmappableEventId,
+    );
+
+    const subscriptionJob = await queue.getJob(subscriptionJobId);
+    expect(subscriptionJob).toBeDefined();
+    expect(subscriptionJob!.data.isBackfill).toBe(true);
+
+    const creditJob = await queue.getJob(creditJobId);
+    expect(creditJob).toBeDefined();
+    expect(creditJob!.data.isBackfill).toBe(true);
+
+    const unmappableJob = await queue.getJob(unmappableJobId);
+    expect(unmappableJob).toBeUndefined();
+  }, 30_000);
+
+  it("does not backfill a PAYWALL_EVENT row (its outbox payload has no top-level projectId)", async () => {
+    // Mirrors the exact shape routes/v1/events.ts writes to the outbox for
+    // paywall_* events — the client envelope, with projectId only in
+    // aggregateId (added at Kafka-publish time by
+    // shapePaywallEventMessage), never inside payload itself.
+    const paywallEventId = `evt-paywall-${createId()}`;
+    await insertOutboxEventOfType({
+      id: paywallEventId,
+      aggregateType: "PAYWALL_EVENT",
+      eventType: "paywall_view",
+      payload: {
+        eventId: createId(),
+        subscriberId: `sub_${createId()}`,
+        occurredAt: new Date().toISOString(),
+        paywallContext: {
+          paywallId: `pw_${createId()}`,
+          placementId: `pl_${createId()}`,
+          placementRevision: 1,
+        },
+      },
+    });
+
+    const deps = makeBackfillDeps();
+    await enqueueBackfillForConnection(
+      {
+        connectionId: WEBHOOK_CONNECTION_ID,
+        projectId: PROJECT_ID,
+        providerId: "CUSTOM_WEBHOOK",
+      },
+      deps,
+    );
+
+    const jobId = buildIntegrationsDeliverJobId(WEBHOOK_CONNECTION_ID, paywallEventId);
+    const job = await queue.getJob(jobId);
+    expect(job).toBeUndefined();
+  }, 30_000);
 });

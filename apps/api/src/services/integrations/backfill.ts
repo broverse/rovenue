@@ -7,9 +7,11 @@
 //
 // Called when an integration connection transitions from
 // `isEnabled = false` to `isEnabled = true`. Queries the
-// `outbox_events` table for REVENUE_EVENT rows from the last
-// `windowDays` days and enqueues each one into the
-// integrations-deliver BullMQ queue tagged `isBackfill: true`.
+// `outbox_events` table for rows of every fanout-backed aggregate type
+// (see BACKFILL_AGGREGATE_TYPES below — REVENUE_EVENT / SUBSCRIPTION /
+// CREDIT_LEDGER as of Task 11) from the last `windowDays` days and
+// enqueues each one into the integrations-deliver BullMQ queue tagged
+// `isBackfill: true`.
 //
 // BILLING is deliberately NOT in that list: `rovenue.billing` carries
 // Rovenue-cloud's own internal billing events and never reaches customer
@@ -37,6 +39,41 @@ import { fanoutTopics } from "./registry";
 
 const PAGE_SIZE = 10_000;
 const DEFAULT_WINDOW_DAYS = 7;
+
+// The aggregate types eligible for backfill's `payload->>'projectId' = $1`
+// filter — i.e. every fanout-backed aggregate whose STORED OUTBOX ROW
+// payload (not the Kafka-shaped message the dispatcher publishes) carries
+// projectId at the top level:
+//
+//   - REVENUE_EVENT: createRevenueEvent's outbox emit
+//     (packages/db/src/drizzle/repositories/revenue-events.ts) writes the
+//     CH-shaped row with a top-level projectId.
+//   - SUBSCRIPTION: the webhook-processor/expiry-checker bridge
+//     (apps/api/src/services/webhook-processor.ts:372,
+//     apps/api/src/workers/expiry-checker.ts:191) always stamps
+//     `payload.projectId`.
+//   - CREDIT_LEDGER: insertCreditLedger's outbox emit
+//     (packages/db/src/drizzle/repositories/credit-ledger.ts:151) always
+//     stamps `payload.projectId`.
+//
+// PAYWALL_EVENT is deliberately EXCLUDED: routes/v1/events.ts writes the
+// outbox row's payload as the raw client envelope (eventType, subscriberId,
+// paywallContext, eventId, occurredAt) with the project id living only in
+// the row's `aggregateId` column, never inside `payload` — see
+// routes/v1/events.ts:164-170 (`aggregateId: project.id`, `payload` is the
+// client body verbatim, no projectId key). The Kafka-shaped message that
+// DOES carry a top-level `payload.projectId` is only produced at publish
+// time by workers/outbox-dispatcher.ts's `shapePaywallEventMessage`, which
+// reads `row.aggregateId` — the raw stored row backfill reads here never
+// gets that reshaping. Concretely: (1) the `payload->>'projectId'` SQL
+// filter above would never match a PAYWALL_EVENT row (payload has no such
+// key), and (2) even if it did, toFanoutEnvelope's toPaywallEnvelope
+// requires `payload.projectId` and would return null. Widening to
+// PAYWALL_EVENT would need backfill to read `aggregateId` instead of
+// `payload->>'projectId'` for that one aggregate — left for a follow-up
+// rather than guessed at here.
+const BACKFILL_AGGREGATE_TYPES = ["REVENUE_EVENT", "SUBSCRIPTION", "CREDIT_LEDGER"] as const;
+const BACKFILL_AGGREGATE_TYPES_SQL = BACKFILL_AGGREGATE_TYPES.map((t) => `'${t}'`).join(", ");
 
 // =============================================================
 // Types
@@ -205,7 +242,7 @@ export async function enqueueBackfillForConnection(
         FROM outbox_events
         WHERE payload->>'projectId' = $1
           AND "createdAt" > NOW() - INTERVAL '${windowDays} days'
-          AND "aggregateType" IN ('REVENUE_EVENT')
+          AND "aggregateType" IN (${BACKFILL_AGGREGATE_TYPES_SQL})
         ORDER BY "createdAt" ASC
         LIMIT ${PAGE_SIZE}
       `;
@@ -218,7 +255,7 @@ export async function enqueueBackfillForConnection(
         WHERE payload->>'projectId' = $1
           AND "createdAt" > NOW() - INTERVAL '${windowDays} days'
           AND "createdAt" > $2::timestamptz
-          AND "aggregateType" IN ('REVENUE_EVENT')
+          AND "aggregateType" IN (${BACKFILL_AGGREGATE_TYPES_SQL})
         ORDER BY "createdAt" ASC
         LIMIT ${PAGE_SIZE}
       `;
