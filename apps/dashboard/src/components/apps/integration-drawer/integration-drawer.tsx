@@ -131,6 +131,14 @@ const SLACK_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate
 // every catalog key already defaults to a mapped GA4 event name.
 const FIREBASE_GA4_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// BRAZE has the same shape as AMPLITUDE/MIXPANEL/APPSFLYER/SLACK/
+// FIREBASE_GA4: no vendor "Events Manager" test-event tooling (Braze's own
+// users/track probe is used internally by validateCredentials, not
+// surfaced as a wizard step), but keeps "mapping" as optional customization
+// — every catalog key already defaults to a mapped Braze purchase/custom
+// event name (revenue.REFUND excepted, see event-mapping.ts).
+const BRAZE_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
@@ -139,6 +147,7 @@ const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = 
   ADJUST: ADJUST_STEPS,
   SLACK: SLACK_STEPS,
   FIREBASE_GA4: FIREBASE_GA4_STEPS,
+  BRAZE: BRAZE_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -159,6 +168,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   ADJUST: "Adjust",
   SLACK: "Slack",
   FIREBASE_GA4: "Firebase / GA4",
+  BRAZE: "Braze",
 };
 
 // ---------------------------------------------------------------------------

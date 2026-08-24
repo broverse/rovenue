@@ -8,6 +8,7 @@ import { appsflyerProvider } from "./providers/appsflyer";
 import { adjustProvider } from "./providers/adjust";
 import { slackProvider } from "./providers/slack";
 import { firebaseGa4Provider } from "./providers/firebase-ga4";
+import { brazeProvider } from "./providers/braze";
 
 export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   META_CAPI: metaCapiProvider,
@@ -19,6 +20,7 @@ export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   ADJUST: adjustProvider,
   SLACK: slackProvider,
   FIREBASE_GA4: firebaseGa4Provider,
+  BRAZE: brazeProvider,
 };
 
 export function getProvider(id: ProviderId): IntegrationProvider {

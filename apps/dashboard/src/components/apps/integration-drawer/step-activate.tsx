@@ -32,6 +32,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   ADJUST: "Adjust",
   SLACK: "Slack",
   FIREBASE_GA4: "Firebase / GA4",
+  BRAZE: "Braze",
 };
 
 // ---------------------------------------------------------------------------

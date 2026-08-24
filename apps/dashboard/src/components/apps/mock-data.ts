@@ -1,4 +1,4 @@
-import { BarChart3, CircleCheck, LayoutGrid, Megaphone, MessageSquare, Radar } from "lucide-react";
+import { BarChart3, CircleCheck, LayoutGrid, Megaphone, MessageSquare, Radar, Repeat2 } from "lucide-react";
 import type { AppDescriptor, CategoryId, RailEntry } from "./types";
 
 /** Catalog id for the CUSTOM_WEBHOOK provider's card (Task 12). Distinct
@@ -15,8 +15,9 @@ export const CUSTOM_WEBHOOK_APP_ID = "custom-webhook";
  * branch `feat/integrations-meta-tiktok`, extended by Task 12); AMPLITUDE
  * (Wave-1 Task 5) is the first `analytics`-category entry; APPSFLYER
  * (Wave-1 Task 7) is the first `attribution`-category entry; SLACK
- * (Wave-1 Task 9) is the first `communication`-category entry. Other
- * surfaces — lifecycle, data, automation, etc. — are still out of scope.
+ * (Wave-1 Task 9) is the first `communication`-category entry; BRAZE
+ * (Wave-2 Task 4) is the first `lifecycle`-category entry. Other
+ * surfaces — data, identity, billing, etc. — are still out of scope.
  * When a new provider lands, add it here with its own `custom` brand mark in
  * `app-logo.tsx` if it needs a vector logo instead of a glyph.
  */
@@ -142,6 +143,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "braze",
+    category: "lifecycle",
+    vendorKey: "braze",
+    logo: {
+      // Braze brand orange/red.
+      background: "#FF443A",
+      glyph: "B",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
@@ -152,6 +166,9 @@ export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
   { kind: "item", id: "analytics", icon: BarChart3 },
   { kind: "item", id: "attribution", icon: Radar },
   { kind: "item", id: "communication", icon: MessageSquare },
+  // BRAZE (Wave-2 Task 4) is the first `lifecycle`-category entry — this
+  // activates the rail item once, for every future lifecycle provider.
+  { kind: "item", id: "lifecycle", icon: Repeat2 },
 ];
 
 export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = [
@@ -159,6 +176,7 @@ export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = [
   "analytics",
   "attribution",
   "communication",
+  "lifecycle",
 ];
 
 /** Public documentation site — linked from the docs / API-reference CTAs. */

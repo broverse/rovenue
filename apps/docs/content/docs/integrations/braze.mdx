@@ -1,0 +1,84 @@
+---
+title: Braze
+description: Sync Rovenue revenue and subscription-lifecycle events into Braze for customer engagement and lifecycle messaging.
+---
+
+# Braze
+
+The Braze integration forwards Rovenue revenue events (purchases, trial conversions, renewals, cancellations) as Braze **purchases** and subscription-lifecycle events (trials, grace period, billing issues, plan changes) as Braze **custom events**, via Braze's `users/track` REST endpoint — so a subscriber's Rovenue purchase and subscription history is available inside Braze for lifecycle campaigns, canvases, and segmentation.
+
+Braze is a customer-engagement platform, not an analytics warehouse: this integration sends **events, not a full profile sync**. It does not push subscriber attributes, and it does not read anything back from Braze.
+
+---
+
+## 1. Get your credentials from Braze
+
+1. In the Braze dashboard, open **Settings → APIs and Identifiers → API Keys** and create (or reuse) a key with the **`users.track`** permission.
+2. Copy the **REST API Key**.
+3. Note your workspace's **REST endpoint** — shown on the same page, or in **Settings → APIs and Identifiers** (e.g. `https://rest.iad-01.braze.com`). This is specific to the Braze instance/cluster your workspace lives on; it is *not* the same as your SDK endpoint.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Braze** under **CRM & lifecycle** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **REST API key** — paste the key from step 1.
+   - **REST endpoint** — paste the endpoint from step 1 (e.g. `https://rest.iad-01.braze.com`). Only `https://rest.<cluster>.braze.com` and `https://rest.<cluster>.braze.eu` hosts are accepted — Rovenue rejects any other host, both when you save the connection and again on every delivery.
+4. Click **Validate**.
+
+> **Validate creates a real, deletable probe profile.** Braze's `users/track` endpoint has no dedicated read-only credential-check call that would prove your key actually has `users.track` permission — a read-only check would pass even for a key that can't send events. Rovenue instead sends one clearly-tagged event (`rovenue_credential_check`) to a single, stable Braze profile (`external_id: "rovenue-credential-probe"`). This profile is reused across every re-validation — clicking **Validate** again updates the same profile and event rather than creating a new one, so it counts toward your Braze Monthly Active Users **once**, not on every click. You can safely delete this profile from Braze at any time; doing so does not affect your connection.
+
+5. Choose which events to forward, optionally override the default mapping, then activate.
+
+---
+
+## 3. Event mapping
+
+Revenue keys ride Braze's `purchases` array, which has no vendor event-name concept of its own (a purchase is keyed by `product_id`, not a name) — so the mapping table below only matters for the `rovenue_event` tag stamped on each purchase, and for the six `subscription.*` lifecycle keys, which become genuine Braze custom events since Braze has no built-in vocabulary for subscription lifecycle:
+
+| Rovenue event key | Braze wire shape | `name` / tag |
+|---|---|---|
+| `revenue.INITIAL` | `purchases[]` | `revenue.INITIAL` |
+| `revenue.TRIAL_CONVERSION` | `purchases[]` | `revenue.TRIAL_CONVERSION` |
+| `revenue.RENEWAL` | `purchases[]` | `revenue.RENEWAL` |
+| `revenue.CREDIT_PURCHASE` | `purchases[]` | `revenue.CREDIT_PURCHASE` |
+| `revenue.CANCELLATION` | `purchases[]` | `revenue.CANCELLATION` |
+| `subscription.trial.started` | `events[]` | `rovenue_subscription_trial_started` |
+| `subscription.cancel_requested` | `events[]` | `rovenue_subscription_cancel_requested` |
+| `subscription.expired` | `events[]` | `rovenue_subscription_expired` |
+| `subscription.billing_issue` | `events[]` | `rovenue_subscription_billing_issue` |
+| `subscription.grace_period` | `events[]` | `rovenue_subscription_grace_period` |
+| `subscription.uncancelled` | `events[]` | `rovenue_subscription_uncancelled` |
+| `subscription.product_changed` | `events[]` | `rovenue_subscription_product_changed` |
+
+Every forwarded purchase and event carries `properties.rovenue_event` (the original Rovenue event key) and `properties.outbox_event_id`, so you can always trace a Braze record back to its Rovenue source.
+
+**`revenue.REFUND` is not forwarded.** Braze's `purchases` object (`product_id`/`currency`/`price`/`time`) is an append-only revenue record with no documented reversal or negative-price refund convention — sending a refund through it would double-count revenue in Braze's own reporting rather than reverse it. Refunds are skipped with reason `no_mapping` and never reach Braze.
+
+---
+
+## 4. Identity resolution
+
+Every purchase or event object sent to Braze needs exactly one primary identifier (Braze rejects an object carrying more than one). Rovenue resolves it in this order:
+
+1. **`appUserId`** — your app's own subscriber id, if the subscriber has one. Sent as `external_id`.
+2. **`$brazeAliasName`** — used **instead of** `external_id`, only when `appUserId` is absent. Sent as `user_alias: { alias_name, alias_label: "rovenue" }`, so you can resolve a subscriber to an existing Braze user profile without ever setting an external id.
+3. The Rovenue-internal subscriber id, as a last resort so revenue is never silently dropped. Sent as `external_id`.
+
+If none of the three is available, the event is skipped with reason `no_user_data` (visible in the connection's Delivery Log).
+
+See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference, including `$brazeAliasName`.
+
+---
+
+## 5. Verify events are arriving
+
+1. Open **Apps → Braze → Delivery Log** in the Rovenue dashboard and check for `succeeded` rows with HTTP `200`/`201`.
+2. In Braze, look up the resolved user profile (by `external_id` or alias) and check its **Purchases** or **Custom Events** timeline for the mapped names above.
+3. If events are not appearing:
+   - A `401`/`403` response means the REST API key is wrong or lacks the `users.track` permission.
+   - A `400` response usually means a malformed request — check the Delivery Log's response body.
+   - Confirm the subscriber has `appUserId`, `$brazeAliasName`, or a resolvable Rovenue subscriber id set (missing all three skips silently with `no_user_data`).
+   - Ensure the event type you're sending is included in the connection's enabled events, and that `revenue.REFUND` isn't the only thing you're testing with — it's intentionally never forwarded (see above).

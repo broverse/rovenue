@@ -72,6 +72,9 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   ADJUST: STANDARD_PROVIDER_EVENT_KEYS,
   SLACK: ROVENUE_EVENT_KEYS,
   FIREBASE_GA4: STANDARD_PROVIDER_EVENT_KEYS,
+  // BRAZE (Wave-2 Task 4) offers the same 13-key Wave-1 catalog — its
+  // `eventCatalog` (providers/braze.ts) is literally STANDARD_PROVIDER_EVENT_KEYS.
+  BRAZE: STANDARD_PROVIDER_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

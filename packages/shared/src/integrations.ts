@@ -105,7 +105,9 @@ export type IntegrationProviderId =
   | "APPSFLYER"
   | "ADJUST"
   | "SLACK"
-  | "FIREBASE_GA4";
+  | "FIREBASE_GA4"
+  // Wave-2 Task 4 — first LIFECYCLE-category provider.
+  | "BRAZE";
 
 export const WEBHOOK_API_VERSION = "2026-08-24";
 

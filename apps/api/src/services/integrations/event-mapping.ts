@@ -60,6 +60,32 @@ function ga4SubscriptionEventName(key: RovenueEventKey): string {
   return `${GA4_CUSTOM_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
 }
 
+// BRAZE — the first LIFECYCLE-category provider (Wave-2 Task 4). Its
+// `revenue.*` keys don't need a Braze-side event NAME at all: they ride
+// Braze's dedicated `users/track` `purchases` array (keyed by `product_id`,
+// not an event name — see providers/braze.ts), and the value mapped here is
+// only read back as the `properties.rovenue_event` tag stamped onto that
+// purchase entry. Each revenue key therefore maps to ITSELF, an identity
+// map exactly like SLACK's below — `providerEvent` is a label, not a wire
+// event name, for this provider's revenue keys. Lifecycle keys have no
+// Braze-native equivalent, so each becomes a Rovenue-namespaced Braze
+// custom event via `events`, the same `rovenue_<suffix>` convention as
+// FIREBASE_GA4's `ga4SubscriptionEventName`.
+//
+// `revenue.REFUND` is intentionally OMITTED — the fallback ruling from the
+// Task 4 controller context: Braze's users/track / purchase-object
+// reference (https://www.braze.com/docs/api/endpoints/user_data/
+// post_user_track/ and .../objects_filters/purchase_object/, fetched
+// 2026-08-25) documents `purchases` as an append-only revenue record
+// (required `product_id`/`currency`/`price`/`time`, no reversal or
+// negative-price refund convention anywhere in the schema) — forwarding a
+// REFUND through `purchases` would double-count revenue in Braze's own
+// reporting rather than reverse it. Falls through to `no_mapping`/skip.
+const BRAZE_LIFECYCLE_EVENT_PREFIX = "rovenue_";
+function brazeLifecycleEventName(key: RovenueEventKey): string {
+  return `${BRAZE_LIFECYCLE_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
+}
+
 // INTENTIONAL OMISSION — `revenue.REFUND` and `revenue.CANCELLATION` are
 // deliberately NOT mapped for either provider. Meta CAPI and TikTok Events
 // API have no standard refund/cancellation conversion event; forwarding them
@@ -136,6 +162,17 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.CANCELLATION": GA4_CANCELLATION_EVENT,
     ...Object.fromEntries(
       SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, ga4SubscriptionEventName(key)]),
+    ),
+  },
+  BRAZE: {
+    "revenue.INITIAL": "revenue.INITIAL",
+    "revenue.TRIAL_CONVERSION": "revenue.TRIAL_CONVERSION",
+    "revenue.RENEWAL": "revenue.RENEWAL",
+    "revenue.CREDIT_PURCHASE": "revenue.CREDIT_PURCHASE",
+    // revenue.REFUND: intentionally unmapped — see comment above.
+    "revenue.CANCELLATION": "revenue.CANCELLATION",
+    ...Object.fromEntries(
+      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, brazeLifecycleEventName(key)]),
     ),
   },
 };

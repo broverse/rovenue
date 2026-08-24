@@ -197,6 +197,18 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * (see providers/slack.ts), so clicking Validate again posts another
  * message. Documented again in apps/docs/content/docs/integrations/
  * slack.mdx.
+ *
+ * BRAZE: like AMPLITUDE/MIXPANEL, Braze's users/track has no dedicated
+ * read-only credential-check endpoint that would prove "users.track"
+ * permission on a scoped key, so validateCredentials sends a real, tagged
+ * probe event to a single, stable, deletable profile
+ * (external_id = "rovenue-credential-probe"). Unlike AMPLITUDE/MIXPANEL's
+ * insert_id dedup, Braze counts this profile once toward Monthly Active
+ * Users on creation — it does NOT create a new profile or event on repeat
+ * "Validate" clicks (both the external_id and the event name are stable
+ * constants), so re-validating never adds another MAU. See
+ * providers/braze.ts's validateCredentials comment and
+ * apps/docs/content/docs/integrations/braze.mdx.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:
@@ -212,6 +224,8 @@ export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   // reading as proof the connection works.
   FIREBASE_GA4:
     "Validate checks the payload format only — it cannot verify the api_secret or app ID are correct. The first real delivery is the live proof.",
+  BRAZE:
+    "Validate sends a real, clearly-tagged test event to a single reusable Braze profile (deduplicated across repeat clicks — it does not create a new profile or MAU each time).",
 };
 
 // ---------------------------------------------------------------------------
