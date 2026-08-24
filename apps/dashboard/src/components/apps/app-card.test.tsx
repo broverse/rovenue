@@ -49,6 +49,33 @@ describe("AppCard — M6.11", () => {
     expect(onOpenIntegration).toHaveBeenCalledWith("meta-capi");
   });
 
+  it("clicking amplitude card calls onOpenIntegration with 'amplitude'", async () => {
+    const user = userEvent.setup();
+    const onOpenIntegration = vi.fn();
+    const AMPLITUDE_APP: AppDescriptor = {
+      id: "amplitude",
+      category: "analytics",
+      vendorKey: "amplitude",
+      logo: { background: "#0148FE", glyph: "A" },
+      status: "available",
+    };
+
+    const { container } = renderWithRouter(
+      <AppCard app={AMPLITUDE_APP} onOpenIntegration={onOpenIntegration} />,
+    );
+
+    await waitFor(() => {
+      const article = container.querySelector("article");
+      expect(article).toBeTruthy();
+    });
+
+    const article = container.querySelector("article")!;
+    await user.click(article);
+
+    expect(onOpenIntegration).toHaveBeenCalledOnce();
+    expect(onOpenIntegration).toHaveBeenCalledWith("amplitude");
+  });
+
   it("clicking unavailable snapchat-ads card does NOT call onOpenIntegration", async () => {
     const user = userEvent.setup();
     const onOpenIntegration = vi.fn();

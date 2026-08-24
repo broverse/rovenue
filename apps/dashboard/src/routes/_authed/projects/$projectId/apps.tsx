@@ -34,14 +34,18 @@ import {
 } from "../../../../lib/hooks/useProjectIntegrations";
 import type { AppConnectionRow } from "@rovenue/shared";
 
-// CUSTOM_WEBHOOK is deliberately absent here — unlike these two, it allows
+// CUSTOM_WEBHOOK is deliberately absent here — unlike these, it allows
 // several connections per project, so it has no single "open the drawer
 // for this provider" entry point. It's opened only via the card's own
 // per-row Edit / "Add endpoint" actions (handleEditWebhookConnection /
 // handleAddWebhookEndpoint below), never via handleOpenIntegration.
-const CARD_ID_TO_PROVIDER: Record<string, "META_CAPI" | "TIKTOK_EVENTS"> = {
+const CARD_ID_TO_PROVIDER: Record<
+  string,
+  Exclude<IntegrationProviderId, "CUSTOM_WEBHOOK">
+> = {
   "meta-capi": "META_CAPI",
   "tiktok-events": "TIKTOK_EVENTS",
+  amplitude: "AMPLITUDE",
 };
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({

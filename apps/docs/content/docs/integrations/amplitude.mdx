@@ -1,0 +1,95 @@
+---
+title: Amplitude
+description: Forward Rovenue revenue and subscription-lifecycle events to Amplitude for funnel, retention, and cohort analysis.
+---
+
+# Amplitude
+
+The Amplitude integration forwards Rovenue revenue events (purchases, trial conversions, renewals, refunds, cancellations) and subscription-lifecycle events (trials, grace period, billing issues, plan changes) to Amplitude's HTTP API v2, so subscription behavior shows up alongside the rest of your product analytics.
+
+---
+
+## 1. Get your API key from Amplitude
+
+1. Open your Amplitude project's **Settings → Projects**.
+2. Select the project you want Rovenue events to land in.
+3. Copy the **API Key** shown under **General**.
+4. Note your project's **data residency** (US or EU) — it's set at project creation and shown on the same settings page.
+
+> The API key only grants event-ingestion write access; it is not a secret in the same sense as an API secret key, but treat it as sensitive.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Amplitude** under **Product analytics** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **API key** — paste the API key from step 1.
+   - **Region** — `us` (default) or `eu`, matching your project's data residency. Leave blank for `us`.
+4. Click **Validate** — Rovenue sends a minimal, clearly-tagged probe event (`[Rovenue] Credential Check`) to Amplitude's ingestion endpoint to confirm the API key is accepted.
+5. Choose which events to forward, optionally override the default vendor event names, then activate.
+
+---
+
+## 3. Event mapping
+
+Amplitude has no built-in "purchase" event — Rovenue's public event keys are forwarded as your Amplitude `event_type`, using the following default names (overridable per-connection in the drawer's mapping step):
+
+| Rovenue event key | Amplitude `event_type` |
+|---|---|
+| `revenue.INITIAL` | `purchase_initial` |
+| `revenue.TRIAL_CONVERSION` | `trial_conversion` |
+| `revenue.RENEWAL` | `renewal` |
+| `revenue.CREDIT_PURCHASE` | `credit_purchase` |
+| `revenue.REFUND` | `refund` |
+| `revenue.CANCELLATION` | `cancellation` |
+| `subscription.trial.started` | `trial_started` |
+| `subscription.cancel_requested` | `cancel_requested` |
+| `subscription.expired` | `subscription_expired` |
+| `subscription.billing_issue` | `billing_issue` |
+| `subscription.grace_period` | `grace_period` |
+| `subscription.uncancelled` | `uncancelled` |
+| `subscription.product_changed` | `product_changed` |
+
+Every forwarded event carries `event_properties.rovenue_event` set to the original Rovenue event key (e.g. `revenue.RENEWAL`), so you can always trace an Amplitude event back to its Rovenue source regardless of how the vendor event name has been overridden, plus `event_properties.product_id`.
+
+### Revenue fields
+
+For the six `revenue.*` keys only, Rovenue also populates Amplitude's [revenue-tracking fields](https://amplitude.com/docs/apis/analytics/http-v2): `revenue`, `price` (both equal to the event's amount), `quantity` (always `1`), `revenueType` (set to the Rovenue event key), and `currency`. Subscription-lifecycle events never carry these fields — they represent no money movement.
+
+**`revenue.REFUND` is sent with a NEGATIVE `revenue`/`price`**, per Amplitude's own convention for representing refunds in revenue reports. Rovenue's internal ledger always stores refund amounts as positive; the sign flip happens only at the Amplitude wire boundary.
+
+---
+
+## 4. Identity resolution
+
+Amplitude requires either a `user_id` or a `device_id` on every event. Rovenue resolves `user_id` using this fallback chain, in order:
+
+1. `$amplitudeUserId` — the subscriber attribute you should set once you've called Amplitude's own `identify()`/`setUserId()` on the client, so revenue events join the correct identified Amplitude user.
+2. `appUserId` — your app's own subscriber id, if the subscriber has one.
+3. The Rovenue-internal subscriber id, as a last resort so revenue is never silently dropped for lack of an explicit Amplitude identity.
+
+`device_id` is populated only from `$amplitudeDeviceId`, and omitted otherwise (Amplitude derives its own hashed device id from `user_id` when `device_id` is absent).
+
+Set these via the SDK's `setAttributes` call. See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference, including `$amplitudeUserId` and `$amplitudeDeviceId`.
+
+If neither `$amplitudeUserId`, `appUserId`, nor a subscriber id is available, the event is skipped with reason `no_user_data` (visible in the connection's Delivery Log).
+
+---
+
+## 5. Deduplication
+
+Every forwarded event carries `insert_id` set to Rovenue's internal `outboxEventId`. Amplitude ignores subsequent events with the same `insert_id` on the same `device_id` within a 7-day window, so retries after a network failure or an at-least-once outbox replay do not double-count revenue.
+
+---
+
+## 6. Verify events are arriving
+
+1. Open your project in the Amplitude web app and use **User Lookup** or a live funnel/chart filtered to one of the vendor event names above.
+2. Trigger a real event from your app (a renewal, a trial start, etc.) — Amplitude typically shows events within a minute.
+3. If events are not appearing:
+   - Verify the API key and region are correct (use **Validate** in the drawer — a `us`/`eu` mismatch sends events to the wrong data center, where they will never appear).
+   - Check **Apps → Amplitude → Delivery Log** in Rovenue for HTTP status codes and error messages.
+   - Ensure the event type you're sending is included in the connection's enabled events.
+   - A `400` response with `"Invalid API key"` means the credentials are wrong or belong to a different Amplitude project than you expect.

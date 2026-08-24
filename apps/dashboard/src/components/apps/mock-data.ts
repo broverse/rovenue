@@ -1,4 +1,4 @@
-import { CircleCheck, LayoutGrid, Megaphone } from "lucide-react";
+import { BarChart3, CircleCheck, LayoutGrid, Megaphone } from "lucide-react";
 import type { AppDescriptor, CategoryId, RailEntry } from "./types";
 
 /** Catalog id for the CUSTOM_WEBHOOK provider's card (Task 12). Distinct
@@ -10,12 +10,13 @@ export const CUSTOM_WEBHOOK_APP_ID = "custom-webhook";
 /**
  * Static catalog of integrations Rovenue ships with.
  *
- * Currently only the two outbound ad-platform integrations plus the
- * generic outgoing-webhook provider are wired end-to-end (M0–M9 plan,
- * branch `feat/integrations-meta-tiktok`, extended by Task 12). Other
- * surfaces — attribution, analytics, lifecycle, etc. — are out of scope
- * for the first integrations release. When a new provider lands, add it
- * here with its own `custom` brand mark in `app-logo.tsx`.
+ * The two outbound ad-platform integrations plus the generic
+ * outgoing-webhook provider were the first wired end-to-end (M0–M9 plan,
+ * branch `feat/integrations-meta-tiktok`, extended by Task 12); AMPLITUDE
+ * (Wave-1 Task 5) is the first `analytics`-category entry. Other surfaces —
+ * attribution, lifecycle, etc. — are still out of scope. When a new
+ * provider lands, add it here with its own `custom` brand mark in
+ * `app-logo.tsx` if it needs a vector logo instead of a glyph.
  */
 export const APPS: ReadonlyArray<AppDescriptor> = [
   {
@@ -58,6 +59,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "amplitude",
+    category: "analytics",
+    vendorKey: "amplitude",
+    logo: {
+      // Amplitude brand blue.
+      background: "#0148FE",
+      glyph: "A",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
@@ -65,9 +79,10 @@ export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
   { kind: "item", id: "connected", icon: CircleCheck },
   { kind: "section", labelKey: "byUseCase" },
   { kind: "item", id: "ads", icon: Megaphone },
+  { kind: "item", id: "analytics", icon: BarChart3 },
 ];
 
-export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = ["ads"];
+export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = ["ads", "analytics"];
 
 /** Public documentation site — linked from the docs / API-reference CTAs. */
 export const DOCS_URL = "https://docs.rovenue.io";

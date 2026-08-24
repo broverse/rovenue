@@ -92,8 +92,16 @@ const DEFAULT_STEPS: DrawerStep[] = [
 
 const WEBHOOK_STEPS: DrawerStep[] = ["credentials", "events", "activate"];
 
+// AMPLITUDE has no vendor "Events Manager" / test_event_code concept (that's
+// specific to Meta CAPI / TikTok Events' ad-platform test-event tooling —
+// see StepTest), so its wizard skips "test" but keeps "mapping" (AMPLITUDE
+// does have a per-event default vendor name that a user may want to
+// override, unlike CUSTOM_WEBHOOK's WEBHOOK_STEPS).
+const AMPLITUDE_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
+  AMPLITUDE: AMPLITUDE_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -108,6 +116,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   META_CAPI: "Meta Conversions API",
   TIKTOK_EVENTS: "TikTok Events API",
   CUSTOM_WEBHOOK: "Custom Webhook",
+  AMPLITUDE: "Amplitude",
 };
 
 // ---------------------------------------------------------------------------
@@ -139,10 +148,11 @@ export function IntegrationDrawer({
   const STEPS = STEPS_BY_PROVIDER[providerId] ?? DEFAULT_STEPS;
   const isWebhook = providerId === "CUSTOM_WEBHOOK";
   // Narrowed directly off `providerId` (not off the `isWebhook` boolean) so
-  // TS actually excludes "CUSTOM_WEBHOOK" from the type — the ad-provider-
-  // only step components (StepCredentials/StepMapping/StepTest) declare a
-  // 2-way providerId union and won't accept the full 3-way one.
-  const adProviderId: "META_CAPI" | "TIKTOK_EVENTS" | null =
+  // TS actually excludes "CUSTOM_WEBHOOK" from the type — every non-webhook
+  // provider (META_CAPI/TIKTOK_EVENTS/AMPLITUDE, and Tasks 6-10's) shares
+  // this single-connection wizard branch below, each picking its own
+  // subset of steps via STEPS_BY_PROVIDER.
+  const adProviderId: Exclude<IntegrationProviderId, "CUSTOM_WEBHOOK"> | null =
     providerId === "CUSTOM_WEBHOOK" ? null : providerId;
 
   const currentStepIndex = STEPS.indexOf(state.step);

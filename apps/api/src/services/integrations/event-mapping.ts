@@ -54,6 +54,24 @@ export const DEFAULT_EVENT_MAPPING: Record<
   CUSTOM_WEBHOOK: {
     // CUSTOM_WEBHOOK has no default event mappings; user configures all via dashboard.
   },
+  // Kept in sync with providers/amplitude.ts's own `defaultEventMapping`
+  // export (which the dashboard drawer reads) — see that file for the
+  // rationale behind each vendor event name.
+  AMPLITUDE: {
+    "revenue.INITIAL": "purchase_initial",
+    "revenue.TRIAL_CONVERSION": "trial_conversion",
+    "revenue.RENEWAL": "renewal",
+    "revenue.CREDIT_PURCHASE": "credit_purchase",
+    "revenue.REFUND": "refund",
+    "revenue.CANCELLATION": "cancellation",
+    "subscription.trial.started": "trial_started",
+    "subscription.cancel_requested": "cancel_requested",
+    "subscription.expired": "subscription_expired",
+    "subscription.billing_issue": "billing_issue",
+    "subscription.grace_period": "grace_period",
+    "subscription.uncancelled": "uncancelled",
+    "subscription.product_changed": "product_changed",
+  },
 };
 
 export type ApplyEventMappingInput = {

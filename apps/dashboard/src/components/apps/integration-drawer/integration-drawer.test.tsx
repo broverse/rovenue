@@ -52,4 +52,22 @@ describe("IntegrationDrawer shell", () => {
     // 3-step wizard (credentials/events/activate), not the 5-step ad flow.
     expect(screen.getByText(/step 1 of 3/i)).toBeTruthy();
   });
+
+  it("AMPLITUDE drawer renders a 4-step wizard (no vendor Events Manager test step)", async () => {
+    renderWithRouter(
+      <IntegrationDrawer
+        open={true}
+        onClose={vi.fn()}
+        projectId="p1"
+        providerId="AMPLITUDE"
+        existingConnection={null}
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeTruthy();
+    // credentials/events/mapping/activate — "test" is Meta/TikTok-specific.
+    expect(screen.getByText(/step 1 of 4/i)).toBeTruthy();
+    expect(await screen.findByLabelText(/api key/i)).toBeTruthy();
+  });
 });

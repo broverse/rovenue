@@ -13,15 +13,22 @@ interface StepTestProps {
   onNext: () => void;
   onBack: () => void;
   existingConnection: { id: string } | null;
-  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  // Widened to `string` on purpose (mirrors step-credentials.tsx): only
+  // META_CAPI/TIKTOK_EVENTS ever reach this step today (STEPS_BY_PROVIDER
+  // omits "test" for every other provider — AMPLITUDE has no vendor
+  // "Events Manager" / test_event_code concept), but the drawer's shared
+  // `adProviderId` covers every non-CUSTOM_WEBHOOK provider.
+  providerId: string;
   projectId: string;
 }
 
 // ---------------------------------------------------------------------------
-// Provider Events Manager URLs
+// Provider Events Manager URLs — only the two ad platforms that have one;
+// EVENTS_MANAGER_URLS[providerId] is `undefined` for anything else, and the
+// external link below is simply omitted in that case.
 // ---------------------------------------------------------------------------
 
-const EVENTS_MANAGER_URLS: Record<"META_CAPI" | "TIKTOK_EVENTS", string> = {
+const EVENTS_MANAGER_URLS: Partial<Record<string, string>> = {
   META_CAPI: "https://business.facebook.com/events_manager",
   TIKTOK_EVENTS: "https://ads.tiktok.com/i18n/events_manager",
 };
@@ -111,16 +118,18 @@ export function StepTest({
         </p>
       )}
 
-      {/* External link to Events Manager */}
-      <a
-        href={eventsManagerUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-1.5 text-[12px] text-rv-accent-500 hover:underline"
-      >
-        Open Events Manager
-        <ExternalLink size={11} />
-      </a>
+      {/* External link to Events Manager — only for providers that have one */}
+      {eventsManagerUrl && (
+        <a
+          href={eventsManagerUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 text-[12px] text-rv-accent-500 hover:underline"
+        >
+          Open Events Manager
+          <ExternalLink size={11} />
+        </a>
+      )}
 
       {/* Navigation */}
       <div className="flex items-center gap-2">

@@ -13,7 +13,11 @@ interface StepMappingProps {
   onNext: () => void;
   onBack: () => void;
   existingConnection: { id: string } | null;
-  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  // Widened to `string` on purpose (mirrors step-credentials.tsx): this
+  // component doesn't branch on the concrete provider id at all, so any
+  // non-CUSTOM_WEBHOOK provider (META_CAPI/TIKTOK_EVENTS/AMPLITUDE, and
+  // Tasks 6-10's) can render it unchanged.
+  providerId: string;
   projectId: string;
 }
 

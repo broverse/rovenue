@@ -3,18 +3,20 @@ import { PROVIDERS, getProvider, providerIds, fanoutTopics } from "./registry";
 import { metaCapiProvider } from "./providers/meta-capi";
 import { tiktokEventsProvider } from "./providers/tiktok-events";
 import { customWebhookProvider } from "./providers/custom-webhook";
+import { amplitudeProvider } from "./providers/amplitude";
 import type { ProviderId } from "./types";
 
 describe("PROVIDERS registry", () => {
-  it("contains exactly META_CAPI, TIKTOK_EVENTS and CUSTOM_WEBHOOK", () => {
+  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK and AMPLITUDE", () => {
     const keys = Object.keys(PROVIDERS).sort();
-    expect(keys).toEqual(["CUSTOM_WEBHOOK", "META_CAPI", "TIKTOK_EVENTS"]);
+    expect(keys).toEqual(["AMPLITUDE", "CUSTOM_WEBHOOK", "META_CAPI", "TIKTOK_EVENTS"]);
   });
 
   it("getProvider returns the matching module", () => {
     expect(getProvider("META_CAPI")).toBe(metaCapiProvider);
     expect(getProvider("TIKTOK_EVENTS")).toBe(tiktokEventsProvider);
     expect(getProvider("CUSTOM_WEBHOOK")).toBe(customWebhookProvider);
+    expect(getProvider("AMPLITUDE")).toBe(amplitudeProvider);
   });
 
   it("throws on unknown provider", () => {
@@ -29,11 +31,12 @@ describe("PROVIDERS registry", () => {
 // =============================================================
 
 describe("providerIds()", () => {
-  it("contains META_CAPI, TIKTOK_EVENTS and CUSTOM_WEBHOOK", () => {
+  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK and AMPLITUDE", () => {
     const ids = providerIds();
     expect(ids).toContain("META_CAPI");
     expect(ids).toContain("TIKTOK_EVENTS");
     expect(ids).toContain("CUSTOM_WEBHOOK");
+    expect(ids).toContain("AMPLITUDE");
   });
 
   it("returns a non-empty tuple usable by z.enum", () => {

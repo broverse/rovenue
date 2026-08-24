@@ -42,6 +42,27 @@ export const ALL_EVENT_KEYS = [
   "subscriber.identified",
 ] as const;
 
+// Mirrors apps/api/src/services/integrations/providers/amplitude.ts's
+// `eventCatalog` — the 13-key Wave-1 revenue + subscription-lifecycle set
+// AMPLITUDE supports (a superset of the two ad-providers' list above: it
+// adds REFUND/CANCELLATION plus the six non-trial subscription-lifecycle
+// keys, and drops subscriber.identified, which AMPLITUDE has no mapping for).
+const AMPLITUDE_EVENT_KEYS = [
+  "revenue.INITIAL",
+  "revenue.TRIAL_CONVERSION",
+  "revenue.RENEWAL",
+  "revenue.CREDIT_PURCHASE",
+  "revenue.REFUND",
+  "revenue.CANCELLATION",
+  "subscription.trial.started",
+  "subscription.cancel_requested",
+  "subscription.expired",
+  "subscription.billing_issue",
+  "subscription.grace_period",
+  "subscription.uncancelled",
+  "subscription.product_changed",
+] as const;
+
 // CUSTOM_WEBHOOK has no per-event allowlist on the backend — its
 // `eventCatalog` is `ROVENUE_EVENT_KEYS` in full (custom-webhook.ts) — so
 // the picker offers every public event key rather than the ad-providers'
@@ -50,6 +71,7 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   META_CAPI: ALL_EVENT_KEYS,
   TIKTOK_EVENTS: ALL_EVENT_KEYS,
   CUSTOM_WEBHOOK: ROVENUE_EVENT_KEYS,
+  AMPLITUDE: AMPLITUDE_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

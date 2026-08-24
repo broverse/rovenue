@@ -2,11 +2,13 @@ import type { FanoutTopic, IntegrationProvider, ProviderId } from "./types";
 import { metaCapiProvider } from "./providers/meta-capi";
 import { tiktokEventsProvider } from "./providers/tiktok-events";
 import { customWebhookProvider } from "./providers/custom-webhook";
+import { amplitudeProvider } from "./providers/amplitude";
 
 export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   META_CAPI: metaCapiProvider,
   TIKTOK_EVENTS: tiktokEventsProvider,
   CUSTOM_WEBHOOK: customWebhookProvider,
+  AMPLITUDE: amplitudeProvider,
 };
 
 export function getProvider(id: ProviderId): IntegrationProvider {

@@ -26,6 +26,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   META_CAPI: "Meta Conversions API",
   TIKTOK_EVENTS: "TikTok Events API",
   CUSTOM_WEBHOOK: "Custom Webhook",
+  AMPLITUDE: "Amplitude",
 };
 
 // ---------------------------------------------------------------------------
