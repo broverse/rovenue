@@ -2,18 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRouter } from "../../../tests/render";
-import { AppCard, MAX_WEBHOOK_ENDPOINTS_PER_PROJECT } from "./app-card";
-import { CUSTOM_WEBHOOK_APP_ID } from "./mock-data";
+import { AppCard, DRAWER_IDS, MAX_WEBHOOK_ENDPOINTS_PER_PROJECT } from "./app-card";
+import { APPS, CUSTOM_WEBHOOK_APP_ID } from "./mock-data";
 import type { AppDescriptor } from "./types";
 import type { IntegrationConnectionRow } from "../../lib/hooks/useProjectIntegrations";
 
-const META_CAPI_APP: AppDescriptor = {
-  id: "meta-capi",
-  category: "ads",
-  vendorKey: "meta",
-  logo: { background: "#1877F2", glyph: "M" },
-  status: "available",
-};
+/** Every drawer-opening catalog card, taken from the SHIPPED catalog rather
+ *  than hand-written fixtures — a provider added to DRAWER_IDS without a
+ *  catalog entry, or a catalog entry whose click handler regresses, fails
+ *  here instead of shipping an inert card (the Slack card shipped inert
+ *  precisely because the click tests sampled 6 of the 8 drawer ids). */
+const DRAWER_APPS: ReadonlyArray<AppDescriptor> = APPS.filter((app) =>
+  DRAWER_IDS.has(app.id),
+);
 
 const SNAPCHAT_UNAVAILABLE_APP: AppDescriptor = {
   id: "snapchat-ads",
@@ -25,164 +26,33 @@ const SNAPCHAT_UNAVAILABLE_APP: AppDescriptor = {
 };
 
 describe("AppCard — M6.11", () => {
-  it("clicking meta-capi card calls onOpenIntegration with 'meta-capi'", async () => {
-    const user = userEvent.setup();
-    const onOpenIntegration = vi.fn();
-
-    const { container } = renderWithRouter(
-      <AppCard
-        app={META_CAPI_APP}
-        onOpenIntegration={onOpenIntegration}
-      />,
-    );
-
-    // Wait for component to render (the article element)
-    await waitFor(() => {
-      const article = container.querySelector("article");
-      expect(article).toBeTruthy();
-    });
-
-    const article = container.querySelector("article")!;
-    await user.click(article);
-
-    expect(onOpenIntegration).toHaveBeenCalledOnce();
-    expect(onOpenIntegration).toHaveBeenCalledWith("meta-capi");
+  it("every drawer id has a catalog card to click", () => {
+    expect(new Set(DRAWER_APPS.map((app) => app.id))).toEqual(new Set(DRAWER_IDS));
   });
 
-  it("clicking amplitude card calls onOpenIntegration with 'amplitude'", async () => {
-    const user = userEvent.setup();
-    const onOpenIntegration = vi.fn();
-    const AMPLITUDE_APP: AppDescriptor = {
-      id: "amplitude",
-      category: "analytics",
-      vendorKey: "amplitude",
-      logo: { background: "#0148FE", glyph: "A" },
-      status: "available",
-    };
+  it.each(DRAWER_APPS.map((app) => [app.id, app] as const))(
+    "clicking the %s card calls onOpenIntegration with its id",
+    async (id, app) => {
+      const user = userEvent.setup();
+      const onOpenIntegration = vi.fn();
 
-    const { container } = renderWithRouter(
-      <AppCard app={AMPLITUDE_APP} onOpenIntegration={onOpenIntegration} />,
-    );
+      const { container } = renderWithRouter(
+        <AppCard app={app} onOpenIntegration={onOpenIntegration} />,
+      );
 
-    await waitFor(() => {
-      const article = container.querySelector("article");
-      expect(article).toBeTruthy();
-    });
+      // Wait for component to render (the article element)
+      await waitFor(() => {
+        const article = container.querySelector("article");
+        expect(article).toBeTruthy();
+      });
 
-    const article = container.querySelector("article")!;
-    await user.click(article);
+      const article = container.querySelector("article")!;
+      await user.click(article);
 
-    expect(onOpenIntegration).toHaveBeenCalledOnce();
-    expect(onOpenIntegration).toHaveBeenCalledWith("amplitude");
-  });
-
-  it("clicking mixpanel card calls onOpenIntegration with 'mixpanel'", async () => {
-    const user = userEvent.setup();
-    const onOpenIntegration = vi.fn();
-    const MIXPANEL_APP: AppDescriptor = {
-      id: "mixpanel",
-      category: "analytics",
-      vendorKey: "mixpanel",
-      logo: { background: "#7856FF", glyph: "M" },
-      status: "available",
-    };
-
-    const { container } = renderWithRouter(
-      <AppCard app={MIXPANEL_APP} onOpenIntegration={onOpenIntegration} />,
-    );
-
-    await waitFor(() => {
-      const article = container.querySelector("article");
-      expect(article).toBeTruthy();
-    });
-
-    const article = container.querySelector("article")!;
-    await user.click(article);
-
-    expect(onOpenIntegration).toHaveBeenCalledOnce();
-    expect(onOpenIntegration).toHaveBeenCalledWith("mixpanel");
-  });
-
-  it("clicking appsflyer card calls onOpenIntegration with 'appsflyer'", async () => {
-    const user = userEvent.setup();
-    const onOpenIntegration = vi.fn();
-    const APPSFLYER_APP: AppDescriptor = {
-      id: "appsflyer",
-      category: "attribution",
-      vendorKey: "appsflyer",
-      logo: { background: "#0F1F41", glyph: "AF" },
-      status: "available",
-    };
-
-    const { container } = renderWithRouter(
-      <AppCard app={APPSFLYER_APP} onOpenIntegration={onOpenIntegration} />,
-    );
-
-    await waitFor(() => {
-      const article = container.querySelector("article");
-      expect(article).toBeTruthy();
-    });
-
-    const article = container.querySelector("article")!;
-    await user.click(article);
-
-    expect(onOpenIntegration).toHaveBeenCalledOnce();
-    expect(onOpenIntegration).toHaveBeenCalledWith("appsflyer");
-  });
-
-  it("clicking adjust card calls onOpenIntegration with 'adjust'", async () => {
-    const user = userEvent.setup();
-    const onOpenIntegration = vi.fn();
-    const ADJUST_APP: AppDescriptor = {
-      id: "adjust",
-      category: "attribution",
-      vendorKey: "adjust",
-      logo: { background: "#EC1C50", glyph: "AJ" },
-      status: "available",
-    };
-
-    const { container } = renderWithRouter(
-      <AppCard app={ADJUST_APP} onOpenIntegration={onOpenIntegration} />,
-    );
-
-    await waitFor(() => {
-      const article = container.querySelector("article");
-      expect(article).toBeTruthy();
-    });
-
-    const article = container.querySelector("article")!;
-    await user.click(article);
-
-    expect(onOpenIntegration).toHaveBeenCalledOnce();
-    expect(onOpenIntegration).toHaveBeenCalledWith("adjust");
-  });
-
-  it("clicking firebase-ga4 card calls onOpenIntegration with 'firebase-ga4'", async () => {
-    const user = userEvent.setup();
-    const onOpenIntegration = vi.fn();
-    const FIREBASE_GA4_APP: AppDescriptor = {
-      id: "firebase-ga4",
-      category: "analytics",
-      vendorKey: "google",
-      logo: { background: "#FFA000", glyph: "F" },
-      status: "available",
-    };
-
-    const { container } = renderWithRouter(
-      <AppCard app={FIREBASE_GA4_APP} onOpenIntegration={onOpenIntegration} />,
-    );
-
-    await waitFor(() => {
-      const article = container.querySelector("article");
-      expect(article).toBeTruthy();
-    });
-
-    const article = container.querySelector("article")!;
-    await user.click(article);
-
-    expect(onOpenIntegration).toHaveBeenCalledOnce();
-    expect(onOpenIntegration).toHaveBeenCalledWith("firebase-ga4");
-  });
+      expect(onOpenIntegration).toHaveBeenCalledOnce();
+      expect(onOpenIntegration).toHaveBeenCalledWith(id);
+    },
+  );
 
   it("clicking unavailable snapchat-ads card does NOT call onOpenIntegration", async () => {
     const user = userEvent.setup();

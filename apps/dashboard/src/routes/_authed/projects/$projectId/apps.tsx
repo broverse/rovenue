@@ -39,7 +39,13 @@ import type { AppConnectionRow } from "@rovenue/shared";
 // for this provider" entry point. It's opened only via the card's own
 // per-row Edit / "Add endpoint" actions (handleEditWebhookConnection /
 // handleAddWebhookEndpoint below), never via handleOpenIntegration.
-const CARD_ID_TO_PROVIDER: Record<
+//
+// Exported so apps.test.tsx can assert it stays in step with app-card.tsx's
+// `DRAWER_IDS`: a card id in only one of the two is a dead end (in DRAWER_IDS
+// only → the drawer opens for a provider this map can't resolve; here only →
+// the card never opens the drawer at all, which is how the SLACK card
+// shipped inert).
+export const CARD_ID_TO_PROVIDER: Record<
   string,
   Exclude<IntegrationProviderId, "CUSTOM_WEBHOOK">
 > = {

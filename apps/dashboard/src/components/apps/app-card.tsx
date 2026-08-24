@@ -7,7 +7,23 @@ import { CUSTOM_WEBHOOK_APP_ID } from "./mock-data";
 import type { AppDescriptor } from "./types";
 import type { IntegrationConnectionRow } from "../../lib/hooks/useProjectIntegrations";
 
-const DRAWER_IDS = new Set(["meta-capi", "tiktok-events", "amplitude", "mixpanel", "appsflyer", "adjust", "firebase-ga4"]);
+/** Catalog card ids that open the integration drawer on click. MUST stay in
+ *  step with `CARD_ID_TO_PROVIDER` in routes/_authed/projects/$projectId/
+ *  apps.tsx: card-click is the ONLY drawer entry point (the footer
+ *  Connect/Configure button's `onSelect` is not wired to the drawer), so a
+ *  provider missing here is unreachable from the dashboard even with a
+ *  complete backend + drawer. Exported so app-card.test.tsx can assert a
+ *  click test exists for every id rather than sampling a few. */
+export const DRAWER_IDS: ReadonlySet<string> = new Set([
+  "meta-capi",
+  "tiktok-events",
+  "amplitude",
+  "mixpanel",
+  "appsflyer",
+  "adjust",
+  "slack",
+  "firebase-ga4",
+]);
 
 // Mirrors apps/api/src/routes/dashboard/integrations.ts's
 // `MAX_WEBHOOK_ENDPOINTS_PER_PROJECT`. Duplicated here because dashboard

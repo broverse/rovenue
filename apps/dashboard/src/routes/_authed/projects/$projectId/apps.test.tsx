@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithRouter } from "../../../../../tests/render";
-import { AppsPage } from "./apps";
+import { AppsPage, CARD_ID_TO_PROVIDER } from "./apps";
+import { DRAWER_IDS } from "../../../../components/apps/app-card";
 import type { IntegrationConnectionRow } from "../../../../lib/hooks/useProjectIntegrations";
 
 // =============================================================
@@ -87,5 +88,20 @@ describe("AppsPage — CUSTOM_WEBHOOK connected status", () => {
     ]);
 
     expect(await screen.findByText(/your connected apps/i)).toBeInTheDocument();
+  });
+});
+
+// =============================================================
+// Drawer routing invariant — CARD_ID_TO_PROVIDER ↔ DRAWER_IDS
+// =============================================================
+//
+// Regression guard for the inert SLACK card: the provider had a complete
+// backend, drawer steps and catalog entry, and was listed here, but was
+// missing from app-card.tsx's DRAWER_IDS — the only thing that makes a card
+// clickable — so it could never be connected from the dashboard. Neither
+// side's own tests could see the mismatch; this one does.
+describe("AppsPage — drawer routing coverage", () => {
+  it("CARD_ID_TO_PROVIDER and DRAWER_IDS cover exactly the same card ids", () => {
+    expect(new Set(Object.keys(CARD_ID_TO_PROVIDER))).toEqual(new Set(DRAWER_IDS));
   });
 });
