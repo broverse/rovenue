@@ -668,6 +668,101 @@ describe.sequential("GET /projects/:projectId/integrations/:id/secret", () => {
 });
 
 // =============================================================
+// (e2) PATCH — webhook credentials are url-only
+// =============================================================
+//
+// The signing keys are server-owned: minted on create, replaced only via
+// rotate-secret (which stamps the rotation grace and audits the change).
+// PATCH must not become a side door for installing an arbitrary key.
+
+describe.sequential("PATCH /projects/:projectId/integrations/:id — webhook credentials", () => {
+  it("rejects a client-supplied secrets array and leaves the stored secret untouched", async () => {
+    const { userId, cookie } = await createUserAndSession("patch_secrets");
+    const projectId = await seedProject("patch_secrets");
+    await addMember(projectId, userId, "ADMIN");
+
+    const app = buildApp();
+    const created = await createWebhook(app, projectId, cookie, "https://example.com/patch-secrets");
+    const { data: createData } = (await created.json()) as {
+      data: { connection: { id: string }; secret: string };
+    };
+    const connectionId = createData.connection.id;
+
+    const res = await app.request(`/projects/${projectId}/integrations/${connectionId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        credentials: {
+          url: "https://example.com/patch-secrets",
+          secrets: JSON.stringify([
+            { id: "attacker", key: "whsec_YXR0YWNrZXJrZXk=", createdAt: new Date().toISOString() },
+          ]),
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+
+    const [row] = await db
+      .select()
+      .from(drizzle.schema.integrationConnections)
+      .where(eq(drizzle.schema.integrationConnections.id, connectionId));
+    const { secrets } = parseWebhookCredentials(
+      JSON.parse(decrypt(row!.credentialsCipher, TEST_ENC_KEY)) as Record<string, string>,
+    );
+    expect(secrets.map((s) => s.key)).toEqual([createData.secret]);
+  });
+
+  it("allows a url-only credentials patch, re-validated through the SSRF guard", async () => {
+    const { userId, cookie } = await createUserAndSession("patch_url");
+    const projectId = await seedProject("patch_url");
+    await addMember(projectId, userId, "ADMIN");
+
+    const app = buildApp();
+    const created = await createWebhook(app, projectId, cookie, "https://example.com/patch-url");
+    const { data: createData } = (await created.json()) as {
+      data: { connection: { id: string }; secret: string };
+    };
+    const connectionId = createData.connection.id;
+
+    const ok = await app.request(`/projects/${projectId}/integrations/${connectionId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ credentials: { url: "https://example.com/patched" } }),
+    });
+    expect(ok.status).toBe(200);
+
+    const [row] = await db
+      .select()
+      .from(drizzle.schema.integrationConnections)
+      .where(eq(drizzle.schema.integrationConnections.id, connectionId));
+    const creds = JSON.parse(decrypt(row!.credentialsCipher, TEST_ENC_KEY)) as Record<
+      string,
+      string
+    >;
+    const { url, secrets } = parseWebhookCredentials(creds);
+    expect(url).toBe("https://example.com/patched");
+    // The server-owned secret survives a url patch unchanged.
+    expect(secrets.map((s) => s.key)).toEqual([createData.secret]);
+
+    // The SSRF guard still runs on a PATCHed url. (Private/loopback targets
+    // are deliberately allowed outside production — see ALLOW_PRIVATE_TARGETS
+    // — so this probes a rule that holds in every environment: embedded
+    // userinfo.)
+    const blocked = await app.request(`/projects/${projectId}/integrations/${connectionId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ credentials: { url: "https://user:pass@example.com/hook" } }),
+    });
+    expect(blocked.status).toBe(400);
+    const blockedBody = (await blocked.json()) as { error: { code: string } };
+    expect(blockedBody.error.code).toBe("invalid_credentials");
+  });
+});
+
+// =============================================================
 // (f) manual redeliver — Task 10
 // =============================================================
 

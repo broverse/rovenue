@@ -140,6 +140,12 @@ const WEBHOOK_ENDPOINT_CAP_LOCK_PREFIX = "webhook-endpoint-cap:";
 // than silently ignored.
 const webhookCreateCredentialsBody = z.object({ url: z.string().min(1) }).strict();
 
+// Same reasoning for PATCH: the stored `secrets` array is server-owned and
+// only POST /:id/rotate-secret may change it, so a webhook connection's
+// patchable credentials are exactly `{ url }` — anything else is rejected,
+// not merged.
+const webhookPatchCredentialsBody = z.object({ url: z.string().min(1) }).strict();
+
 // =============================================================
 // Zod schemas
 // =============================================================
@@ -806,9 +812,45 @@ export const integrationsRoute = new Hono()
       const existingCreds = JSON.parse(
         decrypt(existing.credentialsCipher, encKey),
       ) as Record<string, string>;
-      const mergedCreds = { ...existingCreds, ...body.credentials };
 
       const provider = getProvider(existing.providerId as ProviderId);
+
+      // For webhook connections the SERVER owns the signing keys: they are
+      // minted on create and replaced only via POST /:id/rotate-secret,
+      // which stamps the rotation grace and audits the change. Accepting a
+      // client-supplied `secrets` array here would let an ADMIN install an
+      // arbitrary (or shared, or attacker-chosen) signing key behind the
+      // rotation audit trail, and could silently strip the grace stamps off
+      // keys still in their window. Only `url` is patchable, and it is
+      // re-validated through the same SSRF guard as create.
+      if (provider.allowMultipleConnections) {
+        const webhookPatch = webhookPatchCredentialsBody.safeParse(body.credentials);
+        if (!webhookPatch.success) {
+          return c.json(
+            {
+              error: {
+                code: "VALIDATION_ERROR",
+                message:
+                  "only `url` may be patched on a webhook connection; use POST /:id/rotate-secret to change the signing secret",
+              },
+            },
+            400,
+          );
+        }
+        try {
+          assertPublicWebhookUrl(webhookPatch.data.url);
+        } catch (err) {
+          if (err instanceof WebhookUrlError) {
+            return c.json(
+              { error: { code: "invalid_credentials", message: err.reason } },
+              400,
+            );
+          }
+          throw err;
+        }
+      }
+
+      const mergedCreds = { ...existingCreds, ...body.credentials };
       const credsParse = provider.credentialsSchema.safeParse(mergedCreds);
       if (!credsParse.success) {
         return c.json(
@@ -832,7 +874,11 @@ export const integrationsRoute = new Hono()
       }
 
       newCipher = encrypt(JSON.stringify(mergedCreds), encKey);
-      newHint = buildCredentialsHint(existing.providerId, mergedCreds);
+      // Prefer the provider's own hint builder (webhook = host · …key4);
+      // the generic one assumes a pixel-style access token.
+      newHint = provider.buildCredentialsHint
+        ? provider.buildCredentialsHint(mergedCreds)
+        : buildCredentialsHint(existing.providerId, mergedCreds);
       rotated = true;
     }
 

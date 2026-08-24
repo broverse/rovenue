@@ -24,7 +24,15 @@ function decodeSecretKey(secretKey: string): Buffer {
   const encoded = secretKey.startsWith(WEBHOOK_SECRET_PREFIX)
     ? secretKey.slice(WEBHOOK_SECRET_PREFIX.length)
     : secretKey;
-  return Buffer.from(encoded, "base64");
+  const key = Buffer.from(encoded, "base64");
+  // Base64 decoding never throws — an empty or entirely non-base64 value
+  // yields a zero-length buffer, and HMAC-ing with a zero-length key
+  // produces a signature anyone can forge. Fail closed, mirroring the
+  // verifier's identical guard in lib/svix-signature.ts.
+  if (key.length === 0) {
+    throw new Error("undecodable webhook secret");
+  }
+  return key;
 }
 
 /**

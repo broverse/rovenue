@@ -110,6 +110,30 @@ describe("signWebhook", () => {
     ).not.toThrow();
   });
 
+  // Base64 decoding never throws — an empty or entirely non-base64 secret
+  // yields a zero-length key, and HMAC-ing with one produces a signature
+  // anyone can reproduce. Fail closed, exactly as the verifier does.
+  it.each([
+    ["empty after the prefix", `${WEBHOOK_SECRET_PREFIX}`],
+    ["empty string", ""],
+    ["no base64 characters at all", `${WEBHOOK_SECRET_PREFIX}!!!!`],
+  ])("(e) throws on a secret that decodes to zero bytes: %s", (_label, badSecret) => {
+    expect(() =>
+      signWebhook({ id, timestampSec, body, secretKeys: [badSecret] }),
+    ).toThrow(/undecodable/i);
+  });
+
+  it("(f) throws when ANY key in the rotation set is undecodable — never signs partially", () => {
+    expect(() =>
+      signWebhook({
+        id,
+        timestampSec,
+        body,
+        secretKeys: [generateWebhookSecret(), WEBHOOK_SECRET_PREFIX],
+      }),
+    ).toThrow(/undecodable/i);
+  });
+
   it("(d) a tampered body fails BOTH our verifier and the svix verifier", () => {
     const signature = signWebhook({ id, timestampSec, body, secretKeys: [secret] });
     const tamperedBody = JSON.stringify({ hello: "world!!" });
