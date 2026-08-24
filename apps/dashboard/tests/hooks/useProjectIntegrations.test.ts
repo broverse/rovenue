@@ -40,6 +40,7 @@ const mockDelivery: IntegrationDeliveryRow = {
   httpStatus: 200,
   responseBody: '{"events_received":1}',
   errorMessage: null,
+  skipReason: null,
   createdAt: "2026-05-27T12:00:00Z",
 };
 

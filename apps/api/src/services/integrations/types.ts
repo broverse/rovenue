@@ -105,10 +105,9 @@ export type MapEventSkipReason =
   // unrecognized, or "web" — there is no way to pick which AppsFlyer app id
   // the in-app-event API path segment should use. The delivery-log
   // `skip_reason` column is plain text (see integration-deliveries.schema),
-  // so a new reason string here needs no migration; the dashboard's
-  // deliveries table does not render skipReason today (it isn't even on
-  // IntegrationDeliveryRow) — this string flows through unrendered, same as
-  // every existing reason, until that surface is built.
+  // so a new reason string here needs no migration. It IS operator-visible:
+  // the dashboard's Delivery Log renders it verbatim beside a skipped row's
+  // status (step-deliveries.tsx), so keep these strings self-explanatory.
   | "no_platform_app_id";
 
 export type MapEventResult =

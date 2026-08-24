@@ -27,6 +27,12 @@ const REDELIVERABLE_STATUSES = new Set<IntegrationDeliveryRow["status"]>([
   "failed",
 ]);
 
+/** The one delivery status that carries a `skipReason`. */
+const SKIPPED_STATUS: IntegrationDeliveryRow["status"] = "skipped";
+
+/** Separates the status badge from its skip reason ("skipped · no_user_data"). */
+const SKIP_REASON_SEPARATOR = "· ";
+
 const STATUS_FILTER_OPTIONS: ReadonlyArray<{
   value: "" | IntegrationDeliveryRow["status"];
   label: string;
@@ -128,6 +134,17 @@ export function StepDeliveries({ projectId, connectionId }: StepDeliveriesProps)
                     >
                       {d.status}
                     </span>
+                    {/* The reason a skip happened is the whole diagnostic
+                        value of a skipped row (which gate dropped it —
+                        no_user_data, no_platform_app_id, …), and the provider
+                        docs tell operators to look for it here. Only skipped
+                        rows carry one. */}
+                    {d.status === SKIPPED_STATUS && d.skipReason && (
+                      <span className="ml-1.5 font-rv-mono text-[10px] text-rv-mute-500">
+                        {SKIP_REASON_SEPARATOR}
+                        {d.skipReason}
+                      </span>
+                    )}
                   </td>
                   <td className="py-2 pr-3 font-rv-mono text-[11px] text-rv-mute-600">
                     {d.httpStatus ?? "—"}

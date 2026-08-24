@@ -213,6 +213,13 @@ export interface IntegrationDeliveryRow {
   httpStatus: number | null;
   responseBody: string | null;
   errorMessage: string | null;
+  /** Why a `skipped` delivery was skipped — `no_mapping`,
+   *  `filtered_by_event_scope`, `no_user_data`, `no_platform_app_id`, …
+   *  (apps/api's MapEventSkipReason, stored as plain text). Null on every
+   *  non-skipped row. Rendered next to the status in the Delivery Log —
+   *  identity-gated providers make skips routine, and the provider docs
+   *  point operators here to find out which gate they hit. */
+  skipReason: string | null;
   createdAt: string;
 }
 

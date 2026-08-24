@@ -18,6 +18,7 @@ const DELIVERY_SUCCEEDED: IntegrationDeliveryRow = {
   httpStatus: 200,
   responseBody: null,
   errorMessage: null,
+  skipReason: null,
   createdAt: "2026-05-28T10:00:00Z",
 };
 
@@ -32,6 +33,7 @@ const DELIVERY_DEAD_LETTER: IntegrationDeliveryRow = {
   httpStatus: 500,
   responseBody: null,
   errorMessage: "Internal Server Error",
+  skipReason: null,
   createdAt: "2026-05-28T09:00:00Z",
 };
 
@@ -46,7 +48,27 @@ const DELIVERY_FAILED: IntegrationDeliveryRow = {
   httpStatus: 500,
   responseBody: null,
   errorMessage: "Internal Server Error",
+  skipReason: null,
   createdAt: "2026-05-28T08:00:00Z",
+};
+
+// Final-review I5: identity-gated providers (APPSFLYER without a usable
+// platform app id, AMPLITUDE/MIXPANEL without a resolvable user id, …) skip
+// routinely, and appsflyer.mdx tells operators the reason is "visible in the
+// connection's Delivery Log". It was not rendered anywhere before this fix.
+const DELIVERY_SKIPPED: IntegrationDeliveryRow = {
+  id: "d4",
+  connectionId: "c1",
+  outboxEventId: "oe4",
+  eventKey: "revenue.RENEWAL",
+  providerEvent: null,
+  status: "skipped",
+  attempt: 1,
+  httpStatus: null,
+  responseBody: null,
+  errorMessage: null,
+  skipReason: "no_user_data",
+  createdAt: "2026-05-28T07:00:00Z",
 };
 
 describe("StepDeliveries — M6.15", () => {
@@ -147,5 +169,34 @@ describe("StepDeliveries — M6.15", () => {
     });
     expect(screen.getByText("revenue.INITIAL_BUY")).toBeInTheDocument();
     expect(requestedStatuses).toContain("dead_letter");
+  });
+
+  it("renders the skip reason on a skipped row and nothing extra on a succeeded one", async () => {
+    server.use(
+      http.get(
+        "http://localhost:3000/dashboard/projects/p1/integrations/c1/deliveries",
+        () =>
+          HttpResponse.json({
+            data: {
+              deliveries: [DELIVERY_SKIPPED, DELIVERY_SUCCEEDED],
+              nextCursor: null,
+            },
+          }),
+      ),
+    );
+
+    renderWithRouter(<StepDeliveries projectId="p1" connectionId="c1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("skipped")).toBeInTheDocument();
+    });
+
+    // The reason renders beside the skipped row's status badge …
+    const skippedCell = screen.getByText("skipped").closest("td")!;
+    expect(skippedCell.textContent).toContain("no_user_data");
+
+    // … and the succeeded row shows a status and nothing else.
+    const succeededCell = screen.getByText("succeeded").closest("td")!;
+    expect(succeededCell.textContent?.trim()).toBe("succeeded");
   });
 });
