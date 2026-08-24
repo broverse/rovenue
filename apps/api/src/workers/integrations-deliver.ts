@@ -21,9 +21,8 @@ import { env } from "../lib/env";
 import { attachRedisErrorLogger } from "../lib/redis";
 import { logger } from "../lib/logger";
 import {
-  INTEGRATIONS_DELIVER_ATTEMPTS,
-  INTEGRATIONS_DELIVER_BACKOFF_MS,
   INTEGRATIONS_DELIVER_QUEUE_NAME,
+  retryPolicyFor,
   type IntegrationsDeliverJob,
 } from "../queues/integrations";
 import { getProvider } from "../services/integrations/registry";
@@ -86,6 +85,9 @@ export interface DeliverStepDeps {
   provider: ReturnType<typeof getProvider>;
   http: ReturnType<typeof createUndiciHttpClient>;
   attempt: number;
+  /** From retryPolicyFor(job.providerId).attempts — each provider's own
+   *  retry policy governs its own exhaustion checks (Task 9). */
+  maxAttempts: number;
   publishLiveEvent?: (ev: {
     projectId: string;
     connectionId: string;
@@ -176,7 +178,7 @@ export async function runDeliverStep(
   const payload = mapResult as ProviderPayload;
 
   // 5. Check attempt exhaustion before calling provider
-  if (deps.attempt >= INTEGRATIONS_DELIVER_ATTEMPTS) {
+  if (deps.attempt >= deps.maxAttempts) {
     const deliveryId = createId();
     const row = await deps.insertPendingDelivery({
       id: deliveryId,
@@ -313,7 +315,7 @@ export async function runDeliverStep(
   // alone) never sees the exhausted value. Mirror the non-retriable
   // dead-letter branch: terminal status + audit + Sentry + live event, and
   // return instead of throwing.
-  if (deps.attempt >= INTEGRATIONS_DELIVER_ATTEMPTS - 1) {
+  if (deps.attempt >= deps.maxAttempts - 1) {
     await deps.updateDeliveryStatus({
       id: rowId,
       createdAt: rowCreatedAt,
@@ -463,6 +465,7 @@ export async function ensureIntegrationsDeliverWorker(
         provider: getProvider(job.providerId),
         http,
         attempt,
+        maxAttempts: retryPolicyFor(job.providerId).attempts,
         publishLiveEvent: async (ev) => {
           await publishIntegrationDeliveryLiveEvent(livePublisher, {
             type: "integration.delivery",
@@ -521,9 +524,13 @@ export async function ensureIntegrationsDeliverWorker(
       connection,
       concurrency: 10,
       settings: {
-        backoffStrategy: (attempt) => {
-          const idx = Math.min(attempt - 1, INTEGRATIONS_DELIVER_BACKOFF_MS.length - 1);
-          return INTEGRATIONS_DELIVER_BACKOFF_MS[idx] ?? INTEGRATIONS_DELIVER_BACKOFF_MS[INTEGRATIONS_DELIVER_BACKOFF_MS.length - 1]!;
+        // Only consulted by BullMQ when a job's `backoff.type === "custom"`
+        // (see deliverJobOptions in queues/integrations.ts) — each provider
+        // can have its own schedule, so this reads the policy per-job from
+        // job.data.providerId rather than using one fixed schedule.
+        backoffStrategy: (attempt, _type, _err, bullJob) => {
+          const ms = retryPolicyFor(bullJob?.data.providerId ?? "").backoffMs;
+          return ms[Math.min(attempt - 1, ms.length - 1)]!;
         },
       },
     },

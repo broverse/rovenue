@@ -89,6 +89,7 @@ describe("runDeliverStep", () => {
       },
       http: { request: vi.fn() },
       attempt: 0,
+      maxAttempts: 5,
     };
 
     const result = await runDeliverStep(makeJob(), deps);
@@ -115,6 +116,7 @@ describe("runDeliverStep", () => {
       },
       http: { request: vi.fn() },
       attempt: 0,
+      maxAttempts: 5,
     };
 
     const result = await runDeliverStep(makeJob(), deps);
@@ -141,6 +143,7 @@ describe("runDeliverStep", () => {
       },
       http: { request: vi.fn() },
       attempt: 0,
+      maxAttempts: 5,
     };
 
     const result = await runDeliverStep(makeJob(), deps);
@@ -181,6 +184,7 @@ describe("runDeliverStep", () => {
       },
       http: { request: vi.fn() },
       attempt: 0,
+      maxAttempts: 5,
     };
 
     const result = await runDeliverStep(makeJob(), deps);
@@ -221,6 +225,7 @@ describe("runDeliverStep", () => {
       },
       http: { request: vi.fn() },
       attempt: 0,
+      maxAttempts: 5,
     };
 
     const result = await runDeliverStep(makeJob(), deps);
@@ -260,6 +265,7 @@ describe("runDeliverStep", () => {
       },
       http: { request: vi.fn() },
       attempt: 0,
+      maxAttempts: 5,
     };
 
     await expect(runDeliverStep(makeJob(), deps)).rejects.toThrow(
@@ -308,7 +314,8 @@ describe("runDeliverStep", () => {
         }),
       },
       http: { request: vi.fn() },
-      attempt: 4, // INTEGRATIONS_DELIVER_ATTEMPTS - 1: the last invocation
+      attempt: 4, // maxAttempts - 1: the last invocation
+      maxAttempts: 5,
       auditDeadLetter,
       captureSentry,
       publishLiveEvent,
@@ -360,6 +367,7 @@ describe("runDeliverStep", () => {
       },
       http: { request: vi.fn() },
       attempt: 0,
+      maxAttempts: 5,
       publishLiveEvent,
       auditDeadLetter,
       captureSentry,
@@ -409,6 +417,7 @@ describe("runDeliverStep", () => {
       },
       http: { request: vi.fn() },
       attempt: 0,
+      maxAttempts: 5,
       publishLiveEvent,
       auditDeadLetter,
       captureSentry,
@@ -465,6 +474,7 @@ describe("runDeliverStep", () => {
       provider: provider as never,
       http: { request: vi.fn() } as never,
       attempt: 1,
+      maxAttempts: 5,
     });
     expect(r.outcome).toBe("succeeded");
     // Worker no longer short-circuits on a (now non-existent) conflict.
@@ -512,6 +522,7 @@ describe("runDeliverStep", () => {
       provider: provider as never,
       http: { request: vi.fn() } as never,
       attempt: 1,
+      maxAttempts: 5,
     });
     expect(r.outcome).toBe("succeeded");
     expect(deliver).toHaveBeenCalledOnce();

@@ -13,6 +13,7 @@ import type {
   FanoutTopic,
 } from "../types";
 import { deriveRevenueEventKey } from "../event-mapping";
+import { WEBHOOK_RETRY_POLICY } from "../retry-policies";
 import { signWebhook } from "../../../lib/svix-sign";
 import {
   WebhookUrlError,
@@ -179,6 +180,7 @@ export const customWebhookProvider: IntegrationProvider = {
   eventCatalog: ROVENUE_EVENT_KEYS,
   allowMultipleConnections: true,
   credentialsSchema,
+  retryPolicy: WEBHOOK_RETRY_POLICY,
 
   // No default mappings — the user configures event scope entirely via
   // config.enabledEvents; providerEvent always equals the derived eventKey.

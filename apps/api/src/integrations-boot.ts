@@ -21,6 +21,7 @@ import { ensureIntegrationsDeliverWorker } from "./workers/integrations-deliver"
 import {
   INTEGRATIONS_DELIVER_QUEUE_NAME,
   buildIntegrationsDeliverJobId,
+  deliverJobOptions,
   type IntegrationsDeliverJob,
 } from "./queues/integrations";
 
@@ -59,12 +60,7 @@ export async function bootIntegrations(
   const fanout = await startIntegrationsFanout({
     cache,
     enqueue: async (job: IntegrationsDeliverJob, jobId: string) => {
-      await queue.add("deliver", job, {
-        jobId,
-        attempts: 5,
-        removeOnComplete: { age: 86_400, count: 10_000 },
-        removeOnFail: { age: 7 * 86_400 },
-      });
+      await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId));
     },
   });
 

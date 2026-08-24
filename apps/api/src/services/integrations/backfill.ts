@@ -19,6 +19,7 @@ import type { Queue } from "bullmq";
 import type { ProviderId, RovenueEventEnvelope } from "./types";
 import {
   buildIntegrationsDeliverJobId,
+  deliverJobOptions,
   type IntegrationsDeliverJob,
 } from "../../queues/integrations";
 
@@ -158,7 +159,11 @@ export async function enqueueBackfillForConnection(
           isBackfill: true,
         },
         {
-          jobId,
+          // Backfill jobs deprioritize behind realtime deliveries (which
+          // enqueue with no `priority`, so BullMQ treats them as priority 0
+          // — highest) while still getting the provider's full retry
+          // policy from deliverJobOptions.
+          ...deliverJobOptions(providerId, jobId),
           priority: 10,
         },
       );
