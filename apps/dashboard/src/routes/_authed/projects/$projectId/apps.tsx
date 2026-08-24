@@ -47,6 +47,7 @@ const CARD_ID_TO_PROVIDER: Record<
   "tiktok-events": "TIKTOK_EVENTS",
   amplitude: "AMPLITUDE",
   mixpanel: "MIXPANEL",
+  appsflyer: "APPSFLYER",
 };
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({

@@ -33,7 +33,8 @@ export type IntegrationProviderId =
   | "TIKTOK_EVENTS"
   | "CUSTOM_WEBHOOK"
   | "AMPLITUDE"
-  | "MIXPANEL";
+  | "MIXPANEL"
+  | "APPSFLYER";
 
 export const WEBHOOK_API_VERSION = "2026-08-24";
 

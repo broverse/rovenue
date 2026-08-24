@@ -99,7 +99,17 @@ export interface ProviderPayload {
 export type MapEventSkipReason =
   | "no_mapping"
   | "filtered_by_event_scope"
-  | "no_user_data";
+  | "no_user_data"
+  // APPSFLYER-specific (Wave-1 Task 7): both app_id_ios and app_id_android
+  // are configured but the subscriber's `platform` attribute is absent,
+  // unrecognized, or "web" — there is no way to pick which AppsFlyer app id
+  // the in-app-event API path segment should use. The delivery-log
+  // `skip_reason` column is plain text (see integration-deliveries.schema),
+  // so a new reason string here needs no migration; the dashboard's
+  // deliveries table does not render skipReason today (it isn't even on
+  // IntegrationDeliveryRow) — this string flows through unrendered, same as
+  // every existing reason, until that surface is built.
+  | "no_platform_app_id";
 
 export type MapEventResult =
   | ProviderPayload

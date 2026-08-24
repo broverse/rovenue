@@ -1,0 +1,108 @@
+---
+title: AppsFlyer
+description: Forward Rovenue revenue and subscription-lifecycle events to AppsFlyer's server-to-server (S2S) in-app-event API for mobile attribution.
+---
+
+# AppsFlyer
+
+The AppsFlyer integration forwards Rovenue revenue events (purchases, trial conversions, renewals, refunds, cancellations) and subscription-lifecycle events (trials, grace period, billing issues, plan changes) to AppsFlyer's server-to-server in-app-event API, so subscription revenue is attributed back to the install-time campaign, media source, and cohort that drove it.
+
+---
+
+## 1. Get your credentials from AppsFlyer
+
+1. Open **AppsFlyer → App settings → App settings (General)** for the app you want Rovenue events attributed to.
+2. Copy the **Dev key** — a single dev key is shared across all of an account's apps.
+3. Note the app's **App ID**:
+   - iOS: the numeric **App Store ID** (e.g. `1234567890`).
+   - Android: the **package name** (e.g. `com.yourcompany.yourapp`).
+
+If you have both an iOS and an Android app sharing this Rovenue project, note both app ids — Rovenue picks the right one per event automatically (see [App id selection](#3-app-id-selection) below).
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **AppsFlyer** under **Attribution & MMP** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **Dev key** — paste the dev key from step 1.
+   - **iOS app ID** *(optional)* — the App Store ID, if you have an iOS app.
+   - **Android app ID** *(optional)* — the package name, if you have an Android app.
+   - At least one of the two app ids is required; leave the other blank if you only ship on one platform.
+4. Click **Validate**.
+5. Choose which events to forward, optionally override the default `af_`-prefixed vendor event names, then activate.
+
+> **Validate is shape-only.** AppsFlyer's S2S in-app-event API has no dedicated credential-check endpoint — there is no way to confirm a dev key or app id is *correct* without sending a real, attributable event. Validate here only confirms the form is well-formed (dev key present, at least one app id present). The connection's **Delivery Log** (in the drawer's Deliveries tab) is the actual proof: trigger a real event and confirm it shows `succeeded` with an HTTP `200`.
+
+---
+
+## 3. App id selection
+
+AppsFlyer's in-app-event endpoint is per-app (`/inappevent/{appId}`), so Rovenue needs to pick exactly one app id per event when a connection has both configured:
+
+1. **Both app ids configured, platform known** — the subscriber's first-install `platform` attribute (`ios` or `android`, set automatically by the SDK) selects the matching app id.
+2. **Only one app id configured** — that one is used for every event, regardless of platform. This is the common case for a single-platform app.
+3. **Both app ids configured, but platform is absent, unrecognized, or `web`** — there's no basis to choose, so the event is skipped with reason `no_platform_app_id` rather than guessing which app it belongs to.
+
+---
+
+## 4. Event mapping
+
+AppsFlyer's `af_`-prefixed vocabulary is its own documented in-app-event set. Rovenue's public event keys map to it by default (overridable per-connection in the drawer's mapping step):
+
+| Rovenue event key | AppsFlyer `eventName` |
+|---|---|
+| `revenue.INITIAL` | `af_purchase` |
+| `revenue.TRIAL_CONVERSION` | `af_subscribe` |
+| `revenue.RENEWAL` | `af_subscription_renewal` |
+| `revenue.CREDIT_PURCHASE` | `af_credit_purchase` |
+| `revenue.REFUND` | `af_refund` |
+| `revenue.CANCELLATION` | `af_cancel` |
+| `subscription.trial.started` | `af_start_trial` |
+| `subscription.cancel_requested` | `af_cancel_requested` |
+| `subscription.expired` | `af_subscription_expired` |
+| `subscription.billing_issue` | `af_billing_issue` |
+| `subscription.grace_period` | `af_grace_period` |
+| `subscription.uncancelled` | `af_uncancel` |
+| `subscription.product_changed` | `af_product_change` |
+
+Every forwarded event's `eventValue` JSON always carries `af_order_id` (Rovenue's internal `outboxEventId`, for dedup — see below) and `product_id` when known. For the six `revenue.*` keys only, it also carries `af_revenue` (the event's amount) and `af_currency`; the top-level `eventCurrency` field is set the same way. Subscription-lifecycle events never carry revenue fields — they represent no money movement.
+
+`af_revenue` is always sent as a **positive** number, including for `revenue.REFUND` — AppsFlyer's in-app-event API has no documented convention for representing a refund as negative revenue (unlike Amplitude/Mixpanel).
+
+---
+
+## 5. Identity resolution
+
+Every forwarded event requires an `appsflyer_id` — AppsFlyer's own device-level identifier. Rovenue reads it from the **`$appsflyerId`** subscriber attribute; there is no fallback chain, since a Rovenue-internal id or your own app-user id has no meaning inside AppsFlyer's attribution graph.
+
+Set it from your host app once you have the SDK's AppsFlyer UID (typically available from AppsFlyer's own SDK's `getAppsFlyerUID` / `onConversionDataSuccess` callback):
+
+```
+setAttributes({ "$appsflyerId": appsFlyerUID })
+```
+
+If `$appsflyerId` is not set, the event is skipped with reason `no_user_data` (visible in the connection's Delivery Log).
+
+`customer_user_id` is populated from your app's own subscriber id (`appUserId`) when the subscriber has one, so you can cross-reference an AppsFlyer event back to your own user records — it's optional and omitted when not available.
+
+See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference, including `$appsflyerId`.
+
+---
+
+## 6. Deduplication
+
+Every forwarded event's `eventValue.af_order_id` is set to Rovenue's internal `outboxEventId`. Combined with AppsFlyer's own event-level deduplication, retries after a network failure or an at-least-once outbox replay do not double-count revenue.
+
+---
+
+## 7. Verify events are arriving
+
+1. Open **Apps → AppsFlyer → Delivery Log** in the Rovenue dashboard and check for `succeeded` rows with HTTP `200`.
+2. Cross-check in AppsFlyer's own **Raw data** / **Postbacks** view, filtered to one of the vendor event names above.
+3. If events are not appearing:
+   - Confirm the subscriber has `$appsflyerId` set (missing it skips silently with `no_user_data`).
+   - If both app ids are configured, confirm the subscriber's platform is known — an unknown/absent/`web` platform with both ids configured skips with `no_platform_app_id`.
+   - A `401`/`403` response means the dev key is wrong, or belongs to a different AppsFlyer account than the app id.
+   - Ensure the event type you're sending is included in the connection's enabled events.

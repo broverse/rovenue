@@ -7,7 +7,7 @@ import { CUSTOM_WEBHOOK_APP_ID } from "./mock-data";
 import type { AppDescriptor } from "./types";
 import type { IntegrationConnectionRow } from "../../lib/hooks/useProjectIntegrations";
 
-const DRAWER_IDS = new Set(["meta-capi", "tiktok-events", "amplitude", "mixpanel"]);
+const DRAWER_IDS = new Set(["meta-capi", "tiktok-events", "amplitude", "mixpanel", "appsflyer"]);
 
 // Mirrors apps/api/src/routes/dashboard/integrations.ts's
 // `MAX_WEBHOOK_ENDPOINTS_PER_PROJECT`. Duplicated here because dashboard

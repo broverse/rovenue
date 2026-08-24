@@ -242,4 +242,151 @@ describe("StepCredentials — PROVIDER_VALIDATE_NOTES", () => {
       expect(screen.queryByText(note)).toBeNull();
     }
   });
+
+  it("renders no note for APPSFLYER — validateCredentials sends nothing, unlike AMPLITUDE/MIXPANEL", async () => {
+    renderWithRouter(<ProviderWrapper providerId="APPSFLYER" />);
+
+    expect(await screen.findByLabelText(/dev key/i)).toBeTruthy();
+    expect(PROVIDER_VALIDATE_NOTES.APPSFLYER).toBeUndefined();
+    for (const note of Object.values(PROVIDER_VALIDATE_NOTES)) {
+      expect(screen.queryByText(note)).toBeNull();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// APPSFLYER — optional-field handling (CredentialFieldDef.optional refactor)
+// ---------------------------------------------------------------------------
+
+function AppsflyerWrapper({ onValidated }: { onValidated: (s: DrawerState) => void }) {
+  const [state, setState] = useState<DrawerState>(BASE_STATE);
+  return (
+    <StepCredentials
+      state={state}
+      onChange={(next) => {
+        setState(next);
+        if (next.validated) onValidated(next);
+      }}
+      onNext={vi.fn()}
+      onBack={vi.fn()}
+      existingConnection={null}
+      providerId="APPSFLYER"
+      projectId="p1"
+    />
+  );
+}
+
+describe("StepCredentials — declarative multi-field providers (APPSFLYER)", () => {
+  it("renders one labeled input per field in PROVIDER_CREDENTIAL_FIELDS.APPSFLYER", async () => {
+    renderWithRouter(<AppsflyerWrapper onValidated={vi.fn()} />);
+
+    const fields = PROVIDER_CREDENTIAL_FIELDS.APPSFLYER;
+    expect(fields).toHaveLength(3);
+
+    for (const field of fields) {
+      expect(await screen.findByLabelText(new RegExp(escapeRegExp(field.label), "i"))).toBeTruthy();
+    }
+  });
+
+  it("flags app_id_ios/app_id_android as optional via CredentialFieldDef.optional, not label sniffing", () => {
+    const fields = PROVIDER_CREDENTIAL_FIELDS.APPSFLYER;
+    const devKey = fields.find((f) => f.id === "dev_key")!;
+    const iosId = fields.find((f) => f.id === "app_id_ios")!;
+    const androidId = fields.find((f) => f.id === "app_id_android")!;
+
+    expect(devKey.optional).toBeUndefined();
+    expect(iosId.optional).toBe(true);
+    expect(androidId.optional).toBe(true);
+    // Labels keep the "(optional)" suffix purely for display.
+    expect(iosId.label).toContain("(optional)");
+    expect(androidId.label).toContain("(optional)");
+  });
+
+  it("Validate is enabled with only dev_key + ONE app id filled (the other optional field left blank)", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<AppsflyerWrapper onValidated={vi.fn()} />);
+
+    await user.type(await screen.findByLabelText(/dev key/i), "dk_abc123");
+    await user.type(await screen.findByLabelText(/ios app id/i), "1234567890");
+    // app_id_android intentionally left blank.
+
+    const validateBtn = screen.getByRole("button", { name: /validate/i });
+    expect((validateBtn as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("Validate stays disabled while dev_key (required) is blank, even with an app id filled", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<AppsflyerWrapper onValidated={vi.fn()} />);
+
+    await user.type(await screen.findByLabelText(/ios app id/i), "1234567890");
+
+    const validateBtn = screen.getByRole("button", { name: /validate/i });
+    expect((validateBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("submits credentials OMITTING a blank optional field rather than sending an empty string", async () => {
+    const user = userEvent.setup();
+    const postSpy = vi.fn();
+
+    server.use(
+      http.post(
+        "http://localhost:3000/dashboard/projects/p1/integrations/validate",
+        async ({ request }) => {
+          postSpy(await request.json());
+          return HttpResponse.json({ data: { ok: true } });
+        },
+      ),
+    );
+
+    renderWithRouter(<AppsflyerWrapper onValidated={vi.fn()} />);
+
+    await user.type(await screen.findByLabelText(/dev key/i), "dk_abc123");
+    await user.type(await screen.findByLabelText(/ios app id/i), "1234567890");
+    // app_id_android left blank.
+
+    await user.click(screen.getByRole("button", { name: /validate/i }));
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "APPSFLYER",
+        credentials: { dev_key: "dk_abc123", app_id_ios: "1234567890" },
+      }),
+    );
+    const sentKeys = Object.keys(
+      (postSpy.mock.calls[0][0] as { credentials: Record<string, string> }).credentials,
+    );
+    expect(sentKeys).not.toContain("app_id_android");
+  });
+
+  it("dropping a typed-then-cleared optional field's value out of submitted credentials", async () => {
+    const user = userEvent.setup();
+    const postSpy = vi.fn();
+
+    server.use(
+      http.post(
+        "http://localhost:3000/dashboard/projects/p1/integrations/validate",
+        async ({ request }) => {
+          postSpy(await request.json());
+          return HttpResponse.json({ data: { ok: true } });
+        },
+      ),
+    );
+
+    renderWithRouter(<AppsflyerWrapper onValidated={vi.fn()} />);
+
+    await user.type(await screen.findByLabelText(/dev key/i), "dk_abc123");
+    const androidInput = await screen.findByLabelText(/android app id/i);
+    await user.type(androidInput, "com.rovenue.app");
+    await user.clear(androidInput);
+    await user.type(await screen.findByLabelText(/ios app id/i), "1234567890");
+
+    await user.click(screen.getByRole("button", { name: /validate/i }));
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    const sentKeys = Object.keys(
+      (postSpy.mock.calls[0][0] as { credentials: Record<string, string> }).credentials,
+    );
+    expect(sentKeys).not.toContain("app_id_android");
+  });
 });

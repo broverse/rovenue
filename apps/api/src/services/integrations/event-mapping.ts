@@ -91,6 +91,24 @@ export const DEFAULT_EVENT_MAPPING: Record<
     "subscription.uncancelled": "uncancelled",
     "subscription.product_changed": "product_changed",
   },
+  // Kept in sync with providers/appsflyer.ts's own `defaultEventMapping`
+  // export. AppsFlyer's `af_`-prefixed names are its own documented
+  // in-app-event vocabulary (unlike AMPLITUDE/MIXPANEL's free-form names).
+  APPSFLYER: {
+    "revenue.INITIAL": "af_purchase",
+    "revenue.TRIAL_CONVERSION": "af_subscribe",
+    "revenue.RENEWAL": "af_subscription_renewal",
+    "revenue.CREDIT_PURCHASE": "af_credit_purchase",
+    "revenue.REFUND": "af_refund",
+    "revenue.CANCELLATION": "af_cancel",
+    "subscription.trial.started": "af_start_trial",
+    "subscription.cancel_requested": "af_cancel_requested",
+    "subscription.expired": "af_subscription_expired",
+    "subscription.billing_issue": "af_billing_issue",
+    "subscription.grace_period": "af_grace_period",
+    "subscription.uncancelled": "af_uncancel",
+    "subscription.product_changed": "af_product_change",
+  },
 };
 
 export type ApplyEventMappingInput = {

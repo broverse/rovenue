@@ -104,10 +104,16 @@ const AMPLITUDE_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "acti
 // default vendor name a user may want to override.
 const MIXPANEL_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// APPSFLYER has the same shape as AMPLITUDE/MIXPANEL: no vendor "Events
+// Manager" test-event tooling, but does have a per-event default `af_`
+// vendor name a user may want to override.
+const APPSFLYER_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
   MIXPANEL: MIXPANEL_STEPS,
+  APPSFLYER: APPSFLYER_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -124,6 +130,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   CUSTOM_WEBHOOK: "Custom Webhook",
   AMPLITUDE: "Amplitude",
   MIXPANEL: "Mixpanel",
+  APPSFLYER: "AppsFlyer",
 };
 
 // ---------------------------------------------------------------------------

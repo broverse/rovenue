@@ -28,6 +28,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   CUSTOM_WEBHOOK: "Custom Webhook",
   AMPLITUDE: "Amplitude",
   MIXPANEL: "Mixpanel",
+  APPSFLYER: "AppsFlyer",
 };
 
 // ---------------------------------------------------------------------------

@@ -41,15 +41,20 @@ interface StepCredentialsProps {
  *   label is used as the placeholder (matches prior behavior for the two
  *   existing fields).
  *
- * A field whose label contains "(optional)" is not required to submit —
- * every other field is. This mirrors the six provider tasks' credential
- * schemas (Task 4 brief): required fields carry no such marker.
+ * A field with `optional: true` is not required to submit — every other
+ * field is. This mirrors the provider tasks' credential schemas: a field is
+ * flagged `optional` exactly when the backend `credentialsSchema` allows it
+ * to be absent (e.g. APPSFLYER's `app_id_ios`/`app_id_android`, guarded
+ * instead by a schema-level `.refine` requiring at least one of the two).
+ * The "(optional)" text some labels carry is purely a display convention —
+ * required-ness is driven by this flag, not by sniffing the label string.
  */
 export interface CredentialFieldDef {
   id: string;
   label: string;
   secret?: boolean;
   placeholder?: string;
+  optional?: boolean;
 }
 
 // NOTE: these labels are string literals, not routed through an i18n layer.
@@ -85,8 +90,8 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
   ],
   APPSFLYER: [
     { id: "dev_key", label: "Dev key", secret: true },
-    { id: "app_id_ios", label: "iOS app ID (optional)" },
-    { id: "app_id_android", label: "Android app ID (optional)" },
+    { id: "app_id_ios", label: "iOS app ID (optional)", optional: true },
+    { id: "app_id_android", label: "Android app ID (optional)", optional: true },
   ],
   ADJUST: [{ id: "app_token", label: "App token", secret: true }],
   SLACK: [
@@ -140,6 +145,15 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * comment). The probe instead uses a stable distinct_id/$insert_id pair
  * (MIXPANEL_VALIDATION_INSERT_ID) so repeat validations collapse to one
  * Mixpanel event via the vendor's own dedup rule.
+ *
+ * APPSFLYER: deliberately has NO entry here (unlike AMPLITUDE/MIXPANEL).
+ * Its `validateCredentials` sends nothing — no event, no request at all —
+ * it only checks the submitted credentials' shape against
+ * `credentialsSchema` (dev_key present, at least one app id present). There
+ * is no live-write side effect to disclose. See
+ * providers/appsflyer.ts's validateCredentials comment and
+ * apps/docs/content/docs/integrations/appsflyer.mdx for the documented
+ * "first delivery is the live proof" caveat this implies.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:
@@ -172,7 +186,7 @@ export function StepCredentials({
   });
 
   const valueOf = (id: string) => state.credentials[id] ?? "";
-  const isOptional = (field: CredentialFieldDef) => field.label.includes("(optional)");
+  const isOptional = (field: CredentialFieldDef) => field.optional === true;
   const canValidate = fields
     .filter((f) => !isOptional(f))
     .every((f) => valueOf(f.id).trim() !== "");
@@ -180,8 +194,17 @@ export function StepCredentials({
   const handleValidate = async () => {
     setError(null);
     try {
+      // An optional field left blank (e.g. APPSFLYER's app_id_android when
+      // only app_id_ios is set) must be OMITTED from the submitted
+      // credentials, not sent as an empty string — the backend
+      // credentialsSchema types an omitted optional field as `.optional()`
+      // but an empty string still runs through `z.string().min(1)` and
+      // fails it. A required field is never blank here (canValidate gates
+      // the button on that), so no equivalent risk on that side.
       const credentials = Object.fromEntries(
-        fields.map((f) => [f.id, valueOf(f.id)]),
+        fields
+          .filter((f) => !(isOptional(f) && valueOf(f.id).trim() === ""))
+          .map((f) => [f.id, valueOf(f.id)]),
       );
       const result = await validate.mutateAsync(credentials);
       if (result.ok) {
@@ -192,6 +215,21 @@ export function StepCredentials({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Validation failed");
     }
+  };
+
+  // Mirrors the omission in handleValidate above: an optional field cleared
+  // back to empty must drop OUT of `state.credentials` entirely rather than
+  // linger as an empty string, since `state.credentials` is also what
+  // step-activate.tsx submits verbatim when creating the connection (it has
+  // no field-level knowledge of which keys are optional).
+  const handleFieldChange = (field: CredentialFieldDef, value: string) => {
+    const nextCredentials = { ...state.credentials };
+    if (isOptional(field) && value.trim() === "") {
+      delete nextCredentials[field.id];
+    } else {
+      nextCredentials[field.id] = value;
+    }
+    onChange({ ...state, validated: false, credentials: nextCredentials });
   };
 
   return (
@@ -214,13 +252,7 @@ export function StepCredentials({
               id={`cred-${field.id}`}
               type={field.secret ? "password" : "text"}
               value={value}
-              onChange={(e) =>
-                onChange({
-                  ...state,
-                  validated: false,
-                  credentials: { ...state.credentials, [field.id]: e.target.value },
-                })
-              }
+              onChange={(e) => handleFieldChange(field, e.target.value)}
               placeholder={field.placeholder ?? field.label}
               className={cn(
                 "w-full rounded-md border border-rv-divider bg-rv-c2 px-3 py-2 text-[13px] text-foreground placeholder:text-rv-mute-500",
