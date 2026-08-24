@@ -12,6 +12,7 @@ import {
   GOOGLE_VOIDED_PURCHASE_PRODUCT_TYPE,
   GOOGLE_VOIDED_PURCHASE_REFUND_TYPE,
   type GoogleRtdnPayload,
+  type GoogleSubscriptionNotificationType,
   type GoogleSubscriptionState,
 } from "../src/services/google/google-types";
 
@@ -53,7 +54,13 @@ describe("parsePushBody", () => {
 });
 
 describe("classifyNotification", () => {
-  it("tags subscription notifications with their numeric type", () => {
+  it("tags subscription notifications with their named type", () => {
+    // Regression guard for the Wave-1 fix: classifyNotification used to
+    // interpolate the raw numeric RTDN notificationType straight into
+    // "SUBSCRIPTION_${n}", which matched nothing in EVENT_TYPE_TO_CATEGORY
+    // or STORE_EVENT_TO_PUBLIC_KEY (both keyed on Google's NAMED form,
+    // same as Apple's notificationType strings). It now maps the known
+    // numeric codes through a named table first.
     expect(
       classifyNotification({
         version: "1.0",
@@ -67,9 +74,25 @@ describe("classifyNotification", () => {
           subscriptionId: "s",
         },
       }),
-    ).toBe(
-      `SUBSCRIPTION_${GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_PURCHASED}`,
-    );
+    ).toBe("SUBSCRIPTION_PURCHASED");
+  });
+
+  it("falls back to the numeric SUBSCRIPTION_<n> shape for an unrecognized notificationType", () => {
+    expect(
+      classifyNotification({
+        version: "1.0",
+        packageName: "com.x",
+        eventTimeMillis: "0",
+        subscriptionNotification: {
+          version: "1.0",
+          // 999 is not a real Google RTDN code — stands in for any future
+          // undocumented value. Must never throw or drop the event.
+          notificationType: 999 as unknown as GoogleSubscriptionNotificationType,
+          purchaseToken: "t",
+          subscriptionId: "s",
+        },
+      }),
+    ).toBe("SUBSCRIPTION_999");
   });
 
   it("tags voided purchase notifications", () => {
