@@ -27,6 +27,11 @@ this spec wherever unstated). Wave 1's parked minors are folded in here as clean
   stays in the vendor). Discord bots/slash commands (incoming webhook only, Slack parity).
 - Web SDK-dependent identity flows; store-native full passthrough (still Wave-1's documented gap).
 - The rate-limit 429 test worker-namespacing (latent flake, separate small fix if it bites CI).
+- **Vendor-side user-attribute/state SYNC** (e.g. keeping a "subscription_status" attribute updated
+  in Braze/OneSignal/Iterable profiles, RC's fuller lifecycle integration). This wave forwards
+  EVENTS only — same surface as every Wave-1 provider. State sync is a distinct feature (needs
+  update-on-transition semantics, backfill of current state, conflict rules) and would be its own
+  spec if wanted; the docs pages say "events, not profile sync" so nobody assumes otherwise.
 
 ## 4. Provider matrix
 
@@ -50,10 +55,16 @@ Provider notes (binding):
   implementer verifies; if none documented, negative price with vendor citation or skip REFUND from
   the default mapping with a comment], time=occurredAt, properties {rovenue_event, outbox_event_id});
   lifecycle keys → custom `events` entries named `rovenue_<suffix>`. Auth `Authorization: Bearer
-  rest_api_key`. The instance endpoint is user-supplied — validate https + braze host allowlist at
-  create AND deliver (two-phase, Slack pattern). validateCredentials: a real minimal
-  `/users/track` probe is Braze's only check — stable dedup via a fixed external_id
-  `rovenue-credential-probe` + `PROVIDER_VALIDATE_NOTES.BRAZE` disclosure.
+  rest_api_key`. The instance endpoint is user-supplied — TIGHT allowlist, not a bare wildcard:
+  https + host matching `^rest\.[a-z0-9-]+\.braze\.(com|eu)$` (Braze REST instances are exactly
+  `rest.<cluster>.braze.<tld>`), enforced at create AND deliver (two-phase, Slack pattern).
+  validateCredentials: Braze REST keys carry granular permissions, so only a `users/track` probe
+  proves the permission that matters — BUT a probe user is a **billable MAU profile** on the
+  customer's Braze account. Ruling: probe with the FIXED external_id `rovenue-credential-probe`
+  (repeated validations reuse the same single profile — MAU cost is exactly one, ever), and both
+  `PROVIDER_VALIDATE_NOTES.BRAZE` and the docs page must state that one deletable probe profile is
+  created. A read-only endpoint probe is NOT acceptable here (false negatives on correctly-scoped
+  track-only keys).
 - **ONESIGNAL**: RC-parity behavior is tag/outcome updates keyed by the player/subscription id;
   implement as custom events via the current Events API if available for the account tier —
   implementer verifies the contemporary endpoint (`api.onesignal.com`) and picks events-API if
@@ -66,13 +77,22 @@ Provider notes (binding):
   (implementer verifies; default: negative total with citation); lifecycle → events/track
   (eventName `rovenue_<suffix>`, id=outboxEventId). validateCredentials: a real zero-footprint GET
   (e.g. lists or key-info endpoint — implementer picks from current docs).
+  **PII note (explicit, deliberate):** Iterable receives PLAINTEXT email when `$email` is the
+  identity key — unlike ad providers, which only ever get hashes. That is the vendor's identity
+  model (an email platform), it is the customer's configured choice, and it MUST be stated plainly
+  on the Iterable docs page ("your subscribers' email addresses are sent to Iterable as their user
+  key"). The provider reads email from `subscriberAttributes.$email` / enriched identityContext —
+  never invents it.
 - **AIRBRIDGE**: S2S events API (`api.airbridge.io`), header `Authorization: Bearer api_token`;
   eventCategory from mapping; transactionID + revenue/currency on revenue.*. Shape-only validation
   is NOT acceptable if a real check exists — implementer verifies; if none, AppsFlyer-pattern
   (shape-only + "first delivery is the proof" docs note).
 - **SINGULAR**: S2S `https://s2s.singular.net/api/v1/evt` (GET/POST with query params per docs),
   `a={sdk_key}`; revenue via `is_revenue_event=true&amp;amt&amp;cur`; device via `idfa`/`aifa`/custom.
-  Same validation stance as Airbridge.
+  Same validation stance as Airbridge. **Secret-in-query note:** the sdk_key rides the query string
+  per Singular's own S2S contract — the provider must never log or persist the request URL (our
+  deliveries row stores httpStatus + truncated responseBody only — verify and keep it that way; a
+  code comment states the constraint).
 - **DISCORD**: mirror the Slack provider file nearly verbatim: message builder reuse is REQUIRED —
   hoist Wave-1's Slack message-text builder into a shared chat-message module consumed by both
   (don't copy-paste a second 4-family builder); Discord body `{ content }`; classification per
