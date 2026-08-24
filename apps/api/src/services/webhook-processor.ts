@@ -318,22 +318,45 @@ async function enqueueOutgoingWebhook(
   // No existing tx at this call site — wrap the outbox bridge and the
   // v1 outgoing-webhook write (category filter + dedupe + insert) in a
   // minimal transaction so they commit atomically. The outbox insert is
-  // unconditional: v2 subscribers must get the event even when no v1
-  // webhookUrl is configured, or when the project's category filter
-  // would have dropped it for v1 delivery.
+  // unconditional on webhookUrl/category — v2 subscribers must get the
+  // event even when no v1 webhookUrl is configured, or when the
+  // project's category filter would have dropped it for v1 delivery —
+  // but it IS deduped (dedupe and v1-config gating are orthogonal):
+  // runPostProcessing re-runs whole on a BullMQ retry, and without a
+  // dedupe check here a retry would insert a fresh outbox_events row
+  // (fresh id) every attempt. Reuse the same signals as the v1 dedupe
+  // below: purchase events key on (aggregateType, subscriber, type,
+  // purchase); purchase-less events key on the inbound webhookEventId.
   await drizzle.db.transaction(async (tx) => {
-    await drizzle.outboxRepo.insert(tx, {
-      aggregateType: "SUBSCRIPTION",
-      aggregateId: args.subscriberId,
-      eventType: args.eventType,
-      payload: {
-        projectId: args.projectId,
-        subscriberId: args.subscriberId,
-        purchaseId: args.purchaseId ?? null,
-        webhookEventId: args.webhookEventId,
-        timestamp: new Date().toISOString(),
-      },
-    });
+    const alreadyBridged = args.purchaseId
+      ? await drizzle.outboxRepo.findByPurchaseAndType(
+          tx,
+          "SUBSCRIPTION",
+          args.subscriberId,
+          args.eventType,
+          args.purchaseId,
+        )
+      : await drizzle.outboxRepo.findByWebhookEventAndType(
+          tx,
+          "SUBSCRIPTION",
+          args.subscriberId,
+          args.eventType,
+          args.webhookEventId,
+        );
+    if (!alreadyBridged) {
+      await drizzle.outboxRepo.insert(tx, {
+        aggregateType: "SUBSCRIPTION",
+        aggregateId: args.subscriberId,
+        eventType: args.eventType,
+        payload: {
+          projectId: args.projectId,
+          subscriberId: args.subscriberId,
+          purchaseId: args.purchaseId ?? null,
+          webhookEventId: args.webhookEventId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
 
     if (!config?.url) return;
 

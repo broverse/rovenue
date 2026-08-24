@@ -41,6 +41,8 @@ vi.mock("@rovenue/db", async (orig) => {
       },
       outboxRepo: {
         insert: vi.fn().mockResolvedValue(undefined),
+        findByPurchaseAndType: vi.fn().mockResolvedValue(null),
+        findByWebhookEventAndType: vi.fn().mockResolvedValue(null),
       },
       purchaseExtRepo: {
         findPurchaseWithCreditInfo: vi.fn(),
@@ -239,9 +241,12 @@ describe("enqueueOutgoingWebhook idempotency", () => {
 
   it("skips a purchase-less event already enqueued for this inbound webhook event", async () => {
     cfg([]);
+    // mockResolvedValueOnce — this mock's persistent module-scope default
+    // (null) must survive for later tests/describe blocks that don't
+    // override it.
     vi.mocked(
       drizzle.outgoingWebhookRepo.findOutgoingByWebhookEvent,
-    ).mockResolvedValue({ id: "ow_existing" } as never);
+    ).mockResolvedValueOnce({ id: "ow_existing" } as never);
     await enqueueOutgoingWebhook({
       projectId: "p1",
       subscriberId: "s1",
@@ -249,6 +254,61 @@ describe("enqueueOutgoingWebhook idempotency", () => {
       eventType: "DID_RENEW",
     });
     expect(enqueueSpy()).not.toHaveBeenCalled();
+  });
+
+  // The SUBSCRIPTION outbox bridge is inserted unconditionally on
+  // webhookUrl/category, but must still be deduped on retry — otherwise
+  // a BullMQ retry inserts a fresh outbox_events row (fresh id) every
+  // attempt, breaking runPostProcessing's idempotency invariant.
+  it("does not re-bridge a purchase event onto the outbox when already bridged", async () => {
+    cfg([]);
+    vi.mocked(drizzle.outboxRepo.findByPurchaseAndType).mockResolvedValueOnce({
+      id: "oe_existing",
+    } as never);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      purchaseId: "pur_dup",
+      webhookEventId: "whe_dup_purchase",
+      eventType: "DID_RENEW",
+    });
+    expect(outboxInsertSpy()).not.toHaveBeenCalled();
+    // v1 write is unaffected by the outbox dedupe check.
+    expect(enqueueSpy()).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-bridge a purchase-less event onto the outbox when already bridged", async () => {
+    cfg([]);
+    vi.mocked(
+      drizzle.outboxRepo.findByWebhookEventAndType,
+    ).mockResolvedValueOnce({
+      id: "oe_existing",
+    } as never);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_dup_no_purchase",
+      eventType: "DID_RENEW",
+    });
+    expect(outboxInsertSpy()).not.toHaveBeenCalled();
+    expect(enqueueSpy()).toHaveBeenCalledTimes(1);
+  });
+
+  it("bridges onto the outbox exactly once even when the v1 write is independently deduped", async () => {
+    cfg([]);
+    vi.mocked(
+      drizzle.outgoingWebhookRepo.findOutgoingByWebhookEvent,
+    ).mockResolvedValueOnce({ id: "ow_existing" } as never);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_dup_v1_only",
+      eventType: "DID_RENEW",
+    });
+    // v1 dedupe and outbox dedupe are independent checks: the outbox
+    // bridge still fires on the first call even though v1 is skipped.
+    expect(enqueueSpy()).not.toHaveBeenCalled();
+    expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
   });
 });
 

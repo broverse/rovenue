@@ -1,4 +1,4 @@
-import { and, asc, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   outboxEvents,
@@ -30,6 +30,63 @@ export async function insert(
   row: NewOutboxEvent,
 ): Promise<void> {
   await db.insert(outboxEvents).values(row);
+}
+
+/**
+ * Dedup check: has an outbox row for this (aggregateType, aggregateId,
+ * eventType) already been bridged for this purchase? Mirrors
+ * outgoing-webhooks' findRecentOutgoingByPurchaseAndType — used by
+ * callers (webhook-processor's post-processing) that re-run on BullMQ
+ * retry so the outbox bridge doesn't insert a fresh row (and thus a
+ * fresh id) every attempt.
+ */
+export async function findByPurchaseAndType(
+  db: Db,
+  aggregateType: OutboxEvent["aggregateType"],
+  aggregateId: string,
+  eventType: string,
+  purchaseId: string,
+): Promise<OutboxEvent | null> {
+  const rows = await db
+    .select()
+    .from(outboxEvents)
+    .where(
+      and(
+        eq(outboxEvents.aggregateType, aggregateType),
+        eq(outboxEvents.aggregateId, aggregateId),
+        eq(outboxEvents.eventType, eventType),
+        sql`"outbox_events"."payload" ->> 'purchaseId' = ${purchaseId}`,
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Dedup check for purchase-less events: has an outbox row already been
+ * bridged for this inbound webhook_events row? Mirrors outgoing-webhooks'
+ * findOutgoingByWebhookEvent.
+ */
+export async function findByWebhookEventAndType(
+  db: Db,
+  aggregateType: OutboxEvent["aggregateType"],
+  aggregateId: string,
+  eventType: string,
+  webhookEventId: string,
+): Promise<OutboxEvent | null> {
+  const rows = await db
+    .select()
+    .from(outboxEvents)
+    .where(
+      and(
+        eq(outboxEvents.aggregateType, aggregateType),
+        eq(outboxEvents.aggregateId, aggregateId),
+        eq(outboxEvents.eventType, eventType),
+        sql`"outbox_events"."payload" ->> 'webhookEventId' = ${webhookEventId}`,
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export async function claimBatch(

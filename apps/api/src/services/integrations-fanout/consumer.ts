@@ -93,10 +93,17 @@ function toSubscriptionEnvelope(
   w: OutboxWrapper & { eventId: string },
   payload: Record<string, unknown>,
 ): RovenueEventEnvelope | null {
-  // Only `subscription.cancel_requested` has a producer today (Task 6
-  // wires the SUBSCRIPTION outbox rows). `subscription.expired` is a
-  // known public eventKey but unmapped until a producer emits it.
-  if (w.eventType !== "subscription.cancel_requested") return null;
+  // Both `subscription.cancel_requested` (scheduled-actions.ts) and
+  // `subscription.expired` (expiry-checker.ts) have real producers as of
+  // Task 6 (the SUBSCRIPTION outbox bridge) and share this exact shape:
+  // eventKey = eventType, payload passthrough, mandatory projectId.
+  if (
+    w.eventType !== "subscription.cancel_requested" &&
+    w.eventType !== "subscription.expired"
+  ) {
+    return null;
+  }
+  const eventType = w.eventType;
 
   const projectId = payload.projectId;
   if (typeof projectId !== "string" || projectId.length === 0) return null;
@@ -107,10 +114,14 @@ function toSubscriptionEnvelope(
   return {
     outboxEventId: w.eventId,
     projectId,
-    eventType: "subscription.cancel_requested",
-    eventKey: "subscription.cancel_requested",
+    eventType,
+    eventKey: eventType,
+    // cancel_requested stamps `requestedAt`; expired stamps `timestamp`.
     occurredAt:
-      asStr(payload.requestedAt) ?? asStr(w.createdAt) ?? new Date().toISOString(),
+      asStr(payload.requestedAt) ??
+      asStr(payload.timestamp) ??
+      asStr(w.createdAt) ??
+      new Date().toISOString(),
     subscriberId,
     payload,
   };

@@ -194,10 +194,53 @@ describe("toFanoutEnvelope", () => {
     expect(envelope?.occurredAt).toBe("2026-08-24T00:00:00.000Z");
   });
 
+  it("[rovenue.subscription] maps subscription.expired (Task 6's expiry-checker producer)", () => {
+    const wrapper = {
+      eventId: "ob-sub-4",
+      eventType: "subscription.expired",
+      aggregateId: "sub1",
+      createdAt: "2026-08-24T00:00:00.000Z",
+      payload: {
+        projectId: "p1",
+        purchaseId: "purchase1",
+        subscriberId: "sub1",
+        timestamp: "2026-08-23T12:00:00.000Z",
+      },
+    };
+
+    const envelope = toFanoutEnvelope(wrapper, "rovenue.subscription");
+
+    expect(envelope).toEqual({
+      outboxEventId: "ob-sub-4",
+      projectId: "p1",
+      eventType: "subscription.expired",
+      eventKey: "subscription.expired",
+      occurredAt: "2026-08-23T12:00:00.000Z",
+      subscriberId: "sub1",
+      payload: wrapper.payload,
+    });
+  });
+
+  it("[rovenue.subscription] falls back to wrapper createdAt for subscription.expired when timestamp is missing", () => {
+    const wrapper = {
+      eventId: "ob-sub-5",
+      eventType: "subscription.expired",
+      createdAt: "2026-08-24T00:00:00.000Z",
+      payload: { projectId: "p1", purchaseId: "purchase1", subscriberId: "sub1" },
+    };
+
+    const envelope = toFanoutEnvelope(wrapper, "rovenue.subscription");
+
+    expect(envelope?.occurredAt).toBe("2026-08-24T00:00:00.000Z");
+  });
+
   it("[rovenue.subscription] returns null for an unmapped eventType", () => {
     const wrapper = {
       eventId: "ob-sub-3",
-      eventType: "subscription.expired",
+      // A genuinely unmapped SUBSCRIPTION eventType — subscription.expired
+      // is now a real accepted case (see above), so this regression case
+      // uses a value with no producer at all.
+      eventType: "subscription.something_unmapped",
       createdAt: "2026-08-24T00:00:00.000Z",
       payload: { projectId: "p1" },
     };

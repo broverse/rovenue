@@ -16,7 +16,10 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, outboxEvents, projects, subscribers } from "@rovenue/db";
-import { __test_enqueueOutgoingWebhook as enqueueOutgoingWebhook } from "./webhook-processor";
+import {
+  __test_enqueueOutgoingWebhook as enqueueOutgoingWebhook,
+  __test_runPostProcessing as runPostProcessing,
+} from "./webhook-processor";
 
 const RUN_ID = Date.now();
 
@@ -45,7 +48,7 @@ async function seedSubscriber(projectId: string, suffix: string) {
 
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["W1", "W2"]) {
+  for (const suffix of ["W1", "W2", "W3", "W4"]) {
     const projectId = `prj_whp_${RUN_ID}${suffix}`;
     await db.delete(outboxEvents).where(
       inArray(
@@ -123,6 +126,79 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
     expect(outboxRows[0]!.aggregateType).toBe("SUBSCRIPTION");
     expect((outboxRows[0]!.payload as Record<string, unknown>).purchaseId).toBe(
       "pur_whp_w2",
+    );
+  });
+
+  // -------------------------------------------------------------------
+  // Fix-loop finding 1: the outbox bridge must be idempotent on a BullMQ
+  // retry (runPostProcessing re-runs the WHOLE post-processing block on
+  // any side-effect failure) — a retry must not insert a second
+  // outbox_events row for the same store event.
+  // -------------------------------------------------------------------
+
+  it("Case 3: running post-processing twice for the same purchase-less store event bridges exactly one SUBSCRIPTION outbox row", async () => {
+    const db = getDb();
+    const project = await seedProject("W3", null);
+    const subscriber = await seedSubscriber(project.id, "W3");
+
+    const args = {
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      eventType: "DID_RENEW",
+      webhookEventId: "whe_int_w3_retry",
+    };
+
+    // Simulates a BullMQ retry: the whole post-processing block re-runs
+    // for the same inbound webhook event.
+    await runPostProcessing(args);
+    await runPostProcessing(args);
+
+    const outboxRows = await db
+      .select()
+      .from(outboxEvents)
+      .where(
+        and(
+          eq(outboxEvents.aggregateId, subscriber.id),
+          eq(outboxEvents.eventType, "DID_RENEW"),
+        ),
+      );
+    expect(outboxRows.length).toBe(1);
+    expect(outboxRows[0]!.aggregateType).toBe("SUBSCRIPTION");
+  });
+
+  it("Case 4: running post-processing twice for the same purchase-keyed store event bridges exactly one SUBSCRIPTION outbox row", async () => {
+    const db = getDb();
+    const project = await seedProject("W4", null);
+    const subscriber = await seedSubscriber(project.id, "W4");
+
+    const args = {
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      // Purchase does not need to exist for this path — maybeCredit-
+      // ConsumablePurchase looks it up and no-ops when not found, and
+      // the outbox dedupe below keys on (aggregateType, subscriber,
+      // eventType, purchaseId), not on the purchase row itself.
+      purchaseId: "pur_whp_w4_retry",
+      eventType: "DID_RENEW",
+      webhookEventId: "whe_int_w4_retry",
+    };
+
+    await runPostProcessing(args);
+    await runPostProcessing(args);
+
+    const outboxRows = await db
+      .select()
+      .from(outboxEvents)
+      .where(
+        and(
+          eq(outboxEvents.aggregateId, subscriber.id),
+          eq(outboxEvents.eventType, "DID_RENEW"),
+        ),
+      );
+    expect(outboxRows.length).toBe(1);
+    expect(outboxRows[0]!.aggregateType).toBe("SUBSCRIPTION");
+    expect((outboxRows[0]!.payload as Record<string, unknown>).purchaseId).toBe(
+      "pur_whp_w4_retry",
     );
   });
 });
