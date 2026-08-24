@@ -5,14 +5,29 @@ import {
   INTEGRATIONS_DELIVER_QUEUE_NAME,
   type IntegrationsDeliverJob,
 } from "../../queues/integrations";
+import { fanoutTopics } from "../integrations/registry";
 import type {
+  FanoutTopic,
   RevenueEventKind,
   RovenueEventEnvelope,
 } from "../integrations/types";
 import type { ConnectionCache } from "./connection-cache";
 
 export const FANOUT_CONSUMER_GROUP = "rovenue-integrations-fanout";
-export const FANOUT_TOPICS = ["rovenue.revenue", "rovenue.billing"] as const;
+
+// Populated at module load from the provider registry's deduped topic
+// union (Task 3's `fanoutTopics()`). Exported as a read-only snapshot for
+// logging/tests only — `startIntegrationsFanout` re-calls `fanoutTopics()`
+// itself at start time (see below), so a provider registered after this
+// module loaded (e.g. Task 7's CUSTOM_WEBHOOK) is picked up on the next
+// process start with no further changes to this file.
+//
+// IMPORTANT: `rovenue.billing` is deliberately NEVER a member of this set.
+// That topic carries Rovenue-cloud's own internal billing events
+// (`billing.invoice.paid`, `billing.usage_lock.*`) — never customer-facing
+// integration fan-out. No provider's `topics` may include it; if one ever
+// does, this comment is the tripwire to revert that.
+export const FANOUT_TOPICS: readonly FanoutTopic[] = fanoutTopics();
 
 const log = logger.child("integrations-fanout");
 
@@ -21,13 +36,17 @@ const log = logger.child("integrations-fanout");
 // =============================================================
 //
 // The outbox dispatcher publishes `{ eventId, eventType, aggregateId,
-// createdAt, payload }`, where `payload` is the ClickHouse-shaped revenue
-// row (field names like `revenueEventId`, `type`, `eventDate`, `amountUsd`)
-// — NOT a RovenueEventEnvelope. The producer payload can't change (the CH
-// Kafka-engine tables read those exact names), so the consumer maps it here.
-// Crucially, `outboxEventId` is taken from the wrapper's `eventId` (the
-// outbox row id) — the providers hard-require it and dedup on it. Returns
-// null for event types that don't map to ad-platform conversions.
+// createdAt, payload }` on every fanout topic — `payload` is shaped
+// per-domain (ClickHouse-shaped revenue row, flat paywall event, raw
+// credit-ledger row, ...), NOT a RovenueEventEnvelope. The producer
+// payloads can't change (CH Kafka-engine tables / other consumers read
+// those exact field names), so this function maps each topic's wrapper
+// shape into the shared envelope. Crucially, `outboxEventId` is always
+// taken from the wrapper's `eventId` (the outbox row id, or — for
+// PAYWALL_EVENT rows — a content-derived hash; see
+// workers/outbox-dispatcher.ts's shapePaywallEventMessage) — providers
+// hard-require it and dedup on it. Returns null for (topic, eventType)
+// pairs that don't map to a known envelope shape.
 
 interface OutboxWrapper {
   eventId?: unknown;
@@ -36,7 +55,126 @@ interface OutboxWrapper {
   payload?: unknown;
 }
 
-export function toFanoutEnvelope(parsed: unknown): RovenueEventEnvelope | null {
+const asStr = (v: unknown): string | undefined =>
+  typeof v === "string" ? v : undefined;
+
+function toRevenueEnvelope(
+  w: OutboxWrapper & { eventId: string },
+  payload: Record<string, unknown>,
+): RovenueEventEnvelope | null {
+  if (w.eventType !== "revenue.event.recorded") return null;
+
+  const projectId = payload.projectId;
+  if (typeof projectId !== "string" || projectId.length === 0) return null;
+
+  const subscriberId =
+    typeof payload.subscriberId === "string" ? payload.subscriberId : undefined;
+
+  return {
+    outboxEventId: w.eventId,
+    projectId,
+    eventType: "revenue.event.recorded",
+    occurredAt:
+      asStr(payload.eventDate) ?? asStr(w.createdAt) ?? new Date().toISOString(),
+    revenueEventKind: payload.type as RevenueEventKind | undefined,
+    // The original transaction amount + currency (Meta/TikTok value fields).
+    amount: asStr(payload.amount),
+    currency: asStr(payload.currency),
+    subscriberId,
+    productId: asStr(payload.productId),
+    // No PII in the outbox payload (by design); externalId = subscriberId
+    // gives the platforms a stable match key. Email/phone enrichment is a
+    // follow-up in the delivery worker.
+    identityContext: subscriberId ? { externalId: subscriberId } : undefined,
+  };
+}
+
+function toSubscriptionEnvelope(
+  w: OutboxWrapper & { eventId: string },
+  payload: Record<string, unknown>,
+): RovenueEventEnvelope | null {
+  // Only `subscription.cancel_requested` has a producer today (Task 6
+  // wires the SUBSCRIPTION outbox rows). `subscription.expired` is a
+  // known public eventKey but unmapped until a producer emits it.
+  if (w.eventType !== "subscription.cancel_requested") return null;
+
+  const projectId = payload.projectId;
+  if (typeof projectId !== "string" || projectId.length === 0) return null;
+
+  const subscriberId =
+    typeof payload.subscriberId === "string" ? payload.subscriberId : undefined;
+
+  return {
+    outboxEventId: w.eventId,
+    projectId,
+    eventType: "subscription.cancel_requested",
+    eventKey: "subscription.cancel_requested",
+    occurredAt:
+      asStr(payload.requestedAt) ?? asStr(w.createdAt) ?? new Date().toISOString(),
+    subscriberId,
+    payload,
+  };
+}
+
+function toPaywallEnvelope(
+  w: OutboxWrapper & { eventId: string },
+  payload: Record<string, unknown>,
+): RovenueEventEnvelope | null {
+  // Real wire shape comes from workers/outbox-dispatcher.ts's
+  // shapePaywallEventMessage() — a FLAT payload carrying `projectId`
+  // (reshaped from the raw POST /v1/events client envelope).
+  if (w.eventType !== "paywall_view" && w.eventType !== "paywall_close") return null;
+
+  const projectId = payload.projectId;
+  if (typeof projectId !== "string" || projectId.length === 0) return null;
+
+  const subscriberId =
+    typeof payload.subscriberId === "string" ? payload.subscriberId : undefined;
+
+  return {
+    outboxEventId: w.eventId,
+    projectId,
+    eventType: w.eventType,
+    eventKey: w.eventType === "paywall_view" ? "paywall.view" : "paywall.close",
+    occurredAt:
+      asStr(payload.occurredAt) ?? asStr(w.createdAt) ?? new Date().toISOString(),
+    subscriberId,
+    payload,
+  };
+}
+
+function toCreditEnvelope(
+  w: OutboxWrapper & { eventId: string },
+  payload: Record<string, unknown>,
+): RovenueEventEnvelope | null {
+  // Field names per packages/db/src/drizzle/repositories/credit-ledger.ts:151
+  // (insertCreditLedger's outbox emit site): creditLedgerId, projectId,
+  // subscriberId, currencyId, type, amount, balance, referenceType,
+  // referenceId, createdAt.
+  if (w.eventType !== "credit.ledger.appended") return null;
+
+  const projectId = payload.projectId;
+  if (typeof projectId !== "string" || projectId.length === 0) return null;
+
+  const subscriberId =
+    typeof payload.subscriberId === "string" ? payload.subscriberId : undefined;
+
+  return {
+    outboxEventId: w.eventId,
+    projectId,
+    eventType: "credit.ledger.appended",
+    eventKey: "credit.ledger.appended",
+    occurredAt:
+      asStr(payload.createdAt) ?? asStr(w.createdAt) ?? new Date().toISOString(),
+    subscriberId,
+    payload,
+  };
+}
+
+export function toFanoutEnvelope(
+  parsed: unknown,
+  topic: FanoutTopic,
+): RovenueEventEnvelope | null {
   if (!parsed || typeof parsed !== "object") return null;
   const w = parsed as OutboxWrapper & Partial<RovenueEventEnvelope>;
 
@@ -47,36 +185,23 @@ export function toFanoutEnvelope(parsed: unknown): RovenueEventEnvelope | null {
 
   // Dispatcher-wrapped outbox row.
   if (typeof w.eventId !== "string") return null;
-  if (w.eventType !== "revenue.event.recorded") return null; // only revenue maps today
   const p = w.payload;
   if (!p || typeof p !== "object") return null;
   const payload = p as Record<string, unknown>;
+  const wrapper = w as OutboxWrapper & { eventId: string };
 
-  const projectId = payload.projectId;
-  if (typeof projectId !== "string" || projectId.length === 0) return null;
-
-  const subscriberId =
-    typeof payload.subscriberId === "string" ? payload.subscriberId : undefined;
-  const str = (v: unknown): string | undefined =>
-    typeof v === "string" ? v : undefined;
-
-  return {
-    outboxEventId: w.eventId,
-    projectId,
-    eventType: "revenue.event.recorded",
-    occurredAt:
-      str(payload.eventDate) ?? str(w.createdAt) ?? new Date().toISOString(),
-    revenueEventKind: payload.type as RevenueEventKind | undefined,
-    // The original transaction amount + currency (Meta/TikTok value fields).
-    amount: str(payload.amount),
-    currency: str(payload.currency),
-    subscriberId,
-    productId: str(payload.productId),
-    // No PII in the outbox payload (by design); externalId = subscriberId
-    // gives the platforms a stable match key. Email/phone enrichment is a
-    // follow-up in the delivery worker.
-    identityContext: subscriberId ? { externalId: subscriberId } : undefined,
-  };
+  switch (topic) {
+    case "rovenue.revenue":
+      return toRevenueEnvelope(wrapper, payload);
+    case "rovenue.subscription":
+      return toSubscriptionEnvelope(wrapper, payload);
+    case "rovenue.paywall_events":
+      return toPaywallEnvelope(wrapper, payload);
+    case "rovenue.credit":
+      return toCreditEnvelope(wrapper, payload);
+    default:
+      return null;
+  }
 }
 
 // =============================================================
@@ -144,20 +269,25 @@ export async function startIntegrationsFanout(
     return { stop: async () => {} };
   }
 
+  // Resolved at start time (not module-import time) so a provider
+  // registered after this module loaded — e.g. Task 7's CUSTOM_WEBHOOK —
+  // is picked up on the next process start without touching this file.
+  const topics = fanoutTopics();
+
   const consumer = kafka.consumer({ groupId: FANOUT_CONSUMER_GROUP });
   await consumer.connect();
 
-  for (const topic of FANOUT_TOPICS) {
+  for (const topic of topics) {
     await consumer.subscribe({ topic, fromBeginning: false });
   }
 
   await consumer.run({
-    eachMessage: async ({ message }) => {
+    eachMessage: async ({ topic, message }) => {
       const raw = message.value?.toString() ?? "";
       if (!raw) return;
       let envelope: RovenueEventEnvelope | null;
       try {
-        envelope = toFanoutEnvelope(JSON.parse(raw));
+        envelope = toFanoutEnvelope(JSON.parse(raw), topic as FanoutTopic);
       } catch (err) {
         log.error("parse_failed", {
           err: err instanceof Error ? err.message : String(err),
@@ -165,7 +295,7 @@ export async function startIntegrationsFanout(
         });
         return;
       }
-      // Unmappable event type (e.g. a non-revenue billing event) — skip.
+      // Unmappable (topic, eventType) pair — skip.
       if (!envelope) return;
       try {
         await processFanoutMessage(envelope, deps);
@@ -180,7 +310,7 @@ export async function startIntegrationsFanout(
   });
 
   log.info("started", {
-    topics: FANOUT_TOPICS,
+    topics,
     groupId: FANOUT_CONSUMER_GROUP,
     queue: INTEGRATIONS_DELIVER_QUEUE_NAME,
   });
