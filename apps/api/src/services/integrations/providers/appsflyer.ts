@@ -28,8 +28,8 @@ import {
 // Same shape as AMPLITUDE/MIXPANEL (Tasks 5/6): the seven `subscription.*`
 // RovenueEventType values are already spelled identically to their
 // RovenueEventKey counterparts, so only revenue.* goes through the shared
-// `deriveRevenueEventKey` helper. Kept in sync deliberately — see
-// amplitude.ts for the fuller rationale.
+// `deriveRevenueEventKey` helper (the set itself is shared — see
+// amplitude.ts for the fuller rationale).
 // ---------------------------------------------------------------------------
 
 // Typing the Set as RovenueEventType while seeding it from the shared
@@ -49,10 +49,15 @@ function deriveEventKey(
 }
 
 // ---------------------------------------------------------------------------
-// Default event mapping — AppsFlyer's own `af_`-prefixed in-app-event
-// vocabulary (unlike AMPLITUDE/MIXPANEL, which have no reserved event-name
-// vocabulary of their own). Kept in sync with event-mapping.ts's
-// DEFAULT_EVENT_MAPPING.APPSFLYER (the dashboard drawer reads this export).
+// Default event mapping + catalog
+// ---------------------------------------------------------------------------
+//
+// The vendor names are AppsFlyer's own `af_`-prefixed in-app-event vocabulary
+// (unlike AMPLITUDE/MIXPANEL, which have no reserved event-name vocabulary of
+// their own); the table lives in event-mapping.ts's DEFAULT_EVENT_MAPPING,
+// the one copy applyEventMapping reads. The offered key set comes from
+// @rovenue/shared's WAVE1_PROVIDER_EVENT_KEYS, which the dashboard drawer's
+// event picker reads too.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
