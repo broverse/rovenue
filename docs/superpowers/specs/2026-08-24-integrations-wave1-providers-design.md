@@ -66,6 +66,12 @@ encryption, 6-step drawer, docs page. Exploration findings this spec builds on:
   not fail because a subscriber row is missing).
 - CUSTOM_WEBHOOK is EXCLUDED from enrichment-derived PII: its `buildWebhookData` continues stripping
   identityContext to `externalId` (customers fetch their own PII; webhook bodies stay lean).
+- **ATT/consent gating (compliance):** the catalog already stores `$attConsentStatus`. Enrichment
+  EXCLUDES `$idfa` and `$gpsAdId` from `subscriberAttributes` whenever `$attConsentStatus` is present
+  and not `"authorized"` — forwarding a device advertising id the user declined to share to an ad/
+  attribution platform is a compliance bug, not a feature. Vendor-scoped ids ($appsflyerId, $adjustId,
+  $firebaseAppInstanceId, $amplitudeDeviceId, $mixpanelDistinctId) are not ATT-gated (they are the
+  vendors' own first-party ids). Unit-test the gate both ways.
 
 ### 4.2 Provider matrix
 
@@ -77,7 +83,7 @@ validateCredentials call is the live proof.
 | Provider | Topics | Identity requirement | Credentials | Dedup key |
 |---|---|---|---|---|
 | AMPLITUDE | revenue, subscription | user_id = `appUserId` ?? subscriberId; device_id ← `$amplitudeDeviceId`; `$amplitudeUserId` overrides user_id | `api_key`, `region` (us/eu) | `insert_id` = outboxEventId |
-| MIXPANEL | revenue, subscription | distinct_id ← `$mixpanelDistinctId` ?? appUserId ?? subscriberId | `project_token`, `api_secret`, `region` (us/eu) | `$insert_id` = outboxEventId |
+| MIXPANEL | revenue, subscription | distinct_id ← `$mixpanelDistinctId` ?? appUserId ?? subscriberId | `service_account_username`, `service_account_secret`, `project_id`, `region` (us/eu) | `$insert_id` = outboxEventId |
 | APPSFLYER | revenue, subscription | REQUIRES `$appsflyerId` else skip `no_user_data`; per-platform app id chosen via `subscriberAttributes.platform` | `dev_key`, `app_id_ios`, `app_id_android` (≥1 app id) | `eventTime` + af dedup; outboxEventId in `eventValue` |
 | ADJUST | revenue, subscription | REQUIRES `$adjustId` (adid) or `$idfa`/`$gpsAdId` else skip | `app_token` + per-event tokens via `eventMapping` (eventName = Adjust event token) | Adjust server-side dedup on `deduplication_id` = outboxEventId |
 | SLACK | revenue, subscription, paywall_events, credit | none | `webhook_url` (host-allowlisted `hooks.slack.com`, https) | n/a (notification) |
@@ -88,23 +94,33 @@ Provider notes:
   events set `revenue`, `price`, `quantity: 1`, `revenueType` = event key. `validateCredentials`:
   post a `$identify`-free noop batch or use the API-key error contract — implementer picks the
   cheapest real call.
-- **Mixpanel**: `/import?strict=1` (EU `api-eu.mixpanel.com`) with basic auth `api_secret`; revenue
-  amount in properties. `validateCredentials`: strict-mode import of an empty/probe batch or the
-  documented auth-check.
+- **Mixpanel**: `/import?strict=1&project_id=` (EU `api-eu.mixpanel.com`) with **Service Account**
+  basic auth (username:secret) — Mixpanel's recommended server-side auth; the legacy per-project
+  `api_secret` is deliberately NOT offered (one auth path, the modern one). Revenue amount in
+  properties. `validateCredentials`: strict-mode import probe against the real endpoint.
 - **AppsFlyer**: S2S `https://api2.appsflyer.com/inappevent/{app_id}` header `authentication:
-  dev_key`; af_revenue/af_currency in eventValue; missing platform-matching app id → skip
-  `no_mapping`-style reason (named const).
+  dev_key`; af_revenue/af_currency in eventValue. App-id selection rules (explicit, in this order):
+  platform attribute matches a configured app id → use it; exactly ONE app id configured → use it
+  regardless of platform; both configured but platform absent/unknown/web → skip with named reason
+  `no_platform_app_id`. Missing `$appsflyerId` → skip `no_user_data`.
 - **Adjust**: `https://s2s.adjust.com/event`; `eventMapping` semantic REUSE: value's `eventName` IS
   the Adjust event token — drawer mapping step already edits this; events without a token → skip
   (Adjust requires per-event tokens; no defaults possible). Revenue: `revenue` + `currency`.
 - **Slack**: message built per event key (compact text: emoji + event + amount/currency + product +
-  masked subscriber), posted to the stored webhook URL. Delivery classification: Slack returns 200
-  "ok" / 4xx body strings; 404 `no_service` = endpoint revoked → non-retriable dead-letter (surfaces
-  the existing dead-letter notification). Host allowlist `hooks.slack.com` at validate AND deliver
-  (same two-phase shape as the SSRF guard, but allowlist not blocklist).
+  masked subscriber — NO raw PII in Slack messages), posted to the stored webhook URL. Delivery
+  classification: Slack returns 200 "ok" / 4xx body strings; 404 `no_service` = endpoint revoked →
+  non-retriable dead-letter (surfaces the existing dead-letter notification); 429 honors the
+  existing retriable path. Host allowlist `hooks.slack.com` at validate AND deliver (same two-phase
+  shape as the SSRF guard, but allowlist not blocklist). **Known semantics, documented in the
+  provider's docs page:** Slack has no consumer-side dedup key, so the pipeline's at-least-once
+  delivery can rarely duplicate a message (crash between POST and status write) — accepted for a
+  notification channel; do not build bespoke exactly-once machinery for it.
 - **GA4**: `https://www.google-analytics.com/mp/collect?firebase_app_id=&api_secret=`; `purchase` /
   `refund` canonical names in defaultEventMapping; `validateCredentials` uses the
   `debug/mp/collect` validation endpoint (it returns validation messages — a real check).
+  **Scope: Firebase app streams only** (app_instance_id). GA4 web streams (measurement_id +
+  client_id) are a documented non-goal this wave — the SDK surface is mobile-first and the web SDK
+  is its own roadmap item.
 
 `IntegrationProviderId` union grows by six; registry entries added; `providerIds()`/Zod/fanout pick
 them up automatically (that was the point of the foundation).
