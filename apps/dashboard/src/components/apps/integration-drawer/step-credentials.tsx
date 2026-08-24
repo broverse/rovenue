@@ -154,12 +154,23 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * providers/appsflyer.ts's validateCredentials comment and
  * apps/docs/content/docs/integrations/appsflyer.mdx for the documented
  * "first delivery is the live proof" caveat this implies.
+ *
+ * SLACK: unlike AMPLITUDE/MIXPANEL's deduplicated analytics-event probe,
+ * this posts a REAL, human-visible "Rovenue connected ✅" message straight
+ * into the configured Slack channel — RC-parity behavior for a Slack
+ * connect flow, where seeing a message land IS the confirmation. It is NOT
+ * deduplicated: Slack incoming webhooks have no dedup-key concept at all
+ * (see providers/slack.ts), so clicking Validate again posts another
+ * message. Documented again in apps/docs/content/docs/integrations/
+ * slack.mdx.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:
     "Validate sends a real, clearly-tagged test event to this Amplitude project (deduplicated across repeat clicks).",
   MIXPANEL:
     "Validate sends a real, clearly-tagged test event to this Mixpanel project (deduplicated across repeat clicks).",
+  SLACK:
+    "Validate posts a real \"Rovenue connected ✅\" message to this Slack channel — not deduplicated, so repeat clicks post again.",
 };
 
 // ---------------------------------------------------------------------------

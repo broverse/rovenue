@@ -1,0 +1,73 @@
+---
+title: Slack
+description: Post real-time Rovenue revenue, subscription, paywall, and credit-ledger events to a Slack channel via an incoming webhook.
+---
+
+# Slack
+
+The Slack integration posts a short, human-readable message to a Slack channel for every Rovenue event you enable — revenue events (purchases, trial conversions, renewals, refunds, cancellations), subscription-lifecycle events (trials, grace period, billing issues, plan changes), paywall events (views, closes), and credit-ledger events. It's a notification channel, not a data pipeline: unlike Amplitude/Mixpanel/AppsFlyer/Adjust, it subscribes to **all four** Rovenue fanout topics and every one of the 17 public event keys, since there's no reason to scope a Slack alert to a single event family the way an analytics or attribution tool would.
+
+---
+
+## 1. Create an incoming webhook in Slack
+
+1. In Slack, create (or reuse) an app and enable **Incoming Webhooks** for your workspace — see [Slack's incoming webhooks guide](https://api.slack.com/messaging/webhooks) if you haven't done this before.
+2. Click **Add New Webhook to Workspace**, choose the channel Rovenue events should post to, and authorize it.
+3. Copy the generated webhook URL — it looks like `https://hooks.slack.com/services/T000/B000/xxxxxxxxxxxxxxxxxxxxxxxx`.
+
+> Treat this URL as a secret: anyone who has it can post messages to your channel.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Slack** under **Communication & alerts** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **Incoming webhook URL** — paste the URL from step 1.
+4. Click **Validate**.
+
+> **Validate posts a real message.** Unlike a zero-footprint credential check, Rovenue confirms a Slack incoming webhook by actually posting `Rovenue connected :white_check_mark:` to the configured channel — the same way you'd confirm a Slack integration by hand. This is intentional (it's the standard way to prove a Slack webhook works) but it means clicking **Validate** again posts the message again; it is not deduplicated the way Amplitude's/Mixpanel's credential probes are.
+
+5. Choose which events to forward, optionally review the mapping step, then activate.
+
+---
+
+## 3. Event mapping
+
+Slack has no vendor-specific event vocabulary of its own — every one of Rovenue's 17 public event keys maps to itself. The mapping step exists only if you want to relabel what shows up in the connection's Delivery Log; it has no effect on the Slack message text.
+
+---
+
+## 4. Message format
+
+Each event becomes a single Slack message (`{ "text": "..." }`, no Block Kit), prefixed with an emoji per event family:
+
+| Event family | Prefix | Example |
+|---|---|---|
+| `revenue.*` | `:moneybag:` | `:moneybag: revenue.RENEWAL — 9.99 USD · prod_gold · subscriber sub_…` |
+| `subscription.*` (+ `subscriber.identified`) | `:repeat:` | `:repeat: subscription.trial.started · subscriber sub_…` |
+| `paywall.*` | `:eyes:` | `:eyes: paywall.view · subscriber sub_…` |
+| `credit.ledger.appended` | `:coin:` | `:coin: credit.ledger.appended · subscriber sub_…` |
+
+The `subscriber` segment shows only the **first 4 characters** of the Rovenue subscriber id, followed by an ellipsis — enough to recognize repeat activity from the same subscriber in a channel, without printing an identifier a reader could act on.
+
+**No PII ever appears in a Slack message.** The message builder only ever reads the event key, amount, currency, product id, and (masked) subscriber id off the event — it never reads `identityContext` (email, phone, IP, user agent) or subscriber attributes (arbitrary host-app-set key/values), regardless of what a subscriber's profile carries.
+
+---
+
+## 5. At-least-once delivery and duplicate messages
+
+Slack has no consumer-side dedup key, so the pipeline's at-least-once delivery can rarely duplicate a message (crash between POST and status write) — accepted for a notification channel.
+
+---
+
+## 6. Verify events are arriving
+
+1. Trigger a real event from your app (a purchase, a trial start, a paywall view) and check the configured Slack channel — messages typically arrive within a few seconds.
+2. If messages are not appearing:
+   - Check **Apps → Slack → Delivery Log** in Rovenue for HTTP status codes and error messages.
+   - A `404` or `410` response (Slack's `no_service` / `no_active_hooks`) means the webhook was deleted or deactivated in Slack — recreate it and update the connection's credentials.
+   - A `400` response (Slack's `invalid_payload`) means the request was malformed; this indicates a bug rather than a misconfiguration and should not recur on retry.
+   - Ensure the event type you're sending is included in the connection's enabled events.
+   - Rovenue only ever POSTs to `https://hooks.slack.com/...` — a webhook URL hosted anywhere else is rejected at both credential-validation time and delivery time.

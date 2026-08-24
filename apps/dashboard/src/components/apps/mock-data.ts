@@ -1,4 +1,4 @@
-import { BarChart3, CircleCheck, LayoutGrid, Megaphone, Radar } from "lucide-react";
+import { BarChart3, CircleCheck, LayoutGrid, Megaphone, MessageSquare, Radar } from "lucide-react";
 import type { AppDescriptor, CategoryId, RailEntry } from "./types";
 
 /** Catalog id for the CUSTOM_WEBHOOK provider's card (Task 12). Distinct
@@ -14,9 +14,10 @@ export const CUSTOM_WEBHOOK_APP_ID = "custom-webhook";
  * outgoing-webhook provider were the first wired end-to-end (M0–M9 plan,
  * branch `feat/integrations-meta-tiktok`, extended by Task 12); AMPLITUDE
  * (Wave-1 Task 5) is the first `analytics`-category entry; APPSFLYER
- * (Wave-1 Task 7) is the first `attribution`-category entry. Other
- * surfaces — lifecycle, communication, etc. — are still out of scope. When
- * a new provider lands, add it here with its own `custom` brand mark in
+ * (Wave-1 Task 7) is the first `attribution`-category entry; SLACK
+ * (Wave-1 Task 9) is the first `communication`-category entry. Other
+ * surfaces — lifecycle, data, automation, etc. — are still out of scope.
+ * When a new provider lands, add it here with its own `custom` brand mark in
  * `app-logo.tsx` if it needs a vector logo instead of a glyph.
  */
 export const APPS: ReadonlyArray<AppDescriptor> = [
@@ -112,6 +113,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "slack",
+    category: "communication",
+    vendorKey: "slack",
+    logo: {
+      // Slack "Aubergine" brand purple.
+      background: "#4A154B",
+      glyph: "S",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
@@ -121,9 +135,15 @@ export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
   { kind: "item", id: "ads", icon: Megaphone },
   { kind: "item", id: "analytics", icon: BarChart3 },
   { kind: "item", id: "attribution", icon: Radar },
+  { kind: "item", id: "communication", icon: MessageSquare },
 ];
 
-export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = ["ads", "analytics", "attribution"];
+export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = [
+  "ads",
+  "analytics",
+  "attribution",
+  "communication",
+];
 
 /** Public documentation site — linked from the docs / API-reference CTAs. */
 export const DOCS_URL = "https://docs.rovenue.io";

@@ -49,6 +49,7 @@ const CARD_ID_TO_PROVIDER: Record<
   mixpanel: "MIXPANEL",
   appsflyer: "APPSFLYER",
   adjust: "ADJUST",
+  slack: "SLACK",
 };
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({

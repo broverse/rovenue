@@ -116,12 +116,20 @@ const APPSFLYER_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "acti
 // token must be entered there or the event is skipped as `no_mapping`).
 const ADJUST_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// SLACK has the same shape as AMPLITUDE/MIXPANEL/APPSFLYER: no vendor
+// "Events Manager" test-event tooling. It keeps "mapping" purely as
+// optional customization — every catalog key already defaults to a mapped
+// (identity) providerEvent, so nothing there is required the way it is for
+// ADJUST.
+const SLACK_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
   MIXPANEL: MIXPANEL_STEPS,
   APPSFLYER: APPSFLYER_STEPS,
   ADJUST: ADJUST_STEPS,
+  SLACK: SLACK_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -140,6 +148,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   MIXPANEL: "Mixpanel",
   APPSFLYER: "AppsFlyer",
   ADJUST: "Adjust",
+  SLACK: "Slack",
 };
 
 // ---------------------------------------------------------------------------

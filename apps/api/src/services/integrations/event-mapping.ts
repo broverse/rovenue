@@ -1,4 +1,5 @@
 import type { RovenueEventKey, IntegrationProviderId } from "@rovenue/shared";
+import { ROVENUE_EVENT_KEYS } from "@rovenue/shared";
 import type { RovenueEventEnvelope } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -116,6 +117,14 @@ export const DEFAULT_EVENT_MAPPING: Record<
   // key here unless the connection's own `eventMapping` override supplies
   // a token.
   ADJUST: {},
+  // SLACK — every one of the 17 public event keys maps to itself. Slack has
+  // no vendor-specific event-name vocabulary (there is no "Subscribe" or
+  // "purchase_initial" equivalent) — `providerEvent` is only ever used as a
+  // human-readable label. Kept in sync with providers/slack.ts's own
+  // `defaultEventMapping` export (which the dashboard drawer reads).
+  SLACK: Object.fromEntries(
+    ROVENUE_EVENT_KEYS.map((key) => [key, key]),
+  ) as Partial<Record<RovenueEventKey, string>>,
 };
 
 export type ApplyEventMappingInput = {

@@ -6,6 +6,7 @@ import { amplitudeProvider } from "./providers/amplitude";
 import { mixpanelProvider } from "./providers/mixpanel";
 import { appsflyerProvider } from "./providers/appsflyer";
 import { adjustProvider } from "./providers/adjust";
+import { slackProvider } from "./providers/slack";
 
 export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   META_CAPI: metaCapiProvider,
@@ -15,6 +16,7 @@ export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   MIXPANEL: mixpanelProvider,
   APPSFLYER: appsflyerProvider,
   ADJUST: adjustProvider,
+  SLACK: slackProvider,
 };
 
 export function getProvider(id: ProviderId): IntegrationProvider {

@@ -85,6 +85,11 @@ const ADJUST_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
 // `eventCatalog` is `ROVENUE_EVENT_KEYS` in full (custom-webhook.ts) — so
 // the picker offers every public event key rather than the ad-providers'
 // narrower list above.
+//
+// SLACK's `eventCatalog` is also `ROVENUE_EVENT_KEYS` in full
+// (providers/slack.ts) — unlike CUSTOM_WEBHOOK it subscribes to all four
+// fanout topics on purpose (it's a general-purpose notification channel,
+// not scoped to one domain), so the picker offers the same complete set.
 const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> = {
   META_CAPI: ALL_EVENT_KEYS,
   TIKTOK_EVENTS: ALL_EVENT_KEYS,
@@ -93,6 +98,7 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   MIXPANEL: MIXPANEL_EVENT_KEYS,
   APPSFLYER: APPSFLYER_EVENT_KEYS,
   ADJUST: ADJUST_EVENT_KEYS,
+  SLACK: ROVENUE_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

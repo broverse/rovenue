@@ -30,6 +30,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   MIXPANEL: "Mixpanel",
   APPSFLYER: "AppsFlyer",
   ADJUST: "Adjust",
+  SLACK: "Slack",
 };
 
 // ---------------------------------------------------------------------------

@@ -35,7 +35,8 @@ export type IntegrationProviderId =
   | "AMPLITUDE"
   | "MIXPANEL"
   | "APPSFLYER"
-  | "ADJUST";
+  | "ADJUST"
+  | "SLACK";
 
 export const WEBHOOK_API_VERSION = "2026-08-24";
 
