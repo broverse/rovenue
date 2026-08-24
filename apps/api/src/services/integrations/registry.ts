@@ -2,6 +2,7 @@ import type { FanoutTopic, IntegrationProvider, ProviderId } from "./types";
 import { metaCapiProvider } from "./providers/meta-capi";
 import { tiktokEventsProvider } from "./providers/tiktok-events";
 
+// @ts-expect-error CUSTOM_WEBHOOK provider lands in Task 7
 export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   META_CAPI: metaCapiProvider,
   TIKTOK_EVENTS: tiktokEventsProvider,

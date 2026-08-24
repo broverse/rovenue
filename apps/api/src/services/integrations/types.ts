@@ -24,7 +24,12 @@ export interface RetryPolicy {
 export type RovenueEventType =
   | "revenue.event.recorded"
   | "subscription.trial.started"
-  | "subscriber.identified";
+  | "subscriber.identified"
+  | "subscription.cancel_requested"
+  | "subscription.expired"
+  | "paywall_view"
+  | "paywall_close"
+  | "credit.ledger.appended";
 
 export type RevenueEventKind =
   | "INITIAL"
@@ -58,6 +63,11 @@ export interface RovenueEventEnvelope {
   productId?: string;
   identityContext?: IdentityContext;
   eventSourceUrl?: string;
+  /** Public event key; set by toFanoutEnvelope for non-revenue topics.
+   *  Revenue events keep deriving `revenue.${revenueEventKind}` (existing path). */
+  eventKey?: RovenueEventKey;
+  /** Domain payload passthrough for the webhook provider's `data` field. */
+  payload?: Record<string, unknown>;
 }
 
 export interface ConnectionConfig {

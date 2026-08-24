@@ -20,6 +20,7 @@ export const DEFAULT_EVENT_MAPPING: Record<
     "subscription.trial.started": "StartTrial",
     "subscriber.identified": "CompleteRegistration",
     // revenue.REFUND / revenue.CANCELLATION: intentionally unmapped (see above).
+    // v2 additions: not mapped to Meta CAPI events (provider-specific, Task 7+).
   },
   TIKTOK_EVENTS: {
     "revenue.INITIAL": "Subscribe",
@@ -29,6 +30,10 @@ export const DEFAULT_EVENT_MAPPING: Record<
     "subscription.trial.started": "StartTrial",
     "subscriber.identified": "CompleteRegistration",
     // revenue.REFUND / revenue.CANCELLATION: intentionally unmapped (see above).
+    // v2 additions: not mapped to TikTok Events API events (provider-specific, Task 7+).
+  },
+  CUSTOM_WEBHOOK: {
+    // CUSTOM_WEBHOOK has no default event mappings; user configures all via dashboard.
   },
 };
 
