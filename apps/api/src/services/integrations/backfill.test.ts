@@ -8,7 +8,7 @@
 // All DB and BullMQ dependencies are injected as vi.fn() stubs.
 
 import { describe, expect, it, vi, type Mock } from "vitest";
-import { enqueueBackfillForConnection } from "./backfill";
+import { enqueueBackfillForConnection, outboxRowToEnvelope } from "./backfill";
 import type { EnqueueBackfillDeps, OutboxRow } from "./backfill";
 
 // ---------------------------------------------------------------------------
@@ -167,5 +167,120 @@ describe("enqueueBackfillForConnection — M4.3 chunked", () => {
       | undefined;
     expect(secondCall).toBeDefined();
     expect(secondCall!.sql).toContain("$2::timestamptz");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// outboxRowToEnvelope — normalization of REAL stored outbox rows
+// ---------------------------------------------------------------------------
+//
+// The payload column is domain-shaped, never a RovenueEventEnvelope, so this
+// must go through toFanoutEnvelope rather than casting. A cast produced
+// `outboxEventId: undefined`, which then violates integration_deliveries'
+// NOT NULL outbox_event_id on both the backfill and the redeliver path.
+
+describe("outboxRowToEnvelope", () => {
+  const ROW_ID = "oe_row_1";
+  const PROJECT_ID = "proj_norm";
+
+  /** Field names per createRevenueEvent's outbox emit
+   *  (packages/db/src/drizzle/repositories/revenue-events.ts). */
+  const productionRevenuePayload = {
+    revenueEventId: "rev_1",
+    projectId: PROJECT_ID,
+    subscriberId: "sub_1",
+    purchaseId: "pur_1",
+    productId: "prod_1",
+    type: "RENEWAL",
+    store: "APP_STORE",
+    amount: "9.9900",
+    amountUsd: "9.9900",
+    currency: "USD",
+    eventDate: "2026-08-20T10:00:00.000Z",
+  };
+
+  it("normalizes a production REVENUE_EVENT row into a complete envelope", () => {
+    const envelope = outboxRowToEnvelope({
+      id: ROW_ID,
+      aggregateType: "REVENUE_EVENT",
+      eventType: "revenue.event.recorded",
+      payload: productionRevenuePayload,
+      createdAt: new Date("2026-08-20T10:00:01.000Z"),
+    });
+
+    expect(envelope).not.toBeNull();
+    expect(envelope!.outboxEventId).toBe(ROW_ID);
+    expect(envelope!.projectId).toBe(PROJECT_ID);
+    expect(envelope!.revenueEventKind).toBe("RENEWAL");
+    expect(envelope!.amount).toBe("9.9900");
+    expect(envelope!.currency).toBe("USD");
+    expect(envelope!.occurredAt).toBe(productionRevenuePayload.eventDate);
+    expect(envelope!.identityContext).toEqual({ externalId: "sub_1" });
+  });
+
+  it("normalizes a SUBSCRIPTION bridge row", () => {
+    const envelope = outboxRowToEnvelope({
+      id: ROW_ID,
+      aggregateType: "SUBSCRIPTION",
+      eventType: "subscription.expired",
+      payload: {
+        projectId: PROJECT_ID,
+        subscriberId: "sub_2",
+        purchaseId: "pur_2",
+        timestamp: "2026-08-20T11:00:00.000Z",
+      },
+      createdAt: "2026-08-20T11:00:01.000Z",
+    });
+
+    expect(envelope).not.toBeNull();
+    expect(envelope!.outboxEventId).toBe(ROW_ID);
+    expect(envelope!.eventKey).toBe("subscription.expired");
+    expect(envelope!.occurredAt).toBe("2026-08-20T11:00:00.000Z");
+  });
+
+  it("passes a legacy already-complete envelope payload through unchanged", () => {
+    const legacy = {
+      outboxEventId: "oe_legacy",
+      projectId: PROJECT_ID,
+      eventType: "revenue.event.recorded",
+      revenueEventKind: "INITIAL",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      amount: "4.99",
+      currency: "USD",
+    };
+
+    const envelope = outboxRowToEnvelope({
+      id: ROW_ID,
+      aggregateType: "REVENUE_EVENT",
+      eventType: "revenue.event.recorded",
+      payload: legacy,
+      createdAt: "2026-08-20T12:00:01.000Z",
+    });
+
+    expect(envelope).toEqual(legacy);
+  });
+
+  it("returns null for an aggregate type that never fans out to integrations", () => {
+    expect(
+      outboxRowToEnvelope({
+        id: ROW_ID,
+        aggregateType: "BILLING",
+        eventType: "billing.invoice.paid",
+        payload: { projectId: PROJECT_ID },
+        createdAt: "2026-08-20T13:00:00.000Z",
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null for an event type the fan-out consumer does not map", () => {
+    expect(
+      outboxRowToEnvelope({
+        id: ROW_ID,
+        aggregateType: "SUBSCRIPTION",
+        eventType: "DID_RENEW",
+        payload: { projectId: PROJECT_ID, subscriberId: "sub_3" },
+        createdAt: "2026-08-20T14:00:00.000Z",
+      }),
+    ).toBeNull();
   });
 });

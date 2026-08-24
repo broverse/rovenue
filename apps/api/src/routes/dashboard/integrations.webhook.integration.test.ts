@@ -108,15 +108,41 @@ async function seedOutboxEvent(opts: {
   id: string;
   projectId: string;
   payload: Record<string, unknown>;
+  aggregateType?: "REVENUE_EVENT" | "SUBSCRIPTION";
+  eventType?: string;
 }) {
   await db.insert(drizzle.schema.outboxEvents).values({
     id: opts.id,
-    aggregateType: "REVENUE_EVENT",
+    aggregateType: opts.aggregateType ?? "REVENUE_EVENT",
     aggregateId: opts.projectId,
-    eventType: "revenue.event.recorded",
+    eventType: opts.eventType ?? "revenue.event.recorded",
     payload: opts.payload,
   });
   seededOutboxEventIds.push(opts.id);
+}
+
+/**
+ * The payload a REVENUE_EVENT outbox row carries in PRODUCTION — field names
+ * copied verbatim from createRevenueEvent's outbox emit in
+ * packages/db/src/drizzle/repositories/revenue-events.ts. It is not a
+ * RovenueEventEnvelope (no outboxEventId / occurredAt / revenueEventKind),
+ * so redeliver only works if the route normalizes the row instead of casting
+ * its payload.
+ */
+function productionRevenuePayload(projectId: string): Record<string, unknown> {
+  return {
+    revenueEventId: `rev_${RUN_ID}`,
+    projectId,
+    subscriberId: `sub_${RUN_ID}`,
+    purchaseId: `pur_${RUN_ID}`,
+    productId: `prod_${RUN_ID}`,
+    type: "INITIAL",
+    store: "APP_STORE",
+    amount: "9.9900",
+    amountUsd: "9.9900",
+    currency: "USD",
+    eventDate: new Date().toISOString(),
+  };
 }
 
 /** Insert an integration_deliveries audit row directly. */
@@ -548,19 +574,12 @@ describe.sequential(
       const connectionId = createData.connection.id;
 
       const outboxEventId = `outbox_${RUN_ID}_redeliver_ok`;
+      // Seeded with the REAL production payload shape — see
+      // productionRevenuePayload.
       await seedOutboxEvent({
         id: outboxEventId,
         projectId,
-        payload: {
-          outboxEventId,
-          projectId,
-          eventType: "revenue.event.recorded",
-          revenueEventKind: "INITIAL",
-          occurredAt: new Date().toISOString(),
-          amount: "9.99",
-          currency: "USD",
-          subscriberId: `sub_${RUN_ID}`,
-        },
+        payload: productionRevenuePayload(projectId),
       });
 
       const deliveryId = `del_${RUN_ID}_redeliver_ok`;
@@ -587,8 +606,12 @@ describe.sequential(
       expect(job!.data.connectionId).toBe(connectionId);
       expect(job!.data.projectId).toBe(projectId);
       expect(job!.data.providerId).toBe("CUSTOM_WEBHOOK");
+      // Normalized from the row, not cast from its payload: the outbox row
+      // id becomes outboxEventId, payload.type becomes revenueEventKind.
       expect(job!.data.envelope.outboxEventId).toBe(outboxEventId);
-      expect(job!.data.envelope.amount).toBe("9.99");
+      expect(job!.data.envelope.projectId).toBe(projectId);
+      expect(job!.data.envelope.revenueEventKind).toBe("INITIAL");
+      expect(job!.data.envelope.amount).toBe("9.9900");
 
       const auditRows = await db
         .select()
@@ -639,6 +662,54 @@ describe.sequential(
       expect(res.status).toBe(410);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("event_expired");
+    });
+
+    it("422 event_unmappable when the outbox row maps to no deliverable event", async () => {
+      const { userId, cookie } = await createUserAndSession("redeliver_unmappable");
+      const projectId = await seedProject("redeliver_unmappable");
+      await addMember(projectId, userId, "ADMIN");
+
+      const app = buildApp();
+      const created = await createWebhook(
+        app,
+        projectId,
+        cookie,
+        "https://example.com/redeliver-unmappable",
+      );
+      const { data: createData } = (await created.json()) as {
+        data: { connection: { id: string } };
+      };
+      const connectionId = createData.connection.id;
+
+      // A store-native SUBSCRIPTION row: the fan-out consumer maps only the
+      // normalized subscription keys, so this one has no envelope shape.
+      const outboxEventId = `outbox_${RUN_ID}_redeliver_unmappable`;
+      await seedOutboxEvent({
+        id: outboxEventId,
+        projectId,
+        aggregateType: "SUBSCRIPTION",
+        eventType: "DID_RENEW",
+        payload: { projectId, subscriberId: `sub_${RUN_ID}_unmappable` },
+      });
+
+      const deliveryId = `del_${RUN_ID}_redeliver_unmappable`;
+      await seedDelivery({
+        id: deliveryId,
+        connectionId,
+        projectId,
+        providerId: "CUSTOM_WEBHOOK",
+        outboxEventId,
+        status: "dead_letter",
+      });
+
+      const res = await app.request(
+        `/projects/${projectId}/integrations/${connectionId}/deliveries/${deliveryId}/redeliver`,
+        { method: "POST", headers: { cookie } },
+      );
+
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("event_unmappable");
     });
 
     it("404 when the delivery does not belong to the connection", async () => {

@@ -83,7 +83,9 @@ let workerHandle: WorkerHandle;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build a valid RovenueEventEnvelope stored in outbox_events.payload */
+/** A legacy/directly-published payload that already IS a complete
+ *  RovenueEventEnvelope. Kept to cover `outboxRowToEnvelope`'s passthrough
+ *  branch — the production shape is `buildProductionRevenuePayload` below. */
 function buildOutboxPayload(outboxEventId: string): Record<string, unknown> {
   return {
     outboxEventId,
@@ -95,6 +97,34 @@ function buildOutboxPayload(outboxEventId: string): Record<string, unknown> {
     currency: "USD",
     subscriberId: `sub_${createId()}`,
     identityContext: { email: `${createId()}@test.com`, externalId: `uid_${createId()}` },
+  };
+}
+
+/**
+ * The payload a REVENUE_EVENT outbox row actually carries in production —
+ * field names copied verbatim from createRevenueEvent's outbox emit in
+ * packages/db/src/drizzle/repositories/revenue-events.ts (mirrored by
+ * publishRevenueEvent in apps/api/src/services/event-bus.ts).
+ *
+ * It is deliberately NOT a RovenueEventEnvelope: there is no
+ * `outboxEventId`, no `occurredAt`, no `revenueEventKind`, and the amount
+ * fields are CH-shaped. Backfilling it only works if outboxRowToEnvelope
+ * NORMALIZES the row (dispatcher wrapper → toFanoutEnvelope) instead of
+ * casting the payload.
+ */
+function buildProductionRevenuePayload(revenueEventId: string): Record<string, unknown> {
+  return {
+    revenueEventId,
+    projectId: PROJECT_ID,
+    subscriberId: `sub_${createId()}`,
+    purchaseId: `pur_${createId()}`,
+    productId: `prod_${createId()}`,
+    type: "RENEWAL",
+    store: "APP_STORE",
+    amount: "4.9900",
+    amountUsd: "4.9900",
+    currency: "USD",
+    eventDate: new Date().toISOString(),
   };
 }
 
@@ -300,7 +330,7 @@ describe("backfill integration — M4.5", () => {
 // ---------------------------------------------------------------------------
 
 describe("backfill integration — M4.6", () => {
-  it("worker processes 5 RENEWAL backfill jobs and writes succeeded rows", async () => {
+  it("worker processes 5 RENEWAL backfill jobs seeded with PRODUCTION outbox payloads and writes succeeded rows", async () => {
     const N = 5;
     const eventIds = Array.from({ length: N }, () => `evt-e2e-${createId()}`);
 
@@ -315,9 +345,14 @@ describe("backfill integration — M4.6", () => {
       })
       .persist();
 
-    // Insert outbox events
+    // Insert outbox events carrying the REAL production payload shape
+    // (CH-shaped revenue row, no envelope fields) — see
+    // buildProductionRevenuePayload.
     for (const id of eventIds) {
-      await insertOutboxEvent({ id, payload: buildOutboxPayload(id) });
+      await insertOutboxEvent({
+        id,
+        payload: buildProductionRevenuePayload(`rev_${createId()}`),
+      });
     }
 
     // Run backfill — enqueues all 5 jobs

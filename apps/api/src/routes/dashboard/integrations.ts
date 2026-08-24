@@ -1262,7 +1262,32 @@ export const integrationsRoute = new Hono()
         );
       }
 
-      const envelope = outboxRowToEnvelope({ payload: outboxRow.payload });
+      // Same normalization the live fan-out consumer applies (see
+      // services/integrations/backfill.ts). A row this build can't map onto
+      // a fan-out envelope — an aggregate type with no fan-out topic, an
+      // unmapped event type, a payload without a projectId — is a permanent
+      // condition, not a transient one: report it instead of enqueueing a
+      // job that would fail on the NOT NULL outbox_event_id column.
+      const envelope = outboxRowToEnvelope({
+        id: outboxRow.id,
+        aggregateType: outboxRow.aggregateType,
+        eventType: outboxRow.eventType,
+        payload: outboxRow.payload,
+        createdAt: outboxRow.createdAt,
+      });
+      if (!envelope) {
+        return c.json(
+          {
+            error: {
+              code: "event_unmappable",
+              message:
+                "The originating outbox event cannot be mapped onto a deliverable event and can no longer be redelivered",
+            },
+          },
+          422,
+        );
+      }
+
       const jobId = buildRedeliverJobId(id, delivery.outboxEventId, createId());
 
       // Short-lived Queue + Redis connection, same pattern as the

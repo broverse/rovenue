@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { drizzle, getDb, type OutboxEvent } from "@rovenue/db";
 import { assertTopic, disconnectKafka, getProducer } from "../lib/kafka";
+import { AGGREGATE_TO_TOPIC } from "../lib/outbox-topics";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
 
@@ -94,18 +95,9 @@ const BACKOFF_BASE_MS = 500;
 const BACKOFF_MAX_MS = 30_000;
 const BACKOFF_LOG_THRESHOLD = 3;
 
-const AGGREGATE_TO_TOPIC: Record<OutboxEvent["aggregateType"], string> = {
-  EXPOSURE: "rovenue.exposures",
-  REVENUE_EVENT: "rovenue.revenue",
-  CREDIT_LEDGER: "rovenue.credit",
-  BILLING: "rovenue.billing",
-  NOTIFICATION: "rovenue.notifications",
-  FUNNEL: "rovenue.funnel",
-  PAYWALL_EVENT: "rovenue.paywall_events",
-  // Wired for the migration-0104 aggregate_type value; no producer emits
-  // SUBSCRIPTION outbox rows yet (that's Task 6 of the integrations plan).
-  SUBSCRIPTION: "rovenue.subscription",
-};
+// AGGREGATE_TO_TOPIC lives in lib/outbox-topics.ts so the integrations
+// backfill/redeliver path can reconstruct a stored row's topic from the same
+// map without importing this worker (and its Kafka/Redis/Drizzle deps).
 
 // =============================================================
 // PAYWALL_EVENT payload shaping
@@ -402,6 +394,19 @@ export async function runOnce(
   return false;
 }
 
+/**
+ * Provisions every topic in `topics` (deduped), the way the dispatcher does
+ * at boot. Exported so other boot paths that only CONSUME a topic — notably
+ * the integrations fan-out (integrations-boot.ts) — can provision it instead
+ * of depending on the dispatcher having been deployed first. `assertTopic`
+ * is a no-op when KAFKA_BROKERS is unset, so this is safe in dev/tests.
+ */
+export async function assertTopics(topics: Iterable<string>): Promise<void> {
+  for (const topic of new Set(topics)) {
+    await assertTopic(topic);
+  }
+}
+
 export async function runOutboxDispatcher(): Promise<void> {
   const producer = await getProducer();
   if (!producer) {
@@ -410,9 +415,7 @@ export async function runOutboxDispatcher(): Promise<void> {
   }
 
   // Ensure all topics exist before we try to publish.
-  for (const topic of new Set(Object.values(AGGREGATE_TO_TOPIC))) {
-    await assertTopic(topic);
-  }
+  await assertTopics(Object.values(AGGREGATE_TO_TOPIC));
 
   // Log the broker URL we actually resolved so integration tests can
   // prove the dispatcher is hitting the testcontainer and not the

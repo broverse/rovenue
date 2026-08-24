@@ -7,21 +7,29 @@
 //
 // Called when an integration connection transitions from
 // `isEnabled = false` to `isEnabled = true`. Queries the
-// `outbox_events` table for REVENUE_EVENT and BILLING events
-// from the last `windowDays` days and enqueues each one into
-// the integrations-deliver BullMQ queue tagged `isBackfill: true`.
+// `outbox_events` table for REVENUE_EVENT rows from the last
+// `windowDays` days and enqueues each one into the
+// integrations-deliver BullMQ queue tagged `isBackfill: true`.
+//
+// BILLING is deliberately NOT in that list: `rovenue.billing` carries
+// Rovenue-cloud's own internal billing events and never reaches customer
+// integrations — same tripwire as FANOUT_TOPICS in
+// services/integrations-fanout/consumer.ts.
 //
 // The `jobId = connectionId|outboxEventId` separator ensures that
 // realtime and backfill jobs co-deduplicate (BullMQ v5 reserves `:`,
 // so we use `|` — see queues/integrations.ts).
 
 import type { Queue } from "bullmq";
-import type { ProviderId, RovenueEventEnvelope } from "./types";
+import type { FanoutTopic, ProviderId, RovenueEventEnvelope } from "./types";
 import {
   buildIntegrationsDeliverJobId,
   deliverJobOptions,
   type IntegrationsDeliverJob,
 } from "../../queues/integrations";
+import { topicForAggregateType } from "../../lib/outbox-topics";
+import { toFanoutEnvelope } from "../integrations-fanout/consumer";
+import { fanoutTopics } from "./registry";
 
 // =============================================================
 // Constants
@@ -91,14 +99,77 @@ export interface EnqueueBackfillResult {
 // outboxRowToEnvelope
 // =============================================================
 //
-// The single reuse point for "an outbox_events row IS a RovenueEventEnvelope
-// once you cast its payload column". Both the backfill loop below and the
-// manual-redeliver route (routes/dashboard/integrations.ts, Task 10) go
-// through this instead of duplicating the cast, so if the outbox payload
-// shape ever needs normalization before use, there's exactly one place to
-// change it.
-export function outboxRowToEnvelope(row: Pick<OutboxRow, "payload">): RovenueEventEnvelope {
-  return row.payload as unknown as RovenueEventEnvelope;
+// The single reuse point for "turn a stored outbox_events row into the
+// RovenueEventEnvelope the delivery worker expects". Both the backfill loop
+// below and the manual-redeliver route (routes/dashboard/integrations.ts,
+// Task 10) go through it.
+//
+// An outbox row's `payload` is NOT an envelope: it is the CH-shaped revenue
+// row (revenueEventId/type/eventDate/amountUsd/…), the flat SUBSCRIPTION
+// bridge payload, the credit-ledger row, and so on — see
+// packages/db/src/drizzle/repositories/revenue-events.ts and
+// services/event-bus.ts. So we rebuild the exact wrapper the outbox
+// dispatcher publishes (`{ eventId, eventType, createdAt, payload }`) and
+// hand it to `toFanoutEnvelope`, the same normalizer the live fan-out
+// consumer uses. Anything the consumer would drop — an aggregate type with
+// no fan-out topic, an unmapped (topic, eventType) pair, a payload missing
+// projectId — returns null here too, so backfill skips the row and
+// redeliver reports it rather than enqueueing a job whose envelope has an
+// undefined `outboxEventId` (a NOT NULL column on integration_deliveries).
+//
+// Envelopes that were published directly (already complete) still pass
+// through unchanged — that branch lives in toFanoutEnvelope.
+
+/** The subset of an outbox row `outboxRowToEnvelope` needs. Accepts both the
+ *  snake_case shape the backfill query selects and the camelCase Drizzle row
+ *  the redeliver route reads. */
+export interface OutboxEnvelopeSource {
+  id: string;
+  aggregateType: string;
+  eventType: string;
+  payload: unknown;
+  createdAt: Date | string;
+}
+
+// Memoized on first use (not at module load) so a provider registered after
+// this module was imported is still reflected — same reasoning as
+// startIntegrationsFanout re-calling fanoutTopics() at start time.
+let fanoutTopicSet: ReadonlySet<string> | null = null;
+
+function asFanoutTopic(topic: string | undefined): FanoutTopic | null {
+  if (!topic) return null;
+  fanoutTopicSet ??= new Set<string>(fanoutTopics());
+  return fanoutTopicSet.has(topic) ? (topic as FanoutTopic) : null;
+}
+
+/** True when the stored payload is ALREADY a complete envelope — a directly
+ *  published event rather than a domain payload. Those must be handed to
+ *  toFanoutEnvelope at the top level so its passthrough branch sees them;
+ *  wrapping one would re-derive its fields from a payload that doesn't have
+ *  them. Mirrors toFanoutEnvelope's own passthrough predicate. */
+function isCompleteEnvelope(payload: unknown): payload is RovenueEventEnvelope {
+  if (!payload || typeof payload !== "object") return false;
+  const p = payload as { outboxEventId?: unknown; projectId?: unknown };
+  return typeof p.outboxEventId === "string" && typeof p.projectId === "string";
+}
+
+export function outboxRowToEnvelope(
+  row: OutboxEnvelopeSource,
+): RovenueEventEnvelope | null {
+  const topic = asFanoutTopic(topicForAggregateType(row.aggregateType));
+  if (!topic) return null;
+
+  const parsed = isCompleteEnvelope(row.payload)
+    ? row.payload
+    : {
+        eventId: row.id,
+        eventType: row.eventType,
+        createdAt:
+          row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+        payload: row.payload,
+      };
+
+  return toFanoutEnvelope(parsed, topic);
 }
 
 // =============================================================
@@ -134,7 +205,7 @@ export async function enqueueBackfillForConnection(
         FROM outbox_events
         WHERE payload->>'projectId' = $1
           AND "createdAt" > NOW() - INTERVAL '${windowDays} days'
-          AND "aggregateType" IN ('REVENUE_EVENT', 'BILLING')
+          AND "aggregateType" IN ('REVENUE_EVENT')
         ORDER BY "createdAt" ASC
         LIMIT ${PAGE_SIZE}
       `;
@@ -147,7 +218,7 @@ export async function enqueueBackfillForConnection(
         WHERE payload->>'projectId' = $1
           AND "createdAt" > NOW() - INTERVAL '${windowDays} days'
           AND "createdAt" > $2::timestamptz
-          AND "aggregateType" IN ('REVENUE_EVENT', 'BILLING')
+          AND "aggregateType" IN ('REVENUE_EVENT')
         ORDER BY "createdAt" ASC
         LIMIT ${PAGE_SIZE}
       `;
@@ -161,8 +232,18 @@ export async function enqueueBackfillForConnection(
 
     // Enqueue each row as a backfill job
     for (const row of rows) {
+      const envelope = outboxRowToEnvelope({
+        id: row.id,
+        aggregateType: row.aggregate_type,
+        eventType: row.event_type,
+        payload: row.payload,
+        createdAt: row.created_at,
+      });
+      // Not fan-out material (unknown aggregate type, unmapped event type,
+      // payload without a projectId) — the live consumer would drop it too.
+      if (!envelope) continue;
+      eventCount++;
       const jobId = buildIntegrationsDeliverJobId(connectionId, row.id);
-      const envelope = outboxRowToEnvelope(row);
       await deps.queue.add(
         "deliver",
         {
@@ -182,8 +263,6 @@ export async function enqueueBackfillForConnection(
         },
       );
     }
-
-    eventCount += rows.length;
 
     // Advance cursor to last row's created_at
     const lastRow = rows[rows.length - 1];

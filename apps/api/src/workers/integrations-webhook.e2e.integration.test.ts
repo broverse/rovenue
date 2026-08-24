@@ -59,7 +59,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createId } from "@paralleldrive/cuid2";
 import { Pool } from "pg";
 import { drizzle as drizzleClient } from "drizzle-orm/node-postgres";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { MockAgent, setGlobalDispatcher } from "undici";
@@ -82,6 +82,7 @@ import {
   processFanoutMessage,
   toFanoutEnvelope,
 } from "../services/integrations-fanout/consumer";
+import { outboxRowToEnvelope } from "../services/integrations/backfill";
 import { verifySvixSignature } from "../lib/svix-signature";
 import { generateWebhookSecret } from "../lib/svix-sign";
 import type { WebhookSecretEntry } from "../services/integrations/providers/custom-webhook";
@@ -250,6 +251,28 @@ function revenueEnvelope(
     subscriberId: `sub_${createId()}`,
     identityContext: { email: "e2e-webhook@example.com", externalId: "ext-e2e" },
     ...overrides,
+  };
+}
+
+/**
+ * The payload a REVENUE_EVENT outbox row carries in production — field names
+ * copied verbatim from createRevenueEvent's outbox emit in
+ * packages/db/src/drizzle/repositories/revenue-events.ts. Deliberately NOT a
+ * RovenueEventEnvelope (no outboxEventId / occurredAt / revenueEventKind).
+ */
+function productionRevenuePayload(): Record<string, unknown> {
+  return {
+    revenueEventId: `rev_${createId()}`,
+    projectId: PROJECT_ID,
+    subscriberId: `sub_${createId()}`,
+    purchaseId: `pur_${createId()}`,
+    productId: `prod_${createId()}`,
+    type: "RENEWAL",
+    store: "APP_STORE",
+    amount: "9.9900",
+    amountUsd: "9.9900",
+    currency: "USD",
+    eventDate: new Date().toISOString(),
   };
 }
 
@@ -634,22 +657,39 @@ describe("integrations-webhook v2 — end-to-end (money path)", () => {
       });
 
       const outboxEventId = createId();
-      const envelope = revenueEnvelope(outboxEventId);
 
       // Intact originating outbox row — the real POST .../redeliver route
       // rebuilds its envelope from exactly this row (outboxRowToEnvelope).
-      // This file enqueues directly (see "Choices made" at the top) but
-      // still seeds the row so the scenario's precondition is real, not
-      // merely assumed.
+      // The payload is the PRODUCTION revenue shape (see
+      // productionRevenuePayload), not a pre-built envelope, so this
+      // scenario exercises the same normalization the route depends on.
       await testDb.insert(schema.outboxEvents).values({
         id: outboxEventId,
         aggregateType: "REVENUE_EVENT",
         aggregateId: PROJECT_ID,
         eventType: "revenue.event.recorded",
-        payload: envelope as unknown as Record<string, unknown>,
+        payload: productionRevenuePayload(),
       });
 
-      await deliverDirect(connId, "CUSTOM_WEBHOOK", envelope);
+      // Rebuild exactly the way the redeliver route does: read the row
+      // back and normalize it. A bare `payload as RovenueEventEnvelope`
+      // cast yields `outboxEventId: undefined` here.
+      const [storedRow] = await testDb
+        .select()
+        .from(schema.outboxEvents)
+        .where(eq(schema.outboxEvents.id, outboxEventId));
+      const envelope = outboxRowToEnvelope({
+        id: storedRow!.id,
+        aggregateType: storedRow!.aggregateType,
+        eventType: storedRow!.eventType,
+        payload: storedRow!.payload,
+        createdAt: storedRow!.createdAt,
+      });
+      expect(envelope).not.toBeNull();
+      expect(envelope!.outboxEventId).toBe(outboxEventId);
+      expect(envelope!.revenueEventKind).toBe("RENEWAL");
+
+      await deliverDirect(connId, "CUSTOM_WEBHOOK", envelope!);
       const deadRow = await pollDeliveryRowWithStatus(connId, outboxEventId, "dead_letter");
       expect(deadRow).toBeDefined();
 
@@ -658,7 +698,12 @@ describe("integrations-webhook v2 — end-to-end (money path)", () => {
       const redeliverJobId = buildRedeliverJobId(connId, outboxEventId, createId());
       await queue.add(
         "deliver",
-        { connectionId: connId, projectId: PROJECT_ID, providerId: "CUSTOM_WEBHOOK", envelope },
+        {
+          connectionId: connId,
+          projectId: PROJECT_ID,
+          providerId: "CUSTOM_WEBHOOK",
+          envelope: envelope!,
+        },
         deliverJobOptions("CUSTOM_WEBHOOK", redeliverJobId),
       );
 
