@@ -1,6 +1,10 @@
 import { request } from "undici";
 import type { HttpClient } from "./types";
 
+/** Delivery response bodies are stored (audit log, test-event echo) truncated
+ *  to this many bytes — provider responses can be arbitrarily large. */
+export const RESPONSE_BODY_MAX_BYTES = 4096;
+
 export function createUndiciHttpClient(): HttpClient {
   return {
     async request(input) {

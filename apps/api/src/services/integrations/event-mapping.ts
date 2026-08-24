@@ -1,4 +1,23 @@
 import type { RovenueEventKey, IntegrationProviderId } from "@rovenue/shared";
+import type { RovenueEventEnvelope } from "./types";
+
+// ---------------------------------------------------------------------------
+// deriveRevenueEventKey — shared revenue-kind → eventKey derivation.
+// Meta CAPI / TikTok Events / CUSTOM_WEBHOOK all fold a revenue envelope's
+// `revenueEventKind` into the same `revenue.${kind}` public event key; keep
+// that one mapping in one place instead of re-deriving it per provider.
+// ---------------------------------------------------------------------------
+export function deriveRevenueEventKey(
+  envelope: Pick<RovenueEventEnvelope, "eventType" | "revenueEventKind">,
+): RovenueEventKey | undefined {
+  if (
+    envelope.eventType === "revenue.event.recorded" &&
+    envelope.revenueEventKind
+  ) {
+    return `revenue.${envelope.revenueEventKind}` as RovenueEventKey;
+  }
+  return undefined;
+}
 
 // INTENTIONAL OMISSION — `revenue.REFUND` and `revenue.CANCELLATION` are
 // deliberately NOT mapped for either provider. Meta CAPI and TikTok Events

@@ -15,7 +15,10 @@ import { audit } from "../../lib/audit";
 import { env } from "../../lib/env";
 import { attachRedisErrorLogger } from "../../lib/redis";
 import { getProvider, providerIds } from "../../services/integrations/registry";
-import { createUndiciHttpClient } from "../../services/integrations/http-client";
+import {
+  createUndiciHttpClient,
+  RESPONSE_BODY_MAX_BYTES,
+} from "../../services/integrations/http-client";
 import {
   handleConnectionEnableTransition,
 } from "../../services/integrations/connection-events";
@@ -715,7 +718,7 @@ export const integrationsRoute = new Hono()
       const deliveryResult = await provider.deliver(mapResult as ProviderPayload, creds, http);
       okResult = deliveryResult.ok;
       httpStatus = deliveryResult.httpStatus;
-      responseBody = deliveryResult.responseBody.slice(0, 4096);
+      responseBody = deliveryResult.responseBody.slice(0, RESPONSE_BODY_MAX_BYTES);
       errorMessage = deliveryResult.errorMessage ?? null;
     }
 

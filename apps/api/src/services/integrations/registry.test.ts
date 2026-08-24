@@ -2,17 +2,19 @@ import { describe, expect, it } from "vitest";
 import { PROVIDERS, getProvider, providerIds, fanoutTopics } from "./registry";
 import { metaCapiProvider } from "./providers/meta-capi";
 import { tiktokEventsProvider } from "./providers/tiktok-events";
+import { customWebhookProvider } from "./providers/custom-webhook";
 import type { ProviderId } from "./types";
 
 describe("PROVIDERS registry", () => {
-  it("contains exactly META_CAPI and TIKTOK_EVENTS", () => {
+  it("contains exactly META_CAPI, TIKTOK_EVENTS and CUSTOM_WEBHOOK", () => {
     const keys = Object.keys(PROVIDERS).sort();
-    expect(keys).toEqual(["META_CAPI", "TIKTOK_EVENTS"]);
+    expect(keys).toEqual(["CUSTOM_WEBHOOK", "META_CAPI", "TIKTOK_EVENTS"]);
   });
 
   it("getProvider returns the matching module", () => {
     expect(getProvider("META_CAPI")).toBe(metaCapiProvider);
     expect(getProvider("TIKTOK_EVENTS")).toBe(tiktokEventsProvider);
+    expect(getProvider("CUSTOM_WEBHOOK")).toBe(customWebhookProvider);
   });
 
   it("throws on unknown provider", () => {
@@ -27,10 +29,11 @@ describe("PROVIDERS registry", () => {
 // =============================================================
 
 describe("providerIds()", () => {
-  it("contains META_CAPI and TIKTOK_EVENTS", () => {
+  it("contains META_CAPI, TIKTOK_EVENTS and CUSTOM_WEBHOOK", () => {
     const ids = providerIds();
     expect(ids).toContain("META_CAPI");
     expect(ids).toContain("TIKTOK_EVENTS");
+    expect(ids).toContain("CUSTOM_WEBHOOK");
   });
 
   it("returns a non-empty tuple usable by z.enum", () => {
@@ -41,8 +44,15 @@ describe("providerIds()", () => {
 });
 
 describe("fanoutTopics()", () => {
-  it("equals [\"rovenue.revenue\"] while only the two ad providers exist", () => {
-    expect(fanoutTopics()).toEqual(["rovenue.revenue"]);
+  it("is the deduped union of every provider's topics — now includes CUSTOM_WEBHOOK's 4 topics", () => {
+    expect(new Set(fanoutTopics())).toEqual(
+      new Set([
+        "rovenue.revenue",
+        "rovenue.subscription",
+        "rovenue.paywall_events",
+        "rovenue.credit",
+      ]),
+    );
   });
 });
 

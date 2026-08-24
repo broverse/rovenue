@@ -10,7 +10,7 @@ import type {
   DeliveryResult,
 } from "../types";
 import type { RovenueEventKey } from "@rovenue/shared";
-import { applyEventMapping } from "../event-mapping";
+import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
 import {
   hashPii,
   normalizeEmail,
@@ -31,13 +31,7 @@ function deriveEventKey(
   if (envelope.eventType === "subscriber.identified") {
     return "subscriber.identified";
   }
-  if (
-    envelope.eventType === "revenue.event.recorded" &&
-    envelope.revenueEventKind
-  ) {
-    return `revenue.${envelope.revenueEventKind}` as RovenueEventKey;
-  }
-  return undefined;
+  return deriveRevenueEventKey(envelope);
 }
 
 // ---------------------------------------------------------------------------
