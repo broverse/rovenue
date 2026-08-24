@@ -17,6 +17,7 @@ import {
   DEFAULT_EVENT_MAPPING,
   deriveRevenueEventKey,
 } from "../event-mapping";
+import { buildChatMessageText } from "../chat-message";
 
 // ---------------------------------------------------------------------------
 // deriveEventKey
@@ -78,68 +79,11 @@ const credentialsSchema = z
   });
 
 // ---------------------------------------------------------------------------
-// Message builder — PURE function, no I/O. Deliberately reads ONLY
-// eventKey/amount/currency/productId/subscriberId off the envelope — never
-// `identityContext` (email/phone/ip/userAgent) and never
-// `subscriberAttributes` (arbitrary host-app-set key/values) or `payload`
-// (raw domain passthrough for paywall/credit events). That is what keeps
-// "no PII in Slack messages" true by construction rather than by a filter
-// that could someday miss a field.
+// Message builder — hoisted to ../chat-message.ts (shared with DISCORD in
+// Wave-2 Task 9). See that module's header comment for the "no PII by
+// construction" rationale; buildChatMessageText / maskSubscriberId are
+// imported above.
 // ---------------------------------------------------------------------------
-
-type EventFamily = "revenue" | "subscription" | "paywall" | "credit";
-
-const FAMILY_EMOJI: Record<EventFamily, string> = {
-  revenue: ":moneybag:",
-  subscription: ":repeat:",
-  paywall: ":eyes:",
-  credit: ":coin:",
-};
-
-function eventFamily(eventKey: RovenueEventKey): EventFamily {
-  if (eventKey.startsWith("revenue.")) return "revenue";
-  if (eventKey.startsWith("paywall.")) return "paywall";
-  if (eventKey.startsWith("credit.")) return "credit";
-  // subscription.* lifecycle keys, plus subscriber.identified (identity is
-  // conceptually part of the subscription-lifecycle story here).
-  return "subscription";
-}
-
-/** First 4 characters + an ellipsis — enough to recognize "the same
- *  subscriber posted again" across messages in a channel without printing
- *  an identifier a reader could act on. */
-const MASKED_ID_PREFIX_LENGTH = 4;
-
-export function maskSubscriberId(subscriberId: string): string {
-  return `${subscriberId.slice(0, MASKED_ID_PREFIX_LENGTH)}…`;
-}
-
-export interface SlackMessageInput {
-  eventKey: RovenueEventKey;
-  amount?: string;
-  currency?: string;
-  productId?: string;
-  subscriberId?: string;
-}
-
-export function buildSlackMessageText(input: SlackMessageInput): string {
-  const family = eventFamily(input.eventKey);
-  const emoji = FAMILY_EMOJI[family];
-
-  const segments: string[] = [];
-  if (family === "revenue" && input.amount !== undefined) {
-    segments.push(`${emoji} ${input.eventKey} — ${input.amount} ${input.currency ?? ""}`.trim());
-  } else {
-    segments.push(`${emoji} ${input.eventKey}`);
-  }
-  if (input.productId) {
-    segments.push(input.productId);
-  }
-  if (input.subscriberId) {
-    segments.push(`subscriber ${maskSubscriberId(input.subscriberId)}`);
-  }
-  return segments.join(" · ");
-}
 
 // ---------------------------------------------------------------------------
 // validateCredentials — RC-parity for Slack connect: a REAL "Rovenue
@@ -292,7 +236,7 @@ export const slackProvider: IntegrationProvider = {
       return { skip: true, reason: mappingResult.reason };
     }
 
-    const text = buildSlackMessageText({
+    const text = buildChatMessageText({
       eventKey,
       amount: eventKey.startsWith("revenue.") ? envelope.amount : undefined,
       currency: envelope.currency,

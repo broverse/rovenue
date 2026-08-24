@@ -5,8 +5,6 @@ import {
   slackProvider,
   SLACK_WEBHOOK_HOST,
   isAllowedSlackWebhookUrl,
-  buildSlackMessageText,
-  maskSubscriberId,
 } from "./slack";
 import type {
   RovenueEventEnvelope,
@@ -122,72 +120,10 @@ describe("isAllowedSlackWebhookUrl", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Message builder — pure, per event family
+// Message builder — moved to chat-message.test.ts (Task 3: hoisted to
+// ../chat-message.ts, shared with DISCORD). See that file for the
+// per-family / masking assertions, byte-identical to what lived here.
 // ---------------------------------------------------------------------------
-
-describe("buildSlackMessageText", () => {
-  it("maskSubscriberId keeps the first 4 chars + ellipsis", () => {
-    expect(maskSubscriberId("sub_123456")).toBe("sub_…");
-    expect(maskSubscriberId("abcd")).toBe("abcd…");
-  });
-
-  it("revenue family: :moneybag: prefix with amount/currency/productId/subscriber", () => {
-    const text = buildSlackMessageText({
-      eventKey: "revenue.RENEWAL",
-      amount: "9.99",
-      currency: "USD",
-      productId: "prod_gold",
-      subscriberId: "sub_123",
-    });
-    expect(text).toBe(
-      ":moneybag: revenue.RENEWAL — 9.99 USD · prod_gold · subscriber sub_…",
-    );
-  });
-
-  it("subscription family: :repeat: prefix, no amount/currency segment", () => {
-    const text = buildSlackMessageText({
-      eventKey: "subscription.trial.started",
-      subscriberId: "sub_123",
-    });
-    expect(text).toBe(":repeat: subscription.trial.started · subscriber sub_…");
-  });
-
-  it("paywall family: :eyes: prefix", () => {
-    const text = buildSlackMessageText({
-      eventKey: "paywall.view",
-      subscriberId: "sub_123",
-    });
-    expect(text).toBe(":eyes: paywall.view · subscriber sub_…");
-  });
-
-  it("credit family: :coin: prefix", () => {
-    const text = buildSlackMessageText({
-      eventKey: "credit.ledger.appended",
-      subscriberId: "sub_123",
-    });
-    expect(text).toBe(":coin: credit.ledger.appended · subscriber sub_…");
-  });
-
-  it("subscriber.identified is treated as the subscription family", () => {
-    const text = buildSlackMessageText({ eventKey: "subscriber.identified" });
-    expect(text.startsWith(":repeat:")).toBe(true);
-  });
-
-  it("omits the productId/subscriber segments entirely when absent", () => {
-    const text = buildSlackMessageText({ eventKey: "credit.ledger.appended" });
-    expect(text).toBe(":coin: credit.ledger.appended");
-  });
-
-  it("never includes amount/currency for a non-revenue family even if passed", () => {
-    const text = buildSlackMessageText({
-      eventKey: "subscription.expired",
-      amount: "9.99",
-      currency: "USD",
-    });
-    expect(text).not.toContain("9.99");
-    expect(text).not.toContain("USD");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // mapEvent
