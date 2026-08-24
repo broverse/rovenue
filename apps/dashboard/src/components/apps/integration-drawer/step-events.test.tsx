@@ -57,7 +57,7 @@ describe("StepEvents", () => {
     expect(lastState.enabledEvents).toContain("revenue.RENEWAL");
   });
 
-  it("offers all 13 ROVENUE_EVENT_KEYS for CUSTOM_WEBHOOK and hides Back", async () => {
+  it("offers all 17 ROVENUE_EVENT_KEYS for CUSTOM_WEBHOOK and hides Back", async () => {
     renderWithRouter(
       <StepEvents
         state={BASE_STATE}
@@ -72,7 +72,7 @@ describe("StepEvents", () => {
 
     // A webhook-only event key (not in the ad-providers' 8-key catalog).
     expect(await screen.findByRole("checkbox", { name: "paywall.view" })).toBeTruthy();
-    expect(screen.getAllByRole("checkbox")).toHaveLength(13);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(17);
     expect(screen.queryByRole("button", { name: /^back$/i })).toBeNull();
   });
 

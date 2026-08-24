@@ -51,9 +51,39 @@ export function parsePushBody(body: GooglePubSubPushBody): GoogleRtdnPayload {
   return JSON.parse(dataJson) as GoogleRtdnPayload;
 }
 
+// Maps a Google RTDN `subscriptionNotification.notificationType` numeric
+// code (the wire value) onto its named form. Google's numeric codes are
+// dense enough (1-13, plus 20) that hand-spelling `SUBSCRIPTION_${n}`
+// silently produced a numeric-suffixed string that matched NOTHING in
+// `EVENT_TYPE_TO_CATEGORY` (webhook-events.ts) or
+// `STORE_EVENT_TO_PUBLIC_KEY` (store-event-normalization.ts) — both of
+// which key on the named form, same as Apple's notificationType strings.
+// Unknown codes fall back to the historical `SUBSCRIPTION_${n}` shape
+// (below) so a new/undocumented code never throws or drops the event —
+// it just stays unmapped everywhere the named form matters, same as
+// before this fix.
+const GOOGLE_SUBSCRIPTION_NOTIFICATION_NAME: Readonly<Record<number, string>> = {
+  1: "SUBSCRIPTION_RECOVERED",
+  2: "SUBSCRIPTION_RENEWED",
+  3: "SUBSCRIPTION_CANCELED",
+  4: "SUBSCRIPTION_PURCHASED",
+  5: "SUBSCRIPTION_ON_HOLD",
+  6: "SUBSCRIPTION_IN_GRACE_PERIOD",
+  7: "SUBSCRIPTION_RESTARTED",
+  8: "SUBSCRIPTION_PRICE_CHANGE_CONFIRMED",
+  9: "SUBSCRIPTION_DEFERRED",
+  10: "SUBSCRIPTION_PAUSED",
+  12: "SUBSCRIPTION_REVOKED",
+  13: "SUBSCRIPTION_EXPIRED",
+};
+
 export function classifyNotification(payload: GoogleRtdnPayload): string {
   if (payload.subscriptionNotification) {
-    return `SUBSCRIPTION_${payload.subscriptionNotification.notificationType}`;
+    const { notificationType } = payload.subscriptionNotification;
+    return (
+      GOOGLE_SUBSCRIPTION_NOTIFICATION_NAME[notificationType] ??
+      `SUBSCRIPTION_${notificationType}`
+    );
   }
   if (payload.oneTimeProductNotification) {
     return `ONE_TIME_${payload.oneTimeProductNotification.notificationType}`;

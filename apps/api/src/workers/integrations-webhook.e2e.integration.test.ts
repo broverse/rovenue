@@ -764,4 +764,63 @@ describe("integrations-webhook v2 — end-to-end (money path)", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  it(
+    "scenario 6: Wave-1 store-lifecycle normalization — toFanoutEnvelope wraps rovenue.subscription with eventType subscription.billing_issue, webhook body carries type subscription.billing_issue",
+    async () => {
+      // Fanout half of the spec's acceptance 4 (spec acceptance's bridge
+      // half — resolving the store-native DID_FAIL_TO_RENEW /
+      // SUBSCRIPTION_ON_HOLD / invoice.payment_failed onto this same
+      // public key via STORE_EVENT_TO_PUBLIC_KEY — is covered by
+      // webhook-processor.integration.test.ts's Case 6, against real
+      // Postgres). This scenario exercises what happens once that
+      // already-normalized outbox row reaches the fan-out consumer.
+      const server = await startWebhookServer(HTTP_OK);
+      serversToClose.push(server);
+      const secret = secretEntry();
+      const connId = createId();
+      await insertConnection({
+        id: connId,
+        providerId: "CUSTOM_WEBHOOK",
+        displayName: "subscription-billing-issue",
+        credentials: webhookCreds(server.port, [secret]),
+      });
+
+      const outboxEventId = createId();
+      const wrapper = {
+        eventId: outboxEventId,
+        eventType: "subscription.billing_issue",
+        aggregateId: `sub_${createId()}`,
+        createdAt: new Date().toISOString(),
+        payload: {
+          projectId: PROJECT_ID,
+          subscriberId: `sub_${createId()}`,
+          purchaseId: `purchase_${createId()}`,
+          webhookEventId: `whe_${createId()}`,
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      const envelope = toFanoutEnvelope(wrapper, "rovenue.subscription");
+      expect(envelope).not.toBeNull();
+      expect(envelope!.eventKey).toBe("subscription.billing_issue");
+      expect(envelope!.eventType).toBe("subscription.billing_issue");
+
+      await deliverDirect(connId, "CUSTOM_WEBHOOK", envelope!);
+
+      const row = await pollDeliveryRowWithStatus(connId, outboxEventId, "succeeded");
+      expect(row).toBeDefined();
+      expect(server.requests).toHaveLength(1);
+
+      const req = server.requests[0]!;
+      expect(() =>
+        verifySvixSignature(svixHeadersFrom(req.headers), req.body, secret.key),
+      ).not.toThrow();
+
+      const body = JSON.parse(req.body) as { type: string; data: Record<string, unknown> };
+      expect(body.type).toBe("subscription.billing_issue");
+      expect(body.data).toEqual(wrapper.payload);
+    },
+    TEST_TIMEOUT_MS,
+  );
 });

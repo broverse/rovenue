@@ -5,7 +5,11 @@ import {
   ProductType,
   drizzle,
 } from "@rovenue/db";
-import { isRovenueEventKey, toWebhookEventCategory } from "@rovenue/shared";
+import {
+  isRovenueEventKey,
+  STORE_EVENT_TO_PUBLIC_KEY,
+  toWebhookEventCategory,
+} from "@rovenue/shared";
 import { logger } from "../lib/logger";
 import { loadGoogleCredentials } from "../lib/project-credentials";
 import { requireConnectedStripe } from "../lib/stripe-platform";
@@ -329,37 +333,46 @@ async function enqueueOutgoingWebhook(
   await drizzle.db.transaction(async (tx) => {
     // Only bridge event types the integrations fan-out can actually
     // deliver. This call site passes the STORE-NATIVE type (DID_RENEW,
-    // EXPIRED, …); toFanoutEnvelope maps only the normalized Rovenue keys,
-    // so bridging a raw type wrote an outbox row that every consumer drops
-    // — a permanent dead write on the store-webhook hot path. Gated before
-    // the dedupe query so that path skips the SELECT as well as the INSERT.
+    // SUBSCRIPTION_ON_HOLD, DID_FAIL_TO_RENEW, …); toFanoutEnvelope maps
+    // only normalized Rovenue keys, so bridging a raw type wrote an
+    // outbox row that every consumer drops — a permanent dead write on
+    // the store-webhook hot path. Gated before the dedupe query so that
+    // path skips the SELECT as well as the INSERT.
     //
-    // Normalizing store-native lifecycle events into Rovenue event keys
-    // (so DID_RENEW et al. DO reach webhook subscribers) is Wave-1 spec
-    // work, not something to fake here. The scheduled-actions and
-    // expiry-checker bridges are unaffected: they already emit mapped keys
-    // (subscription.cancel_requested / subscription.expired).
-    if (isRovenueEventKey(args.eventType)) {
+    // Two-step resolution (Wave-1 narrow store-lifecycle normalization):
+    // args.eventType is already a public key for the scheduled-actions /
+    // expiry-checker producers (subscription.cancel_requested /
+    // subscription.expired) — pass it through unchanged. Otherwise it's
+    // a store-native type; STORE_EVENT_TO_PUBLIC_KEY narrowly maps the
+    // handful of store signals that unambiguously mean a NEW public key
+    // (billing_issue / grace_period / uncancelled / product_changed —
+    // see that file for the exact table and the ambiguous rows
+    // deliberately excluded from it). Everything else stays unmapped and
+    // is dropped here exactly as before this change.
+    const publicKey = isRovenueEventKey(args.eventType)
+      ? args.eventType
+      : STORE_EVENT_TO_PUBLIC_KEY[args.eventType];
+    if (publicKey) {
       const alreadyBridged = args.purchaseId
         ? await drizzle.outboxRepo.findByPurchaseAndType(
             tx,
             "SUBSCRIPTION",
             args.subscriberId,
-            args.eventType,
+            publicKey,
             args.purchaseId,
           )
         : await drizzle.outboxRepo.findByWebhookEventAndType(
             tx,
             "SUBSCRIPTION",
             args.subscriberId,
-            args.eventType,
+            publicKey,
             args.webhookEventId,
           );
       if (!alreadyBridged) {
         await drizzle.outboxRepo.insert(tx, {
           aggregateType: "SUBSCRIPTION",
           aggregateId: args.subscriberId,
-          eventType: args.eventType,
+          eventType: publicKey,
           payload: {
             projectId: args.projectId,
             subscriberId: args.subscriberId,

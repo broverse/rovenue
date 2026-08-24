@@ -27,6 +27,12 @@ export type RovenueEventType =
   | "subscriber.identified"
   | "subscription.cancel_requested"
   | "subscription.expired"
+  // Wave-1 narrow store-lifecycle normalization (2026-08-24) — bridged
+  // from STORE_EVENT_TO_PUBLIC_KEY, see store-event-normalization.ts.
+  | "subscription.billing_issue"
+  | "subscription.grace_period"
+  | "subscription.uncancelled"
+  | "subscription.product_changed"
   | "paywall_view"
   | "paywall_close"
   | "credit.ledger.appended";

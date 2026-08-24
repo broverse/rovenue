@@ -89,20 +89,35 @@ function toRevenueEnvelope(
   };
 }
 
+// `subscription.cancel_requested` and `subscription.expired` have real
+// producers as of Task 6 (scheduled-actions.ts / expiry-checker.ts). The
+// other four — billing_issue / grace_period / uncancelled /
+// product_changed — are the Wave-1 narrow store-lifecycle normalization
+// keys bridged from STORE_EVENT_TO_PUBLIC_KEY (webhook-processor.ts's
+// enqueueOutgoingWebhook). All six share this exact wrapper shape:
+// eventKey = eventType, payload passthrough, mandatory projectId.
+const SUBSCRIPTION_EVENT_TYPES = [
+  "subscription.cancel_requested",
+  "subscription.expired",
+  "subscription.billing_issue",
+  "subscription.grace_period",
+  "subscription.uncancelled",
+  "subscription.product_changed",
+] as const;
+type SubscriptionEventType = (typeof SUBSCRIPTION_EVENT_TYPES)[number];
+
+function isSubscriptionEventType(v: unknown): v is SubscriptionEventType {
+  return (
+    typeof v === "string" &&
+    (SUBSCRIPTION_EVENT_TYPES as readonly string[]).includes(v)
+  );
+}
+
 function toSubscriptionEnvelope(
   w: OutboxWrapper & { eventId: string },
   payload: Record<string, unknown>,
 ): RovenueEventEnvelope | null {
-  // Both `subscription.cancel_requested` (scheduled-actions.ts) and
-  // `subscription.expired` (expiry-checker.ts) have real producers as of
-  // Task 6 (the SUBSCRIPTION outbox bridge) and share this exact shape:
-  // eventKey = eventType, payload passthrough, mandatory projectId.
-  if (
-    w.eventType !== "subscription.cancel_requested" &&
-    w.eventType !== "subscription.expired"
-  ) {
-    return null;
-  }
+  if (!isSubscriptionEventType(w.eventType)) return null;
   const eventType = w.eventType;
 
   const projectId = payload.projectId;

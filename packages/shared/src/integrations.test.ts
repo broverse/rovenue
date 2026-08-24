@@ -7,7 +7,7 @@ import {
 } from "./integrations";
 
 describe("RovenueEventKey", () => {
-  it("includes all 13 canonical keys (v2)", () => {
+  it("includes all 17 canonical keys (v2, Wave-1 store-lifecycle normalization)", () => {
     expect(ROVENUE_EVENT_KEYS).toEqual([
       "revenue.INITIAL",
       "revenue.TRIAL_CONVERSION",
@@ -19,6 +19,10 @@ describe("RovenueEventKey", () => {
       "subscriber.identified",
       "subscription.cancel_requested",
       "subscription.expired",
+      "subscription.billing_issue",
+      "subscription.grace_period",
+      "subscription.uncancelled",
+      "subscription.product_changed",
       "paywall.view",
       "paywall.close",
       "credit.ledger.appended",
@@ -40,6 +44,13 @@ describe("RovenueEventKey", () => {
     expect(isRovenueEventKey("subscription.cancel_requested")).toBe(true);
     expect(isRovenueEventKey("subscription.expired")).toBe(true);
     expect(isRovenueEventKey("credit.ledger.appended")).toBe(true);
+  });
+
+  it("recognizes the Wave-1 store-lifecycle normalization keys", () => {
+    expect(isRovenueEventKey("subscription.billing_issue")).toBe(true);
+    expect(isRovenueEventKey("subscription.grace_period")).toBe(true);
+    expect(isRovenueEventKey("subscription.uncancelled")).toBe(true);
+    expect(isRovenueEventKey("subscription.product_changed")).toBe(true);
   });
 
   it("rejects unknown strings", () => {

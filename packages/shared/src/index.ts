@@ -234,6 +234,13 @@ export { pick, expand, isLocalized, liftToLocalized, mapLocalizedFields } from "
 export * from "./webhook-events";
 
 // =============================================================
+// Store-native lifecycle -> public RovenueEventKey normalization
+// (Wave-1, narrow — see store-event-normalization.ts for scope)
+// =============================================================
+
+export * from "./store-event-normalization";
+
+// =============================================================
 // Paywall fonts — format detection and constants
 // =============================================================
 

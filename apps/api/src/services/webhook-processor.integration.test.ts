@@ -48,7 +48,7 @@ async function seedSubscriber(projectId: string, suffix: string) {
 
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["W1", "W2", "W3", "W4", "W5"]) {
+  for (const suffix of ["W1", "W2", "W3", "W4", "W5", "W6"]) {
     const projectId = `prj_whp_${RUN_ID}${suffix}`;
     await db.delete(outboxEvents).where(
       inArray(
@@ -232,5 +232,44 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
       .from(outboxEvents)
       .where(eq(outboxEvents.aggregateId, subscriber.id));
     expect(outboxRows).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------
+  // Wave-1 narrow store-lifecycle normalization: a synthetic Apple
+  // DID_FAIL_TO_RENEW notification (the store-native type post-processing
+  // actually carries) resolves through STORE_EVENT_TO_PUBLIC_KEY to
+  // "subscription.billing_issue" and bridges under that PUBLIC key —
+  // and re-running the whole post-processing block (a BullMQ retry) must
+  // still leave exactly one row (dedupe keyed on the resolved public key).
+  // -------------------------------------------------------------------
+  it("Case 6: a synthetic Apple DID_FAIL_TO_RENEW normalizes to subscription.billing_issue and bridges exactly once across a retry", async () => {
+    const db = getDb();
+    const project = await seedProject("W6", null);
+    const subscriber = await seedSubscriber(project.id, "W6");
+
+    const args = {
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      eventType: "DID_FAIL_TO_RENEW",
+      webhookEventId: "whe_int_w6_retry",
+    };
+
+    // Simulates a BullMQ retry: the whole post-processing block re-runs
+    // for the same inbound webhook event.
+    await runPostProcessing(args);
+    await runPostProcessing(args);
+
+    const outboxRows = await db
+      .select()
+      .from(outboxEvents)
+      .where(eq(outboxEvents.aggregateId, subscriber.id));
+    expect(outboxRows.length).toBe(1);
+    const row = outboxRows[0]!;
+    expect(row.aggregateType).toBe("SUBSCRIPTION");
+    expect(row.eventType).toBe("subscription.billing_issue");
+    const payload = row.payload as Record<string, unknown>;
+    expect(payload.projectId).toBe(project.id);
+    expect(payload.subscriberId).toBe(subscriber.id);
+    expect(payload.webhookEventId).toBe("whe_int_w6_retry");
   });
 });

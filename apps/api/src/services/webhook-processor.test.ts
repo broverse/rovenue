@@ -215,6 +215,51 @@ describe("enqueueOutgoingWebhook category filter", () => {
     expect(enqueueSpy()).toHaveBeenCalledTimes(1);
   });
 
+  // Wave-1 narrow store-lifecycle normalization: a store-native event
+  // type with a STORE_EVENT_TO_PUBLIC_KEY entry now bridges onto the
+  // outbox under the resolved PUBLIC key, not the raw store-native string.
+  it("bridges a store-native event type through STORE_EVENT_TO_PUBLIC_KEY, using the resolved public key as the outbox eventType", async () => {
+    cfg([]);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_test",
+      eventType: "DID_FAIL_TO_RENEW",
+    });
+    expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
+    expect(outboxInsertSpy()).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        aggregateType: "SUBSCRIPTION",
+        aggregateId: "s1",
+        eventType: "subscription.billing_issue",
+        payload: expect.objectContaining({ projectId: "p1" }),
+      }),
+    );
+    // Dedupe lookup must also use the resolved public key, not the raw
+    // store-native type.
+    expect(
+      vi.mocked(drizzle.outboxRepo.findByWebhookEventAndType),
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      "SUBSCRIPTION",
+      "s1",
+      "subscription.billing_issue",
+      "whe_test",
+    );
+  });
+
+  it("does not bridge a store-native event type with no STORE_EVENT_TO_PUBLIC_KEY entry (e.g. the ambiguous DID_CHANGE_RENEWAL_STATUS, dropped by design)", async () => {
+    cfg([]);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_test",
+      eventType: "DID_CHANGE_RENEWAL_STATUS",
+    });
+    expect(outboxInsertSpy()).not.toHaveBeenCalled();
+  });
+
   it("fails open for unmapped event types", async () => {
     cfg(["purchase"]);
     await enqueueOutgoingWebhook({

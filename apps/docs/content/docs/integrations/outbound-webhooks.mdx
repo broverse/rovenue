@@ -82,6 +82,10 @@ For every other event type (`subscription.*`, `subscriber.identified`, `paywall.
 | `subscriber.identified` [^not-yet-emitted] | An SDK `identify()` call binds a Rovenue subscriber to your app-user id. |
 | `subscription.cancel_requested` | A subscriber requests cancellation (the subscription may still be active until period end). |
 | `subscription.expired` | A subscription reaches the `EXPIRED` state. |
+| `subscription.billing_issue` | A renewal payment fails and enters retry/grace limbo (Apple `DID_FAIL_TO_RENEW` / `GRACE_PERIOD_EXPIRED`, Google `SUBSCRIPTION_ON_HOLD`, Stripe `invoice.payment_failed`). |
+| `subscription.grace_period` | A subscription enters Google Play's grace period after a failed renewal (Google `SUBSCRIPTION_IN_GRACE_PERIOD`). |
+| `subscription.uncancelled` | A subscriber re-enables auto-renew after previously cancelling (Google `SUBSCRIPTION_RESTARTED`). |
+| `subscription.product_changed` | A subscription's product/price changes outside a cancellation (Apple `DID_CHANGE_RENEWAL_PREF`, Google `SUBSCRIPTION_PRICE_CHANGE_CONFIRMED` / `SUBSCRIPTION_DEFERRED`). |
 | `paywall.view` | A paywall is shown to a user. |
 | `paywall.close` | A paywall is dismissed or closed. |
 | `credit.ledger.appended` | A row is appended to the append-only credit ledger (a grant or a spend). |

@@ -234,6 +234,39 @@ describe("toFanoutEnvelope", () => {
     expect(envelope?.occurredAt).toBe("2026-08-24T00:00:00.000Z");
   });
 
+  // Wave-1 narrow store-lifecycle normalization: the 4 new public keys
+  // bridged from STORE_EVENT_TO_PUBLIC_KEY (webhook-processor.ts).
+  it.each([
+    "subscription.billing_issue",
+    "subscription.grace_period",
+    "subscription.uncancelled",
+    "subscription.product_changed",
+  ])("[rovenue.subscription] maps %s", (eventType) => {
+    const wrapper = {
+      eventId: `ob-sub-${eventType}`,
+      eventType,
+      aggregateId: "sub1",
+      createdAt: "2026-08-24T00:00:00.000Z",
+      payload: {
+        projectId: "p1",
+        subscriberId: "sub1",
+        timestamp: "2026-08-23T12:00:00.000Z",
+      },
+    };
+
+    const envelope = toFanoutEnvelope(wrapper, "rovenue.subscription");
+
+    expect(envelope).toEqual({
+      outboxEventId: `ob-sub-${eventType}`,
+      projectId: "p1",
+      eventType,
+      eventKey: eventType,
+      occurredAt: "2026-08-23T12:00:00.000Z",
+      subscriberId: "sub1",
+      payload: wrapper.payload,
+    });
+  });
+
   it("[rovenue.subscription] returns null for an unmapped eventType", () => {
     const wrapper = {
       eventId: "ob-sub-3",
