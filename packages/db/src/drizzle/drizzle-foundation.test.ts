@@ -391,6 +391,7 @@ describe("outboxEvents", () => {
       "NOTIFICATION",
       "FUNNEL",
       "PAYWALL_EVENT",
+      "SUBSCRIPTION",
     ]);
   });
 

@@ -139,6 +139,7 @@ export const aggregateTypeEnum = pgEnum("aggregate_type", [
   "NOTIFICATION",
   "FUNNEL",
   "PAYWALL_EVENT",
+  "SUBSCRIPTION",
 ]);
 
 export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
@@ -336,11 +337,6 @@ export const customDomainCertStatus = pgEnum("CustomDomainCertStatus", [
 // =============================================================
 // Integrations pgEnums
 // =============================================================
-
-export const integrationProvider = pgEnum("IntegrationProvider", [
-  "META_CAPI",
-  "TIKTOK_EVENTS",
-]);
 
 export const integrationDeliveryStatus = pgEnum("IntegrationDeliveryStatus", [
   "pending",

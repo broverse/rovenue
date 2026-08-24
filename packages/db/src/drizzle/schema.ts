@@ -42,7 +42,6 @@ import {
   funnelStatus,
   funnelTemplateScope,
   integrationDeliveryStatus,
-  integrationProvider,
   invitationDeliveryStatus,
   memberRole,
   notificationChannel,
@@ -2856,7 +2855,7 @@ export const integrationConnections = pgTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    providerId: integrationProvider("provider_id").notNull(),
+    providerId: text("provider_id").notNull(),
     displayName: text("display_name").notNull(),
     credentialsCipher: text("credentials_cipher").notNull(),
     credentialsHint: text("credentials_hint").notNull(),
@@ -2885,7 +2884,9 @@ export const integrationConnections = pgTable(
   (t) => ({
     projectProviderUidx: uniqueIndex(
       "integration_connections_project_provider_uidx",
-    ).on(t.projectId, t.providerId),
+    )
+      .on(t.projectId, t.providerId)
+      .where(sql`provider_id <> 'CUSTOM_WEBHOOK' AND deleted_at IS NULL`),
     enabledIdx: index("integration_connections_enabled_idx")
       .on(t.projectId)
       .where(sql`is_enabled = true`),
@@ -2905,7 +2906,7 @@ export const integrationDeliveries = pgTable(
     id: text("id").notNull(),
     connectionId: text("connection_id").notNull(),
     projectId: text("project_id").notNull(),
-    providerId: integrationProvider("provider_id").notNull(),
+    providerId: text("provider_id").notNull(),
     outboxEventId: text("outbox_event_id").notNull(),
     eventKey: text("event_key").notNull(),
     providerEvent: text("provider_event"),
