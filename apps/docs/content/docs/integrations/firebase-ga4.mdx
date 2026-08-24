@@ -1,0 +1,93 @@
+---
+title: Firebase / GA4
+description: Forward Rovenue revenue and subscription-lifecycle events to a Firebase app stream via the Google Analytics 4 Measurement Protocol.
+---
+
+# Firebase / GA4
+
+The Firebase / GA4 integration forwards Rovenue revenue events (purchases, trial conversions, renewals, refunds, cancellations) and subscription-lifecycle events (trials, grace period, billing issues, plan changes) to a **Firebase app stream** via the [GA4 Measurement Protocol](https://developers.google.com/analytics/devguides/collection/protocol/ga4), so subscription behavior shows up alongside the rest of your Firebase Analytics / BigQuery export data.
+
+> **Scope note — Firebase app streams only.** This integration authenticates with `firebase_app_id`, which only works for a **Firebase app stream** (an iOS/Android/Unity app registered in a Firebase project). A **GA4 web stream** — authenticated with `measurement_id` + a browser `client_id` instead — is a different Measurement Protocol contract and is a **documented non-goal for this wave**. If you need to forward events to a GA4 web property, use the [Custom Webhook](/docs/integrations/outbound-webhooks) provider and adapt the payload yourself.
+
+---
+
+## 1. Get your credentials from Firebase and Google Analytics
+
+1. In the [Firebase console](https://console.firebase.google.com), open **Project settings → General** and copy the **App ID** for the specific app (iOS/Android) you want events attributed to — this is `firebase_app_id`. It looks like `1:1234567890:android:abc123` or `1:1234567890:ios:abc123`.
+2. In Google Analytics (the GA4 property linked to that Firebase project), open **Admin → Data Streams**, select the Firebase app stream, then **Measurement Protocol API secrets**.
+3. Click **Create** to mint a new secret and copy it — this is `api_secret`.
+
+> The Measurement Protocol API secret only grants event-ingestion write access to this one data stream; it is not a full Google Analytics credential.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Firebase / GA4** under **Product analytics** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **Measurement Protocol API secret** — from step 1.
+   - **Firebase app ID** — from step 1.
+4. Click **Validate** — Rovenue POSTs a minimal, clearly-tagged probe event to GA4's **validation server** (`/debug/mp/collect`), which per Google's own docs does not count toward your reports, and fails the check if GA4 reports any `validationMessages`.
+   - **Caveat, straight from Google's docs**: the validation server does **not** verify that `api_secret` or `firebase_app_id` are actually correct — only that the event body is well-formed. A well-formed but wrong secret/app-id pair still passes Validate. Double-check both values against the Firebase console / GA4 Admin screen.
+5. Choose which events to forward, optionally override the default vendor event names, then activate.
+
+---
+
+## 3. Event mapping
+
+GA4 constrains custom event names to the regex `^[A-Za-z]\w*$` (must start with a letter; letters, digits, and underscores only — no dots or hyphens). Rovenue's public event keys are forwarded as your GA4 event `name`, using the following default names (overridable per-connection in the drawer's mapping step):
+
+| Rovenue event key | GA4 event `name` |
+|---|---|
+| `revenue.INITIAL` | `purchase` |
+| `revenue.RENEWAL` | `purchase` |
+| `revenue.TRIAL_CONVERSION` | `purchase` |
+| `revenue.CREDIT_PURCHASE` | `purchase` |
+| `revenue.REFUND` | `refund` |
+| `revenue.CANCELLATION` | `rovenue_cancellation` |
+| `subscription.trial.started` | `rovenue_subscription_trial_started` |
+| `subscription.cancel_requested` | `rovenue_subscription_cancel_requested` |
+| `subscription.expired` | `rovenue_subscription_expired` |
+| `subscription.billing_issue` | `rovenue_subscription_billing_issue` |
+| `subscription.grace_period` | `rovenue_subscription_grace_period` |
+| `subscription.uncancelled` | `rovenue_subscription_uncancelled` |
+| `subscription.product_changed` | `rovenue_subscription_product_changed` |
+
+Unlike Amplitude/Mixpanel's free-form event names, four distinct Rovenue revenue keys (`INITIAL`/`RENEWAL`/`TRIAL_CONVERSION`/`CREDIT_PURCHASE`) all collapse onto GA4's own recommended `purchase` event — GA4 has no separate vocabulary to distinguish an initial purchase from a renewal. Every subscription-lifecycle key is instead sent as a `rovenue_`-prefixed custom event, since GA4 has no standard vocabulary for subscription lifecycle at all.
+
+Every forwarded event carries `params.rovenue_event` set to the original Rovenue event key (e.g. `revenue.RENEWAL`), so you can always trace a GA4 event back to its Rovenue source regardless of how the vendor event name has been overridden, plus `params.product_id` and `params.transaction_id`.
+
+### Revenue fields
+
+For the six `revenue.*` keys only, Rovenue also populates `params.value` and `params.currency`. Subscription-lifecycle events never carry these fields — they represent no money movement.
+
+**`revenue.REFUND` is sent with a POSITIVE `value`, alongside the distinct `refund` event name** — this is the **opposite** convention from Amplitude/Mixpanel (which negate the amount and reuse a generic event name). GA4's own documented [refund model](https://support.google.com/analytics/answer/9267735) represents a refund as its own `refund` event carrying the positive amount being refunded; GA4 nets this against prior `purchase` events server-side when computing revenue metrics. Rovenue's internal ledger always stores refund amounts as positive, so no sign flip happens at this wire boundary (unlike Amplitude/Mixpanel).
+
+---
+
+## 4. Identity resolution
+
+Every event requires GA4's `app_instance_id` — the Firebase Analytics SDK's own per-install identifier. **There is no fallback chain here** (unlike Amplitude/Mixpanel's `appUserId`/subscriber-id fallbacks): GA4's Measurement Protocol for a Firebase app stream has no concept of an arbitrary user id, so Rovenue cannot substitute anything else and land the event against the correct GA4 user.
+
+Set the `$firebaseAppInstanceId` subscriber attribute from your app using the Firebase SDK's own instance-id accessor (e.g. `Analytics.appInstanceID()` on iOS, `FirebaseAnalytics.getAppInstanceId()` on Android), then call the Rovenue SDK's `setAttributes`. See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference.
+
+If `$firebaseAppInstanceId` is not set, the event is skipped with reason `no_user_data` (visible in the connection's Delivery Log).
+
+---
+
+## 5. Deduplication
+
+Every forwarded event carries `params.transaction_id` set to Rovenue's internal `outboxEventId`. GA4 uses `transaction_id` to dedup repeated purchase/refund events, so retries after a network failure or an at-least-once outbox replay do not double-count revenue.
+
+---
+
+## 6. Verify events are arriving
+
+1. Open **DebugView** in Google Analytics (Admin → DebugView), or wait for the event to appear in standard GA4 reports (can take up to 24 hours outside DebugView).
+2. Trigger a real event from your app (a renewal, a trial start, etc.).
+3. If events are not appearing:
+   - Re-check `api_secret` and `firebase_app_id` directly against the Firebase console / GA4 Admin screen — remember, **Validate does not catch a wrong-but-well-formed pair** (see the caveat in step 2).
+   - Check **Apps → Firebase / GA4 → Delivery Log** in Rovenue for HTTP status codes and error messages. Note that GA4's live collect endpoint (`/mp/collect`) returns success codes even for a malformed event body — a "successful" delivery in the log does not by itself prove the event was accepted by GA4's processing pipeline.
+   - Ensure the event type you're sending is included in the connection's enabled events.
+   - Ensure the subscriber has `$firebaseAppInstanceId` set — without it, events are skipped before ever reaching GA4.

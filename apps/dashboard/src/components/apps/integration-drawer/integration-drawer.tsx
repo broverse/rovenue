@@ -123,6 +123,14 @@ const ADJUST_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activat
 // ADJUST.
 const SLACK_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// FIREBASE_GA4 has the same shape as AMPLITUDE/MIXPANEL/APPSFLYER/SLACK: no
+// vendor "Events Manager" test-event tooling (GA4's Measurement Protocol has
+// no equivalent to Meta/TikTok's ad-platform test-event concept — its own
+// "debug" endpoint is used internally by validateCredentials, not surfaced
+// as a wizard step), but keeps "mapping" as optional customization since
+// every catalog key already defaults to a mapped GA4 event name.
+const FIREBASE_GA4_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
@@ -130,6 +138,7 @@ const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = 
   APPSFLYER: APPSFLYER_STEPS,
   ADJUST: ADJUST_STEPS,
   SLACK: SLACK_STEPS,
+  FIREBASE_GA4: FIREBASE_GA4_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -149,6 +158,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   APPSFLYER: "AppsFlyer",
   ADJUST: "Adjust",
   SLACK: "Slack",
+  FIREBASE_GA4: "Firebase / GA4",
 };
 
 // ---------------------------------------------------------------------------

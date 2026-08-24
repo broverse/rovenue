@@ -126,6 +126,22 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "firebase-ga4",
+    category: "analytics",
+    // en.json has no dedicated "firebase" vendors.* entry — "google" is the
+    // correct existing key (Google LLC), matching Task 10 controller
+    // ruling's "use whichever exists".
+    vendorKey: "google",
+    logo: {
+      // Firebase brand amber/orange.
+      background: "#FFA000",
+      glyph: "F",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [

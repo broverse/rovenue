@@ -8,16 +8,18 @@ import { mixpanelProvider } from "./providers/mixpanel";
 import { appsflyerProvider } from "./providers/appsflyer";
 import { adjustProvider } from "./providers/adjust";
 import { slackProvider } from "./providers/slack";
+import { firebaseGa4Provider } from "./providers/firebase-ga4";
 import type { ProviderId } from "./types";
 
 describe("PROVIDERS registry", () => {
-  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST and SLACK", () => {
+  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK and FIREBASE_GA4", () => {
     const keys = Object.keys(PROVIDERS).sort();
     expect(keys).toEqual([
       "ADJUST",
       "AMPLITUDE",
       "APPSFLYER",
       "CUSTOM_WEBHOOK",
+      "FIREBASE_GA4",
       "META_CAPI",
       "MIXPANEL",
       "SLACK",
@@ -34,6 +36,7 @@ describe("PROVIDERS registry", () => {
     expect(getProvider("APPSFLYER")).toBe(appsflyerProvider);
     expect(getProvider("ADJUST")).toBe(adjustProvider);
     expect(getProvider("SLACK")).toBe(slackProvider);
+    expect(getProvider("FIREBASE_GA4")).toBe(firebaseGa4Provider);
   });
 
   it("throws on unknown provider", () => {
@@ -48,7 +51,7 @@ describe("PROVIDERS registry", () => {
 // =============================================================
 
 describe("providerIds()", () => {
-  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST and SLACK", () => {
+  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK and FIREBASE_GA4", () => {
     const ids = providerIds();
     expect(ids).toContain("META_CAPI");
     expect(ids).toContain("TIKTOK_EVENTS");
@@ -58,6 +61,7 @@ describe("providerIds()", () => {
     expect(ids).toContain("APPSFLYER");
     expect(ids).toContain("ADJUST");
     expect(ids).toContain("SLACK");
+    expect(ids).toContain("FIREBASE_GA4");
   });
 
   it("returns a non-empty tuple usable by z.enum", () => {

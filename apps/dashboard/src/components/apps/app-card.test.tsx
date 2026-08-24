@@ -157,6 +157,33 @@ describe("AppCard — M6.11", () => {
     expect(onOpenIntegration).toHaveBeenCalledWith("adjust");
   });
 
+  it("clicking firebase-ga4 card calls onOpenIntegration with 'firebase-ga4'", async () => {
+    const user = userEvent.setup();
+    const onOpenIntegration = vi.fn();
+    const FIREBASE_GA4_APP: AppDescriptor = {
+      id: "firebase-ga4",
+      category: "analytics",
+      vendorKey: "google",
+      logo: { background: "#FFA000", glyph: "F" },
+      status: "available",
+    };
+
+    const { container } = renderWithRouter(
+      <AppCard app={FIREBASE_GA4_APP} onOpenIntegration={onOpenIntegration} />,
+    );
+
+    await waitFor(() => {
+      const article = container.querySelector("article");
+      expect(article).toBeTruthy();
+    });
+
+    const article = container.querySelector("article")!;
+    await user.click(article);
+
+    expect(onOpenIntegration).toHaveBeenCalledOnce();
+    expect(onOpenIntegration).toHaveBeenCalledWith("firebase-ga4");
+  });
+
   it("clicking unavailable snapchat-ads card does NOT call onOpenIntegration", async () => {
     const user = userEvent.setup();
     const onOpenIntegration = vi.fn();

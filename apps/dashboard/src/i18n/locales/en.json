@@ -4561,6 +4561,10 @@
         "name": "Firebase Analytics",
         "description": "Mobile-first analytics with Rovenue subscription state."
       },
+      "firebase-ga4": {
+        "name": "Firebase / GA4",
+        "description": "Stream Rovenue revenue and subscription events to Firebase app streams via the GA4 Measurement Protocol."
+      },
       "segment": {
         "name": "Segment",
         "description": "Forward all Rovenue events through your Segment workspace to 300+ destinations."

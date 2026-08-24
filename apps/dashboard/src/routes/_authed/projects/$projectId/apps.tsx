@@ -50,6 +50,7 @@ const CARD_ID_TO_PROVIDER: Record<
   appsflyer: "APPSFLYER",
   adjust: "ADJUST",
   slack: "SLACK",
+  "firebase-ga4": "FIREBASE_GA4",
 };
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({

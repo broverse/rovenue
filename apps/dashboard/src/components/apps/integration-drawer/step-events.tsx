@@ -81,6 +81,11 @@ const APPSFLYER_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
 // Adjust event token configured entirely in the drawer's mapping step.
 const ADJUST_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
 
+// Mirrors apps/api/src/services/integrations/providers/firebase-ga4.ts's
+// `eventCatalog` — the same 13-key set as AMPLITUDE/MIXPANEL/APPSFLYER/
+// ADJUST (Task 10 brief), mapped to GA4's own regex-constrained event names.
+const FIREBASE_GA4_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
+
 // CUSTOM_WEBHOOK has no per-event allowlist on the backend — its
 // `eventCatalog` is `ROVENUE_EVENT_KEYS` in full (custom-webhook.ts) — so
 // the picker offers every public event key rather than the ad-providers'
@@ -99,6 +104,7 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   APPSFLYER: APPSFLYER_EVENT_KEYS,
   ADJUST: ADJUST_EVENT_KEYS,
   SLACK: ROVENUE_EVENT_KEYS,
+  FIREBASE_GA4: FIREBASE_GA4_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

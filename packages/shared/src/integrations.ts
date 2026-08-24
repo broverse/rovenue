@@ -36,7 +36,8 @@ export type IntegrationProviderId =
   | "MIXPANEL"
   | "APPSFLYER"
   | "ADJUST"
-  | "SLACK";
+  | "SLACK"
+  | "FIREBASE_GA4";
 
 export const WEBHOOK_API_VERSION = "2026-08-24";
 

@@ -125,6 +125,28 @@ export const DEFAULT_EVENT_MAPPING: Record<
   SLACK: Object.fromEntries(
     ROVENUE_EVENT_KEYS.map((key) => [key, key]),
   ) as Partial<Record<RovenueEventKey, string>>,
+  // Kept in sync with providers/firebase-ga4.ts's own `defaultEventMapping`
+  // export (which the dashboard drawer reads). GA4 custom event names must
+  // match `^[A-Za-z]\w*$`, so unlike AMPLITUDE/MIXPANEL/APPSFLYER these are
+  // NOT free-form vendor names — see firebase-ga4.ts for the full mapping
+  // rationale (revenue.* collapse onto "purchase"/"refund"/
+  // "rovenue_cancellation"; subscription.* derive as "rovenue_" + the event
+  // type with dots replaced by underscores).
+  FIREBASE_GA4: {
+    "revenue.INITIAL": "purchase",
+    "revenue.RENEWAL": "purchase",
+    "revenue.TRIAL_CONVERSION": "purchase",
+    "revenue.CREDIT_PURCHASE": "purchase",
+    "revenue.REFUND": "refund",
+    "revenue.CANCELLATION": "rovenue_cancellation",
+    "subscription.trial.started": "rovenue_subscription_trial_started",
+    "subscription.cancel_requested": "rovenue_subscription_cancel_requested",
+    "subscription.expired": "rovenue_subscription_expired",
+    "subscription.billing_issue": "rovenue_subscription_billing_issue",
+    "subscription.grace_period": "rovenue_subscription_grace_period",
+    "subscription.uncancelled": "rovenue_subscription_uncancelled",
+    "subscription.product_changed": "rovenue_subscription_product_changed",
+  },
 };
 
 export type ApplyEventMappingInput = {

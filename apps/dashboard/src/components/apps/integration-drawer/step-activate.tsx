@@ -31,6 +31,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   APPSFLYER: "AppsFlyer",
   ADJUST: "Adjust",
   SLACK: "Slack",
+  FIREBASE_GA4: "Firebase / GA4",
 };
 
 // ---------------------------------------------------------------------------
