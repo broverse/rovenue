@@ -411,6 +411,9 @@ export interface WorkerHandle {
 
 export interface WorkerOptions {
   autoStart?: boolean;
+  /** Override the BullMQ queue name — tests use a per-file unique name so
+   *  parallel vitest threads' workers cannot steal each other's jobs. */
+  queueName?: string;
 }
 
 export async function ensureIntegrationsDeliverWorker(
@@ -421,6 +424,8 @@ export async function ensureIntegrationsDeliverWorker(
   if (!autoStart) {
     return { stop: async () => {} };
   }
+
+  const queueName = opts.queueName ?? INTEGRATIONS_DELIVER_QUEUE_NAME;
 
   const log = logger.child("integrations-deliver-worker");
   const deadLetterLastWriteAt = new Map<string, number>();
@@ -439,7 +444,7 @@ export async function ensureIntegrationsDeliverWorker(
   const http = createUndiciHttpClient();
 
   const worker = new Worker<IntegrationsDeliverJob>(
-    INTEGRATIONS_DELIVER_QUEUE_NAME,
+    queueName,
     async (bullJob: Job<IntegrationsDeliverJob>) => {
       const job = bullJob.data;
       const attempt = bullJob.attemptsMade ?? 0;
@@ -538,7 +543,7 @@ export async function ensureIntegrationsDeliverWorker(
   });
 
   log.info("started", {
-    queue: INTEGRATIONS_DELIVER_QUEUE_NAME,
+    queue: queueName,
     concurrency: 10,
   });
 

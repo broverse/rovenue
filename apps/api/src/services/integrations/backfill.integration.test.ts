@@ -24,7 +24,6 @@ import { MockAgent, setGlobalDispatcher } from "undici";
 import { drizzle as drizzleNs } from "@rovenue/db";
 import { encrypt } from "@rovenue/shared/crypto";
 import {
-  INTEGRATIONS_DELIVER_QUEUE_NAME,
   buildIntegrationsDeliverJobId,
   type IntegrationsDeliverJob,
 } from "../../queues/integrations";
@@ -46,6 +45,11 @@ process.env.ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
 
 const REDIS_URL = process.env.REDIS_URL!;
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY!;
+
+// Unique per-file queue name — vitest runs these real-infra test files in
+// parallel threads; a shared queue name lets one thread's worker steal
+// another thread's jobs (see task-1-brief.md).
+const TEST_QUEUE_NAME = `rovenue-integrations-deliver-test-${createId()}`;
 
 // ---------------------------------------------------------------------------
 // undici MockAgent
@@ -170,11 +174,11 @@ beforeAll(async () => {
   });
 
   // Boot worker
-  workerHandle = await ensureIntegrationsDeliverWorker({ autoStart: true });
+  workerHandle = await ensureIntegrationsDeliverWorker({ autoStart: true, queueName: TEST_QUEUE_NAME });
 
   // Queue client
   queueConn = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
-  queue = new Queue<IntegrationsDeliverJob>(INTEGRATIONS_DELIVER_QUEUE_NAME, {
+  queue = new Queue<IntegrationsDeliverJob>(TEST_QUEUE_NAME, {
     connection: queueConn,
   });
 }, 30_000);
