@@ -12,7 +12,11 @@ import type {
   DeliveryResult,
   FanoutTopic,
 } from "../types";
-import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
+import {
+  applyEventMapping,
+  DEFAULT_EVENT_MAPPING,
+  deriveRevenueEventKey,
+} from "../event-mapping";
 
 // ---------------------------------------------------------------------------
 // deriveEventKey
@@ -31,17 +35,6 @@ function deriveEventKey(
 ): RovenueEventKey | undefined {
   return deriveRevenueEventKey(envelope) ?? envelope.eventKey;
 }
-
-// ---------------------------------------------------------------------------
-// Default event mapping — every one of the 17 public event keys maps to
-// itself. Slack has no vendor-specific event vocabulary; `providerEvent` is
-// purely a label surfaced in the Delivery Log. Kept in sync with
-// event-mapping.ts's DEFAULT_EVENT_MAPPING.SLACK.
-// ---------------------------------------------------------------------------
-
-const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = Object.fromEntries(
-  ROVENUE_EVENT_KEYS.map((key) => [key, key]),
-) as Partial<Record<RovenueEventKey, string>>;
 
 const topics: readonly FanoutTopic[] = [
   "rovenue.revenue",
@@ -246,7 +239,7 @@ export const slackProvider: IntegrationProvider = {
   allowMultipleConnections: false,
   credentialsSchema,
 
-  defaultEventMapping,
+  defaultEventMapping: DEFAULT_EVENT_MAPPING.SLACK,
 
   async validateCredentials(
     creds: ProviderCredentials,

@@ -11,7 +11,15 @@ import type {
   DeliveryResult,
 } from "../types";
 import type { RovenueEventKey } from "@rovenue/shared";
-import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
+import {
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+  WAVE1_PROVIDER_EVENT_KEYS,
+} from "@rovenue/shared";
+import {
+  applyEventMapping,
+  DEFAULT_EVENT_MAPPING,
+  deriveRevenueEventKey,
+} from "../event-mapping";
 
 // ---------------------------------------------------------------------------
 // deriveEventKey
@@ -24,15 +32,12 @@ import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
 // amplitude.ts for the fuller rationale.
 // ---------------------------------------------------------------------------
 
-const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>([
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-]);
+// Typing the Set as RovenueEventType while seeding it from the shared
+// RovenueEventKey list is load-bearing, not incidental: it is what makes tsc
+// reject the pass-through cast below the moment the two unions drift.
+const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>(
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+);
 
 function deriveEventKey(
   envelope: RovenueEventEnvelope,
@@ -49,39 +54,6 @@ function deriveEventKey(
 // vocabulary of their own). Kept in sync with event-mapping.ts's
 // DEFAULT_EVENT_MAPPING.APPSFLYER (the dashboard drawer reads this export).
 // ---------------------------------------------------------------------------
-
-const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = {
-  "revenue.INITIAL": "af_purchase",
-  "revenue.TRIAL_CONVERSION": "af_subscribe",
-  "revenue.RENEWAL": "af_subscription_renewal",
-  "revenue.CREDIT_PURCHASE": "af_credit_purchase",
-  "revenue.REFUND": "af_refund",
-  "revenue.CANCELLATION": "af_cancel",
-  "subscription.trial.started": "af_start_trial",
-  "subscription.cancel_requested": "af_cancel_requested",
-  "subscription.expired": "af_subscription_expired",
-  "subscription.billing_issue": "af_billing_issue",
-  "subscription.grace_period": "af_grace_period",
-  "subscription.uncancelled": "af_uncancel",
-  "subscription.product_changed": "af_product_change",
-};
-
-// eventCatalog = exactly the keys of defaultEventMapping above.
-const eventCatalog: readonly RovenueEventKey[] = [
-  "revenue.INITIAL",
-  "revenue.TRIAL_CONVERSION",
-  "revenue.RENEWAL",
-  "revenue.CREDIT_PURCHASE",
-  "revenue.REFUND",
-  "revenue.CANCELLATION",
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-];
 
 // ---------------------------------------------------------------------------
 // Credentials — field ids mirror apps/dashboard's
@@ -222,11 +194,11 @@ export const appsflyerProvider: IntegrationProvider = {
   id: "APPSFLYER",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog,
+  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 
-  defaultEventMapping,
+  defaultEventMapping: DEFAULT_EVENT_MAPPING.APPSFLYER,
 
   // SHAPE-ONLY validation — deliberate, documented deviation from the other
   // Wave-1 providers. AppsFlyer's S2S in-app-event API has no dedicated

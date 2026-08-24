@@ -10,7 +10,11 @@ import type {
   DeliveryResult,
 } from "../types";
 import type { RovenueEventKey } from "@rovenue/shared";
-import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
+import {
+  applyEventMapping,
+  DEFAULT_EVENT_MAPPING,
+  deriveRevenueEventKey,
+} from "../event-mapping";
 import {
   hashPii,
   normalizeEmail,
@@ -74,15 +78,6 @@ function buildUser(envelope: RovenueEventEnvelope): TikTokUser | undefined {
 // Default event mapping
 // ---------------------------------------------------------------------------
 
-const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = {
-  "revenue.INITIAL": "Subscribe",
-  "revenue.TRIAL_CONVERSION": "Subscribe",
-  "revenue.RENEWAL": "Subscribe",
-  "revenue.CREDIT_PURCHASE": "CompletePayment",
-  "subscription.trial.started": "StartTrial",
-  "subscriber.identified": "CompleteRegistration",
-};
-
 // eventCatalog = exactly the keys of defaultEventMapping above.
 const eventCatalog: readonly RovenueEventKey[] = [
   "revenue.INITIAL",
@@ -118,7 +113,7 @@ export const tiktokEventsProvider: IntegrationProvider = {
   allowMultipleConnections: false,
   credentialsSchema,
 
-  defaultEventMapping,
+  defaultEventMapping: DEFAULT_EVENT_MAPPING.TIKTOK_EVENTS,
 
   async validateCredentials(
     creds: ProviderCredentials,

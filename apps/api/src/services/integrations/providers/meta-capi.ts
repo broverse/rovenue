@@ -10,7 +10,11 @@ import type {
   DeliveryResult,
 } from "../types";
 import type { RovenueEventKey } from "@rovenue/shared";
-import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
+import {
+  applyEventMapping,
+  DEFAULT_EVENT_MAPPING,
+  deriveRevenueEventKey,
+} from "../event-mapping";
 import {
   hashPii,
   normalizeEmail,
@@ -76,15 +80,6 @@ function buildUserData(
 // Default event mapping
 // ---------------------------------------------------------------------------
 
-const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = {
-  "revenue.INITIAL": "Subscribe",
-  "revenue.TRIAL_CONVERSION": "Subscribe",
-  "revenue.RENEWAL": "Purchase",
-  "revenue.CREDIT_PURCHASE": "Purchase",
-  "subscription.trial.started": "StartTrial",
-  "subscriber.identified": "CompleteRegistration",
-};
-
 // eventCatalog = exactly the keys of defaultEventMapping above.
 const eventCatalog: readonly RovenueEventKey[] = [
   "revenue.INITIAL",
@@ -120,7 +115,7 @@ export const metaCapiProvider: IntegrationProvider = {
   allowMultipleConnections: false,
   credentialsSchema,
 
-  defaultEventMapping,
+  defaultEventMapping: DEFAULT_EVENT_MAPPING.META_CAPI,
 
   async validateCredentials(
     creds: ProviderCredentials,

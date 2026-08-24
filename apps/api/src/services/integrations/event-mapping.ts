@@ -1,5 +1,5 @@
 import type { RovenueEventKey, IntegrationProviderId } from "@rovenue/shared";
-import { ROVENUE_EVENT_KEYS } from "@rovenue/shared";
+import { ROVENUE_EVENT_KEYS, SUBSCRIPTION_LIFECYCLE_KEYS } from "@rovenue/shared";
 import type { RovenueEventEnvelope } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -18,6 +18,46 @@ export function deriveRevenueEventKey(
     return `revenue.${envelope.revenueEventKind}` as RovenueEventKey;
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Vendor event names that are DERIVED rather than spelled out
+// ---------------------------------------------------------------------------
+
+// AMPLITUDE and MIXPANEL use identical names: neither vendor has a
+// reserved/standard vocabulary for these, so the same free-form snake_case
+// names are used as consistent defaults across both analytics providers
+// (Task 6 brief: "Topics/catalog/mapping keys identical to Amplitude").
+// One object, referenced twice — not two hand-synced copies.
+const ANALYTICS_DEFAULT_EVENT_NAMES: Partial<Record<RovenueEventKey, string>> = {
+  "revenue.INITIAL": "purchase_initial",
+  "revenue.TRIAL_CONVERSION": "trial_conversion",
+  "revenue.RENEWAL": "renewal",
+  "revenue.CREDIT_PURCHASE": "credit_purchase",
+  "revenue.REFUND": "refund",
+  "revenue.CANCELLATION": "cancellation",
+  "subscription.trial.started": "trial_started",
+  "subscription.cancel_requested": "cancel_requested",
+  "subscription.expired": "subscription_expired",
+  "subscription.billing_issue": "billing_issue",
+  "subscription.grace_period": "grace_period",
+  "subscription.uncancelled": "uncancelled",
+  "subscription.product_changed": "product_changed",
+};
+
+// GA4 custom event names must match `^[A-Za-z]\w*$`, so unlike
+// AMPLITUDE/MIXPANEL/APPSFLYER these are not free-form vendor names: the
+// revenue keys collapse onto GA4's own recommended `purchase`/`refund`
+// events, and every subscription.* key derives as a namespaced custom name
+// (GA4 has no standard subscription-lifecycle vocabulary at all).
+const GA4_PURCHASE_EVENT = "purchase";
+const GA4_REFUND_EVENT = "refund";
+const GA4_CANCELLATION_EVENT = "rovenue_cancellation";
+const GA4_CUSTOM_EVENT_PREFIX = "rovenue_";
+
+/** "subscription.trial.started" -> "rovenue_subscription_trial_started". */
+function ga4SubscriptionEventName(key: RovenueEventKey): string {
+  return `${GA4_CUSTOM_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
 }
 
 // INTENTIONAL OMISSION — `revenue.REFUND` and `revenue.CANCELLATION` are
@@ -55,45 +95,9 @@ export const DEFAULT_EVENT_MAPPING: Record<
   CUSTOM_WEBHOOK: {
     // CUSTOM_WEBHOOK has no default event mappings; user configures all via dashboard.
   },
-  // Kept in sync with providers/amplitude.ts's own `defaultEventMapping`
-  // export (which the dashboard drawer reads) — see that file for the
-  // rationale behind each vendor event name.
-  AMPLITUDE: {
-    "revenue.INITIAL": "purchase_initial",
-    "revenue.TRIAL_CONVERSION": "trial_conversion",
-    "revenue.RENEWAL": "renewal",
-    "revenue.CREDIT_PURCHASE": "credit_purchase",
-    "revenue.REFUND": "refund",
-    "revenue.CANCELLATION": "cancellation",
-    "subscription.trial.started": "trial_started",
-    "subscription.cancel_requested": "cancel_requested",
-    "subscription.expired": "subscription_expired",
-    "subscription.billing_issue": "billing_issue",
-    "subscription.grace_period": "grace_period",
-    "subscription.uncancelled": "uncancelled",
-    "subscription.product_changed": "product_changed",
-  },
-  // Identical vendor names to AMPLITUDE — kept in sync with
-  // providers/mixpanel.ts's own `defaultEventMapping` export (which the
-  // dashboard drawer reads). Task 6 brief: "Topics/catalog/mapping keys
-  // identical to Amplitude."
-  MIXPANEL: {
-    "revenue.INITIAL": "purchase_initial",
-    "revenue.TRIAL_CONVERSION": "trial_conversion",
-    "revenue.RENEWAL": "renewal",
-    "revenue.CREDIT_PURCHASE": "credit_purchase",
-    "revenue.REFUND": "refund",
-    "revenue.CANCELLATION": "cancellation",
-    "subscription.trial.started": "trial_started",
-    "subscription.cancel_requested": "cancel_requested",
-    "subscription.expired": "subscription_expired",
-    "subscription.billing_issue": "billing_issue",
-    "subscription.grace_period": "grace_period",
-    "subscription.uncancelled": "uncancelled",
-    "subscription.product_changed": "product_changed",
-  },
-  // Kept in sync with providers/appsflyer.ts's own `defaultEventMapping`
-  // export. AppsFlyer's `af_`-prefixed names are its own documented
+  AMPLITUDE: ANALYTICS_DEFAULT_EVENT_NAMES,
+  MIXPANEL: ANALYTICS_DEFAULT_EVENT_NAMES,
+  // AppsFlyer's `af_`-prefixed names are its own documented
   // in-app-event vocabulary (unlike AMPLITUDE/MIXPANEL's free-form names).
   APPSFLYER: {
     "revenue.INITIAL": "af_purchase",
@@ -110,8 +114,8 @@ export const DEFAULT_EVENT_MAPPING: Record<
     "subscription.uncancelled": "af_uncancel",
     "subscription.product_changed": "af_product_change",
   },
-  // DELIBERATELY EMPTY — see providers/adjust.ts's `defaultEventMapping`
-  // comment for the full PRE-FLIGHT RULING rationale: Adjust event tokens
+  // DELIBERATELY EMPTY — see providers/adjust.ts's "Default event mapping"
+  // header comment for the full PRE-FLIGHT RULING rationale: Adjust event tokens
   // are opaque, account-specific ids with no vendor-wide vocabulary to
   // default to. `applyEventMapping` falls through to `no_mapping` for every
   // key here unless the connection's own `eventMapping` override supplies
@@ -120,32 +124,20 @@ export const DEFAULT_EVENT_MAPPING: Record<
   // SLACK — every one of the 17 public event keys maps to itself. Slack has
   // no vendor-specific event-name vocabulary (there is no "Subscribe" or
   // "purchase_initial" equivalent) — `providerEvent` is only ever used as a
-  // human-readable label. Kept in sync with providers/slack.ts's own
-  // `defaultEventMapping` export (which the dashboard drawer reads).
+  // human-readable label.
   SLACK: Object.fromEntries(
     ROVENUE_EVENT_KEYS.map((key) => [key, key]),
   ) as Partial<Record<RovenueEventKey, string>>,
-  // Kept in sync with providers/firebase-ga4.ts's own `defaultEventMapping`
-  // export (which the dashboard drawer reads). GA4 custom event names must
-  // match `^[A-Za-z]\w*$`, so unlike AMPLITUDE/MIXPANEL/APPSFLYER these are
-  // NOT free-form vendor names — see firebase-ga4.ts for the full mapping
-  // rationale (revenue.* collapse onto "purchase"/"refund"/
-  // "rovenue_cancellation"; subscription.* derive as "rovenue_" + the event
-  // type with dots replaced by underscores).
   FIREBASE_GA4: {
-    "revenue.INITIAL": "purchase",
-    "revenue.RENEWAL": "purchase",
-    "revenue.TRIAL_CONVERSION": "purchase",
-    "revenue.CREDIT_PURCHASE": "purchase",
-    "revenue.REFUND": "refund",
-    "revenue.CANCELLATION": "rovenue_cancellation",
-    "subscription.trial.started": "rovenue_subscription_trial_started",
-    "subscription.cancel_requested": "rovenue_subscription_cancel_requested",
-    "subscription.expired": "rovenue_subscription_expired",
-    "subscription.billing_issue": "rovenue_subscription_billing_issue",
-    "subscription.grace_period": "rovenue_subscription_grace_period",
-    "subscription.uncancelled": "rovenue_subscription_uncancelled",
-    "subscription.product_changed": "rovenue_subscription_product_changed",
+    "revenue.INITIAL": GA4_PURCHASE_EVENT,
+    "revenue.RENEWAL": GA4_PURCHASE_EVENT,
+    "revenue.TRIAL_CONVERSION": GA4_PURCHASE_EVENT,
+    "revenue.CREDIT_PURCHASE": GA4_PURCHASE_EVENT,
+    "revenue.REFUND": GA4_REFUND_EVENT,
+    "revenue.CANCELLATION": GA4_CANCELLATION_EVENT,
+    ...Object.fromEntries(
+      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, ga4SubscriptionEventName(key)]),
+    ),
   },
 };
 

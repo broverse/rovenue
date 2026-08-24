@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { IntegrationProviderId, RovenueEventKey } from "@rovenue/shared";
+import { SUBSCRIPTION_LIFECYCLE_KEYS } from "@rovenue/shared";
 
 export type ProviderId = IntegrationProviderId;
 
@@ -36,6 +37,16 @@ export type RovenueEventType =
   | "paywall_view"
   | "paywall_close"
   | "credit.ledger.appended";
+
+// Compile-time bridge between the two HAND-MAINTAINED unions: this one and
+// @rovenue/shared's RovenueEventKey. Every provider mapper pass-through casts
+// `envelope.eventType as RovenueEventKey` for exactly the subscription-
+// lifecycle keys, and nothing enforced that those spellings actually agree
+// across the two files — a rename on either side would have made that cast a
+// silent lie (paywall_view / paywall.view is precisely such a divergence,
+// which is why the guard is scoped to the lifecycle set the cast covers).
+// Drift now fails tsc here.
+SUBSCRIPTION_LIFECYCLE_KEYS satisfies readonly RovenueEventType[];
 
 export type RevenueEventKind =
   | "INITIAL"

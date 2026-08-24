@@ -11,7 +11,15 @@ import type {
   DeliveryResult,
 } from "../types";
 import type { RovenueEventKey } from "@rovenue/shared";
-import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
+import {
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+  WAVE1_PROVIDER_EVENT_KEYS,
+} from "@rovenue/shared";
+import {
+  applyEventMapping,
+  DEFAULT_EVENT_MAPPING,
+  deriveRevenueEventKey,
+} from "../event-mapping";
 
 // ---------------------------------------------------------------------------
 // deriveEventKey
@@ -23,15 +31,12 @@ import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
 // shared `deriveRevenueEventKey` helper.
 // ---------------------------------------------------------------------------
 
-const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>([
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-]);
+// Typing the Set as RovenueEventType while seeding it from the shared
+// RovenueEventKey list is load-bearing, not incidental: it is what makes tsc
+// reject the pass-through cast below the moment the two unions drift.
+const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>(
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+);
 
 function deriveEventKey(
   envelope: RovenueEventEnvelope,
@@ -58,53 +63,13 @@ function deriveEventKey(
 //     underscores rule below, since "revenue.CANCELLATION" would otherwise
 //     produce "rovenue_revenue_cancellation").
 //   - every subscription.* key -> "rovenue_" + the event type with dots
-//     replaced by underscores (ga4SubscriptionEventName below), since GA4
-//     has no standard vocabulary for subscription lifecycle at all.
+//     replaced by underscores (ga4SubscriptionEventName), since GA4 has no
+//     standard vocabulary for subscription lifecycle at all.
+//
+// The table itself lives in event-mapping.ts's DEFAULT_EVENT_MAPPING — the
+// one copy applyEventMapping reads — including the derivation helper and the
+// named GA4 event constants.
 // ---------------------------------------------------------------------------
-
-const GA4_PURCHASE_EVENT = "purchase";
-const GA4_REFUND_EVENT = "refund";
-const GA4_CANCELLATION_EVENT = "rovenue_cancellation";
-
-/** "subscription.trial.started" -> "rovenue_subscription_trial_started". */
-function ga4SubscriptionEventName(eventType: RovenueEventType): string {
-  return `rovenue_${eventType.replace(/\./g, "_")}`;
-}
-
-const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = {
-  "revenue.INITIAL": GA4_PURCHASE_EVENT,
-  "revenue.RENEWAL": GA4_PURCHASE_EVENT,
-  "revenue.TRIAL_CONVERSION": GA4_PURCHASE_EVENT,
-  "revenue.CREDIT_PURCHASE": GA4_PURCHASE_EVENT,
-  "revenue.REFUND": GA4_REFUND_EVENT,
-  "revenue.CANCELLATION": GA4_CANCELLATION_EVENT,
-  "subscription.trial.started": ga4SubscriptionEventName("subscription.trial.started"),
-  "subscription.cancel_requested": ga4SubscriptionEventName("subscription.cancel_requested"),
-  "subscription.expired": ga4SubscriptionEventName("subscription.expired"),
-  "subscription.billing_issue": ga4SubscriptionEventName("subscription.billing_issue"),
-  "subscription.grace_period": ga4SubscriptionEventName("subscription.grace_period"),
-  "subscription.uncancelled": ga4SubscriptionEventName("subscription.uncancelled"),
-  "subscription.product_changed": ga4SubscriptionEventName("subscription.product_changed"),
-};
-
-// eventCatalog = exactly the keys of defaultEventMapping above — the same
-// 13-key Wave-1 revenue + subscription-lifecycle set as AMPLITUDE/MIXPANEL/
-// APPSFLYER/ADJUST.
-const eventCatalog: readonly RovenueEventKey[] = [
-  "revenue.INITIAL",
-  "revenue.TRIAL_CONVERSION",
-  "revenue.RENEWAL",
-  "revenue.CREDIT_PURCHASE",
-  "revenue.REFUND",
-  "revenue.CANCELLATION",
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-];
 
 // ---------------------------------------------------------------------------
 // Credentials — field ids mirror apps/dashboard's
@@ -196,11 +161,11 @@ export const firebaseGa4Provider: IntegrationProvider = {
   id: "FIREBASE_GA4",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog,
+  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 
-  defaultEventMapping,
+  defaultEventMapping: DEFAULT_EVENT_MAPPING.FIREBASE_GA4,
 
   // REAL, zero-footprint validation — the one Wave-1 vendor with a
   // purpose-built validation endpoint (GA4's `/debug/mp/collect`), unlike

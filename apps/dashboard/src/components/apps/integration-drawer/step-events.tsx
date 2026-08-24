@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { IntegrationProviderId } from "@rovenue/shared";
-import { ROVENUE_EVENT_KEYS } from "@rovenue/shared";
+import { ROVENUE_EVENT_KEYS, WAVE1_PROVIDER_EVENT_KEYS } from "@rovenue/shared";
 import { cn } from "../../../lib/cn";
 import {
   useRevealWebhookSecret,
@@ -42,49 +42,16 @@ export const ALL_EVENT_KEYS = [
   "subscriber.identified",
 ] as const;
 
-// Mirrors apps/api/src/services/integrations/providers/amplitude.ts's
-// `eventCatalog` — the 13-key Wave-1 revenue + subscription-lifecycle set
-// AMPLITUDE supports (a superset of the two ad-providers' list above: it
-// adds REFUND/CANCELLATION plus the six non-trial subscription-lifecycle
-// keys, and drops subscriber.identified, which AMPLITUDE has no mapping for).
-const AMPLITUDE_EVENT_KEYS = [
-  "revenue.INITIAL",
-  "revenue.TRIAL_CONVERSION",
-  "revenue.RENEWAL",
-  "revenue.CREDIT_PURCHASE",
-  "revenue.REFUND",
-  "revenue.CANCELLATION",
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-] as const;
-
-// Mirrors apps/api/src/services/integrations/providers/mixpanel.ts's
-// `eventCatalog` — identical to AMPLITUDE's (Task 6 brief: "Topics/
-// catalog/mapping keys identical to Amplitude").
-const MIXPANEL_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
-
-// Mirrors apps/api/src/services/integrations/providers/appsflyer.ts's
-// `eventCatalog` — the same 13-key set as AMPLITUDE/MIXPANEL (Task 7 brief),
-// just mapped to AppsFlyer's own `af_`-prefixed vendor event names.
-const APPSFLYER_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
-
-// Mirrors apps/api/src/services/integrations/providers/adjust.ts's
-// `eventCatalog` — the same 13-key set as AMPLITUDE/MIXPANEL/APPSFLYER
-// (Task 8 brief). ADJUST has no vendor-wide event-name vocabulary of its
-// own (its `defaultEventMapping` is `{}`), but the picker still offers
-// exactly this set — the value each key maps to is an account-specific
-// Adjust event token configured entirely in the drawer's mapping step.
-const ADJUST_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
-
-// Mirrors apps/api/src/services/integrations/providers/firebase-ga4.ts's
-// `eventCatalog` — the same 13-key set as AMPLITUDE/MIXPANEL/APPSFLYER/
-// ADJUST (Task 10 brief), mapped to GA4's own regex-constrained event names.
-const FIREBASE_GA4_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
+// AMPLITUDE / MIXPANEL / APPSFLYER / ADJUST / FIREBASE_GA4 all offer the SAME
+// 13-key Wave-1 revenue + subscription-lifecycle catalog — it is the literal
+// `eventCatalog` of all five providers, so it comes from @rovenue/shared
+// rather than being re-typed here (the picker and the backend allowlist
+// disagreeing would silently drop events). It is a superset of the two
+// ad-providers' list above (adds REFUND/CANCELLATION plus the six non-trial
+// subscription-lifecycle keys) minus `subscriber.identified`, which none of
+// the five maps. ADJUST is included even though its `defaultEventMapping` is
+// empty: the picker offers the keys, and each maps to an account-specific
+// Adjust event token configured in the drawer's mapping step.
 
 // CUSTOM_WEBHOOK has no per-event allowlist on the backend — its
 // `eventCatalog` is `ROVENUE_EVENT_KEYS` in full (custom-webhook.ts) — so
@@ -99,12 +66,12 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   META_CAPI: ALL_EVENT_KEYS,
   TIKTOK_EVENTS: ALL_EVENT_KEYS,
   CUSTOM_WEBHOOK: ROVENUE_EVENT_KEYS,
-  AMPLITUDE: AMPLITUDE_EVENT_KEYS,
-  MIXPANEL: MIXPANEL_EVENT_KEYS,
-  APPSFLYER: APPSFLYER_EVENT_KEYS,
-  ADJUST: ADJUST_EVENT_KEYS,
+  AMPLITUDE: WAVE1_PROVIDER_EVENT_KEYS,
+  MIXPANEL: WAVE1_PROVIDER_EVENT_KEYS,
+  APPSFLYER: WAVE1_PROVIDER_EVENT_KEYS,
+  ADJUST: WAVE1_PROVIDER_EVENT_KEYS,
   SLACK: ROVENUE_EVENT_KEYS,
-  FIREBASE_GA4: FIREBASE_GA4_EVENT_KEYS,
+  FIREBASE_GA4: WAVE1_PROVIDER_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

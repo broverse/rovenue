@@ -1,3 +1,4 @@
+import { SUBSCRIPTION_BRIDGE_EVENT_KEYS } from "@rovenue/shared";
 import { getKafka } from "../../lib/kafka";
 import { logger } from "../../lib/logger";
 import {
@@ -96,20 +97,14 @@ function toRevenueEnvelope(
 // keys bridged from STORE_EVENT_TO_PUBLIC_KEY (webhook-processor.ts's
 // enqueueOutgoingWebhook). All six share this exact wrapper shape:
 // eventKey = eventType, payload passthrough, mandatory projectId.
-const SUBSCRIPTION_EVENT_TYPES = [
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-] as const;
-type SubscriptionEventType = (typeof SUBSCRIPTION_EVENT_TYPES)[number];
+// (single-sourced as SUBSCRIPTION_BRIDGE_EVENT_KEYS in @rovenue/shared —
+// the provider mappers and the dashboard event picker need the same set)
+type SubscriptionEventType = (typeof SUBSCRIPTION_BRIDGE_EVENT_KEYS)[number];
 
 function isSubscriptionEventType(v: unknown): v is SubscriptionEventType {
   return (
     typeof v === "string" &&
-    (SUBSCRIPTION_EVENT_TYPES as readonly string[]).includes(v)
+    (SUBSCRIPTION_BRIDGE_EVENT_KEYS as readonly string[]).includes(v)
   );
 }
 

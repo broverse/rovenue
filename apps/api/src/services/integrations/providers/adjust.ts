@@ -11,7 +11,15 @@ import type {
   DeliveryResult,
 } from "../types";
 import type { RovenueEventKey } from "@rovenue/shared";
-import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
+import {
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+  WAVE1_PROVIDER_EVENT_KEYS,
+} from "@rovenue/shared";
+import {
+  applyEventMapping,
+  DEFAULT_EVENT_MAPPING,
+  deriveRevenueEventKey,
+} from "../event-mapping";
 
 // ---------------------------------------------------------------------------
 // deriveEventKey
@@ -23,15 +31,12 @@ import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
 // shared `deriveRevenueEventKey` helper.
 // ---------------------------------------------------------------------------
 
-const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>([
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-]);
+// Typing the Set as RovenueEventType while seeding it from the shared
+// RovenueEventKey list is load-bearing, not incidental: it is what makes tsc
+// reject the pass-through cast below the moment the two unions drift.
+const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>(
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+);
 
 function deriveEventKey(
   envelope: RovenueEventEnvelope,
@@ -54,28 +59,9 @@ function deriveEventKey(
 // token per key); a key with no configured token falls through
 // `applyEventMapping` to `{ kind: "skip", reason: "no_mapping" }` exactly
 // like every other provider's genuinely-unmapped key — no special-casing
-// needed here.
+// needed here. The (empty) table itself lives in event-mapping.ts's
+// DEFAULT_EVENT_MAPPING.ADJUST, the one copy applyEventMapping reads.
 // ---------------------------------------------------------------------------
-
-const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = {};
-
-// eventCatalog = the 13-key Wave-1 revenue + subscription-lifecycle set,
-// identical to AMPLITUDE/MIXPANEL/APPSFLYER's.
-const eventCatalog: readonly RovenueEventKey[] = [
-  "revenue.INITIAL",
-  "revenue.TRIAL_CONVERSION",
-  "revenue.RENEWAL",
-  "revenue.CREDIT_PURCHASE",
-  "revenue.REFUND",
-  "revenue.CANCELLATION",
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-];
 
 // ---------------------------------------------------------------------------
 // Credentials — field id mirrors apps/dashboard's
@@ -178,11 +164,11 @@ export const adjustProvider: IntegrationProvider = {
   id: "ADJUST",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog,
+  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 
-  defaultEventMapping,
+  defaultEventMapping: DEFAULT_EVENT_MAPPING.ADJUST,
 
   // SHAPE-ONLY validation — same documented deviation as APPSFLYER. Adjust's
   // S2S events endpoint has no dedicated credential-check probe (it's a

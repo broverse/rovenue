@@ -11,7 +11,15 @@ import type {
   DeliveryResult,
 } from "../types";
 import type { RovenueEventKey } from "@rovenue/shared";
-import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
+import {
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+  WAVE1_PROVIDER_EVENT_KEYS,
+} from "@rovenue/shared";
+import {
+  applyEventMapping,
+  DEFAULT_EVENT_MAPPING,
+  deriveRevenueEventKey,
+} from "../event-mapping";
 
 // ---------------------------------------------------------------------------
 // deriveEventKey
@@ -26,15 +34,12 @@ import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
 // `deriveRevenueEventKey` (kind -> `revenue.${kind}`) helper.
 // ---------------------------------------------------------------------------
 
-const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>([
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-]);
+// Typing the Set as RovenueEventType while seeding it from the shared
+// RovenueEventKey list is load-bearing, not incidental: it is what makes tsc
+// reject the pass-through cast below the moment the two unions drift.
+const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>(
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+);
 
 function deriveEventKey(
   envelope: RovenueEventEnvelope,
@@ -69,41 +74,15 @@ function resolveDeviceId(envelope: RovenueEventEnvelope): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Default event mapping
+// Default event mapping + catalog
 // ---------------------------------------------------------------------------
-
-const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = {
-  "revenue.INITIAL": "purchase_initial",
-  "revenue.TRIAL_CONVERSION": "trial_conversion",
-  "revenue.RENEWAL": "renewal",
-  "revenue.CREDIT_PURCHASE": "credit_purchase",
-  "revenue.REFUND": "refund",
-  "revenue.CANCELLATION": "cancellation",
-  "subscription.trial.started": "trial_started",
-  "subscription.cancel_requested": "cancel_requested",
-  "subscription.expired": "subscription_expired",
-  "subscription.billing_issue": "billing_issue",
-  "subscription.grace_period": "grace_period",
-  "subscription.uncancelled": "uncancelled",
-  "subscription.product_changed": "product_changed",
-};
-
-// eventCatalog = exactly the keys of defaultEventMapping above.
-const eventCatalog: readonly RovenueEventKey[] = [
-  "revenue.INITIAL",
-  "revenue.TRIAL_CONVERSION",
-  "revenue.RENEWAL",
-  "revenue.CREDIT_PURCHASE",
-  "revenue.REFUND",
-  "revenue.CANCELLATION",
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-];
+//
+// Both come from single sources rather than a per-provider copy: the vendor
+// event names from event-mapping.ts's DEFAULT_EVENT_MAPPING (the ONLY copy
+// any runtime path — applyEventMapping — has ever read), and the offered key
+// set from @rovenue/shared's WAVE1_PROVIDER_EVENT_KEYS, which the dashboard
+// drawer's event picker reads too. The names' per-key rationale lives with
+// the mapping table in event-mapping.ts.
 
 // Field ids mirror apps/dashboard's PROVIDER_CREDENTIAL_FIELDS.AMPLITUDE
 // (step-credentials.tsx) — the backend contract those inputs submit
@@ -156,11 +135,11 @@ export const amplitudeProvider: IntegrationProvider = {
   id: "AMPLITUDE",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog,
+  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 
-  defaultEventMapping,
+  defaultEventMapping: DEFAULT_EVENT_MAPPING.AMPLITUDE,
 
   async validateCredentials(
     creds: ProviderCredentials,

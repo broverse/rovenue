@@ -11,7 +11,15 @@ import type {
   DeliveryResult,
 } from "../types";
 import type { RovenueEventKey } from "@rovenue/shared";
-import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
+import {
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+  WAVE1_PROVIDER_EVENT_KEYS,
+} from "@rovenue/shared";
+import {
+  applyEventMapping,
+  DEFAULT_EVENT_MAPPING,
+  deriveRevenueEventKey,
+} from "../event-mapping";
 
 // ---------------------------------------------------------------------------
 // deriveEventKey
@@ -24,15 +32,12 @@ import { applyEventMapping, deriveRevenueEventKey } from "../event-mapping";
 // the fuller rationale — kept in sync deliberately.
 // ---------------------------------------------------------------------------
 
-const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>([
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-]);
+// Typing the Set as RovenueEventType while seeding it from the shared
+// RovenueEventKey list is load-bearing, not incidental: it is what makes tsc
+// reject the pass-through cast below the moment the two unions drift.
+const SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = new Set<RovenueEventType>(
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+);
 
 function deriveEventKey(
   envelope: RovenueEventEnvelope,
@@ -72,39 +77,6 @@ function resolveDistinctId(envelope: RovenueEventEnvelope): string | undefined {
 // event-name vocabulary of its own for these, so the same snake_case names
 // are used as sensible, consistent defaults across both analytics providers.
 // ---------------------------------------------------------------------------
-
-const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = {
-  "revenue.INITIAL": "purchase_initial",
-  "revenue.TRIAL_CONVERSION": "trial_conversion",
-  "revenue.RENEWAL": "renewal",
-  "revenue.CREDIT_PURCHASE": "credit_purchase",
-  "revenue.REFUND": "refund",
-  "revenue.CANCELLATION": "cancellation",
-  "subscription.trial.started": "trial_started",
-  "subscription.cancel_requested": "cancel_requested",
-  "subscription.expired": "subscription_expired",
-  "subscription.billing_issue": "billing_issue",
-  "subscription.grace_period": "grace_period",
-  "subscription.uncancelled": "uncancelled",
-  "subscription.product_changed": "product_changed",
-};
-
-// eventCatalog = exactly the keys of defaultEventMapping above.
-const eventCatalog: readonly RovenueEventKey[] = [
-  "revenue.INITIAL",
-  "revenue.TRIAL_CONVERSION",
-  "revenue.RENEWAL",
-  "revenue.CREDIT_PURCHASE",
-  "revenue.REFUND",
-  "revenue.CANCELLATION",
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-];
 
 // Field ids mirror apps/dashboard's PROVIDER_CREDENTIAL_FIELDS.MIXPANEL
 // (step-credentials.tsx) — the backend contract those inputs submit
@@ -173,11 +145,11 @@ export const mixpanelProvider: IntegrationProvider = {
   id: "MIXPANEL",
 
   topics: ["rovenue.revenue", "rovenue.subscription"],
-  eventCatalog,
+  eventCatalog: WAVE1_PROVIDER_EVENT_KEYS,
   allowMultipleConnections: false,
   credentialsSchema,
 
-  defaultEventMapping,
+  defaultEventMapping: DEFAULT_EVENT_MAPPING.MIXPANEL,
 
   async validateCredentials(
     creds: ProviderCredentials,
