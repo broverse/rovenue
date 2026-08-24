@@ -109,11 +109,14 @@ is config + mapper only:
 - `credentialsSchema` (Zod) — replaces per-provider ad-hoc validation in the route.
 
 **Migration note:** `integration_connections_project_provider_uidx` (unique
-projectId+providerId) blocks multiple webhook endpoints. Since the providers allowed
-multiple connections are only known in code, the index becomes a **plain (non-unique)**
-index, and single-connection policy for analytics providers is enforced in the create
-route inside the same tx (SELECT … FOR UPDATE precheck, same pattern as the §6.19
-experiment launch). DB stays permissive; app enforces policy.
+projectId+providerId) blocks multiple webhook endpoints. It becomes a **partial unique
+index** excluding the multi-connection providers by name
+(`WHERE provider_id <> 'CUSTOM_WEBHOOK'`) — DB-level enforcement stays for every
+single-connection provider, which is the common case. A future multi-connection
+provider needs a one-line index migration; that is rare and an acceptable price for
+keeping the constraint in the database rather than only in route code. Webhook
+connections get an app-level per-project cap instead (named constant
+`MAX_WEBHOOK_ENDPOINTS_PER_PROJECT`, tx-safe count precheck in the create route).
 
 ### 4.4 Fanout topic coverage
 
@@ -161,15 +164,22 @@ free — and stays architecturally consistent (outbox is the only path).
   provider mappers.
 - **Filtering:** `enabledEvents` (existing column) holds public event keys; the drawer's
   Events step lists the full catalog with per-key toggles (finer than v1's categories).
-- **Delivery semantics:** existing worker — at-least-once, 5 attempts (30s→6h),
-  dead-letter row + audit + `webhook.failing`-style project notification on dead-letter
-  (port the v1 notification emission). 2xx = success; 3xx is **not** followed
-  (redirects rejected — signature-stripping risk); anything else retried. Response body
-  captured truncated (existing behavior).
-- **SSRF guard:** URL validation on create/update *and* at send time (DNS re-resolution):
-  https only (http allowed only when `NODE_ENV !== "production"`), block private/loopback/
-  link-local/metadata ranges. Send-time guard lives in the provider's deliver step so
-  DNS-rebinding after creation doesn't bypass it.
+- **Delivery semantics:** existing worker — at-least-once, dead-letter row + audit +
+  `webhook.failing`-style project notification on dead-letter (port the v1 notification
+  emission). 2xx = success; 3xx is **not** followed (redirects rejected —
+  signature-stripping risk); anything else retried. Response body captured truncated
+  (existing behavior). Explicit per-request timeout as a named constant.
+  **Retry schedule becomes registry-configurable** (`retryPolicy` on the provider
+  entry): analytics providers keep today's 5 attempts / 30s→6h (a CAPI event a day
+  late is worthless), while `CUSTOM_WEBHOOK` uses an extended schedule spanning
+  ≥24h wall-clock (Svix retries over ~17h, RevenueCat up to a day+ — a consumer
+  redeploy shouldn't dead-letter a billing event after 7 hours).
+- **SSRF guard:** URL validation on create/update *and* at send time: https only
+  (http allowed only when `NODE_ENV !== "production"`), block private/loopback/
+  link-local/metadata ranges. At send time the guard resolves DNS, validates the
+  resolved IPs, and **pins the connection to a validated IP** (undici custom
+  `lookup`/connect) — validating and then letting the HTTP client re-resolve would
+  leave a DNS-rebinding TOCTOU window.
 - **Manual redeliver:** `POST …/integrations/:id/deliveries/:deliveryId/redeliver`
   re-enqueues the original envelope with a fresh jobId (`conn|event|redeliver-<n>`)
   bypassing the dedup jobId; RBAC'd + audited + rate-limited. UI button on the
@@ -202,8 +212,9 @@ scope remaining bullets to Wave 1/2 (next spec).
 
 1. `provider_id` columns → `text`; drop `integration_provider` enum (verify against
    pg_partman-partitioned `integration_deliveries`).
-2. `integration_connections_project_provider_uidx` → plain (non-unique) index;
-   uniqueness policy moves to the create route (tx-safe precheck).
+2. `integration_connections_project_provider_uidx` → partial unique index
+   (`WHERE provider_id <> 'CUSTOM_WEBHOOK'`); webhook endpoint count capped app-side
+   (`MAX_WEBHOOK_ENDPOINTS_PER_PROJECT`, tx-safe precheck).
 
 No new tables. Webhook v2 state lives entirely in `integration_connections` /
 `integration_deliveries`.
@@ -212,8 +223,11 @@ No new tables. Webhook v2 state lives entirely in `integration_connections` /
 
 - Dead-letter on a `CUSTOM_WEBHOOK` connection emits the project notification v1 already
   has for failing webhooks; `last_error` on the connection surfaces in the drawer.
-- No auto-disable of failing endpoints in this spec (Svix disables after sustained
-  failure; we notify only — revisit with production data).
+- **Deliberate deviation from Svix:** no auto-disable of persistently failing endpoints
+  in this spec — we notify only. Svix disables after sustained failure to protect the
+  sender; with self-hosted single-tenant scale the protection matters less than the
+  surprise of a silently-disabled endpoint. Revisit with production data; the
+  `is_enabled` flag and dead-letter partial index make it a small follow-up.
 - Fanout lag and deliver-queue depth are already visible via the existing worker
   metrics; add the new topics to whatever the observability profile scrapes.
 
