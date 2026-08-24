@@ -22,17 +22,26 @@ interface StepCredentialsProps {
 // Provider field config
 // ---------------------------------------------------------------------------
 
+// Field ids are snake_case to match what the backend's credentialsSchema
+// actually validates (apps/api/src/services/integrations/providers/
+// meta-capi.ts / tiktok-events.ts: `pixel_id` / `pixel_code` +
+// `access_token`) — this previously sent camelCase ids that the server
+// rejected on every real create/update, so the ad-provider flow never
+// validated end-to-end until this fix.
 const PROVIDER_FIELDS: Record<
   "META_CAPI" | "TIKTOK_EVENTS",
   { id: string; label: string }
 > = {
   // Meta renamed "Pixel ID" → "Dataset ID" in the 2023 Events Manager
   // refresh. Both terms point to the same underlying CAPI endpoint; we
-  // store the value under the legacy `pixelId` key for backwards-
+  // store the value under the legacy `pixel_id` key for backwards-
   // compat with existing connections.
-  META_CAPI: { id: "pixelId", label: "Dataset ID (Pixel ID)" },
-  TIKTOK_EVENTS: { id: "pixelCode", label: "Pixel ID" },
+  META_CAPI: { id: "pixel_id", label: "Dataset ID (Pixel ID)" },
+  TIKTOK_EVENTS: { id: "pixel_code", label: "Pixel ID" },
 };
+
+/** Shared across both ad providers' credentialsSchema. */
+const ACCESS_TOKEN_FIELD_ID = "access_token";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -57,7 +66,7 @@ export function StepCredentials({
   });
 
   const idValue = state.credentials[field.id] ?? "";
-  const tokenValue = state.credentials.accessToken ?? "";
+  const tokenValue = state.credentials[ACCESS_TOKEN_FIELD_ID] ?? "";
   const tokenPreview = state.validated && tokenValue.length >= 4
     ? `Token ending …${tokenValue.slice(-4)}`
     : null;
@@ -67,7 +76,7 @@ export function StepCredentials({
     try {
       const result = await validate.mutateAsync({
         [field.id]: idValue,
-        accessToken: tokenValue,
+        [ACCESS_TOKEN_FIELD_ID]: tokenValue,
       });
       if (result.ok) {
         onChange({ ...state, validated: true });
@@ -124,7 +133,7 @@ export function StepCredentials({
               validated: false,
               credentials: {
                 ...state.credentials,
-                accessToken: e.target.value,
+                [ACCESS_TOKEN_FIELD_ID]: e.target.value,
               },
             })
           }

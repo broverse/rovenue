@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { AppCard } from "./app-card";
+import { AppCard, type WebhookCardBundle } from "./app-card";
+import { CUSTOM_WEBHOOK_APP_ID } from "./mock-data";
 import type { AppDescriptor, CategoryId } from "./types";
 
 type Props = {
@@ -9,9 +10,19 @@ type Props = {
   onViewAll: (category: CategoryId) => void;
   onSelect?: (id: string) => void;
   onOpenIntegration?: (providerId: string) => void;
+  /** Passed through to the CUSTOM_WEBHOOK card only. */
+  webhook?: WebhookCardBundle;
 };
 
-export function AppsSection({ category, apps, totalCount, onViewAll, onSelect, onOpenIntegration }: Props) {
+export function AppsSection({
+  category,
+  apps,
+  totalCount,
+  onViewAll,
+  onSelect,
+  onOpenIntegration,
+  webhook,
+}: Props) {
   const { t } = useTranslation();
   if (apps.length === 0) return null;
   return (
@@ -33,7 +44,13 @@ export function AppsSection({ category, apps, totalCount, onViewAll, onSelect, o
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
         {apps.map((app) => (
-          <AppCard key={app.id} app={app} onSelect={onSelect} onOpenIntegration={onOpenIntegration} />
+          <AppCard
+            key={app.id}
+            app={app}
+            onSelect={onSelect}
+            onOpenIntegration={onOpenIntegration}
+            webhook={app.id === CUSTOM_WEBHOOK_APP_ID ? webhook : undefined}
+          />
         ))}
       </div>
     </section>

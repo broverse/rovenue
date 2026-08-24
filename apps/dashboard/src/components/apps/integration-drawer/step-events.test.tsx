@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+import { http, HttpResponse } from "msw";
 import { useState } from "react";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { server } from "../../../../tests/msw/server";
 import { renderWithRouter } from "../../../../tests/render";
 import { StepEvents } from "./step-events";
 import type { DrawerState } from "./integration-drawer";
+import type { IntegrationConnectionRow } from "../../../lib/hooks/useProjectIntegrations";
 
 const BASE_STATE: DrawerState = {
   step: "events",
@@ -52,5 +55,99 @@ describe("StepEvents", () => {
     expect(onChanged).toHaveBeenCalled();
     const lastState = onChanged.mock.calls[onChanged.mock.calls.length - 1][0] as DrawerState;
     expect(lastState.enabledEvents).toContain("revenue.RENEWAL");
+  });
+
+  it("offers all 13 ROVENUE_EVENT_KEYS for CUSTOM_WEBHOOK and hides Back", async () => {
+    renderWithRouter(
+      <StepEvents
+        state={BASE_STATE}
+        onChange={vi.fn()}
+        onNext={vi.fn()}
+        onBack={vi.fn()}
+        existingConnection={null}
+        providerId="CUSTOM_WEBHOOK"
+        projectId="p1"
+      />,
+    );
+
+    // A webhook-only event key (not in the ad-providers' 8-key catalog).
+    expect(await screen.findByRole("checkbox", { name: "paywall.view" })).toBeTruthy();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(13);
+    expect(screen.queryByRole("button", { name: /^back$/i })).toBeNull();
+  });
+
+  const EXISTING_WEBHOOK: IntegrationConnectionRow = {
+    id: "wh1",
+    providerId: "CUSTOM_WEBHOOK",
+    displayName: "api.example.com",
+    credentialsHint: "api.example.com · …abcd",
+    enabledEvents: ["revenue.INITIAL"],
+    eventMapping: {},
+    actionSource: "app",
+    testEventCode: null,
+    isEnabled: true,
+    lastValidatedAt: null,
+    lastError: null,
+    lastBackfillAt: null,
+    createdAt: "2026-08-24T00:00:00Z",
+    updatedAt: "2026-08-24T00:00:00Z",
+  };
+
+  it("reveals and rotates the webhook signing secret for an existing connection", async () => {
+    const user = userEvent.setup();
+
+    server.use(
+      http.get(
+        "http://localhost:3000/dashboard/projects/p1/integrations/wh1/secret",
+        () => HttpResponse.json({ data: { secret: "whsec_revealed1234" } }),
+      ),
+      http.post(
+        "http://localhost:3000/dashboard/projects/p1/integrations/wh1/rotate-secret",
+        () => HttpResponse.json({ data: { secret: "whsec_rotatedABCD" } }),
+      ),
+    );
+
+    renderWithRouter(
+      <StepEvents
+        state={{ ...BASE_STATE, enabledEvents: ["revenue.INITIAL"] }}
+        onChange={vi.fn()}
+        onNext={vi.fn()}
+        onBack={vi.fn()}
+        existingConnection={EXISTING_WEBHOOK}
+        providerId="CUSTOM_WEBHOOK"
+        projectId="p1"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /reveal secret/i }));
+    expect(await screen.findByText("whsec_revealed1234")).toBeTruthy();
+  });
+
+  it("rotate shows the newly rotated secret with a 'won't be shown again' warning", async () => {
+    const user = userEvent.setup();
+
+    server.use(
+      http.post(
+        "http://localhost:3000/dashboard/projects/p1/integrations/wh1/rotate-secret",
+        () => HttpResponse.json({ data: { secret: "whsec_rotatedABCD" } }),
+      ),
+    );
+
+    renderWithRouter(
+      <StepEvents
+        state={{ ...BASE_STATE, enabledEvents: ["revenue.INITIAL"] }}
+        onChange={vi.fn()}
+        onNext={vi.fn()}
+        onBack={vi.fn()}
+        existingConnection={EXISTING_WEBHOOK}
+        providerId="CUSTOM_WEBHOOK"
+        projectId="p1"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /rotate secret/i }));
+
+    expect(await screen.findByText("whsec_rotatedABCD")).toBeTruthy();
+    expect(screen.getByText(/won't be shown again/i)).toBeTruthy();
   });
 });

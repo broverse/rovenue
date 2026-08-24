@@ -34,4 +34,22 @@ describe("IntegrationDrawer shell", () => {
 
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("CUSTOM_WEBHOOK drawer shows the URL field, not the ad-provider pixel fields", async () => {
+    renderWithRouter(
+      <IntegrationDrawer
+        open={true}
+        onClose={vi.fn()}
+        projectId="p1"
+        providerId="CUSTOM_WEBHOOK"
+        existingConnection={null}
+      />,
+    );
+
+    expect(await screen.findByLabelText(/endpoint url/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/pixel/i)).toBeNull();
+    expect(screen.queryByLabelText(/access token/i)).toBeNull();
+    // 3-step wizard (credentials/events/activate), not the 5-step ad flow.
+    expect(screen.getByText(/step 1 of 3/i)).toBeTruthy();
+  });
 });

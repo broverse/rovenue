@@ -10,6 +10,7 @@ describe("IntegrationDrawer — M6.16 e2e happy path", () => {
   it("full flow: credentials → validate → 4× Next → Activate calls onClose", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
+    const createSpy = vi.fn();
 
     server.use(
       http.post("http://localhost:3000/dashboard/projects/p1/integrations/validate", () =>
@@ -19,7 +20,10 @@ describe("IntegrationDrawer — M6.16 e2e happy path", () => {
         "http://localhost:3000/dashboard/projects/p1/integrations",
         // Both routes wrap the row: `ok({ connection: row })` —
         // apps/api/src/routes/dashboard/integrations.ts:289 and :545.
-        () => HttpResponse.json({ data: { connection: { id: "new1" } } }, { status: 201 }),
+        async ({ request }) => {
+          createSpy(await request.json());
+          return HttpResponse.json({ data: { connection: { id: "new1" } } }, { status: 201 });
+        },
       ),
       http.patch("http://localhost:3000/dashboard/projects/p1/integrations/new1", () =>
         HttpResponse.json({
@@ -109,6 +113,91 @@ describe("IntegrationDrawer — M6.16 e2e happy path", () => {
     await user.click(activateBtn);
 
     // Assert onClose was called
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+    // Regression guard: the create body must carry the backend's
+    // snake_case credential ids (pixel_id / access_token), not the
+    // camelCase ids the drawer used to send.
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentials: { pixel_id: "123456789", access_token: "tok_abcd1234" },
+      }),
+    );
+  });
+
+  it("CUSTOM_WEBHOOK full flow: create endpoint → copy secret → select events → Activate calls onClose", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    const WEBHOOK_CONNECTION = {
+      id: "wh1",
+      providerId: "CUSTOM_WEBHOOK",
+      displayName: "api.example.com",
+      credentialsHint: "api.example.com · …cret",
+      enabledEvents: [] as string[],
+      eventMapping: {},
+      actionSource: "app",
+      testEventCode: null,
+      isEnabled: false,
+      lastValidatedAt: null,
+      lastError: null,
+      lastBackfillAt: null,
+      createdAt: "2026-08-24T00:00:00Z",
+      updatedAt: "2026-08-24T00:00:00Z",
+    };
+
+    server.use(
+      http.post(
+        "http://localhost:3000/dashboard/projects/p1/integrations",
+        () =>
+          HttpResponse.json(
+            { data: { connection: WEBHOOK_CONNECTION, secret: "whsec_supersecret" } },
+            { status: 201 },
+          ),
+      ),
+      http.patch("http://localhost:3000/dashboard/projects/p1/integrations/wh1", () =>
+        HttpResponse.json({
+          data: { connection: { ...WEBHOOK_CONNECTION, isEnabled: true, enabledEvents: ["revenue.INITIAL"] } },
+        }),
+      ),
+    );
+
+    renderWithRouter(
+      <IntegrationDrawer
+        open={true}
+        onClose={onClose}
+        projectId="p1"
+        providerId="CUSTOM_WEBHOOK"
+        existingConnection={null}
+      />,
+    );
+
+    // Wait for the dialog (and its Base UI focus-trap) to fully settle
+    // before typing — starting to type immediately races the dialog's
+    // open-transition focus assertion and can drop keystrokes.
+    await screen.findByRole("dialog");
+
+    // Step 1 — Credentials: URL field, create the endpoint.
+    const urlInput = await screen.findByLabelText(/endpoint url/i);
+    await user.type(urlInput, "https://api.example.com/hooks");
+    await user.click(screen.getByRole("button", { name: /create endpoint/i }));
+
+    // Secret shown once, then Next.
+    expect(await screen.findByText("whsec_supersecret")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /^next$/i }));
+
+    // Step 2 — Events: select one, Next.
+    await screen.findByText(/choose which events/i);
+    const firstCheckbox = screen.getAllByRole("checkbox")[0];
+    await user.click(firstCheckbox);
+    const eventsNextBtn = screen.getByRole("button", { name: /^next$/i });
+    await waitFor(() => expect((eventsNextBtn as HTMLButtonElement).disabled).toBe(false));
+    await user.click(eventsNextBtn);
+
+    // Step 3 — Activate (no mapping/test steps for CUSTOM_WEBHOOK).
+    await screen.findByText(/configuration summary/i);
+    await user.click(screen.getByRole("button", { name: /^activate$/i }));
+
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });

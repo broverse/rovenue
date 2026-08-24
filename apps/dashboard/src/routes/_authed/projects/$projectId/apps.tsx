@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Webhook } from "lucide-react";
+import type { IntegrationProviderId } from "@rovenue/shared";
 import { Button, buttonVariants } from "../../../../ui/button";
 import {
   APPS,
@@ -14,20 +15,30 @@ import {
   CategoryRail,
   ConfiguredWebhookCard,
   ConnectedStrip,
+  CUSTOM_WEBHOOK_APP_ID,
   DOCS_URL,
   HOMEPAGE_SECTIONS,
   computeCategoryCounts,
   matchesQuery,
   type AppDescriptor,
   type RailEntryId,
+  type WebhookCardBundle,
 } from "../../../../components/apps";
 import { IntegrationDrawer } from "../../../../components/apps/integration-drawer/integration-drawer";
 import { CustomWebhookModal } from "../../../../components/apps/custom-webhook-modal";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectAppConnections } from "../../../../lib/hooks/useProjectAppConnections";
-import { useProjectIntegrations } from "../../../../lib/hooks/useProjectIntegrations";
+import {
+  useProjectIntegrations,
+  type IntegrationConnectionRow,
+} from "../../../../lib/hooks/useProjectIntegrations";
 import type { AppConnectionRow } from "@rovenue/shared";
 
+// CUSTOM_WEBHOOK is deliberately absent here — unlike these two, it allows
+// several connections per project, so it has no single "open the drawer
+// for this provider" entry point. It's opened only via the card's own
+// per-row Edit / "Add endpoint" actions (handleEditWebhookConnection /
+// handleAddWebhookEndpoint below), never via handleOpenIntegration.
 const CARD_ID_TO_PROVIDER: Record<string, "META_CAPI" | "TIKTOK_EVENTS"> = {
   "meta-capi": "META_CAPI",
   "tiktok-events": "TIKTOK_EVENTS",
@@ -68,11 +79,34 @@ function applyConnectionOverlay(
   });
 }
 
+/**
+ * CUSTOM_WEBHOOK has no row in `useProjectAppConnections` (that endpoint
+ * covers the single-connection catalog entries) — its "connected" status is
+ * derived here from whether the project has any live webhook endpoint.
+ */
+function applyWebhookStatus(
+  catalog: ReadonlyArray<AppDescriptor>,
+  webhookConnections: ReadonlyArray<IntegrationConnectionRow>,
+): ReadonlyArray<AppDescriptor> {
+  if (webhookConnections.length === 0) return catalog;
+  return catalog.map((app) =>
+    app.id === CUSTOM_WEBHOOK_APP_ID ? { ...app, status: "connected" } : app,
+  );
+}
+
 function AppsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [active, setActive] = useState<RailEntryId>("all");
   const [query, setQuery] = useState("");
-  const [drawerProviderId, setDrawerProviderId] = useState<"META_CAPI" | "TIKTOK_EVENTS" | null>(null);
+  const [drawerProviderId, setDrawerProviderId] = useState<IntegrationProviderId | null>(null);
+  // Which CUSTOM_WEBHOOK connection the drawer should open in edit mode.
+  // null while `drawerProviderId === "CUSTOM_WEBHOOK"` means "add a new
+  // endpoint" rather than "edit the first one" — CUSTOM_WEBHOOK allows many
+  // connections, so (unlike META_CAPI/TIKTOK_EVENTS) provider id alone
+  // doesn't identify which one to edit.
+  const [editingWebhookConnectionId, setEditingWebhookConnectionId] = useState<string | null>(
+    null,
+  );
   const [webhookModalOpen, setWebhookModalOpen] = useState(false);
   const { data: project } = useProject(projectId);
   const connections = useProjectAppConnections(projectId);
@@ -83,13 +117,40 @@ function AppsPage({ projectId }: { projectId: string }) {
     if (providerId) setDrawerProviderId(providerId);
   };
 
-  const existingConnection = drawerProviderId
-    ? (integrations.data?.find((c) => c.providerId === drawerProviderId) ?? null)
-    : null;
+  const webhookConnections = useMemo(
+    () => (integrations.data ?? []).filter((c) => c.providerId === "CUSTOM_WEBHOOK"),
+    [integrations.data],
+  );
+
+  const handleAddWebhookEndpoint = () => {
+    setEditingWebhookConnectionId(null);
+    setDrawerProviderId("CUSTOM_WEBHOOK");
+  };
+
+  const handleEditWebhookConnection = (connection: IntegrationConnectionRow) => {
+    setEditingWebhookConnectionId(connection.id);
+    setDrawerProviderId("CUSTOM_WEBHOOK");
+  };
+
+  const webhookCardBundle: WebhookCardBundle = {
+    connections: webhookConnections,
+    onAddEndpoint: handleAddWebhookEndpoint,
+    onEditConnection: handleEditWebhookConnection,
+  };
+
+  const existingConnection: IntegrationConnectionRow | null = !drawerProviderId
+    ? null
+    : drawerProviderId === "CUSTOM_WEBHOOK"
+      ? (webhookConnections.find((c) => c.id === editingWebhookConnectionId) ?? null)
+      : (integrations.data?.find((c) => c.providerId === drawerProviderId) ?? null);
 
   const apps = useMemo<ReadonlyArray<AppDescriptor>>(
-    () => applyConnectionOverlay(APPS, connections.data?.connections ?? []),
-    [connections.data],
+    () =>
+      applyWebhookStatus(
+        applyConnectionOverlay(APPS, connections.data?.connections ?? []),
+        webhookConnections,
+      ),
+    [connections.data, webhookConnections],
   );
 
   const counts = useMemo(() => computeCategoryCounts(apps), [apps]);
@@ -173,6 +234,7 @@ function AppsPage({ projectId }: { projectId: string }) {
                   totalCount={counts[category] ?? 0}
                   onViewAll={(next) => setActive(next)}
                   onOpenIntegration={handleOpenIntegration}
+                  webhook={webhookCardBundle}
                 />
               ))}
             </>
@@ -191,7 +253,12 @@ function AppsPage({ projectId }: { projectId: string }) {
               {filtered.length > 0 ? (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
                   {filtered.map((app) => (
-                    <AppCard key={app.id} app={app} onOpenIntegration={handleOpenIntegration} />
+                    <AppCard
+                      key={app.id}
+                      app={app}
+                      onOpenIntegration={handleOpenIntegration}
+                      webhook={app.id === CUSTOM_WEBHOOK_APP_ID ? webhookCardBundle : undefined}
+                    />
                   ))}
                 </div>
               ) : (
@@ -207,7 +274,10 @@ function AppsPage({ projectId }: { projectId: string }) {
       {drawerProviderId && (
         <IntegrationDrawer
           open={true}
-          onClose={() => setDrawerProviderId(null)}
+          onClose={() => {
+            setDrawerProviderId(null);
+            setEditingWebhookConnectionId(null);
+          }}
           projectId={projectId}
           providerId={drawerProviderId}
           existingConnection={existingConnection}

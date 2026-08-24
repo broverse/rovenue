@@ -1,3 +1,4 @@
+import type { IntegrationProviderId } from "@rovenue/shared";
 import {
   useCreateIntegration,
   useUpdateIntegration,
@@ -17,9 +18,15 @@ interface StepActivateProps {
   onBack: () => void;
   onClose: () => void;
   existingConnection: IntegrationConnectionRow | null;
-  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  providerId: IntegrationProviderId;
   projectId: string;
 }
+
+const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
+  META_CAPI: "Meta Conversions API",
+  TIKTOK_EVENTS: "TikTok Events API",
+  CUSTOM_WEBHOOK: "Custom Webhook",
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -39,8 +46,7 @@ export function StepActivate({
   const isPending = create.isPending || update.isPending;
   const error = create.error ?? update.error;
 
-  const providerLabel =
-    providerId === "META_CAPI" ? "Meta Conversions API" : "TikTok Events API";
+  const providerLabel = PROVIDER_LABELS[providerId];
 
   const handleActivate = async () => {
     try {
@@ -70,7 +76,7 @@ export function StepActivate({
         });
         // Ensure isEnabled on the newly created connection
         await update.mutateAsync({
-          connectionId: created.id,
+          connectionId: created.connection.id,
           body: { isEnabled: true },
         });
       }

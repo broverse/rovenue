@@ -4405,6 +4405,14 @@
         "new": "NEW",
         "beta": "BETA",
         "partner": "Partner"
+      },
+      "webhook": {
+        "addEndpoint": "Add endpoint",
+        "atCapTooltip": "Maximum of {{max}} webhook endpoints reached",
+        "edit": "Edit",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "noEndpoints": "No endpoints configured yet."
       }
     },
     "results": {
@@ -4469,7 +4477,8 @@
       "paddle": "Paddle.com",
       "lemonsqueezy": "Lemon Squeezy",
       "amazon": "Amazon",
-      "roku": "Roku Inc."
+      "roku": "Roku Inc.",
+      "rovenue": "Rovenue"
     },
     "items": {
       "appsflyer": {
@@ -4699,6 +4708,10 @@
       "tiktok-events": {
         "name": "TikTok Events API",
         "description": "Send server-side conversions to your TikTok Pixel."
+      },
+      "custom-webhook": {
+        "name": "Custom Webhook",
+        "description": "Send Rovenue subscription events to any number of your own HTTPS endpoints — HMAC-signed, retried, and replayable."
       }
     },
     "drawer": {

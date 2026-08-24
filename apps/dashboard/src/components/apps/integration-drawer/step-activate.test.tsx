@@ -10,7 +10,7 @@ import type { IntegrationConnectionRow } from "../../../lib/hooks/useProjectInte
 
 const BASE_STATE: DrawerState = {
   step: "activate",
-  credentials: { pixelId: "123", accessToken: "tok_abc" },
+  credentials: { pixel_id: "123", access_token: "tok_abc" },
   validated: true,
   enabledEvents: ["revenue.RENEWAL"],
   eventMapping: {},

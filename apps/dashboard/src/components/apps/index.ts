@@ -1,5 +1,9 @@
 export { AppLogo, type AppLogoProps } from "./app-logo";
-export { AppCard } from "./app-card";
+export {
+  AppCard,
+  MAX_WEBHOOK_ENDPOINTS_PER_PROJECT,
+  type WebhookCardBundle,
+} from "./app-card";
 export { AppsHero } from "./apps-hero";
 export { AppsToolbar } from "./apps-toolbar";
 export { AppsSection } from "./apps-section";
@@ -10,6 +14,7 @@ export { ConnectedStrip } from "./connected-strip";
 export { ConfiguredWebhookCard } from "./configured-webhook-card";
 export {
   APPS,
+  CUSTOM_WEBHOOK_APP_ID,
   DOCS_URL,
   HOMEPAGE_SECTIONS,
   RAIL_ENTRIES,

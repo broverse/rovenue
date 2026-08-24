@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { X } from "lucide-react";
+import type { IntegrationProviderId } from "@rovenue/shared";
 import { cn } from "../../../lib/cn";
 import type { IntegrationConnectionRow } from "../../../lib/hooks/useProjectIntegrations";
 import { StepCredentials } from "./step-credentials";
+import { StepCredentialsWebhook } from "./step-credentials-webhook";
 import { StepEvents } from "./step-events";
 import { StepMapping } from "./step-mapping";
 import { StepTest } from "./step-test";
@@ -64,15 +66,23 @@ interface IntegrationDrawerProps {
   open: boolean;
   onClose: () => void;
   projectId: string;
-  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  providerId: IntegrationProviderId;
   existingConnection?: IntegrationConnectionRow | null;
 }
 
 // ---------------------------------------------------------------------------
 // Step order
+//
+// CUSTOM_WEBHOOK skips "mapping" (there's no default event-name mapping to
+// override — the provider forwards the derived event key verbatim, see
+// custom-webhook.ts's `defaultEventMapping: {}`) and "test" (the existing
+// test-event endpoint still works from the card if wired later, but a raw
+// webhook has no third-party "Events Manager" concept to round-trip
+// against). Every other provider keeps the full 5-step wizard, driven by
+// this Record's fallback.
 // ---------------------------------------------------------------------------
 
-const STEPS: DrawerStep[] = [
+const DEFAULT_STEPS: DrawerStep[] = [
   "credentials",
   "events",
   "mapping",
@@ -80,12 +90,24 @@ const STEPS: DrawerStep[] = [
   "activate",
 ];
 
+const WEBHOOK_STEPS: DrawerStep[] = ["credentials", "events", "activate"];
+
+const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
+  CUSTOM_WEBHOOK: WEBHOOK_STEPS,
+};
+
 const STEP_LABELS: Record<DrawerStep, string> = {
   credentials: "Credentials",
   events: "Events",
   mapping: "Mapping",
   test: "Test",
   activate: "Activate",
+};
+
+const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
+  META_CAPI: "Meta Conversions API",
+  TIKTOK_EVENTS: "TikTok Events API",
+  CUSTOM_WEBHOOK: "Custom Webhook",
 };
 
 // ---------------------------------------------------------------------------
@@ -103,6 +125,25 @@ export function IntegrationDrawer({
     defaultState(existingConnection),
   );
   const [view, setView] = useState<"wizard" | "deliveries">("wizard");
+  // CUSTOM_WEBHOOK's credentials step creates the connection immediately
+  // (the server generates the signing secret at creation time — see
+  // step-credentials-webhook.tsx), so the "events"/"activate" steps that
+  // follow need to PATCH that connection rather than POST a new one. This
+  // tracks the connection created mid-flow; every other provider never
+  // sets it and keeps using `existingConnection` as-is.
+  const [liveConnection, setLiveConnection] = useState<IntegrationConnectionRow | null>(
+    existingConnection ?? null,
+  );
+
+  const effectiveConnection = liveConnection ?? existingConnection ?? null;
+  const STEPS = STEPS_BY_PROVIDER[providerId] ?? DEFAULT_STEPS;
+  const isWebhook = providerId === "CUSTOM_WEBHOOK";
+  // Narrowed directly off `providerId` (not off the `isWebhook` boolean) so
+  // TS actually excludes "CUSTOM_WEBHOOK" from the type — the ad-provider-
+  // only step components (StepCredentials/StepMapping/StepTest) declare a
+  // 2-way providerId union and won't accept the full 3-way one.
+  const adProviderId: "META_CAPI" | "TIKTOK_EVENTS" | null =
+    providerId === "CUSTOM_WEBHOOK" ? null : providerId;
 
   const currentStepIndex = STEPS.indexOf(state.step);
 
@@ -122,13 +163,11 @@ export function IntegrationDrawer({
     onNext: handleNext,
     onBack: handleBack,
     onClose,
-    existingConnection: existingConnection ?? null,
-    providerId,
+    existingConnection: effectiveConnection,
     projectId,
   };
 
-  const providerLabel =
-    providerId === "META_CAPI" ? "Meta Conversions API" : "TikTok Events API";
+  const providerLabel = PROVIDER_LABELS[providerId];
 
   return (
     <Dialog.Root
@@ -168,7 +207,7 @@ export function IntegrationDrawer({
           </header>
 
           {/* Wizard / Deliveries tab row — only when there is an existing connection */}
-          {existingConnection && (
+          {effectiveConnection && (
             <div className="flex gap-0.5 border-b border-rv-divider px-5 py-2">
               {(["wizard", "deliveries"] as const).map((tab) => (
                 <button
@@ -207,29 +246,50 @@ export function IntegrationDrawer({
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-5 pb-10 pt-5 [scrollbar-color:var(--color-rv-c4)_transparent] [scrollbar-width:thin]">
-            {view === "deliveries" && existingConnection ? (
+            {view === "deliveries" && effectiveConnection ? (
               <StepDeliveries
                 projectId={projectId}
-                connectionId={existingConnection.id}
+                connectionId={effectiveConnection.id}
               />
-            ) : (
+            ) : isWebhook ? (
               <>
                 {state.step === "credentials" && (
-                  <StepCredentials {...sharedStepProps} />
+                  <StepCredentialsWebhook
+                    state={state}
+                    onChange={sharedStepProps.onChange}
+                    onNext={handleNext}
+                    existingConnection={effectiveConnection}
+                    projectId={projectId}
+                    onConnectionCreated={setLiveConnection}
+                  />
                 )}
                 {state.step === "events" && (
-                  <StepEvents {...sharedStepProps} />
-                )}
-                {state.step === "mapping" && (
-                  <StepMapping {...sharedStepProps} />
-                )}
-                {state.step === "test" && (
-                  <StepTest {...sharedStepProps} />
+                  <StepEvents {...sharedStepProps} providerId="CUSTOM_WEBHOOK" />
                 )}
                 {state.step === "activate" && (
-                  <StepActivate {...sharedStepProps} />
+                  <StepActivate {...sharedStepProps} providerId="CUSTOM_WEBHOOK" />
                 )}
               </>
+            ) : (
+              adProviderId && (
+                <>
+                  {state.step === "credentials" && (
+                    <StepCredentials {...sharedStepProps} providerId={adProviderId} />
+                  )}
+                  {state.step === "events" && (
+                    <StepEvents {...sharedStepProps} providerId={adProviderId} />
+                  )}
+                  {state.step === "mapping" && (
+                    <StepMapping {...sharedStepProps} providerId={adProviderId} />
+                  )}
+                  {state.step === "test" && (
+                    <StepTest {...sharedStepProps} providerId={adProviderId} />
+                  )}
+                  {state.step === "activate" && (
+                    <StepActivate {...sharedStepProps} providerId={adProviderId} />
+                  )}
+                </>
+              )
             )}
           </div>
         </Dialog.Popup>

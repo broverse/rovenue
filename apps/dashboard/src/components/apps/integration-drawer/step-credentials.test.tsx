@@ -41,11 +41,15 @@ describe("StepCredentials", () => {
   it("validates credentials, calls onChange with validated=true, shows token preview, then Next button becomes enabled", async () => {
     const user = userEvent.setup();
     const onValidated = vi.fn();
+    const postSpy = vi.fn();
 
     server.use(
       http.post(
         "http://localhost:3000/dashboard/projects/p1/integrations/validate",
-        () => HttpResponse.json({ data: { ok: true } }),
+        async ({ request }) => {
+          postSpy(await request.json());
+          return HttpResponse.json({ data: { ok: true } });
+        },
       ),
     );
 
@@ -72,5 +76,16 @@ describe("StepCredentials", () => {
     // Next button should be enabled
     const nextBtn = screen.getByRole("button", { name: /next/i });
     expect((nextBtn as HTMLButtonElement).disabled).toBe(false);
+
+    // Regression guard for the snake_case fix: the backend's
+    // credentialsSchema (meta-capi.ts) only accepts `pixel_id` +
+    // `access_token` — camelCase ids fail validation silently for real
+    // Meta accounts even though this mocked test route doesn't enforce it.
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "META_CAPI",
+        credentials: { pixel_id: "123456789", access_token: "tok_abcd1234" },
+      }),
+    );
   });
 });

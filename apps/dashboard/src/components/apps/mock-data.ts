@@ -1,15 +1,21 @@
 import { CircleCheck, LayoutGrid, Megaphone } from "lucide-react";
 import type { AppDescriptor, CategoryId, RailEntry } from "./types";
 
+/** Catalog id for the CUSTOM_WEBHOOK provider's card (Task 12). Distinct
+ *  from the pre-existing single-endpoint "custom webhook" feature
+ *  (ConfiguredWebhookCard / CustomWebhookModal, project.webhookUrl) — this
+ *  one is the multi-connection integrations-framework provider. */
+export const CUSTOM_WEBHOOK_APP_ID = "custom-webhook";
+
 /**
  * Static catalog of integrations Rovenue ships with.
  *
- * Currently only the two outbound ad-platform integrations are wired
- * end-to-end (M0–M9 plan, branch `feat/integrations-meta-tiktok`).
- * Other surfaces — attribution, analytics, lifecycle, etc. — are out
- * of scope for the first integrations release. When a new provider
- * lands, add it here with its own `custom` brand mark in
- * `app-logo.tsx`.
+ * Currently only the two outbound ad-platform integrations plus the
+ * generic outgoing-webhook provider are wired end-to-end (M0–M9 plan,
+ * branch `feat/integrations-meta-tiktok`, extended by Task 12). Other
+ * surfaces — attribution, analytics, lifecycle, etc. — are out of scope
+ * for the first integrations release. When a new provider lands, add it
+ * here with its own `custom` brand mark in `app-logo.tsx`.
  */
 export const APPS: ReadonlyArray<AppDescriptor> = [
   {
@@ -35,6 +41,18 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
       background: "#000",
       glyph: "",
       custom: "tiktok",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
+  {
+    id: CUSTOM_WEBHOOK_APP_ID,
+    category: "automation",
+    vendorKey: "rovenue",
+    logo: {
+      background: "#6D28D9",
+      glyph: "W",
     },
     status: "available",
     tag: "new",

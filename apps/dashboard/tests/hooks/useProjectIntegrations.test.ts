@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
@@ -12,6 +12,9 @@ import {
   useValidateIntegrationCredentials,
   useTestIntegrationEvent,
   useIntegrationDeliveries,
+  useRotateWebhookSecret,
+  useRevealWebhookSecret,
+  useRedeliverDelivery,
   type IntegrationConnectionRow,
   type IntegrationDeliveryRow,
 } from "../../src/lib/hooks/useProjectIntegrations";
@@ -90,7 +93,7 @@ describe("useProjectIntegrations", () => {
 // ---------------------------------------------------------------------------
 
 describe("useCreateIntegration", () => {
-  test("POST create returns id", async () => {
+  test("POST create returns the connection (and no secret for a non-webhook provider)", async () => {
     server.use(
       http.post(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
         // `ok({ connection: row })` — integrations.ts:289.
@@ -111,11 +114,42 @@ describe("useCreateIntegration", () => {
     result.current.mutate({
       providerId: "META_CAPI",
       displayName: "New Connection",
-      credentials: { accessToken: "tok_test" },
+      credentials: { access_token: "tok_test" },
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.id).toBe("conn_new");
+    expect(result.current.data?.connection.id).toBe("conn_new");
+    expect(result.current.data?.secret).toBeUndefined();
+  });
+
+  test("POST create for CUSTOM_WEBHOOK returns the server-generated secret", async () => {
+    server.use(
+      http.post(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
+        // `ok({ connection: row, secret })` — createWebhookConnection in
+        // integrations.ts.
+        HttpResponse.json({
+          data: {
+            connection: { ...mockConnection, id: "wh_new", providerId: "CUSTOM_WEBHOOK" },
+            secret: "whsec_abc123",
+          },
+        }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useCreateIntegration("proj_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    result.current.mutate({
+      providerId: "CUSTOM_WEBHOOK",
+      displayName: "api.example.com",
+      credentials: { url: "https://api.example.com/hooks" },
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.connection.id).toBe("wh_new");
+    expect(result.current.data?.secret).toBe("whsec_abc123");
   });
 });
 
@@ -250,5 +284,121 @@ describe("useIntegrationDeliveries", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.pages[0]?.deliveries).toHaveLength(1);
+  });
+
+  test("passes the status filter through as a query param", async () => {
+    let capturedStatus: string | null = null;
+    server.use(
+      http.get(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id/deliveries`,
+        ({ request }) => {
+          capturedStatus = new URL(request.url).searchParams.get("status");
+          return HttpResponse.json({
+            data: { deliveries: [mockDelivery], nextCursor: null },
+          });
+        },
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useIntegrationDeliveries("proj_1", "conn_1", { status: "dead_letter" }),
+      { wrapper: makeWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(capturedStatus).toBe("dead_letter");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 12 — webhook secret rotate/reveal + manual redeliver
+// ---------------------------------------------------------------------------
+
+describe("useRotateWebhookSecret", () => {
+  test("POST rotate-secret returns the new secret", async () => {
+    server.use(
+      http.post(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id/rotate-secret`,
+        () => HttpResponse.json({ data: { secret: "whsec_rotated" } }),
+      ),
+      http.get(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
+        HttpResponse.json({ data: { connections: [] } }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useRotateWebhookSecret("proj_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    result.current.mutate("wh_1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.secret).toBe("whsec_rotated");
+  });
+});
+
+describe("useRevealWebhookSecret", () => {
+  test("GET secret returns the current secret", async () => {
+    server.use(
+      http.get(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id/secret`,
+        () => HttpResponse.json({ data: { secret: "whsec_revealed" } }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useRevealWebhookSecret("proj_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    result.current.mutate("wh_1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.secret).toBe("whsec_revealed");
+  });
+});
+
+describe("useRedeliverDelivery", () => {
+  test("POST redeliver returns enqueued:true and invalidates the deliveries query", async () => {
+    server.use(
+      http.post(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id/deliveries/:deliveryId/redeliver`,
+        () => HttpResponse.json({ data: { enqueued: true } }, { status: 202 }),
+      ),
+      http.get(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id/deliveries`,
+        () =>
+          HttpResponse.json({
+            data: { deliveries: [mockDelivery], nextCursor: null },
+          }),
+      ),
+    );
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: qc }, children);
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const deliveries = renderHook(
+      () => useIntegrationDeliveries("proj_1", "conn_1"),
+      { wrapper },
+    );
+    await waitFor(() => expect(deliveries.result.current.isSuccess).toBe(true));
+
+    const { result } = renderHook(
+      () => useRedeliverDelivery("proj_1", "conn_1"),
+      { wrapper },
+    );
+
+    result.current.mutate("del_1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.enqueued).toBe(true);
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryKey: ["integration-deliveries", "proj_1", "conn_1"],
+      }),
+    );
   });
 });

@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import type { IntegrationProviderId } from "@rovenue/shared";
 import { api } from "../api";
 
 // ---------------------------------------------------------------------------
@@ -7,7 +8,7 @@ import { api } from "../api";
 
 export interface IntegrationConnectionRow {
   id: string;
-  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  providerId: IntegrationProviderId;
   displayName: string;
   credentialsHint: string;
   enabledEvents: string[];
@@ -23,7 +24,7 @@ export interface IntegrationConnectionRow {
 }
 
 export interface CreateIntegrationBody {
-  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  providerId: IntegrationProviderId;
   displayName: string;
   credentials: Record<string, string>;
   enabledEvents?: string[];
@@ -41,6 +42,14 @@ export interface UpdateIntegrationBody {
   actionSource?: "app" | "website" | "system_generated";
   testEventCode?: string | null;
   isEnabled?: boolean;
+}
+
+/** POST /integrations response. `secret` is only present for a freshly
+ *  created CUSTOM_WEBHOOK connection (server-generated signing secret,
+ *  shown once) — every other provider's create response omits it. */
+export interface CreateIntegrationResult {
+  connection: IntegrationConnectionRow;
+  secret?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,13 +76,11 @@ export function useProjectIntegrations(projectId: string) {
 export function useCreateIntegration(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: CreateIntegrationBody) => {
-      const result = await api<{ connection: IntegrationConnectionRow }>(
-        `/dashboard/projects/${projectId}/integrations`,
-        { method: "POST", body: JSON.stringify(body) },
-      );
-      return result.connection;
-    },
+    mutationFn: (body: CreateIntegrationBody) =>
+      api<CreateIntegrationResult>(`/dashboard/projects/${projectId}/integrations`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["project-integrations", projectId] });
     },
@@ -157,6 +164,41 @@ export function useTestIntegrationEvent(
 }
 
 // ---------------------------------------------------------------------------
+// Task 12 — Webhook secret rotate / reveal
+//
+// NOTE: `useRotateWebhookSecret` is also the name of an unrelated, pre-
+// existing hook (../hooks/useRotateWebhookSecret.ts) that rotates the
+// legacy single-project webhook secret at a different endpoint
+// (`/webhook-secret/rotate`). That hook backs a separate feature (the
+// `apps_.webhooks` route + ConfiguredWebhookCard) and is never imported
+// alongside these — the two never collide at a single call site, but
+// don't reach for one when you mean the other.
+// ---------------------------------------------------------------------------
+
+export function useRotateWebhookSecret(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connectionId: string) =>
+      api<{ secret: string }>(
+        `/dashboard/projects/${projectId}/integrations/${connectionId}/rotate-secret`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["project-integrations", projectId] });
+    },
+  });
+}
+
+export function useRevealWebhookSecret(projectId: string) {
+  return useMutation({
+    mutationFn: (connectionId: string) =>
+      api<{ secret: string }>(
+        `/dashboard/projects/${projectId}/integrations/${connectionId}/secret`,
+      ),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // M6.4 — Deliveries infinite query
 // ---------------------------------------------------------------------------
 
@@ -204,5 +246,27 @@ export function useIntegrationDeliveries(
       );
     },
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Task 12 — Manual redeliver
+// ---------------------------------------------------------------------------
+
+export function useRedeliverDelivery(projectId: string, connectionId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (deliveryId: string) =>
+      api<{ enqueued: true }>(
+        `/dashboard/projects/${projectId}/integrations/${connectionId}/deliveries/${deliveryId}/redeliver`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      // `useIntegrationDeliveries`'s query key includes the `params` object
+      // (status filter / limit), so match by prefix rather than an exact key.
+      void qc.invalidateQueries({
+        queryKey: ["integration-deliveries", projectId, connectionId],
+      });
+    },
   });
 }
