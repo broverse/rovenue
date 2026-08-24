@@ -48,7 +48,7 @@ async function seedSubscriber(projectId: string, suffix: string) {
 
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["W1", "W2", "W3", "W4"]) {
+  for (const suffix of ["W1", "W2", "W3", "W4", "W5"]) {
     const projectId = `prj_whp_${RUN_ID}${suffix}`;
     await db.delete(outboxEvents).where(
       inArray(
@@ -63,8 +63,16 @@ afterAll(async () => {
   }
 });
 
+// The bridge only fires for event types the integrations fan-out can
+// deliver (isRovenueEventKey). Store-native types like DID_RENEW are NOT
+// bridged — the fan-out drops them, so a row would be a permanent dead
+// write. MAPPED_EVENT_TYPE stands in for the normalized keys this path will
+// carry once store-native lifecycle normalization lands (Wave-1 spec).
+const MAPPED_EVENT_TYPE = "subscription.expired";
+const RAW_STORE_EVENT_TYPE = "DID_RENEW";
+
 describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
-  it("Case 1: bridges the raw store eventType onto SUBSCRIPTION even when no v1 webhookUrl is configured", async () => {
+  it("Case 1: bridges a mapped event type onto SUBSCRIPTION even when no v1 webhookUrl is configured", async () => {
     const db = getDb();
     const project = await seedProject("W1", null);
     const subscriber = await seedSubscriber(project.id, "W1");
@@ -73,7 +81,7 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
       projectId: project.id,
       subscriberId: subscriber.id,
       webhookEventId: "whe_int_w1",
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
     });
 
     const outboxRows = await db
@@ -82,7 +90,7 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
       .where(
         and(
           eq(outboxEvents.aggregateId, subscriber.id),
-          eq(outboxEvents.eventType, "DID_RENEW"),
+          eq(outboxEvents.eventType, MAPPED_EVENT_TYPE),
         ),
       );
     expect(outboxRows.length).toBe(1);
@@ -94,11 +102,12 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
     expect(payload.webhookEventId).toBe("whe_int_w1");
   });
 
-  it("Case 2: bridges onto SUBSCRIPTION even when the v1 category filter would drop the event", async () => {
+  it("Case 2: bridges onto SUBSCRIPTION independently of the project's v1 category filter", async () => {
     const db = getDb();
     const project = await seedProject("W2", "https://hook.example.com/w2");
-    // Category filter subscribes to "purchase" only; DID_RENEW normalizes
-    // to "renewal", so the v1 write is dropped but the outbox must not be.
+    // A v1 category filter is configured. It gates only the v1 write — the
+    // outbox bridge is gated on the event type being deliverable, nothing
+    // else — so the bridge must fire regardless of what this list says.
     await db
       .update(projects)
       .set({ webhookEventCategories: ["purchase"] })
@@ -108,9 +117,8 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
     await enqueueOutgoingWebhook({
       projectId: project.id,
       subscriberId: subscriber.id,
-      purchaseId: "pur_whp_w2",
       webhookEventId: "whe_int_w2",
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
     });
 
     const outboxRows = await db
@@ -119,13 +127,13 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
       .where(
         and(
           eq(outboxEvents.aggregateId, subscriber.id),
-          eq(outboxEvents.eventType, "DID_RENEW"),
+          eq(outboxEvents.eventType, MAPPED_EVENT_TYPE),
         ),
       );
     expect(outboxRows.length).toBe(1);
     expect(outboxRows[0]!.aggregateType).toBe("SUBSCRIPTION");
-    expect((outboxRows[0]!.payload as Record<string, unknown>).purchaseId).toBe(
-      "pur_whp_w2",
+    expect((outboxRows[0]!.payload as Record<string, unknown>).webhookEventId).toBe(
+      "whe_int_w2",
     );
   });
 
@@ -144,7 +152,7 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
     const args = {
       projectId: project.id,
       subscriberId: subscriber.id,
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
       webhookEventId: "whe_int_w3_retry",
     };
 
@@ -159,7 +167,7 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
       .where(
         and(
           eq(outboxEvents.aggregateId, subscriber.id),
-          eq(outboxEvents.eventType, "DID_RENEW"),
+          eq(outboxEvents.eventType, MAPPED_EVENT_TYPE),
         ),
       );
     expect(outboxRows.length).toBe(1);
@@ -179,7 +187,7 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
       // the outbox dedupe below keys on (aggregateType, subscriber,
       // eventType, purchaseId), not on the purchase row itself.
       purchaseId: "pur_whp_w4_retry",
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
       webhookEventId: "whe_int_w4_retry",
     };
 
@@ -192,7 +200,7 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
       .where(
         and(
           eq(outboxEvents.aggregateId, subscriber.id),
-          eq(outboxEvents.eventType, "DID_RENEW"),
+          eq(outboxEvents.eventType, MAPPED_EVENT_TYPE),
         ),
       );
     expect(outboxRows.length).toBe(1);
@@ -200,5 +208,29 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
     expect((outboxRows[0]!.payload as Record<string, unknown>).purchaseId).toBe(
       "pur_whp_w4_retry",
     );
+  });
+
+  // -------------------------------------------------------------------
+  // The store-webhook hot path carries store-native event types, which the
+  // integrations fan-out drops. Bridging them wrote a row nothing would
+  // ever read.
+  // -------------------------------------------------------------------
+  it("Case 5: does NOT bridge a store-native event type onto SUBSCRIPTION", async () => {
+    const db = getDb();
+    const project = await seedProject("W5", null);
+    const subscriber = await seedSubscriber(project.id, "W5");
+
+    await enqueueOutgoingWebhook({
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      webhookEventId: "whe_int_w5",
+      eventType: RAW_STORE_EVENT_TYPE,
+    });
+
+    const outboxRows = await db
+      .select()
+      .from(outboxEvents)
+      .where(eq(outboxEvents.aggregateId, subscriber.id));
+    expect(outboxRows).toHaveLength(0);
   });
 });

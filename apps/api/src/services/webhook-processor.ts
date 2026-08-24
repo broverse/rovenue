@@ -6,7 +6,7 @@ import {
   ProductType,
   drizzle,
 } from "@rovenue/db";
-import { toWebhookEventCategory } from "@rovenue/shared";
+import { isRovenueEventKey, toWebhookEventCategory } from "@rovenue/shared";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { loadGoogleCredentials } from "../lib/project-credentials";
@@ -318,44 +318,59 @@ async function enqueueOutgoingWebhook(
   // No existing tx at this call site — wrap the outbox bridge and the
   // v1 outgoing-webhook write (category filter + dedupe + insert) in a
   // minimal transaction so they commit atomically. The outbox insert is
-  // unconditional on webhookUrl/category — v2 subscribers must get the
+  // independent of webhookUrl/category — v2 subscribers must get the
   // event even when no v1 webhookUrl is configured, or when the
-  // project's category filter would have dropped it for v1 delivery —
-  // but it IS deduped (dedupe and v1-config gating are orthogonal):
+  // project's category filter would have dropped it for v1 delivery
+  // (it is gated only on the event type being deliverable, see below) —
+  // and it IS deduped (dedupe and v1-config gating are orthogonal):
   // runPostProcessing re-runs whole on a BullMQ retry, and without a
   // dedupe check here a retry would insert a fresh outbox_events row
   // (fresh id) every attempt. Reuse the same signals as the v1 dedupe
   // below: purchase events key on (aggregateType, subscriber, type,
   // purchase); purchase-less events key on the inbound webhookEventId.
   await drizzle.db.transaction(async (tx) => {
-    const alreadyBridged = args.purchaseId
-      ? await drizzle.outboxRepo.findByPurchaseAndType(
-          tx,
-          "SUBSCRIPTION",
-          args.subscriberId,
-          args.eventType,
-          args.purchaseId,
-        )
-      : await drizzle.outboxRepo.findByWebhookEventAndType(
-          tx,
-          "SUBSCRIPTION",
-          args.subscriberId,
-          args.eventType,
-          args.webhookEventId,
-        );
-    if (!alreadyBridged) {
-      await drizzle.outboxRepo.insert(tx, {
-        aggregateType: "SUBSCRIPTION",
-        aggregateId: args.subscriberId,
-        eventType: args.eventType,
-        payload: {
-          projectId: args.projectId,
-          subscriberId: args.subscriberId,
-          purchaseId: args.purchaseId ?? null,
-          webhookEventId: args.webhookEventId,
-          timestamp: new Date().toISOString(),
-        },
-      });
+    // Only bridge event types the integrations fan-out can actually
+    // deliver. This call site passes the STORE-NATIVE type (DID_RENEW,
+    // EXPIRED, …); toFanoutEnvelope maps only the normalized Rovenue keys,
+    // so bridging a raw type wrote an outbox row that every consumer drops
+    // — a permanent dead write on the store-webhook hot path. Gated before
+    // the dedupe query so that path skips the SELECT as well as the INSERT.
+    //
+    // Normalizing store-native lifecycle events into Rovenue event keys
+    // (so DID_RENEW et al. DO reach webhook subscribers) is Wave-1 spec
+    // work, not something to fake here. The scheduled-actions and
+    // expiry-checker bridges are unaffected: they already emit mapped keys
+    // (subscription.cancel_requested / subscription.expired).
+    if (isRovenueEventKey(args.eventType)) {
+      const alreadyBridged = args.purchaseId
+        ? await drizzle.outboxRepo.findByPurchaseAndType(
+            tx,
+            "SUBSCRIPTION",
+            args.subscriberId,
+            args.eventType,
+            args.purchaseId,
+          )
+        : await drizzle.outboxRepo.findByWebhookEventAndType(
+            tx,
+            "SUBSCRIPTION",
+            args.subscriberId,
+            args.eventType,
+            args.webhookEventId,
+          );
+      if (!alreadyBridged) {
+        await drizzle.outboxRepo.insert(tx, {
+          aggregateType: "SUBSCRIPTION",
+          aggregateId: args.subscriberId,
+          eventType: args.eventType,
+          payload: {
+            projectId: args.projectId,
+            subscriberId: args.subscriberId,
+            purchaseId: args.purchaseId ?? null,
+            webhookEventId: args.webhookEventId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
     }
 
     if (!config?.url) return;

@@ -51,6 +51,13 @@ vi.mock("@rovenue/db", async (orig) => {
   };
 });
 
+// The SUBSCRIPTION outbox bridge only fires for event types the
+// integrations fan-out can deliver (isRovenueEventKey). Store-native types
+// are NOT bridged — the fan-out drops them, so the row would be a permanent
+// dead write. The v1 outgoing-webhook path still handles both.
+const MAPPED_EVENT_TYPE = "subscription.expired";
+const RAW_STORE_EVENT_TYPE = "DID_RENEW";
+
 const cfg = (eventCategories: string[]) =>
   vi.mocked(drizzle.projectRepo.findProjectWebhookConfig).mockResolvedValue({
     url: "https://hook.example.com",
@@ -150,28 +157,27 @@ describe("enqueueOutgoingWebhook category filter", () => {
     expect(enqueueSpy()).not.toHaveBeenCalled();
   });
 
-  it("bridges onto the outbox (SUBSCRIPTION) even when the v1 category filter drops the event", async () => {
+  it("bridges a mapped event type onto the outbox (SUBSCRIPTION) regardless of the v1 category filter", async () => {
     cfg(["purchase"]);
     await enqueueOutgoingWebhook({
       projectId: "p1",
       subscriberId: "s1",
       webhookEventId: "whe_test",
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
     });
-    expect(enqueueSpy()).not.toHaveBeenCalled();
     expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
     expect(outboxInsertSpy()).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         aggregateType: "SUBSCRIPTION",
         aggregateId: "s1",
-        eventType: "DID_RENEW",
+        eventType: MAPPED_EVENT_TYPE,
         payload: expect.objectContaining({ projectId: "p1" }),
       }),
     );
   });
 
-  it("bridges onto the outbox even when no v1 webhookUrl is configured", async () => {
+  it("bridges a mapped event type onto the outbox even when no v1 webhookUrl is configured", async () => {
     vi.mocked(drizzle.projectRepo.findProjectWebhookConfig).mockResolvedValue({
       url: null,
       eventCategories: [],
@@ -180,10 +186,33 @@ describe("enqueueOutgoingWebhook category filter", () => {
       projectId: "p1",
       subscriberId: "s1",
       webhookEventId: "whe_test",
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
     });
     expect(enqueueSpy()).not.toHaveBeenCalled();
     expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
+  });
+
+  // The bridge is gated on the event type being something the integrations
+  // fan-out can deliver. Store-native types are dropped by the fan-out, so
+  // bridging one only ever produced a dead row — and the gate runs BEFORE
+  // the dedupe query, so the store-webhook hot path skips that too.
+  it("does NOT bridge a store-native event type, and skips the dedupe query for it", async () => {
+    cfg([]);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_test",
+      eventType: RAW_STORE_EVENT_TYPE,
+    });
+    expect(outboxInsertSpy()).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(drizzle.outboxRepo.findByWebhookEventAndType),
+    ).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(drizzle.outboxRepo.findByPurchaseAndType),
+    ).not.toHaveBeenCalled();
+    // The v1 outgoing-webhook write is untouched by the gate.
+    expect(enqueueSpy()).toHaveBeenCalledTimes(1);
   });
 
   it("fails open for unmapped event types", async () => {
@@ -270,7 +299,7 @@ describe("enqueueOutgoingWebhook idempotency", () => {
       subscriberId: "s1",
       purchaseId: "pur_dup",
       webhookEventId: "whe_dup_purchase",
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
     });
     expect(outboxInsertSpy()).not.toHaveBeenCalled();
     // v1 write is unaffected by the outbox dedupe check.
@@ -288,7 +317,7 @@ describe("enqueueOutgoingWebhook idempotency", () => {
       projectId: "p1",
       subscriberId: "s1",
       webhookEventId: "whe_dup_no_purchase",
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
     });
     expect(outboxInsertSpy()).not.toHaveBeenCalled();
     expect(enqueueSpy()).toHaveBeenCalledTimes(1);
@@ -303,7 +332,7 @@ describe("enqueueOutgoingWebhook idempotency", () => {
       projectId: "p1",
       subscriberId: "s1",
       webhookEventId: "whe_dup_v1_only",
-      eventType: "DID_RENEW",
+      eventType: MAPPED_EVENT_TYPE,
     });
     // v1 dedupe and outbox dedupe are independent checks: the outbox
     // bridge still fires on the first call even though v1 is skipped.
@@ -327,7 +356,7 @@ describe("runPostProcessing durability", () => {
     projectId: "p1",
     subscriberId: "s1",
     purchaseId: "pur_1",
-    eventType: "DID_RENEW",
+    eventType: MAPPED_EVENT_TYPE,
     webhookEventId: "whe_pp",
   };
 
