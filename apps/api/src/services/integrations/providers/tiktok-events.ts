@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   IntegrationProvider,
   RovenueEventEnvelope,
@@ -88,12 +89,40 @@ const defaultEventMapping: IntegrationProvider["defaultEventMapping"] = {
   "subscriber.identified": "CompleteRegistration",
 };
 
+// eventCatalog = exactly the keys of defaultEventMapping above.
+const eventCatalog: readonly RovenueEventKey[] = [
+  "revenue.INITIAL",
+  "revenue.TRIAL_CONVERSION",
+  "revenue.RENEWAL",
+  "revenue.CREDIT_PURCHASE",
+  "subscription.trial.started",
+  "subscriber.identified",
+];
+
+// Field ids mirror what validateCredentials/deliver/mapEvent read off creds
+// (pixel_code + access_token) — also what the existing route/provider unit
+// tests send. .catchall(z.string()) so unrelated extra string keys never
+// fail validation, while keeping the inferred type Record<string, string>
+// (a .passthrough() object types loose keys as `unknown`, which doesn't
+// satisfy IntegrationProvider["credentialsSchema"]).
+const credentialsSchema = z
+  .object({
+    pixel_code: z.string().min(1),
+    access_token: z.string().min(1),
+  })
+  .catchall(z.string());
+
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
 
 export const tiktokEventsProvider: IntegrationProvider = {
   id: "TIKTOK_EVENTS",
+
+  topics: ["rovenue.revenue"],
+  eventCatalog,
+  allowMultipleConnections: false,
+  credentialsSchema,
 
   defaultEventMapping,
 

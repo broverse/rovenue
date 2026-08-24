@@ -14,7 +14,7 @@ import { ok } from "../../lib/response";
 import { audit } from "../../lib/audit";
 import { env } from "../../lib/env";
 import { attachRedisErrorLogger } from "../../lib/redis";
-import { getProvider } from "../../services/integrations/registry";
+import { getProvider, providerIds } from "../../services/integrations/registry";
 import { createUndiciHttpClient } from "../../services/integrations/http-client";
 import {
   handleConnectionEnableTransition,
@@ -96,7 +96,7 @@ function getEncryptionKey(): string {
 // =============================================================
 
 const createConnectionBody = z.object({
-  providerId: z.enum(["META_CAPI", "TIKTOK_EVENTS"]),
+  providerId: z.enum(providerIds()),
   displayName: z.string().min(1).max(255),
   credentials: z.record(z.string()),
   enabledEvents: z.array(z.string()).optional(),
@@ -130,7 +130,7 @@ const patchConnectionBody = z.object({
 });
 
 const validateBody = z.object({
-  providerId: z.enum(["META_CAPI", "TIKTOK_EVENTS"]),
+  providerId: z.enum(providerIds()),
   credentials: z.record(z.string()),
 });
 
@@ -220,8 +220,16 @@ export const integrationsRoute = new Hono()
     const body = parse.data;
 
     // Validate credentials BEFORE any DB write
-    const http = createUndiciHttpClient();
     const provider = getProvider(body.providerId as ProviderId);
+    const credsParse = provider.credentialsSchema.safeParse(body.credentials);
+    if (!credsParse.success) {
+      return c.json(
+        { error: { code: "VALIDATION_ERROR", message: credsParse.error.message } },
+        400,
+      );
+    }
+
+    const http = createUndiciHttpClient();
     const validation = await provider.validateCredentials(body.credentials, http);
     if (!validation.ok) {
       return c.json(
@@ -398,8 +406,16 @@ export const integrationsRoute = new Hono()
       ) as Record<string, string>;
       const mergedCreds = { ...existingCreds, ...body.credentials };
 
-      const http = createUndiciHttpClient();
       const provider = getProvider(existing.providerId as ProviderId);
+      const credsParse = provider.credentialsSchema.safeParse(mergedCreds);
+      if (!credsParse.success) {
+        return c.json(
+          { error: { code: "VALIDATION_ERROR", message: credsParse.error.message } },
+          400,
+        );
+      }
+
+      const http = createUndiciHttpClient();
       const validation = await provider.validateCredentials(mergedCreds, http);
       if (!validation.ok) {
         return c.json(

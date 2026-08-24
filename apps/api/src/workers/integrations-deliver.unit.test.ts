@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { z } from "zod";
 import {
   runDeliverStep,
   ensureIntegrationsDeliverWorker,
@@ -77,6 +78,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn(),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn(),
@@ -99,6 +104,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn(),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn(),
@@ -121,6 +130,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn(),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn().mockReturnValue({ skip: true, reason: "no_mapping" }),
@@ -148,6 +161,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn().mockReturnValue({
@@ -183,6 +200,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn().mockReturnValue({
@@ -218,6 +239,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn().mockResolvedValue(deliveryRow),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn().mockReturnValue({
@@ -263,6 +288,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn().mockResolvedValue(deliveryRow),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn().mockReturnValue({
@@ -311,6 +340,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn().mockReturnValue({
@@ -355,6 +388,10 @@ describe("runDeliverStep", () => {
       updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
       provider: {
         id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
         defaultEventMapping: {},
         validateCredentials: vi.fn(),
         mapEvent: vi.fn().mockReturnValue({
@@ -405,6 +442,10 @@ describe("runDeliverStep", () => {
     });
     const provider = {
       id: "META_CAPI" as const,
+      topics: ["rovenue.revenue"] as const,
+      eventCatalog: [],
+      allowMultipleConnections: false,
+      credentialsSchema: { safeParse: vi.fn() },
       defaultEventMapping: {},
       validateCredentials: vi.fn(),
       mapEvent: vi.fn().mockReturnValue({
@@ -450,6 +491,10 @@ describe("runDeliverStep", () => {
     });
     const provider = {
       id: "META_CAPI" as const,
+      topics: ["rovenue.revenue"] as const,
+      eventCatalog: [],
+      allowMultipleConnections: false,
+      credentialsSchema: { safeParse: vi.fn() },
       defaultEventMapping: {},
       validateCredentials: vi.fn(),
       mapEvent: vi.fn().mockReturnValue({

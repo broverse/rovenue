@@ -1,6 +1,25 @@
+import type { z } from "zod";
 import type { IntegrationProviderId, RovenueEventKey } from "@rovenue/shared";
 
 export type ProviderId = IntegrationProviderId;
+
+// ---------------------------------------------------------------------------
+// Fan-out topics — the Kafka topics an outbox-driven integration provider can
+// subscribe events from. SINGULAR "rovenue.subscription" per decision;
+// CUSTOM_WEBHOOK (Task 7) and retry wiring (Task 9) are NOT part of this set.
+// ---------------------------------------------------------------------------
+
+export type FanoutTopic =
+  | "rovenue.revenue"
+  | "rovenue.subscription"
+  | "rovenue.paywall_events"
+  | "rovenue.credit";
+
+export interface RetryPolicy {
+  attempts: number;
+  /** backoffMs[i] = delay before attempt i+2; last entry repeats. */
+  backoffMs: readonly number[];
+}
 
 export type RovenueEventType =
   | "revenue.event.recorded"
@@ -88,6 +107,13 @@ export interface HttpClient {
 
 export interface IntegrationProvider {
   id: ProviderId;
+  topics: readonly FanoutTopic[];
+  eventCatalog: readonly RovenueEventKey[];
+  allowMultipleConnections: boolean;
+  credentialsSchema: z.ZodType<Record<string, string>>;
+  /** undefined → DEFAULT_RETRY_POLICY (wired in Task 9). */
+  retryPolicy?: RetryPolicy;
+  buildCredentialsHint?(creds: ProviderCredentials): string;
   defaultEventMapping: Partial<Record<RovenueEventKey, string>>;
   validateCredentials(
     creds: ProviderCredentials,
