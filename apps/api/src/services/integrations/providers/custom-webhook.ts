@@ -38,6 +38,48 @@ export interface WebhookSecretEntry {
   id: string;
   key: string;
   createdAt: string;
+  /** ISO timestamp after which this key stops signing and becomes eligible
+   *  for pruning. Stamped only when the key is ROTATED OUT (see the
+   *  rotate-secret route), so the grace window is measured from the
+   *  rotation rather than from when the key happened to be created — a
+   *  long-lived key that is finally rotated still gets the full window.
+   *  Absent on the current key and on entries written before this field
+   *  existed; those are treated as active indefinitely. */
+  expiresAt?: string;
+}
+
+/** The keys that may still sign an outgoing delivery: everything without an
+ *  expiry, plus anything whose rotation-stamped expiry is still in the
+ *  future. An entry with an unparseable expiresAt is treated as expired —
+ *  fail closed rather than sign with a key we can't reason about. */
+export function activeWebhookSecrets(
+  secrets: WebhookSecretEntry[],
+  nowMs: number = Date.now(),
+): WebhookSecretEntry[] {
+  return secrets.filter((s) => {
+    if (!s.expiresAt) return true;
+    const expiresMs = new Date(s.expiresAt).getTime();
+    return Number.isFinite(expiresMs) && expiresMs > nowMs;
+  });
+}
+
+/** activeWebhookSecrets, projected to the raw keys signWebhook takes. */
+export function activeWebhookSecretKeys(
+  secrets: WebhookSecretEntry[],
+  nowMs: number = Date.now(),
+): string[] {
+  return activeWebhookSecrets(secrets, nowMs).map((s) => s.key);
+}
+
+/** THE current signing key: the newest entry that has not been rotated out.
+ *  This is the one a rotation supersedes, the one the reveal route returns,
+ *  and the one the credentials hint fingerprints. */
+export function newestSecretEntry(
+  secrets: WebhookSecretEntry[],
+): WebhookSecretEntry | undefined {
+  return [...secrets]
+    .filter((s) => !s.expiresAt)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
 // ProviderCredentials is Record<string, string> — the secrets array is
@@ -199,7 +241,7 @@ export const customWebhookProvider: IntegrationProvider = {
       }
       throw err;
     }
-    if (secrets.length === 0) {
+    if (activeWebhookSecrets(secrets).length === 0) {
       return { ok: false, reason: "at least one webhook secret is required" };
     }
     return { ok: true };
@@ -214,7 +256,7 @@ export const customWebhookProvider: IntegrationProvider = {
         return url;
       }
     })();
-    const newest = [...secrets].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const newest = newestSecretEntry(secrets);
     if (!newest) return host;
     return `${host} · …${newest.key.slice(-4)}`;
   },
@@ -252,13 +294,17 @@ export const customWebhookProvider: IntegrationProvider = {
     const { url, secrets } = parseWebhookCredentials(creds);
     const body = payload.body as string;
 
+    // Rotated-out keys stop signing once their grace window closes, even if
+    // a later rotation hasn't pruned them from the stored array yet.
+    const activeKeys = activeWebhookSecretKeys(secrets);
+
     // Never send an unsigned or un-identifiable webhook. Both are reachable
     // in practice: parseWebhookCredentials degrades malformed "secrets" JSON
     // to [] rather than throwing, and payload.body is `unknown` on the
     // shared ProviderPayload type. signWebhook([]) would silently produce
     // an empty signature header, and an empty/missing id would ship
     // `webhook-id: ""` — fail closed instead, before any network call.
-    if (secrets.length === 0) {
+    if (activeKeys.length === 0) {
       return nonRetriableFailure("no active webhook secret configured for this connection");
     }
 
@@ -288,7 +334,7 @@ export const customWebhookProvider: IntegrationProvider = {
         id,
         timestampSec,
         body,
-        secretKeys: secrets.map((s) => s.key),
+        secretKeys: activeKeys,
       });
 
       const res = await pinnedHttp.request({

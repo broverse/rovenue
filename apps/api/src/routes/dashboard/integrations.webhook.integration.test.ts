@@ -25,8 +25,12 @@ import {
   MAX_WEBHOOK_ENDPOINTS_PER_PROJECT,
   WEBHOOK_SECRET_GRACE_MS,
 } from "./integrations";
-import { WEBHOOK_SECRET_PREFIX } from "../../lib/svix-sign";
-import { parseWebhookCredentials } from "../../services/integrations/providers/custom-webhook";
+import { WEBHOOK_SECRET_PREFIX, signWebhook } from "../../lib/svix-sign";
+import { verifySvixSignature } from "../../lib/svix-signature";
+import {
+  activeWebhookSecretKeys,
+  parseWebhookCredentials,
+} from "../../services/integrations/providers/custom-webhook";
 import {
   INTEGRATIONS_DELIVER_QUEUE_NAME,
   type IntegrationsDeliverJob,
@@ -35,6 +39,14 @@ import {
 const RUN_ID = Date.now();
 const db = getDb();
 const TEST_ENC_KEY = process.env.ENCRYPTION_KEY!;
+
+// Named constants for the rotation-grace assertions below.
+const SECRET_AGE_30_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+/** Slack absorbed by the wall-clock gap between the route stamping
+ *  `expiresAt` and the assertion reading `Date.now()`. */
+const GRACE_ASSERTION_SLACK_MS = 60_000;
+const SIGN_PROBE_ID = "evt_rotation_probe";
+const SIGN_PROBE_BODY = '{"id":"evt_rotation_probe"}';
 
 function buildApp() {
   const app = new Hono();
@@ -441,11 +453,18 @@ describe.sequential("POST /projects/:projectId/integrations/:id/rotate-secret", 
     expect(secrets.map((s) => s.key)).toContain(originalSecret);
     expect(secrets.map((s) => s.key)).toContain(rotateData.secret);
 
-    // Fake the original entry's createdAt beyond the grace window, then
-    // rotate again — the original should be pruned, the newest kept.
-    const staleAt = new Date(Date.now() - WEBHOOK_SECRET_GRACE_MS - 60_000).toISOString();
+    // The outgoing secret is stamped with a rotation-relative expiry, NOT
+    // pruned on its own age — that is what gives a receiver the full grace
+    // window no matter how old the key it is still using.
+    const outgoing = secrets.find((s) => s.key === originalSecret);
+    expect(outgoing?.expiresAt).toBeDefined();
+    expect(new Date(outgoing!.expiresAt!).getTime()).toBeGreaterThan(Date.now());
+
+    // Fake the original entry's expiresAt into the past, then rotate again —
+    // the original should be pruned, the newest kept.
+    const expiredAt = new Date(Date.now() - 60_000).toISOString();
     const agedSecrets = secrets.map((s) =>
-      s.key === originalSecret ? { ...s, createdAt: staleAt } : s,
+      s.key === originalSecret ? { ...s, expiresAt: expiredAt } : s,
     );
     const agedCreds = { url: decrypted.url, secrets: JSON.stringify(agedSecrets) };
     const { encrypt } = await import("@rovenue/shared/crypto");
@@ -475,6 +494,100 @@ describe.sequential("POST /projects/:projectId/integrations/:id/rotate-secret", 
     const keys2 = secrets2.map((s) => s.key);
     expect(keys2).not.toContain(originalSecret);
     expect(keys2).toContain(rotateAgainData.secret);
+  });
+
+  // -------------------------------------------------------------------
+  // The grace window is measured from the ROTATION, not from when the
+  // outgoing secret was created. Measuring it from creation meant that
+  // rotating any secret older than the window invalidated it instantly,
+  // dead-lettering every delivery to a receiver still holding it.
+  // -------------------------------------------------------------------
+  it("keeps a 30-day-old secret signing for the full grace window after it is rotated out", async () => {
+    const { userId, cookie } = await createUserAndSession("rotate_aged");
+    const projectId = await seedProject("rotate_aged");
+    await addMember(projectId, userId, "ADMIN");
+
+    const app = buildApp();
+    const created = await createWebhook(app, projectId, cookie, "https://example.com/rotate-aged");
+    const { data: createData } = (await created.json()) as {
+      data: { connection: { id: string }; secret: string };
+    };
+    const connectionId = createData.connection.id;
+    const agedSecret = createData.secret;
+
+    // Age the only secret well past the grace window (a long-lived endpoint
+    // whose key has simply never been rotated).
+    const [row0] = await db
+      .select()
+      .from(drizzle.schema.integrationConnections)
+      .where(eq(drizzle.schema.integrationConnections.id, connectionId));
+    const creds0 = JSON.parse(decrypt(row0!.credentialsCipher, TEST_ENC_KEY)) as {
+      url: string;
+      secrets: string;
+    };
+    const { secrets: secrets0 } = parseWebhookCredentials(creds0);
+    const thirtyDaysAgo = new Date(Date.now() - SECRET_AGE_30_DAYS_MS).toISOString();
+    const { encrypt } = await import("@rovenue/shared/crypto");
+    await db
+      .update(drizzle.schema.integrationConnections)
+      .set({
+        credentialsCipher: encrypt(
+          JSON.stringify({
+            url: creds0.url,
+            secrets: JSON.stringify(secrets0.map((s) => ({ ...s, createdAt: thirtyDaysAgo }))),
+          }),
+          TEST_ENC_KEY,
+        ),
+      })
+      .where(eq(drizzle.schema.integrationConnections.id, connectionId));
+
+    const rotateRes = await app.request(
+      `/projects/${projectId}/integrations/${connectionId}/rotate-secret`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(rotateRes.status).toBe(200);
+    const { data: rotateData } = (await rotateRes.json()) as { data: { secret: string } };
+
+    const [row1] = await db
+      .select()
+      .from(drizzle.schema.integrationConnections)
+      .where(eq(drizzle.schema.integrationConnections.id, connectionId));
+    const creds1 = JSON.parse(decrypt(row1!.credentialsCipher, TEST_ENC_KEY)) as {
+      url: string;
+      secrets: string;
+    };
+    const { secrets: secrets1 } = parseWebhookCredentials(creds1);
+
+    // Both keys survive the rotation, and the aged one now carries a
+    // rotation-relative expiry roughly one grace window out.
+    expect(secrets1.map((s) => s.key)).toEqual(
+      expect.arrayContaining([agedSecret, rotateData.secret]),
+    );
+    const rotatedOut = secrets1.find((s) => s.key === agedSecret);
+    expect(rotatedOut?.expiresAt).toBeDefined();
+    expect(new Date(rotatedOut!.expiresAt!).getTime()).toBeGreaterThan(
+      Date.now() + WEBHOOK_SECRET_GRACE_MS - GRACE_ASSERTION_SLACK_MS,
+    );
+
+    // And the next delivery signs with BOTH: the header carries two `v1,`
+    // candidates and each verifies under its own key.
+    const activeKeys = activeWebhookSecretKeys(secrets1);
+    expect(activeKeys).toHaveLength(2);
+    const timestampSec = Math.floor(Date.now() / 1000);
+    const signature = signWebhook({
+      id: SIGN_PROBE_ID,
+      timestampSec,
+      body: SIGN_PROBE_BODY,
+      secretKeys: activeKeys,
+    });
+    expect(signature.split(" ").filter((p) => p.startsWith("v1,"))).toHaveLength(2);
+    const headers = { id: SIGN_PROBE_ID, timestamp: String(timestampSec), signature };
+    expect(() =>
+      verifySvixSignature(headers, SIGN_PROBE_BODY, agedSecret),
+    ).not.toThrow();
+    expect(() =>
+      verifySvixSignature(headers, SIGN_PROBE_BODY, rotateData.secret),
+    ).not.toThrow();
   });
 
   it("audits integration.webhook.secret.rotated", async () => {

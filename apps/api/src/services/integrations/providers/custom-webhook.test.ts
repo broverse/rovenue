@@ -6,7 +6,10 @@ import { Webhook as SvixWebhook } from "svix";
 import { ROVENUE_EVENT_KEYS, WEBHOOK_API_VERSION } from "@rovenue/shared";
 import type { RovenueEventKey } from "@rovenue/shared";
 import {
+  activeWebhookSecretKeys,
+  activeWebhookSecrets,
   customWebhookProvider,
+  newestSecretEntry,
   parseWebhookCredentials,
   WEBHOOK_DELIVERY_TIMEOUT_MS,
 } from "./custom-webhook";
@@ -77,6 +80,58 @@ describe("parseWebhookCredentials", () => {
       secrets: "not-json",
     });
     expect(result.secrets).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// activeWebhookSecrets / newestSecretEntry — rotation-relative expiry
+// ---------------------------------------------------------------------------
+
+describe("activeWebhookSecrets", () => {
+  const NOW_MS = Date.parse("2026-08-24T12:00:00.000Z");
+  const unstamped = { id: "s_cur", key: "whsec_cur", createdAt: "2024-01-01T00:00:00.000Z" };
+  const stampedFuture = {
+    id: "s_grace",
+    key: "whsec_grace",
+    createdAt: "2023-01-01T00:00:00.000Z",
+    expiresAt: "2026-08-25T12:00:00.000Z",
+  };
+  const stampedPast = {
+    id: "s_gone",
+    key: "whsec_gone",
+    createdAt: "2023-01-01T00:00:00.000Z",
+    expiresAt: "2026-08-23T12:00:00.000Z",
+  };
+
+  it("keeps unstamped entries however old they are", () => {
+    expect(activeWebhookSecrets([unstamped], NOW_MS)).toEqual([unstamped]);
+  });
+
+  it("keeps a rotated-out entry until its stamped expiry passes", () => {
+    expect(activeWebhookSecretKeys([unstamped, stampedFuture], NOW_MS)).toEqual([
+      "whsec_cur",
+      "whsec_grace",
+    ]);
+  });
+
+  it("drops an entry whose stamped expiry has passed", () => {
+    expect(activeWebhookSecretKeys([unstamped, stampedPast], NOW_MS)).toEqual(["whsec_cur"]);
+  });
+
+  it("fails closed on an unparseable expiresAt", () => {
+    expect(
+      activeWebhookSecrets([{ ...unstamped, expiresAt: "not-a-date" }], NOW_MS),
+    ).toEqual([]);
+  });
+
+  it("newestSecretEntry ignores rotated-out entries even when they sort newer", () => {
+    const rotatedOutButNewer = {
+      id: "s_new_but_out",
+      key: "whsec_out",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-08-25T12:00:00.000Z",
+    };
+    expect(newestSecretEntry([rotatedOutButNewer, unstamped])?.id).toBe("s_cur");
   });
 });
 
@@ -348,6 +403,82 @@ describe("customWebhookProvider.deliver", () => {
     });
     const result = await customWebhookProvider.deliver(payload, credsFor(port), noopHttp);
     expect(result.responseBody.length).toBe(4096);
+  });
+
+  // Rotated-out keys carry a rotation-stamped `expiresAt`. They must stop
+  // signing the moment it passes, even if no later rotation has pruned them
+  // from the stored array yet.
+  it("signs with the active key only, skipping a rotated-out key whose grace window closed", async () => {
+    const activeKey = "whsec_ZGVhZGJlZWZkZWFkYmVlZg==";
+    const expiredKey = "whsec_YmVlZmRlYWRiZWVmZGVhZA==";
+    let receivedHeaders: Record<string, string | string[] | undefined> = {};
+    const { port } = await listen((req, res) => {
+      receivedHeaders = req.headers;
+      res.writeHead(200);
+      res.end("ok");
+    });
+
+    const creds = {
+      url: `http://127.0.0.1:${port}/hook`,
+      secrets: JSON.stringify([
+        { id: "s_new", key: activeKey, createdAt: "2024-02-01T00:00:00.000Z" },
+        {
+          id: "s_old",
+          key: expiredKey,
+          createdAt: "2024-01-01T00:00:00.000Z",
+          expiresAt: "2024-02-02T00:00:00.000Z",
+        },
+      ]),
+    };
+
+    const result = await customWebhookProvider.deliver(payload, creds, noopHttp);
+
+    expect(result.ok).toBe(true);
+    const signature = receivedHeaders["svix-signature"] as string;
+    expect(signature.split(" ").filter((p) => p.startsWith("v1,"))).toHaveLength(1);
+    expect(() =>
+      new SvixWebhook(activeKey).verify(payload.body as string, {
+        "svix-id": receivedHeaders["svix-id"] as string,
+        "svix-timestamp": receivedHeaders["svix-timestamp"] as string,
+        "svix-signature": signature,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      new SvixWebhook(expiredKey).verify(payload.body as string, {
+        "svix-id": receivedHeaders["svix-id"] as string,
+        "svix-timestamp": receivedHeaders["svix-timestamp"] as string,
+        "svix-signature": signature,
+      }),
+    ).toThrow();
+  });
+
+  it("all secrets expired → non-retriable failure, no request ever sent", async () => {
+    const requestsSeen: string[] = [];
+    server = createServer((req, res) => {
+      requestsSeen.push(req.url ?? "");
+      res.writeHead(200);
+      res.end("ok");
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    const creds = {
+      url: `http://127.0.0.1:${port}/hook`,
+      secrets: JSON.stringify([
+        {
+          id: "s_old",
+          key: "whsec_ZGVhZGJlZWZkZWFkYmVlZg==",
+          createdAt: "2024-01-01T00:00:00.000Z",
+          expiresAt: "2024-01-02T00:00:00.000Z",
+        },
+      ]),
+    };
+    const result = await customWebhookProvider.deliver(payload, creds, noopHttp);
+
+    expect(result.ok).toBe(false);
+    expect(result.retriable).toBe(false);
+    expect(result.errorMessage).toMatch(/secret/i);
+    expect(requestsSeen).toHaveLength(0);
   });
 
   it("empty secrets array → non-retriable failure, no request ever sent", async () => {

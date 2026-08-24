@@ -23,6 +23,7 @@ import {
   handleConnectionEnableTransition,
 } from "../../services/integrations/connection-events";
 import {
+  newestSecretEntry,
   parseWebhookCredentials,
   type WebhookSecretEntry,
 } from "../../services/integrations/providers/custom-webhook";
@@ -116,9 +117,11 @@ function getEncryptionKey(): string {
 // free from the index.
 export const MAX_WEBHOOK_ENDPOINTS_PER_PROJECT = 10;
 
-// Rotation keeps the newest secret plus anything not yet past this age, so
-// a receiver mid-rotation has a window to pick up the new key before the
-// old one stops verifying.
+// How long a rotated-out secret keeps signing. Measured from the ROTATION
+// (stamped onto the outgoing entry as `expiresAt`), never from when the key
+// was created — otherwise rotating a key older than this window would
+// invalidate it the instant the operator clicked the button, dead-lettering
+// every delivery to a receiver that hadn't picked up the new key yet.
 export const WEBHOOK_SECRET_GRACE_MS = 24 * 60 * 60 * 1000;
 
 // The unique index from migration 0104 — matched by name (not by code
@@ -631,13 +634,28 @@ export const integrationsRoute = new Hono()
       key: generateWebhookSecret(),
       createdAt: now.toISOString(),
     };
-    // Always keep the newest entry; prune everything else once it's aged
-    // past the grace window so a rotation window can't grow unbounded.
-    const keptSecrets = [
+
+    // Grace is measured from THIS rotation, not from when each key was
+    // created: stamp the outgoing (previously newest) entry with an
+    // `expiresAt` one grace window out, and prune anything whose stamp has
+    // already passed. Measuring from creation instantly invalidated any
+    // secret older than the window — exactly the receivers most likely to
+    // still be holding it.
+    const outgoingId = newestSecretEntry(secrets)?.id;
+    const keptSecrets: WebhookSecretEntry[] = [
       newEntry,
-      ...secrets.filter(
-        (s) => now.getTime() - new Date(s.createdAt).getTime() < WEBHOOK_SECRET_GRACE_MS,
-      ),
+      ...secrets
+        .map((s) =>
+          s.id === outgoingId
+            ? {
+                ...s,
+                expiresAt: new Date(now.getTime() + WEBHOOK_SECRET_GRACE_MS).toISOString(),
+              }
+            : s,
+        )
+        // Entries with no expiresAt were written before this field existed
+        // and are only pruned once a rotation has stamped them.
+        .filter((s) => !s.expiresAt || new Date(s.expiresAt).getTime() > now.getTime()),
     ];
     const newCredsObj = { url, secrets: JSON.stringify(keptSecrets) };
     const newCipher = encrypt(JSON.stringify(newCredsObj), encKey);
@@ -720,7 +738,7 @@ export const integrationsRoute = new Hono()
       decrypt(existing.credentialsCipher, encKey),
     ) as Record<string, string>;
     const { secrets } = parseWebhookCredentials(creds);
-    const newest = [...secrets].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const newest = newestSecretEntry(secrets);
 
     await audit({
       projectId,
