@@ -1,5 +1,4 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
 import { createBullConnection } from "../lib/redis";
 import type Stripe from "stripe";
 import {
@@ -7,7 +6,6 @@ import {
   drizzle,
 } from "@rovenue/db";
 import { isRovenueEventKey, toWebhookEventCategory } from "@rovenue/shared";
-import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { loadGoogleCredentials } from "../lib/project-credentials";
 import { requireConnectedStripe } from "../lib/stripe-platform";

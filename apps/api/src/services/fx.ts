@@ -1,5 +1,4 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { Redis } from "ioredis";
 import { drizzle, type Db } from "@rovenue/db";
 import { redis, createBullConnection } from "../lib/redis";
 import { env } from "../lib/env";

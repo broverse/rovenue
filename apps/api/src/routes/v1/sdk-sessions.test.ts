@@ -20,9 +20,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { errorHandler } from "../../middleware/error";
 
 const sendMock = vi.fn();
+// The route provisions the sdk-sessions topic before its first produce
+// (Redpanda has auto-create off), so the mocked kafka module must expose
+// assertTopic too — without it the route's ensureSdkSessionsTopic() throws
+// and every produce path degrades to 503.
+const assertTopicMock = vi.fn(async (_topic: string) => undefined);
 
 vi.mock("../../lib/kafka", () => ({
   getProducer: vi.fn(async () => ({ send: sendMock })),
+  assertTopic: (topic: string) => assertTopicMock(topic),
 }));
 
 // Resolve the client-supplied id to a project-owned subscriber. The
@@ -89,6 +95,7 @@ describe("POST /v1/sdk/sessions", () => {
   beforeEach(() => {
     sendMock.mockReset();
     sendMock.mockResolvedValue(undefined);
+    assertTopicMock.mockClear();
     upsertSubscriberMock.mockReset();
     // The repo resolves the client-supplied rovenueId to the canonical,
     // project-owned subscriber row. Echo a distinct id so tests can prove
@@ -137,6 +144,8 @@ describe("POST /v1/sdk/sessions", () => {
     expect(sendMock).toHaveBeenCalledTimes(1);
     const call = sendMock.mock.calls[0]?.[0];
     expect(call.topic).toBe("rovenue.sdk-sessions");
+    // The topic was provisioned before the produce, on the same topic name.
+    expect(assertTopicMock).toHaveBeenCalledWith(call.topic);
     expect(call.messages).toHaveLength(1);
     const msg = call.messages[0];
     // Key + payload use the resolved id, NOT the raw foreign id.

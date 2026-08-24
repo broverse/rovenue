@@ -3,7 +3,6 @@ import { Queue, Worker, type Job } from "bullmq";
 import { createBullConnection } from "../lib/redis";
 import { eq } from "drizzle-orm";
 import { OutgoingWebhookStatus, drizzle } from "@rovenue/db";
-import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { captureNotifierError } from "../lib/sentry-notifications";
 import { emitNotification } from "../services/notifications/emit";
