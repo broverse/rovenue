@@ -17,6 +17,9 @@
 // the BullMQ queue and lets the worker pick them up.
 
 import { randomBytes } from "node:crypto";
+import { createServer } from "node:http";
+import type { IncomingMessage, ServerResponse, Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createId } from "@paralleldrive/cuid2";
 import { Pool } from "pg";
@@ -36,6 +39,9 @@ import {
   ensureIntegrationsDeliverWorker,
   type WorkerHandle,
 } from "./integrations-deliver";
+import { hashPii, normalizeEmail } from "../services/integrations/hash-pii";
+import { generateWebhookSecret } from "../lib/svix-sign";
+import type { WebhookSecretEntry } from "../services/integrations/providers/custom-webhook";
 
 // ---------------------------------------------------------------------------
 // Env (tests/setup.ts has defaults; this belt-and-braces guard keeps the
@@ -129,6 +135,42 @@ async function pollDelivery(
   return row;
 }
 
+const LOOPBACK_HOST = "127.0.0.1";
+
+interface WebhookTestServer {
+  port: number;
+  requests: string[];
+  close: () => Promise<void>;
+}
+
+/** Real local HTTP server on 127.0.0.1 — CUSTOM_WEBHOOK's deliver() bypasses
+ *  the process-global undici dispatcher (it builds its own pinned Agent, see
+ *  lib/ssrf-guard.ts), so a webhook delivery test needs a real listener
+ *  rather than a MockAgent intercept. Mirrors the pattern in
+ *  workers/integrations-webhook.e2e.integration.test.ts. */
+function startWebhookServer(): Promise<WebhookTestServer> {
+  return new Promise((resolve) => {
+    const requests: string[] = [];
+    const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (chunk: Buffer) => (raw += chunk));
+      req.on("end", () => {
+        requests.push(raw);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ received: true }));
+      });
+    });
+    server.listen(0, LOOPBACK_HOST, () => {
+      const port = (server.address() as AddressInfo).port;
+      resolve({
+        port,
+        requests,
+        close: () => new Promise((r) => server.close(() => r())),
+      });
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Setup / teardown
 // ---------------------------------------------------------------------------
@@ -174,11 +216,14 @@ beforeAll(async () => {
   });
 }, 30_000);
 
+const webhookServersToClose: WebhookTestServer[] = [];
+
 afterAll(async () => {
   await workerHandle.stop();
   await queue.close();
   await queueConn.quit();
   mockAgent.deactivate();
+  await Promise.all(webhookServersToClose.map((s) => s.close()));
   await pool.end();
 });
 
@@ -405,4 +450,151 @@ describe("integrations-deliver worker (e2e)", () => {
     expect(hit).toBeDefined();
     expect(hit?.resourceId).toBe(CONNECTION_ID);
   }, 30_000);
+
+  // -----------------------------------------------------------------------
+  // Task 2 — delivery-time subscriber identity enrichment
+  // -----------------------------------------------------------------------
+  it(
+    "enriches Meta CAPI with the subscriber's $email attribute while CUSTOM_WEBHOOK never sees it",
+    async () => {
+      // 1. Seed a subscriber with $email (nested AttributeEntry shape, as
+      //    written by applyMutations) but NO identityContext.email on the
+      //    envelope itself — the worker must backfill it at delivery time.
+      const rawEmail = "hidden-subscriber@example.com";
+      const nowIso = new Date().toISOString();
+      const [subscriber] = await testDb
+        .insert(schema.subscribers)
+        .values({
+          projectId: PROJECT_ID,
+          rovenueId: `rov_${createId()}`,
+          appUserId: `app_${createId()}`,
+          attributes: {
+            $email: { value: rawEmail, updatedAt: nowIso, source: "sdk" },
+            $appsflyerId: { value: "af-123", updatedAt: nowIso, source: "sdk" },
+          },
+        })
+        .returning();
+      if (!subscriber) throw new Error("seed: subscriber insert returned no row");
+
+      // 2. Seed a CUSTOM_WEBHOOK connection pointed at a real local server —
+      //    its deliver() bypasses the undici MockAgent (see ssrf-guard.ts).
+      const webhookServer = await startWebhookServer();
+      webhookServersToClose.push(webhookServer);
+      const webhookSecret: WebhookSecretEntry = {
+        id: createId(),
+        key: generateWebhookSecret(),
+        createdAt: nowIso,
+      };
+      const WEBHOOK_CONNECTION_ID = createId();
+      await testDb.insert(schema.integrationConnections).values({
+        id: WEBHOOK_CONNECTION_ID,
+        projectId: PROJECT_ID,
+        providerId: "CUSTOM_WEBHOOK",
+        displayName: "Test Custom Webhook — Task 2 enrichment",
+        credentialsCipher: encrypt(
+          JSON.stringify({
+            url: `http://${LOOPBACK_HOST}:${webhookServer.port}/hook`,
+            secrets: JSON.stringify([webhookSecret]),
+          }),
+          ENCRYPTION_KEY,
+        ),
+        credentialsHint: "task2-test",
+        enabledEvents: ["revenue.INITIAL", "revenue.RENEWAL"],
+        eventMapping: {},
+        actionSource: "app",
+        isEnabled: true,
+      });
+
+      const outboxEventId = `e2e-enrich-${createId()}`;
+      const envelope: IntegrationsDeliverJob["envelope"] = {
+        outboxEventId,
+        projectId: PROJECT_ID,
+        eventType: "revenue.event.recorded",
+        revenueEventKind: "INITIAL",
+        occurredAt: new Date().toISOString(),
+        amount: "9.99",
+        currency: "USD",
+        subscriberId: subscriber.id,
+        // Deliberately no identityContext at all — the only path to an
+        // email reaching Meta is delivery-time enrichment off the
+        // subscriber's $email attribute.
+      };
+
+      // 3. Capture the Meta CAPI request body.
+      let capturedMetaBody: { data?: Array<{ user_data?: { em?: string[] } }> } | undefined;
+      metaPool
+        .intercept({
+          path: (p) => p.startsWith(`/v18.0/${PIXEL_ID}/events`),
+          method: "POST",
+        })
+        .reply((opts) => {
+          try {
+            capturedMetaBody = JSON.parse(opts.body as string);
+          } catch {
+            capturedMetaBody = undefined;
+          }
+          return {
+            statusCode: 200,
+            data: JSON.stringify({ events_received: 1 }),
+            responseOptions: { headers: { "content-type": "application/json" } },
+          };
+        });
+
+      // 4a. Deliver to META_CAPI (existing suite connection).
+      const metaOutboxEventId = `${outboxEventId}-meta`;
+      const metaJobId = buildIntegrationsDeliverJobId(CONNECTION_ID, metaOutboxEventId);
+      await queue.add(
+        "deliver",
+        {
+          connectionId: CONNECTION_ID,
+          projectId: PROJECT_ID,
+          providerId: "META_CAPI",
+          envelope: { ...envelope, outboxEventId: metaOutboxEventId },
+        },
+        deliverJobOptions("META_CAPI", metaJobId),
+      );
+
+      const metaRow = await pollDelivery(CONNECTION_ID, metaOutboxEventId);
+      expect(metaRow).toBeDefined();
+      expect(metaRow!.status).toBe("succeeded");
+      expect(capturedMetaBody?.data?.[0]?.user_data?.em?.[0]).toBe(
+        hashPii(normalizeEmail(rawEmail)),
+      );
+
+      // 4b. Deliver the SAME subscriber's event to CUSTOM_WEBHOOK — its
+      //     body must contain neither the raw email nor subscriberAttributes.
+      const webhookOutboxEventId = `${outboxEventId}-webhook`;
+      const webhookJobId = buildIntegrationsDeliverJobId(
+        WEBHOOK_CONNECTION_ID,
+        webhookOutboxEventId,
+      );
+      await queue.add(
+        "deliver",
+        {
+          connectionId: WEBHOOK_CONNECTION_ID,
+          projectId: PROJECT_ID,
+          providerId: "CUSTOM_WEBHOOK",
+          envelope: { ...envelope, outboxEventId: webhookOutboxEventId },
+        },
+        deliverJobOptions("CUSTOM_WEBHOOK", webhookJobId),
+      );
+
+      const webhookRow = await pollDelivery(WEBHOOK_CONNECTION_ID, webhookOutboxEventId);
+      expect(webhookRow).toBeDefined();
+      expect(webhookRow!.status).toBe("succeeded");
+
+      // Poll the local server for the received request body (delivery may
+      // finish writing its DB row a beat before the request handler runs).
+      const start = Date.now();
+      while (webhookServer.requests.length === 0 && Date.now() - start < 10_000) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(webhookServer.requests.length).toBeGreaterThan(0);
+      const webhookBody = webhookServer.requests[webhookServer.requests.length - 1]!;
+      expect(webhookBody).not.toContain(rawEmail);
+      expect(webhookBody).not.toContain("subscriberAttributes");
+      expect(webhookBody).not.toContain("$email");
+    },
+    30_000,
+  );
 });

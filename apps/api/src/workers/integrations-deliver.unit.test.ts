@@ -541,3 +541,154 @@ describe("ensureIntegrationsDeliverWorker", () => {
     await handle.stop();
   });
 });
+
+// =============================================================
+// Delivery-time identity enrichment (Task 2)
+// =============================================================
+
+describe("runDeliverStep — subscriber identity enrichment", () => {
+  it("enriches the envelope passed to mapEvent when loadSubscriberIdentity resolves", async () => {
+    const deliveryRow = makeDelivery("d1");
+    const updatedRow = { ...deliveryRow, status: "succeeded" as const };
+    const mapEvent = vi.fn().mockReturnValue({
+      eventKey: "revenue.event.recorded",
+      providerEvent: "Purchase",
+      body: { data: [] },
+    });
+    const loadSubscriberIdentity = vi.fn().mockResolvedValue({
+      appUserId: "user_1",
+      attributes: { $email: "attr@example.com" },
+    });
+    const deps: DeliverStepDeps = {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: vi.fn().mockReturnValue({ accessToken: "tok" }),
+      insertPendingDelivery: vi.fn().mockResolvedValue(deliveryRow),
+      updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
+      provider: {
+        id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
+        defaultEventMapping: {},
+        validateCredentials: vi.fn(),
+        mapEvent,
+        deliver: vi.fn().mockResolvedValue({
+          ok: true,
+          httpStatus: 200,
+          responseBody: "{}",
+          retriable: false,
+        }),
+      },
+      http: { request: vi.fn() },
+      attempt: 0,
+      maxAttempts: 5,
+      loadSubscriberIdentity,
+    };
+
+    const job = makeJob({
+      envelope: { ...envelope, subscriberId: "sub_1" },
+    });
+    const result = await runDeliverStep(job, deps);
+
+    expect(result.outcome).toBe("succeeded");
+    expect(loadSubscriberIdentity).toHaveBeenCalledWith("sub_1");
+    const [deliveredEnvelope] = mapEvent.mock.calls[0]!;
+    expect(deliveredEnvelope.identityContext?.email).toBe("attr@example.com");
+    expect(deliveredEnvelope.subscriberAttributes).toEqual({
+      $email: "attr@example.com",
+      appUserId: "user_1",
+    });
+  });
+
+  it("does not call loadSubscriberIdentity when the envelope has no subscriberId", async () => {
+    const deliveryRow = makeDelivery("d1");
+    const updatedRow = { ...deliveryRow, status: "succeeded" as const };
+    const loadSubscriberIdentity = vi.fn().mockResolvedValue(null);
+    const deps: DeliverStepDeps = {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: vi.fn().mockReturnValue({ accessToken: "tok" }),
+      insertPendingDelivery: vi.fn().mockResolvedValue(deliveryRow),
+      updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
+      provider: {
+        id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
+        defaultEventMapping: {},
+        validateCredentials: vi.fn(),
+        mapEvent: vi.fn().mockReturnValue({
+          eventKey: "revenue.event.recorded",
+          providerEvent: "Purchase",
+          body: { data: [] },
+        }),
+        deliver: vi.fn().mockResolvedValue({
+          ok: true,
+          httpStatus: 200,
+          responseBody: "{}",
+          retriable: false,
+        }),
+      },
+      http: { request: vi.fn() },
+      attempt: 0,
+      maxAttempts: 5,
+      loadSubscriberIdentity,
+    };
+
+    // Shared fixture `envelope` has no subscriberId.
+    const result = await runDeliverStep(makeJob(), deps);
+
+    expect(result.outcome).toBe("succeeded");
+    expect(loadSubscriberIdentity).not.toHaveBeenCalled();
+  });
+
+  it("soft-fails: proceeds unenriched when loadSubscriberIdentity throws", async () => {
+    const deliveryRow = makeDelivery("d1");
+    const updatedRow = { ...deliveryRow, status: "succeeded" as const };
+    const mapEvent = vi.fn().mockReturnValue({
+      eventKey: "revenue.event.recorded",
+      providerEvent: "Purchase",
+      body: { data: [] },
+    });
+    const loadSubscriberIdentity = vi.fn().mockRejectedValue(new Error("db down"));
+    const deps: DeliverStepDeps = {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: vi.fn().mockReturnValue({ accessToken: "tok" }),
+      insertPendingDelivery: vi.fn().mockResolvedValue(deliveryRow),
+      updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
+      provider: {
+        id: "META_CAPI",
+        topics: ["rovenue.revenue"],
+        eventCatalog: [],
+        allowMultipleConnections: false,
+        credentialsSchema: z.record(z.string()),
+        defaultEventMapping: {},
+        validateCredentials: vi.fn(),
+        mapEvent,
+        deliver: vi.fn().mockResolvedValue({
+          ok: true,
+          httpStatus: 200,
+          responseBody: "{}",
+          retriable: false,
+        }),
+      },
+      http: { request: vi.fn() },
+      attempt: 0,
+      maxAttempts: 5,
+      loadSubscriberIdentity,
+    };
+
+    const job = makeJob({
+      envelope: { ...envelope, subscriberId: "sub_1" },
+    });
+    const result = await runDeliverStep(job, deps);
+
+    // Delivery must never fail on enrichment — it still succeeds, unenriched.
+    expect(result.outcome).toBe("succeeded");
+    expect(loadSubscriberIdentity).toHaveBeenCalledWith("sub_1");
+    const [deliveredEnvelope] = mapEvent.mock.calls[0]!;
+    expect(deliveredEnvelope.identityContext).toBeUndefined();
+    expect(deliveredEnvelope.subscriberAttributes).toBeUndefined();
+  });
+});

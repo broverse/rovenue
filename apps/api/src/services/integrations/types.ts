@@ -68,6 +68,11 @@ export interface RovenueEventEnvelope {
   eventKey?: RovenueEventKey;
   /** Domain payload passthrough for the webhook provider's `data` field. */
   payload?: Record<string, unknown>;
+  /** Delivery-time subscriber attribute enrichment (Task 2). Flattened
+   *  attribute map + `appUserId` when present. NEVER read by
+   *  CUSTOM_WEBHOOK's buildWebhookData — this field (and identityContext
+   *  PII) must stay off webhook bodies. */
+  subscriberAttributes?: Record<string, string>;
 }
 
 export interface ConnectionConfig {

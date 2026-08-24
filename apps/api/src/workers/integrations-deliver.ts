@@ -18,6 +18,7 @@ import { Redis } from "ioredis";
 import { and, eq } from "drizzle-orm";
 import { getDb, drizzle } from "@rovenue/db";
 import { decrypt } from "@rovenue/shared/crypto";
+import { flattenAttributes } from "@rovenue/shared";
 import { env } from "../lib/env";
 import { attachRedisErrorLogger } from "../lib/redis";
 import { logger } from "../lib/logger";
@@ -33,11 +34,22 @@ import { captureNotifierError } from "../lib/sentry-notifications";
 import { emitNotification } from "../services/notifications/emit";
 import { publishIntegrationDeliveryLiveEvent } from "../services/integrations/live-events";
 import { reportDeadLetterToSentry } from "../services/integrations/sentry-bridge";
+import { enrichEnvelope } from "../services/integrations/enrich-envelope";
+import {
+  createSubscriberIdentityCache,
+  SUBSCRIBER_IDENTITY_CACHE_TTL_MS,
+  type SubscriberIdentity,
+} from "../services/integrations/subscriber-identity-cache";
 import type {
   IntegrationConnection,
   IntegrationDelivery,
 } from "@rovenue/db";
-import type { ProviderCredentials, ProviderId, ProviderPayload } from "../services/integrations/types";
+import type {
+  ProviderCredentials,
+  ProviderId,
+  ProviderPayload,
+  RovenueEventEnvelope,
+} from "../services/integrations/types";
 
 // =============================================================
 // Types
@@ -87,6 +99,13 @@ export interface DeliverStepDeps {
   provider: ReturnType<typeof getProvider>;
   http: ReturnType<typeof createUndiciHttpClient>;
   attempt: number;
+  /** Delivery-time subscriber identity lookup (Task 2). Optional — absent
+   *  in most unit tests, which then get a no-op enrichment step. When
+   *  present and the job carries a subscriberId, its result is merged
+   *  into the envelope via enrichEnvelope before mapEvent. A throw here
+   *  is caught and logged: enrichment is soft, delivery must proceed
+   *  unenriched rather than fail. */
+  loadSubscriberIdentity?: (subscriberId: string) => Promise<SubscriberIdentity | null>;
   /** From retryPolicyFor(job.providerId).attempts — each provider's own
    *  retry policy governs its own exhaustion checks (Task 9). */
   maxAttempts: number;
@@ -153,8 +172,25 @@ export async function runDeliverStep(
     testEventCode: conn.testEventCode ?? undefined,
   };
 
+  // 3.5. Delivery-time subscriber identity enrichment (Task 2) — SOFT: any
+  // loader/enrich failure is logged and the delivery proceeds unenriched,
+  // it must never fail the delivery itself.
+  let envelope: RovenueEventEnvelope = job.envelope;
+  if (deps.loadSubscriberIdentity && envelope.subscriberId) {
+    try {
+      const identity = await deps.loadSubscriberIdentity(envelope.subscriberId);
+      envelope = enrichEnvelope(envelope, identity);
+    } catch (err) {
+      log.warn("enrichment_failed", {
+        connectionId: conn.id,
+        subscriberId: envelope.subscriberId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // 4. Map event
-  const mapResult = deps.provider.mapEvent(job.envelope, config, creds);
+  const mapResult = deps.provider.mapEvent(envelope, config, creds);
 
   if ("skip" in mapResult && mapResult.skip) {
     const deliveryId = createId();
@@ -516,6 +552,22 @@ export async function ensureIntegrationsDeliverWorker(
 
   const http = createUndiciHttpClient();
 
+  const subscriberIdentityCache = createSubscriberIdentityCache({
+    ttlMs: SUBSCRIBER_IDENTITY_CACHE_TTL_MS,
+    loader: async (subscriberId) => {
+      const identityDb = getDb();
+      const row = await drizzle.subscriberRepo.findSubscriberIdentityById(
+        identityDb,
+        subscriberId,
+      );
+      if (!row) return null;
+      return {
+        appUserId: row.appUserId,
+        attributes: flattenAttributes(row.attributes),
+      };
+    },
+  });
+
   const worker = new Worker<IntegrationsDeliverJob>(
     queueName,
     async (bullJob: Job<IntegrationsDeliverJob>) => {
@@ -537,6 +589,7 @@ export async function ensureIntegrationsDeliverWorker(
         http,
         attempt,
         maxAttempts: retryPolicyFor(job.providerId).attempts,
+        loadSubscriberIdentity: (subscriberId) => subscriberIdentityCache.get(subscriberId),
         publishLiveEvent: async (ev) => {
           await publishIntegrationDeliveryLiveEvent(livePublisher, {
             type: "integration.delivery",

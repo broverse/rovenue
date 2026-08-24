@@ -165,6 +165,32 @@ describe("customWebhookProvider.mapEvent", () => {
     expect(JSON.stringify(body)).not.toContain("u@x.com");
   });
 
+  it("regression (Task 2): buildWebhookData never surfaces enriched identityContext/subscriberAttributes", () => {
+    // A worker that ran delivery-time enrichment (enrichEnvelope) before
+    // calling mapEvent hands this provider an envelope carrying
+    // identityContext.email (possibly backfilled from a $email attribute)
+    // and a subscriberAttributes bag. CUSTOM_WEBHOOK must keep ignoring
+    // both — buildWebhookData only reads externalId off identityContext
+    // for revenue envelopes and never reads subscriberAttributes at all.
+    const enrichedEnvelope = makeEnvelope({
+      identityContext: { email: "enriched@example.com", externalId: "ext-1" },
+      subscriberAttributes: {
+        $email: "enriched@example.com",
+        appUserId: "user_1",
+        country: "US",
+      },
+    });
+    const result = customWebhookProvider.mapEvent(enrichedEnvelope, makeConfig(), {});
+    const payload = result as ProviderPayload;
+    const body = JSON.parse(payload.body as string);
+
+    expect(body.data).not.toHaveProperty("subscriberAttributes");
+    expect(body.data).not.toHaveProperty("email");
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("enriched@example.com");
+    expect(serialized).not.toContain("subscriberAttributes");
+  });
+
   it("uses envelope.eventKey directly for non-revenue envelopes, passthrough payload", () => {
     const envelope = makeEnvelope({
       eventType: "subscription.trial.started",
