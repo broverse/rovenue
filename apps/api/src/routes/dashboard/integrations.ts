@@ -122,6 +122,11 @@ export const WEBHOOK_SECRET_GRACE_MS = 24 * 60 * 60 * 1000;
 // get misreported as "connection already exists".
 const PROJECT_PROVIDER_UNIQUE_INDEX = "integration_connections_project_provider_uidx";
 
+// Namespaces the advisory-lock key space so a project id can never collide
+// with a lock key some other subsystem derives from the same string (e.g.
+// assets/quota.ts locks storage reservations by project id too).
+const WEBHOOK_ENDPOINT_CAP_LOCK_PREFIX = "webhook-endpoint-cap:";
+
 // Client input for CUSTOM_WEBHOOK create — deliberately NOT the provider's
 // stored-credentials schema ({ url, secrets }): the server generates the
 // secret, so a client-supplied "secrets" field is rejected outright rather
@@ -209,10 +214,19 @@ function connectionSelect() {
 //
 // CUSTOM_WEBHOOK is exempt from the DB-enforced one-per-provider unique
 // index (migration 0104), so uniqueness isn't the concern here — an
-// unbounded endpoint count is. The cap check and insert share one
-// transaction with a `FOR UPDATE` row lock on the project's existing
-// webhook connections, so two concurrent creates at the cap can't both
-// read "9 of 10" and both insert a 10th and an 11th.
+// unbounded endpoint count is.
+//
+// A bare `SELECT ... FOR UPDATE` precheck does NOT close the race: under
+// READ COMMITTED it only blocks on rows that already exist, so at zero
+// (or few) pre-existing rows there's nothing to lock, and a transaction
+// that blocked on an existing row never re-scans for a sibling
+// transaction's newly-inserted row (the classic phantom-read gap). N
+// concurrent creates near the cap can overrun it by up to N-1. The fix is
+// a per-project `pg_advisory_xact_lock`, taken BEFORE the count check —
+// the same pattern `reserveStorage` in services/assets/quota.ts uses for
+// the storage cap: the second transaction's count is only taken after the
+// first has committed (or rolled back) and released the lock, so the
+// count it sees already reflects the first transaction's insert.
 //
 // Unlike the generic path, this does NOT call `provider.validateCredentials`
 // — that function requires a non-empty `secrets` array, which doesn't exist
@@ -264,6 +278,15 @@ async function createWebhookConnection(
 
   let capReached = false;
   await drizzle.db.transaction(async (tx) => {
+    // Serializes the count-then-insert below across concurrent creates
+    // for this project. Must come BEFORE the count query — see the
+    // block comment above this function for why FOR UPDATE alone can't
+    // do this job.
+    await drizzle.lockRepo.advisoryXactLock(
+      tx,
+      `${WEBHOOK_ENDPOINT_CAP_LOCK_PREFIX}${projectId}`,
+    );
+
     const existing = await tx
       .select({ id: integrationConnections.id })
       .from(integrationConnections)
@@ -273,8 +296,7 @@ async function createWebhookConnection(
           eq(integrationConnections.providerId, "CUSTOM_WEBHOOK"),
           isNull(integrationConnections.deletedAt),
         ),
-      )
-      .for("update");
+      );
 
     if (existing.length >= MAX_WEBHOOK_ENDPOINTS_PER_PROJECT) {
       capReached = true;

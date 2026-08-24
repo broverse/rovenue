@@ -10,7 +10,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { MockAgent, setGlobalDispatcher } from "undici";
 import { getDb, drizzle, projects } from "@rovenue/db";
 import { decrypt } from "@rovenue/shared/crypto";
@@ -216,6 +216,76 @@ describe.sequential("POST /projects/:projectId/integrations — CUSTOM_WEBHOOK c
     expect(second.status).toBe(409);
     const errBody = (await second.json()) as { error: { code: string } };
     expect(errBody.error.code).toBe("connection_exists");
+  });
+});
+
+// =============================================================
+// Real concurrency — the reviewer-flagged race
+// =============================================================
+//
+// A `SELECT ... FOR UPDATE` precheck alone does not close this race: under
+// READ COMMITTED it only blocks on rows that already exist, so with zero
+// (or few) pre-existing rows there's nothing to lock, and a transaction
+// blocked on an existing row never re-scans for a sibling's newly-inserted
+// row. Two genuinely concurrent Postgres transactions (not mocked, not
+// sequential awaits) is the only thing that actually exercises the
+// `pg_advisory_xact_lock` fix — `Promise.all` against the real `app.request`
+// handler opens two real connections from the shared pg pool (max: 10, see
+// packages/db/src/drizzle/pool.ts) and lets Postgres itself decide who
+// blocks on whom.
+describe.sequential("POST /projects/:projectId/integrations — CUSTOM_WEBHOOK cap race", () => {
+  it("two concurrent creates at the cap: exactly one 201, one 409, final count == cap", async () => {
+    const { userId, cookie } = await createUserAndSession("create_race");
+    const projectId = await seedProject("create_race");
+    await addMember(projectId, userId, "ADMIN");
+
+    // Seed MAX-1 existing webhook connections directly (bypassing the
+    // route — a sequential seed loop wouldn't exercise the race we're
+    // trying to prove).
+    const seedNow = new Date();
+    for (let i = 0; i < MAX_WEBHOOK_ENDPOINTS_PER_PROJECT - 1; i += 1) {
+      await db.insert(drizzle.schema.integrationConnections).values({
+        id: `conn_race_${RUN_ID}_${i}`,
+        projectId,
+        providerId: "CUSTOM_WEBHOOK",
+        displayName: `Seed ${i}`,
+        credentialsCipher: "v1:enc:seed",
+        credentialsHint: "seed",
+        enabledEvents: [],
+        eventMapping: {},
+        actionSource: "app",
+        isEnabled: false,
+        createdAt: seedNow,
+        updatedAt: seedNow,
+      });
+    }
+
+    const app = buildApp();
+    // Fired together (no await between them) so both requests are in
+    // flight before either's transaction reaches the advisory lock.
+    const [resA, resB] = await Promise.all([
+      createWebhook(app, projectId, cookie, "https://example.com/race-a", "Race A"),
+      createWebhook(app, projectId, cookie, "https://example.com/race-b", "Race B"),
+    ]);
+
+    const statuses = [resA.status, resB.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([201, 409]);
+
+    const loser = resA.status === 409 ? resA : resB;
+    const loserBody = (await loser.json()) as { error: { code: string } };
+    expect(loserBody.error.code).toBe("endpoint_limit_reached");
+
+    const rows = await db
+      .select({ id: drizzle.schema.integrationConnections.id })
+      .from(drizzle.schema.integrationConnections)
+      .where(
+        and(
+          eq(drizzle.schema.integrationConnections.projectId, projectId),
+          eq(drizzle.schema.integrationConnections.providerId, "CUSTOM_WEBHOOK"),
+          isNull(drizzle.schema.integrationConnections.deletedAt),
+        ),
+      );
+    expect(rows).toHaveLength(MAX_WEBHOOK_ENDPOINTS_PER_PROJECT);
   });
 });
 
