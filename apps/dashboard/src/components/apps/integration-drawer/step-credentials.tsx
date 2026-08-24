@@ -130,10 +130,22 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * (AMPLITUDE_VALIDATION_INSERT_ID), so repeat validations dedupe within
  * Amplitude's 7-day window instead of writing a fresh event each time —
  * this note communicates that dedup, not an unbounded write.
+ *
+ * MIXPANEL: same shape as AMPLITUDE. The brief's zero-footprint
+ * alternative (an empty `[]` events array to /import) was evaluated
+ * against Mixpanel's documented contract and rejected — the docs specify
+ * "Minimum array length: 1" for the request body, so an empty array is
+ * off-contract and its response would not reliably distinguish good vs.
+ * bad credentials (see providers/mixpanel.ts's validateCredentials
+ * comment). The probe instead uses a stable distinct_id/$insert_id pair
+ * (MIXPANEL_VALIDATION_INSERT_ID) so repeat validations collapse to one
+ * Mixpanel event via the vendor's own dedup rule.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:
     "Validate sends a real, clearly-tagged test event to this Amplitude project (deduplicated across repeat clicks).",
+  MIXPANEL:
+    "Validate sends a real, clearly-tagged test event to this Mixpanel project (deduplicated across repeat clicks).",
 };
 
 // ---------------------------------------------------------------------------

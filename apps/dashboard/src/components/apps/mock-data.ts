@@ -72,6 +72,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "mixpanel",
+    category: "analytics",
+    vendorKey: "mixpanel",
+    logo: {
+      // Mixpanel brand purple.
+      background: "#7856FF",
+      glyph: "M",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [

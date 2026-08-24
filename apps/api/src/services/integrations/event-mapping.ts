@@ -72,6 +72,25 @@ export const DEFAULT_EVENT_MAPPING: Record<
     "subscription.uncancelled": "uncancelled",
     "subscription.product_changed": "product_changed",
   },
+  // Identical vendor names to AMPLITUDE — kept in sync with
+  // providers/mixpanel.ts's own `defaultEventMapping` export (which the
+  // dashboard drawer reads). Task 6 brief: "Topics/catalog/mapping keys
+  // identical to Amplitude."
+  MIXPANEL: {
+    "revenue.INITIAL": "purchase_initial",
+    "revenue.TRIAL_CONVERSION": "trial_conversion",
+    "revenue.RENEWAL": "renewal",
+    "revenue.CREDIT_PURCHASE": "credit_purchase",
+    "revenue.REFUND": "refund",
+    "revenue.CANCELLATION": "cancellation",
+    "subscription.trial.started": "trial_started",
+    "subscription.cancel_requested": "cancel_requested",
+    "subscription.expired": "subscription_expired",
+    "subscription.billing_issue": "billing_issue",
+    "subscription.grace_period": "grace_period",
+    "subscription.uncancelled": "uncancelled",
+    "subscription.product_changed": "product_changed",
+  },
 };
 
 export type ApplyEventMappingInput = {

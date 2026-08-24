@@ -99,9 +99,15 @@ const WEBHOOK_STEPS: DrawerStep[] = ["credentials", "events", "activate"];
 // override, unlike CUSTOM_WEBHOOK's WEBHOOK_STEPS).
 const AMPLITUDE_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// MIXPANEL has the same shape as AMPLITUDE: no vendor "test event" tooling
+// (that's Meta/TikTok-ad-platform specific), but does have a per-event
+// default vendor name a user may want to override.
+const MIXPANEL_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
+  MIXPANEL: MIXPANEL_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -117,6 +123,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   TIKTOK_EVENTS: "TikTok Events API",
   CUSTOM_WEBHOOK: "Custom Webhook",
   AMPLITUDE: "Amplitude",
+  MIXPANEL: "Mixpanel",
 };
 
 // ---------------------------------------------------------------------------

@@ -63,6 +63,11 @@ const AMPLITUDE_EVENT_KEYS = [
   "subscription.product_changed",
 ] as const;
 
+// Mirrors apps/api/src/services/integrations/providers/mixpanel.ts's
+// `eventCatalog` — identical to AMPLITUDE's (Task 6 brief: "Topics/
+// catalog/mapping keys identical to Amplitude").
+const MIXPANEL_EVENT_KEYS = AMPLITUDE_EVENT_KEYS;
+
 // CUSTOM_WEBHOOK has no per-event allowlist on the backend — its
 // `eventCatalog` is `ROVENUE_EVENT_KEYS` in full (custom-webhook.ts) — so
 // the picker offers every public event key rather than the ad-providers'
@@ -72,6 +77,7 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   TIKTOK_EVENTS: ALL_EVENT_KEYS,
   CUSTOM_WEBHOOK: ROVENUE_EVENT_KEYS,
   AMPLITUDE: AMPLITUDE_EVENT_KEYS,
+  MIXPANEL: MIXPANEL_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   TIKTOK_EVENTS: "TikTok Events API",
   CUSTOM_WEBHOOK: "Custom Webhook",
   AMPLITUDE: "Amplitude",
+  MIXPANEL: "Mixpanel",
 };
 
 // ---------------------------------------------------------------------------

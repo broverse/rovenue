@@ -225,6 +225,13 @@ describe("StepCredentials — PROVIDER_VALIDATE_NOTES", () => {
     expect(screen.getByText(PROVIDER_VALIDATE_NOTES.AMPLITUDE)).toBeTruthy();
   });
 
+  it("renders the note near Validate when the provider has one (MIXPANEL)", async () => {
+    renderWithRouter(<ProviderWrapper providerId="MIXPANEL" />);
+
+    expect(await screen.findByLabelText(/service account username/i)).toBeTruthy();
+    expect(screen.getByText(PROVIDER_VALIDATE_NOTES.MIXPANEL)).toBeTruthy();
+  });
+
   it("renders no note for a provider without one (META_CAPI)", async () => {
     renderWithRouter(<ProviderWrapper providerId="META_CAPI" />);
 

@@ -1,0 +1,98 @@
+---
+title: Mixpanel
+description: Forward Rovenue revenue and subscription-lifecycle events to Mixpanel for cohort analysis, retention, and behavioral analytics.
+---
+
+# Mixpanel
+
+The Mixpanel integration forwards Rovenue revenue events (purchases, trial conversions, renewals, refunds, cancellations) and subscription-lifecycle events (trials, grace period, billing issues, plan changes) to Mixpanel's Import Events API, so subscription behavior shows up alongside the rest of your product analytics.
+
+---
+
+## 1. Create a Service Account in Mixpanel
+
+Mixpanel's Import Events API does **not** accept a plain project token for this integration — it requires a **Service Account** with Owner or Admin permissions on the project.
+
+1. In Mixpanel, open your project's **Settings → Service Accounts**.
+2. Click **Add Service Account**, give it Owner or Admin role, and create it.
+3. Copy the generated **username** and **secret** — the secret is shown only once.
+4. Note your project's **Project ID** (also under **Settings → Project Settings**).
+5. Note your project's **data residency** (US or EU) — set at project creation, shown on the same settings page.
+
+> Rovenue only ever writes events through this Service Account — it does not read, modify, or delete anything else in your Mixpanel project.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Mixpanel** under **Product analytics** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **Service account username** — from step 1.
+   - **Service account secret** — from step 1.
+   - **Project ID** — from step 1.
+   - **Region** — `us` (default) or `eu`, matching your project's data residency. Leave blank for `us`.
+4. Click **Validate** — Rovenue sends a real, clearly-tagged test event (deduplicated across repeat clicks) to Mixpanel's Import Events API to confirm the credentials are accepted for this project.
+5. Choose which events to forward, optionally override the default vendor event names, then activate.
+
+---
+
+## 3. Event mapping
+
+Mixpanel has no built-in "purchase" event — Rovenue's public event keys are forwarded as your Mixpanel `event` name, using the following default names (overridable per-connection in the drawer's mapping step). These are the same default names Rovenue uses for the Amplitude integration:
+
+| Rovenue event key | Mixpanel `event` |
+|---|---|
+| `revenue.INITIAL` | `purchase_initial` |
+| `revenue.TRIAL_CONVERSION` | `trial_conversion` |
+| `revenue.RENEWAL` | `renewal` |
+| `revenue.CREDIT_PURCHASE` | `credit_purchase` |
+| `revenue.REFUND` | `refund` |
+| `revenue.CANCELLATION` | `cancellation` |
+| `subscription.trial.started` | `trial_started` |
+| `subscription.cancel_requested` | `cancel_requested` |
+| `subscription.expired` | `subscription_expired` |
+| `subscription.billing_issue` | `billing_issue` |
+| `subscription.grace_period` | `grace_period` |
+| `subscription.uncancelled` | `uncancelled` |
+| `subscription.product_changed` | `product_changed` |
+
+Every forwarded event carries `properties.rovenue_event` set to the original Rovenue event key (e.g. `revenue.RENEWAL`), so you can always trace a Mixpanel event back to its Rovenue source regardless of how the vendor event name has been overridden, plus `properties.product_id`.
+
+### Revenue fields
+
+For the six `revenue.*` keys only, Rovenue also populates `properties.amount` and `properties.currency`. Subscription-lifecycle events never carry these fields — they represent no money movement.
+
+**`revenue.REFUND` is sent with a NEGATIVE `amount`**, mirroring the same convention Rovenue uses for the Amplitude integration, so a refund reads as negative revenue in any Mixpanel report that sums this property. Rovenue's internal ledger always stores refund amounts as positive; the sign flip happens only at the Mixpanel wire boundary.
+
+---
+
+## 4. Identity resolution
+
+Every Mixpanel event requires a `distinct_id`. Rovenue resolves it using this fallback chain, in order:
+
+1. `$mixpanelDistinctId` — the subscriber attribute you should set once you've called Mixpanel's own `identify()` on the client, so revenue events join the correct identified Mixpanel user profile.
+2. `appUserId` — your app's own subscriber id, if the subscriber has one.
+3. The Rovenue-internal subscriber id, as a last resort so revenue is never silently dropped for lack of an explicit Mixpanel identity.
+
+Set these via the SDK's `setAttributes` call. See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference, including `$mixpanelDistinctId`.
+
+If neither `$mixpanelDistinctId`, `appUserId`, nor a subscriber id is available, the event is skipped with reason `no_user_data` (visible in the connection's Delivery Log).
+
+---
+
+## 5. Deduplication
+
+Every forwarded event carries `properties.$insert_id` set to Rovenue's internal `outboxEventId`. Mixpanel treats events sharing the same `(event, time, distinct_id, $insert_id)` tuple as duplicates and surfaces only one of them in queries, so retries after a network failure or an at-least-once outbox replay do not double-count revenue.
+
+---
+
+## 6. Verify events are arriving
+
+1. Open your project in Mixpanel and use **Events** (Data Management) or a live report filtered to one of the vendor event names above.
+2. Trigger a real event from your app (a renewal, a trial start, etc.) — Mixpanel's Import API typically ingests events within a few minutes.
+3. If events are not appearing:
+   - Verify the service account username/secret, project ID, and region are correct (use **Validate** in the drawer — a `us`/`eu` mismatch sends events to the wrong data center, where they will never appear).
+   - Check **Apps → Mixpanel → Delivery Log** in Rovenue for HTTP status codes and error messages.
+   - Ensure the event type you're sending is included in the connection's enabled events.
+   - A `401` response means the service account credentials (or project ID) are wrong. A `400` response means an event failed Mixpanel's strict validation — the response body includes the failing field and its `$insert_id`.

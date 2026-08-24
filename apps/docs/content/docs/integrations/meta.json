@@ -1,5 +1,5 @@
 {
   "title": "Integrations",
   "icon": "Blocks",
-  "pages": ["meta-capi", "tiktok-events", "amplitude", "outbound-webhooks", "subscriber-identity-attributes"]
+  "pages": ["meta-capi", "tiktok-events", "amplitude", "mixpanel", "outbound-webhooks", "subscriber-identity-attributes"]
 }

@@ -46,6 +46,7 @@ const CARD_ID_TO_PROVIDER: Record<
   "meta-capi": "META_CAPI",
   "tiktok-events": "TIKTOK_EVENTS",
   amplitude: "AMPLITUDE",
+  mixpanel: "MIXPANEL",
 };
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({

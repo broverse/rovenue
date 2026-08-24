@@ -3,12 +3,14 @@ import { metaCapiProvider } from "./providers/meta-capi";
 import { tiktokEventsProvider } from "./providers/tiktok-events";
 import { customWebhookProvider } from "./providers/custom-webhook";
 import { amplitudeProvider } from "./providers/amplitude";
+import { mixpanelProvider } from "./providers/mixpanel";
 
 export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   META_CAPI: metaCapiProvider,
   TIKTOK_EVENTS: tiktokEventsProvider,
   CUSTOM_WEBHOOK: customWebhookProvider,
   AMPLITUDE: amplitudeProvider,
+  MIXPANEL: mixpanelProvider,
 };
 
 export function getProvider(id: ProviderId): IntegrationProvider {

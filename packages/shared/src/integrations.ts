@@ -32,7 +32,8 @@ export type IntegrationProviderId =
   | "META_CAPI"
   | "TIKTOK_EVENTS"
   | "CUSTOM_WEBHOOK"
-  | "AMPLITUDE";
+  | "AMPLITUDE"
+  | "MIXPANEL";
 
 export const WEBHOOK_API_VERSION = "2026-08-24";
 

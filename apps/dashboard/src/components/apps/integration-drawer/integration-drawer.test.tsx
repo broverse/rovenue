@@ -70,4 +70,22 @@ describe("IntegrationDrawer shell", () => {
     expect(screen.getByText(/step 1 of 4/i)).toBeTruthy();
     expect(await screen.findByLabelText(/api key/i)).toBeTruthy();
   });
+
+  it("MIXPANEL drawer renders a 4-step wizard with the service-account fields", async () => {
+    renderWithRouter(
+      <IntegrationDrawer
+        open={true}
+        onClose={vi.fn()}
+        projectId="p1"
+        providerId="MIXPANEL"
+        existingConnection={null}
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeTruthy();
+    // credentials/events/mapping/activate — "test" is Meta/TikTok-specific.
+    expect(screen.getByText(/step 1 of 4/i)).toBeTruthy();
+    expect(await screen.findByLabelText(/service account username/i)).toBeTruthy();
+  });
 });

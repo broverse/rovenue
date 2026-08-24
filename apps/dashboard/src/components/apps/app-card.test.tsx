@@ -76,6 +76,33 @@ describe("AppCard — M6.11", () => {
     expect(onOpenIntegration).toHaveBeenCalledWith("amplitude");
   });
 
+  it("clicking mixpanel card calls onOpenIntegration with 'mixpanel'", async () => {
+    const user = userEvent.setup();
+    const onOpenIntegration = vi.fn();
+    const MIXPANEL_APP: AppDescriptor = {
+      id: "mixpanel",
+      category: "analytics",
+      vendorKey: "mixpanel",
+      logo: { background: "#7856FF", glyph: "M" },
+      status: "available",
+    };
+
+    const { container } = renderWithRouter(
+      <AppCard app={MIXPANEL_APP} onOpenIntegration={onOpenIntegration} />,
+    );
+
+    await waitFor(() => {
+      const article = container.querySelector("article");
+      expect(article).toBeTruthy();
+    });
+
+    const article = container.querySelector("article")!;
+    await user.click(article);
+
+    expect(onOpenIntegration).toHaveBeenCalledOnce();
+    expect(onOpenIntegration).toHaveBeenCalledWith("mixpanel");
+  });
+
   it("clicking unavailable snapchat-ads card does NOT call onOpenIntegration", async () => {
     const user = userEvent.setup();
     const onOpenIntegration = vi.fn();
