@@ -77,15 +77,11 @@ export function OfferingHeader({
         <KpiCell
           label={t("offerings.kpi.mrr")}
           value={`$${offering.mrr.toLocaleString()}`}
-          delta={t("offerings.kpi.deltaMrr")}
-          deltaTone="success"
           first
         />
         <KpiCell
           label={t("offerings.kpi.activeSubs")}
           value={offering.subs == null ? "—" : offering.subs.toLocaleString()}
-          delta={t("offerings.kpi.deltaSubs")}
-          deltaTone="success"
         />
         <KpiCell
           label={t("offerings.kpi.products")}

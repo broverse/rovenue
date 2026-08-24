@@ -4,9 +4,8 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { API_KEY_KIND } from "@rovenue/shared";
 import { HTTPException } from "hono/http-exception";
-import { drizzle } from "@rovenue/db";
 import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscriber";
-import { getProducer } from "../../lib/kafka";
+import { assertTopic, getProducer } from "../../lib/kafka";
 import { logger } from "../../lib/logger";
 
 // =============================================================
@@ -43,6 +42,27 @@ import { logger } from "../../lib/logger";
 // JSONExtract* expressions parse out.
 
 const log = logger.child("route:v1:sdk-sessions");
+
+// Redpanda topic for the direct-produce session-telemetry path. Unlike the
+// outbox aggregate topics, nothing else provisions this one — the outbox
+// dispatcher only asserts topics it publishes to. Redpanda ships with
+// auto-create off (see docker-compose), so on a fresh cluster the first
+// produce fails with "This server does not host this topic-partition" until
+// the topic exists. Ensure it once per process, memoized so we don't spin up
+// an admin client on every request.
+const SDK_SESSIONS_TOPIC = "rovenue.sdk-sessions";
+let topicEnsured: Promise<void> | null = null;
+function ensureSdkSessionsTopic(): Promise<void> {
+  if (!topicEnsured) {
+    topicEnsured = assertTopic(SDK_SESSIONS_TOPIC).catch((err) => {
+      // Reset so a transient admin failure is retried on the next request
+      // instead of being cached as "ensured" forever.
+      topicEnsured = null;
+      throw err;
+    });
+  }
+  return topicEnsured;
+}
 
 /**
  * Content-derived, deterministic event id for a session event. Stable across
@@ -156,8 +176,9 @@ export const sdkSessionsRoute = new Hono().post(
     }
 
     try {
+      await ensureSdkSessionsTopic();
       await producer.send({
-        topic: "rovenue.sdk-sessions",
+        topic: SDK_SESSIONS_TOPIC,
         messages,
       });
     } catch (err) {

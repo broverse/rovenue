@@ -931,7 +931,7 @@
       "vsPrev": "vs prev 28d",
       "activeSubs": "Active subscribers",
       "acrossProducts": "across {{count}} products",
-      "access": "Access"
+      "entitlements": "Entitlements"
     },
     "groups": {
       "heading": "Groups"
@@ -1185,8 +1185,6 @@
       "activeSubs": "Active subs",
       "products": "Products",
       "mrr28d": "MRR · last 28d",
-      "deltaMrr": "▲ 9.1%",
-      "deltaSubs": "▲ 42",
       "productsBreakdown": "{{archived}} archived · {{draft}} draft"
     },
     "duration": {

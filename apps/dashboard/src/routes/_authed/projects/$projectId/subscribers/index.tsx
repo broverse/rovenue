@@ -303,6 +303,12 @@ function SubscribersPage({
         detailData.purchases.length,
       );
       const subUserId = detailData.appUserId ?? "";
+      // The detail endpoint carries identity, access, and purchases but not the
+      // computed revenue metrics (ltv/mrr/risk) or country/platforms — those
+      // are only in the list-endpoint row. Reuse the matching list row for them
+      // so the panel shows the same numbers as the row the user clicked,
+      // instead of resetting them to zero.
+      const listRow = flat.find((s) => s.rovenueId === detailData.id);
       return {
         id:
           subUserId.length > 20
@@ -315,18 +321,18 @@ function SubscribersPage({
           subUserId.length > 24
             ? `${subUserId.slice(0, 21)}...`
             : subUserId,
-        country: "US",
+        country: listRow?.country ?? "US",
         access: detailData.access
           .filter((a) => a.isActive)
           .map((a) => a.accessId),
         product: detailData.purchases[0]?.productIdentifier ?? "—",
         status,
-        ltv: 0,
-        mrr: 0,
+        ltv: listRow?.ltv ?? 0,
+        mrr: listRow?.mrr ?? 0,
         created: detailData.firstSeenAt,
         renew: detailData.purchases[0]?.expiresDate ?? "—",
-        platforms: [],
-        risk: 0,
+        platforms: listRow?.platforms ?? [],
+        risk: listRow?.risk ?? 0,
         plan:
           detailData.access.filter((a) => a.isActive).map((a) => a.accessId)[0] ??
           "—",

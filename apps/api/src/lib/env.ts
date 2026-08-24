@@ -81,7 +81,13 @@ const envSchema = z
     // When true, Apple webhooks fall back to jose-only verification and
     // Google webhooks skip Pub/Sub OIDC token validation. Intended for
     // local development and integration test environments only.
-    ALLOW_UNVERIFIED_WEBHOOKS: z.coerce.boolean().default(false),
+    // NB: parse with the same string→bool transform every other flag here
+    // uses — `z.coerce.boolean()` runs JS `Boolean()`, and `Boolean("false")`
+    // is `true`, so the literal string "false" would enable the bypass.
+    ALLOW_UNVERIFIED_WEBHOOKS: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
     // Accepted clock skew (seconds) between a webhook event's
     // timestamp and our wall clock. Deliveries outside this window
     // are rejected by the replay-guard middleware.
