@@ -1209,10 +1209,10 @@ export const integrationsRoute = new Hono()
   //
   // The redeliver window is bounded by outbox retention, NOT by anything
   // this route enforces directly: workers/outbox-cleanup.ts prunes
-  // `outbox_events` rows older than its retention window (24h as of this
-  // writing), and once the row is gone this returns 410 event_expired —
-  // the delivery row itself is kept indefinitely as an audit trail, but
-  // there is nothing left to replay.
+  // `outbox_events` rows older than OUTBOX_RETENTION_WINDOW_MS (72h, kept
+  // deliberately longer than the longest retry ladder), and once the row is
+  // gone this returns 410 event_expired — the delivery row itself is kept
+  // indefinitely as an audit trail, but there is nothing left to replay.
   // =============================================================
   .post(
     "/:id/deliveries/:deliveryId/redeliver",

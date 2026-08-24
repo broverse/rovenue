@@ -17,7 +17,9 @@ import { env } from "./lib/env";
 import { attachRedisErrorLogger } from "./lib/redis";
 import { startIntegrationsFanout } from "./services/integrations-fanout/consumer";
 import { createConnectionCache } from "./services/integrations-fanout/connection-cache";
+import { fanoutTopics } from "./services/integrations/registry";
 import { ensureIntegrationsDeliverWorker } from "./workers/integrations-deliver";
+import { assertTopics } from "./workers/outbox-dispatcher";
 import {
   INTEGRATIONS_DELIVER_QUEUE_NAME,
   buildIntegrationsDeliverJobId,
@@ -56,6 +58,13 @@ export async function bootIntegrations(
     loader: (projectId) =>
       integrationConnectionRepo.listActiveConnectionsForProject(db, projectId),
   });
+
+  // Provision the topics the fan-out subscribes to. Only the outbox
+  // dispatcher used to assert topics, so on a cluster where the dispatcher
+  // hadn't run yet (Redpanda ships with auto-create off) the consumer
+  // joined a group on topics that didn't exist. Reuses the dispatcher's own
+  // helper — no-op when KAFKA_BROKERS is unset.
+  await assertTopics(fanoutTopics());
 
   const fanout = await startIntegrationsFanout({
     cache,

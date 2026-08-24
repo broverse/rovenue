@@ -78,8 +78,8 @@ For every other event type (`subscription.*`, `subscriber.identified`, `paywall.
 | `revenue.CREDIT_PURCHASE` | A virtual-currency / credit pack is purchased. |
 | `revenue.REFUND` | A refund is recorded (`data.amount` is always a positive value). |
 | `revenue.CANCELLATION` | A cancellation is recorded as a revenue-affecting event. |
-| `subscription.trial.started` | A new trial period begins. |
-| `subscriber.identified` | An SDK `identify()` call binds a Rovenue subscriber to your app-user id. |
+| `subscription.trial.started` [^not-yet-emitted] | A new trial period begins. |
+| `subscriber.identified` [^not-yet-emitted] | An SDK `identify()` call binds a Rovenue subscriber to your app-user id. |
 | `subscription.cancel_requested` | A subscriber requests cancellation (the subscription may still be active until period end). |
 | `subscription.expired` | A subscription reaches the `EXPIRED` state. |
 | `paywall.view` | A paywall is shown to a user. |
@@ -87,6 +87,8 @@ For every other event type (`subscription.*`, `subscriber.identified`, `paywall.
 | `credit.ledger.appended` | A row is appended to the append-only credit ledger (a grant or a spend). |
 
 You choose which of these keys are delivered to a given endpoint when you configure the connection.
+
+[^not-yet-emitted]: Defined in the catalog and selectable on a connection, but not yet emitted by the backend — coming with SDK identify/trial instrumentation.
 
 ---
 
@@ -217,6 +219,8 @@ Up to 8 attempts total (the first attempt plus 7 retries), spread over roughly 3
 | 8 | 12h | ≈31h 12m 30s |
 
 If attempt 8 still fails (or a non-retriable status is returned earlier), the delivery moves to a **dead-letter** state and is shown as failed in the Delivery Log. You can manually **redeliver** it from there at any time — redelivery is not limited by the retry schedule, only by how long the originating event is retained.
+
+**Redelivery window:** roughly **3 days from the time of the event**. Past that the originating event is pruned and redelivery returns a `410` — the delivery row stays in the log as a record, but there is nothing left to replay. That window is deliberately more than a day longer than the ≈31-hour retry schedule above, so a fully-exhausted dead-letter is always still redeliverable when you find it.
 
 ---
 
