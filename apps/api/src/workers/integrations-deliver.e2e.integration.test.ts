@@ -28,6 +28,7 @@ import { drizzle as drizzleNs } from "@rovenue/db";
 import { encrypt } from "@rovenue/shared/crypto";
 import {
   buildIntegrationsDeliverJobId,
+  deliverJobOptions,
   type IntegrationsDeliverJob,
 } from "../queues/integrations";
 import {
@@ -239,7 +240,7 @@ describe("integrations-deliver worker — identityContext PII hashing (e2e)", ()
         },
       };
 
-      await queue.add("deliver", job, { jobId, attempts: 5 });
+      await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId));
 
       // -----------------------------------------------------------------------
       // 4. Wait for the delivery row to reach a terminal state.

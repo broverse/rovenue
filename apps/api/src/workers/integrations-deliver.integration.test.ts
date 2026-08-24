@@ -29,6 +29,7 @@ import { drizzle as drizzleNs, getDb } from "@rovenue/db";
 import { encrypt } from "@rovenue/shared/crypto";
 import {
   buildIntegrationsDeliverJobId,
+  deliverJobOptions,
   type IntegrationsDeliverJob,
 } from "../queues/integrations";
 import {
@@ -207,7 +208,7 @@ describe("integrations-deliver worker (e2e)", () => {
         headers: { "content-type": "application/json" },
       });
 
-    await queue.add("deliver", job, { jobId, attempts: 5 });
+    await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId));
 
     const row = await pollDelivery(CONNECTION_ID, outboxEventId);
     expect(row).toBeDefined();
@@ -226,7 +227,7 @@ describe("integrations-deliver worker (e2e)", () => {
       envelope: buildEnvelope(outboxEventId, false /* no user data */),
     };
 
-    await queue.add("deliver", job, { jobId, attempts: 5 });
+    await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId));
 
     const row = await pollDelivery(CONNECTION_ID, outboxEventId);
     expect(row).toBeDefined();
@@ -256,8 +257,8 @@ describe("integrations-deliver worker (e2e)", () => {
       .times(1);
 
     // Add twice with same jobId — BullMQ dedupes at the queue level
-    await queue.add("deliver", job, { jobId, attempts: 5 });
-    await queue.add("deliver", job, { jobId, attempts: 5 }).catch(() => undefined);
+    await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId));
+    await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId)).catch(() => undefined);
 
     const row = await pollDelivery(CONNECTION_ID, outboxEventId);
     expect(row).toBeDefined();
@@ -291,7 +292,7 @@ describe("integrations-deliver worker (e2e)", () => {
         headers: { "content-type": "application/json" },
       });
 
-    await queue.add("deliver", job, { jobId, attempts: 5 });
+    await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId));
 
     const row = await pollDelivery(CONNECTION_ID, outboxEventId);
     expect(row).toBeDefined();
@@ -319,7 +320,7 @@ describe("integrations-deliver worker (e2e)", () => {
         headers: { "content-type": "application/json" },
       });
 
-    await queue.add("deliver", job, { jobId, attempts: 5 });
+    await queue.add("deliver", job, deliverJobOptions(job.providerId, jobId));
 
     // Wait for the delivery row to be written first
     const deliveryRow = await pollDelivery(CONNECTION_ID, outboxEventId);

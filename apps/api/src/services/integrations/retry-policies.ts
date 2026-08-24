@@ -17,7 +17,7 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
 
 // CUSTOM_WEBHOOK's policy — receivers like Svix (~17h) and RevenueCat
 // (~1 day) keep retrying for roughly a day, so ours needs comparable
-// wall-clock coverage: 30s+2m+10m+1h+6h+12h+12h ≈ 31.7h ≥ 24h.
+// wall-clock coverage: 30s+2m+10m+1h+6h+12h+12h = 112,350,000ms ≈ 31.2h ≥ 24h.
 export const WEBHOOK_RETRY_POLICY: RetryPolicy = {
   attempts: 8,
   backoffMs: [
