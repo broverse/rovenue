@@ -104,6 +104,19 @@ function buildWebhookData(envelope: RovenueEventEnvelope): Record<string, unknow
  *  transient "try again shortly"), as opposed to a permanent rejection. */
 const RETRIABLE_4XX_STATUSES = new Set([408, 425, 429]);
 
+/** A delivery that never reached the network — a bad URL, no secrets to
+ *  sign with, or an unparseable payload. Always non-retriable: retrying an
+ *  unsigned/un-identifiable send would just repeat the same local failure. */
+function nonRetriableFailure(reason: string): DeliveryResult {
+  return {
+    ok: false,
+    httpStatus: 0,
+    responseBody: "",
+    errorMessage: reason,
+    retriable: false,
+  };
+}
+
 function classifyDeliveryResponse(res: { status: number; body: string }): DeliveryResult {
   const responseBody = res.body.slice(0, RESPONSE_BODY_MAX_BYTES);
   const { status } = res;
@@ -237,11 +250,27 @@ export const customWebhookProvider: IntegrationProvider = {
     const { url, secrets } = parseWebhookCredentials(creds);
     const body = payload.body as string;
 
-    let id = "";
+    // Never send an unsigned or un-identifiable webhook. Both are reachable
+    // in practice: parseWebhookCredentials degrades malformed "secrets" JSON
+    // to [] rather than throwing, and payload.body is `unknown` on the
+    // shared ProviderPayload type. signWebhook([]) would silently produce
+    // an empty signature header, and an empty/missing id would ship
+    // `webhook-id: ""` — fail closed instead, before any network call.
+    if (secrets.length === 0) {
+      return nonRetriableFailure("no active webhook secret configured for this connection");
+    }
+
+    let id: string | undefined;
     try {
-      id = (JSON.parse(body) as { id?: string }).id ?? "";
+      const parsed = JSON.parse(body) as { id?: unknown };
+      if (typeof parsed.id === "string" && parsed.id.length > 0) {
+        id = parsed.id;
+      }
     } catch {
-      id = "";
+      id = undefined;
+    }
+    if (!id) {
+      return nonRetriableFailure("webhook payload is missing a valid id");
     }
 
     try {
@@ -278,13 +307,7 @@ export const customWebhookProvider: IntegrationProvider = {
       return classifyDeliveryResponse(res);
     } catch (err) {
       if (err instanceof WebhookUrlError) {
-        return {
-          ok: false,
-          httpStatus: 0,
-          responseBody: "",
-          errorMessage: err.reason,
-          retriable: false,
-        };
+        return nonRetriableFailure(err.reason);
       }
       return {
         ok: false,

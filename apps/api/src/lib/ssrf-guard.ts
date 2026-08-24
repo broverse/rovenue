@@ -4,6 +4,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { Agent, buildConnector, request as undiciRequest } from "undici";
 import { env } from "./env";
 import type { HttpClient } from "../services/integrations/types";
+import { RESPONSE_BODY_MAX_BYTES } from "../services/integrations/http-client";
 
 // =============================================================
 // SSRF guard
@@ -100,81 +101,18 @@ export const ssrfSafeAgent = new Agent({
   },
 });
 
-/**
- * Cheap up-front check for save-time validation paths (e.g. persisting a
- * webhook or BYOK baseUrl). Rejects non-http(s) schemes and IP-literal
- * hosts that are already known-bad, so an obviously-internal URL fails
- * with a clear 4xx before we ever store it. Runtime enforcement still
- * relies on {@link ssrfSafeAgent} at connect time (DNS names, rebinding).
- */
-export function assertAllowedOutboundUrl(raw: string): URL {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error("Invalid URL");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("URL must use http or https");
-  }
-  const host = url.hostname.replace(/^\[|\]$/g, ""); // unwrap [::1]
-  if (host.toLowerCase() === "localhost") {
-    throw new Error("URL host is not allowed");
-  }
-  if (isIP(host) && isBlockedIp(host)) {
-    throw new Error("URL host resolves to a non-public address");
-  }
-  return url;
-}
-
-/**
- * Drop-in `fetch` that routes through {@link ssrfSafeAgent}. Suitable as
- * the AI-SDK provider `fetch` option or anywhere a guarded fetch is needed.
- */
-export const ssrfSafeFetch: typeof globalThis.fetch = (input, init) =>
-  globalThis.fetch(input, { ...init, dispatcher: ssrfSafeAgent } as RequestInit);
-
-// =============================================================
-// CUSTOM_WEBHOOK-specific SSRF guard (Task 7)
-// =============================================================
-//
-// The generic guard above validates at TCP-connect time via a custom
-// connector — good for a single guarded fetch/Agent, but it doesn't hand
-// back the resolved address for reuse. CUSTOM_WEBHOOK delivery needs the
-// resolved IP up front so it can be pinned into the actual request (the
-// same address that was validated is the one connected to — no second,
-// unpinned DNS lookup in between) and so the delivery classification code
-// can distinguish "URL rejected before any network call" from HTTP/network
-// outcomes. Two layers:
-//
-//  1. assertPublicWebhookUrl — sync, cheap checks on the URL itself
-//     (scheme, userinfo, IP-literal host against BLOCKED_CIDRS).
-//  2. resolvePinnedAddress — resolves the hostname via DNS and rejects
-//     the whole result set if ANY resolved address is private (defends
-//     against DNS-rebinding: a hostname that resolves to a public IP at
-//     validation time and a private one at connect time). The single
-//     address it returns is later pinned into the actual TCP connection
-//     by createPinnedHttpClient so the DNS answer used for validation is
-//     the same one used for the request.
-//
-// Both checks are gated by ALLOW_PRIVATE_TARGETS, derived from
-// NODE_ENV !== "production": self-hosted local dev and CI regularly point
-// CUSTOM_WEBHOOK at http://localhost:… or a container-network IP, so the
-// private-target block only applies in production. Tests inject the mode
-// explicitly via `deps.allowPrivateTargets` rather than mutating
-// `process.env.NODE_ENV` (see the vitest env/import-hoisting footgun —
-// lib/env.ts parses NODE_ENV once at import time, so a later assignment in
-// a test file is silently a no-op and would leak between tests anyway).
-
-export class WebhookUrlError extends Error {
-  constructor(public reason: string) {
-    super(reason);
-    this.name = "WebhookUrlError";
-  }
-}
-
-/** Non-production allows http:// and private/loopback targets (dev/test story). */
-export const ALLOW_PRIVATE_TARGETS = env.NODE_ENV !== "production";
+// ---------------------------------------------------------------------------
+// Named block table + BlockList — the SINGLE blocklist decision in this
+// file. isBlockedAddress composes it with isBlockedIp above: BLOCKED_CIDRS
+// documents the ranges the CUSTOM_WEBHOOK guard cares about most (and gives
+// resolvePinnedAddress/assertPublicWebhookUrl a named, auditable table to
+// point at), while isBlockedIp carries the broader, previously-shipped
+// coverage (CGNAT, NAT64, multicast/reserved, IPv4-mapped v6, zone ids,
+// "::" unspecified, etc.) that BLOCKED_CIDRS alone does not encode (e.g.
+// BLOCKED_CIDRS has no entry for "::" or 100.64.0.0/10). Neither table is
+// treated as authoritative on its own — an address is blocked if EITHER
+// says so.
+// ---------------------------------------------------------------------------
 
 interface BlockedCidr {
   family: "ipv4" | "ipv6";
@@ -209,12 +147,14 @@ function getBlockList(): BlockList {
   return blockList;
 }
 
-/** True for any IP address (v4 or v6) that falls inside BLOCKED_CIDRS, or
- *  that fails to parse as a valid IP at all (fail closed). */
+/** True for any IP address (v4 or v6) that falls inside BLOCKED_CIDRS OR
+ *  {@link isBlockedIp}'s broader range table, or that fails to parse as a
+ *  valid IP at all (fail closed). Union, not either table alone — see the
+ *  block comment above BLOCKED_CIDRS. */
 function isBlockedAddress(ip: string): boolean {
   const family = isIP(ip);
-  if (family === 4) return getBlockList().check(ip, "ipv4");
-  if (family === 6) return getBlockList().check(ip, "ipv6");
+  if (family === 4) return getBlockList().check(ip, "ipv4") || isBlockedIp(ip);
+  if (family === 6) return getBlockList().check(ip, "ipv6") || isBlockedIp(ip);
   return true;
 }
 
@@ -225,9 +165,97 @@ function stripBrackets(hostname: string): string {
 }
 
 /**
- * Sync validation of a candidate webhook URL: scheme, userinfo, and (unless
- * `deps.allowPrivateTargets`) IP-literal / localhost host checks. Does NOT
- * perform DNS resolution — see resolvePinnedAddress for that.
+ * True when `hostname` is "localhost" or an IP literal blocked per
+ * {@link isBlockedAddress}. The single host-literal check shared by
+ * {@link assertAllowedOutboundUrl} and {@link assertPublicWebhookUrl} —
+ * there is exactly one blocklist decision in this file, not two
+ * independently-maintained ones.
+ */
+function isBlockedHost(hostname: string): boolean {
+  const bareHost = stripBrackets(hostname.toLowerCase());
+  if (bareHost === "localhost") return true;
+  return isIP(bareHost) !== 0 && isBlockedAddress(bareHost);
+}
+
+/**
+ * Cheap up-front check for save-time validation paths (e.g. persisting a
+ * webhook or BYOK baseUrl). Rejects non-http(s) schemes and IP-literal
+ * hosts that are already known-bad, so an obviously-internal URL fails
+ * with a clear 4xx before we ever store it. Runtime enforcement still
+ * relies on {@link ssrfSafeAgent} at connect time (DNS names, rebinding).
+ */
+export function assertAllowedOutboundUrl(raw: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("Invalid URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("URL must use http or https");
+  }
+  if (isBlockedHost(url.hostname)) {
+    throw new Error("URL host is not allowed");
+  }
+  return url;
+}
+
+/**
+ * Drop-in `fetch` that routes through {@link ssrfSafeAgent}. Suitable as
+ * the AI-SDK provider `fetch` option or anywhere a guarded fetch is needed.
+ */
+export const ssrfSafeFetch: typeof globalThis.fetch = (input, init) =>
+  globalThis.fetch(input, { ...init, dispatcher: ssrfSafeAgent } as RequestInit);
+
+// =============================================================
+// CUSTOM_WEBHOOK-specific SSRF guard (Task 7)
+// =============================================================
+//
+// The generic guard above validates at TCP-connect time via a custom
+// connector — good for a single guarded fetch/Agent, but it doesn't hand
+// back the resolved address for reuse. CUSTOM_WEBHOOK delivery needs the
+// resolved IP up front so it can be pinned into the actual request (the
+// same address that was validated is the one connected to — no second,
+// unpinned DNS lookup in between) and so the delivery classification code
+// can distinguish "URL rejected before any network call" from HTTP/network
+// outcomes. Two layers:
+//
+//  1. assertPublicWebhookUrl — sync, cheap checks on the URL itself
+//     (scheme, userinfo, prod-http, and — via the shared isBlockedHost —
+//     localhost/IP-literal host).
+//  2. resolvePinnedAddress — resolves the hostname via DNS and rejects
+//     the whole result set if ANY resolved address is private (defends
+//     against DNS-rebinding: a hostname that resolves to a public IP at
+//     validation time and a private one at connect time). The single
+//     address it returns is later pinned into the actual TCP connection
+//     by createPinnedHttpClient so the DNS answer used for validation is
+//     the same one used for the request.
+//
+// Both checks are gated by ALLOW_PRIVATE_TARGETS, derived from
+// NODE_ENV !== "production": self-hosted local dev and CI regularly point
+// CUSTOM_WEBHOOK at http://localhost:… or a container-network IP, so the
+// private-target block only applies in production. Tests inject the mode
+// explicitly via `deps.allowPrivateTargets` rather than mutating
+// `process.env.NODE_ENV` (see the vitest env/import-hoisting footgun —
+// lib/env.ts parses NODE_ENV once at import time, so a later assignment in
+// a test file is silently a no-op and would leak between tests anyway).
+
+export class WebhookUrlError extends Error {
+  constructor(public reason: string) {
+    super(reason);
+    this.name = "WebhookUrlError";
+  }
+}
+
+/** Non-production allows http:// and private/loopback targets (dev/test story). */
+export const ALLOW_PRIVATE_TARGETS = env.NODE_ENV !== "production";
+
+/**
+ * Sync validation of a candidate webhook URL. Delegates the host/IP-literal
+ * decision to the shared {@link isBlockedHost} (unless
+ * `deps.allowPrivateTargets`) and adds only the two rules specific to
+ * webhook targets: no userinfo, and no plain http:// in production. Does
+ * NOT perform DNS resolution — see resolvePinnedAddress for that.
  */
 export function assertPublicWebhookUrl(
   raw: string,
@@ -252,14 +280,10 @@ export function assertPublicWebhookUrl(
     throw new WebhookUrlError("credentials in the webhook URL are not allowed");
   }
 
-  if (!allowPrivateTargets) {
-    const bareHost = stripBrackets(url.hostname.toLowerCase());
-    if (bareHost === "localhost") {
-      throw new WebhookUrlError("localhost is not a publicly routable webhook target");
-    }
-    if (isIP(bareHost) && isBlockedAddress(bareHost)) {
-      throw new WebhookUrlError(`IP-literal webhook target is not publicly routable: ${bareHost}`);
-    }
+  if (!allowPrivateTargets && isBlockedHost(url.hostname)) {
+    throw new WebhookUrlError(
+      `webhook target is not a publicly routable host: ${stripBrackets(url.hostname.toLowerCase())}`,
+    );
   }
 
   return url;
@@ -287,7 +311,7 @@ export async function resolvePinnedAddress(
   const bareHost = stripBrackets(url.hostname);
 
   // Already an IP literal — nothing to resolve, and assertPublicWebhookUrl
-  // already validated it against BLOCKED_CIDRS for this same mode.
+  // already validated it against isBlockedAddress for this same mode.
   if (isIP(bareHost)) {
     if (!allowPrivateTargets && isBlockedAddress(bareHost)) {
       throw new WebhookUrlError(`IP-literal webhook target is not publicly routable: ${bareHost}`);
@@ -318,6 +342,42 @@ export async function resolvePinnedAddress(
 export const WEBHOOK_DELIVERY_TIMEOUT_MS = 15_000;
 
 /**
+ * Reads at most `limitBytes` from `body`, then stops and destroys the
+ * stream — an attacker-chosen destination controls the response, so the
+ * read must be bounded independently of `bodyTimeout` (a slow-but-huge
+ * response would otherwise buffer unboundedly before timing out). Any
+ * unread remainder is discarded by destroying the stream rather than
+ * draining it, since the response is about to be closed anyway.
+ */
+async function readCappedBody(
+  body: AsyncIterable<Buffer> & { destroy(): void },
+  limitBytes: number,
+): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+
+  for await (const chunk of body) {
+    if (total >= limitBytes) break;
+    const remaining = limitBytes - total;
+    if (chunk.length > remaining) {
+      chunks.push(chunk.subarray(0, remaining));
+      total += remaining;
+      break;
+    }
+    chunks.push(chunk);
+    total += chunk.length;
+  }
+
+  try {
+    body.destroy();
+  } catch {
+    // Best-effort — the stream may already be fully consumed/closed.
+  }
+
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
  * Builds an HttpClient whose underlying undici Agent connects ONLY to
  * `pinnedIp`, no matter what hostname the request URL carries — this is
  * what makes resolvePinnedAddress's DNS answer authoritative: the TCP
@@ -329,6 +389,11 @@ export const WEBHOOK_DELIVERY_TIMEOUT_MS = 15_000;
  * Redirects are never followed (`maxRedirections: 0`) — a 3xx response is
  * classified by the caller instead of being transparently chased, which
  * could otherwise re-route the request outside the pinned/validated host.
+ *
+ * The Agent is scoped to a single delivery attempt: each call to
+ * `.request()` closes it in a `finally` once the (capped) response has been
+ * read, so a fresh Agent per CUSTOM_WEBHOOK delivery never leaks sockets or
+ * file descriptors across deliveries.
  */
 export function createPinnedHttpClient(pinnedIp: string): HttpClient {
   const pinnedFamily = isIP(pinnedIp);
@@ -351,14 +416,21 @@ export function createPinnedHttpClient(pinnedIp: string): HttpClient {
 
   return {
     async request(input) {
-      const res = await undiciRequest(input.url, {
-        method: input.method,
-        headers: input.headers,
-        body: input.body,
-        dispatcher: agent,
-      });
-      const text = await res.body.text();
-      return { status: res.statusCode, body: text };
+      try {
+        const res = await undiciRequest(input.url, {
+          method: input.method,
+          headers: input.headers,
+          body: input.body,
+          dispatcher: agent,
+        });
+        const text = await readCappedBody(res.body, RESPONSE_BODY_MAX_BYTES);
+        return { status: res.statusCode, body: text };
+      } finally {
+        await agent.close().catch(() => {
+          // Best-effort close — the delivery result above is already
+          // decided; a close failure here must not mask it.
+        });
+      }
     },
   };
 }

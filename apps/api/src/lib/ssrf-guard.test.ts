@@ -7,9 +7,44 @@ import {
   BLOCKED_CIDRS,
   WEBHOOK_DELIVERY_TIMEOUT_MS,
   assertPublicWebhookUrl,
+  assertAllowedOutboundUrl,
   resolvePinnedAddress,
   createPinnedHttpClient,
 } from "./ssrf-guard";
+
+// ---------------------------------------------------------------------------
+// assertAllowedOutboundUrl — the pre-existing, always-strict guard (copilot
+// BYOK baseUrl). Locked in here because assertPublicWebhookUrl's host/
+// IP-literal check was refactored to share isBlockedHost with this
+// function; these tests pin its own behavior unchanged by that refactor.
+// ---------------------------------------------------------------------------
+
+describe("assertAllowedOutboundUrl", () => {
+  it("accepts a public https URL", () => {
+    const url = assertAllowedOutboundUrl("https://example.com/hook");
+    expect(url.hostname).toBe("example.com");
+  });
+
+  it("rejects a non-http(s) scheme", () => {
+    expect(() => assertAllowedOutboundUrl("ftp://example.com/hook")).toThrow();
+  });
+
+  it("rejects localhost", () => {
+    expect(() => assertAllowedOutboundUrl("https://localhost/hook")).toThrow();
+  });
+
+  it("rejects a private IPv4 literal", () => {
+    expect(() => assertAllowedOutboundUrl("https://10.0.0.5/hook")).toThrow();
+  });
+
+  it("rejects a CGNAT IPv4 literal", () => {
+    expect(() => assertAllowedOutboundUrl("https://100.64.0.1/hook")).toThrow();
+  });
+
+  it("rejects the unspecified IPv6 literal [::]", () => {
+    expect(() => assertAllowedOutboundUrl("https://[::]/hook")).toThrow();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // assertPublicWebhookUrl
@@ -86,6 +121,9 @@ describe("assertPublicWebhookUrl", () => {
     "192.168.1.1", // 192.168.0.0/16
     "169.254.169.254", // 169.254.0.0/16 (cloud metadata)
     "0.0.0.0", // 0.0.0.0/8
+    "100.64.0.1", // 100.64.0.0/10 (CGNAT) — NOT in BLOCKED_CIDRS, only in
+    // isBlockedIp; proves isBlockedAddress is the union of both tables,
+    // not BLOCKED_CIDRS alone.
   ];
 
   for (const ip of blockedIpLiterals) {
@@ -106,7 +144,16 @@ describe("assertPublicWebhookUrl", () => {
     });
   }
 
-  const blockedIpv6Literals = ["::1", "fc00::1", "fe80::1"];
+  const blockedIpv6Literals = [
+    "::1",
+    "fc00::1",
+    "fe80::1",
+    "::", // unspecified address — NOT in BLOCKED_CIDRS (only ::1/128 is
+    // there); a hostname of "[::]" pins to loopback on Linux, so this must
+    // be blocked too. Proves isBlockedAddress is the union, not
+    // BLOCKED_CIDRS alone.
+    "64:ff9b::1", // NAT64 (embeds a v4 address) — also not in BLOCKED_CIDRS.
+  ];
 
   for (const ip of blockedIpv6Literals) {
     it(`rejects IPv6-literal ${ip} in production mode`, () => {
@@ -192,6 +239,36 @@ describe("resolvePinnedAddress", () => {
       },
     });
     expect(pinned).toBe("203.0.113.9");
+  });
+
+  it("rejects a resolved CGNAT address (100.64.0.0/10 — not in BLOCKED_CIDRS, covered via isBlockedIp union)", async () => {
+    const url = new URL("https://cgnat.example/hook");
+    await expect(
+      resolvePinnedAddress(url, {
+        allowPrivateTargets: false,
+        lookup: async () => ["100.64.0.1"],
+      }),
+    ).rejects.toThrow(WebhookUrlError);
+  });
+
+  it("rejects a resolved unspecified IPv6 address (:: — not in BLOCKED_CIDRS)", async () => {
+    const url = new URL("https://unspecified.example/hook");
+    await expect(
+      resolvePinnedAddress(url, {
+        allowPrivateTargets: false,
+        lookup: async () => ["::"],
+      }),
+    ).rejects.toThrow(WebhookUrlError);
+  });
+
+  it("rejects a resolved NAT64 address (64:ff9b::/96 — not in BLOCKED_CIDRS)", async () => {
+    const url = new URL("https://nat64.example/hook");
+    await expect(
+      resolvePinnedAddress(url, {
+        allowPrivateTargets: false,
+        lookup: async () => ["64:ff9b::1"],
+      }),
+    ).rejects.toThrow(WebhookUrlError);
   });
 });
 

@@ -338,13 +338,109 @@ describe("customWebhookProvider.deliver", () => {
     expect(result.errorMessage).toMatch(/scheme/);
   });
 
-  it("truncates responseBody to RESPONSE_BODY_MAX_BYTES", async () => {
+  it("truncates responseBody to exactly RESPONSE_BODY_MAX_BYTES on a large response, without hanging", async () => {
+    // 2 MiB response — proves the read is capped at the transport level
+    // (readCappedBody stops and destroys the stream), not just sliced after
+    // fully buffering an attacker-chosen, arbitrarily large body.
     const { port } = await listen((req, res) => {
       res.writeHead(500);
-      res.end("x".repeat(5000));
+      res.end("y".repeat(2 * 1024 * 1024));
     });
     const result = await customWebhookProvider.deliver(payload, credsFor(port), noopHttp);
-    expect(result.responseBody.length).toBeLessThanOrEqual(4096);
+    expect(result.responseBody.length).toBe(4096);
+  });
+
+  it("empty secrets array → non-retriable failure, no request ever sent", async () => {
+    const requestsSeen: string[] = [];
+    server = createServer((req, res) => {
+      requestsSeen.push(req.url ?? "");
+      res.writeHead(200);
+      res.end("ok");
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    const creds = { url: `http://127.0.0.1:${port}/hook`, secrets: "[]" };
+    const result = await customWebhookProvider.deliver(payload, creds, noopHttp);
+
+    expect(result.ok).toBe(false);
+    expect(result.retriable).toBe(false);
+    expect(result.errorMessage).toMatch(/secret/i);
+    expect(requestsSeen).toHaveLength(0);
+  });
+
+  it("malformed secrets JSON (degrades to []) → non-retriable failure, no request ever sent", async () => {
+    const requestsSeen: string[] = [];
+    server = createServer((req, res) => {
+      requestsSeen.push(req.url ?? "");
+      res.writeHead(200);
+      res.end("ok");
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    const creds = { url: `http://127.0.0.1:${port}/hook`, secrets: "not-json" };
+    const result = await customWebhookProvider.deliver(payload, creds, noopHttp);
+
+    expect(result.ok).toBe(false);
+    expect(result.retriable).toBe(false);
+    expect(requestsSeen).toHaveLength(0);
+  });
+
+  it("payload.body with no id → non-retriable failure, no request ever sent, never sends webhook-id: \"\"", async () => {
+    const requestsSeen: string[] = [];
+    server = createServer((req, res) => {
+      requestsSeen.push(req.url ?? "");
+      res.writeHead(200);
+      res.end("ok");
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    const noIdPayload: ProviderPayload = {
+      eventKey: "revenue.RENEWAL",
+      providerEvent: "revenue.RENEWAL",
+      body: JSON.stringify({ type: "revenue.RENEWAL", data: {} }), // no "id"
+    };
+    const result = await customWebhookProvider.deliver(noIdPayload, credsFor(port), noopHttp);
+
+    expect(result.ok).toBe(false);
+    expect(result.retriable).toBe(false);
+    expect(result.errorMessage).toMatch(/id/i);
+    expect(requestsSeen).toHaveLength(0);
+  });
+
+  it("unparseable payload.body → non-retriable failure, no request ever sent", async () => {
+    const requestsSeen: string[] = [];
+    server = createServer((req, res) => {
+      requestsSeen.push(req.url ?? "");
+      res.writeHead(200);
+      res.end("ok");
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    const brokenPayload: ProviderPayload = {
+      eventKey: "revenue.RENEWAL",
+      providerEvent: "revenue.RENEWAL",
+      body: "not json at all",
+    };
+    const result = await customWebhookProvider.deliver(brokenPayload, credsFor(port), noopHttp);
+
+    expect(result.ok).toBe(false);
+    expect(result.retriable).toBe(false);
+    expect(requestsSeen).toHaveLength(0);
+  });
+
+  it("does not leak sockets/agents across deliveries — repeated sequential deliveries all succeed", async () => {
+    const { port } = await listen((req, res) => {
+      res.writeHead(200);
+      res.end("ok");
+    });
+    for (let i = 0; i < 10; i++) {
+      const result = await customWebhookProvider.deliver(payload, credsFor(port), noopHttp);
+      expect(result.ok).toBe(true);
+    }
   });
 });
 
