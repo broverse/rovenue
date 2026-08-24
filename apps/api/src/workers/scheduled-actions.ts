@@ -224,6 +224,21 @@ async function executeAction(
         })
         .where(eq(purchases.id, purchase.id));
 
+      // Outbox: bridge onto rovenue.subscription for v2 subscribers,
+      // regardless of whether a v1 webhookUrl is configured below.
+      await drizzle.outboxRepo.insert(tx, {
+        aggregateType: "SUBSCRIPTION",
+        aggregateId: purchase.subscriberId,
+        eventType: "subscription.cancel_requested",
+        payload: {
+          projectId: purchase.projectId,
+          purchaseId: purchase.id,
+          subscriberId: purchase.subscriberId,
+          store,
+          requestedAt: now.toISOString(),
+        },
+      });
+
       // Get the project's webhook URL for outgoing notification
       const webhookUrl = await drizzle.projectRepo.findProjectWebhookUrl(
         drizzle.db,

@@ -180,36 +180,57 @@ async function safeSyncAccess(subscriberId: string): Promise<void> {
 }
 
 async function enqueueExpirationWebhook(candidate: Candidate): Promise<void> {
-  const webhookUrl = await drizzle.projectRepo.findProjectWebhookUrl(
-    drizzle.db,
-    candidate.projectId,
-  );
-  if (!webhookUrl) return;
+  const timestamp = new Date().toISOString();
 
-  const existing =
-    await drizzle.outgoingWebhookRepo.findRecentOutgoingByPurchaseAndType(
-      drizzle.db,
+  // No existing tx at this call site — wrap the outbox bridge and the
+  // v1 outgoing-webhook write in a minimal transaction of their own so
+  // they commit atomically. The outbox insert is unconditional (v2
+  // subscribers must get the event even when no v1 webhookUrl is
+  // configured); the v1 write keeps its existing webhookUrl/dedupe gates.
+  await drizzle.db.transaction(async (tx) => {
+    await drizzle.outboxRepo.insert(tx, {
+      aggregateType: "SUBSCRIPTION",
+      aggregateId: candidate.subscriberId,
+      eventType: "subscription.expired",
+      payload: {
+        projectId: candidate.projectId,
+        subscriberId: candidate.subscriberId,
+        purchaseId: candidate.id,
+        timestamp,
+      },
+    });
+
+    const webhookUrl = await drizzle.projectRepo.findProjectWebhookUrl(
+      tx,
       candidate.projectId,
-      candidate.subscriberId,
-      EXPIRATION_EVENT_TYPE,
-      candidate.id,
     );
-  if (existing) return;
+    if (!webhookUrl) return;
 
-  const payload = {
-    eventType: EXPIRATION_EVENT_TYPE,
-    subscriberId: candidate.subscriberId,
-    purchaseId: candidate.id,
-    timestamp: new Date().toISOString(),
-  };
+    const existing =
+      await drizzle.outgoingWebhookRepo.findRecentOutgoingByPurchaseAndType(
+        tx,
+        candidate.projectId,
+        candidate.subscriberId,
+        EXPIRATION_EVENT_TYPE,
+        candidate.id,
+      );
+    if (existing) return;
 
-  await drizzle.outgoingWebhookRepo.enqueueOutgoingWebhook(drizzle.db, {
-    projectId: candidate.projectId,
-    eventType: EXPIRATION_EVENT_TYPE,
-    subscriberId: candidate.subscriberId,
-    purchaseId: candidate.id,
-    payload,
-    url: webhookUrl,
+    const payload = {
+      eventType: EXPIRATION_EVENT_TYPE,
+      subscriberId: candidate.subscriberId,
+      purchaseId: candidate.id,
+      timestamp,
+    };
+
+    await drizzle.outgoingWebhookRepo.enqueueOutgoingWebhook(tx, {
+      projectId: candidate.projectId,
+      eventType: EXPIRATION_EVENT_TYPE,
+      subscriberId: candidate.subscriberId,
+      purchaseId: candidate.id,
+      payload,
+      url: webhookUrl,
+    });
   });
 }
 

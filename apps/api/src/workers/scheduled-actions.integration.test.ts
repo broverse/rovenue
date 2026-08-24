@@ -15,10 +15,11 @@
 // =============================================================
 
 import { afterAll, describe, expect, it } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   access,
   getDb,
+  outboxEvents,
   projects,
   subscribers,
   products,
@@ -34,12 +35,13 @@ import { runScheduledActionsSweep } from "./scheduled-actions";
 
 const RUN_ID = Date.now();
 
-async function seedProject(suffix = "") {
+async function seedProject(suffix = "", webhookUrl: string | null = null) {
   const db = getDb();
   const id = `prj_swp_${RUN_ID}${suffix}`;
   await db.insert(projects).values({
     id,
     name: `Sweep Test Project ${RUN_ID}${suffix}`,
+    webhookUrl,
   });
   return { id };
 }
@@ -147,13 +149,55 @@ async function seedManualPurchase({
   return { purchase, product, subscriber };
 }
 
+async function seedStorePurchase({
+  projectId,
+  suffix = "",
+  store = "APP_STORE" as "APP_STORE" | "PLAY_STORE",
+}: {
+  projectId: string;
+  suffix?: string;
+  store?: "APP_STORE" | "PLAY_STORE";
+}) {
+  const db = getDb();
+  const subscriber = await seedSubscriber({ projectId, suffix });
+  const product = await seedProduct({ projectId, suffix });
+  const synth = `comp_swp_${RUN_ID}_${suffix}_${Math.random().toString(36).slice(2, 8)}`;
+  const futureDate = new Date(Date.now() + 30 * 86400_000);
+
+  const [purchase] = await db
+    .insert(purchases)
+    .values({
+      projectId,
+      subscriberId: subscriber.id,
+      productId: product.id,
+      store,
+      storeTransactionId: synth,
+      originalTransactionId: synth,
+      status: "ACTIVE",
+      isTrial: false,
+      isIntroOffer: false,
+      isSandbox: false,
+      environment: "PRODUCTION",
+      purchaseDate: new Date(),
+      originalPurchaseDate: new Date(),
+      expiresDate: futureDate,
+      priceAmount: "9.99",
+      priceCurrency: "USD",
+      autoRenewStatus: true,
+    })
+    .returning();
+  if (!purchase) throw new Error("seedStorePurchase: no row returned");
+
+  return { purchase, product, subscriber };
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup — remove all rows inserted by this test run (cascade handles the rest)
 // ---------------------------------------------------------------------------
 
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["C1", "C2", "C3"]) {
+  for (const suffix of ["C1", "C2", "C3", "C4", "C5"]) {
     const projectId = `prj_swp_${RUN_ID}${suffix}`;
     // subscriber_access first. Deleting the project cascades to both
     // `subscribers` and `access`, but subscriber_access.accessId -> access.id
@@ -163,6 +207,15 @@ afterAll(async () => {
     await db.delete(subscriberAccess).where(
       inArray(
         subscriberAccess.subscriberId,
+        db
+          .select({ id: subscribers.id })
+          .from(subscribers)
+          .where(eq(subscribers.projectId, projectId)),
+      ),
+    );
+    await db.delete(outboxEvents).where(
+      inArray(
+        outboxEvents.aggregateId,
         db
           .select({ id: subscribers.id })
           .from(subscribers)
@@ -307,5 +360,101 @@ describe("runScheduledActionsSweep", () => {
       .from(scheduledSubscriptionActions)
       .where(eq(scheduledSubscriptionActions.id, action.id));
     expect(updatedAction?.status).toBe("PENDING");
+  });
+
+  // -------------------------------------------------------------------
+  // Task 6: SUBSCRIPTION outbox bridge — APP_STORE/PLAY_STORE branch
+  // enqueues both the v1 outgoing_webhooks row (when a webhookUrl is
+  // configured) AND a rovenue.subscription outbox row (always).
+  // -------------------------------------------------------------------
+
+  it("Case 4: APP_STORE cancel with a webhookUrl configured → outbox row bridged onto SUBSCRIPTION", async () => {
+    const db = getDb();
+    const project = await seedProject("C4", "https://hook.example.com/c4");
+    const { purchase, subscriber } = await seedStorePurchase({
+      projectId: project.id,
+      suffix: "C4",
+      store: "APP_STORE",
+    });
+
+    const [action] = await db
+      .insert(scheduledSubscriptionActions)
+      .values({
+        projectId: project.id,
+        purchaseId: purchase.id,
+        subscriberId: subscriber.id,
+        action: "CANCEL",
+        dueAt: new Date(Date.now() - 1_000),
+        status: "PENDING",
+        payload: { revokeImmediately: false },
+        createdBy: "user-1",
+      })
+      .returning();
+    if (!action) throw new Error("action insert failed");
+
+    const result = await runScheduledActionsSweep();
+    expect(result.executed).toBe(1);
+
+    const outboxRows = await db
+      .select()
+      .from(outboxEvents)
+      .where(
+        and(
+          eq(outboxEvents.aggregateId, subscriber.id),
+          eq(outboxEvents.eventType, "subscription.cancel_requested"),
+        ),
+      );
+    expect(outboxRows.length).toBe(1);
+    const row = outboxRows[0]!;
+    expect(row.aggregateType).toBe("SUBSCRIPTION");
+    const payload = row.payload as Record<string, unknown>;
+    expect(payload.projectId).toBe(project.id);
+    expect(payload.purchaseId).toBe(purchase.id);
+    expect(payload.subscriberId).toBe(subscriber.id);
+    expect(payload.store).toBe("APP_STORE");
+    expect(typeof payload.requestedAt).toBe("string");
+  });
+
+  it("Case 5: APP_STORE cancel with NO webhookUrl configured → outbox row is still bridged (v1 gate does not apply)", async () => {
+    const db = getDb();
+    const project = await seedProject("C5", null);
+    const { purchase, subscriber } = await seedStorePurchase({
+      projectId: project.id,
+      suffix: "C5",
+      store: "PLAY_STORE",
+    });
+
+    const [action] = await db
+      .insert(scheduledSubscriptionActions)
+      .values({
+        projectId: project.id,
+        purchaseId: purchase.id,
+        subscriberId: subscriber.id,
+        action: "CANCEL",
+        dueAt: new Date(Date.now() - 1_000),
+        status: "PENDING",
+        payload: { revokeImmediately: false },
+        createdBy: "user-1",
+      })
+      .returning();
+    if (!action) throw new Error("action insert failed");
+
+    const result = await runScheduledActionsSweep();
+    expect(result.executed).toBe(1);
+
+    const outboxRows = await db
+      .select()
+      .from(outboxEvents)
+      .where(
+        and(
+          eq(outboxEvents.aggregateId, subscriber.id),
+          eq(outboxEvents.eventType, "subscription.cancel_requested"),
+        ),
+      );
+    expect(outboxRows.length).toBe(1);
+    expect(outboxRows[0]!.aggregateType).toBe("SUBSCRIPTION");
+    expect((outboxRows[0]!.payload as Record<string, unknown>).projectId).toBe(
+      project.id,
+    );
   });
 });

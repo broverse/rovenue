@@ -20,13 +20,23 @@ const { dbMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
     findFirst: vi.fn(),
     create: vi.fn(),
   };
-  const dbMock = { purchase, project, outgoingWebhook, revenueEvent };
+  const outbox = {
+    insert: vi.fn(),
+  };
+  const dbMock = { purchase, project, outgoingWebhook, revenueEvent, outbox };
 
   // Drizzle repo stubs delegate to the dbMock spies so existing
   // setup (.mockResolvedValue / .mockRejectedValue) keeps driving
   // the test assertions.
   const drizzleMock = {
-    db: {} as unknown,
+    // enqueueExpirationWebhook wraps the outbox bridge + v1 write in
+    // `drizzle.db.transaction(...)`. The mocked repos below don't care
+    // what `tx` shape they receive, so a bare passthrough is enough.
+    db: {
+      transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
+        cb({}),
+      ),
+    } as unknown,
     purchaseExtRepo: {
       findOverduePurchases: vi.fn(
         async (
@@ -113,6 +123,11 @@ const { dbMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
       createRevenueEvent: vi.fn(
         async (_db: unknown, input: Record<string, unknown>) =>
           dbMock.revenueEvent.create({ data: input }),
+      ),
+    },
+    outboxRepo: {
+      insert: vi.fn(async (_db: unknown, row: Record<string, unknown>) =>
+        dbMock.outbox.insert({ data: row }),
       ),
     },
   };
@@ -284,6 +299,22 @@ describe("runExpiryCheck — ACTIVE expiration", () => {
     expect(revenueCall.data.type).toBe("CANCELLATION");
     expect(revenueCall.data.purchaseId).toBe("pur_1");
 
+    // Task 6: SUBSCRIPTION outbox bridge — bridged alongside the v1 write.
+    expect(dbMock.outbox.insert).toHaveBeenCalledOnce();
+    const outboxCall = dbMock.outbox.insert.mock.calls[0]![0] as {
+      data: {
+        aggregateType: string;
+        aggregateId: string;
+        eventType: string;
+        payload: { projectId: string; purchaseId: string };
+      };
+    };
+    expect(outboxCall.data.aggregateType).toBe("SUBSCRIPTION");
+    expect(outboxCall.data.aggregateId).toBe("sub_1");
+    expect(outboxCall.data.eventType).toBe("subscription.expired");
+    expect(outboxCall.data.payload.projectId).toBe("proj_a");
+    expect(outboxCall.data.payload.purchaseId).toBe("pur_1");
+
     expect(result.checked).toBe(1);
     expect(result.expired).toBe(1);
     expect(result.movedToGracePeriod).toBe(0);
@@ -372,6 +403,8 @@ describe("runExpiryCheck — idempotency", () => {
     expect(dbMock.outgoingWebhook.create).not.toHaveBeenCalled();
     // But revenue event still recorded
     expect(dbMock.revenueEvent.create).toHaveBeenCalled();
+    // And the SUBSCRIPTION outbox bridge fires regardless of the v1 gate.
+    expect(dbMock.outbox.insert).toHaveBeenCalledOnce();
   });
 });
 

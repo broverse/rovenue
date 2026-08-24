@@ -25,12 +25,22 @@ vi.mock("@rovenue/db", async (orig) => {
     ...actual,
     drizzle: {
       ...actual.drizzle,
-      db: {},
+      // The bridge wraps the v1 write in `drizzle.db.transaction(...)`.
+      // The mocked repos below don't care what `tx` shape they receive,
+      // so a bare passthrough that just invokes the callback is enough.
+      db: {
+        transaction: vi.fn(async (cb: (tx: unknown) => Promise<void>) =>
+          cb({}),
+        ),
+      },
       projectRepo: { findProjectWebhookConfig: vi.fn() },
       outgoingWebhookRepo: {
         findRecentOutgoingByPurchaseAndType: vi.fn().mockResolvedValue(null),
         findOutgoingByWebhookEvent: vi.fn().mockResolvedValue(null),
         enqueueOutgoingWebhook: vi.fn().mockResolvedValue(undefined),
+      },
+      outboxRepo: {
+        insert: vi.fn().mockResolvedValue(undefined),
       },
       purchaseExtRepo: {
         findPurchaseWithCreditInfo: vi.fn(),
@@ -46,6 +56,7 @@ const cfg = (eventCategories: string[]) =>
   });
 const enqueueSpy = () =>
   vi.mocked(drizzle.outgoingWebhookRepo.enqueueOutgoingWebhook);
+const outboxInsertSpy = () => vi.mocked(drizzle.outboxRepo.insert);
 
 const mockFindPurchase = () =>
   vi.mocked(drizzle.purchaseExtRepo.findPurchaseWithCreditInfo);
@@ -135,6 +146,42 @@ describe("enqueueOutgoingWebhook category filter", () => {
       eventType: "DID_RENEW",
     });
     expect(enqueueSpy()).not.toHaveBeenCalled();
+  });
+
+  it("bridges onto the outbox (SUBSCRIPTION) even when the v1 category filter drops the event", async () => {
+    cfg(["purchase"]);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_test",
+      eventType: "DID_RENEW",
+    });
+    expect(enqueueSpy()).not.toHaveBeenCalled();
+    expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
+    expect(outboxInsertSpy()).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        aggregateType: "SUBSCRIPTION",
+        aggregateId: "s1",
+        eventType: "DID_RENEW",
+        payload: expect.objectContaining({ projectId: "p1" }),
+      }),
+    );
+  });
+
+  it("bridges onto the outbox even when no v1 webhookUrl is configured", async () => {
+    vi.mocked(drizzle.projectRepo.findProjectWebhookConfig).mockResolvedValue({
+      url: null,
+      eventCategories: [],
+    });
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      webhookEventId: "whe_test",
+      eventType: "DID_RENEW",
+    });
+    expect(enqueueSpy()).not.toHaveBeenCalled();
+    expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
   });
 
   it("fails open for unmapped event types", async () => {
@@ -261,6 +308,7 @@ describe("runPostProcessing durability", () => {
     await expect(runPostProcessing(args)).resolves.toBeUndefined();
     expect(vi.mocked(syncAccess)).toHaveBeenCalledWith("s1");
     expect(enqueueSpy()).toHaveBeenCalledTimes(1);
+    expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
   });
 });
 

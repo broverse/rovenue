@@ -314,59 +314,81 @@ async function enqueueOutgoingWebhook(
     drizzle.db,
     args.projectId,
   );
-  if (!config?.url) return;
 
-  // Category filter — empty list means "all events". For a non-empty
-  // list, drop events whose category isn't subscribed. Unmapped events
-  // (category === null) fail open so unknown/new types aren't lost.
-  if (config.eventCategories.length > 0) {
-    const category = toWebhookEventCategory(args.eventType);
-    if (category !== null && !config.eventCategories.includes(category)) {
-      return;
+  // No existing tx at this call site — wrap the outbox bridge and the
+  // v1 outgoing-webhook write (category filter + dedupe + insert) in a
+  // minimal transaction so they commit atomically. The outbox insert is
+  // unconditional: v2 subscribers must get the event even when no v1
+  // webhookUrl is configured, or when the project's category filter
+  // would have dropped it for v1 delivery.
+  await drizzle.db.transaction(async (tx) => {
+    await drizzle.outboxRepo.insert(tx, {
+      aggregateType: "SUBSCRIPTION",
+      aggregateId: args.subscriberId,
+      eventType: args.eventType,
+      payload: {
+        projectId: args.projectId,
+        subscriberId: args.subscriberId,
+        purchaseId: args.purchaseId ?? null,
+        webhookEventId: args.webhookEventId,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    if (!config?.url) return;
+
+    // Category filter — empty list means "all events". For a non-empty
+    // list, drop events whose category isn't subscribed. Unmapped events
+    // (category === null) fail open so unknown/new types aren't lost.
+    if (config.eventCategories.length > 0) {
+      const category = toWebhookEventCategory(args.eventType);
+      if (category !== null && !config.eventCategories.includes(category)) {
+        return;
+      }
     }
-  }
 
-  // Idempotency across BullMQ retries (post-processing re-runs whole):
-  // purchase events dedupe on (project, subscriber, type, purchase);
-  // purchase-less events dedupe on the inbound webhookEventId stamped
-  // into the outgoing payload below.
-  if (args.purchaseId) {
-    const existing =
-      await drizzle.outgoingWebhookRepo.findRecentOutgoingByPurchaseAndType(
-        drizzle.db,
-        args.projectId,
-        args.subscriberId,
-        args.eventType,
-        args.purchaseId,
-      );
-    if (existing) return;
-  } else {
-    const existing =
-      await drizzle.outgoingWebhookRepo.findOutgoingByWebhookEvent(
-        drizzle.db,
-        args.projectId,
-        args.subscriberId,
-        args.eventType,
-        args.webhookEventId,
-      );
-    if (existing) return;
-  }
+    // Idempotency across BullMQ retries (post-processing re-runs whole):
+    // purchase events dedupe on (project, subscriber, type, purchase);
+    // purchase-less events dedupe on the inbound webhookEventId stamped
+    // into the outgoing payload below.
+    if (args.purchaseId) {
+      const existing =
+        await drizzle.outgoingWebhookRepo.findRecentOutgoingByPurchaseAndType(
+          tx,
+          args.projectId,
+          args.subscriberId,
+          args.eventType,
+          args.purchaseId,
+        );
+      if (existing) return;
+    } else {
+      const existing =
+        await drizzle.outgoingWebhookRepo.findOutgoingByWebhookEvent(
+          tx,
+          args.projectId,
+          args.subscriberId,
+          args.eventType,
+          args.webhookEventId,
+        );
+      if (existing) return;
+    }
 
-  const payload = {
-    eventType: args.eventType,
-    subscriberId: args.subscriberId,
-    purchaseId: args.purchaseId ?? null,
-    webhookEventId: args.webhookEventId,
-    timestamp: new Date().toISOString(),
-  };
+    const payload = {
+      eventType: args.eventType,
+      subscriberId: args.subscriberId,
+      purchaseId: args.purchaseId ?? null,
+      webhookEventId: args.webhookEventId,
+      timestamp: new Date().toISOString(),
+    };
 
-  await drizzle.outgoingWebhookRepo.enqueueOutgoingWebhook(drizzle.db, {
-    projectId: args.projectId,
-    eventType: args.eventType,
-    subscriberId: args.subscriberId,
-    purchaseId: args.purchaseId ?? null,
-    payload,
-    url: config.url,
+    await drizzle.outgoingWebhookRepo.enqueueOutgoingWebhook(tx, {
+      projectId: args.projectId,
+      eventType: args.eventType,
+      subscriberId: args.subscriberId,
+      purchaseId: args.purchaseId ?? null,
+      payload,
+      url: config.url,
+    });
   });
 }
 
