@@ -82,19 +82,24 @@ function applyConnectionOverlay(
 /**
  * CUSTOM_WEBHOOK has no row in `useProjectAppConnections` (that endpoint
  * covers the single-connection catalog entries) — its "connected" status is
- * derived here from whether the project has any live webhook endpoint.
+ * derived here from whether the project has any live (isEnabled) webhook
+ * endpoint. Mirrors the `isEnabled` gate the API applies to every other
+ * provider's status derivation (apps/api/src/services/apps-connections.ts:
+ * `if (!conn || !conn.isEnabled) return available;`) — a project whose
+ * endpoints are all disabled must not show as "Connected".
  */
-function applyWebhookStatus(
+export function applyWebhookStatus(
   catalog: ReadonlyArray<AppDescriptor>,
   webhookConnections: ReadonlyArray<IntegrationConnectionRow>,
 ): ReadonlyArray<AppDescriptor> {
-  if (webhookConnections.length === 0) return catalog;
+  const hasEnabledEndpoint = webhookConnections.some((c) => c.isEnabled);
+  if (!hasEnabledEndpoint) return catalog;
   return catalog.map((app) =>
     app.id === CUSTOM_WEBHOOK_APP_ID ? { ...app, status: "connected" } : app,
   );
 }
 
-function AppsPage({ projectId }: { projectId: string }) {
+export function AppsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [active, setActive] = useState<RailEntryId>("all");
   const [query, setQuery] = useState("");
