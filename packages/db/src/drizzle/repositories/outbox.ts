@@ -35,10 +35,16 @@ export async function insert(
 /**
  * Dedup check: has an outbox row for this (aggregateType, aggregateId,
  * eventType) already been bridged for this purchase? Mirrors
- * outgoing-webhooks' findRecentOutgoingByPurchaseAndType — used by
- * callers (webhook-processor's post-processing) that re-run on BullMQ
- * retry so the outbox bridge doesn't insert a fresh row (and thus a
- * fresh id) every attempt.
+ * outgoing-webhooks' findRecentOutgoingByPurchaseAndType.
+ *
+ * FALLBACK ONLY for the outbox bridge: this predicate is time-unbounded
+ * and blind to which inbound event produced the row, so it also swallows
+ * a genuinely NEW store event that normalizes onto an already-bridged
+ * public key for the same purchase (billing_issue recurring next cycle,
+ * DID_FAIL_TO_RENEW then GRACE_PERIOD_EXPIRED, …). webhook-processor
+ * therefore prefers findByWebhookEventAndType below whenever it has an
+ * inbound webhook_events id, and reaches for this one only when it does
+ * not.
  */
 export async function findByPurchaseAndType(
   db: Db,

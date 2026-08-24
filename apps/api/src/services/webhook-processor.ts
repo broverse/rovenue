@@ -327,9 +327,10 @@ async function enqueueOutgoingWebhook(
   // and it IS deduped (dedupe and v1-config gating are orthogonal):
   // runPostProcessing re-runs whole on a BullMQ retry, and without a
   // dedupe check here a retry would insert a fresh outbox_events row
-  // (fresh id) every attempt. Reuse the same signals as the v1 dedupe
-  // below: purchase events key on (aggregateType, subscriber, type,
-  // purchase); purchase-less events key on the inbound webhookEventId.
+  // (fresh id) every attempt. The dedupe key is the INBOUND
+  // webhookEventId whenever there is one — see the key-selection comment
+  // at the lookup below for why the purchase-keyed variant is only a
+  // fallback here (it differs from the v1 dedupe further down).
   await drizzle.db.transaction(async (tx) => {
     // Only bridge event types the integrations fan-out can actually
     // deliver. This call site passes the STORE-NATIVE type (DID_RENEW,
@@ -353,21 +354,40 @@ async function enqueueOutgoingWebhook(
       ? args.eventType
       : STORE_EVENT_TO_PUBLIC_KEY[args.eventType];
     if (publicKey) {
-      const alreadyBridged = args.purchaseId
-        ? await drizzle.outboxRepo.findByPurchaseAndType(
-            tx,
-            "SUBSCRIPTION",
-            args.subscriberId,
-            publicKey,
-            args.purchaseId,
-          )
-        : await drizzle.outboxRepo.findByWebhookEventAndType(
+      // DEDUPE KEY SELECTION — the inbound webhookEventId wins.
+      //
+      // The unit of replay this dedupe exists to absorb is one BullMQ retry
+      // of runPostProcessing, i.e. one inbound webhook_events row, so that
+      // row's id is exactly the right key. Keying on the PURCHASE instead
+      // (the previous behavior, mirroring the v1 dedupe below) is wrong
+      // here because normalization deliberately collapses several DISTINCT
+      // store events onto ONE public key: Apple DID_FAIL_TO_RENEW and a
+      // later GRACE_PERIOD_EXPIRED both bridge to
+      // `subscription.billing_issue` for the same purchase, Google
+      // PRICE_CHANGE_CONFIRMED and DEFERRED both to
+      // `subscription.product_changed`, and a billing issue recurs every
+      // renewal cycle. Purchase-keyed and time-unbounded, the second and
+      // every later one of those was silently dropped forever — while v1,
+      // which dedupes per inbound event id, still delivered them. Purchase
+      // keying stays only as the fallback for a producer that carries no
+      // inbound webhook event.
+      const alreadyBridged = args.webhookEventId
+        ? await drizzle.outboxRepo.findByWebhookEventAndType(
             tx,
             "SUBSCRIPTION",
             args.subscriberId,
             publicKey,
             args.webhookEventId,
-          );
+          )
+        : args.purchaseId
+          ? await drizzle.outboxRepo.findByPurchaseAndType(
+              tx,
+              "SUBSCRIPTION",
+              args.subscriberId,
+              publicKey,
+              args.purchaseId,
+            )
+          : null;
       if (!alreadyBridged) {
         await drizzle.outboxRepo.insert(tx, {
           aggregateType: "SUBSCRIPTION",

@@ -48,7 +48,7 @@ async function seedSubscriber(projectId: string, suffix: string) {
 
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["W1", "W2", "W3", "W4", "W5", "W6"]) {
+  for (const suffix of ["W1", "W2", "W3", "W4", "W5", "W6", "W7"]) {
     const projectId = `prj_whp_${RUN_ID}${suffix}`;
     await db.delete(outboxEvents).where(
       inArray(
@@ -271,5 +271,67 @@ describe("enqueueOutgoingWebhook — SUBSCRIPTION outbox bridge", () => {
     expect(payload.projectId).toBe(project.id);
     expect(payload.subscriberId).toBe(subscriber.id);
     expect(payload.webhookEventId).toBe("whe_int_w6_retry");
+  });
+
+  // -------------------------------------------------------------------
+  // Final-review C2 regression: normalization collapses DISTINCT store
+  // events onto one public key, so a purchase-keyed, time-unbounded
+  // dedupe silently dropped every one after the first. Apple's
+  // postProcess always passes purchaseId, making that the COMMON path
+  // for exactly these events — and v1 (which dedupes per inbound
+  // webhookEventId) kept delivering them, so v2 diverged from v1.
+  //
+  // Two distinct inbound webhook events, same purchase, both normalizing
+  // to subscription.billing_issue, must bridge TWO outbox rows — while
+  // Case 4/Case 6's same-webhookEventId retry still bridges exactly one.
+  // -------------------------------------------------------------------
+  it("Case 7: two DISTINCT inbound webhook events on the same purchase that normalize to the same public key bridge TWO outbox rows", async () => {
+    const db = getDb();
+    const project = await seedProject("W7", null);
+    const subscriber = await seedSubscriber(project.id, "W7");
+
+    const purchaseId = "pur_whp_w7_shared";
+    const base = {
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      purchaseId,
+    };
+
+    // The renewal fails …
+    await runPostProcessing({
+      ...base,
+      eventType: "DID_FAIL_TO_RENEW",
+      webhookEventId: "whe_int_w7_fail",
+    });
+    // … and weeks later the billing grace period runs out. Different
+    // inbound event, same purchase, same normalized public key.
+    await runPostProcessing({
+      ...base,
+      eventType: "GRACE_PERIOD_EXPIRED",
+      webhookEventId: "whe_int_w7_grace",
+    });
+    // A BullMQ retry of that second event must still not add a third row.
+    await runPostProcessing({
+      ...base,
+      eventType: "GRACE_PERIOD_EXPIRED",
+      webhookEventId: "whe_int_w7_grace",
+    });
+
+    const outboxRows = await db
+      .select()
+      .from(outboxEvents)
+      .where(eq(outboxEvents.aggregateId, subscriber.id));
+
+    expect(outboxRows.length).toBe(2);
+    for (const row of outboxRows) {
+      expect(row.aggregateType).toBe("SUBSCRIPTION");
+      expect(row.eventType).toBe("subscription.billing_issue");
+      expect((row.payload as Record<string, unknown>).purchaseId).toBe(purchaseId);
+    }
+    expect(
+      new Set(
+        outboxRows.map((r) => (r.payload as Record<string, unknown>).webhookEventId),
+      ),
+    ).toEqual(new Set(["whe_int_w7_fail", "whe_int_w7_grace"]));
   });
 });

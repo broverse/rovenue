@@ -291,10 +291,11 @@ describe("enqueueOutgoingWebhook category filter", () => {
 // =============================================================
 //
 // A BullMQ retry re-runs the whole post-processing block, so a second
-// enqueue for the SAME inbound webhook event must be a no-op. Purchase
-// events were already deduped on (project, subscriber, eventType,
-// purchaseId); purchase-less events dedupe on the inbound
-// webhookEventId stamped into the outgoing payload.
+// enqueue for the SAME inbound webhook event must be a no-op. The v1
+// outgoing-webhook write dedupes purchase events on (project, subscriber,
+// eventType, purchaseId) and purchase-less ones on the inbound
+// webhookEventId stamped into the outgoing payload; the v2 outbox bridge
+// always dedupes on that webhookEventId (see the C2 case below).
 describe("enqueueOutgoingWebhook idempotency", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -334,9 +335,11 @@ describe("enqueueOutgoingWebhook idempotency", () => {
   // webhookUrl/category, but must still be deduped on retry — otherwise
   // a BullMQ retry inserts a fresh outbox_events row (fresh id) every
   // attempt, breaking runPostProcessing's idempotency invariant.
-  it("does not re-bridge a purchase event onto the outbox when already bridged", async () => {
+  it("does not re-bridge a purchase event onto the outbox when the SAME inbound webhook event was already bridged", async () => {
     cfg([]);
-    vi.mocked(drizzle.outboxRepo.findByPurchaseAndType).mockResolvedValueOnce({
+    vi.mocked(
+      drizzle.outboxRepo.findByWebhookEventAndType,
+    ).mockResolvedValueOnce({
       id: "oe_existing",
     } as never);
     await enqueueOutgoingWebhook({
@@ -349,6 +352,40 @@ describe("enqueueOutgoingWebhook idempotency", () => {
     expect(outboxInsertSpy()).not.toHaveBeenCalled();
     // v1 write is unaffected by the outbox dedupe check.
     expect(enqueueSpy()).toHaveBeenCalledTimes(1);
+  });
+
+  // Final-review C2: the outbox bridge keys on the INBOUND webhook event,
+  // never on the purchase, precisely because several distinct store events
+  // normalize onto one public key for one purchase (DID_FAIL_TO_RENEW then
+  // GRACE_PERIOD_EXPIRED, a billing issue recurring next cycle, …). A
+  // purchase-keyed hit must NOT suppress a genuinely new inbound event —
+  // asserted here by making findByPurchaseAndType report a match and
+  // proving it is not even consulted.
+  it("bridges a purchase event whose purchase already has a row for this key, when the inbound webhook event is a different one", async () => {
+    cfg([]);
+    vi.mocked(drizzle.outboxRepo.findByPurchaseAndType).mockResolvedValueOnce({
+      id: "oe_existing_for_purchase",
+    } as never);
+    await enqueueOutgoingWebhook({
+      projectId: "p1",
+      subscriberId: "s1",
+      purchaseId: "pur_dup",
+      webhookEventId: "whe_second_distinct_event",
+      eventType: MAPPED_EVENT_TYPE,
+    });
+    expect(
+      vi.mocked(drizzle.outboxRepo.findByPurchaseAndType),
+    ).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(drizzle.outboxRepo.findByWebhookEventAndType),
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      "SUBSCRIPTION",
+      "s1",
+      MAPPED_EVENT_TYPE,
+      "whe_second_distinct_event",
+    );
+    expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
   });
 
   it("does not re-bridge a purchase-less event onto the outbox when already bridged", async () => {
