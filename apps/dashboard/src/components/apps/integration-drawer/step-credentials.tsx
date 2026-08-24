@@ -80,13 +80,19 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
   // defined here verbatim per the Task 4 brief.
   AMPLITUDE: [
     { id: "api_key", label: "API key", secret: true },
-    { id: "region", label: "Region (us or eu)", placeholder: "us" },
+    // Optional: the backend credentialsSchema types it `.optional()` and
+    // both providers default to the US ingestion host when it is absent, so
+    // leaving it blank must not block Validate.
+    { id: "region", label: "Region (us or eu)", placeholder: "us", optional: true },
   ],
   MIXPANEL: [
     { id: "service_account_username", label: "Service account username" },
     { id: "service_account_secret", label: "Service account secret", secret: true },
     { id: "project_id", label: "Project ID" },
-    { id: "region", label: "Region (us or eu)", placeholder: "us" },
+    // Optional: the backend credentialsSchema types it `.optional()` and
+    // both providers default to the US ingestion host when it is absent, so
+    // leaving it blank must not block Validate.
+    { id: "region", label: "Region (us or eu)", placeholder: "us", optional: true },
   ],
   APPSFLYER: [
     { id: "dev_key", label: "Dev key", secret: true },
@@ -171,6 +177,13 @@ export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
     "Validate sends a real, clearly-tagged test event to this Mixpanel project (deduplicated across repeat clicks).",
   SLACK:
     "Validate posts a real \"Rovenue connected ✅\" message to this Slack channel — not deduplicated, so repeat clicks post again.",
+  // GA4's /debug/mp/collect endpoint validates the PAYLOAD and answers 200
+  // with an empty validationMessages array for wrong-but-well-formed
+  // credentials too — it never checks that the api_secret and firebase app id
+  // actually belong together. Saying so here keeps a green Validate from
+  // reading as proof the connection works.
+  FIREBASE_GA4:
+    "Validate checks the payload format only — it cannot verify the api_secret or app ID are correct. The first real delivery is the live proof.",
 };
 
 // ---------------------------------------------------------------------------

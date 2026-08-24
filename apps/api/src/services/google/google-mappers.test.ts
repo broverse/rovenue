@@ -11,6 +11,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  STORE_EVENT_TO_PUBLIC_KEY,
+  toWebhookEventCategory,
+} from "@rovenue/shared";
+import {
   classifyNotification,
   effectiveGoogleOrderId,
   isGoogleRenewalOrderId,
@@ -89,20 +93,28 @@ describe("classifyNotification", () => {
     [8, "SUBSCRIPTION_PRICE_CHANGE_CONFIRMED"],
     [9, "SUBSCRIPTION_DEFERRED"],
     [10, "SUBSCRIPTION_PAUSED"],
+    [11, "SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED"],
     [12, "SUBSCRIPTION_REVOKED"],
     [13, "SUBSCRIPTION_EXPIRED"],
+    [20, "SUBSCRIPTION_PENDING_PURCHASE_CANCELED"],
   ])("maps numeric notificationType %d to the named %s", (numeric, named) => {
     expect(classifyNotification(subscriptionPayload(numeric))).toBe(named);
   });
 
   it("keeps the SUBSCRIPTION_${n} fallback for a numeric code with no named entry", () => {
-    // 11 (SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED) and 20
-    // (SUBSCRIPTION_PENDING_PURCHASE_CANCELED) are real Google codes not
-    // in the spec's named table; an outright-unknown code (999) must also
-    // never throw or drop the event.
-    expect(classifyNotification(subscriptionPayload(11))).toBe("SUBSCRIPTION_11");
-    expect(classifyNotification(subscriptionPayload(20))).toBe("SUBSCRIPTION_20");
+    // An outright-unknown/future code must never throw or drop the event.
     expect(classifyNotification(subscriptionPayload(999))).toBe("SUBSCRIPTION_999");
+  });
+
+  // Naming codes 11 and 20 is a LOG-READABILITY change only: neither has a
+  // webhook category nor a public-key normalization entry, so both must stay
+  // unmapped — exactly as they were under the SUBSCRIPTION_${n} fallback.
+  it("names codes 11 and 20 without giving them a category or a public event key", () => {
+    for (const numeric of [11, 20]) {
+      const named = classifyNotification(subscriptionPayload(numeric));
+      expect(toWebhookEventCategory(named)).toBeNull();
+      expect(STORE_EVENT_TO_PUBLIC_KEY[named]).toBeUndefined();
+    }
   });
 
   it("still classifies one-time product notifications by their own numeric scheme", () => {

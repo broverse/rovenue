@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { server } from "../../../../tests/msw/server";
 import { renderWithRouter } from "../../../../tests/render";
@@ -129,6 +129,7 @@ describe("IntegrationDrawer — M6.16 e2e happy path", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
+    const WEBHOOK_URL = "https://api.example.com/hooks";
     const WEBHOOK_CONNECTION = {
       id: "wh1",
       providerId: "CUSTOM_WEBHOOK",
@@ -178,9 +179,24 @@ describe("IntegrationDrawer — M6.16 e2e happy path", () => {
     await screen.findByRole("dialog");
 
     // Step 1 — Credentials: URL field, create the endpoint.
+    //
+    // fireEvent.change, not user.type/user.paste: this drawer's Base UI
+    // dialog keeps its focus trap moving while the open transition runs, and
+    // in a fast standalone run the keystrokes land nowhere — the input stays
+    // EMPTY. "Create endpoint" is gated on `isHttpsUrl(url)`, so the button
+    // then stays disabled, the click is a no-op, and the test fails three
+    // assertions later on a missing secret, reading like a network problem.
+    // (Pointer events are unaffected — every user.click below is genuine.)
+    // A change event sets the controlled value in one shot, which is what
+    // makes this test deterministic; the value is asserted immediately so a
+    // future regression fails HERE with an obvious message.
     const urlInput = await screen.findByLabelText(/endpoint url/i);
-    await user.type(urlInput, "https://api.example.com/hooks");
-    await user.click(screen.getByRole("button", { name: /create endpoint/i }));
+    fireEvent.change(urlInput, { target: { value: WEBHOOK_URL } });
+    expect(urlInput).toHaveValue(WEBHOOK_URL);
+
+    const createBtn = screen.getByRole("button", { name: /create endpoint/i });
+    await waitFor(() => expect((createBtn as HTMLButtonElement).disabled).toBe(false));
+    await user.click(createBtn);
 
     // Secret shown once, then Next.
     expect(await screen.findByText("whsec_supersecret")).toBeTruthy();

@@ -32,4 +32,4 @@ All six accept any non-empty string value up to 500 characters — Rovenue does 
 
 - Setting a vendor-id attribute does not, by itself, forward any data anywhere — it only makes the id available for integrations (such as the Wave-1 AppsFlyer/Adjust/Firebase/Mixpanel/Amplitude outbound integrations) to read when resolving a subscriber's identity on the destination platform.
 - An unrecognised `$`-prefixed key is still treated as reserved and rejected, so typos in a vendor-id key name fail the write instead of being silently stored as an unknown attribute.
-- See [Outbound Webhooks](/docs/integrations/outbound-webhooks) for how subscriber attributes surface in webhook payloads.
+- Subscriber attributes deliberately never appear in outbound webhook payloads — vendor ids and other attributes are read only at delivery time, by the integrations that need them. See [Outbound Webhooks](/docs/integrations/outbound-webhooks) for the PII-free payload contract that keeps them out.

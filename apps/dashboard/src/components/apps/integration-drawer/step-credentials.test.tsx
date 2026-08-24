@@ -232,6 +232,16 @@ describe("StepCredentials — PROVIDER_VALIDATE_NOTES", () => {
     expect(screen.getByText(PROVIDER_VALIDATE_NOTES.MIXPANEL)).toBeTruthy();
   });
 
+  // FIREBASE_GA4's note discloses a LIMIT rather than a side effect: GA4's
+  // debug endpoint answers 200 for credentials that are well-formed but
+  // wrong, so a green Validate is not proof the connection works.
+  it("renders the note near Validate when the provider has one (FIREBASE_GA4)", async () => {
+    renderWithRouter(<ProviderWrapper providerId="FIREBASE_GA4" />);
+
+    expect(await screen.findByLabelText(/measurement protocol api secret/i)).toBeTruthy();
+    expect(screen.getByText(PROVIDER_VALIDATE_NOTES.FIREBASE_GA4)).toBeTruthy();
+  });
+
   it("renders no note for a provider without one (META_CAPI)", async () => {
     renderWithRouter(<ProviderWrapper providerId="META_CAPI" />);
 

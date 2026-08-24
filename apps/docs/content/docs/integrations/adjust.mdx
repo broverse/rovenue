@@ -76,7 +76,9 @@ See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attr
 
 ## 5. Deduplication
 
-Every forwarded event's `deduplication_id` and `callback_params.outbox_event_id` are both set to Rovenue's internal `outboxEventId`. Combined with Adjust's own event-level deduplication, retries after a network failure or an at-least-once outbox replay do not double-count revenue.
+Every forwarded event's `deduplication_id` and `callback_params.outbox_event_id` are both set to Rovenue's internal `outboxEventId`.
+
+`deduplication_id` is **not** an enumerated parameter in Adjust's published S2S events reference — Adjust's dedup behaviour for S2S events is undocumented there. Rovenue sends it as a top-level echo of the same id already carried in `callback_params.outbox_event_id`, on the expectation that an unrecognised parameter is ignored safely; if Adjust does act on it, retries after a network failure or an at-least-once outbox replay dedupe at Adjust as well. Either way, Rovenue's own guarantees (an at-least-once outbox plus query-time idempotent revenue views) do not depend on Adjust honouring the field, and `callback_params.outbox_event_id` is always available in Adjust's raw-data exports for dedup on your side.
 
 ---
 

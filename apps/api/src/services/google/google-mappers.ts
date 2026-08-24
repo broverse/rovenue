@@ -62,6 +62,13 @@ export function parsePushBody(body: GooglePubSubPushBody): GoogleRtdnPayload {
 // (below) so a new/undocumented code never throws or drops the event —
 // it just stays unmapped everywhere the named form matters, same as
 // before this fix.
+//
+// Codes 11 (PAUSE_SCHEDULE_CHANGED) and 20 (PENDING_PURCHASE_CANCELED) are
+// named here for LOG READABILITY ONLY — naming a code changes nothing about
+// how it is handled. Neither has an EVENT_TYPE_TO_CATEGORY nor a
+// STORE_EVENT_TO_PUBLIC_KEY entry, deliberately: a pause-schedule change and
+// a canceled pending purchase carry no unambiguous public lifecycle meaning,
+// so both stay unmapped and undelivered exactly as before.
 const GOOGLE_SUBSCRIPTION_NOTIFICATION_NAME: Readonly<Record<number, string>> = {
   1: "SUBSCRIPTION_RECOVERED",
   2: "SUBSCRIPTION_RENEWED",
@@ -73,8 +80,10 @@ const GOOGLE_SUBSCRIPTION_NOTIFICATION_NAME: Readonly<Record<number, string>> = 
   8: "SUBSCRIPTION_PRICE_CHANGE_CONFIRMED",
   9: "SUBSCRIPTION_DEFERRED",
   10: "SUBSCRIPTION_PAUSED",
+  11: "SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED",
   12: "SUBSCRIPTION_REVOKED",
   13: "SUBSCRIPTION_EXPIRED",
+  20: "SUBSCRIPTION_PENDING_PURCHASE_CANCELED",
 };
 
 export function classifyNotification(payload: GoogleRtdnPayload): string {
