@@ -12,13 +12,15 @@ import { firebaseGa4Provider } from "./providers/firebase-ga4";
 import { brazeProvider } from "./providers/braze";
 import { onesignalProvider } from "./providers/onesignal";
 import { iterableProvider } from "./providers/iterable";
+import { airbridgeProvider } from "./providers/airbridge";
 import type { ProviderId } from "./types";
 
 describe("PROVIDERS registry", () => {
-  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK, FIREBASE_GA4, BRAZE, ONESIGNAL and ITERABLE", () => {
+  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK, FIREBASE_GA4, BRAZE, ONESIGNAL, ITERABLE and AIRBRIDGE", () => {
     const keys = Object.keys(PROVIDERS).sort();
     expect(keys).toEqual([
       "ADJUST",
+      "AIRBRIDGE",
       "AMPLITUDE",
       "APPSFLYER",
       "BRAZE",
@@ -46,6 +48,7 @@ describe("PROVIDERS registry", () => {
     expect(getProvider("BRAZE")).toBe(brazeProvider);
     expect(getProvider("ONESIGNAL")).toBe(onesignalProvider);
     expect(getProvider("ITERABLE")).toBe(iterableProvider);
+    expect(getProvider("AIRBRIDGE")).toBe(airbridgeProvider);
   });
 
   it("throws on unknown provider", () => {
@@ -60,7 +63,7 @@ describe("PROVIDERS registry", () => {
 // =============================================================
 
 describe("providerIds()", () => {
-  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK, FIREBASE_GA4, BRAZE, ONESIGNAL and ITERABLE", () => {
+  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK, FIREBASE_GA4, BRAZE, ONESIGNAL, ITERABLE and AIRBRIDGE", () => {
     const ids = providerIds();
     expect(ids).toContain("META_CAPI");
     expect(ids).toContain("TIKTOK_EVENTS");
@@ -74,6 +77,7 @@ describe("providerIds()", () => {
     expect(ids).toContain("BRAZE");
     expect(ids).toContain("ONESIGNAL");
     expect(ids).toContain("ITERABLE");
+    expect(ids).toContain("AIRBRIDGE");
   });
 
   it("returns a non-empty tuple usable by z.enum", () => {

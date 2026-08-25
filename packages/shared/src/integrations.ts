@@ -112,7 +112,10 @@ export type IntegrationProviderId =
   // already activated by BRAZE).
   | "ONESIGNAL"
   // Wave-2 Task 6 — third lifecycle-category provider.
-  | "ITERABLE";
+  | "ITERABLE"
+  // Wave-2 Task 7 — attribution-category provider (category already exists
+  // since Wave-1's APPSFLYER/ADJUST).
+  | "AIRBRIDGE";
 
 export const WEBHOOK_API_VERSION = "2026-08-24";
 

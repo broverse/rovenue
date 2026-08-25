@@ -222,6 +222,17 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * project-scoped credential-check call that fails with 401 on a bad
  * api_key and writes nothing. There is no live-write side effect to
  * disclose. See providers/iterable.ts's validateCredentials comment.
+ *
+ * AIRBRIDGE: deliberately has NO entry here (same shape as APPSFLYER, NOT
+ * ONESIGNAL/ITERABLE). Its validateCredentials sends nothing — no event, no
+ * request at all — it only checks the submitted credentials' shape against
+ * credentialsSchema (app_name + api_token both present). Every genuinely
+ * zero-footprint GET endpoint Airbridge documents (List Tracking Links) is
+ * an unrelated feature that isn't scoped by app_name, so it can't prove
+ * this connection's app_name/api_token pair together — see
+ * providers/airbridge.ts's validateCredentials comment and
+ * apps/docs/content/docs/integrations/airbridge.mdx for the documented
+ * "first delivery is the live proof" caveat this implies.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:

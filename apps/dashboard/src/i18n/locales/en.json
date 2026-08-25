@@ -4431,6 +4431,7 @@
     "vendors": {
       "appsflyer": "AppsFlyer Inc.",
       "adjust": "Adjust GmbH",
+      "airbridge": "AB180 Inc.",
       "branch": "Branch Metrics",
       "kochava": "Kochava Inc.",
       "singular": "Singular Labs",
@@ -4488,6 +4489,10 @@
       "adjust": {
         "name": "Adjust",
         "description": "Attribution, fraud prevention, and audience builder. Forwards subscription events to your Adjust dashboard."
+      },
+      "airbridge": {
+        "name": "Airbridge",
+        "description": "Mobile attribution and marketing analytics. Forwards purchase and subscription-lifecycle events as Airbridge in-app events."
       },
       "branch": {
         "name": "Branch",

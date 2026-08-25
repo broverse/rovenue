@@ -85,6 +85,11 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   // filtered out at the mapping layer via defaultEventMapping, same as
   // BRAZE, not hidden from the picker).
   ITERABLE: STANDARD_PROVIDER_EVENT_KEYS,
+  // AIRBRIDGE (Wave-2 Task 7) offers the same 13-key catalog — its
+  // `eventCatalog` (providers/airbridge.ts) is also literally
+  // STANDARD_PROVIDER_EVENT_KEYS. Unlike BRAZE/ITERABLE, AIRBRIDGE's
+  // defaultEventMapping maps revenue.REFUND too (see event-mapping.ts).
+  AIRBRIDGE: STANDARD_PROVIDER_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

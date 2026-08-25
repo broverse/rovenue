@@ -1,5 +1,9 @@
 import type { RovenueEventKey, IntegrationProviderId } from "@rovenue/shared";
-import { ROVENUE_EVENT_KEYS, SUBSCRIPTION_LIFECYCLE_KEYS } from "@rovenue/shared";
+import {
+  ROVENUE_EVENT_KEYS,
+  SUBSCRIPTION_LIFECYCLE_KEYS,
+  SUBSCRIPTION_BRIDGE_EVENT_KEYS,
+} from "@rovenue/shared";
 import type { RovenueEventEnvelope } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -94,6 +98,51 @@ function brazeLifecycleEventName(key: RovenueEventKey): string {
 // which is the desired behavior — not a gap. Refund handling on ad platforms
 // (e.g. value-based deletion of a prior Purchase) is a separate, provider-
 // specific feature, not a default conversion mapping.
+// AIRBRIDGE (Wave-2 Task 7) — vendor category names verified against
+// Airbridge's own first-party docs (help.airbridge.io/en/guides/
+// airbridge-event-types, fetched 2026-08-25; the developers.airbridge.io
+// portal itself is a JS-rendered SPA shell that returns no content to a
+// plain fetch, so help.airbridge.io — the same content, server-rendered —
+// was used instead, corroborated by help.airbridge.io/en/references/
+// s2s-event's own request/response examples for the wire shape). Airbridge's
+// standard e-commerce/subscription vocabulary covers 6 of the 13 keys with a
+// real vendor event name; the remaining 6 subscription-lifecycle keys (Wave-1
+// narrow store-lifecycle normalization — cancel_requested/expired/
+// billing_issue/grace_period/uncancelled/product_changed) have no Airbridge
+// equivalent, so they get the same Rovenue-namespaced `rovenue_<suffix>`
+// custom-category convention BRAZE/GA4/ITERABLE already use (own local copy
+// of the string transform, matching BRAZE's pattern rather than importing
+// GA4's helper).
+//
+// revenue.INITIAL / revenue.TRIAL_CONVERSION -> "airbridge.subscribe" — both
+// are "a paid subscription just started" moments (first purchase, or a
+// trial converting to paid), mirroring META_CAPI/TIKTOK_EVENTS' identical
+// choice to map both keys to their platforms' "Subscribe" event above.
+// revenue.RENEWAL / revenue.CREDIT_PURCHASE -> "airbridge.ecommerce.
+// order.completed" — a repeat charge or one-time IAP is a completed order,
+// not a new "subscribe" action; same INITIAL-vs-repeat split META_CAPI makes
+// (RENEWAL/CREDIT_PURCHASE -> "Purchase" there).
+//
+// revenue.REFUND -> "airbridge.ecommerce.order.canceled" — UNLIKE BRAZE/
+// ITERABLE (which drop REFUND because their vendor docs document no reversal
+// convention at all), Airbridge's own standard-events table documents a
+// dedicated "Order Cancel" event alongside "Order Complete". Its guide
+// frames the example around pre-fulfillment cart cancellation rather than a
+// post-purchase refund specifically, so this is not a perfect semantic
+// match — but it is the vendor's own, only standard event for reversing a
+// completed order's revenue, and mapping it prevents a refunded purchase
+// from staying permanently double-counted in Airbridge's own LTV/ROAS
+// rollups (which silently dropping REFUND, as BRAZE/ITERABLE do, would
+// cause). revenue.CANCELLATION -> "airbridge.unsubscribe" — a clean,
+// documented match for "this subscriber's subscription ended".
+//
+// subscription.trial.started -> "airbridge.startTrial" — exact documented
+// vendor match.
+const AIRBRIDGE_LIFECYCLE_EVENT_PREFIX = "rovenue_";
+function airbridgeLifecycleEventName(key: RovenueEventKey): string {
+  return `${AIRBRIDGE_LIFECYCLE_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
+}
+
 export const DEFAULT_EVENT_MAPPING: Readonly<
   Record<IntegrationProviderId, Readonly<Partial<Record<RovenueEventKey, string>>>>
 > = {
@@ -218,6 +267,20 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.CANCELLATION": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.CANCELLATION"],
     ...Object.fromEntries(
       SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, ga4SubscriptionEventName(key)]),
+    ),
+  },
+  AIRBRIDGE: {
+    "revenue.INITIAL": "airbridge.subscribe",
+    "revenue.TRIAL_CONVERSION": "airbridge.subscribe",
+    "revenue.RENEWAL": "airbridge.ecommerce.order.completed",
+    "revenue.CREDIT_PURCHASE": "airbridge.ecommerce.order.completed",
+    // revenue.REFUND: MAPPED (unlike BRAZE/ITERABLE) — see the AIRBRIDGE
+    // header comment above for the full citation/rationale.
+    "revenue.REFUND": "airbridge.ecommerce.order.canceled",
+    "revenue.CANCELLATION": "airbridge.unsubscribe",
+    "subscription.trial.started": "airbridge.startTrial",
+    ...Object.fromEntries(
+      SUBSCRIPTION_BRIDGE_EVENT_KEYS.map((key) => [key, airbridgeLifecycleEventName(key)]),
     ),
   },
 };

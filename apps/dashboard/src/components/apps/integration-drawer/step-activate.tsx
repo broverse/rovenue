@@ -35,6 +35,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   BRAZE: "Braze",
   ONESIGNAL: "OneSignal",
   ITERABLE: "Iterable",
+  AIRBRIDGE: "Airbridge",
 };
 
 // ---------------------------------------------------------------------------

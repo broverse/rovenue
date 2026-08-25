@@ -1,0 +1,109 @@
+---
+title: Airbridge
+description: Sync Rovenue revenue and subscription-lifecycle events into Airbridge as in-app events, so you can attribute revenue back to ad campaigns.
+---
+
+# Airbridge
+
+The Airbridge integration forwards Rovenue revenue events (purchases, trial conversions, renewals, refunds, cancellations) and subscription-lifecycle events (trials, grace period, billing issues, plan changes) to Airbridge's **Server-to-Server In-App Events API**, so purchases and subscription-lifecycle changes made in your app show up as Airbridge events, attributable back to the ad campaign that acquired the user.
+
+Airbridge is a mobile attribution / marketing-measurement platform, not an analytics warehouse: this integration sends **events, not a full profile sync**. It does not push user properties and does not read anything back from Airbridge.
+
+---
+
+## Wire contract
+
+Every forwarded event is a `POST` to:
+
+```
+https://api.airbridge.io/events/v2/apps/{app_name}/mobile-app/9360
+```
+
+authenticated with:
+
+```
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+`{app_name}` is your Airbridge app's slug (the credential you paste below), used as a URL path segment. Each event carries `device.deviceUUID` (the subscriber's Airbridge Device ID — see [Identity resolution](#identity-resolution) below), `eventData.goal.category` (the mapped event name), and `eventData.goal.semanticAttributes.transactionID` set to Rovenue's own `outboxEventId`, so every Airbridge event traces back to its Rovenue source.
+
+**Known limitation:** Airbridge's contract also documents `app.packageName` (your app's OS bundle id / package name) as a required field. Rovenue has no dedicated place to store that today — this integration sends your `app_name` credential in its place, which works for accounts where the Airbridge app slug matches the bundle id, but may not for every account. If your events aren't attributing correctly, check your Airbridge dashboard's app configuration.
+
+---
+
+## 1. Get your credentials from Airbridge
+
+1. In the Airbridge dashboard, open **Settings → Tokens**.
+2. Copy your **App name** (the app's unique slug/ID).
+3. Copy your **API Token**.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Airbridge** under **Attribution** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **App name** — paste the app slug from step 1.
+   - **API token** — paste the token from step 1.
+4. Click **Validate**. Airbridge has no zero-footprint endpoint that verifies an `app_name` + `api_token` pair together (see [Validation](#validation) below), so this only checks that both fields are filled in — it sends nothing to Airbridge.
+5. Choose which events to forward, optionally override the default mapping, then activate.
+
+---
+
+## 3. Event mapping
+
+Every forwarded key becomes an Airbridge event category, named per the mapping table below (override any name in the drawer's mapping step). Six keys map onto Airbridge's own standard event vocabulary; the rest use a Rovenue-namespaced custom category name, since Airbridge has no built-in equivalent:
+
+| Rovenue event key | Default Airbridge category |
+|---|---|
+| `revenue.INITIAL` | `airbridge.subscribe` |
+| `revenue.TRIAL_CONVERSION` | `airbridge.subscribe` |
+| `revenue.RENEWAL` | `airbridge.ecommerce.order.completed` |
+| `revenue.CREDIT_PURCHASE` | `airbridge.ecommerce.order.completed` |
+| `revenue.REFUND` | `airbridge.ecommerce.order.canceled` |
+| `revenue.CANCELLATION` | `airbridge.unsubscribe` |
+| `subscription.trial.started` | `airbridge.startTrial` |
+| `subscription.cancel_requested` | `rovenue_subscription_cancel_requested` |
+| `subscription.expired` | `rovenue_subscription_expired` |
+| `subscription.billing_issue` | `rovenue_subscription_billing_issue` |
+| `subscription.grace_period` | `rovenue_subscription_grace_period` |
+| `subscription.uncancelled` | `rovenue_subscription_uncancelled` |
+| `subscription.product_changed` | `rovenue_subscription_product_changed` |
+
+**On `revenue.REFUND`:** Airbridge documents a dedicated "Order Cancel" (`airbridge.ecommerce.order.canceled`) standard event. Its own guide frames the example around cancelling an order before fulfillment rather than a post-purchase refund specifically, so this is not a perfect semantic match — but it's Airbridge's own, only standard event for reversing a completed order's revenue, and mapping it (rather than dropping `revenue.REFUND`, as some other Rovenue integrations do when their vendor has no reversal convention at all) avoids leaving a refunded purchase permanently double-counted in Airbridge's own revenue/LTV rollups.
+
+Every forwarded event carries `eventData.goal.customAttributes.rovenue_event` (the original Rovenue event key), so you can always trace an Airbridge event back to its Rovenue source.
+
+**Amount/currency are included only when both are present and valid.** Airbridge's own "Order Complete" guide recommends always sending a currency with a purchase event — but Rovenue never guesses one (it does **not** default to `"USD"`). When a revenue event has an amount but no known currency (or an unparseable amount), the event is still forwarded — it's still useful for attribution — just without `eventData.goal.value`/`semanticAttributes.currency`.
+
+---
+
+## Identity resolution
+
+Every event needs an Airbridge Device ID. Rovenue requires the reserved subscriber attribute **`$airbridgeDeviceId`** — Airbridge's own device identifier (accepts a GAID, IDFA, IDFV, App Set ID, or a randomly generated UUID, per Airbridge's SDK). Set it on the subscriber via `setAttributes` alongside your other reserved identity attributes, once your app's Airbridge SDK has resolved a device id.
+
+If `$airbridgeDeviceId` is not set on a subscriber, every event for that subscriber is skipped with reason `no_user_data` (visible in the connection's Delivery Log) — there is no fallback to a Rovenue-internal id, since a Rovenue id is not a valid Airbridge Device ID.
+
+See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference, including `$airbridgeDeviceId`.
+
+---
+
+## Validation
+
+Unlike OneSignal or Iterable (which have a dedicated, app-scoped, read-only credential-check endpoint), Airbridge's only genuinely zero-footprint `GET` endpoints (its Tracking Link list APIs) belong to an unrelated feature and aren't scoped by `app_name` — a successful response there would only prove the `api_token` authenticates, never that it's paired with *this* connection's `app_name`. Sending a real event to prove the pair together would itself be a live, attributable write to a real Airbridge app.
+
+So, like the AppsFlyer integration, clicking **Validate** here only checks that both fields are filled in — **the first real event delivery is the live proof**. Check the connection's Delivery Log after activating to confirm events are landing.
+
+---
+
+## Verify events are arriving
+
+1. Open **Apps → Airbridge → Delivery Log** in the Rovenue dashboard and check for `succeeded` rows with HTTP `2xx`.
+2. In the Airbridge dashboard, look up the device by its Airbridge Device ID and check its event timeline for the mapped category names above.
+3. If events are not appearing:
+   - A `401`/`403` response means the API token is wrong or doesn't belong to the configured app.
+   - A `400` response usually means a malformed request — check the Delivery Log's response body.
+   - A `429` response means you're being rate-limited; Rovenue retries these automatically, as it does `5xx` responses.
+   - Confirm the subscriber has `$airbridgeDeviceId` set (missing it skips silently with `no_user_data`).
+   - Ensure the event type you're sending is included in the connection's enabled events.

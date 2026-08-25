@@ -182,6 +182,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "airbridge",
+    category: "attribution",
+    vendorKey: "airbridge",
+    logo: {
+      // Airbridge brand navy.
+      background: "#1B1E3C",
+      glyph: "AB",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [

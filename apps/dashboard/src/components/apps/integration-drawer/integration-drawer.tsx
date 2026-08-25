@@ -154,6 +154,14 @@ const ONESIGNAL_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "acti
 // already defaults to a mapped provider event name/label.
 const ITERABLE_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// AIRBRIDGE (Wave-2 Task 7) has the same shape as every Wave-2 provider
+// before it: no vendor "Events Manager" test-event tooling (validateCredentials
+// is shape-only — see step-credentials.tsx's PROVIDER_VALIDATE_NOTES comment),
+// but keeps "mapping" as optional customization — unlike BRAZE/ITERABLE,
+// every one of AIRBRIDGE's 13 catalog keys (including revenue.REFUND)
+// already defaults to a mapped Airbridge event category name.
+const AIRBRIDGE_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
@@ -165,6 +173,7 @@ const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = 
   BRAZE: BRAZE_STEPS,
   ONESIGNAL: ONESIGNAL_STEPS,
   ITERABLE: ITERABLE_STEPS,
+  AIRBRIDGE: AIRBRIDGE_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -188,6 +197,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   BRAZE: "Braze",
   ONESIGNAL: "OneSignal",
   ITERABLE: "Iterable",
+  AIRBRIDGE: "Airbridge",
 };
 
 // ---------------------------------------------------------------------------

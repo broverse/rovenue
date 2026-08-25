@@ -26,6 +26,7 @@ export const DRAWER_IDS: ReadonlySet<string> = new Set([
   "braze",
   "onesignal",
   "iterable",
+  "airbridge",
 ]);
 
 // Mirrors apps/api/src/routes/dashboard/integrations.ts's
