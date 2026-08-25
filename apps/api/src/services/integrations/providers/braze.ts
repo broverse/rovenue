@@ -20,6 +20,7 @@ import {
   applyEventMapping,
   DEFAULT_EVENT_MAPPING,
   deriveRevenueEventKey,
+  rovenueCustomEventName,
 } from "../event-mapping";
 
 // ---------------------------------------------------------------------------
@@ -119,13 +120,42 @@ function resolveIdentity(envelope: RovenueEventEnvelope): BrazeIdentity | undefi
   return undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Revenue fallbacks — product_id has one, MONEY DOES NOT.
+//
 // Braze's purchase object requires product_id/currency/price as non-null
 // strings/numbers (https://www.braze.com/docs/api/objects_filters/
-// purchase_object/) — these are the same-shaped fallbacks used elsewhere in
-// this codebase (see the Task 6 Iterable brief's `productId ?? "unknown"`)
-// for the rare case a revenue envelope lacks one.
+// purchase_object/). `product_id` gets the same `"unknown"` placeholder used
+// elsewhere in this codebase (Iterable's `productId ?? "unknown"`): it labels
+// what was bought, and a wrong label misreports nothing monetary.
+//
+// `currency` and `price` are different, and this provider used to get them
+// wrong: it defaulted currency to "USD" and price to 0. Per the
+// cross-provider currency ruling every Wave-2 provider honors (see
+// onesignal.ts / airbridge.ts / singular.ts), Rovenue never fabricates a
+// currency — and Braze is the worst place to break that rule, because
+// `purchases` is an APPEND-ONLY revenue record with no documented reversal
+// convention (the same fact that makes revenue.REFUND unmappable, see
+// event-mapping.ts): a ₺ or € charge mislabeled as USD can never be taken
+// back out of Braze's revenue reporting.
+//
+// Braze leaves no "omit the field" escape hatch (currency is REQUIRED on a
+// purchase object), so this routes AROUND the purchase shape instead: when
+// the currency is unknown, or the amount is missing/unparseable, the revenue
+// key is forwarded through the SAME `events` array the lifecycle keys use,
+// as a `rovenue_<suffix>` custom event carrying the event key + outbox id in
+// `properties`. The fact that a purchase happened still reaches Braze (it can
+// still trigger a Canvas); the money is simply not invented.
+// ---------------------------------------------------------------------------
+
 const BRAZE_UNKNOWN_PRODUCT_ID = "unknown";
-const BRAZE_DEFAULT_CURRENCY = "USD";
+
+/** Parsed purchase price, or undefined when the amount is absent/unparseable. */
+function parsePrice(amount: string | undefined): number | undefined {
+  if (!amount) return undefined;
+  const parsed = parseFloat(amount);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
 
 // ---------------------------------------------------------------------------
 // validateCredentials — spec RULING (task-4-context.md, binding): a real
@@ -263,36 +293,55 @@ export const brazeProvider: IntegrationProvider = {
       outbox_event_id: envelope.outboxEventId,
     };
 
-    if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) {
-      const amount = envelope.amount ? parseFloat(envelope.amount) : undefined;
-      const price = amount !== undefined && !isNaN(amount) ? amount : 0;
+    const isRevenue = eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX);
 
-      return {
-        eventKey,
-        providerEvent: mappingResult.providerEvent,
-        body: {
-          purchases: [
-            {
-              ...identity,
-              product_id: envelope.productId ?? BRAZE_UNKNOWN_PRODUCT_ID,
-              currency: envelope.currency ?? BRAZE_DEFAULT_CURRENCY,
-              price,
-              time,
-              properties,
-            },
-          ],
-        },
-      };
+    // Revenue keys ride Braze's `purchases` array — but ONLY when the money
+    // can be stated honestly (see the fallback comment above the constants).
+    if (isRevenue) {
+      const price = parsePrice(envelope.amount);
+      if (envelope.currency && price !== undefined) {
+        return {
+          eventKey,
+          providerEvent: mappingResult.providerEvent,
+          body: {
+            purchases: [
+              {
+                ...identity,
+                product_id: envelope.productId ?? BRAZE_UNKNOWN_PRODUCT_ID,
+                currency: envelope.currency,
+                price,
+                time,
+                properties,
+              },
+            ],
+          },
+        };
+      }
     }
+
+    // Custom-event shape: every subscription.* lifecycle key, plus any
+    // revenue key whose currency/amount could not be stated honestly.
+    //
+    // Lifecycle keys already carry a `rovenue_<suffix>` name from
+    // DEFAULT_EVENT_MAPPING.BRAZE. Revenue keys map to THEMSELVES there (the
+    // value is only ever read back as a tag on a purchase, never as a wire
+    // event name — see event-mapping.ts's BRAZE comment), so sending
+    // `mappingResult.providerEvent` for them would put "revenue.INITIAL" on
+    // the wire as a Braze custom-event name. They get the same namespaced
+    // derivation the lifecycle keys use instead, so a Braze operator sees one
+    // consistent `rovenue_*` vocabulary in their Custom Events list.
+    const eventName = isRevenue
+      ? rovenueCustomEventName(eventKey)
+      : mappingResult.providerEvent;
 
     return {
       eventKey,
-      providerEvent: mappingResult.providerEvent,
+      providerEvent: eventName,
       body: {
         events: [
           {
             ...identity,
-            name: mappingResult.providerEvent,
+            name: eventName,
             time,
             properties,
           },

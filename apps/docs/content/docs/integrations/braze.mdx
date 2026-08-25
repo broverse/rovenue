@@ -55,6 +55,8 @@ Revenue keys ride Braze's `purchases` array, which has no vendor event-name conc
 
 Every forwarded purchase and event carries `properties.rovenue_event` (the original Rovenue event key) and `properties.outbox_event_id`, so you can always trace a Braze record back to its Rovenue source.
 
+**A purchase is only sent when both a currency and a valid amount are known.** Rovenue never guesses a currency (it does **not** default to `"USD"`). Braze's purchase object *requires* `currency` and `price`, so unlike the OneSignal/Airbridge/Singular integrations there is no "send the event without the money" option on a purchase. Instead, when a revenue event has no known currency (or an unparseable amount), Rovenue forwards it through Braze's **custom events** array rather than `purchases` — named `rovenue_revenue_INITIAL`, `rovenue_revenue_RENEWAL`, and so on, carrying the same `properties.rovenue_event` / `properties.outbox_event_id` tags. The event still reaches Braze and can still trigger a Canvas; it just carries no dollar figure. This matters more here than elsewhere: `purchases` is append-only with no reversal convention, so a purchase mislabeled `USD` could never be corrected.
+
 **`revenue.REFUND` is not forwarded.** Braze's `purchases` object (`product_id`/`currency`/`price`/`time`) is an append-only revenue record with no documented reversal or negative-price refund convention — sending a refund through it would double-count revenue in Braze's own reporting rather than reverse it. Refunds are skipped with reason `no_mapping` and never reach Braze.
 
 ---

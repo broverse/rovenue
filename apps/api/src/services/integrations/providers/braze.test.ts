@@ -139,24 +139,108 @@ describe("brazeProvider.mapEvent — revenue.* -> purchases", () => {
     expect(body.purchases[0]!.product_id).toBe("unknown");
   });
 
-  it("defaults currency to USD when absent (Braze requires currency on a purchase object)", () => {
+  it("keeps the purchase shape when BOTH currency and a parseable amount are present", () => {
+    const result = brazeProvider.mapEvent(
+      makeEnvelope({ currency: "EUR", amount: "12.50" }),
+      makeConfig(),
+      {},
+    );
+    const body = (result as ProviderPayload).body as BrazePurchaseBody;
+    expect(body.purchases).toHaveLength(1);
+    expect(body.purchases[0]!.currency).toBe("EUR");
+    expect(body.purchases[0]!.price).toBe(12.5);
+    expect(body).not.toHaveProperty("events");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapEvent — revenue.* WITHOUT honest money -> custom event, never a purchase
+//
+// Braze's purchase object REQUIRES currency, so "omit the field" (the escape
+// hatch OneSignal/Airbridge/Singular use) is unavailable here. Rather than
+// fabricate "USD" into an append-only, non-reversible revenue record, the
+// event is routed through the `events` array instead. These tests assert the
+// money is never invented AND the event is never silently dropped.
+// ---------------------------------------------------------------------------
+
+describe("brazeProvider.mapEvent — revenue.* with unknown currency/amount", () => {
+  it("forwards a custom event (NOT a purchase) when currency is absent", () => {
     const result = brazeProvider.mapEvent(
       makeEnvelope({ currency: undefined }),
       makeConfig(),
       {},
     );
-    const body = (result as ProviderPayload).body as BrazePurchaseBody;
-    expect(body.purchases[0]!.currency).toBe("USD");
+    expect(result).not.toHaveProperty("skip");
+    const payload = result as ProviderPayload;
+    const body = payload.body as BrazeEventBody & Partial<BrazePurchaseBody>;
+    expect(body.purchases).toBeUndefined();
+    expect(body.events).toHaveLength(1);
+    const event = body.events[0]!;
+    expect(event.name).toBe("rovenue_revenue_RENEWAL");
+    expect(payload.providerEvent).toBe("rovenue_revenue_RENEWAL");
+    expect(event.external_id).toBe("app_user_1");
+    expect(event.time).toBe(new Date("2024-01-15T10:00:00.000Z").toISOString());
+    expect(event.properties).toEqual({
+      rovenue_event: "revenue.RENEWAL",
+      outbox_event_id: "ob1",
+    });
+    // The whole point: no currency and no price anywhere on the wire.
+    expect(JSON.stringify(body)).not.toContain("USD");
+    expect(JSON.stringify(body)).not.toContain("price");
   });
 
-  it("defaults price to 0 when amount is absent/unparseable (Braze requires price on a purchase object)", () => {
+  it("forwards a custom event (NOT a purchase) when amount is absent", () => {
     const result = brazeProvider.mapEvent(
       makeEnvelope({ amount: undefined }),
       makeConfig(),
       {},
     );
-    const body = (result as ProviderPayload).body as BrazePurchaseBody;
-    expect(body.purchases[0]!.price).toBe(0);
+    const body = (result as ProviderPayload).body as BrazeEventBody &
+      Partial<BrazePurchaseBody>;
+    expect(body.purchases).toBeUndefined();
+    expect(body.events).toHaveLength(1);
+    expect(body.events[0]!.name).toBe("rovenue_revenue_RENEWAL");
+    expect(JSON.stringify(body)).not.toContain("price");
+  });
+
+  it("forwards a custom event (NOT a purchase) when amount is unparseable", () => {
+    const result = brazeProvider.mapEvent(
+      makeEnvelope({ amount: "not-a-number" }),
+      makeConfig(),
+      {},
+    );
+    const body = (result as ProviderPayload).body as BrazeEventBody &
+      Partial<BrazePurchaseBody>;
+    expect(body.purchases).toBeUndefined();
+    expect(body.events).toHaveLength(1);
+    expect(body.events[0]!.name).toBe("rovenue_revenue_RENEWAL");
+  });
+
+  it("uses the Rovenue-namespaced name for every revenue key it falls back on", () => {
+    for (const [kind, expectedName] of [
+      ["INITIAL", "rovenue_revenue_INITIAL"],
+      ["TRIAL_CONVERSION", "rovenue_revenue_TRIAL_CONVERSION"],
+      ["RENEWAL", "rovenue_revenue_RENEWAL"],
+      ["CREDIT_PURCHASE", "rovenue_revenue_CREDIT_PURCHASE"],
+      ["CANCELLATION", "rovenue_revenue_CANCELLATION"],
+    ] as const) {
+      const result = brazeProvider.mapEvent(
+        makeEnvelope({ revenueEventKind: kind, currency: undefined }),
+        makeConfig(),
+        {},
+      );
+      const body = (result as ProviderPayload).body as BrazeEventBody;
+      expect(body.events[0]!.name).toBe(expectedName);
+    }
+  });
+
+  it("still skips REFUND rather than falling back to a custom event (no_mapping wins)", () => {
+    const result = brazeProvider.mapEvent(
+      makeEnvelope({ revenueEventKind: "REFUND", currency: undefined }),
+      makeConfig(),
+      {},
+    );
+    expect(result).toEqual({ skip: true, reason: "no_mapping" });
   });
 });
 
