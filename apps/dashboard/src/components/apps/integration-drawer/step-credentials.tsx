@@ -131,7 +131,14 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
     { id: "app_name", label: "App name" },
     { id: "api_token", label: "API token", secret: true },
   ],
-  SINGULAR: [{ id: "sdk_key", label: "SDK key", secret: true }],
+  // app_id added post-review (2026-08-25): Singular's EVENT endpoint
+  // requires an app identifier (`i`, bundle id / package name) on every
+  // request with no other honest source — see providers/singular.ts's
+  // credentialsSchema comment for the full correction rationale.
+  SINGULAR: [
+    { id: "app_id", label: "App ID (bundle id / package name)", placeholder: "com.example.app" },
+    { id: "sdk_key", label: "SDK key", secret: true },
+  ],
   DISCORD: [
     {
       id: "webhook_url",
@@ -237,7 +244,7 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * SINGULAR: deliberately has NO entry here (same shape as APPSFLYER/
  * AIRBRIDGE). Its validateCredentials sends nothing — no event, no request
  * at all — it only checks the submitted credentials' shape against
- * credentialsSchema (sdk_key present). Singular's own docs state that
+ * credentialsSchema (sdk_key + app_id present). Singular's own docs state that
  * device-level data "cannot be deleted after ingestion", so there is no
  * zero-footprint way to send a real probe event even if one wanted to. See
  * providers/singular.ts's validateCredentials comment and

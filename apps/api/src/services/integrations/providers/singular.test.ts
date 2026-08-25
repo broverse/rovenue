@@ -31,6 +31,7 @@ const ALL_EVENTS: RovenueEventKey[] = [
 ];
 
 const SDK_KEY = "sdk_key_abc123SECRET";
+const APP_ID = "com.example.app";
 
 function makeEnvelope(
   overrides: Partial<RovenueEventEnvelope> = {},
@@ -84,7 +85,7 @@ describe("singularProvider.mapEvent — revenue.*", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ revenueEventKind: kind }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     expect(result).not.toHaveProperty("skip");
     const payload = result as ProviderPayload;
@@ -103,7 +104,7 @@ describe("singularProvider.mapEvent — revenue.*", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ revenueEventKind: "REFUND" }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     expect(result).toEqual({ skip: true, reason: "no_mapping" });
   });
@@ -112,7 +113,7 @@ describe("singularProvider.mapEvent — revenue.*", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ amount: "9.99", currency: undefined }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.fields.amt).toBeUndefined();
@@ -127,7 +128,7 @@ describe("singularProvider.mapEvent — revenue.*", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ amount: undefined, currency: "USD" }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.fields.amt).toBeUndefined();
@@ -138,7 +139,7 @@ describe("singularProvider.mapEvent — revenue.*", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ amount: "not-a-number", currency: "USD" }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.fields.amt).toBeUndefined();
@@ -153,7 +154,7 @@ describe("singularProvider.mapEvent — revenue.*", () => {
         amount: undefined,
       }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.fields.is_revenue_event).toBeUndefined();
@@ -175,7 +176,7 @@ describe("singularProvider.mapEvent — subscription.*", () => {
         amount: undefined,
       }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     expect(result).not.toHaveProperty("skip");
     expect((result as ProviderPayload).providerEvent).toBe("sng_start_trial");
@@ -192,7 +193,7 @@ describe("singularProvider.mapEvent — subscription.*", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ eventType, revenueEventKind: undefined, amount: undefined }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     expect(result).not.toHaveProperty("skip");
     const payload = result as ProviderPayload;
@@ -216,7 +217,7 @@ describe("singularProvider.mapEvent — device-id ladder", () => {
         },
       }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.endpoint).toBe(V2_ENDPOINT);
@@ -234,7 +235,7 @@ describe("singularProvider.mapEvent — device-id ladder", () => {
         },
       }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.fields.p).toBe("Android");
@@ -244,7 +245,7 @@ describe("singularProvider.mapEvent — device-id ladder", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ subscriberAttributes: { $singularDeviceId: "sdid-1" } }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.fields.p).toBeUndefined();
@@ -256,7 +257,7 @@ describe("singularProvider.mapEvent — device-id ladder", () => {
         subscriberAttributes: { $idfa: "DFC5A647-9043-4699-B2A5-76F03A97064B" },
       }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.endpoint).toBe(V1_ENDPOINT);
@@ -271,7 +272,7 @@ describe("singularProvider.mapEvent — device-id ladder", () => {
         subscriberAttributes: { $gpsAdId: "8ecd7512-2864-440c-93f3-a3cabe62525b" },
       }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.endpoint).toBe(V1_ENDPOINT);
@@ -285,7 +286,7 @@ describe("singularProvider.mapEvent — device-id ladder", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ subscriberAttributes: {}, subscriberId: "sub_should_not_be_used" }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     expect(result).toEqual({ skip: true, reason: "no_user_data" });
   });
@@ -294,7 +295,7 @@ describe("singularProvider.mapEvent — device-id ladder", () => {
     const result = singularProvider.mapEvent(
       makeEnvelope({ subscriberAttributes: undefined }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     expect(result).toEqual({ skip: true, reason: "no_user_data" });
   });
@@ -309,7 +310,7 @@ describe("singularProvider.mapEvent — ip, custom arg, scope and idempotency", 
     const result = singularProvider.mapEvent(
       makeEnvelope({ identityContext: { ip: "172.58.29.235" } }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.fields.ip).toBe("172.58.29.235");
@@ -319,7 +320,7 @@ describe("singularProvider.mapEvent — ip, custom arg, scope and idempotency", 
     const result = singularProvider.mapEvent(
       makeEnvelope({ identityContext: undefined }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     const body = (result as ProviderPayload).body as SingularPayloadBody;
     expect(body.fields.ip).toBeUndefined();
@@ -349,7 +350,7 @@ describe("singularProvider.mapEvent — ip, custom arg, scope and idempotency", 
     const result = singularProvider.mapEvent(
       makeEnvelope({ revenueEventKind: "RENEWAL" }),
       config,
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     expect(result).toEqual({ skip: true, reason: "filtered_by_event_scope" });
   });
@@ -358,9 +359,77 @@ describe("singularProvider.mapEvent — ip, custom arg, scope and idempotency", 
     const result = singularProvider.mapEvent(
       makeEnvelope({ eventType: "paywall_view", revenueEventKind: undefined }),
       makeConfig(),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
     );
     expect(result).toEqual({ skip: true, reason: "no_mapping" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapEvent — att_authorization_status (post-review correction: "Always
+// required" for iOS per Singular's docs, but never fabricated)
+// ---------------------------------------------------------------------------
+
+describe("singularProvider.mapEvent — att_authorization_status", () => {
+  it.each([
+    ["notDetermined", "0"],
+    ["restricted", "1"],
+    ["denied", "2"],
+    ["authorized", "3"],
+  ] as const)("maps $attConsentStatus=%s to att_authorization_status=%s on the iOS (idfa) branch", (consentStatus, expected) => {
+    const result = singularProvider.mapEvent(
+      makeEnvelope({
+        subscriberAttributes: {
+          $idfa: "DFC5A647-9043-4699-B2A5-76F03A97064B",
+          $attConsentStatus: consentStatus,
+        },
+      }),
+      makeConfig(),
+      { sdk_key: SDK_KEY, app_id: APP_ID },
+    );
+    const body = (result as ProviderPayload).body as SingularPayloadBody;
+    expect(body.fields.att_authorization_status).toBe(expected);
+  });
+
+  it("omits att_authorization_status when $attConsentStatus is absent (never fabricates 0)", () => {
+    const result = singularProvider.mapEvent(
+      makeEnvelope({ subscriberAttributes: { $idfa: "DFC5A647-9043-4699-B2A5-76F03A97064B" } }),
+      makeConfig(),
+      { sdk_key: SDK_KEY, app_id: APP_ID },
+    );
+    const body = (result as ProviderPayload).body as SingularPayloadBody;
+    expect(body.fields.att_authorization_status).toBeUndefined();
+  });
+
+  it("does not send att_authorization_status on the Android (aifa) branch", () => {
+    const result = singularProvider.mapEvent(
+      makeEnvelope({
+        subscriberAttributes: {
+          $gpsAdId: "8ecd7512-2864-440c-93f3-a3cabe62525b",
+          $attConsentStatus: "authorized",
+        },
+      }),
+      makeConfig(),
+      { sdk_key: SDK_KEY, app_id: APP_ID },
+    );
+    const body = (result as ProviderPayload).body as SingularPayloadBody;
+    expect(body.fields.att_authorization_status).toBeUndefined();
+  });
+
+  it("sends att_authorization_status on the sdid branch only when platform resolves to iOS", () => {
+    const result = singularProvider.mapEvent(
+      makeEnvelope({
+        subscriberAttributes: {
+          $singularDeviceId: "sdid-1",
+          platform: "ios",
+          $attConsentStatus: "denied",
+        },
+      }),
+      makeConfig(),
+      { sdk_key: SDK_KEY, app_id: APP_ID },
+    );
+    const body = (result as ProviderPayload).body as SingularPayloadBody;
+    expect(body.fields.att_authorization_status).toBe("2");
   });
 });
 
@@ -369,10 +438,10 @@ describe("singularProvider.mapEvent — ip, custom arg, scope and idempotency", 
 // ---------------------------------------------------------------------------
 
 describe("singularProvider.credentialsSchema", () => {
-  it("accepts sdk_key", () => {
-    expect(singularProvider.credentialsSchema.safeParse({ sdk_key: SDK_KEY }).success).toBe(
-      true,
-    );
+  it("accepts sdk_key + app_id", () => {
+    expect(
+      singularProvider.credentialsSchema.safeParse({ sdk_key: SDK_KEY, app_id: APP_ID }).success,
+    ).toBe(true);
   });
 
   it("rejects an empty object", () => {
@@ -380,12 +449,34 @@ describe("singularProvider.credentialsSchema", () => {
   });
 
   it("rejects an empty sdk_key", () => {
-    expect(singularProvider.credentialsSchema.safeParse({ sdk_key: "" }).success).toBe(false);
+    expect(
+      singularProvider.credentialsSchema.safeParse({ sdk_key: "", app_id: APP_ID }).success,
+    ).toBe(false);
+  });
+
+  // app_id (post-review, 2026-08-25): `i` (app identifier) is a genuinely
+  // required Singular wire parameter with no other honest source — see
+  // providers/singular.ts's credentialsSchema comment. Missing/empty must
+  // reject, the same as sdk_key.
+  it("rejects a missing app_id", () => {
+    expect(singularProvider.credentialsSchema.safeParse({ sdk_key: SDK_KEY }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects an empty app_id", () => {
+    expect(
+      singularProvider.credentialsSchema.safeParse({ sdk_key: SDK_KEY, app_id: "" }).success,
+    ).toBe(false);
   });
 
   it("accepts unrelated extra string keys via catchall", () => {
     expect(
-      singularProvider.credentialsSchema.safeParse({ sdk_key: SDK_KEY, note: "x" }).success,
+      singularProvider.credentialsSchema.safeParse({
+        sdk_key: SDK_KEY,
+        app_id: APP_ID,
+        note: "x",
+      }).success,
     ).toBe(true);
   });
 });
@@ -401,13 +492,19 @@ describe("singularProvider.validateCredentials", () => {
         throw new Error("validateCredentials must not send any request");
       },
     };
-    const result = await singularProvider.validateCredentials({ sdk_key: SDK_KEY }, http);
+    const result = await singularProvider.validateCredentials({ sdk_key: SDK_KEY, app_id: APP_ID }, http);
     expect(result).toEqual({ ok: true });
   });
 
   it("fails when sdk_key is missing", async () => {
     const http = { request: async () => ({ status: 200, body: "" }) };
-    const result = await singularProvider.validateCredentials({}, http);
+    const result = await singularProvider.validateCredentials({ app_id: APP_ID }, http);
+    expect(result.ok).toBe(false);
+  });
+
+  it("fails when app_id is missing", async () => {
+    const http = { request: async () => ({ status: 200, body: "" }) };
+    const result = await singularProvider.validateCredentials({ sdk_key: SDK_KEY }, http);
     expect(result.ok).toBe(false);
   });
 });
@@ -455,7 +552,7 @@ describe("singularProvider.deliver", () => {
       .intercept({ path: "/api/v1/evt", method: "POST" })
       .reply(200, JSON.stringify({ status: "ok" }));
     const http = createUndiciHttpClient();
-    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY }, http);
+    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY, app_id: APP_ID }, http);
     expect(result.ok).toBe(true);
     expect(result.retriable).toBe(false);
     expect(result.httpStatus).toBe(200);
@@ -477,7 +574,7 @@ describe("singularProvider.deliver", () => {
       const http = createUndiciHttpClient();
       const result = await singularProvider.deliver(
         dummyPayload(V1_ENDPOINT),
-        { sdk_key: SDK_KEY },
+        { sdk_key: SDK_KEY, app_id: APP_ID },
         http,
       );
       expect(result.ok).toBe(false);
@@ -492,7 +589,7 @@ describe("singularProvider.deliver", () => {
       .intercept({ path: "/api/v1/evt", method: "POST" })
       .reply(200, "not json");
     const http = createUndiciHttpClient();
-    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY }, http);
+    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY, app_id: APP_ID }, http);
     expect(result.ok).toBe(false);
     expect(result.retriable).toBe(true);
   });
@@ -510,13 +607,13 @@ describe("singularProvider.deliver", () => {
       .intercept({ path: "/api/v1/evt", method: "POST" })
       .reply(status, "");
     const http = createUndiciHttpClient();
-    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY }, http);
+    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY, app_id: APP_ID }, http);
     expect(result.ok).toBe(ok);
     expect(result.retriable).toBe(retriable);
     expect(result.httpStatus).toBe(status);
   });
 
-  it("POSTs form-urlencoded to the V1 endpoint with `a` (sdk_key) in the BODY, not the URL", async () => {
+  it("POSTs form-urlencoded to the V1 endpoint with `a` (sdk_key) and `i` (app_id) in the BODY, not the URL", async () => {
     let observedHeaders: Record<string, string> = {};
     let observedPath = "";
     let observedBody = "";
@@ -530,13 +627,33 @@ describe("singularProvider.deliver", () => {
         return { statusCode: 200, data: JSON.stringify({ status: "ok" }) };
       });
     const http = createUndiciHttpClient();
-    await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY }, http);
+    await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY, app_id: APP_ID }, http);
     expect(observedHeaders["content-type"]).toBe("application/x-www-form-urlencoded");
     expect(observedPath).toBe("/api/v1/evt");
     const params = new URLSearchParams(observedBody);
     expect(params.get("a")).toBe(SDK_KEY);
+    expect(params.get("i")).toBe(APP_ID);
     expect(params.get("idfa")).toBe("DFC5A647-9043-4699-B2A5-76F03A97064B");
     expect(params.get("n")).toBe("sng_ecommerce_purchase");
+  });
+
+  it("carries `i` (app_id) on the V2 endpoint too", async () => {
+    let observedBody = "";
+    agent
+      .get("https://s2s.singular.net")
+      .intercept({ path: "/api/v2/evt", method: "POST" })
+      .reply((opts) => {
+        observedBody = opts.body as string;
+        return { statusCode: 200, data: JSON.stringify({ status: "ok" }) };
+      });
+    const http = createUndiciHttpClient();
+    await singularProvider.deliver(
+      dummyPayload(V2_ENDPOINT, { sdid: "40009df0-d618-4d81-9da1-cbb3337b8dec", idfa: "" }),
+      { sdk_key: SDK_KEY, app_id: APP_ID },
+      http,
+    );
+    const params = new URLSearchParams(observedBody);
+    expect(params.get("i")).toBe(APP_ID);
   });
 
   it("POSTs to the V2 endpoint when payload.body.endpoint is V2", async () => {
@@ -553,7 +670,7 @@ describe("singularProvider.deliver", () => {
     const http = createUndiciHttpClient();
     await singularProvider.deliver(
       dummyPayload(V2_ENDPOINT, { sdid: "40009df0-d618-4d81-9da1-cbb3337b8dec", idfa: "" }),
-      { sdk_key: SDK_KEY },
+      { sdk_key: SDK_KEY, app_id: APP_ID },
       http,
     );
     expect(observedPath).toBe("/api/v2/evt");
@@ -581,7 +698,7 @@ describe("singularProvider.deliver", () => {
       .intercept({ path: "/api/v1/evt", method: "POST" })
       .reply(200, JSON.stringify({ status: "ok" }));
     const http = createUndiciHttpClient();
-    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY }, http);
+    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY, app_id: APP_ID }, http);
     assertNoSecretLeak(result);
   });
 
@@ -591,7 +708,7 @@ describe("singularProvider.deliver", () => {
       .intercept({ path: "/api/v1/evt", method: "POST" })
       .reply(200, JSON.stringify({ status: "error", reason: "missing argument: a" }));
     const http = createUndiciHttpClient();
-    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY }, http);
+    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY, app_id: APP_ID }, http);
     assertNoSecretLeak(result);
   });
 
@@ -601,7 +718,7 @@ describe("singularProvider.deliver", () => {
       .intercept({ path: "/api/v1/evt", method: "POST" })
       .reply(500, "");
     const http = createUndiciHttpClient();
-    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY }, http);
+    const result = await singularProvider.deliver(dummyPayload(V1_ENDPOINT), { sdk_key: SDK_KEY, app_id: APP_ID }, http);
     assertNoSecretLeak(result);
   });
 });

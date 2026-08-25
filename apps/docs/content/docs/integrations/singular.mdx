@@ -21,20 +21,21 @@ Singular has two EVENT endpoint versions. This integration picks between them pe
 | `$idfa` (no SDID) | `POST https://s2s.singular.net/api/v1/evt` | `idfa` |
 | `$gpsAdId` (no SDID, no IDFA) | `POST https://s2s.singular.net/api/v1/evt` | `aifa` |
 
-All request parameters — including your SDK key (`a`) — are sent as `application/x-www-form-urlencoded` **POST body** fields, never as a query string. Every event also carries `n` (the mapped event name), `is_revenue_event`/`amt`/`cur` on revenue events (see [Event mapping](#event-mapping)), and an `e` field — a JSON object with `outbox_event_id` and `rovenue_event` — so every Singular event traces back to its Rovenue source. Singular does not deduplicate events server-side; Rovenue's own delivery pipeline is the real dedup guarantee.
+All request parameters — including your SDK key (`a`) and app ID (`i`) — are sent as `application/x-www-form-urlencoded` **POST body** fields, never as a query string. Every event also carries `n` (the mapped event name), `is_revenue_event`/`amt`/`cur` on revenue events (see [Event mapping](#event-mapping)), and an `e` field — a JSON object with `outbox_event_id` and `rovenue_event` — so every Singular event traces back to its Rovenue source. Singular does not deduplicate events server-side; Rovenue's own delivery pipeline is the real dedup guarantee.
 
 **Known limitations:**
 
-- Singular's EVENT contract also documents `i` (your app's OS bundle id / package name) as a commonly-required field. Rovenue has no dedicated place to store that today, so it is not sent — if you see `missing argument: i` in the Delivery Log, that's why.
-- The device's IP address (`ip`) is sent only when Rovenue already has it (from your identity/consent context). It is never derived from Singular's `use_ip` fallback, since that would attribute the event to Rovenue's own server IP rather than your subscriber's device, which would corrupt Singular's geolocation-based attribution.
+- **The subscriber's IP address (`ip`) is only sent when Rovenue already has it**, and is never derived from Singular's `use_ip` fallback — that would attribute the event to Rovenue's own server IP rather than your subscriber's device, corrupting Singular's geolocation-based attribution. In practice, most **server- or webhook-driven** revenue events (a purchase your backend reports, or a store webhook Rovenue relays) have no client HTTP request in the loop and therefore no known IP, so `ip` is frequently omitted and Singular may reject those events with `missing argument: ip`. If you want these attributed, pass `identityContext.ip` (the real device/customer IP, not your server's) on your own calls to [`POST /v1/events`](/docs/reference/methods#track) — Rovenue forwards it through to Singular whenever it's present.
+- **`att_authorization_status`** (Apple's App Tracking Transparency status) is documented by Singular as "Always required" for iOS — but Rovenue does not fabricate a value. It is sent only when the subscriber's `$attConsentStatus` reserved attribute is set (mapped to Singular's numeric codes: `notDetermined`→`0`, `restricted`→`1`, `denied`→`2`, `authorized`→`3`), and only on the iOS branch of the identity ladder. If `$attConsentStatus` isn't set, the field is omitted rather than defaulted to `0`.
 - The platform field (`p`) is always `iOS`/`Android` when the IDFA/GAID ladder branch matched, but is only sent for the SDID branch when the subscriber's `platform` attribute is set to a recognized value — Rovenue never guesses a platform.
 
 ---
 
-## 1. Get your SDK key from Singular
+## 1. Get your credentials from Singular
 
 1. In the Singular dashboard, open **Developer Tools → SDK Integration → SDK Keys**.
 2. Copy your **SDK Key** — not the Reporting API Key, which Singular's own EVENT endpoint rejects.
+3. Copy your app's **App ID** — the OS bundle id (iOS, e.g. `com.example.app`) or package name (Android) you registered the app with in Singular. This is required on every event (`i`); there is no way to deliver without it.
 
 ---
 
@@ -42,8 +43,10 @@ All request parameters — including your SDK key (`a`) — are sent as `applica
 
 1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
 2. Find **Singular** under **Attribution** and click it.
-3. The side drawer opens. Paste your **SDK key** into the Credentials step.
-4. Click **Validate** (see [Validation](#validation) below — it only checks that the field is filled in, it sends nothing to Singular).
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **App ID (bundle id / package name)** — paste the app id from step 1.
+   - **SDK key** — paste the SDK key from step 1.
+4. Click **Validate** (see [Validation](#validation) below — it only checks that both fields are filled in, it sends nothing to Singular).
 5. Choose which events to forward, optionally override the default mapping, then activate.
 
 ---
@@ -94,9 +97,9 @@ See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attr
 
 ## Validation
 
-Singular's EVENT/SESSION endpoints are write-only and reachable with just an SDK key — Singular's own docs state that device-level data "cannot be deleted after ingestion," so there is no zero-footprint, read-only way to confirm an SDK key is valid without sending a real, permanent, attributable event.
+Singular's EVENT/SESSION endpoints are write-only and reachable with just an SDK key — Singular's own docs state that device-level data "cannot be deleted after ingestion," so there is no zero-footprint, read-only way to confirm an SDK key/App ID pair is valid without sending a real, permanent, attributable event.
 
-So, like the AppsFlyer and Airbridge integrations, clicking **Validate** here only checks that the SDK key is filled in — **the first real event delivery is the live proof**. Check the connection's Delivery Log after activating to confirm events are landing.
+So, like the AppsFlyer and Airbridge integrations, clicking **Validate** here only checks that both fields are filled in — **the first real event delivery is the live proof**. Check the connection's Delivery Log after activating to confirm events are landing.
 
 ---
 
@@ -107,6 +110,7 @@ So, like the AppsFlyer and Airbridge integrations, clicking **Validate** here on
 3. If events are not appearing:
    - Singular's EVENT API always answers HTTP `200` — a rejected request still shows as `200` with a body `{"status":"error","reason":"..."}`. Check the Delivery Log's response body for the `reason` string.
    - A reason containing "missing argument", "invalid platform", "no device ID supplied", or "should have an ... param" means the request itself needs fixing (Rovenue treats these as permanent failures and does not retry them).
+   - `missing argument: ip` is expected for server/webhook-driven events with no known subscriber IP — see the "Known limitations" note in [Wire contract](#wire-contract) for how to send one.
    - Any other error reason, or a non-`200` HTTP status (`429`/`5xx`), is retried automatically.
    - Confirm the subscriber has `$singularDeviceId`, `$idfa`, or `$gpsAdId` set (missing all three skips silently with `no_user_data`).
    - Ensure the event type you're sending is included in the connection's enabled events.

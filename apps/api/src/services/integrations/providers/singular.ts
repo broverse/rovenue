@@ -42,17 +42,28 @@ function deriveEventKey(
 }
 
 // ---------------------------------------------------------------------------
-// Credentials — LOCKED per the Task 8 controller context: a single
-// `sdk_key` field (Singular's own "SDK Key", retrieved from Singular UI →
-// Developer Tools → SDK Integration → SDK Keys — explicitly NOT the
-// Reporting API Key, which the vendor's own docs say gets requests
-// rejected). `.catchall(z.string())` so unrelated extra string keys never
-// fail validation, while keeping the inferred type Record<string, string>.
+// Credentials — `sdk_key` (Singular's own "SDK Key", retrieved from
+// Singular UI → Developer Tools → SDK Integration → SDK Keys — explicitly
+// NOT the Reporting API Key, which the vendor's own docs say gets requests
+// rejected) plus `app_id` (the app's OS bundle id / package name, sent as
+// the wire's required `i` parameter — see "Wire contract" below).
+//
+// CORRECTION (post-review, 2026-08-25): `app_id` was originally left out of
+// this schema per the Task 8 controller context's field lock, with the gap
+// documented rather than fixed. That was wrong — `i` is a genuinely
+// required Singular parameter with no other honest source, so omitting it
+// made every real delivery fail permanently (`missing argument: i`). The
+// field lock exists to prevent drift, not to freeze a provably-broken
+// contract; this is now the corrected, binding credential shape.
+//
+// `.catchall(z.string())` so unrelated extra string keys never fail
+// validation, while keeping the inferred type Record<string, string>.
 // ---------------------------------------------------------------------------
 
 const credentialsSchema = z
   .object({
     sdk_key: z.string().min(1),
+    app_id: z.string().min(1),
   })
   .catchall(z.string());
 
@@ -110,20 +121,12 @@ const SINGULAR_V1_EVENT_ENDPOINT = "https://s2s.singular.net/api/v1/evt";
 const SINGULAR_V2_EVENT_ENDPOINT = "https://s2s.singular.net/api/v2/evt";
 
 // ---------------------------------------------------------------------------
-// KNOWN GAPS (documented, not silently swallowed) — same "pragmatic
-// default / disclosed limitation" pattern as AIRBRIDGE's `app.packageName`
-// note. Singular's EVENT Endpoint Reference lists `i` (app identifier /
-// bundle id) and `ip` (or `use_ip`) as parameters its own "Missing Required
-// Parameters" error page calls out as commonly-required:
+// KNOWN GAPS (documented, not silently swallowed):
 //
-//   - `i` (app identifier): this task's credentials are LOCKED to
-//     `{ sdk_key }` — there is no bundle-id/package-name field anywhere in
-//     Rovenue's Singular credentials or event envelope to source `i` from
-//     honestly, unlike AIRBRIDGE which could (imperfectly) reuse its own
-//     `app_name` credential. `i` is simply omitted; a real delivery will
-//     surface Singular's own `missing argument: i` rejection in the
-//     connection's Delivery Log until a dedicated app-id credential field
-//     exists — flagged here as a follow-up candidate, not assumed solved.
+//   - `i` (app identifier / bundle id): RESOLVED (post-review, 2026-08-25) —
+//     sourced from the `app_id` credential above and sent on every event.
+//     Previously omitted with the gap merely disclosed; that was corrected
+//     because `i` is genuinely required and had no other honest source.
 //   - `ip`: NOT solved by the documented `use_ip=true` escape hatch — that
 //     instructs Singular to read the IP off the HTTP request, which for a
 //     server-to-server relay would attribute the event to ROVENUE'S OWN
@@ -131,12 +134,39 @@ const SINGULAR_V2_EVENT_ENDPOINT = "https://s2s.singular.net/api/v2/evt";
 //     geolocation-based attribution. Sent only when a real subscriber IP is
 //     available via `identityContext.ip`; omitted (never `use_ip`)
 //     otherwise, for the same "never fabricate" reasoning as the currency
-//     ruling below.
-//   - `att_authorization_status` / device-make/model/locale/build
-//     enrichment: real, available fields (`ve`/`ma`/`mo`/`lc`/`bd`) are
-//     documented as optional context, not sent — scoped out as a follow-up
-//     rather than attempted with unreliable derivations.
+//     ruling below. This stance stands after review, but its practical
+//     consequence is disclosed rather than left implicit: most
+//     server/webhook-driven revenue events (no client HTTP request in the
+//     loop) carry no known subscriber IP, so `ip` is frequently omitted and
+//     Singular's EVENT endpoint may reject with `missing argument: ip` for
+//     exactly that class of event. A customer who wants these attributed
+//     should pass `identityContext.ip` on their own `POST /v1/events` calls
+//     (apps/api/src/routes/v1/events.ts's `identityContextSchema` already
+//     accepts it) — documented in singular.mdx.
+//   - `att_authorization_status`: CORRECTED characterization (post-review,
+//     2026-08-25) — Singular's EVENT Endpoint Reference documents this as
+//     "Always required" for iOS ("Even if ATT is not implemented, pass 0
+//     (undetermined)"), not optional context as a prior version of this
+//     comment stated. Rovenue still does not fabricate a value: it is sent
+//     only when the subscriber's own `$attConsentStatus` reserved attribute
+//     is present (mapped to Singular's numeric codes below), and only on
+//     the ladder's iOS branch; absent, this stays an honestly-documented
+//     gap rather than a guessed `0`. Device-make/model/locale/build
+//     enrichment (`ve`/`ma`/`mo`/`lc`/`bd`) remains a scoped-out follow-up.
 // ---------------------------------------------------------------------------
+
+// Singular's numeric ATT status codes (EVENT Endpoint API Reference,
+// "Application Parameters" > `att_authorization_status`), in the SAME order
+// as the (unexported) `ATT_CONSENT` list in
+// packages/shared/src/attributes/catalog.ts that validates
+// `$attConsentStatus` values — so a value that passed attribute validation
+// is guaranteed to have a mapping here.
+const SINGULAR_ATT_STATUS_BY_CONSENT: Readonly<Record<string, string>> = {
+  notDetermined: "0",
+  restricted: "1",
+  denied: "2",
+  authorized: "3",
+};
 
 // ---------------------------------------------------------------------------
 // SECRET-IN-QUERY CONSTRAINT (spec-binding, Task 8 controller context) —
@@ -384,11 +414,11 @@ export const singularProvider: IntegrationProvider = {
   // SESSION endpoints are the ONLY endpoints reachable with an `sdk_key`
   // (the separate, differently-scoped Reporting API Key is explicitly
   // rejected by these endpoints per the vendor's own docs) — there is no
-  // zero-footprint, read-only way to confirm an `sdk_key` is valid without
-  // sending a real, PERMANENT, attributable event. This only confirms the
-  // submitted credentials are well-formed per credentialsSchema; the first
-  // real delivery is the live proof, surfaced via the connection's
-  // Delivery Log. Disclosed in
+  // zero-footprint, read-only way to confirm an `sdk_key`/`app_id` pair is
+  // valid without sending a real, PERMANENT, attributable event. This only
+  // confirms the submitted credentials are well-formed per
+  // credentialsSchema; the first real delivery is the live proof, surfaced
+  // via the connection's Delivery Log. Disclosed in
   // apps/docs/content/docs/integrations/singular.mdx — no
   // PROVIDER_VALIDATE_NOTES entry is added in the dashboard because nothing
   // is actually sent here.
@@ -456,6 +486,20 @@ export const singularProvider: IntegrationProvider = {
       fields.ip = ip;
     }
 
+    // att_authorization_status — "Always required" for iOS per Singular's
+    // own docs, but never fabricated: sent only when the subscriber's own
+    // $attConsentStatus is present, on the iOS branch of the ladder. See
+    // the KNOWN GAPS comment above for the full citation.
+    if (device.platform === "iOS") {
+      const consentStatus = envelope.subscriberAttributes?.["$attConsentStatus"];
+      const attStatus = consentStatus
+        ? SINGULAR_ATT_STATUS_BY_CONSENT[consentStatus]
+        : undefined;
+      if (attStatus) {
+        fields.att_authorization_status = attStatus;
+      }
+    }
+
     // Revenue fields only apply to revenue.* keys — sending them on a
     // subscription-lifecycle event would fabricate revenue for an event
     // that carries no money movement, same invariant as every other
@@ -488,6 +532,7 @@ export const singularProvider: IntegrationProvider = {
   ): Promise<DeliveryResult> {
     const { endpoint, fields } = payload.body as SingularPayloadBody;
     const sdkKey = creds["sdk_key"] ?? "";
+    const appId = creds["app_id"] ?? "";
 
     // SECRET-IN-QUERY CONSTRAINT: `endpoint` is always the bare constant
     // (never interpolated with sdk_key or any field) — every dynamic value,
@@ -495,6 +540,7 @@ export const singularProvider: IntegrationProvider = {
     // below. See the module-level comment for the full rationale.
     const params = new URLSearchParams();
     params.set("a", sdkKey);
+    params.set("i", appId);
     for (const [key, value] of Object.entries(fields)) {
       params.set(key, value);
     }
