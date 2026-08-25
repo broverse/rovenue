@@ -45,18 +45,30 @@ function deriveEventKey(
 }
 
 // ---------------------------------------------------------------------------
-// Credentials — LOCKED field ids per the Task 7 controller context:
-// app_name (Airbridge's own app slug, used as a URL path segment) +
-// api_token (Airbridge API Token, "Settings > Tokens" in the Airbridge
-// dashboard). Both required; `.catchall(z.string())` so unrelated extra
-// string keys never fail validation, while keeping the inferred type
+// Credentials — app_name (Airbridge's own app slug, used as a URL path
+// segment) + api_token (Airbridge API Token, "Settings > Tokens" in the
+// Airbridge dashboard), both required. `.catchall(z.string())` so unrelated
+// extra string keys never fail validation, while keeping the inferred type
 // Record<string, string>.
+//
+// package_name added post-review (2026-08-25), OPTIONAL: Airbridge's S2S
+// contract marks `app.packageName` (the OS bundle id / package name) as a
+// REQUIRED body field, and this provider was silently guessing it as the
+// app_name slug. That is the same class of sin as fabricating a currency —
+// inventing a vendor-required identifier — so there is now an honest place
+// to put the real value. It stays optional rather than required because
+// making it required would break every already-configured connection on
+// upgrade with no migration to backfill it (this wave ships zero
+// migrations); when it is blank the disclosed slug fallback still applies
+// (see resolvePackageName below), and both the dashboard label and
+// airbridge.mdx say plainly that setting it is strongly recommended.
 // ---------------------------------------------------------------------------
 
 const credentialsSchema = z
   .object({
     app_name: z.string().min(1),
     api_token: z.string().min(1),
+    package_name: z.string().min(1).optional(),
   })
   .catchall(z.string());
 
@@ -84,19 +96,29 @@ const credentialsSchema = z
 // `eventData.goal.semanticAttributes.transactionID` is Rovenue's own
 // `outboxEventId`, per the task brief.
 //
-// KNOWN GAP (documented, not silently swallowed): the vendor docs mark
-// `app.packageName` (the OS bundle id / package name) as a required body
-// field. Rovenue's RovenueEventEnvelope/ConnectionConfig carry no bundle-id
-// field (unlike AppsFlyer, whose per-platform app ids live directly in its
-// own credentialsSchema) and this task's credentials are locked to
-// `{ app_name, api_token }` — there is nowhere honest to source a real
-// bundle id from without fabricating one. As a pragmatic default this sends
-// `app.packageName = app_name` (many Airbridge app registrations use the
-// bundle id as their app slug by dashboard convention, and the `{app_name}`
-// URL segment already tells Airbridge which app/config the event belongs
-// to), but this is NOT guaranteed correct for every customer — flagged here
-// and in the docs page as a follow-up candidate (a dedicated bundle-id
-// credential field) rather than assumed solved.
+// `app.packageName` (the OS bundle id / package name) is marked required by
+// the vendor docs. It now has an honest source — the OPTIONAL `package_name`
+// credential (see credentialsSchema above) — with the previously-disclosed
+// `app_name` slug kept only as the blank-field fallback. See
+// resolvePackageName below.
+//
+// EVENT AGE LIMIT (vendor-imposed, disclosed rather than worked around):
+// Airbridge DISCARDS events whose `eventTimestamp` is more than 24 hours in
+// the past. Nothing in this provider or the delivery pipeline can widen that
+// window — the endpoint answers 2xx and drops the event server-side, so a
+// discarded event is INVISIBLE to Rovenue: the Delivery Log shows a green
+// `succeeded` row and nothing arrives in Airbridge.
+//
+// The consequence that matters operationally: BACKFILL (services/
+// integrations/backfill.ts) is gated only by the provider's topics, so the
+// dashboard happily offers a backfill for an AIRBRIDGE connection — and any
+// backfilled row older than 24 hours is a silent no-op. Backfill is still
+// useful here for a window that starts inside the last day (e.g. a
+// connection activated this morning), and is deliberately NOT blocked in
+// code this wave: that would be a behavior change beyond the disclosure
+// fix, and a hard block would also be wrong for the sub-24h case. Documented
+// in apps/docs/content/docs/integrations/airbridge.mdx's verification
+// section.
 // ---------------------------------------------------------------------------
 
 const AIRBRIDGE_API_BASE = "https://api.airbridge.io";
@@ -118,6 +140,22 @@ function buildEventUrl(appName: string): string {
 
 function resolveDeviceUUID(envelope: RovenueEventEnvelope): string | undefined {
   return envelope.subscriberAttributes?.["$airbridgeDeviceId"];
+}
+
+// ---------------------------------------------------------------------------
+// app.packageName — the real bundle id when the connection supplies one,
+// otherwise the long-standing (and documented) `app_name` slug fallback.
+//
+// The fallback exists only for connections created before `package_name` was
+// offered; it is a guess, and both the dashboard field label and the docs
+// page say so. It is kept rather than skipping the event because
+// `app.packageName` is required by the vendor: dropping every event from an
+// already-working connection on upgrade would be a strictly worse failure
+// than the imperfect value those connections have been sending all along.
+// ---------------------------------------------------------------------------
+
+function resolvePackageName(creds: ProviderCredentials): string {
+  return creds["package_name"] ?? creds["app_name"] ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -351,15 +389,11 @@ export const airbridgeProvider: IntegrationProvider = {
       }
     }
 
-    const appName = creds["app_name"] ?? "";
     const body: AirbridgeEventBody = {
       eventUUID: deriveAirbridgeEventUUID(envelope.outboxEventId),
       eventTimestamp: Date.parse(envelope.occurredAt),
       device: { deviceUUID },
-      // See the "KNOWN GAP" comment above the endpoint constants: reuses
-      // the app_name credential as a pragmatic default for the vendor's
-      // required (and otherwise unavailable) bundle-id field.
-      app: { packageName: appName },
+      app: { packageName: resolvePackageName(creds) },
       eventData: { goal },
     };
 

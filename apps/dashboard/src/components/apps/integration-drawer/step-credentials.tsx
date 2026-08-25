@@ -127,9 +127,21 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
     { id: "api_key", label: "API key", secret: true },
     { id: "region", label: "Region (us or eu)", optional: true, placeholder: "us" },
   ],
+  // package_name added post-review (2026-08-25): Airbridge's S2S contract
+  // marks `app.packageName` (the OS bundle id) as required, and Rovenue was
+  // silently guessing it as the `app_name` slug. It is OPTIONAL here — the
+  // disclosed slug fallback still applies when it is blank — but setting it
+  // is strongly recommended for correct attribution. See
+  // providers/airbridge.ts's credentialsSchema comment.
   AIRBRIDGE: [
     { id: "app_name", label: "App name" },
     { id: "api_token", label: "API token", secret: true },
+    {
+      id: "package_name",
+      label: "Package name / bundle id (optional)",
+      placeholder: "com.example.app",
+      optional: true,
+    },
   ],
   // app_id added post-review (2026-08-25): Singular's EVENT endpoint
   // requires an app identifier (`i`, bundle id / package name) on every

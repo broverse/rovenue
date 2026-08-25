@@ -343,10 +343,65 @@ describe("airbridgeProvider.mapEvent — eventUUID on the wire", () => {
 });
 
 // ---------------------------------------------------------------------------
+// app.packageName — the vendor-required bundle id
+// ---------------------------------------------------------------------------
+
+describe("airbridgeProvider.mapEvent — app.packageName", () => {
+  it("sends the package_name credential when the connection supplies one", () => {
+    const result = airbridgeProvider.mapEvent(makeEnvelope(), makeConfig(), {
+      app_name: APP_NAME,
+      api_token: "tok",
+      package_name: "com.example.app",
+    }) as ProviderPayload;
+    const body = result.body as AirbridgeEventBody;
+    expect(body.app.packageName).toBe("com.example.app");
+    // The slug must NOT leak into the field once a real bundle id exists.
+    expect(body.app.packageName).not.toBe(APP_NAME);
+  });
+
+  it("falls back to the app_name slug when package_name is absent", () => {
+    const result = airbridgeProvider.mapEvent(makeEnvelope(), makeConfig(), {
+      app_name: APP_NAME,
+      api_token: "tok",
+    }) as ProviderPayload;
+    expect((result.body as AirbridgeEventBody).app.packageName).toBe(APP_NAME);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // credentialsSchema
 // ---------------------------------------------------------------------------
 
 describe("airbridgeProvider.credentialsSchema", () => {
+  it("accepts an optional package_name", () => {
+    expect(
+      airbridgeProvider.credentialsSchema.safeParse({
+        app_name: APP_NAME,
+        api_token: "tok",
+        package_name: "com.example.app",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts credentials with no package_name at all (it is optional)", () => {
+    expect(
+      airbridgeProvider.credentialsSchema.safeParse({
+        app_name: APP_NAME,
+        api_token: "tok",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an EMPTY package_name rather than storing a blank bundle id", () => {
+    expect(
+      airbridgeProvider.credentialsSchema.safeParse({
+        app_name: APP_NAME,
+        api_token: "tok",
+        package_name: "",
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts app_name + api_token", () => {
     expect(
       airbridgeProvider.credentialsSchema.safeParse({

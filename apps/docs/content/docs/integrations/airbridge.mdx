@@ -29,7 +29,7 @@ Authorization: Bearer YOUR_API_TOKEN
 
 **Retries are deduplicated.** Every event also carries an `eventUUID`, derived deterministically (SHA-256, formatted as a UUID4) from that same `outboxEventId`. Rovenue's delivery queue is at-least-once, so the same event can be sent more than once after a network error or a `5xx` — a stable `eventUUID` is what lets Airbridge collapse those retries instead of counting the revenue twice.
 
-**Known limitation:** Airbridge's contract also documents `app.packageName` (your app's OS bundle id / package name) as a required field. Rovenue has no dedicated place to store that today — this integration sends your `app_name` credential in its place, which works for accounts where the Airbridge app slug matches the bundle id, but may not for every account. If your events aren't attributing correctly, check your Airbridge dashboard's app configuration.
+**Set your package name.** Airbridge's contract also requires `app.packageName` — your app's OS bundle id (`com.example.app`) / Android package name. Rovenue sends the optional **Package name / bundle id** credential when you fill it in. Leaving it blank falls back to sending your `app_name` slug in its place, which is only correct for accounts whose Airbridge app slug happens to equal the bundle id — **setting the real value is strongly recommended**, and events may not attribute correctly without it.
 
 ---
 
@@ -48,6 +48,7 @@ Authorization: Bearer YOUR_API_TOKEN
 3. The side drawer opens. Fill in the **Credentials** step:
    - **App name** — paste the app slug from step 1.
    - **API token** — paste the token from step 1.
+   - **Package name / bundle id (optional)** — your app's OS bundle id / Android package name (`com.example.app`). Optional, but strongly recommended: see [Wire contract](#wire-contract) above for what happens when it's blank.
 4. Click **Validate**. Airbridge has no zero-footprint endpoint that verifies an `app_name` + `api_token` pair together (see [Validation](#validation) below), so this only checks that both fields are filled in — it sends nothing to Airbridge.
 5. Choose which events to forward, optionally override the default mapping, then activate.
 
@@ -100,6 +101,10 @@ So, like the AppsFlyer integration, clicking **Validate** here only checks that 
 ---
 
 ## Verify events are arriving
+
+**Airbridge discards events older than 24 hours.** If an event's timestamp is more than a day in the past, Airbridge drops it *server-side* and still answers `2xx` — so Rovenue's Delivery Log shows a green `succeeded` row for an event that never landed. This is Airbridge's rule, not Rovenue's, and nothing in Rovenue can widen the window.
+
+The practical consequence is for **backfill**: Rovenue lets you backfill historical events into any connection, but for Airbridge only the portion of the window inside the last 24 hours will actually arrive. Anything older is a silent no-op — green rows, nothing delivered. Backfill an Airbridge connection only for a recent window, and treat older ranges as unavailable rather than as a delivery failure to debug.
 
 1. Open **Apps → Airbridge → Delivery Log** in the Rovenue dashboard and check for `succeeded` rows with HTTP `2xx`.
 2. In the Airbridge dashboard, look up the device by its Airbridge Device ID and check its event timeline for the mapped category names above.
