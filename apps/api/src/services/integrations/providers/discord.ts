@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ROVENUE_EVENT_KEYS } from "@rovenue/shared";
+import { ROVENUE_EVENT_KEYS, REVENUE_EVENT_KEY_PREFIX } from "@rovenue/shared";
 import type { RovenueEventKey } from "@rovenue/shared";
 import type {
   IntegrationProvider,
@@ -138,12 +138,18 @@ function classifyDiscordResponse(res: { status: number; body: string }): Deliver
       retriable: false,
     };
   }
+  // 401/403 are NOT the same failure as 404: the webhook still exists, but
+  // its token is wrong or has been revoked/rotated (regenerating a Discord
+  // webhook's URL invalidates the old token while keeping the webhook id).
+  // Reusing 404's "unknown webhook" text here sent an operator looking for a
+  // deleted webhook that is in fact still there — the docs page already
+  // distinguishes the two cases, so the Delivery Log now does too.
   if (status === 401 || status === 403) {
     return {
       ok: false,
       httpStatus: status,
       responseBody,
-      errorMessage: `discord http ${status}: unknown webhook`,
+      errorMessage: `discord http ${status}: invalid or revoked webhook token`,
       retriable: false,
     };
   }
@@ -255,7 +261,7 @@ export const discordProvider: IntegrationProvider = {
 
     const text = buildChatMessageText({
       eventKey,
-      amount: eventKey.startsWith("revenue.") ? envelope.amount : undefined,
+      amount: eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX) ? envelope.amount : undefined,
       currency: envelope.currency,
       productId: envelope.productId,
       subscriberId: envelope.subscriberId,

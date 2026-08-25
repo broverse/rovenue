@@ -1,4 +1,5 @@
 import type { RovenueEventKey } from "@rovenue/shared";
+import { REVENUE_EVENT_KEY_PREFIX } from "@rovenue/shared";
 
 // ---------------------------------------------------------------------------
 // Chat message builder — PURE function, no I/O. Shared by every chat-webhook
@@ -24,7 +25,7 @@ const FAMILY_EMOJI: Record<EventFamily, string> = {
 };
 
 function eventFamily(eventKey: RovenueEventKey): EventFamily {
-  if (eventKey.startsWith("revenue.")) return "revenue";
+  if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) return "revenue";
   if (eventKey.startsWith("paywall.")) return "paywall";
   if (eventKey.startsWith("credit.")) return "credit";
   // subscription.* lifecycle keys, plus subscriber.identified (identity is

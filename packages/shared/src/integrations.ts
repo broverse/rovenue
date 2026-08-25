@@ -42,8 +42,15 @@ export function isRovenueEventKey(s: string): s is RovenueEventKey {
 // typo or a key removed from ROVENUE_EVENT_KEYS fails tsc here instead of
 // silently mapping to nothing at runtime.
 
-/** Prefix shared by every revenue key in ROVENUE_EVENT_KEYS. */
-const REVENUE_EVENT_KEY_PREFIX = "revenue.";
+/**
+ * Prefix shared by every revenue key in ROVENUE_EVENT_KEYS.
+ *
+ * Exported because "is this a revenue key?" is asked in ~15 places across the
+ * api provider mappers, the chat-message builder and the events route — each
+ * of which used to spell the `"revenue."` literal itself. One const so a
+ * rename of the namespace is a compile error, not a silent behavior change.
+ */
+export const REVENUE_EVENT_KEY_PREFIX = "revenue.";
 
 /** The revenue.* keys, in catalog order — derived from ROVENUE_EVENT_KEYS so
  *  a new revenue kind cannot be added to one list and forgotten in the other. */
@@ -83,13 +90,15 @@ export const SUBSCRIPTION_LIFECYCLE_KEYS = [
 ] as const satisfies readonly RovenueEventKey[];
 
 /**
- * The 13-key revenue + subscription-lifecycle catalog every Wave-1 analytics
- * / attribution provider offers (AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST,
- * FIREBASE_GA4) and the drawer's event picker renders for them. It is
- * deliberately NOT the full ROVENUE_EVENT_KEYS: `subscriber.identified`,
- * `paywall.*` and `credit.ledger.appended` have no mapping in those
- * providers, and only the catch-all providers (CUSTOM_WEBHOOK, SLACK) offer
- * the complete set.
+ * The 13-key revenue + subscription-lifecycle catalog that every
+ * analytics / attribution / lifecycle provider offers — Wave-1's AMPLITUDE,
+ * MIXPANEL, APPSFLYER, ADJUST, FIREBASE_GA4 plus Wave-2's BRAZE, ONESIGNAL,
+ * ITERABLE, AIRBRIDGE, SINGULAR — and the drawer's event picker renders for
+ * them. It is deliberately NOT the full ROVENUE_EVENT_KEYS:
+ * `subscriber.identified`, `paywall.*` and `credit.ledger.appended` have no
+ * mapping in those providers. Only the catch-all / general-purpose
+ * notification providers (CUSTOM_WEBHOOK, SLACK, DISCORD) offer the complete
+ * set.
  */
 export const STANDARD_PROVIDER_EVENT_KEYS = [
   ...REVENUE_EVENT_KEYS,

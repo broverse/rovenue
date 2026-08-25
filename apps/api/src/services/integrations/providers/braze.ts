@@ -14,6 +14,7 @@ import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
   STANDARD_PROVIDER_EVENT_KEYS,
+  REVENUE_EVENT_KEY_PREFIX,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -262,7 +263,7 @@ export const brazeProvider: IntegrationProvider = {
       outbox_event_id: envelope.outboxEventId,
     };
 
-    if (eventKey.startsWith("revenue.")) {
+    if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) {
       const amount = envelope.amount ? parseFloat(envelope.amount) : undefined;
       const price = amount !== undefined && !isNaN(amount) ? amount : 0;
 

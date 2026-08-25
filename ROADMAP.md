@@ -28,7 +28,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
    low priority, narrow scope)
 
 Integrations (§6) is effectively done as of Wave 2 (framework + webhook v2 +
-12 first-class providers across two waves). Completing 1–2 should lift the
+14 first-class providers across two waves, plus the vendor-agnostic CUSTOM_WEBHOOK escape hatch). Completing 1–2 should lift the
 overall picture toward ~88%; items 3–5 close the remaining analytics/
 experiments/integrations gaps on the way to 95%.
 
@@ -95,7 +95,7 @@ Braze, OneSignal, Iterable (lifecycle category), Airbridge, Singular
 RC-compatible vendor-id attributes, Slack's message builder hoisted to a
 shared chat module reused by Discord, plus Wave-1 parked cleanup
 (`STANDARD_PROVIDER_EVENT_KEYS` rename, `Readonly` typings, stale comments).
-Score moved from 75 to 90: twelve first-class providers now exist across
+Score moved from 75 to 90: fourteen first-class providers now exist across
 lifecycle, attribution, analytics, and communication categories (Meta CAPI,
 TikTok, Amplitude, Mixpanel, AppsFlyer, Adjust, Slack, Firebase/GA4, Braze,
 OneSignal, Iterable, Airbridge, Singular, Discord — see the full checklist

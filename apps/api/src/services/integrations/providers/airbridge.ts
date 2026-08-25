@@ -14,6 +14,7 @@ import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
   STANDARD_PROVIDER_EVENT_KEYS,
+  REVENUE_EVENT_KEY_PREFIX,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -302,7 +303,7 @@ export const airbridgeProvider: IntegrationProvider = {
     // subscription-lifecycle event would fabricate revenue for an event
     // that carries no money movement, same invariant as every other
     // provider here.
-    if (eventKey.startsWith("revenue.")) {
+    if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) {
       const revenueFields = resolveRevenueFields(envelope);
       if ("value" in revenueFields) {
         goal.value = revenueFields.value;

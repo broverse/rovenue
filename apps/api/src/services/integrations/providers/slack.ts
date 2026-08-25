@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ROVENUE_EVENT_KEYS } from "@rovenue/shared";
+import { ROVENUE_EVENT_KEYS, REVENUE_EVENT_KEY_PREFIX } from "@rovenue/shared";
 import type { RovenueEventKey } from "@rovenue/shared";
 import type {
   IntegrationProvider,
@@ -238,7 +238,7 @@ export const slackProvider: IntegrationProvider = {
 
     const text = buildChatMessageText({
       eventKey,
-      amount: eventKey.startsWith("revenue.") ? envelope.amount : undefined,
+      amount: eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX) ? envelope.amount : undefined,
       currency: envelope.currency,
       productId: envelope.productId,
       subscriberId: envelope.subscriberId,

@@ -4,7 +4,7 @@ import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { drizzle } from "@rovenue/db";
-import { API_KEY_KIND } from "@rovenue/shared";
+import { API_KEY_KIND, REVENUE_EVENT_KEY_PREFIX } from "@rovenue/shared";
 import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscriber";
 
 // =============================================================
@@ -121,7 +121,7 @@ function deriveAggregateType(
   eventType: string,
 ): "REVENUE_EVENT" | "BILLING" | "PAYWALL_EVENT" {
   if (eventType.startsWith("paywall_")) return "PAYWALL_EVENT";
-  return eventType.startsWith("revenue.") ? "REVENUE_EVENT" : "BILLING";
+  return eventType.startsWith(REVENUE_EVENT_KEY_PREFIX) ? "REVENUE_EVENT" : "BILLING";
 }
 
 // =============================================================

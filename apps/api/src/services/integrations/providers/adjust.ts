@@ -14,6 +14,7 @@ import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
   STANDARD_PROVIDER_EVENT_KEYS,
+  REVENUE_EVENT_KEY_PREFIX,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -258,7 +259,7 @@ export const adjustProvider: IntegrationProvider = {
     // representing a refund as negative revenue (see the endpoint comment
     // above), so `revenue` is sent as Rovenue's own POSITIVE stored amount
     // — same finding and same treatment as AppsFlyer.
-    if (eventKey.startsWith("revenue.")) {
+    if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) {
       const amount = envelope.amount ? parseFloat(envelope.amount) : undefined;
       if (amount !== undefined && !isNaN(amount)) {
         wire.revenue = amount;

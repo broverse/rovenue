@@ -14,6 +14,7 @@ import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
   STANDARD_PROVIDER_EVENT_KEYS,
+  REVENUE_EVENT_KEY_PREFIX,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -280,7 +281,7 @@ export const iterableProvider: IntegrationProvider = {
     // subscription-revenue forwarder — routes its "Cancellation" event
     // through the Custom Events API rather than trackPurchase, corroborating
     // that no such convention exists.
-    if (eventKey.startsWith("revenue.")) {
+    if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) {
       const price = resolvePrice(envelope);
       const body: IterableTrackPurchaseBody = {
         user: identity,
@@ -328,7 +329,7 @@ export const iterableProvider: IntegrationProvider = {
     http: HttpClient,
   ): Promise<DeliveryResult> {
     const apiKey = creds["api_key"] ?? "";
-    const isRevenue = payload.eventKey.startsWith("revenue.");
+    const isRevenue = payload.eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX);
     const url = isRevenue ? buildTrackPurchaseUrl(creds) : buildEventsTrackUrl(creds);
 
     const res = await http.request({

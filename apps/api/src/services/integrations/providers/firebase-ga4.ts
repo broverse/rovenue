@@ -14,6 +14,7 @@ import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
   STANDARD_PROVIDER_EVENT_KEYS,
+  REVENUE_EVENT_KEY_PREFIX,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -63,7 +64,7 @@ function deriveEventKey(
 //     underscores rule below, since "revenue.CANCELLATION" would otherwise
 //     produce "rovenue_revenue_cancellation").
 //   - every subscription.* key -> "rovenue_" + the event type with dots
-//     replaced by underscores (ga4SubscriptionEventName), since GA4 has no
+//     replaced by underscores (`rovenueCustomEventName`), since GA4 has no
 //     standard vocabulary for subscription lifecycle at all.
 //
 // The table itself lives in event-mapping.ts's DEFAULT_EVENT_MAPPING — the
@@ -271,7 +272,7 @@ export const firebaseGa4Provider: IntegrationProvider = {
     // POSITIVE amount being refunded, which GA4 itself nets against prior
     // "purchase" events server-side when computing revenue. Negating the
     // value here would double-negate against GA4's own accounting.
-    if (eventKey.startsWith("revenue.")) {
+    if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) {
       const amount = envelope.amount ? parseFloat(envelope.amount) : undefined;
       if (amount !== undefined && !isNaN(amount)) {
         params.value = amount;

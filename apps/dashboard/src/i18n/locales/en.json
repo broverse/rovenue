@@ -4504,7 +4504,7 @@
       },
       "singular": {
         "name": "Singular",
-        "description": "Marketing analytics with cost aggregation across 2,500+ ad networks."
+        "description": "Mobile attribution and marketing analytics. Forwards purchase and subscription-lifecycle events to Singular's server-to-server event endpoint."
       },
       "tenjin": {
         "name": "Tenjin",
@@ -4600,11 +4600,11 @@
       },
       "braze": {
         "name": "Braze",
-        "description": "Trigger lifecycle messages on subscription milestones, churn risk, and trial conversions."
+        "description": "Customer engagement and lifecycle messaging. Forwards purchases to Braze's purchases array and subscription-lifecycle events as Braze custom events."
       },
       "iterable": {
         "name": "Iterable",
-        "description": "Cross-channel marketing automation triggered by subscription events."
+        "description": "Cross-channel marketing automation. Forwards purchases through Iterable's commerce API and subscription-lifecycle events as Iterable custom events."
       },
       "customerio": {
         "name": "Customer.io",
@@ -4616,7 +4616,7 @@
       },
       "onesignal": {
         "name": "OneSignal",
-        "description": "Push notifications by subscription state."
+        "description": "Customer messaging platform. Forwards purchase and subscription-lifecycle events as OneSignal custom events you can trigger Journeys from."
       },
       "hubspot": {
         "name": "HubSpot",
@@ -4632,7 +4632,7 @@
       },
       "discord": {
         "name": "Discord",
-        "description": "Webhook posts to Discord servers."
+        "description": "Team chat for communities and dev teams. Posts revenue, subscription, paywall, and credit events to a Discord channel via an incoming webhook."
       },
       "pagerduty": {
         "name": "PagerDuty",

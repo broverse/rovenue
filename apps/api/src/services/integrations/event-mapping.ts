@@ -49,20 +49,40 @@ const ANALYTICS_DEFAULT_EVENT_NAMES: Partial<Record<RovenueEventKey, string>> = 
   "subscription.product_changed": "product_changed",
 };
 
+// ---------------------------------------------------------------------------
+// Rovenue-namespaced custom event names — ONE helper for every vendor that
+// needs a name for a key its own vocabulary has no equivalent for.
+//
+// FIREBASE_GA4, BRAZE, ITERABLE and AIRBRIDGE independently landed on the
+// identical `rovenue_<key with dots as underscores>` transform and each kept
+// a byte-identical private copy of it; they now share this one. BRAZE also
+// reuses it at the provider layer (providers/braze.ts) for the revenue keys
+// it cannot honestly send as a purchase.
+//
+// SINGULAR deliberately does NOT use this and keeps its own hand-written,
+// shorter table (SINGULAR_LIFECYCLE_EVENT_NAMES below): Singular's EVENT
+// Endpoint Reference caps the event name `n` at 32 ASCII characters and
+// `rovenue_subscription_product_changed` is 36 — a real vendor constraint,
+// not a missed de-duplication.
+// ---------------------------------------------------------------------------
+
+/** Prefix that marks a vendor-side event name as Rovenue-originated. */
+export const ROVENUE_CUSTOM_EVENT_PREFIX = "rovenue_";
+
+/** "subscription.trial.started" -> "rovenue_subscription_trial_started". */
+export function rovenueCustomEventName(key: RovenueEventKey): string {
+  return `${ROVENUE_CUSTOM_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
+}
+
 // GA4 custom event names must match `^[A-Za-z]\w*$`, so unlike
 // AMPLITUDE/MIXPANEL/APPSFLYER these are not free-form vendor names: the
 // revenue keys collapse onto GA4's own recommended `purchase`/`refund`
 // events, and every subscription.* key derives as a namespaced custom name
-// (GA4 has no standard subscription-lifecycle vocabulary at all).
+// via `rovenueCustomEventName` (GA4 has no standard subscription-lifecycle
+// vocabulary at all).
 const GA4_PURCHASE_EVENT = "purchase";
 const GA4_REFUND_EVENT = "refund";
-const GA4_CANCELLATION_EVENT = "rovenue_cancellation";
-const GA4_CUSTOM_EVENT_PREFIX = "rovenue_";
-
-/** "subscription.trial.started" -> "rovenue_subscription_trial_started". */
-function ga4SubscriptionEventName(key: RovenueEventKey): string {
-  return `${GA4_CUSTOM_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
-}
+const GA4_CANCELLATION_EVENT = `${ROVENUE_CUSTOM_EVENT_PREFIX}cancellation`;
 
 // BRAZE — the first LIFECYCLE-category provider (Wave-2 Task 4). Its
 // `revenue.*` keys don't need a Braze-side event NAME at all: they ride
@@ -74,7 +94,7 @@ function ga4SubscriptionEventName(key: RovenueEventKey): string {
 // event name, for this provider's revenue keys. Lifecycle keys have no
 // Braze-native equivalent, so each becomes a Rovenue-namespaced Braze
 // custom event via `events`, the same `rovenue_<suffix>` convention as
-// FIREBASE_GA4's `ga4SubscriptionEventName`.
+// FIREBASE_GA4 — both through the shared `rovenueCustomEventName` above.
 //
 // `revenue.REFUND` is intentionally OMITTED — the fallback ruling from the
 // Task 4 controller context: Braze's users/track / purchase-object
@@ -85,10 +105,6 @@ function ga4SubscriptionEventName(key: RovenueEventKey): string {
 // negative-price refund convention anywhere in the schema) — forwarding a
 // REFUND through `purchases` would double-count revenue in Braze's own
 // reporting rather than reverse it. Falls through to `no_mapping`/skip.
-const BRAZE_LIFECYCLE_EVENT_PREFIX = "rovenue_";
-function brazeLifecycleEventName(key: RovenueEventKey): string {
-  return `${BRAZE_LIFECYCLE_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
-}
 
 // INTENTIONAL OMISSION — `revenue.REFUND` and `revenue.CANCELLATION` are
 // deliberately NOT mapped for either provider. Meta CAPI and TikTok Events
@@ -110,9 +126,8 @@ function brazeLifecycleEventName(key: RovenueEventKey): string {
 // narrow store-lifecycle normalization — cancel_requested/expired/
 // billing_issue/grace_period/uncancelled/product_changed) have no Airbridge
 // equivalent, so they get the same Rovenue-namespaced `rovenue_<suffix>`
-// custom-category convention BRAZE/GA4/ITERABLE already use (own local copy
-// of the string transform, matching BRAZE's pattern rather than importing
-// GA4's helper).
+// custom-category convention BRAZE/GA4/ITERABLE already use, through the
+// shared `rovenueCustomEventName` helper above.
 //
 // revenue.INITIAL / revenue.TRIAL_CONVERSION -> "airbridge.subscribe" — both
 // are "a paid subscription just started" moments (first purchase, or a
@@ -138,10 +153,6 @@ function brazeLifecycleEventName(key: RovenueEventKey): string {
 //
 // subscription.trial.started -> "airbridge.startTrial" — exact documented
 // vendor match.
-const AIRBRIDGE_LIFECYCLE_EVENT_PREFIX = "rovenue_";
-function airbridgeLifecycleEventName(key: RovenueEventKey): string {
-  return `${AIRBRIDGE_LIFECYCLE_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
-}
 
 // SINGULAR (Wave-2 Task 8) — vendor vocabulary verified against Singular's
 // own first-party support docs (support.singular.net/hc/en-us/articles/
@@ -184,9 +195,8 @@ function airbridgeLifecycleEventName(key: RovenueEventKey): string {
 // billing_issue/grace_period/uncancelled/product_changed) have no Singular
 // equivalent, so — like BRAZE/GA4/AIRBRIDGE — they get a Rovenue-namespaced
 // `rovenue_<suffix>` custom event name. UNLIKE those three, this can't reuse
-// their shared `rovenue_subscription_<key>`-shaped helper
-// (ga4SubscriptionEventName/brazeLifecycleEventName/
-// airbridgeLifecycleEventName all include the literal word "subscription"):
+// their shared `rovenueCustomEventName` helper (its output keeps the literal
+// word "subscription" from the key):
 // Singular's EVENT Endpoint Reference caps `n` (event name) at "Maximum 32
 // ASCII characters", and several of those derivations blow past it —
 // `rovenue_subscription_product_changed` alone is 36 characters. SINGULAR
@@ -272,7 +282,7 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.REFUND": GA4_REFUND_EVENT,
     "revenue.CANCELLATION": GA4_CANCELLATION_EVENT,
     ...Object.fromEntries(
-      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, ga4SubscriptionEventName(key)]),
+      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, rovenueCustomEventName(key)]),
     ),
   },
   BRAZE: {
@@ -283,7 +293,7 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     // revenue.REFUND: intentionally unmapped — see comment above.
     "revenue.CANCELLATION": "revenue.CANCELLATION",
     ...Object.fromEntries(
-      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, brazeLifecycleEventName(key)]),
+      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, rovenueCustomEventName(key)]),
     ),
   },
   // ONESIGNAL (Wave-2 Task 5) — unlike BRAZE, OneSignal's custom_events API
@@ -301,10 +311,9 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
   // when the revenue envelope has no `productId` — so, unlike ONESIGNAL,
   // this is NOT a straight reuse of ANALYTICS_DEFAULT_EVENT_NAMES for every
   // key: revenue.* keys reuse its free-form names (they read fine as either
-  // a fallback item label or a tag), but subscription-lifecycle keys reuse
-  // FIREBASE_GA4's `rovenue_<suffix>` derivation (`ga4SubscriptionEventName`
-  // — the function is GA4-named but its body is vendor-agnostic string
-  // manipulation) rather than the free-form names, since Iterable's
+  // a fallback item label or a tag), but subscription-lifecycle keys use the
+  // shared `rovenue_<suffix>` derivation (`rovenueCustomEventName`)
+  // rather than the free-form names, since Iterable's
   // events/track eventName is a real custom-event name that benefits from
   // the same unambiguous, Rovenue-namespaced convention Braze/GA4 already
   // use for lifecycle keys, and Iterable (like GA4) has "Allow new custom
@@ -328,7 +337,7 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     // revenue.REFUND: intentionally unmapped — see comment above.
     "revenue.CANCELLATION": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.CANCELLATION"],
     ...Object.fromEntries(
-      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, ga4SubscriptionEventName(key)]),
+      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, rovenueCustomEventName(key)]),
     ),
   },
   AIRBRIDGE: {
@@ -342,7 +351,7 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.CANCELLATION": "airbridge.unsubscribe",
     "subscription.trial.started": "airbridge.startTrial",
     ...Object.fromEntries(
-      SUBSCRIPTION_BRIDGE_EVENT_KEYS.map((key) => [key, airbridgeLifecycleEventName(key)]),
+      SUBSCRIPTION_BRIDGE_EVENT_KEYS.map((key) => [key, rovenueCustomEventName(key)]),
     ),
   },
   SINGULAR: {

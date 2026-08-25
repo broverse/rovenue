@@ -14,6 +14,7 @@ import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
   STANDARD_PROVIDER_EVENT_KEYS,
+  REVENUE_EVENT_KEY_PREFIX,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -264,7 +265,7 @@ export const onesignalProvider: IntegrationProvider = {
       outbox_event_id: envelope.outboxEventId,
     };
 
-    if (eventKey.startsWith("revenue.")) {
+    if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) {
       Object.assign(payload, buildMonetaryFields(envelope));
       if (envelope.productId) {
         payload.product_id = envelope.productId;

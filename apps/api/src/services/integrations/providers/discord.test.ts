@@ -351,6 +351,7 @@ describe("discordProvider.deliver", () => {
     const result = await discordProvider.deliver(dummyPayload, creds, http);
     expect(result.ok).toBe(false);
     expect(result.retriable).toBe(false);
+    expect(result.errorMessage).toBe("discord http 404: unknown webhook");
   });
 
   it("401 -> !ok + retriable:false", async () => {
@@ -362,6 +363,10 @@ describe("discordProvider.deliver", () => {
     const result = await discordProvider.deliver(dummyPayload, creds, http);
     expect(result.ok).toBe(false);
     expect(result.retriable).toBe(false);
+    // Distinct from 404's message: the webhook exists, the token doesn't work.
+    expect(result.errorMessage).toBe(
+      "discord http 401: invalid or revoked webhook token",
+    );
   });
 
   it("403 -> !ok + retriable:false", async () => {
@@ -373,6 +378,9 @@ describe("discordProvider.deliver", () => {
     const result = await discordProvider.deliver(dummyPayload, creds, http);
     expect(result.ok).toBe(false);
     expect(result.retriable).toBe(false);
+    expect(result.errorMessage).toBe(
+      "discord http 403: invalid or revoked webhook token",
+    );
   });
 
   it("400 -> !ok + retriable:false", async () => {

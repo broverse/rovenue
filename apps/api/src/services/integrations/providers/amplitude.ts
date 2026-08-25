@@ -14,6 +14,7 @@ import type { RovenueEventKey } from "@rovenue/shared";
 import {
   SUBSCRIPTION_LIFECYCLE_KEYS,
   STANDARD_PROVIDER_EVENT_KEYS,
+  REVENUE_EVENT_KEY_PREFIX,
 } from "@rovenue/shared";
 import {
   applyEventMapping,
@@ -249,7 +250,7 @@ export const amplitudeProvider: IntegrationProvider = {
     // Revenue fields only apply to revenue.* keys — sending them on a
     // subscription-lifecycle event would fabricate revenue in Amplitude's
     // revenue reports for an event that carries no money movement.
-    if (eventKey.startsWith("revenue.")) {
+    if (eventKey.startsWith(REVENUE_EVENT_KEY_PREFIX)) {
       const amount = envelope.amount ? parseFloat(envelope.amount) : undefined;
       if (amount !== undefined && !isNaN(amount)) {
         // Amplitude convention (vendor docs): both `price` and `revenue`
