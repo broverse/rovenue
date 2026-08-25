@@ -10,6 +10,7 @@ import { slackProvider } from "./providers/slack";
 import { firebaseGa4Provider } from "./providers/firebase-ga4";
 import { brazeProvider } from "./providers/braze";
 import { onesignalProvider } from "./providers/onesignal";
+import { iterableProvider } from "./providers/iterable";
 
 export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   META_CAPI: metaCapiProvider,
@@ -23,6 +24,7 @@ export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   FIREBASE_GA4: firebaseGa4Provider,
   BRAZE: brazeProvider,
   ONESIGNAL: onesignalProvider,
+  ITERABLE: iterableProvider,
 };
 
 export function getProvider(id: ProviderId): IntegrationProvider {

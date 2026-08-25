@@ -1,0 +1,91 @@
+---
+title: Iterable
+description: Sync Rovenue revenue and subscription-lifecycle events into Iterable as purchases and custom events, so you can trigger cross-channel campaigns on subscription behavior.
+---
+
+# Iterable
+
+The Iterable integration forwards Rovenue revenue events (purchases, trial conversions, renewals, cancellations) via Iterable's **`commerce/trackPurchase`** endpoint, and subscription-lifecycle events (trials, grace period, billing issues, plan changes) as Iterable **custom events** via `events/track` — so a subscriber's Rovenue purchase and subscription history is available inside Iterable for email/SMS/push campaigns, Workflow triggers, and revenue reporting.
+
+Iterable is a cross-channel marketing platform, not an analytics warehouse: this integration sends **events, not a full profile sync**. It does not push user properties/tags, and it does not read anything back from Iterable.
+
+---
+
+## A note on identity: your subscribers' email addresses are sent to Iterable
+
+**Unlike ad-platform integrations (Meta CAPI, TikTok Events), which only ever receive a hashed identifier, Iterable receives your subscribers' plaintext email addresses when email is used as the identity key.** This is not a Rovenue design choice — it is how Iterable's own data model works: Iterable is an email/SMS/push platform, and its `trackPurchase`/`events/track` endpoints identify a user by `email` or `userId`, not by a hash. If you enable this integration and email is the identity Rovenue resolves for a subscriber (see below), that subscriber's email address is transmitted to Iterable as their user key.
+
+If you'd rather not send plaintext email, set the reserved **`$iterableUserId`** attribute instead (see [Identity resolution](#4-identity-resolution) below) — Rovenue prefers it over email whenever it's present.
+
+---
+
+## 1. Get your credentials from Iterable
+
+1. In the Iterable dashboard, open **Settings → API Keys**.
+2. Create (or reuse) a **Server-side API key**.
+3. Note whether your Iterable project lives in the US or EU data region — this determines which **Region** to select in Rovenue.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Iterable** under **CRM & lifecycle** and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **API key** — paste the server-side API key from step 1.
+   - **Region** — `us` (default) or `eu`. Leave blank for US.
+4. Click **Validate**. This sends a real, read-only `GET /api/lists` request — it does not write anything.
+5. Choose which events to forward, optionally override the default mapping, then activate.
+
+---
+
+## 3. Event mapping
+
+Revenue keys ride Iterable's `commerce/trackPurchase` endpoint, which has no vendor event-name concept of its own (a purchase is an item list with a total, not a named event) — the mapping table below is used only as the fallback item **name** when a purchase has no known `productId`. The six `subscription.*` lifecycle keys become genuine Iterable custom events, since Iterable has no built-in vocabulary for subscription lifecycle:
+
+| Rovenue event key | Iterable wire shape | Default name / label |
+|---|---|---|
+| `revenue.INITIAL` | `commerce/trackPurchase` | `purchase_initial` |
+| `revenue.TRIAL_CONVERSION` | `commerce/trackPurchase` | `trial_conversion` |
+| `revenue.RENEWAL` | `commerce/trackPurchase` | `renewal` |
+| `revenue.CREDIT_PURCHASE` | `commerce/trackPurchase` | `credit_purchase` |
+| `revenue.CANCELLATION` | `commerce/trackPurchase` | `cancellation` |
+| `subscription.trial.started` | `events/track` | `rovenue_subscription_trial_started` |
+| `subscription.cancel_requested` | `events/track` | `rovenue_subscription_cancel_requested` |
+| `subscription.expired` | `events/track` | `rovenue_subscription_expired` |
+| `subscription.billing_issue` | `events/track` | `rovenue_subscription_billing_issue` |
+| `subscription.grace_period` | `events/track` | `rovenue_subscription_grace_period` |
+| `subscription.uncancelled` | `events/track` | `rovenue_subscription_uncancelled` |
+| `subscription.product_changed` | `events/track` | `rovenue_subscription_product_changed` |
+
+Every `trackPurchase` and `events/track` request carries `id` set to Rovenue's own outbox event id, which Iterable uses as its own idempotency key for that record — re-delivering the same event updates the existing Iterable record instead of duplicating it. Every `events/track` request also carries `dataFields.rovenue_event` (the original Rovenue event key) and `dataFields.product_id` when known, so you can trace an Iterable custom event back to its Rovenue source.
+
+**`total`/item `price` are populated from the revenue event's amount whenever it's present and numeric — independent of whether a currency is known.** Iterable's `trackPurchase` contract has no currency field at all (verified against Iterable's own reference integration payloads), so unlike some other Rovenue integrations, there is no currency to gate on: Rovenue never sends a currency to Iterable, and the purchase total is not withheld just because currency is unknown.
+
+**`revenue.REFUND` is not forwarded.** Iterable's `trackPurchase` reference documents no negative-total or reversal convention, and Iterable's own reference integrations route "cancellation" through the Custom Events API rather than attempting a `trackPurchase` reversal — explicitly noting that purchase-revenue reporting in Iterable is not expected to stay accurate across refunds. Rovenue follows the same pattern: refunds are skipped with reason `no_mapping` and never reach Iterable's `trackPurchase`. If you need refund visibility in Iterable, use a Workflow keyed off your own systems, or reach out about wiring refunds through `events/track` as a non-revenue custom event.
+
+---
+
+## 4. Identity resolution
+
+Every purchase or event object sent to Iterable needs exactly one identity key: a `userId` or an `email`. Rovenue resolves it in this order:
+
+1. **`$iterableUserId`** — an explicit Iterable user id, if you've called Iterable's `identify()` (or equivalent) for this subscriber and set the reserved attribute. Sent as `user.userId` / `userId`.
+2. The subscriber's **email address** — read from Rovenue's own identity context (set via `identify()` with an email, or webhook-sourced Stripe/store customer email) or the reserved **`$email`** attribute. Sent as `user.email` / `email`. **This is plaintext, not hashed** — see the note at the top of this page.
+
+There is no fallback to a Rovenue-internal subscriber id: it is neither a valid Iterable `userId` nor an email address, so sending it as either would create a garbage profile in Iterable or be rejected outright. If neither `$iterableUserId` nor an email is available, the event is skipped with reason `no_user_data` (visible in the connection's Delivery Log).
+
+See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference, including `$iterableUserId`.
+
+---
+
+## 5. Verify events are arriving
+
+1. Open **Apps → Iterable → Delivery Log** in the Rovenue dashboard and check for `succeeded` rows with HTTP `200`.
+2. In Iterable, look up the user by email or userId and check their **Purchases** or **Events** timeline for the mapped names above. Custom event names must be allow-listed in your Iterable project (**Settings → Custom Events**) or "Allow new custom events" must be enabled, or Iterable will reject them.
+3. If events are not appearing:
+   - A `401` response means the API key is wrong or scoped to the wrong region.
+   - A `400` response usually means a malformed request — check the Delivery Log's response body.
+   - A `429` response means you're rate limited; Rovenue retries these automatically.
+   - Confirm the subscriber has `$iterableUserId` or a resolvable email set (missing both skips silently with `no_user_data`).
+   - Ensure the event type you're sending is included in the connection's enabled events, and that `revenue.REFUND` isn't the only thing you're testing with — it's intentionally never forwarded (see above).

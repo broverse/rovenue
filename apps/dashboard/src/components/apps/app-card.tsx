@@ -25,6 +25,7 @@ export const DRAWER_IDS: ReadonlySet<string> = new Set([
   "firebase-ga4",
   "braze",
   "onesignal",
+  "iterable",
 ]);
 
 // Mirrors apps/api/src/routes/dashboard/integrations.ts's

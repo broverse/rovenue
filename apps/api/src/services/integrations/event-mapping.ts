@@ -183,6 +183,43 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
   // (same as AMPLITUDE/MIXPANEL), so it reuses that identical default-name
   // table rather than re-typing 13 near-duplicate strings a third time.
   ONESIGNAL: ANALYTICS_DEFAULT_EVENT_NAMES,
+  // ITERABLE (Wave-2 Task 6) — a mapping value is used TWO ways in
+  // providers/iterable.ts, unlike every other table here: (1) as the
+  // `eventName` sent to `events/track` for subscription-lifecycle keys, and
+  // (2) as the fallback `items[].name` on a `commerce/trackPurchase` item
+  // when the revenue envelope has no `productId` — so, unlike ONESIGNAL,
+  // this is NOT a straight reuse of ANALYTICS_DEFAULT_EVENT_NAMES for every
+  // key: revenue.* keys reuse its free-form names (they read fine as either
+  // a fallback item label or a tag), but subscription-lifecycle keys reuse
+  // FIREBASE_GA4's `rovenue_<suffix>` derivation (`ga4SubscriptionEventName`
+  // — the function is GA4-named but its body is vendor-agnostic string
+  // manipulation) rather than the free-form names, since Iterable's
+  // events/track eventName is a real custom-event name that benefits from
+  // the same unambiguous, Rovenue-namespaced convention Braze/GA4 already
+  // use for lifecycle keys, and Iterable (like GA4) has "Allow new custom
+  // events" project-level gating where a clearly-namespaced name matters.
+  //
+  // `revenue.REFUND` is intentionally OMITTED — see providers/iterable.ts's
+  // "REFUND" comment: Iterable's trackPurchase reference documents no
+  // negative-total/reversal convention, and RevenueCat's own Iterable
+  // integration (a directly comparable subscription-revenue forwarder)
+  // routes its "Cancellation" event through the Custom Events API rather
+  // than trackPurchase and states plainly that "revenue for Iterable
+  // campaign reporting will not be accurate due to refund events" — i.e.
+  // even the vendor's own reference integration does not attempt a
+  // trackPurchase reversal. Falls through to `no_mapping`/skip, the Braze
+  // pattern.
+  ITERABLE: {
+    "revenue.INITIAL": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.INITIAL"],
+    "revenue.TRIAL_CONVERSION": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.TRIAL_CONVERSION"],
+    "revenue.RENEWAL": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.RENEWAL"],
+    "revenue.CREDIT_PURCHASE": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.CREDIT_PURCHASE"],
+    // revenue.REFUND: intentionally unmapped — see comment above.
+    "revenue.CANCELLATION": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.CANCELLATION"],
+    ...Object.fromEntries(
+      SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, ga4SubscriptionEventName(key)]),
+    ),
+  },
 };
 
 export type ApplyEventMappingInput = {

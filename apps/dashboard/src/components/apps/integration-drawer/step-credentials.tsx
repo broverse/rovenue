@@ -216,6 +216,12 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * rest_api_key without writing anything. There is no live-write side
  * effect to disclose. See providers/onesignal.ts's validateCredentials
  * comment.
+ *
+ * ITERABLE: deliberately has NO entry here (same shape as ONESIGNAL). Its
+ * validateCredentials does a real `GET /api/lists` — a genuine read-only,
+ * project-scoped credential-check call that fails with 401 on a bad
+ * api_key and writes nothing. There is no live-write side effect to
+ * disclose. See providers/iterable.ts's validateCredentials comment.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:

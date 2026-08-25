@@ -34,6 +34,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   FIREBASE_GA4: "Firebase / GA4",
   BRAZE: "Braze",
   ONESIGNAL: "OneSignal",
+  ITERABLE: "Iterable",
 };
 
 // ---------------------------------------------------------------------------

@@ -169,6 +169,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "iterable",
+    category: "lifecycle",
+    vendorKey: "iterable",
+    logo: {
+      // Iterable brand purple.
+      background: "#5A31F4",
+      glyph: "IT",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [

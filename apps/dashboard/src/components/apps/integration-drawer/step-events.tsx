@@ -79,6 +79,12 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   // `eventCatalog` (providers/onesignal.ts) is also literally
   // STANDARD_PROVIDER_EVENT_KEYS.
   ONESIGNAL: STANDARD_PROVIDER_EVENT_KEYS,
+  // ITERABLE (Wave-2 Task 6) offers the same 13-key catalog — its
+  // `eventCatalog` (providers/iterable.ts) is also literally
+  // STANDARD_PROVIDER_EVENT_KEYS (revenue.REFUND is offered here too; it is
+  // filtered out at the mapping layer via defaultEventMapping, same as
+  // BRAZE, not hidden from the picker).
+  ITERABLE: STANDARD_PROVIDER_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------
