@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { MockAgent, setGlobalDispatcher } from "undici";
 import { createUndiciHttpClient } from "../http-client";
-import { airbridgeProvider } from "./airbridge";
+import { airbridgeProvider, deriveAirbridgeEventUUID } from "./airbridge";
 import type {
   RovenueEventEnvelope,
   ConnectionConfig,
@@ -68,6 +68,7 @@ interface AirbridgeGoal {
 }
 
 interface AirbridgeEventBody {
+  eventUUID: string;
   eventTimestamp: number;
   device: { deviceUUID: string };
   app: { packageName: string };
@@ -262,6 +263,82 @@ describe("airbridgeProvider.mapEvent — scope and idempotency", () => {
       { app_name: APP_NAME, api_token: "tok" },
     );
     expect(result).toEqual({ skip: true, reason: "no_mapping" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// eventUUID — Airbridge's own dedup key. Delivery is at-least-once, so this
+// MUST be stable across retries of the same outbox event or a retried
+// delivery double-counts revenue on Airbridge's side.
+// ---------------------------------------------------------------------------
+
+const UUID4_SHAPE_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+describe("deriveAirbridgeEventUUID", () => {
+  it("is stable: the same outboxEventId always yields the same eventUUID", () => {
+    expect(deriveAirbridgeEventUUID("ob1")).toBe(deriveAirbridgeEventUUID("ob1"));
+  });
+
+  it("produces a UUID4-SHAPED value (version + variant nibbles set)", () => {
+    // Several distinct inputs, because the variant nibble is derived from the
+    // digest — one sample could pass by luck.
+    for (const id of [
+      "ob1",
+      "ob2",
+      "clx0mrc9y0000abcdxyz12345",
+      "",
+      "a".repeat(200),
+    ]) {
+      expect(deriveAirbridgeEventUUID(id)).toMatch(UUID4_SHAPE_RE);
+    }
+  });
+
+  it("exercises every allowed variant nibble across a range of inputs", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      seen.add(deriveAirbridgeEventUUID(`outbox_${i}`).charAt(19));
+    }
+    expect([...seen].sort().join("")).toBe("89ab");
+  });
+
+  it("different outboxEventIds yield different eventUUIDs", () => {
+    expect(deriveAirbridgeEventUUID("ob1")).not.toBe(deriveAirbridgeEventUUID("ob2"));
+  });
+});
+
+describe("airbridgeProvider.mapEvent — eventUUID on the wire", () => {
+  it("sends the derived eventUUID, identical across repeated mapEvent calls", () => {
+    const first = airbridgeProvider.mapEvent(makeEnvelope(), makeConfig(), {
+      app_name: APP_NAME,
+      api_token: "tok",
+    }) as ProviderPayload;
+    const second = airbridgeProvider.mapEvent(makeEnvelope(), makeConfig(), {
+      app_name: APP_NAME,
+      api_token: "tok",
+    }) as ProviderPayload;
+
+    const firstBody = first.body as AirbridgeEventBody;
+    const secondBody = second.body as AirbridgeEventBody;
+    expect(firstBody.eventUUID).toBe(deriveAirbridgeEventUUID("ob1"));
+    expect(firstBody.eventUUID).toBe(secondBody.eventUUID);
+    expect(firstBody.eventUUID).toMatch(UUID4_SHAPE_RE);
+  });
+
+  it("a different outbox event gets a different eventUUID", () => {
+    const a = airbridgeProvider.mapEvent(
+      makeEnvelope({ outboxEventId: "ob_a" }),
+      makeConfig(),
+      { app_name: APP_NAME, api_token: "tok" },
+    ) as ProviderPayload;
+    const b = airbridgeProvider.mapEvent(
+      makeEnvelope({ outboxEventId: "ob_b" }),
+      makeConfig(),
+      { app_name: APP_NAME, api_token: "tok" },
+    ) as ProviderPayload;
+    expect((a.body as AirbridgeEventBody).eventUUID).not.toBe(
+      (b.body as AirbridgeEventBody).eventUUID,
+    );
   });
 });
 

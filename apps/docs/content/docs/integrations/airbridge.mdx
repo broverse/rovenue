@@ -27,6 +27,8 @@ Authorization: Bearer YOUR_API_TOKEN
 
 `{app_name}` is your Airbridge app's slug (the credential you paste below), used as a URL path segment. Each event carries `device.deviceUUID` (the subscriber's Airbridge Device ID — see [Identity resolution](#identity-resolution) below), `eventData.goal.category` (the mapped event name), and `eventData.goal.semanticAttributes.transactionID` set to Rovenue's own `outboxEventId`, so every Airbridge event traces back to its Rovenue source.
 
+**Retries are deduplicated.** Every event also carries an `eventUUID`, derived deterministically (SHA-256, formatted as a UUID4) from that same `outboxEventId`. Rovenue's delivery queue is at-least-once, so the same event can be sent more than once after a network error or a `5xx` — a stable `eventUUID` is what lets Airbridge collapse those retries instead of counting the revenue twice.
+
 **Known limitation:** Airbridge's contract also documents `app.packageName` (your app's OS bundle id / package name) as a required field. Rovenue has no dedicated place to store that today — this integration sends your `app_name` credential in its place, which works for accounts where the Airbridge app slug matches the bundle id, but may not for every account. If your events aren't attributing correctly, check your Airbridge dashboard's app configuration.
 
 ---

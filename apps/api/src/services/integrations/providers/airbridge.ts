@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type {
   IntegrationProvider,
@@ -151,6 +152,46 @@ function resolveRevenueFields(
 }
 
 // ---------------------------------------------------------------------------
+// eventUUID — DETERMINISTIC, derived from outboxEventId.
+//
+// Airbridge types `eventUUID` as "a random string in UUID4 format" and treats
+// it as its own dedup key. It used to be left unset here, on the (correct)
+// premise that Rovenue's cuid2 outboxEventIds are not UUID4-shaped — but the
+// conclusion was wrong: delivery is at-least-once, so an unset eventUUID
+// means a RETRIED delivery arrives as a brand-new event and double-counts the
+// revenue on Airbridge's side. `semanticAttributes.transactionID` carries the
+// outboxEventId for traceability, but it is not the field Airbridge dedups on.
+//
+// So: derive a UUID4-SHAPED value deterministically instead of skipping it.
+// sha256 the outboxEventId, lay the digest out as 8-4-4-4-12, and force the
+// version (`4`) and variant (`8|9|a|b`) nibbles so the result matches the
+// format Airbridge expects while the SAME outboxEventId always produces the
+// SAME eventUUID. Same "deterministic id from stable fields via sha256"
+// precedent the SDK session-telemetry event ids use.
+//
+// This is a dedup key, not a security token: sha256 is used for its stable,
+// well-distributed output, and the truncation to 122 usable bits is inherent
+// to the UUID format Airbridge requires.
+// ---------------------------------------------------------------------------
+
+const UUID4_VERSION_NIBBLE = "4";
+/** The four nibbles RFC 4122 allows in the variant position. */
+const UUID4_VARIANT_NIBBLES = "89ab";
+
+export function deriveAirbridgeEventUUID(outboxEventId: string): string {
+  const hex = createHash("sha256").update(outboxEventId).digest("hex");
+  const variantIndex = parseInt(hex.slice(16, 17), 16) % UUID4_VARIANT_NIBBLES.length;
+  const variant = UUID4_VARIANT_NIBBLES.slice(variantIndex, variantIndex + 1);
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `${UUID4_VERSION_NIBBLE}${hex.slice(13, 16)}`,
+    `${variant}${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
+}
+
+// ---------------------------------------------------------------------------
 // Wire body shapes — POST .../mobile-app/9360 request body (In-App Events).
 // ---------------------------------------------------------------------------
 
@@ -175,6 +216,7 @@ interface AirbridgeGoal {
 }
 
 interface AirbridgeEventBody {
+  eventUUID: string;
   eventTimestamp: number;
   device: AirbridgeDevice;
   app: AirbridgeApp;
@@ -253,15 +295,13 @@ export const airbridgeProvider: IntegrationProvider = {
     config: ConnectionConfig,
     creds: ProviderCredentials,
   ): MapEventResult {
-    // outboxEventId is the SOLE provider-side idempotency boundary — it
-    // rides `semanticAttributes.transactionID` below (Airbridge's own
-    // `eventUUID` field is intentionally left unset rather than fed
-    // outboxEventId: the vendor docs type it as "a random string in UUID4
-    // format", and Rovenue's cuid2 outboxEventIds are not valid UUID4
-    // strings — sending an off-format value there risks a 400 the same way
-    // a guessed currency would misreport revenue). Fail loudly rather than
-    // silently degrade dedup to "every send unique" — same invariant as
-    // every other provider in this codebase.
+    // outboxEventId is the SOLE provider-side idempotency boundary. It rides
+    // the wire TWICE: verbatim as `semanticAttributes.transactionID` (human-
+    // traceable back to the Rovenue outbox row) and hashed into a
+    // UUID4-shaped `eventUUID` (the field Airbridge itself dedups on — see
+    // deriveAirbridgeEventUUID above). Fail loudly rather than silently
+    // degrade dedup to "every send unique" — same invariant as every other
+    // provider in this codebase.
     if (!envelope.outboxEventId) {
       throw new Error(
         "integration delivery requires a non-empty outboxEventId for provider-side idempotency",
@@ -313,6 +353,7 @@ export const airbridgeProvider: IntegrationProvider = {
 
     const appName = creds["app_name"] ?? "";
     const body: AirbridgeEventBody = {
+      eventUUID: deriveAirbridgeEventUUID(envelope.outboxEventId),
       eventTimestamp: Date.parse(envelope.occurredAt),
       device: { deviceUUID },
       // See the "KNOWN GAP" comment above the endpoint constants: reuses
