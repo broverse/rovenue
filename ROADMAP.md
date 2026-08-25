@@ -1,7 +1,7 @@
 # Rovenue Roadmap
 
 Goal: close the gap with RevenueCat / Adapty in every area — target **95%** parity (or better) per area.
-Scores are a self-assessment of "% of a mature best-in-class solution" as of 2026-08-23.
+Scores are a self-assessment of "% of a mature best-in-class solution" as of 2026-08-25.
 
 | # | Area | Now | Target |
 |---|------|-----|--------|
@@ -10,7 +10,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 | 3 | Paywall builder & native rendering | 80% | 95% |
 | 4 | A/B testing & experiments | 75% | 90%+ |
 | 5 | Analytics (MRR / LTV / cohorts) | 70% | 95% |
-| 6 | Third-party integrations | 75% | 95% |
+| 6 | Third-party integrations | 90% | 95% |
 | 7 | SDK platform coverage | 55% | 95% |
 | 8 | Self-hosting & data ownership | 95% | keep |
 | 9 | GDPR / KVKK tooling | 85% | 95% |
@@ -20,15 +20,17 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 
 ## Priority order (impact / cost)
 
-1. Integrations Wave 2 providers (framework + webhook v2 + Wave 1 first-class
-   providers are all done — §6)
-2. Flutter SDK (§7)
-3. RevenueCat / Adapty migration guides + data import tool (§11)
-4. Analytics chart set (§5)
-5. Bayesian experiment engine (§4)
+1. Flutter SDK (§7)
+2. RevenueCat / Adapty migration guides + data import tool (§11)
+3. Analytics chart set (§5)
+4. Bayesian experiment engine (§4)
+5. Store-native full lifecycle passthrough (§6 — the last integrations gap;
+   low priority, narrow scope)
 
-Completing 1–3 should lift the overall picture to ~85%; the rest of the way to 95% is
-largely maturity and live production proof.
+Integrations (§6) is effectively done as of Wave 2 (framework + webhook v2 +
+12 first-class providers across two waves). Completing 1–2 should lift the
+overall picture toward ~88%; items 3–5 close the remaining analytics/
+experiments/integrations gaps on the way to 95%.
 
 ---
 
@@ -79,22 +81,32 @@ largely maturity and live production proof.
 - [ ] Country / currency-normalized revenue reports
 - [ ] Metrics export API for customer BI (ClickHouse-backed)
 
-## 6. Third-party integrations (25 → 75) — biggest single effort
+## 6. Third-party integrations (75 → 90) — Wave 2 shipped, one gap left
 
 Framework + webhook v2 shipped 2026-08-24
 (`docs/superpowers/specs/2026-08-24-integrations-foundation-webhook-v2-design.md`).
 Wave 1 first-class providers + delivery-time identity enrichment + narrow
 store-lifecycle normalization shipped 2026-08-24/25
 (`docs/superpowers/specs/2026-08-24-integrations-wave1-providers-design.md`).
-Score moved from 55-60 to 75: eight first-class providers now exist
-(Meta CAPI, TikTok, Amplitude, Mixpanel, AppsFlyer, Adjust, Slack,
-Firebase/GA4) plus the vendor-agnostic `CUSTOM_WEBHOOK` escape hatch, the
-delivery path now carries vendor identity attributes instead of only
-email/phone hashes, and Google's lifecycle classification bug (RTDN numeric
-codes) is fixed. Not 95 yet: Wave 2's six providers (Braze, OneSignal,
-Iterable, Airbridge, Singular, Discord) are still open, and store-native
-normalization is narrow (4 lifecycle keys) rather than full passthrough of
-every Apple/Google/Stripe event shape.
+Wave 2 first-class providers shipped 2026-08-25
+(`docs/superpowers/specs/2026-08-25-integrations-wave2-providers-design.md`):
+Braze, OneSignal, Iterable (lifecycle category), Airbridge, Singular
+(attribution), Discord (communication) — zero schema migrations, five new
+RC-compatible vendor-id attributes, Slack's message builder hoisted to a
+shared chat module reused by Discord, plus Wave-1 parked cleanup
+(`STANDARD_PROVIDER_EVENT_KEYS` rename, `Readonly` typings, stale comments).
+Score moved from 75 to 90: twelve first-class providers now exist across
+lifecycle, attribution, analytics, and communication categories (Meta CAPI,
+TikTok, Amplitude, Mixpanel, AppsFlyer, Adjust, Slack, Firebase/GA4, Braze,
+OneSignal, Iterable, Airbridge, Singular, Discord — see the full checklist
+below), the vendor-agnostic `CUSTOM_WEBHOOK` escape hatch is at Svix parity,
+delivery-time identity enrichment covers the major attribution/analytics
+vendors, and Google's RTDN lifecycle-classification bug is fixed. This is
+judged a 90 rather than a full 95 because one real gap remains: store-native
+normalization is still narrow (4 lifecycle keys) rather than full passthrough
+of every raw Apple/Google/Stripe event shape — the deferral documented back
+in Wave 1. That gap is the entirety of what's left in this area; everything
+else in the framework/provider-breadth dimension is done.
 
 - [x] Integrations framework (migration 0060, fanout consumer, deliver worker,
       6-step dashboard drawer, Meta CAPI + TikTok providers) — this was already
@@ -137,7 +149,10 @@ every Apple/Google/Stripe event shape.
       works for Google for the first time)
 - [x] Backfill widened to SUBSCRIPTION + CREDIT_LEDGER aggregates
       (PAYWALL_EVENT deliberately excluded, rationale verified)
-- [ ] Wave 2: Braze, OneSignal, Iterable, Airbridge, Singular, Discord
+- [x] Wave 2: Braze, OneSignal, Iterable (lifecycle), Airbridge, Singular
+      (attribution), Discord (communication) — first-class providers, zero
+      schema migrations, five new RC-compatible vendor-id attributes, Slack's
+      message builder hoisted to a shared chat module reused by Discord
 - [ ] Full store-native lifecycle event normalization: raw Apple/Google/Stripe
       event types → the public event-key catalog end to end (currently only
       the 4 keys above are mapped; most raw event shapes still pass through
