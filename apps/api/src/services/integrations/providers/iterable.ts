@@ -270,6 +270,16 @@ export const iterableProvider: IntegrationProvider = {
 
     const createdAt = Date.parse(envelope.occurredAt);
 
+    // REFUND: `revenue.REFUND` never reaches this branch — DEFAULT_EVENT_
+    // MAPPING.ITERABLE (event-mapping.ts) intentionally omits it, so
+    // applyEventMapping() above already returned `{ skip: true, reason:
+    // "no_mapping" }` for it. Rationale (see event-mapping.ts's ITERABLE
+    // comment for the full citation): Iterable's own trackPurchase
+    // reference documents no negative-total/reversal convention, and
+    // RevenueCat's own Iterable integration — a directly comparable
+    // subscription-revenue forwarder — routes its "Cancellation" event
+    // through the Custom Events API rather than trackPurchase, corroborating
+    // that no such convention exists.
     if (eventKey.startsWith("revenue.")) {
       const price = resolvePrice(envelope);
       const body: IterableTrackPurchaseBody = {
