@@ -30,7 +30,7 @@ These five keys extend the same convention to the Wave-2 outbound integrations (
 
 | Key | Purpose |
 |---|---|
-| `$onesignalId` | OneSignal's player/subscription id, used to target push notifications for this subscriber. |
+| `$onesignalId` | OneSignal's internal user id (OneSignal ID), obtained via `OneSignal.User.onesignalId`, used to target push notifications for this subscriber. |
 | `$brazeAliasName` | Braze's alias name, used to resolve this subscriber to an existing Braze user profile without an external user id. |
 | `$iterableUserId` | Iterable's `userId`, used to associate revenue events with an existing Iterable user profile. |
 | `$airbridgeDeviceId` | Airbridge's device identifier, used to attribute revenue back to an Airbridge campaign. |
