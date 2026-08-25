@@ -143,6 +143,68 @@ function airbridgeLifecycleEventName(key: RovenueEventKey): string {
   return `${AIRBRIDGE_LIFECYCLE_EVENT_PREFIX}${key.replace(/\./g, "_")}`;
 }
 
+// SINGULAR (Wave-2 Task 8) — vendor vocabulary verified against Singular's
+// own first-party support docs (support.singular.net/hc/en-us/articles/
+// 7648172966299 "Singular Standard Events: Full List", fetched 2026-08-25
+// via a plain-text reader proxy after support.singular.net's own Zendesk
+// front door 403'd every direct fetch attempt from this environment — same
+// bot-wall shape AIRBRIDGE's/APPSFLYER's sourcing notes describe; the
+// reader-proxied content matches the vendor's documented title/canonical
+// URL exactly, so this is still first-party evidence, just retrieved
+// through a mirror). Singular's FULL standard-event list has only three
+// subscription-shaped events: sng_subscribe, sng_start_trial,
+// sng_ecommerce_purchase — no standard cancellation/refund/renewal event
+// exists at all (the only cancellation-adjacent idea, "Order Canceled", is
+// listed as a freeform, non-standard "Custom Event" suggestion with no
+// reserved name and no documented reversal/negative-amount semantics — the
+// same absence of a convention BRAZE/ITERABLE found for their own vendors).
+//
+// revenue.INITIAL / revenue.TRIAL_CONVERSION -> "sng_subscribe" — both are
+// "a paid subscription just started" (mirrors META_CAPI/TIKTOK_EVENTS/
+// AIRBRIDGE's identical INITIAL+TRIAL_CONVERSION -> Subscribe choice).
+// revenue.RENEWAL / revenue.CREDIT_PURCHASE -> "sng_ecommerce_purchase" —
+// Singular's own doc note reads "User makes a purchase/order... Other names
+// for this event are order success, order confirmed, or payment success",
+// which covers a repeat charge or a one-time IAP equally well; no dedicated
+// "renewal" standard event exists.
+// revenue.REFUND -> intentionally UNMAPPED — no standard reversal event and
+// no amt-sign convention anywhere in the EVENT Endpoint Reference (`amt`'s
+// own docs never mention negative values); this follows BRAZE/ITERABLE's
+// drop-with-citation precedent, not AIRBRIDGE's map-with-citation one —
+// Airbridge had a real, dedicated "Order Cancel" *standard* event; Singular's
+// closest analog is a non-standard, freeform suggestion with no semantics
+// defined anywhere.
+// revenue.CANCELLATION -> no standard match either (same absence) — sent as
+// a Rovenue-namespaced custom event (SINGULAR_CANCELLATION_EVENT below),
+// the same convention as GA4_CANCELLATION_EVENT, rather than reusing the
+// vendor's own ambiguous, e-commerce-flavored "Order Canceled" suggestion.
+// subscription.trial.started -> "sng_start_trial" — exact documented match.
+//
+// The six SUBSCRIPTION_BRIDGE_EVENT_KEYS (cancel_requested/expired/
+// billing_issue/grace_period/uncancelled/product_changed) have no Singular
+// equivalent, so — like BRAZE/GA4/AIRBRIDGE — they get a Rovenue-namespaced
+// `rovenue_<suffix>` custom event name. UNLIKE those three, this can't reuse
+// their shared `rovenue_subscription_<key>`-shaped helper
+// (ga4SubscriptionEventName/brazeLifecycleEventName/
+// airbridgeLifecycleEventName all include the literal word "subscription"):
+// Singular's EVENT Endpoint Reference caps `n` (event name) at "Maximum 32
+// ASCII characters", and several of those derivations blow past it —
+// `rovenue_subscription_product_changed` alone is 36 characters. SINGULAR
+// gets its own short, hand-picked table below (drops the redundant
+// "subscription" word) instead, verified to stay under the limit by a
+// dedicated static-config test in singular.test.ts.
+const SINGULAR_CANCELLATION_EVENT = "rovenue_cancellation";
+const SINGULAR_LIFECYCLE_EVENT_NAMES: Readonly<
+  Record<(typeof SUBSCRIPTION_BRIDGE_EVENT_KEYS)[number], string>
+> = {
+  "subscription.cancel_requested": "rovenue_cancel_requested",
+  "subscription.expired": "rovenue_expired",
+  "subscription.billing_issue": "rovenue_billing_issue",
+  "subscription.grace_period": "rovenue_grace_period",
+  "subscription.uncancelled": "rovenue_uncancelled",
+  "subscription.product_changed": "rovenue_product_changed",
+};
+
 export const DEFAULT_EVENT_MAPPING: Readonly<
   Record<IntegrationProviderId, Readonly<Partial<Record<RovenueEventKey, string>>>>
 > = {
@@ -282,6 +344,17 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     ...Object.fromEntries(
       SUBSCRIPTION_BRIDGE_EVENT_KEYS.map((key) => [key, airbridgeLifecycleEventName(key)]),
     ),
+  },
+  SINGULAR: {
+    "revenue.INITIAL": "sng_subscribe",
+    "revenue.TRIAL_CONVERSION": "sng_subscribe",
+    "revenue.RENEWAL": "sng_ecommerce_purchase",
+    "revenue.CREDIT_PURCHASE": "sng_ecommerce_purchase",
+    // revenue.REFUND: intentionally unmapped — see the SINGULAR header
+    // comment above for the full citation/rationale.
+    "revenue.CANCELLATION": SINGULAR_CANCELLATION_EVENT,
+    "subscription.trial.started": "sng_start_trial",
+    ...SINGULAR_LIFECYCLE_EVENT_NAMES,
   },
 };
 

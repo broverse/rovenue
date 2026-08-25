@@ -115,7 +115,9 @@ export type IntegrationProviderId =
   | "ITERABLE"
   // Wave-2 Task 7 — attribution-category provider (category already exists
   // since Wave-1's APPSFLYER/ADJUST).
-  | "AIRBRIDGE";
+  | "AIRBRIDGE"
+  // Wave-2 Task 8 — second attribution-category provider added this wave.
+  | "SINGULAR";
 
 export const WEBHOOK_API_VERSION = "2026-08-24";
 

@@ -195,6 +195,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "singular",
+    category: "attribution",
+    vendorKey: "singular",
+    logo: {
+      // Singular brand purple.
+      background: "#5B2A86",
+      glyph: "SG",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [

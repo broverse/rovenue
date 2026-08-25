@@ -1,0 +1,112 @@
+---
+title: Singular
+description: Forward Rovenue revenue and subscription-lifecycle events into Singular as Server-to-Server (S2S) events, so you can attribute revenue back to ad campaigns.
+---
+
+# Singular
+
+The Singular integration forwards Rovenue revenue events (purchases, trial conversions, renewals, cancellations) and subscription-lifecycle events (trials, grace period, billing issues, plan changes) to Singular's **Server-to-Server EVENT API**, so purchases and subscription-lifecycle changes made in your app show up as Singular events, attributable back to the ad campaign that acquired the user.
+
+Singular is a mobile attribution / marketing-measurement platform, not an analytics warehouse: this integration sends **events, not a full profile sync**. It does not push user properties and does not read anything back from Singular.
+
+---
+
+## Wire contract
+
+Singular has two EVENT endpoint versions. This integration picks between them per event, based on which device identifier is available on the subscriber (see [Identity resolution](#identity-resolution)):
+
+| When the subscriber has | Endpoint | Device field |
+|---|---|---|
+| `$singularDeviceId` (Singular Device ID / SDID) | `POST https://s2s.singular.net/api/v2/evt` | `sdid` |
+| `$idfa` (no SDID) | `POST https://s2s.singular.net/api/v1/evt` | `idfa` |
+| `$gpsAdId` (no SDID, no IDFA) | `POST https://s2s.singular.net/api/v1/evt` | `aifa` |
+
+All request parameters — including your SDK key (`a`) — are sent as `application/x-www-form-urlencoded` **POST body** fields, never as a query string. Every event also carries `n` (the mapped event name), `is_revenue_event`/`amt`/`cur` on revenue events (see [Event mapping](#event-mapping)), and an `e` field — a JSON object with `outbox_event_id` and `rovenue_event` — so every Singular event traces back to its Rovenue source. Singular does not deduplicate events server-side; Rovenue's own delivery pipeline is the real dedup guarantee.
+
+**Known limitations:**
+
+- Singular's EVENT contract also documents `i` (your app's OS bundle id / package name) as a commonly-required field. Rovenue has no dedicated place to store that today, so it is not sent — if you see `missing argument: i` in the Delivery Log, that's why.
+- The device's IP address (`ip`) is sent only when Rovenue already has it (from your identity/consent context). It is never derived from Singular's `use_ip` fallback, since that would attribute the event to Rovenue's own server IP rather than your subscriber's device, which would corrupt Singular's geolocation-based attribution.
+- The platform field (`p`) is always `iOS`/`Android` when the IDFA/GAID ladder branch matched, but is only sent for the SDID branch when the subscriber's `platform` attribute is set to a recognized value — Rovenue never guesses a platform.
+
+---
+
+## 1. Get your SDK key from Singular
+
+1. In the Singular dashboard, open **Developer Tools → SDK Integration → SDK Keys**.
+2. Copy your **SDK Key** — not the Reporting API Key, which Singular's own EVENT endpoint rejects.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Singular** under **Attribution** and click it.
+3. The side drawer opens. Paste your **SDK key** into the Credentials step.
+4. Click **Validate** (see [Validation](#validation) below — it only checks that the field is filled in, it sends nothing to Singular).
+5. Choose which events to forward, optionally override the default mapping, then activate.
+
+---
+
+## 3. Event mapping
+
+Every forwarded key becomes a Singular event name, per the mapping table below (override any name in the drawer's mapping step). Three keys map onto Singular's own standard event vocabulary; the rest use a short, Rovenue-namespaced custom event name, since Singular has no built-in equivalent:
+
+| Rovenue event key | Default Singular event name |
+|---|---|
+| `revenue.INITIAL` | `sng_subscribe` |
+| `revenue.TRIAL_CONVERSION` | `sng_subscribe` |
+| `revenue.RENEWAL` | `sng_ecommerce_purchase` |
+| `revenue.CREDIT_PURCHASE` | `sng_ecommerce_purchase` |
+| `revenue.REFUND` | *(not mapped — see below)* |
+| `revenue.CANCELLATION` | `rovenue_cancellation` |
+| `subscription.trial.started` | `sng_start_trial` |
+| `subscription.cancel_requested` | `rovenue_cancel_requested` |
+| `subscription.expired` | `rovenue_expired` |
+| `subscription.billing_issue` | `rovenue_billing_issue` |
+| `subscription.grace_period` | `rovenue_grace_period` |
+| `subscription.uncancelled` | `rovenue_uncancelled` |
+| `subscription.product_changed` | `rovenue_product_changed` |
+
+Singular's own EVENT endpoint reference caps event names at 32 ASCII characters — that's why the lifecycle names above drop the word "subscription" (Rovenue's usual `rovenue_subscription_<key>` convention would exceed the limit for several of these keys).
+
+**On `revenue.REFUND`:** Singular's full standard-event vocabulary has no reversal, cancellation, or refund event, and its EVENT endpoint documents no negative-amount convention for `amt`. The only cancellation-adjacent idea in Singular's own docs ("Order Canceled") is listed as a freeform, non-standard suggestion with no reserved name or reversal semantics — so, unlike the Airbridge integration (which has a real dedicated reversal event to map to), `revenue.REFUND` is intentionally left unmapped here and is skipped rather than forwarded.
+
+Every forwarded event carries `e.rovenue_event` (the original Rovenue event key) and `e.outbox_event_id`, so you can always trace a Singular event back to its Rovenue source.
+
+**Amount/currency are included only when both are present and valid.** Rovenue never guesses a currency (it does **not** default to `"USD"`). When a revenue event has an amount but no known currency (or an unparseable amount), the event is still forwarded — with `is_revenue_event=true` and no amount — rather than dropped; Singular's own docs describe this exact pattern for "a revenue event that has no amount."
+
+---
+
+## Identity resolution
+
+Every event needs a Singular device identifier. Rovenue checks, in order:
+
+1. **`$singularDeviceId`** — Singular's own Device ID (SDID), obtained from the Singular SDK once it has initialized. This is Singular's current, recommended identifier (it works across iOS, Android, web, and more) and routes the event through Singular's newer V2 EVENT endpoint.
+2. **`$idfa`** — Apple's Identifier for Advertisers, if no SDID is set. Routes through the legacy V1 endpoint.
+3. **`$gpsAdId`** — Android's Google Advertising ID, if neither of the above is set. Also routes through V1.
+
+If none of these are set on a subscriber, every event for that subscriber is skipped with reason `no_user_data` (visible in the connection's Delivery Log).
+
+See [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes) for the full reserved-attribute reference, including `$singularDeviceId`, `$idfa`, and `$gpsAdId`.
+
+---
+
+## Validation
+
+Singular's EVENT/SESSION endpoints are write-only and reachable with just an SDK key — Singular's own docs state that device-level data "cannot be deleted after ingestion," so there is no zero-footprint, read-only way to confirm an SDK key is valid without sending a real, permanent, attributable event.
+
+So, like the AppsFlyer and Airbridge integrations, clicking **Validate** here only checks that the SDK key is filled in — **the first real event delivery is the live proof**. Check the connection's Delivery Log after activating to confirm events are landing.
+
+---
+
+## Verify events are arriving
+
+1. Open **Apps → Singular → Delivery Log** in the Rovenue dashboard and check for `succeeded` rows with HTTP `200` and a body `status` of `"ok"`.
+2. In the Singular SDK Console, look up the test device by its device identifier and confirm the mapped event names above are appearing.
+3. If events are not appearing:
+   - Singular's EVENT API always answers HTTP `200` — a rejected request still shows as `200` with a body `{"status":"error","reason":"..."}`. Check the Delivery Log's response body for the `reason` string.
+   - A reason containing "missing argument", "invalid platform", "no device ID supplied", or "should have an ... param" means the request itself needs fixing (Rovenue treats these as permanent failures and does not retry them).
+   - Any other error reason, or a non-`200` HTTP status (`429`/`5xx`), is retried automatically.
+   - Confirm the subscriber has `$singularDeviceId`, `$idfa`, or `$gpsAdId` set (missing all three skips silently with `no_user_data`).
+   - Ensure the event type you're sending is included in the connection's enabled events.

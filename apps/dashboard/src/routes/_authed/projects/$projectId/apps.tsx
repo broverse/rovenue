@@ -61,6 +61,7 @@ export const CARD_ID_TO_PROVIDER: Record<
   onesignal: "ONESIGNAL",
   iterable: "ITERABLE",
   airbridge: "AIRBRIDGE",
+  singular: "SINGULAR",
 };
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({

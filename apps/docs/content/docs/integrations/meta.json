@@ -1,5 +1,5 @@
 {
   "title": "Integrations",
   "icon": "Blocks",
-  "pages": ["meta-capi", "tiktok-events", "amplitude", "mixpanel", "appsflyer", "adjust", "slack", "firebase-ga4", "braze", "onesignal", "iterable", "airbridge", "outbound-webhooks", "subscriber-identity-attributes"]
+  "pages": ["meta-capi", "tiktok-events", "amplitude", "mixpanel", "appsflyer", "adjust", "slack", "firebase-ga4", "braze", "onesignal", "iterable", "airbridge", "singular", "outbound-webhooks", "subscriber-identity-attributes"]
 }

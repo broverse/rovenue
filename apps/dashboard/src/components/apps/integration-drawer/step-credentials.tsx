@@ -233,6 +233,16 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * providers/airbridge.ts's validateCredentials comment and
  * apps/docs/content/docs/integrations/airbridge.mdx for the documented
  * "first delivery is the live proof" caveat this implies.
+ *
+ * SINGULAR: deliberately has NO entry here (same shape as APPSFLYER/
+ * AIRBRIDGE). Its validateCredentials sends nothing — no event, no request
+ * at all — it only checks the submitted credentials' shape against
+ * credentialsSchema (sdk_key present). Singular's own docs state that
+ * device-level data "cannot be deleted after ingestion", so there is no
+ * zero-footprint way to send a real probe event even if one wanted to. See
+ * providers/singular.ts's validateCredentials comment and
+ * apps/docs/content/docs/integrations/singular.mdx for the documented
+ * "first delivery is the live proof" caveat this implies.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:

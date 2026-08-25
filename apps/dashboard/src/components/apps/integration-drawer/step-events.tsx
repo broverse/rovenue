@@ -90,6 +90,13 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   // STANDARD_PROVIDER_EVENT_KEYS. Unlike BRAZE/ITERABLE, AIRBRIDGE's
   // defaultEventMapping maps revenue.REFUND too (see event-mapping.ts).
   AIRBRIDGE: STANDARD_PROVIDER_EVENT_KEYS,
+  // SINGULAR (Wave-2 Task 8) offers the same 13-key catalog — its
+  // `eventCatalog` (providers/singular.ts) is also literally
+  // STANDARD_PROVIDER_EVENT_KEYS. Like BRAZE/ITERABLE (not AIRBRIDGE),
+  // revenue.REFUND is offered here too but filtered out at the mapping
+  // layer via defaultEventMapping (see event-mapping.ts) — Singular has no
+  // documented refund/reversal convention.
+  SINGULAR: STANDARD_PROVIDER_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------
