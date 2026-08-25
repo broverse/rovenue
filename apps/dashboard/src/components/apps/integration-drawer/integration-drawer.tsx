@@ -139,6 +139,13 @@ const FIREBASE_GA4_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "a
 // event name (revenue.REFUND excepted, see event-mapping.ts).
 const BRAZE_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// ONESIGNAL has the same shape as BRAZE/AMPLITUDE/MIXPANEL/APPSFLYER/SLACK/
+// FIREBASE_GA4: no vendor "Events Manager" test-event tooling (its own
+// `GET /apps/{app_id}` check is used internally by validateCredentials, not
+// surfaced as a wizard step), but keeps "mapping" as optional customization
+// — every catalog key already defaults to a mapped custom-event name.
+const ONESIGNAL_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
@@ -148,6 +155,7 @@ const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = 
   SLACK: SLACK_STEPS,
   FIREBASE_GA4: FIREBASE_GA4_STEPS,
   BRAZE: BRAZE_STEPS,
+  ONESIGNAL: ONESIGNAL_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -169,6 +177,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   SLACK: "Slack",
   FIREBASE_GA4: "Firebase / GA4",
   BRAZE: "Braze",
+  ONESIGNAL: "OneSignal",
 };
 
 // ---------------------------------------------------------------------------

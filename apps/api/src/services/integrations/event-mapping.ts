@@ -175,6 +175,14 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
       SUBSCRIPTION_LIFECYCLE_KEYS.map((key) => [key, brazeLifecycleEventName(key)]),
     ),
   },
+  // ONESIGNAL (Wave-2 Task 5) — unlike BRAZE, OneSignal's custom_events API
+  // has no structured purchase-object equivalent to forward revenue through
+  // (see providers/onesignal.ts) — every one of the 13 keys, revenue.REFUND
+  // included, becomes a plain custom event named via free-form vendor
+  // vocabulary. OneSignal has no reserved event-name vocabulary of its own
+  // (same as AMPLITUDE/MIXPANEL), so it reuses that identical default-name
+  // table rather than re-typing 13 near-duplicate strings a third time.
+  ONESIGNAL: ANALYTICS_DEFAULT_EVENT_NAMES,
 };
 
 export type ApplyEventMappingInput = {

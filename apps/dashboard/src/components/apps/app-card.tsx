@@ -24,6 +24,7 @@ export const DRAWER_IDS: ReadonlySet<string> = new Set([
   "slack",
   "firebase-ga4",
   "braze",
+  "onesignal",
 ]);
 
 // Mirrors apps/api/src/routes/dashboard/integrations.ts's

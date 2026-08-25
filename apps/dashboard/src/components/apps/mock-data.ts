@@ -156,6 +156,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "onesignal",
+    category: "lifecycle",
+    vendorKey: "onesignal",
+    logo: {
+      // OneSignal brand red.
+      background: "#E54A4A",
+      glyph: "OS",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [

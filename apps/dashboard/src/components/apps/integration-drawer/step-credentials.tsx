@@ -209,6 +209,13 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * constants), so re-validating never adds another MAU. See
  * providers/braze.ts's validateCredentials comment and
  * apps/docs/content/docs/integrations/braze.mdx.
+ *
+ * ONESIGNAL: deliberately has NO entry here (unlike BRAZE). Its
+ * validateCredentials does a real `GET /apps/{app_id}` — a genuine
+ * read-only credential-check call that proves both the app_id and the
+ * rest_api_key without writing anything. There is no live-write side
+ * effect to disclose. See providers/onesignal.ts's validateCredentials
+ * comment.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:

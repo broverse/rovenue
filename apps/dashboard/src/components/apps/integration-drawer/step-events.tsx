@@ -75,6 +75,10 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   // BRAZE (Wave-2 Task 4) offers the same 13-key Wave-1 catalog — its
   // `eventCatalog` (providers/braze.ts) is literally STANDARD_PROVIDER_EVENT_KEYS.
   BRAZE: STANDARD_PROVIDER_EVENT_KEYS,
+  // ONESIGNAL (Wave-2 Task 5) offers the same 13-key catalog — its
+  // `eventCatalog` (providers/onesignal.ts) is also literally
+  // STANDARD_PROVIDER_EVENT_KEYS.
+  ONESIGNAL: STANDARD_PROVIDER_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

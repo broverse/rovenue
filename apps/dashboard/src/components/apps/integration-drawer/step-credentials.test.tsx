@@ -290,6 +290,96 @@ describe("StepCredentials — declarative multi-field providers (BRAZE, Wave-2)"
   });
 });
 
+const ONESIGNAL_STATE: DrawerState = {
+  step: "credentials",
+  credentials: {},
+  validated: false,
+  enabledEvents: [],
+  eventMapping: {},
+  actionSource: "app",
+  testEventCode: "",
+};
+
+/** Stateful wrapper for the ONESIGNAL provider (Wave-2 Task 5). */
+function OnesignalWrapper({ onValidated }: { onValidated: (s: DrawerState) => void }) {
+  const [state, setState] = useState<DrawerState>(ONESIGNAL_STATE);
+  return (
+    <StepCredentials
+      state={state}
+      onChange={(next) => {
+        setState(next);
+        if (next.validated) onValidated(next);
+      }}
+      onNext={vi.fn()}
+      onBack={vi.fn()}
+      existingConnection={null}
+      providerId="ONESIGNAL"
+      projectId="p1"
+    />
+  );
+}
+
+describe("StepCredentials — declarative multi-field providers (ONESIGNAL, Wave-2)", () => {
+  it("renders one labeled input per field in PROVIDER_CREDENTIAL_FIELDS.ONESIGNAL", async () => {
+    renderWithRouter(<OnesignalWrapper onValidated={vi.fn()} />);
+
+    const fields = PROVIDER_CREDENTIAL_FIELDS.ONESIGNAL;
+    expect(fields).toHaveLength(2);
+
+    for (const field of fields) {
+      expect(await screen.findByLabelText(new RegExp(escapeRegExp(field.label), "i"))).toBeTruthy();
+    }
+  });
+
+  it("renders rest_api_key with masked (password) treatment, app_id as plain text", async () => {
+    renderWithRouter(<OnesignalWrapper onValidated={vi.fn()} />);
+
+    for (const field of PROVIDER_CREDENTIAL_FIELDS.ONESIGNAL) {
+      const input = (await screen.findByLabelText(
+        new RegExp(escapeRegExp(field.label), "i"),
+      )) as HTMLInputElement;
+      expect(input.type).toBe(field.secret ? "password" : "text");
+    }
+  });
+
+  it("submits credentials keyed by app_id/rest_api_key on Validate", async () => {
+    const user = userEvent.setup();
+    const postSpy = vi.fn();
+
+    server.use(
+      http.post(
+        "http://localhost:3000/dashboard/projects/p1/integrations/validate",
+        async ({ request }) => {
+          postSpy(await request.json());
+          return HttpResponse.json({ data: { ok: true } });
+        },
+      ),
+    );
+
+    renderWithRouter(<OnesignalWrapper onValidated={vi.fn()} />);
+
+    const values: Record<string, string> = {
+      app_id: "11111111-2222-3333-4444-555555555555",
+      rest_api_key: "key_abcd1234",
+    };
+
+    for (const field of PROVIDER_CREDENTIAL_FIELDS.ONESIGNAL) {
+      const input = await screen.findByLabelText(new RegExp(escapeRegExp(field.label), "i"));
+      await user.type(input, values[field.id]);
+    }
+
+    await user.click(screen.getByRole("button", { name: /validate/i }));
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "ONESIGNAL",
+        credentials: values,
+      }),
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // PROVIDER_VALIDATE_NOTES — validate-time side-effect disclosure
 // (review-fix: a live-write side effect on Validate must be surfaced
@@ -362,6 +452,16 @@ describe("StepCredentials — PROVIDER_VALIDATE_NOTES", () => {
 
     expect(await screen.findByLabelText(/app token/i)).toBeTruthy();
     expect(PROVIDER_VALIDATE_NOTES.ADJUST).toBeUndefined();
+    for (const note of Object.values(PROVIDER_VALIDATE_NOTES)) {
+      expect(screen.queryByText(note)).toBeNull();
+    }
+  });
+
+  it("renders no note for ONESIGNAL — validateCredentials is a real read-only GET /apps/{app_id}, no live-write side effect", async () => {
+    renderWithRouter(<ProviderWrapper providerId="ONESIGNAL" />);
+
+    expect(await screen.findByLabelText(/app id/i)).toBeTruthy();
+    expect(PROVIDER_VALIDATE_NOTES.ONESIGNAL).toBeUndefined();
     for (const note of Object.values(PROVIDER_VALIDATE_NOTES)) {
       expect(screen.queryByText(note)).toBeNull();
     }

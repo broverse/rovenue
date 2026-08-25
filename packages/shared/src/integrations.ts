@@ -107,7 +107,10 @@ export type IntegrationProviderId =
   | "SLACK"
   | "FIREBASE_GA4"
   // Wave-2 Task 4 — first LIFECYCLE-category provider.
-  | "BRAZE";
+  | "BRAZE"
+  // Wave-2 Task 5 — second lifecycle-category provider (rail/homepage
+  // already activated by BRAZE).
+  | "ONESIGNAL";
 
 export const WEBHOOK_API_VERSION = "2026-08-24";
 
