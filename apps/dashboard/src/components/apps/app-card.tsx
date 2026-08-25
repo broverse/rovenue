@@ -28,6 +28,7 @@ export const DRAWER_IDS: ReadonlySet<string> = new Set([
   "iterable",
   "airbridge",
   "singular",
+  "discord",
 ]);
 
 // Mirrors apps/api/src/routes/dashboard/integrations.ts's

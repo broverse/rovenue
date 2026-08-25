@@ -13,6 +13,7 @@ import { onesignalProvider } from "./providers/onesignal";
 import { iterableProvider } from "./providers/iterable";
 import { airbridgeProvider } from "./providers/airbridge";
 import { singularProvider } from "./providers/singular";
+import { discordProvider } from "./providers/discord";
 
 export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   META_CAPI: metaCapiProvider,
@@ -29,6 +30,7 @@ export const PROVIDERS: Record<ProviderId, IntegrationProvider> = {
   ITERABLE: iterableProvider,
   AIRBRIDGE: airbridgeProvider,
   SINGULAR: singularProvider,
+  DISCORD: discordProvider,
 };
 
 export function getProvider(id: ProviderId): IntegrationProvider {

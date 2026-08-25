@@ -356,6 +356,15 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "subscription.trial.started": "sng_start_trial",
     ...SINGULAR_LIFECYCLE_EVENT_NAMES,
   },
+  // DISCORD (Wave-2 Task 9) — same shape as SLACK: every one of the 17
+  // public event keys maps to itself. Discord has no vendor-specific
+  // event-name vocabulary either (identical rationale to SLACK's entry
+  // above) — `providerEvent` is only ever used as a human-readable label,
+  // derived from the shared ROVENUE_EVENT_KEYS const rather than hand-typed
+  // a second time.
+  DISCORD: Object.fromEntries(
+    ROVENUE_EVENT_KEYS.map((key) => [key, key]),
+  ) as Partial<Record<RovenueEventKey, string>>,
 };
 
 export type ApplyEventMappingInput = {

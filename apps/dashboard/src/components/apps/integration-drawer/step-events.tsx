@@ -97,6 +97,12 @@ const EVENT_KEYS_BY_PROVIDER: Record<IntegrationProviderId, readonly string[]> =
   // layer via defaultEventMapping (see event-mapping.ts) — Singular has no
   // documented refund/reversal convention.
   SINGULAR: STANDARD_PROVIDER_EVENT_KEYS,
+  // DISCORD (Wave-2 Task 9) has the same shape as SLACK: its `eventCatalog`
+  // (providers/discord.ts) is also `ROVENUE_EVENT_KEYS` in full — it
+  // subscribes to all four fanout topics on purpose (a general-purpose
+  // notification channel, not scoped to one domain), so the picker offers
+  // the same complete set.
+  DISCORD: ROVENUE_EVENT_KEYS,
 };
 
 // ---------------------------------------------------------------------------

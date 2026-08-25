@@ -14,10 +14,11 @@ import { onesignalProvider } from "./providers/onesignal";
 import { iterableProvider } from "./providers/iterable";
 import { airbridgeProvider } from "./providers/airbridge";
 import { singularProvider } from "./providers/singular";
+import { discordProvider } from "./providers/discord";
 import type { ProviderId } from "./types";
 
 describe("PROVIDERS registry", () => {
-  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK, FIREBASE_GA4, BRAZE, ONESIGNAL, ITERABLE, AIRBRIDGE and SINGULAR", () => {
+  it("contains exactly META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK, FIREBASE_GA4, BRAZE, ONESIGNAL, ITERABLE, AIRBRIDGE, SINGULAR and DISCORD", () => {
     const keys = Object.keys(PROVIDERS).sort();
     expect(keys).toEqual([
       "ADJUST",
@@ -26,6 +27,7 @@ describe("PROVIDERS registry", () => {
       "APPSFLYER",
       "BRAZE",
       "CUSTOM_WEBHOOK",
+      "DISCORD",
       "FIREBASE_GA4",
       "ITERABLE",
       "META_CAPI",
@@ -52,6 +54,7 @@ describe("PROVIDERS registry", () => {
     expect(getProvider("ITERABLE")).toBe(iterableProvider);
     expect(getProvider("AIRBRIDGE")).toBe(airbridgeProvider);
     expect(getProvider("SINGULAR")).toBe(singularProvider);
+    expect(getProvider("DISCORD")).toBe(discordProvider);
   });
 
   it("throws on unknown provider", () => {
@@ -66,7 +69,7 @@ describe("PROVIDERS registry", () => {
 // =============================================================
 
 describe("providerIds()", () => {
-  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK, FIREBASE_GA4, BRAZE, ONESIGNAL, ITERABLE, AIRBRIDGE and SINGULAR", () => {
+  it("contains META_CAPI, TIKTOK_EVENTS, CUSTOM_WEBHOOK, AMPLITUDE, MIXPANEL, APPSFLYER, ADJUST, SLACK, FIREBASE_GA4, BRAZE, ONESIGNAL, ITERABLE, AIRBRIDGE, SINGULAR and DISCORD", () => {
     const ids = providerIds();
     expect(ids).toContain("META_CAPI");
     expect(ids).toContain("TIKTOK_EVENTS");
@@ -82,6 +85,7 @@ describe("providerIds()", () => {
     expect(ids).toContain("ITERABLE");
     expect(ids).toContain("AIRBRIDGE");
     expect(ids).toContain("SINGULAR");
+    expect(ids).toContain("DISCORD");
   });
 
   it("returns a non-empty tuple usable by z.enum", () => {

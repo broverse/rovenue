@@ -62,6 +62,7 @@ export const CARD_ID_TO_PROVIDER: Record<
   iterable: "ITERABLE",
   airbridge: "AIRBRIDGE",
   singular: "SINGULAR",
+  discord: "DISCORD",
 };
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({

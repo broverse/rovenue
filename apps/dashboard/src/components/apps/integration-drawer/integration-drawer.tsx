@@ -170,6 +170,14 @@ const AIRBRIDGE_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "acti
 // except revenue.REFUND already defaults to a mapped Singular event name.
 const SINGULAR_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
 
+// DISCORD (Wave-2 Task 9) has the same shape as SLACK: no vendor "Events
+// Manager" test-event tooling (validateCredentials posts a real message —
+// see step-credentials.tsx's PROVIDER_VALIDATE_NOTES.DISCORD — it is not
+// surfaced as a wizard step). It keeps "mapping" purely as optional
+// customization — every catalog key already defaults to a mapped
+// (identity) providerEvent, so nothing there is required.
+const DISCORD_STEPS: DrawerStep[] = ["credentials", "events", "mapping", "activate"];
+
 const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = {
   CUSTOM_WEBHOOK: WEBHOOK_STEPS,
   AMPLITUDE: AMPLITUDE_STEPS,
@@ -183,6 +191,7 @@ const STEPS_BY_PROVIDER: Partial<Record<IntegrationProviderId, DrawerStep[]>> = 
   ITERABLE: ITERABLE_STEPS,
   AIRBRIDGE: AIRBRIDGE_STEPS,
   SINGULAR: SINGULAR_STEPS,
+  DISCORD: DISCORD_STEPS,
 };
 
 const STEP_LABELS: Record<DrawerStep, string> = {
@@ -208,6 +217,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   ITERABLE: "Iterable",
   AIRBRIDGE: "Airbridge",
   SINGULAR: "Singular",
+  DISCORD: "Discord",
 };
 
 // ---------------------------------------------------------------------------

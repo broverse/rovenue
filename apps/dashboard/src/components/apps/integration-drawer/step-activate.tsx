@@ -37,6 +37,7 @@ const PROVIDER_LABELS: Record<IntegrationProviderId, string> = {
   ITERABLE: "Iterable",
   AIRBRIDGE: "Airbridge",
   SINGULAR: "Singular",
+  DISCORD: "Discord",
 };
 
 // ---------------------------------------------------------------------------

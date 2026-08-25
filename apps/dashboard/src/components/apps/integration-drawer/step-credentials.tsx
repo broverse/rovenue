@@ -250,6 +250,13 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = 
  * providers/singular.ts's validateCredentials comment and
  * apps/docs/content/docs/integrations/singular.mdx for the documented
  * "first delivery is the live proof" caveat this implies.
+ *
+ * DISCORD: Slack-parity — like SLACK, this posts a REAL, human-visible
+ * "Rovenue connected ✅" message straight into the configured Discord
+ * channel via the incoming webhook. It is NOT deduplicated: Discord
+ * incoming webhooks have no dedup-key concept either (see
+ * providers/discord.ts), so clicking Validate again posts another message.
+ * Documented again in apps/docs/content/docs/integrations/discord.mdx.
  */
 export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
   AMPLITUDE:
@@ -267,6 +274,8 @@ export const PROVIDER_VALIDATE_NOTES: Record<string, string> = {
     "Validate checks the payload format only — it cannot verify the api_secret or app ID are correct. The first real delivery is the live proof.",
   BRAZE:
     "Validate sends a real, clearly-tagged test event to a single reusable Braze profile (deduplicated across repeat clicks — it does not create a new profile or MAU each time).",
+  DISCORD:
+    "Validate posts a real \"Rovenue connected ✅\" message to this Discord channel — not deduplicated, so repeat clicks post again.",
 };
 
 // ---------------------------------------------------------------------------

@@ -208,6 +208,19 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     tag: "new",
     featured: true,
   },
+  {
+    id: "discord",
+    category: "communication",
+    vendorKey: "discord",
+    logo: {
+      // Discord brand "blurple".
+      background: "#5865F2",
+      glyph: "DC",
+    },
+    status: "available",
+    tag: "new",
+    featured: true,
+  },
 ];
 
 export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
