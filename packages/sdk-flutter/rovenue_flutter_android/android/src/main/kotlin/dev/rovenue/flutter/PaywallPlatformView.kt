@@ -2,16 +2,20 @@
 // (dev.rovenue.sdk.paywallui.RovenuePaywallView) inside a Flutter
 // `PlatformView`. Task 7.
 //
-// Model: `packages/sdk-rn/android/.../RovenuePaywallExpoView.kt`. Flutter's
-// platform-view contract differs from Expo's in one load-bearing way that
-// simplifies this file relative to that model: creation params arrive
-// ONCE, atomically, in the constructor — there is no per-prop update
-// channel a Flutter host can use to change `placementIdentifier`/`locale`/
-// etc. after the view exists (unlike Expo's `onViewDidUpdateProps`, which
-// can fire many times over a view's life). So there is no `reload()`/
-// content-key-cache dance here: the paywall is resolved exactly once, the
-// job is cancelled in `dispose()` if still in flight, and the single
-// `RovenuePaywallView.bind()` call happens if and when that resolve lands.
+// Model: `packages/sdk-rn/android/.../RovenuePaywallExpoView.kt`. Creation
+// params arrive once, atomically, in the constructor — but unlike Expo's
+// `onViewDidUpdateProps`, Flutter's `AndroidView`/`UiKitView` never resend
+// them on a prop change. Task 8's carry-forward closes that gap with an
+// explicit `updateParams` call the Dart side (`RovenuePaywallView`'s
+// `didUpdateWidget`, see `packages/sdk-flutter/rovenue_flutter/lib/src/
+// paywall_view.dart`) sends over this view's own per-instance channel —
+// the same pattern `google_maps_flutter`/`webview_flutter` use for
+// prop-diffing platform views. `onMethodCall` only re-resolves the paywall
+// (cancelling any in-flight `loadJob`) when
+// `placementIdentifier`/`locale`/`colorSchemeOverride` actually changed; a
+// pure `hasRestoreHandler`/`hasUrlHandler` flip just re-binds the cached
+// `currentPaywall` with new closures, so an unchanged prop never triggers
+// a re-fetch.
 
 package dev.rovenue.flutter
 
@@ -21,6 +25,7 @@ import dev.rovenue.sdk.Rovenue
 import dev.rovenue.sdk.paywallui.PaywallViewOptions
 import dev.rovenue.sdk.paywallui.RovenuePaywallView
 import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.platform.PlatformView
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +34,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import dev.rovenue.sdk.Paywall
 
 internal class PaywallPlatformView(
     context: Context,
@@ -42,11 +48,15 @@ internal class PaywallPlatformView(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var loadJob: Job? = null
 
-    private val placementIdentifier: String
-    private val locale: String?
-    private val colorSchemeOverride: String?
-    private val hasRestoreHandler: Boolean
-    private val hasUrlHandler: Boolean
+    private var placementIdentifier: String
+    private var locale: String?
+    private var colorSchemeOverride: String?
+    private var hasRestoreHandler: Boolean
+    private var hasUrlHandler: Boolean
+
+    /** Cached so a handler-only `updateParams` (no placement/locale/scheme
+     *  change) can re-`bind` without re-resolving the paywall. */
+    private var currentPaywall: Paywall? = null
 
     init {
         @Suppress("UNCHECKED_CAST")
@@ -56,6 +66,7 @@ internal class PaywallPlatformView(
         colorSchemeOverride = params["colorSchemeOverride"] as? String
         hasRestoreHandler = params["hasRestoreHandler"] as? Boolean ?: false
         hasUrlHandler = params["hasUrlHandler"] as? Boolean ?: false
+        channel.setMethodCallHandler(::onMethodCall)
         load()
     }
 
@@ -66,6 +77,44 @@ internal class PaywallPlatformView(
         scope.cancel()
     }
 
+    /** Handles Dart's `updateParams` call (see this file's header). Any
+     *  other method name is answered "not implemented" — this channel is
+     *  also used the other way (native -> Dart `invokeMethod` calls in
+     *  [options]), so an unrecognized method here isn't necessarily a bug.
+     */
+    private fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method != "updateParams") {
+            result.notImplemented()
+            return
+        }
+        @Suppress("UNCHECKED_CAST")
+        val params = call.arguments as? Map<String, Any?> ?: emptyMap()
+        val newPlacement = params["placementIdentifier"] as? String ?: ""
+        val newLocale = params["locale"] as? String
+        val newColorScheme = params["colorSchemeOverride"] as? String
+        val newHasRestore = params["hasRestoreHandler"] as? Boolean ?: false
+        val newHasUrl = params["hasUrlHandler"] as? Boolean ?: false
+
+        val needsReload = newPlacement != placementIdentifier ||
+            newLocale != locale ||
+            newColorScheme != colorSchemeOverride
+        val handlersChanged = newHasRestore != hasRestoreHandler || newHasUrl != hasUrlHandler
+
+        placementIdentifier = newPlacement
+        locale = newLocale
+        colorSchemeOverride = newColorScheme
+        hasRestoreHandler = newHasRestore
+        hasUrlHandler = newHasUrl
+
+        if (needsReload) {
+            loadJob?.cancel()
+            load()
+        } else if (handlersChanged) {
+            currentPaywall?.let { inner.bind(it, options()) }
+        }
+        result.success(null)
+    }
+
     private fun load() {
         val placement = placementIdentifier
         if (placement.isEmpty()) return
@@ -74,6 +123,7 @@ internal class PaywallPlatformView(
             // and the Android renderer's own behavior for a null config.
             val paywall = runCatching { Rovenue.shared.getPaywall(placement, locale) }.getOrNull()
             if (paywall != null) {
+                currentPaywall = paywall
                 inner.bind(paywall, options())
             }
         }

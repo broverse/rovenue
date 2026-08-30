@@ -38,6 +38,23 @@ String? _wireColorScheme(RovenueColorScheme? scheme) => switch (scheme) {
 /// The paywall fills whatever space the parent gives it; size it with a
 /// `SizedBox`/`Expanded`/etc. There is deliberately no `style`/decoration
 /// prop, matching the RN renderer's public surface.
+///
+/// ### Updating a live widget instance
+///
+/// [placementIdentifier], [locale], and [colorScheme] — and whether
+/// [onRestore]/[onUrl] are present at all — ARE live-updatable: changing any
+/// of them on an existing instance (same [Key]) sends an `updateParams`
+/// call over the view's per-instance method channel
+/// (`dev.rovenue.flutter/paywall_view_<viewId>`), and the native side
+/// re-resolves the paywall only when [placementIdentifier]/[locale]/
+/// [colorScheme] actually changed (a pure [onRestore]/[onUrl] handler swap
+/// just re-mounts with the new callbacks, no re-fetch). Swapping a callback
+/// closure's identity WITHOUT changing whether it is present (e.g.
+/// replacing one non-null [onPurchaseCompleted] with another) is picked up
+/// automatically too, since `build` always re-reads `widget.onXxx` — no
+/// remount needed for that case. If you still want to force a full
+/// teardown/rebuild of the native view for any other reason, give the
+/// widget a new [Key].
 class RovenuePaywallView extends StatefulWidget {
   const RovenuePaywallView({
     super.key,
@@ -111,6 +128,23 @@ class _RovenuePaywallViewState extends State<RovenuePaywallView> {
       default:
         return null;
     }
+  }
+
+  @override
+  void didUpdateWidget(covariant RovenuePaywallView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final channel = _channel;
+    if (channel == null) return;
+    final needsUpdate = widget.placementIdentifier != oldWidget.placementIdentifier ||
+        widget.locale != oldWidget.locale ||
+        widget.colorScheme != oldWidget.colorScheme ||
+        (widget.onRestore != null) != (oldWidget.onRestore != null) ||
+        (widget.onUrl != null) != (oldWidget.onUrl != null);
+    if (!needsUpdate) return;
+    // Fire-and-forget: the native side applies this on a best-effort basis
+    // (see `PaywallPlatformView.swift`/`.kt`'s `updateParams` handler) and
+    // there is no meaningful failure the widget can surface here.
+    unawaited(channel.invokeMethod<void>('updateParams', _creationParams));
   }
 
   @override

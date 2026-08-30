@@ -127,4 +127,133 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  // Task 8 carry-forward A: a LIVE widget's creation-time-only props
+  // (placementIdentifier/locale/colorScheme, and onRestore/onUrl presence)
+  // must reach the native side via an `updateParams` call on the
+  // per-view channel when they change on rebuild, and must NOT fire that
+  // call when rebuilding without any of those changing.
+  group('didUpdateWidget update channel', () {
+    Future<int> pumpAndCaptureViewId(
+      WidgetTester tester,
+      Widget child,
+    ) async {
+      int? viewId;
+      messenger.setMockMethodCallHandler(SystemChannels.platform_views, (call) async {
+        if (call.method == 'create') {
+          viewId = ((call.arguments as Map).cast<Object?, Object?>())['id'] as int;
+        }
+        return null;
+      });
+      await tester.pumpWidget(Directionality(textDirection: TextDirection.ltr, child: child));
+      return viewId!;
+    }
+
+    testWidgets('placementIdentifier change sends updateParams with the new params', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        final viewId = await pumpAndCaptureViewId(
+          tester,
+          const RovenuePaywallView(placementIdentifier: 'onboarding'),
+        );
+
+        final viewChannel = MethodChannel('dev.rovenue.flutter/paywall_view_$viewId');
+        final calls = <MethodCall>[];
+        messenger.setMockMethodCallHandler(viewChannel, (call) async {
+          calls.add(call);
+          return null;
+        });
+
+        await tester.pumpWidget(
+          const Directionality(
+            textDirection: TextDirection.ltr,
+            child: RovenuePaywallView(placementIdentifier: 'post_purchase'),
+          ),
+        );
+
+        final update = calls.singleWhere((c) => c.method == 'updateParams');
+        final args = (update.arguments as Map).cast<String, Object?>();
+        expect(args['placementIdentifier'], 'post_purchase');
+        expect(args['hasRestoreHandler'], isFalse);
+        expect(args['hasUrlHandler'], isFalse);
+
+        messenger.setMockMethodCallHandler(viewChannel, null);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('onRestore presence flip sends updateParams', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        final viewId = await pumpAndCaptureViewId(
+          tester,
+          const RovenuePaywallView(placementIdentifier: 'onboarding'),
+        );
+
+        final viewChannel = MethodChannel('dev.rovenue.flutter/paywall_view_$viewId');
+        final calls = <MethodCall>[];
+        messenger.setMockMethodCallHandler(viewChannel, (call) async {
+          calls.add(call);
+          return null;
+        });
+
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: RovenuePaywallView(placementIdentifier: 'onboarding', onRestore: () {}),
+          ),
+        );
+
+        final update = calls.singleWhere((c) => c.method == 'updateParams');
+        expect((update.arguments as Map)['hasRestoreHandler'], isTrue);
+
+        messenger.setMockMethodCallHandler(viewChannel, null);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('rebuild with no relevant prop change sends no updateParams', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        var completedCount = 0;
+        final viewId = await pumpAndCaptureViewId(
+          tester,
+          RovenuePaywallView(
+            placementIdentifier: 'onboarding',
+            onPurchaseCompleted: (_) => completedCount++,
+          ),
+        );
+
+        final viewChannel = MethodChannel('dev.rovenue.flutter/paywall_view_$viewId');
+        final calls = <MethodCall>[];
+        messenger.setMockMethodCallHandler(viewChannel, (call) async {
+          calls.add(call);
+          return null;
+        });
+
+        // Same placementIdentifier, `onPurchaseCompleted` swapped for a
+        // DIFFERENT non-null closure: presence didn't change, so no
+        // `updateParams` should fire — the new closure is picked up simply
+        // because `_handleMethodCall` reads `widget.onPurchaseCompleted`
+        // fresh on every native callback.
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: RovenuePaywallView(
+              placementIdentifier: 'onboarding',
+              onPurchaseCompleted: (_) => completedCount += 100,
+            ),
+          ),
+        );
+
+        expect(calls.where((c) => c.method == 'updateParams'), isEmpty);
+
+        messenger.setMockMethodCallHandler(viewChannel, null);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  });
 }

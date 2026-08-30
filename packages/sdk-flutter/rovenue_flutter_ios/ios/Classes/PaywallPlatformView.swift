@@ -2,19 +2,20 @@
 // (packages/sdk-swift/Sources/Rovenue/PaywallUI/) inside a Flutter
 // `FlutterPlatformView`. Task 7.
 //
-// Model: `packages/sdk-rn/ios/RovenuePaywallExpoView.swift`. Flutter's
-// platform-view contract differs from Expo's in one load-bearing way that
-// simplifies this file relative to that model: creation params arrive
-// ONCE, atomically, at `init` — there is no per-prop update channel a
-// Flutter host can use to change `placementIdentifier`/`locale`/etc. after
-// the view exists (unlike Expo's `onViewDidUpdateProps`, which fires once
-// per prop batch and can fire many times over a view's life). So there is
-// no `reload()`/prop-diffing/content-key-cache dance here: the paywall is
-// resolved exactly once, the result is cancelled on `deinit` if still in
-// flight, and `mount` either builds the hosting controller (first
-// successful resolve) or swaps its `rootView` (a mount from a background
-// queue racing a cancelled task, defensively — in practice this only ever
-// runs once per view).
+// Model: `packages/sdk-rn/ios/RovenuePaywallExpoView.swift`. Creation
+// params arrive once, atomically, at `init` — but unlike Expo's
+// `onViewDidUpdateProps`, Flutter's `AndroidView`/`UiKitView` never resend
+// them on a prop change. Task 8's carry-forward closes that gap with an
+// explicit `updateParams` call the Dart side (`RovenuePaywallView`'s
+// `didUpdateWidget`, see `packages/sdk-flutter/rovenue_flutter/lib/src/
+// paywall_view.dart`) sends over this view's own per-instance channel —
+// the same pattern `google_maps_flutter`/`webview_flutter` use for
+// prop-diffing platform views. `handleMethodCall` only re-resolves the
+// paywall (cancelling any in-flight `loadTask`) when
+// `placementIdentifier`/`locale`/`colorSchemeOverride` actually changed; a
+// pure `hasRestoreHandler`/`hasUrlHandler` flip just re-mounts the cached
+// `currentPaywall` with new closures, so an unchanged prop never triggers
+// a re-fetch.
 //
 // iOS-only — see `PaywallViewFactory.swift`'s header for why this file is
 // excluded from the macOS SwiftPM test harness rather than branched with
@@ -35,14 +36,17 @@ final class PaywallPlatformView: NSObject, FlutterPlatformView {
   private let containerView = UIView()
   private let channel: FlutterMethodChannel
 
-  private let placementIdentifier: String
-  private let locale: String?
-  private let colorSchemeOverride: String?
-  private let hasRestoreHandler: Bool
-  private let hasUrlHandler: Bool
+  private var placementIdentifier: String
+  private var locale: String?
+  private var colorSchemeOverride: String?
+  private var hasRestoreHandler: Bool
+  private var hasUrlHandler: Bool
 
   private var hostingController: UIHostingController<AnyView>?
   private var loadTask: Task<Void, Never>?
+  /// Cached so a handler-only `updateParams` (no placement/locale/scheme
+  /// change) can re-`mount` without re-resolving the paywall.
+  private var currentPaywall: Paywall?
 
   init(frame: CGRect, viewId: Int64, args: Any?, messenger: FlutterBinaryMessenger) {
     let params = args as? [String: Any] ?? [:]
@@ -58,6 +62,9 @@ final class PaywallPlatformView: NSObject, FlutterPlatformView {
     containerView.frame = frame
     containerView.clipsToBounds = true
     super.init()
+    channel.setMethodCallHandler { [weak self] call, result in
+      self?.handleMethodCall(call, result: result)
+    }
     load()
   }
 
@@ -65,6 +72,42 @@ final class PaywallPlatformView: NSObject, FlutterPlatformView {
 
   deinit {
     loadTask?.cancel()
+  }
+
+  /// Handles Dart's `updateParams` call (see this file's header). Any other
+  /// method name is answered with `FlutterMethodNotImplemented` — this
+  /// channel is also used the other way (native → Dart `invokeMethod`
+  /// calls below), so an unrecognized method here isn't necessarily a bug.
+  private func handleMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard call.method == "updateParams" else {
+      result(FlutterMethodNotImplemented)
+      return
+    }
+    let params = call.arguments as? [String: Any] ?? [:]
+    let newPlacement = params["placementIdentifier"] as? String ?? ""
+    let newLocale = params["locale"] as? String
+    let newColorScheme = params["colorSchemeOverride"] as? String
+    let newHasRestore = params["hasRestoreHandler"] as? Bool ?? false
+    let newHasUrl = params["hasUrlHandler"] as? Bool ?? false
+
+    let needsReload = newPlacement != placementIdentifier
+      || newLocale != locale
+      || newColorScheme != colorSchemeOverride
+    let handlersChanged = newHasRestore != hasRestoreHandler || newHasUrl != hasUrlHandler
+
+    placementIdentifier = newPlacement
+    locale = newLocale
+    colorSchemeOverride = newColorScheme
+    hasRestoreHandler = newHasRestore
+    hasUrlHandler = newHasUrl
+
+    if needsReload {
+      loadTask?.cancel()
+      load()
+    } else if handlersChanged {
+      mount(currentPaywall)
+    }
+    result(nil)
   }
 
   private func load() {
@@ -95,6 +138,7 @@ final class PaywallPlatformView: NSObject, FlutterPlatformView {
 
   private func mount(_ paywall: Paywall?) {
     guard let paywall else { return }
+    currentPaywall = paywall
 
     let content = RovenuePaywallView(
       paywall: paywall,

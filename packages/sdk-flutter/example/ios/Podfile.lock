@@ -1,0 +1,28 @@
+PODS:
+  - Flutter (1.0.0)
+  - Rovenue (0.16.0)
+  - rovenue_flutter_ios (0.16.0):
+    - Flutter
+    - Rovenue (= 0.16.0)
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - Rovenue (from `../../../sdk-swift`)
+  - rovenue_flutter_ios (from `.symlinks/plugins/rovenue_flutter_ios/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  Rovenue:
+    :path: "../../../sdk-swift"
+  rovenue_flutter_ios:
+    :path: ".symlinks/plugins/rovenue_flutter_ios/ios"
+
+SPEC CHECKSUMS:
+  Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+  Rovenue: 4a4e7d75f0a4b8c6fb8b6b14d86ddf7fc0e42a8f
+  rovenue_flutter_ios: 73cd2dd85e41e4c0a9687780fe19212cfac955d4
+
+PODFILE CHECKSUM: d86c58355e032540bf40a31abf54c0c3d3f76e30
+
+COCOAPODS: 1.16.2

@@ -57,3 +57,6 @@ Pods/
 # packages/sdk-flutter/* are libraries, not apps — pub convention is to
 # NOT commit pubspec.lock for library packages (only apps commit it).
 pubspec.lock
+# ...except packages/sdk-flutter/example, which IS an application package
+# (Task 8) — pub convention is that applications DO commit their lockfile.
+!packages/sdk-flutter/example/pubspec.lock
