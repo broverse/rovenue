@@ -47,6 +47,12 @@ class RovenueFlutterAndroidPlugin : FlutterPlugin, ActivityAware {
         )
         hostApi = api
         RovenueHostApi.setUp(messenger, api)
+
+        // The paywall PlatformView (Task 7).
+        binding.platformViewRegistry.registerViewFactory(
+            "dev.rovenue.flutter/paywall_view",
+            PaywallViewFactory(messenger),
+        )
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {

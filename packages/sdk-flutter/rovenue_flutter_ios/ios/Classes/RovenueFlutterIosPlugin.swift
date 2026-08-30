@@ -29,6 +29,18 @@ public class RovenueFlutterIosPlugin: NSObject, FlutterPlugin {
     let flutterApi = RovenueFlutterApi(binaryMessenger: messenger)
     let instance = RovenueFlutterIosPlugin(flutterApi: flutterApi)
     RovenueHostApiSetup.setUp(binaryMessenger: messenger, api: instance.hostApi)
+
+    // The paywall PlatformView (Task 7) is iOS-only — `PaywallViewFactory`/
+    // `PaywallPlatformView` host a UIKit `UIHostingController` and are
+    // excluded from the macOS SwiftPM test-harness target for that reason
+    // (see `ios/Package.swift`). This `#if` mirrors the messenger-accessor
+    // branch above rather than introducing a new pattern.
+    #if os(iOS)
+      registrar.register(
+        PaywallViewFactory(messenger: messenger),
+        withId: "dev.rovenue.flutter/paywall_view"
+      )
+    #endif
   }
 
   init(flutterApi: RovenueFlutterApiProtocol) {

@@ -116,6 +116,17 @@ let package = Package(
         "FlutterMacOSBinary",
       ],
       path: "Classes",
+      // Task 7's paywall PlatformView files are iOS-only: they host a
+      // `UIHostingController` (UIKit-only — macOS's SwiftUI hosting type
+      // is `NSHostingController`, a different type) and import `Flutter`
+      // (not the `FlutterMacOS` this harness links). Per the Task 4
+      // controller ruling, that's solved here — by excluding them from
+      // this macOS-only test-harness target's sources — rather than by
+      // adding `#if os(macOS)` branches to the shipping files themselves.
+      exclude: [
+        "PaywallPlatformView.swift",
+        "PaywallViewFactory.swift",
+      ],
       linkerSettings: [
         .unsafeFlags(["-L\(librovenueReleaseDir)"], .when(platforms: [.macOS]))
       ]

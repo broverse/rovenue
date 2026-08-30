@@ -103,6 +103,20 @@ func availabilityError(_ message: String) -> PigeonError {
   )
 }
 
+/// Flattens any thrown error into the `{code, detail, serverCode,
+/// httpStatus, retryable}` map the paywall PlatformView's per-view callback
+/// channel sends for `onPurchaseFailed` (Task 7) — the SAME shape every
+/// other failure path in this SDK uses (see `fail(_:)` above), just not
+/// wrapped in a `PigeonError` since this channel isn't Pigeon-generated.
+/// Built by reusing `fail(_:)` rather than re-deriving the code/detail
+/// mapping, so it can never drift from it.
+func errorArgs(_ error: Error) -> [String: Any] {
+  let pigeonError = fail(error)
+  var args = (pigeonError.details as? [String: Any]) ?? [:]
+  args["code"] = pigeonError.code
+  return args
+}
+
 // MARK: - Simple 1:1 struct/enum mappers
 
 func mapUser(_ u: User) -> RvUser {
@@ -411,6 +425,35 @@ func mapPresentedContext(_ c: PresentedContext) -> RvPresentedContext {
     experimentKey: c.experimentKey,
     revision: c.revision
   )
+}
+
+// MARK: - Paywall PlatformView (Task 7) event payloads
+//
+// The paywall PlatformView's per-view callback channel is a plain
+// `FlutterMethodChannel`, not Pigeon — so its `onPurchaseCompleted` payload
+// is a hand-built `[String: Any?]`, not an `RvPurchaseResult`. Mirrors
+// `packages/sdk-rn/ios/RovenueModule.swift`'s `dtoFromPurchaseResult` /
+// `dtoFromEntitlement` field-for-field, since the Dart side
+// (`rovenue_flutter/lib/src/paywall_view.dart`) decodes these same key
+// names into the public `Entitlement`/`PurchaseResult` models.
+
+private func dtoFromEntitlement(_ e: Entitlement) -> [String: Any?] {
+  [
+    "id": e.id,
+    "active": e.isActive,
+    "expiresAt": e.expiresIso as Any?,
+    "productId": e.productIdentifier,
+  ]
+}
+
+func dtoFromPurchaseResult(_ r: PurchaseResult) -> [String: Any?] {
+  [
+    "entitlements": r.entitlements.map(dtoFromEntitlement),
+    "virtualCurrencies": r.virtualCurrencies,
+    "productId": r.productId,
+    "storeTransactionId": r.storeTransactionId,
+    "isDeferred": r.isDeferred,
+  ]
 }
 
 func mapPaywall(_ p: Paywall) -> RvPaywall {

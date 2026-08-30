@@ -113,6 +113,22 @@ fun fail(error: Throwable): FlutterError =
     }
 
 /**
+ * Flattens any thrown error into the `{code, detail, serverCode,
+ * httpStatus, retryable}` map the paywall PlatformView's per-view callback
+ * channel sends for `onPurchaseFailed` (Task 7) — the SAME shape every
+ * other failure path in this SDK uses (see `fail(Throwable)` above), just
+ * not wrapped in a `FlutterError` since this channel isn't Pigeon-generated.
+ * Built by reusing `fail(Throwable)` rather than re-deriving the
+ * code/detail mapping, so it can never drift from it.
+ */
+fun errorArgs(error: Throwable): Map<String, Any?> {
+    val flutterError = fail(error)
+    @Suppress("UNCHECKED_CAST")
+    val details = (flutterError.details as? Map<String, Any?>) ?: emptyMap()
+    return details + ("code" to flutterError.code)
+}
+
+/**
  * Used for the "no foreground Activity available" guard in HostApiImpl,
  * mirroring `RovenueModule.kt`'s `StoreProblemFallbackCodedException` — but
  * per task-5-context.md this must surface as `code == "Internal"` (a
@@ -231,6 +247,31 @@ fun mapClaimInstallParams(p: RvClaimInstallParams): ClaimInstallParams = ClaimIn
     screenDims = p.screenDims ?: "",
     deviceModel = p.deviceModel,
     installReferrer = p.installReferrer,
+)
+
+// ---------------- Paywall PlatformView (Task 7) event payloads ----------------
+//
+// The paywall PlatformView's per-view callback channel is a plain Flutter
+// `MethodChannel`, not Pigeon — so its `onPurchaseCompleted` payload is a
+// hand-built `Map<String, Any?>`, not an `RvPurchaseResult`. Mirrors
+// `packages/sdk-rn/android/.../RovenueModule.kt`'s `dtoFromPurchaseResult` /
+// `dtoFromEntitlement` field-for-field, since the Dart side
+// (`rovenue_flutter/lib/src/paywall_view.dart`) decodes these same key
+// names into the public `Entitlement`/`PurchaseResult` models.
+
+private fun dtoFromEntitlement(e: Entitlement): Map<String, Any?> = mapOf(
+    "id" to e.id,
+    "active" to e.isActive,
+    "expiresAt" to e.expiresIso,
+    "productId" to e.productIdentifier,
+)
+
+fun dtoFromPurchaseResult(r: PurchaseResult): Map<String, Any?> = mapOf(
+    "entitlements" to r.entitlements.map(::dtoFromEntitlement),
+    "virtualCurrencies" to r.virtualCurrencies,
+    "productId" to r.productId,
+    "storeTransactionId" to r.storeTransactionId,
+    "isDeferred" to r.isDeferred,
 )
 
 // ---------------- Store product graph ----------------
