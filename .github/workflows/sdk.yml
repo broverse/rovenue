@@ -9,6 +9,7 @@ on:
       - "packages/sdk-swift/**"
       - "packages/sdk-kotlin/**"
       - "packages/sdk-rn/**"
+      - "packages/sdk-flutter/**"
       - "Cargo.toml"
       - "rust-toolchain.toml"
       - ".github/workflows/sdk.yml"
@@ -102,3 +103,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @rovenue/react-native-sdk test
       - run: pnpm --filter @rovenue/react-native-sdk build
+
+  flutter:
+    name: Flutter façade (Dart)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable }
+      - run: flutter --version
+      - name: Analyze + test each package
+        run: |
+          for p in rovenue_flutter_platform_interface rovenue_flutter rovenue_flutter_ios rovenue_flutter_android; do
+            (
+              cd packages/sdk-flutter/$p
+              flutter pub get
+              flutter analyze
+              # rovenue_flutter_ios/_android have no test/ dir yet; `flutter
+              # test` exits 1 (not 0) with "Test directory \"test\" not
+              # found." on a package with none, so skip cleanly rather than
+              # let the loop fail on a package that has nothing to test.
+              if [ -d test ]; then
+                flutter test
+              else
+                echo "no test/ directory for $p — skipping flutter test"
+              fi
+            ) || exit 1
+          done

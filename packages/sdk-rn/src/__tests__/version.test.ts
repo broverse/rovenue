@@ -59,4 +59,32 @@ describe("Rovenue RN version parity", () => {
     expect(m, "could not find s.version in sdk-swift/Rovenue.podspec").not.toBeNull();
     expect(SDK_VERSION).toBe(m![1]);
   });
+
+  // Dart pubspecs are hand-maintained strings just like the Kotlin/Swift
+  // manifests above, with no compile-time link to the Rust core. The example
+  // app's pubspec is excluded on purpose: it's an application, never
+  // published, so it isn't part of the SDK version lockstep.
+  const FLUTTER_PUBSPEC_PATHS = [
+    "../../../sdk-flutter/rovenue_flutter_platform_interface/pubspec.yaml",
+    "../../../sdk-flutter/rovenue_flutter/pubspec.yaml",
+    "../../../sdk-flutter/rovenue_flutter_ios/pubspec.yaml",
+    "../../../sdk-flutter/rovenue_flutter_android/pubspec.yaml",
+  ] as const;
+
+  it.each(FLUTTER_PUBSPEC_PATHS)(
+    "SDK_VERSION matches %s",
+    (relativePath) => {
+      const pubspec = readFileSync(join(__dirname, relativePath), "utf8");
+      const m = pubspec.match(/^version:\s*([^\s]+)/m);
+      expect(m, `could not find version: in ${relativePath}`).not.toBeNull();
+      // A pubspec version may carry a Dart build suffix (e.g. "0.16.0+1").
+      // Parity only governs the semver core shared with the Rust crate; the
+      // build suffix is a Dart-side concern (pub.dev release counter), so it
+      // is stripped before comparing.
+      const semverCore = m![1].split("+")[0];
+      expect(semverCore, `${relativePath} drifted from SDK_VERSION (${SDK_VERSION})`).toBe(
+        SDK_VERSION,
+      );
+    },
+  );
 });

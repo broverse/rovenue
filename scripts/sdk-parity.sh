@@ -63,6 +63,30 @@ pnpm --filter @rovenue/react-native-sdk test 2>&1 | tee /tmp/rovenue-rn-parity.l
 grep -E "Test Files +1 passed|[0-9]+ passed" /tmp/rovenue-rn-parity.log >/dev/null
 echo "  ✓ RN unit tests passed"
 
+# Flutter: only run if flutter is on PATH. rovenue_flutter_ios/_android have no
+# test/ dir yet — `flutter test` exits 1 (not 0) there ("Test directory
+# \"test\" not found."), verified locally, so skip cleanly instead of failing
+# the loop on a package with nothing to test.
+FLUTTER_PACKAGES=(rovenue_flutter_platform_interface rovenue_flutter rovenue_flutter_ios rovenue_flutter_android)
+if command -v flutter >/dev/null 2>&1; then
+    echo "→ Flutter analyze + test"
+    for p in "${FLUTTER_PACKAGES[@]}"; do
+        (
+            cd "packages/sdk-flutter/$p"
+            flutter pub get
+            flutter analyze
+            if [ -d test ]; then
+                flutter test
+            else
+                echo "  ~ no test/ directory for $p — skipping flutter test"
+            fi
+        ) >>/tmp/rovenue-flutter-parity.log 2>&1
+    done
+    echo "  ✓ Flutter façade analyze + test passed (${FLUTTER_PACKAGES[*]})"
+else
+    echo "→ Flutter test SKIPPED (flutter not on PATH)"
+fi
+
 # ---- RN sample app native compile (best-effort) ----
 echo "→ RN sample app native compile"
 

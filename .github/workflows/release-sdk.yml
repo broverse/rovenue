@@ -1,11 +1,11 @@
-# Coordinated SDK release — publishes all four façades at the version currently
-# committed in the repo (Rust crate, RN npm, Kotlin AAR, Swift pod). It does NOT
-# bump versions: bump first (see scripts/sdk-parity.sh + the version parity test
-# that locks all four to one number), merge, then run this.
+# Coordinated SDK release — publishes all five façades at the version currently
+# committed in the repo (Rust crate, RN npm, Kotlin AAR, Swift pod, Flutter pub.dev
+# packages). It does NOT bump versions: bump first (see scripts/sdk-parity.sh +
+# the version parity test that locks all five to one number), merge, then run this.
 #
 # Manual-only by design — publishing is irreversible, so an operator triggers it
 # from the Actions tab and ticks which artifacts to push. The `verify` gate runs
-# the same checks as sdk.yml (incl. the 4-façade version parity test) so a
+# the same checks as sdk.yml (incl. the 5-façade version parity test) so a
 # version skew or red test blocks every publish job.
 #
 # Required repository secrets (publish jobs are skipped/fail clearly if unset):
@@ -16,6 +16,16 @@
 #   MAVEN_PUBLISH_USER / MAVEN_PUBLISH_PASSWORD — Maven repo credentials
 #   MAVEN_SIGNING_KEY / MAVEN_SIGNING_PASSWORD  — ASCII-armored GPG private key + passphrase (Central requires signed artifacts)
 #   COCOAPODS_TRUNK_TOKEN — `pod trunk` session token
+#   PUB_DEV_CREDENTIALS   — `dart pub token` / OAuth credentials JSON for pub.dev publishing
+#
+# NOTE (spec §4.6): rovenue_flutter_ios wraps the native `Rovenue` CocoaPod via
+# a platform channel. Rovenue.podspec's `sha256` is still a placeholder over an
+# unpublished release zip (see publish-swift's release-pod.sh), so
+# rovenue_flutter_ios cannot function on a real iOS install until that pod is
+# actually published. publish-flutter below still publishes the Dart package to
+# pub.dev in dependency order — pub.dev has no way to gate on an unrelated
+# CocoaPods release — but do not treat a green publish-flutter run as proof the
+# iOS façade works end-to-end until the Rovenue pod ships.
 name: release-sdk
 
 on:
@@ -37,6 +47,10 @@ on:
         description: "Publish Swift pod to CocoaPods Trunk"
         type: boolean
         default: true
+      flutter:
+        description: "Publish Flutter packages to pub.dev"
+        type: boolean
+        default: true
 
 # release-pod.sh creates a GitHub Release for the Swift zip.
 permissions:
@@ -48,9 +62,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ---- Gate: same checks as sdk.yml, including version parity across all 4 ----
+  # ---- Gate: same checks as sdk.yml, including version parity across all 5 ----
   verify:
-    name: Verify (tests + 4-façade version parity)
+    name: Verify (tests + 5-façade version parity)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +84,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # version.test.ts asserts crate == RN == Kotlin == Swift; a skew fails here.
+      # version.test.ts asserts crate == RN == Kotlin == Swift == Flutter (all
+      # four pubspecs); a skew fails here.
       - run: pnpm --filter @rovenue/react-native-sdk test
 
   publish-crate:
@@ -173,3 +188,36 @@ jobs:
         run: pod trunk push Rovenue.podspec --allow-warnings
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
+
+  publish-flutter:
+    name: Publish Flutter (pub.dev)
+    needs: verify
+    if: ${{ inputs.flutter }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable }
+      - name: Configure pub.dev credentials
+        # ubuntu-latest is Linux, where dart/pub reads credentials from
+        # $XDG_CONFIG_HOME/dart/pub-credentials.json (falls back to
+        # ~/.config/dart/pub-credentials.json) — see pub.dev's CI docs.
+        run: |
+          mkdir -p ~/.config/dart
+          echo "$PUB_DEV_CREDENTIALS" > ~/.config/dart/pub-credentials.json
+        env:
+          PUB_DEV_CREDENTIALS: ${{ secrets.PUB_DEV_CREDENTIALS }}
+      # NOTE (spec §4.6): rovenue_flutter_ios wraps the native `Rovenue`
+      # CocoaPod via a platform channel. Rovenue.podspec's `sha256` is still a
+      # placeholder over an unpublished release zip (see publish-swift's
+      # release-pod.sh above), so a pub.dev publish of rovenue_flutter_ios
+      # does NOT mean the iOS façade works end-to-end on a real app — that
+      # additionally requires the Rovenue pod itself to be live. Publishing
+      # the Dart package here regardless, because pub.dev has no mechanism to
+      # gate on an unrelated CocoaPods release; do not treat a green run here
+      # as proof the iOS path is usable until the pod ships.
+      - name: Publish packages in dependency order
+        run: |
+          for p in rovenue_flutter_platform_interface rovenue_flutter_ios rovenue_flutter_android rovenue_flutter; do
+            (cd packages/sdk-flutter/$p && dart pub publish --force) || exit 1
+          done
