@@ -1,0 +1,53 @@
+group 'dev.rovenue.flutter'
+version '0.16.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.5.2'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'dev.rovenue.flutter'
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 24
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+repositories {
+    // mavenLocal() first: lets `./gradlew publishToMavenLocal` in
+    // packages/sdk-kotlin stand in for a published `dev.rovenue:sdk` during
+    // development, mirroring the iOS side's local `:path` pod override
+    // (see rovenue_flutter_ios.podspec) — this module must never require a
+    // Maven Central publish just to build the example app locally.
+    mavenLocal()
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    // The Kotlin façade (packages/sdk-kotlin) that already wraps the shared
+    // Rust core (librovenue); not yet consumed by any Dart/Kotlin code in
+    // this skeleton task.
+    implementation "dev.rovenue:sdk:0.16.0"
+}

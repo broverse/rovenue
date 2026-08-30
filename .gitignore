@@ -43,3 +43,13 @@ packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/generated/*
 # Cross-compiled Android native libs (built by build-android.sh, bundled in the AAR)
 packages/sdk-kotlin/src/main/jniLibs/**/*.so
 !packages/sdk-kotlin/src/main/jniLibs/.gitkeep
+
+# Dart / Flutter
+.dart_tool/
+build/
+.flutter-plugins*
+Pods/
+*.iml
+# packages/sdk-flutter/* are libraries, not apps — pub convention is to
+# NOT commit pubspec.lock for library packages (only apps commit it).
+pubspec.lock

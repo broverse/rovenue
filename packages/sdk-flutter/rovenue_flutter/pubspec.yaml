@@ -1,0 +1,31 @@
+name: rovenue_flutter
+description: >-
+  Rovenue Flutter SDK — subscription, entitlement, and paywall client for
+  the open-source Rovenue backend. Federated plugin app-facing package.
+version: 0.16.0
+homepage: https://rovenue.app
+repository: https://github.com/rovenue/rovenue
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  rovenue_flutter_platform_interface: ^0.16.0
+  rovenue_flutter_ios: ^0.16.0
+  rovenue_flutter_android: ^0.16.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        default_package: rovenue_flutter_ios
+      android:
+        default_package: rovenue_flutter_android

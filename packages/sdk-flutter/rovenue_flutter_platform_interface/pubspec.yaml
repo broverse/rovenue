@@ -1,0 +1,22 @@
+name: rovenue_flutter_platform_interface
+description: >-
+  Common platform interface for the rovenue_flutter plugin. Defines the
+  shared Dart contract implemented by rovenue_flutter_ios and
+  rovenue_flutter_android.
+version: 0.16.0
+homepage: https://rovenue.app
+repository: https://github.com/rovenue/rovenue
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.1.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

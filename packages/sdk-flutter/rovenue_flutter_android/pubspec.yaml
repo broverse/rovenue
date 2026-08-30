@@ -1,0 +1,30 @@
+name: rovenue_flutter_android
+description: >-
+  Android platform implementation of the rovenue_flutter federated plugin.
+  Wraps the existing dev.rovenue:sdk AAR (packages/sdk-kotlin).
+version: 0.16.0
+homepage: https://rovenue.app
+repository: https://github.com/rovenue/rovenue
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  rovenue_flutter_platform_interface: ^0.16.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  plugin:
+    implements: rovenue_flutter
+    platforms:
+      android:
+        package: dev.rovenue.flutter
+        pluginClass: RovenueFlutterAndroidPlugin
+        dartPluginClass: RovenueFlutterAndroid

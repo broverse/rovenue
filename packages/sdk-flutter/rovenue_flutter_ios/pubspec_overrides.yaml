@@ -1,0 +1,7 @@
+# Monorepo-local dev override — resolves the sibling package from source
+# instead of a published pub.dev version, which does not exist yet.
+# `flutter pub get` merges this over pubspec.yaml automatically (Dart
+# >=3.4.0); it is excluded from `flutter pub publish`.
+dependency_overrides:
+  rovenue_flutter_platform_interface:
+    path: ../rovenue_flutter_platform_interface

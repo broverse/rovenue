@@ -1,0 +1,30 @@
+name: rovenue_flutter_ios
+description: >-
+  iOS platform implementation of the rovenue_flutter federated plugin. Wraps
+  the existing Rovenue CocoaPods pod (packages/sdk-swift).
+version: 0.16.0
+homepage: https://rovenue.app
+repository: https://github.com/rovenue/rovenue
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  rovenue_flutter_platform_interface: ^0.16.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  plugin:
+    implements: rovenue_flutter
+    platforms:
+      ios:
+        pluginClass: RovenueFlutterIosPlugin
+        dartPluginClass: RovenueFlutterIos
+        sharedDarwinSource: false

@@ -1,0 +1,6 @@
+// Stub settings.gradle for the rovenue_flutter_android Flutter plugin
+// module. Flutter's tooling includes this module directly from the
+// consuming app's settings.gradle via `pluginLoader.getPlugins`; this file
+// only needs to exist so standalone `gradle` invocations against the
+// module (e.g. IDE sync) resolve correctly.
+rootProject.name = 'rovenue_flutter_android'
