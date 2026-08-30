@@ -48,9 +48,10 @@ packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/generated/*
 packages/sdk-kotlin/src/main/jniLibs/**/*.so
 !packages/sdk-kotlin/src/main/jniLibs/.gitkeep
 
-# Dart / Flutter
-.dart_tool/
-build/
+# Dart / Flutter — path-anchored like the Swift/Kotlin blocks above, so these
+# never swallow a `build/` or `.dart_tool/` somewhere else in the monorepo.
+packages/sdk-flutter/**/.dart_tool/
+packages/sdk-flutter/**/build/
 .flutter-plugins*
 Pods/
 *.iml

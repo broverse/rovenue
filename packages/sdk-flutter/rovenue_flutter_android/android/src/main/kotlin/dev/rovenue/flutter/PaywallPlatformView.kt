@@ -73,6 +73,14 @@ internal class PaywallPlatformView(
     override fun getView(): View = inner
 
     override fun dispose() {
+        // `setMethodCallHandler(::onMethodCall)` above registers a BOUND
+        // callable reference, so Flutter's `DartMessenger` holds a strong
+        // reference to this view — and this view holds `inner`, whose
+        // `context` is the host Activity. Channel names are unique per
+        // `viewId`, so no later view ever overwrites this entry: without
+        // this unregister every mounted-and-dismissed paywall pins one
+        // Activity for the life of the FlutterEngine.
+        channel.setMethodCallHandler(null)
         loadJob?.cancel()
         scope.cancel()
     }

@@ -13,6 +13,16 @@
 // "no foreground Activity" guard in purchase()/restorePurchases(), which is
 // a plugin-wiring problem rather than a store-layer failure and therefore
 // uses `internalError(...)` (`code == "Internal"`) per task-5-context.md.
+//
+// "Every method" means EVERY method, including the ones whose Swift twin in
+// `HostApiImpl.swift` has no catch. That asymmetry is deliberate: Swift's
+// non-`throws` façade signatures are a compiler-enforced guarantee, and
+// Kotlin — with no checked exceptions — gives none. `Rovenue.shared` alone
+// throws `IllegalStateException` before `configure()`. An unguarded
+// `scope.launch { … }` body would send that throw to the scope's uncaught
+// handler (there is no `CoroutineExceptionHandler` on it), killing the app,
+// AND leave the Dart `Future` hanging forever because pigeon's `callback`
+// never fires.
 
 package dev.rovenue.flutter
 
@@ -78,14 +88,26 @@ class HostApiImpl(
     }
 
     override fun shutdown() {
-        Rovenue.shared.shutdown()
+        try {
+            Rovenue.shared.shutdown()
+        } catch (e: Throwable) {
+            throw fail(e)
+        }
     }
 
     override fun setForeground(foreground: Boolean) {
-        Rovenue.shared.setForeground(foreground)
+        try {
+            Rovenue.shared.setForeground(foreground)
+        } catch (e: Throwable) {
+            throw fail(e)
+        }
     }
 
-    override fun getVersion(): String = Rovenue.shared.version
+    override fun getVersion(): String = try {
+        Rovenue.shared.version
+    } catch (e: Throwable) {
+        throw fail(e)
+    }
 
     override fun getAppVersion(): String? = resolvedAppVersion
 
@@ -93,8 +115,12 @@ class HostApiImpl(
 
     override fun currentUser(callback: (Result<RvUser>) -> Unit) {
         scope.launch {
-            val u = Rovenue.shared.currentUser()
-            callback(Result.success(mapUser(u)))
+            try {
+                val u = Rovenue.shared.currentUser()
+                callback(Result.success(mapUser(u)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
@@ -124,14 +150,22 @@ class HostApiImpl(
 
     override fun entitlement(id: String, callback: (Result<RvEntitlement?>) -> Unit) {
         scope.launch {
-            val e = Rovenue.shared.entitlement(id)
-            callback(Result.success(e?.let(::mapEntitlement)))
+            try {
+                val e = Rovenue.shared.entitlement(id)
+                callback(Result.success(e?.let(::mapEntitlement)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun entitlementsAll(callback: (Result<List<RvEntitlement>>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.entitlementsAll().map(::mapEntitlement)))
+            try {
+                callback(Result.success(Rovenue.shared.entitlementsAll().map(::mapEntitlement)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
@@ -150,13 +184,21 @@ class HostApiImpl(
 
     override fun virtualCurrencies(callback: (Result<Map<String, Long>>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.virtualCurrencyBalances()))
+            try {
+                callback(Result.success(Rovenue.shared.virtualCurrencyBalances()))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun virtualCurrency(code: String, callback: (Result<Long>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.virtualCurrency(code)))
+            try {
+                callback(Result.success(Rovenue.shared.virtualCurrency(code)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
@@ -272,56 +314,92 @@ class HostApiImpl(
 
     override fun remoteConfigBool(key: String, fallback: Boolean, callback: (Result<Boolean>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.remoteConfigBool(key, fallback)))
+            try {
+                callback(Result.success(Rovenue.shared.remoteConfigBool(key, fallback)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun remoteConfigString(key: String, fallback: String, callback: (Result<String>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.remoteConfigString(key, fallback)))
+            try {
+                callback(Result.success(Rovenue.shared.remoteConfigString(key, fallback)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun remoteConfigInt(key: String, fallback: Long, callback: (Result<Long>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.remoteConfigInt(key, fallback)))
+            try {
+                callback(Result.success(Rovenue.shared.remoteConfigInt(key, fallback)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun remoteConfigDouble(key: String, fallback: Double, callback: (Result<Double>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.remoteConfigDouble(key, fallback)))
+            try {
+                callback(Result.success(Rovenue.shared.remoteConfigDouble(key, fallback)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun remoteConfigJson(key: String, callback: (Result<String?>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.remoteConfigJson(key)))
+            try {
+                callback(Result.success(Rovenue.shared.remoteConfigJson(key)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun remoteConfigKeys(callback: (Result<List<String>>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.remoteConfigKeys()))
+            try {
+                callback(Result.success(Rovenue.shared.remoteConfigKeys()))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun remoteConfigAllJson(callback: (Result<String>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.remoteConfigAllJson()))
+            try {
+                callback(Result.success(Rovenue.shared.remoteConfigAllJson()))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun experiment(key: String, callback: (Result<RvExperimentAssignment?>) -> Unit) {
         scope.launch {
-            val a = Rovenue.shared.experiment(key)
-            callback(Result.success(a?.let(::mapExperimentAssignment)))
+            try {
+                val a = Rovenue.shared.experiment(key)
+                callback(Result.success(a?.let(::mapExperimentAssignment)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
     override fun experimentsAll(callback: (Result<List<RvExperimentAssignment>>) -> Unit) {
         scope.launch {
-            callback(Result.success(Rovenue.shared.experimentsAll().map(::mapExperimentAssignment)))
+            try {
+                callback(Result.success(Rovenue.shared.experimentsAll().map(::mapExperimentAssignment)))
+            } catch (e: Throwable) {
+                callback(Result.failure(fail(e)))
+            }
         }
     }
 
@@ -417,12 +495,24 @@ class HostApiImpl(
         callback(Result.success(null))
     }
 
+    // These two answer on the calling thread rather than via `scope.launch`,
+    // but pigeon's generated dispatch (Messages.g.kt) does not wrap async
+    // host calls in a try/catch either — so an escaping throw here is the
+    // same crash-plus-hung-Future as an unguarded coroutine body.
     override fun installId(callback: (Result<String>) -> Unit) {
-        callback(Result.success(Rovenue.shared.installId()))
+        try {
+            callback(Result.success(Rovenue.shared.installId()))
+        } catch (e: Throwable) {
+            callback(Result.failure(fail(e)))
+        }
     }
 
     override fun hasResolvedFunnelClaim(callback: (Result<Boolean>) -> Unit) {
-        callback(Result.success(Rovenue.shared.hasResolvedFunnelClaim()))
+        try {
+            callback(Result.success(Rovenue.shared.hasResolvedFunnelClaim()))
+        } catch (e: Throwable) {
+            callback(Result.failure(fail(e)))
+        }
     }
 
     // ---------------- Generic events ----------------

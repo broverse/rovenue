@@ -1,17 +1,50 @@
 # rovenue_flutter_example
 
-A new Flutter project.
+The example app for the [Rovenue](https://rovenue.app) Flutter SDK. It is a host
+for the real plugin — the only place in this repo where `rovenue_flutter`,
+`rovenue_flutter_android`, and `rovenue_flutter_ios` are compiled and run
+together as a shipping Flutter app rather than as analyzed Dart packages.
 
-## Getting Started
+`pubspec_overrides.yaml` points every `rovenue_*` dependency at its sibling
+directory, so this app always builds the working tree, never a pub.dev release.
 
-This project is a starting point for a Flutter application.
+## What it exercises
 
-A few resources to get you started if this is your first Flutter project:
+`lib/main.dart` walks the public surface top to bottom:
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+- `configure()` on boot, then a live `changes` stream subscription
+- `entitlementsAll()` rendered as a list and refreshed whenever `changes` fires
+- `getOfferings()` rendered as a product list, each row with a `purchase()` button
+- a second route mounting `RovenuePaywallView` for the `onboarding` placement,
+  with all five callbacks (`onPurchaseCompleted`, `onPurchaseFailed`, `onClose`,
+  `onRestore`, `onUrl`) appending to an on-screen event log
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Every call is wrapped in try/catch and logs its outcome to the screen, so the
+app stays useful without a live backend.
+
+## Running it
+
+The API key in `lib/main.dart` is a placeholder and this app is not wired to a
+real project. Replace `_kApiKey` with a public API key from your Rovenue
+dashboard to drive it against a live backend.
+
+```sh
+flutter pub get
+flutter run
+```
+
+## Tests
+
+```sh
+flutter test                                  # widget test
+flutter test -d flutter-tester integration_test   # headless integration test
+flutter build apk --debug                     # compiles the Android plugin
+```
+
+`integration_test/smoke_test.dart` installs a fake `RovenuePlatform` before
+`runApp`, so it needs neither a backend nor a device — `flutter-tester` is
+enough. These three commands are exactly what `.github/workflows/sdk.yml` runs.
+
+An **iOS** build of this app does not work yet: `packages/sdk-swift` vendors a
+stale, simulator-architecture `librovenue_ffi.a`, so the device link fails. That
+is tracked outside this package, and is why CI has no iOS example build step.

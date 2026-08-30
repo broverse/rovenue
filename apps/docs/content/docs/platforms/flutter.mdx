@@ -253,7 +253,7 @@ RovenuePaywallView(
 
 ## Funnel attribution
 
-Resolve a funnel token from a deep link, clipboard, or explicit install claim:
+Resolve a funnel token from a deep link, an explicit install claim, or — on iOS — the clipboard:
 
 ```dart
 import 'package:rovenue_flutter/rovenue_flutter.dart';
@@ -263,6 +263,7 @@ final claim = await Rovenue.instance.claimFromUrl(incomingUrl);
 
 // Or resolve one explicitly:
 final installClaim = await Rovenue.instance.claimInstall();
+// iOS only — always resolves null on Android (see the callout below):
 final pastedClaim = await Rovenue.instance.claimFromClipboard();
 await Rovenue.instance.claimViaEmail('user@example.com');
 
@@ -278,6 +279,10 @@ final sub = Rovenue.instance.funnelClaims.listen((claim) {
   // handle claim.subscriberId / claim.funnelAnswersJson
 });
 ```
+
+<Callout type="warn">
+`claimFromClipboard` is an iOS-only path. On Android it always resolves `null` without reading the clipboard — Android's deferred-attribution source is the Play Install Referrer, which `claimInstall` reads for you. The method exists on both platforms so shared code needs no branching, but only `claimInstall` can recover a deferred Android claim.
+</Callout>
 
 <Callout type="warn">
 Flutter's funnel claim is single-shot: `claimFromUrl`/`claimInstall`/`claimFromClipboard` each make one resolution attempt and return (or throw). The React Native SDK's `resolveFunnelClaim` additionally chains a retry/fallback sequence across multiple claim sources — that chain has not been ported to Flutter. Callers that need the same fallback behavior should compose it themselves from the primitives above.

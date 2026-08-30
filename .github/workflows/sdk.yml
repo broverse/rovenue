@@ -130,3 +130,72 @@ jobs:
               fi
             ) || exit 1
           done
+      - name: Analyze + test the example app
+        working-directory: packages/sdk-flutter/example
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+          # integration_test needs a device; flutter-tester is the headless
+          # one every runner has (it is also how these were run locally).
+          flutter test -d flutter-tester integration_test
+
+  # The plugin's NATIVE sources. `flutter analyze` above is a Dart analyzer —
+  # it never compiles a line of HostApiImpl.kt or HostApiImpl.swift, so
+  # without the two jobs below the Kotlin/Swift halves of this SDK (and their
+  # unit tests) ship unbuilt. See spec §7 acceptance criterion 3.
+  flutter-android-native:
+    name: Flutter plugin (Android/Kotlin)
+    runs-on: ubuntu-latest
+    needs: bindgen-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: System build deps (rusqlite-bundled)
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v3
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable }
+      # The plugin module resolves the Flutter embedding artifact from
+      # $FLUTTER_ROOT/bin/internal/engine.version (see its build.gradle), and
+      # the composite build in its settings.gradle pulls packages/sdk-kotlin,
+      # which needs the generated UniFFI bindings.
+      - run: ./packages/core-rs/scripts/build-bindings.sh
+      - name: gradle test (plugin unit tests)
+        working-directory: packages/sdk-flutter/rovenue_flutter_android/android
+        run: ./gradlew test --no-daemon --console=plain
+      - name: Build the example's debug APK
+        working-directory: packages/sdk-flutter/example
+        run: flutter build apk --debug
+
+  flutter-ios-native:
+    name: Flutter plugin (iOS/Swift)
+    runs-on: macos-14
+    needs: bindgen-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable }
+      # ios/Package.swift links FlutterMacOS.xcframework out of the Flutter
+      # SDK cache; precache puts it there on a cold runner.
+      - run: flutter precache --macos
+      - run: ./packages/core-rs/scripts/build-bindings.sh
+      - name: swift test (plugin unit tests)
+        working-directory: packages/sdk-flutter/rovenue_flutter_ios/ios
+        run: |
+          export DYLD_LIBRARY_PATH="$GITHUB_WORKSPACE/target/release"
+          swift test
+      # NO iOS example build step on purpose. `flutter build ios` /
+      # `xcodebuild` on packages/sdk-flutter/example cannot pass today:
+      # packages/sdk-swift vendors a stale, simulator-arch
+      # `Sources/Rovenue/librovenue_ffi.a`, so the device link fails for
+      # reasons that live outside this plugin. Re-add a step here once that
+      # vendored archive is rebuilt as a proper multi-arch xcframework —
+      # a permanently-red step is worse than no step.

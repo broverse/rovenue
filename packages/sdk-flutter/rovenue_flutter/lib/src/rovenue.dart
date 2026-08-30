@@ -170,6 +170,12 @@ class Rovenue {
 
   Future<void> claimViaEmail(String email) => _platform.claimViaEmail(email);
 
+  /// Reads a funnel token out of the system clipboard and claims it.
+  ///
+  /// **iOS only.** On Android this always resolves `null` without touching
+  /// the clipboard: Android's deferred-attribution path is the Play Install
+  /// Referrer, which [claimInstall] reads. Call both if you support both
+  /// platforms — this one is a no-op on Android by design, not a bug.
   Future<FunnelClaim?> claimFromClipboard() => _platform.claimFromClipboard();
 
   Future<String> installId() => _platform.installId();

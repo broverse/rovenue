@@ -71,6 +71,12 @@ final class PaywallPlatformView: NSObject, FlutterPlatformView {
   func view() -> UIView { containerView }
 
   deinit {
+    // The registered closure captures `self` weakly, so this leaks nothing
+    // on its own — but the messenger keeps the (now-dead) entry for this
+    // view's unique channel name forever, and the Android twin's version of
+    // this omission IS a real Activity leak. Symmetric teardown on both
+    // platforms, so neither can drift back.
+    channel.setMethodCallHandler(nil)
     loadTask?.cancel()
   }
 

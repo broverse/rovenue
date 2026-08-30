@@ -83,8 +83,55 @@ if command -v flutter >/dev/null 2>&1; then
         ) >>/tmp/rovenue-flutter-parity.log 2>&1
     done
     echo "  ✓ Flutter façade analyze + test passed (${FLUTTER_PACKAGES[*]})"
+
+    echo "→ Flutter example app analyze + test"
+    (
+        cd packages/sdk-flutter/example
+        flutter pub get
+        flutter analyze
+        flutter test
+        # integration_test needs a device; flutter-tester is the headless one.
+        flutter test -d flutter-tester integration_test
+    ) >>/tmp/rovenue-flutter-parity.log 2>&1
+    echo "  ✓ Flutter example analyze + test passed"
 else
     echo "→ Flutter test SKIPPED (flutter not on PATH)"
+fi
+
+# The plugin's NATIVE halves. `flutter analyze` is a Dart analyzer — it never
+# compiles HostApiImpl.kt or HostApiImpl.swift, so these two blocks are the
+# only thing that builds and runs them.
+echo "→ Flutter plugin Android unit tests"
+if command -v flutter >/dev/null 2>&1 && command -v java >/dev/null 2>&1 && [ -n "${ANDROID_HOME:-}" ]; then
+    (
+        cd packages/sdk-flutter/rovenue_flutter_android/android
+        ./gradlew test --no-daemon --console=plain
+    ) >/tmp/rovenue-flutter-android-parity.log 2>&1
+    grep -E "BUILD SUCCESSFUL" /tmp/rovenue-flutter-android-parity.log >/dev/null
+    echo "  ✓ rovenue_flutter_android gradle tests passed"
+    echo "→ Flutter example Android debug APK"
+    (
+        cd packages/sdk-flutter/example
+        flutter build apk --debug
+    ) >/tmp/rovenue-flutter-apk-parity.log 2>&1
+    echo "  ✓ example app-debug.apk built"
+else
+    echo "  ~ flutter/java/Android SDK unavailable — Flutter Android native checks skipped"
+fi
+
+echo "→ Flutter plugin iOS unit tests"
+if command -v flutter >/dev/null 2>&1 && command -v swift >/dev/null 2>&1 && [ "$(uname -s)" = "Darwin" ]; then
+    (
+        cd packages/sdk-flutter/rovenue_flutter_ios/ios
+        DYLD_LIBRARY_PATH="$ROOT/target/release" swift test
+    ) 2>&1 | tee /tmp/rovenue-flutter-ios-parity.log >/dev/null
+    grep -E "Test Suite 'All tests' passed" /tmp/rovenue-flutter-ios-parity.log >/dev/null
+    echo "  ✓ rovenue_flutter_ios swift tests passed"
+    # No iOS example build here (or in .github/workflows/sdk.yml):
+    # packages/sdk-swift vendors a stale, simulator-arch librovenue_ffi.a, so
+    # the device link fails for reasons outside this plugin.
+else
+    echo "  ~ flutter/swift unavailable or non-macOS host — Flutter iOS native checks skipped"
 fi
 
 # ---- RN sample app native compile (best-effort) ----
