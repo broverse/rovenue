@@ -164,12 +164,20 @@ else in the framework/provider-breadth dimension is done.
 
 ## 7. SDK platform coverage (55 → 95)
 
-- [ ] Flutter SDK — highest ROI; Dart bindings over the Rust core FFI
+- [x] Flutter SDK (shipped 2026-08-31) — `packages/sdk-flutter/` (federated plugin: `rovenue_flutter` +
+      `rovenue_flutter_platform_interface` + `rovenue_flutter_ios` + `rovenue_flutter_android`), Dart
+      bindings over the same Swift/Kotlin façades (and Rust core) the native SDKs already wrap; 5-way
+      CI parity wired; docs at `/docs/platforms/flutter`. Known gap: RN's `resolveFunnelClaim`
+      retry/fallback chain was not ported (single-shot claim only) — see the docs page's parity table.
 - [ ] Web SDK (TS: Stripe checkout + entitlement reads; funnel/web payment backend exists)
 - [ ] Unity SDK (games market; natural fit with credits/leaderboards)
 - [ ] Capacitor / Cordova façades
-- [ ] Fix release blockers: Rust fmt/clippy CI reds, Swift podspec sha256 placeholder
-- [ ] Align Swift/Kotlin versions with core
+- [ ] Fix release blockers: Rust fmt/clippy CI reds, Swift podspec sha256 placeholder — this also
+      blocks publishing `rovenue_flutter_ios`'s CocoaPods dependency (`Rovenue`), so Flutter's iOS
+      distribution shares the same blocker
+- [x] Align Swift/Kotlin versions with core (already true before this work) — core-rs, sdk-swift,
+      sdk-kotlin, and sdk-rn were all at 0.16.0 prior to the Flutter SDK; sdk-flutter shipped at
+      0.16.0 too, so all five packages are aligned as of 2026-08-31
 - [ ] Make the RN iOS pod externally consumable (persist the M7 fix-set); RN SDK distribution
       (open item from 2026-08-23 batch)
 - [ ] Official macOS / tvOS / watchOS / visionOS targets in the Swift SDK

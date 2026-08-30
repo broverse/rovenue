@@ -1,0 +1,358 @@
+---
+title: Flutter
+description: Install and wire the Rovenue SDK in a Flutter app.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+
+<Steps>
+
+<Step>
+### Install the package
+
+Add the app-facing package to your `pubspec.yaml`:
+
+```yaml
+dependencies:
+  rovenue_flutter: ^0.16.0
+```
+
+Then fetch it:
+
+```bash
+flutter pub get
+```
+
+`rovenue_flutter` is a federated plugin — `rovenue_flutter_ios` and `rovenue_flutter_android` are pulled in automatically as platform implementations and wrap the same Swift and Kotlin SDKs (and the shared Rust core, `librovenue`) that back the native iOS and Android SDKs. Android needs no further setup.
+
+<Callout type="warn">
+**iOS: the CocoaPods dependency isn't published yet.** `rovenue_flutter_ios`'s podspec depends on the `Rovenue` pod (`packages/sdk-swift`), which has not been published to CocoaPods Trunk — its podspec still carries a placeholder release-archive checksum. Until that pod ships, `flutter pub get` alone will not resolve on iOS for an app outside this monorepo. In the meantime, override the dependency in your `ios/Podfile` to point at a local checkout of `sdk-swift`:
+
+```ruby
+target 'Runner' do
+  use_frameworks!
+  pod 'Rovenue', :path => '/path/to/sdk-swift'
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+end
+```
+
+Remove the override once `Rovenue` is published to Trunk. `rovenue_flutter_ios` also raises the deployment target to iOS 16.0 to match the `Rovenue` pod's own floor.
+</Callout>
+</Step>
+
+<Step>
+### Configure the SDK
+
+Call `Rovenue.instance.configure` once, before any other SDK method — the earliest point in `main()` is the right place:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:rovenue_flutter/rovenue_flutter.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Rovenue.instance.configure(
+    apiKey: 'rov_pub_YOUR_API_KEY',
+  );
+  runApp(const MyApp());
+}
+```
+
+<Callout type="info">
+**Self-hosting?** `baseUrl` is optional and defaults to the hosted endpoint `https://api.rovenue.io`. Override it to point at your own deployment, e.g. `Rovenue.instance.configure(apiKey: 'rov_pub_YOUR_API_KEY', baseUrl: 'https://api.acme.com')`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
+</Callout>
+
+### Types on this page
+
+```dart
+Future<void> configure({
+  required String apiKey,      // public SDK key — prefix rov_pub_
+  String? baseUrl,             // optional — defaults to https://api.rovenue.io
+  RovenueLogLevel logLevel = RovenueLogLevel.warn,
+  String? appVersion,          // override auto-detected version
+  String? environment,
+});
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
+| `baseUrl` | `String?` | Optional. Defaults to `https://api.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
+| `logLevel` | `RovenueLogLevel` | Verbosity of SDK logs (`off`/`error`/`warn`/`info`/`debug`/`trace`). Defaults to `warn`. |
+| `appVersion` | `String?` | Overrides the version auto-read from the app bundle. |
+| `environment` | `String?` | Optional environment label forwarded with requests. |
+</Step>
+
+<Step>
+### Wire foreground signals
+
+The SDK uses `setForeground` to manage its internal polling cadence. Wire it to `WidgetsBindingObserver`:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:rovenue_flutter/rovenue_flutter.dart';
+
+class MyApp extends StatefulWidget {
+  const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    Rovenue.instance.setForeground(true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    Rovenue.instance.setForeground(state == AppLifecycleState.resumed);
+  }
+
+  @override
+  Widget build(BuildContext context) => const MaterialApp(home: RootScreen());
+}
+```
+
+<Callout type="info">
+`Rovenue.instance.shutdown()` stops all background work (polling, in-flight refreshes). Reserve it for full app teardown — do **not** call it on every background transition. `setForeground(false)` already pauses polling when the app backgrounds.
+</Callout>
+</Step>
+
+</Steps>
+
+---
+
+## Entitlements
+
+```dart
+final pro = await Rovenue.instance.entitlement('pro');
+if (pro?.active ?? false) {
+  // unlock the feature
+}
+
+final all = await Rovenue.instance.entitlementsAll();
+```
+
+```dart
+// Entitlement
+class Entitlement {
+  final String id;
+  final bool active;
+  final String? expiresAt;   // ISO 8601 — absent for non-expiring grants
+  final String? productId;
+}
+```
+
+Listen for server-pushed updates with `Rovenue.instance.changes` and re-read on any event:
+
+```dart
+final sub = Rovenue.instance.changes.listen((event) {
+  // event.kind: entitlementsChanged | identityChanged |
+  //             virtualCurrenciesChanged | remoteConfigChanged
+  refreshEntitlements();
+});
+
+// Cancel on teardown:
+await sub.cancel();
+```
+
+<Callout type="info">
+See [Entitlements](/docs/guides/entitlements) and [Reacting to Changes](/docs/guides/reacting-to-changes) for the full guides.
+</Callout>
+
+---
+
+## Offerings & purchases
+
+Use `getOfferings()` to fetch products configured in your Rovenue dashboard, then `purchase(product)` to drive the full purchase flow. The SDK triggers the native StoreKit 2 / Play Billing sheet, validates the receipt server-side, and resolves with updated entitlements and virtual-currency balances.
+
+```dart
+import 'package:rovenue_flutter/rovenue_flutter.dart';
+
+final offerings = await Rovenue.instance.getOfferings();
+final products = <StoreProduct>[
+  for (final offering in offerings.offerings)
+    for (final package in offering.packages) package.product,
+];
+
+if (products.isNotEmpty) {
+  try {
+    final result = await Rovenue.instance.purchase(products.first);
+    // result.entitlements and result.virtualCurrencies are already up to date
+  } on RovenueException catch (e) {
+    if (e.kind == RovenueErrorKind.purchaseCanceled) {
+      // User dismissed the store sheet — no action needed
+    } else {
+      rethrow;
+    }
+  }
+}
+```
+
+To re-validate all prior transactions (e.g. after a reinstall):
+
+```dart
+await Rovenue.instance.restorePurchases();
+```
+
+`purchase` also accepts an optional Android `SubscriptionOption` for base-plan/offer selection: `Rovenue.instance.purchase(product, option: option)`.
+
+<Callout type="info">
+See [Processing Purchases](/docs/guides/processing-purchases) for the full API reference including all error kinds and the `StoreProduct` shape.
+</Callout>
+
+---
+
+## Paywalls
+
+`RovenuePaywallView` renders a builder paywall (see [Placements & Paywalls](/docs/guides/placements-and-paywalls)) through the platform's own native paywall renderer — SwiftUI on iOS, Android Views on Android — hosted inside a Flutter platform view, for pixel parity with the Swift and Kotlin SDKs. Only the placement identifier crosses the bridge; the native side re-resolves the paywall itself.
+
+```dart
+import 'package:rovenue_flutter/rovenue_flutter.dart';
+
+RovenuePaywallView(
+  placementIdentifier: 'onboarding_end',
+  locale: 'en',
+  colorScheme: RovenueColorScheme.dark,
+  onPurchaseCompleted: (result) => Navigator.of(context).pop(),
+  onPurchaseFailed: (error) {
+    // error is a RovenueException — keep the paywall up
+  },
+  onClose: () => Navigator.of(context).maybePop(),
+  onRestore: () {
+    // Omit this callback entirely to hide the restore button
+  },
+  onUrl: (url) {
+    // The renderer never navigates itself — scheme-check, then open
+  },
+)
+```
+
+`RovenuePaywallView` takes five callbacks: `onPurchaseCompleted`, `onPurchaseFailed`, `onClose`, `onRestore`, and `onUrl`. `onRestore` and `onUrl` are optional — the native side is told whether each is present (not just whether it's non-null at call time), so omitting one hides the corresponding UI (e.g. the restore button) rather than rendering it as a no-op.
+
+<Callout type="info">
+**Live prop updates.** Changing `placementIdentifier`, `locale`, or `colorScheme` on an already-mounted `RovenuePaywallView` (same `Key`) sends an update over the view's native channel, and the native side re-resolves the paywall only when one of those three actually changed. Swapping a callback's identity (e.g. passing a new `onPurchaseCompleted` closure) is picked up automatically on the next rebuild with no extra work. A new `Key` still forces a full teardown/rebuild of the native view if you need one for another reason.
+</Callout>
+
+<Callout type="warn">
+`getPaywallPreview` and the `logPaywallShown`/`logPaywallClosed` methods that exist on some other façades are intentionally not part of the Flutter API surface, matching the React Native SDK.
+</Callout>
+
+---
+
+## Funnel attribution
+
+Resolve a funnel token from a deep link, clipboard, or explicit install claim:
+
+```dart
+import 'package:rovenue_flutter/rovenue_flutter.dart';
+
+// From a deep link / Universal Link handler:
+final claim = await Rovenue.instance.claimFromUrl(incomingUrl);
+
+// Or resolve one explicitly:
+final installClaim = await Rovenue.instance.claimInstall();
+final pastedClaim = await Rovenue.instance.claimFromClipboard();
+await Rovenue.instance.claimViaEmail('user@example.com');
+
+if (claim != null) {
+  // claim.subscriberId, claim.funnelAnswersJson (JSON-encoded string)
+}
+```
+
+Claims resolved asynchronously on the native side (a deferred deep link or a clipboard token picked up after `configure`) arrive on the `funnelClaims` stream, which replays the most recent claim to a new listener:
+
+```dart
+final sub = Rovenue.instance.funnelClaims.listen((claim) {
+  // handle claim.subscriberId / claim.funnelAnswersJson
+});
+```
+
+<Callout type="warn">
+Flutter's funnel claim is single-shot: `claimFromUrl`/`claimInstall`/`claimFromClipboard` each make one resolution attempt and return (or throw). The React Native SDK's `resolveFunnelClaim` additionally chains a retry/fallback sequence across multiple claim sources — that chain has not been ported to Flutter. Callers that need the same fallback behavior should compose it themselves from the primitives above.
+</Callout>
+
+---
+
+## Error handling
+
+Every public method throws `RovenueException` — never a raw `PlatformException`:
+
+```dart
+import 'package:rovenue_flutter/rovenue_flutter.dart';
+
+try {
+  await Rovenue.instance.identify('user_123');
+} on RovenueException catch (e) {
+  switch (e.kind) {
+    case RovenueErrorKind.networkUnavailable:
+    case RovenueErrorKind.timeout:
+      // e.retryable is true for these — safe to retry
+      break;
+    case RovenueErrorKind.invalidApiKey:
+    case RovenueErrorKind.forbidden:
+      // configuration problem — do not retry
+      break;
+    default:
+      print('Rovenue error: ${e.kind.name} — ${e.detail}');
+  }
+}
+```
+
+```dart
+class RovenueException implements Exception {
+  final RovenueErrorKind kind;
+  final String detail;       // always non-null
+  final String? serverCode;  // present for API-originated errors
+  final int? httpStatus;     // present for API-originated errors
+  final bool retryable;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | `RovenueErrorKind` | Normalized error category, shared across every Rovenue SDK façade. |
+| `detail` | `String` | Human-readable message. Falls back to the kind's name when the native side sent none. |
+| `serverCode` | `String?` | Server-issued error code, when the error came from an API response. |
+| `httpStatus` | `int?` | HTTP status code, when the error came from an API response. |
+| `retryable` | `bool` | Whether the operation is safe to retry. |
+
+---
+
+## Feature parity with React Native
+
+Flutter tracks the React Native SDK as its parity bar. As of this release:
+
+| Area | Status |
+|------|--------|
+| Configure, identity, entitlements, virtual currencies | Full parity |
+| Offerings, purchase, restore, subscription options | Full parity |
+| Remote config, experiments | Full parity |
+| `RovenuePaywallView` (native renderer, five callbacks, live prop updates) | Full parity |
+| Funnel token extraction (`extractFunnelToken`), `claimFromUrl`/`claimInstall`/`claimViaEmail`/`claimFromClipboard` | Full parity |
+| `resolveFunnelClaim` retry/fallback chain | **Not ported** — see [Funnel attribution](#funnel-attribution) above |
+| `getPaywallPreview`, `logPaywallShown`/`logPaywallClosed` | Not exposed on either façade — out of scope by design |
+
+---
+
+## What's next
+
+- [Identifying Users](/docs/guides/identifying-users) — link your backend user to the Rovenue subscriber.
+- [Entitlements](/docs/guides/entitlements) — read and gate on active subscriptions.
+- [Virtual Currencies](/docs/guides/credits) — read virtual-currency balances and grant/spend via server-side APIs.
+- [Processing Purchases](/docs/guides/processing-purchases) — full purchase API and error handling.
+- [Placements & Paywalls](/docs/guides/placements-and-paywalls) — builder paywalls and how placements resolve them.
+- [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
+- [Reference: Methods](/docs/reference/methods) — full method reference.
+- [Reference: Types](/docs/reference/types) — all SDK types in one place.
