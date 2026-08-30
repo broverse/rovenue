@@ -28,6 +28,8 @@ Cargo.lock.bak
 # Swift
 packages/sdk-swift/.build/
 packages/sdk-swift/.swiftpm/
+packages/sdk-flutter/rovenue_flutter_ios/ios/.build/
+packages/sdk-flutter/rovenue_flutter_ios/ios/.swiftpm/
 
 # Kotlin / Android
 packages/sdk-kotlin/build/
