@@ -3,4 +3,24 @@
 // consuming app's settings.gradle via `pluginLoader.getPlugins`; this file
 // only needs to exist so standalone `gradle` invocations against the
 // module (e.g. IDE sync) resolve correctly.
+//
+// `includeBuild` below is what makes `./gradlew test` work standalone in
+// THIS directory (no example/host app exists yet — Task 8): it wires
+// `dev.rovenue:sdk` to the local `packages/sdk-kotlin` composite build.
+// sdk-kotlin's OWN project name is "sdk-kotlin" (its settings.gradle.kts
+// `rootProject.name`), so Gradle's default included-build substitution
+// would only match `dev.rovenue:sdk-kotlin` — an explicit
+// `dependencySubstitution` rule is required to map the REAL published
+// coordinate (`dev.rovenue:sdk`, declared in sdk-kotlin's
+// build.gradle.kts maven-publish block) onto the included project.
+// Mirrors `packages/sdk-rn/plugin/withRovenueAndroid.ts`'s composite-build
+// mode (`includeBuild(kotlinPath)` + `implementation("dev.rovenue:sdk:...")`
+// in a consumer app's own settings.gradle), plus the substitution rule
+// that mode's consumer app would also need to add for the same reason.
+includeBuild('../../../sdk-kotlin') {
+    dependencySubstitution {
+        substitute module('dev.rovenue:sdk') using project(':')
+    }
+}
+
 rootProject.name = 'rovenue_flutter_android'

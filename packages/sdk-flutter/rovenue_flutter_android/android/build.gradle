@@ -2,12 +2,14 @@ group 'dev.rovenue.flutter'
 version '0.16.0'
 
 buildscript {
+    ext.kotlin_version = '1.9.24'
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.5.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
 
@@ -19,6 +21,7 @@ rootProject.allprojects {
 }
 
 apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
 
 android {
     namespace 'dev.rovenue.flutter'
@@ -32,7 +35,57 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    testOptions {
+        unitTests {
+            returnDefaultValues = true
+        }
+    }
 }
+
+// ---------------------------------------------------------------------
+// Flutter Android embedding — needed to COMPILE this module's Kotlin
+// sources (Messages.g.kt's io.flutter.plugin.common.*, HostApiImpl.kt /
+// RovenueFlutterAndroidPlugin.kt's FlutterPlugin/ActivityAware) and to run
+// the Gradle unit tests standalone. Normally the Flutter Gradle plugin
+// injects this dependency automatically when a plugin module is built as
+// part of a Flutter app; no such app/example exists yet for this module
+// (Task 8), so it's resolved directly here — the same problem Task 4
+// solved for iOS by vendoring FlutterMacOS.xcframework into a standalone
+// SwiftPM test harness (see rovenue_flutter_ios/ios/Package.swift).
+//
+// Coordinate + repo pairing mirrors flutter_tools' own
+// aar_init_script.gradle / resolve_dependencies.gradle.kts
+// ("io.flutter:flutter_embedding_debug:1.0.0-$engineVersion" from
+// https://storage.googleapis.com/download.flutter.io). Resolves the local
+// Flutter SDK via $FLUTTER_ROOT, falling back to `which flutter` on $PATH.
+def resolveFlutterRoot() {
+    def envRoot = System.getenv('FLUTTER_ROOT')
+    if (envRoot) return envRoot
+    def out = new ByteArrayOutputStream()
+    try {
+        exec {
+            commandLine 'which', 'flutter'
+            standardOutput = out
+            ignoreExitValue = true
+        }
+    } catch (ignored) {
+        return null
+    }
+    def flutterBin = out.toString().trim()
+    if (!flutterBin) return null
+    def resolved = new File(flutterBin).toPath().toRealPath().toFile()
+    // .../flutter/bin/flutter -> .../flutter
+    return resolved.parentFile.parentFile.path
+}
+
+def flutterRootDir = resolveFlutterRoot()
+def engineVersionFile = flutterRootDir ? new File(flutterRootDir, 'bin/internal/engine.version') : null
+def flutterEngineVersion = (engineVersionFile != null && engineVersionFile.exists()) ? engineVersionFile.text.trim() : null
 
 repositories {
     // mavenLocal() first: lets `./gradlew publishToMavenLocal` in
@@ -43,11 +96,40 @@ repositories {
     mavenLocal()
     google()
     mavenCentral()
+    if (flutterEngineVersion) {
+        maven { url 'https://storage.googleapis.com/download.flutter.io' }
+    }
 }
 
 dependencies {
     // The Kotlin façade (packages/sdk-kotlin) that already wraps the shared
-    // Rust core (librovenue); not yet consumed by any Dart/Kotlin code in
-    // this skeleton task.
+    // Rust core (librovenue) — resolved from the composite build declared
+    // in settings.gradle when no Maven publish of this coordinate exists.
     implementation "dev.rovenue:sdk:0.16.0"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0"
+    // Play Install Referrer — funnel-attribution parity with
+    // packages/sdk-rn/android/build.gradle's RovenueModule.kt.
+    implementation "com.android.installreferrer:installreferrer:2.2"
+    // dev.rovenue.sdk.StoreProduct.rawStoreProduct is typed
+    // com.android.billingclient.api.ProductDetails? — referencing
+    // StoreProduct at all (Mapping.kt/HostApiImpl.kt do) requires this on
+    // the compile classpath. Version matches sdk-kotlin/build.gradle.kts.
+    compileOnly "com.android.billingclient:billing:9.1.0"
+    testImplementation "com.android.billingclient:billing:9.1.0"
+
+    if (flutterEngineVersion) {
+        compileOnly "io.flutter:flutter_embedding_debug:1.0.0-$flutterEngineVersion"
+        testImplementation "io.flutter:flutter_embedding_debug:1.0.0-$flutterEngineVersion"
+    }
+
+    testImplementation "org.jetbrains.kotlin:kotlin-test-junit5:$kotlin_version"
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0"
+    testImplementation "io.mockk:mockk:1.13.10"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
 }

@@ -3,7 +3,23 @@
 ///
 /// Wraps the existing Kotlin façade (`dev.rovenue:sdk`,
 /// `packages/sdk-kotlin`) that already sits on top of the shared Rust core
-/// (`librovenue`). No public API is implemented yet — this package
-/// currently only establishes the federated-plugin skeleton and build
-/// tooling.
+/// (`librovenue`).
 library rovenue_flutter_android;
+
+/// Dart-side plugin registrant required by the federated-plugin
+/// `dartPluginClass` mechanism (see `pubspec.yaml`).
+///
+/// This is intentionally a no-op: `rovenue_flutter_platform_interface`'s
+/// default [RovenuePlatform.instance] is already `MethodChannelRovenue`,
+/// which talks to the native side purely through the Pigeon-generated
+/// `RovenueHostApi`/`RovenueFlutterApi` message channels — channels that
+/// are registered natively (`RovenueFlutterAndroidPlugin.onAttachedToEngine`,
+/// see `android/src/main/kotlin/dev/rovenue/flutter/RovenueFlutterAndroidPlugin.kt`)
+/// the moment the Flutter engine attaches, independent of any Dart-side
+/// registration step. There is nothing platform-specific left for the Dart
+/// side to wire up. Mirrors `rovenue_flutter_ios`'s `RovenueFlutterIos`.
+class RovenueFlutterAndroid {
+  /// Called by the generated plugin registrant. Deliberately empty — see
+  /// the class doc comment.
+  static void registerWith() {}
+}
