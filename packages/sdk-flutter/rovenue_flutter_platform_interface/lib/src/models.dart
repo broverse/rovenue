@@ -10,7 +10,7 @@
 // `messages.g.dart` (itself mirroring `packages/sdk-rn/src/specs/RovenueModule.types.ts`),
 // but using plain Dart enums/types instead of the Pigeon-generated ones.
 
-import 'package:flutter/foundation.dart' show immutable;
+import 'package:flutter/foundation.dart' show immutable, listEquals, mapEquals;
 
 /// Subscription vs. one-time / consumable purchase.
 ///
@@ -339,6 +339,35 @@ class SubscriptionOption {
   final PricingPhase? fullPricePhase;
 
   @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SubscriptionOption &&
+          other.id == id &&
+          other.basePlanId == basePlanId &&
+          other.offerId == offerId &&
+          listEquals(other.tags, tags) &&
+          other.isBasePlan == isBasePlan &&
+          other.isPrepaid == isPrepaid &&
+          listEquals(other.pricingPhases, pricingPhases) &&
+          other.freePhase == freePhase &&
+          other.introPhase == introPhase &&
+          other.fullPricePhase == fullPricePhase;
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        basePlanId,
+        offerId,
+        Object.hashAll(tags),
+        isBasePlan,
+        isPrepaid,
+        Object.hashAll(pricingPhases),
+        freePhase,
+        introPhase,
+        fullPricePhase,
+      );
+
+  @override
   String toString() => 'SubscriptionOption(id: $id, basePlanId: $basePlanId, offerId: $offerId)';
 }
 
@@ -394,6 +423,63 @@ class StoreProduct {
   final String? pricePerYearString;
 
   @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StoreProduct &&
+          other.id == id &&
+          other.type == type &&
+          other.productCategory == productCategory &&
+          other.displayName == displayName &&
+          other.description == description &&
+          other.priceString == priceString &&
+          other.price == price &&
+          other.currencyCode == currencyCode &&
+          other.subscriptionPeriod == subscriptionPeriod &&
+          other.subscriptionGroupIdentifier == subscriptionGroupIdentifier &&
+          other.isFamilyShareable == isFamilyShareable &&
+          other.introPrice == introPrice &&
+          listEquals(other.discounts, discounts) &&
+          other.isEligibleForIntroOffer == isEligibleForIntroOffer &&
+          listEquals(other.subscriptionOptions, subscriptionOptions) &&
+          other.defaultOption == defaultOption &&
+          other.pricePerWeek == pricePerWeek &&
+          other.pricePerMonth == pricePerMonth &&
+          other.pricePerYear == pricePerYear &&
+          other.pricePerWeekString == pricePerWeekString &&
+          other.pricePerMonthString == pricePerMonthString &&
+          other.pricePerYearString == pricePerYearString;
+
+  // Object.hash caps at 20 positional arguments, and this model has 22
+  // fields, so the hash is combined in three chunks.
+  @override
+  int get hashCode => Object.hash(
+        Object.hash(
+          id,
+          type,
+          productCategory,
+          displayName,
+          description,
+          priceString,
+          price,
+          currencyCode,
+          subscriptionPeriod,
+          subscriptionGroupIdentifier,
+        ),
+        Object.hash(
+          isFamilyShareable,
+          introPrice,
+          Object.hashAll(discounts),
+          isEligibleForIntroOffer,
+          subscriptionOptions == null ? null : Object.hashAll(subscriptionOptions!),
+          defaultOption,
+          pricePerWeek,
+          pricePerMonth,
+          pricePerYear,
+        ),
+        Object.hash(pricePerWeekString, pricePerMonthString, pricePerYearString),
+      );
+
+  @override
   String toString() => 'StoreProduct(id: $id, displayName: $displayName, priceString: $priceString)';
 }
 
@@ -406,6 +492,17 @@ class RovenuePackage {
   final String identifier;
   final PackageType? packageType;
   final StoreProduct product;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RovenuePackage &&
+          other.identifier == identifier &&
+          other.packageType == packageType &&
+          other.product == product;
+
+  @override
+  int get hashCode => Object.hash(identifier, packageType, product);
 
   @override
   String toString() => 'RovenuePackage(identifier: $identifier, product: $product)';
@@ -421,6 +518,17 @@ class Offering {
   final List<RovenuePackage> packages;
 
   @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Offering &&
+          other.identifier == identifier &&
+          other.isDefault == isDefault &&
+          listEquals(other.packages, packages);
+
+  @override
+  int get hashCode => Object.hash(identifier, isDefault, Object.hashAll(packages));
+
+  @override
   String toString() => 'Offering(identifier: $identifier, isDefault: $isDefault)';
 }
 
@@ -432,6 +540,14 @@ class Offerings {
 
   final String? current;
   final List<Offering> offerings;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Offerings && other.current == current && listEquals(other.offerings, offerings);
+
+  @override
+  int get hashCode => Object.hash(current, Object.hashAll(offerings));
 
   @override
   String toString() => 'Offerings(current: $current, offerings: ${offerings.length})';
@@ -454,6 +570,19 @@ class PresentedContext {
   final String? variantId;
   final String? experimentKey;
   final int revision;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PresentedContext &&
+          other.placementId == placementId &&
+          other.paywallId == paywallId &&
+          other.variantId == variantId &&
+          other.experimentKey == experimentKey &&
+          other.revision == revision;
+
+  @override
+  int get hashCode => Object.hash(placementId, paywallId, variantId, experimentKey, revision);
 
   @override
   String toString() =>
@@ -493,6 +622,37 @@ class Paywall {
   /// Whether this paywall was served from the on-device offline fallback
   /// file rather than the network.
   final bool servedFromFallback;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Paywall &&
+          other.placementIdentifier == placementIdentifier &&
+          other.placementRevision == placementRevision &&
+          other.paywallIdentifier == paywallIdentifier &&
+          other.paywallName == paywallName &&
+          other.configFormatVersion == configFormatVersion &&
+          other.remoteConfigJson == remoteConfigJson &&
+          other.remoteConfigLocale == remoteConfigLocale &&
+          other.builderConfigJson == builderConfigJson &&
+          other.offering == offering &&
+          other.presentedContext == presentedContext &&
+          other.servedFromFallback == servedFromFallback;
+
+  @override
+  int get hashCode => Object.hash(
+        placementIdentifier,
+        placementRevision,
+        paywallIdentifier,
+        paywallName,
+        configFormatVersion,
+        remoteConfigJson,
+        remoteConfigLocale,
+        builderConfigJson,
+        offering,
+        presentedContext,
+        servedFromFallback,
+      );
 
   @override
   String toString() =>
@@ -557,6 +717,27 @@ class PurchaseResult {
   /// True for a deferred purchase (e.g. Ask to Buy) that has not yet been
   /// finalized by the store.
   final bool isDeferred;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PurchaseResult &&
+          listEquals(other.entitlements, entitlements) &&
+          mapEquals(other.virtualCurrencies, virtualCurrencies) &&
+          other.productId == productId &&
+          other.storeTransactionId == storeTransactionId &&
+          other.isDeferred == isDeferred;
+
+  @override
+  int get hashCode => Object.hash(
+        Object.hashAll(entitlements),
+        Object.hashAllUnordered(
+          virtualCurrencies.entries.map((e) => Object.hash(e.key, e.value)),
+        ),
+        productId,
+        storeTransactionId,
+        isDeferred,
+      );
 
   @override
   String toString() =>

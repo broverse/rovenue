@@ -29,6 +29,23 @@ class MethodChannelRovenue extends RovenuePlatform {
   final StreamController<FunnelClaim> _funnelClaimsController =
       StreamController<FunnelClaim>.broadcast();
 
+  /// The most recent claim delivered by native, if any. `_FlutterApiListener`
+  /// is wired up in the constructor above, so a claim can arrive (and be
+  /// cached here) well before any Dart-side code ever reads [funnelClaims] —
+  /// e.g. a deferred deep link resolving during app startup, before the
+  /// screen that displays onboarding answers has mounted. Without this
+  /// cache, that event would be silently dropped: a broadcast
+  /// [StreamController] delivers only to listeners already subscribed at
+  /// the moment [StreamController.add] is called, and a resolved funnel
+  /// claim's payload (subscriber id + collected answers) cannot be
+  /// reconstructed from any other API afterwards. [changes] and [logs] are
+  /// intentionally NOT given the same treatment: both are "something
+  /// changed, go re-read it" signals whose current state is always
+  /// re-fetchable on demand (`entitlementsAll()`, `remoteConfigAllJson()`,
+  /// etc.), so a missed notification before a listener attaches costs
+  /// nothing — the next explicit read already reflects the latest state.
+  FunnelClaim? _lastFunnelClaim;
+
   @override
   Stream<RovenueChangeEvent> get changes => _changesController.stream;
 
@@ -36,7 +53,16 @@ class MethodChannelRovenue extends RovenuePlatform {
   Stream<RovenueLogRecord> get logs => _logsController.stream;
 
   @override
-  Stream<FunnelClaim> get funnelClaims => _funnelClaimsController.stream;
+  Stream<FunnelClaim> get funnelClaims => _replayLastFunnelClaim();
+
+  /// Yields the cached [_lastFunnelClaim] (if any) to every new subscriber
+  /// before forwarding live events, so a claim resolved before this
+  /// subscriber attached is never missed.
+  Stream<FunnelClaim> _replayLastFunnelClaim() async* {
+    final FunnelClaim? last = _lastFunnelClaim;
+    if (last != null) yield last;
+    yield* _funnelClaimsController.stream;
+  }
 
   /// Runs [body], mapping any [PlatformException] it throws into a
   /// [RovenueException] via [rovenueExceptionFrom]. Every [_hostApi] call
@@ -300,8 +326,11 @@ class MethodChannelRovenue extends RovenuePlatform {
 
   void _onNativeLog(pigeon.RvLogRecord record) => _logsController.add(_toLogRecord(record));
 
-  void _onNativeFunnelClaim(pigeon.RvFunnelClaim claim) =>
-      _funnelClaimsController.add(_toFunnelClaim(claim));
+  void _onNativeFunnelClaim(pigeon.RvFunnelClaim claim) {
+    final FunnelClaim parsed = _toFunnelClaim(claim);
+    _lastFunnelClaim = parsed;
+    _funnelClaimsController.add(parsed);
+  }
 }
 
 /// Implements the native-to-Dart `RovenueFlutterApi` and forwards each

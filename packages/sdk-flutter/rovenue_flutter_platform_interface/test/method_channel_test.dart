@@ -138,6 +138,40 @@ void main() {
     expect(received['plan'], 'pro');
   });
 
+  test(
+      'funnelClaims replays the last claim to a subscriber that attaches after it arrived '
+      '(carry-forward #2: a claim resolved before any UI subscribes must not be lost)', () async {
+    const channelName =
+        'dev.flutter.pigeon.rovenue_flutter_platform_interface.RovenueFlutterApi.onFunnelClaim';
+    final ByteData? message = pigeon.RovenueFlutterApi.pigeonChannelCodec.encodeMessage(
+      <Object?>[pigeon.RvFunnelClaim(subscriberId: 'sub_1', funnelAnswersJson: '{"q1":"yes"}')],
+    );
+
+    // Simulate the native -> Dart onFunnelClaim callback firing before any
+    // Dart-side code has ever read `platform.funnelClaims` (the exact race
+    // the carry-forward item describes: e.g. a deferred deep link resolving
+    // during app startup).
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(channelName, message, null);
+
+    final received = <FunnelClaim>[];
+    final sub = platform.funnelClaims.listen(received.add);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(received, hasLength(1));
+    expect(received.single.subscriberId, 'sub_1');
+    expect(received.single.funnelAnswersJson, '{"q1":"yes"}');
+
+    // A second, later subscriber also sees the replayed last claim.
+    final received2 = <FunnelClaim>[];
+    final sub2 = platform.funnelClaims.listen(received2.add);
+    await Future<void>.delayed(Duration.zero);
+    expect(received2, hasLength(1));
+
+    await sub.cancel();
+    await sub2.cancel();
+  });
+
   test('a PlatformException from native is mapped to RovenueException, never leaks raw', () async {
     const channelName = 'dev.flutter.pigeon.rovenue_flutter_platform_interface.RovenueHostApi.entitlementsAll';
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMessageHandler(
