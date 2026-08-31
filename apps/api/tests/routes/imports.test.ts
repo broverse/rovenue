@@ -226,6 +226,7 @@ describe("capability gate (shared by every job-lifecycle route)", () => {
   const cases: Array<{ name: string; method: string; path: string; body?: unknown }> = [
     { name: "list", method: "GET", path: "" },
     { name: "get one", method: "GET", path: "/job_1" },
+    { name: "columns", method: "GET", path: "/job_1/columns" },
     { name: "report", method: "GET", path: "/job_1/report" },
     { name: "mapping", method: "PATCH", path: "/job_1/mapping", body: { mapping: VALID_MAPPING } },
     { name: "dry-run", method: "POST", path: "/job_1/dry-run" },
@@ -591,6 +592,94 @@ describe("GET /:id", () => {
 
     const body = (await res.json()) as { data: { job: Record<string, unknown> } };
     expect(body.data.job.verificationCountersScope).toBeNull();
+  });
+});
+
+// =============================================================
+// GET /:id/columns — fix round 1, FIX 1
+//
+// Peeks the STORED object on demand and returns its header row, so the
+// mapping editor can offer a picker instead of asking the operator to
+// type exact column names from a file they may not be able to open.
+// =============================================================
+
+describe("GET /:id/columns", () => {
+  it("404s for a cross-tenant id", async () => {
+    getImportJob.mockResolvedValue(null);
+
+    const res = await req("/job_1/columns");
+
+    expect(res.status).toBe(404);
+    expect(objectExistsMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the header row of the stored file, in file order", async () => {
+    getImportJob.mockResolvedValue(makeJob({ storageKey: "imports/p1/job_1/file.csv" }));
+    objectExistsMock.mockResolvedValue(true);
+    getObjectMock.mockResolvedValue(
+      Readable.from([Buffer.from("rc_original_app_user_id,store,product_identifier\nu1,APP_STORE,pro_monthly\n")]),
+    );
+
+    const res = await req("/job_1/columns");
+
+    expect(res.status).toBe(200);
+    expect(objectExistsMock).toHaveBeenCalledWith("imports/p1/job_1/file.csv");
+    const body = (await res.json()) as { data: { columns: string[] } };
+    expect(body.data.columns).toEqual([
+      "rc_original_app_user_id",
+      "store",
+      "product_identifier",
+    ]);
+  });
+
+  it("404s (retention-expired) when the object is gone, matching the report route's posture", async () => {
+    getImportJob.mockResolvedValue(makeJob());
+    objectExistsMock.mockResolvedValue(false);
+
+    const res = await req("/job_1/columns");
+
+    expect(res.status).toBe(404);
+    expect(getObjectMock).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty column list (not an error) when no header can be found", async () => {
+    getImportJob.mockResolvedValue(makeJob());
+    objectExistsMock.mockResolvedValue(true);
+    // No newline anywhere in the peeked prefix — an unusual but normal
+    // file, per the upload route's own header-peek posture.
+    getObjectMock.mockResolvedValue(Readable.from([Buffer.from("no newline here at all")]));
+
+    const res = await req("/job_1/columns");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { columns: string[] } };
+    expect(body.data.columns).toEqual([]);
+  });
+
+  it("destroys the object stream after peeking, never reading past the header", async () => {
+    getImportJob.mockResolvedValue(makeJob());
+    objectExistsMock.mockResolvedValue(true);
+    const stream = Readable.from([Buffer.from("a,b\n1,2\n")]);
+    const destroySpy = vi.spyOn(stream, "destroy");
+    getObjectMock.mockResolvedValue(stream);
+
+    const res = await req("/job_1/columns");
+
+    expect(res.status).toBe(200);
+    expect(destroySpy).toHaveBeenCalled();
+  });
+
+  it("is gated on the READ rate-limit budget, not the mutation one", async () => {
+    getImportJob.mockResolvedValue(makeJob());
+    objectExistsMock.mockResolvedValue(true);
+    getObjectMock.mockImplementation(async () =>
+      Readable.from([Buffer.from("a,b\n1,2\n")]),
+    );
+
+    for (let i = 0; i < IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE + 5; i++) {
+      const res = await req("/job_1/columns");
+      expect(res.status).toBe(200);
+    }
   });
 });
 

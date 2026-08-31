@@ -83,6 +83,8 @@ const base = (projectId: string) => `/dashboard/projects/${projectId}/imports`;
 const listKey = (projectId: string) => ["imports", projectId] as const;
 const detailKey = (projectId: string, jobId: string) =>
   ["imports", projectId, jobId] as const;
+const columnsKey = (projectId: string, jobId: string) =>
+  ["imports", projectId, jobId, "columns"] as const;
 
 /**
  * Recent import jobs for the project, newest first. Not polled — the
@@ -119,6 +121,31 @@ export function useImportJob(projectId: string | undefined, jobId: string | unde
         ? IMPORT_POLL_INTERVAL_MS
         : false;
     },
+  });
+}
+
+/**
+ * The uploaded file's own header row, peeked on demand from
+ * `GET .../imports/:id/columns` (task-11 fix round 1) — NOT persisted
+ * anywhere, so this re-fetches the same bounded peek every time it's
+ * requested. `retry: false` + no `refetchInterval`: this is a single,
+ * best-effort read the mapping editor uses to turn free-text column
+ * entry into a picker; a failure (network error, a 404 from a
+ * retention-expired file) is exactly the "peek unavailable" case the
+ * editor is required to degrade from, not something worth retrying
+ * automatically into a picker that might arrive seconds later after the
+ * operator already started typing.
+ */
+export function useImportColumns(
+  projectId: string | undefined,
+  jobId: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: columnsKey(projectId ?? "", jobId ?? ""),
+    enabled: Boolean(projectId && jobId) && enabled,
+    queryFn: () => api<{ columns: string[] }>(`${base(projectId!)}/${jobId}/columns`),
+    retry: false,
   });
 }
 

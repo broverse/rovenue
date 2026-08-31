@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
@@ -65,6 +65,17 @@ function wrap(ui: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
+
+// `DRY_RUN_COMPLETE` renders the mapping editor, which peeks
+// `GET .../columns` on mount (task-11 fix round 1) — none of the tests
+// below care about that response, so a blanket empty-list default keeps
+// them focused on polling/report-link behaviour instead of every test
+// having to know about a request it isn't testing.
+beforeEach(() => {
+  server.use(
+    http.get(`${jobUrl}/columns`, () => HttpResponse.json({ data: { columns: [] } })),
+  );
+});
 
 describe("ImportJobDetail polling", () => {
   it("polls while RUNNING and stops once the job reaches a terminal status", async () => {

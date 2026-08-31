@@ -878,6 +878,72 @@ importsRoute.get("/:id", statusPollRateLimit, async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /:id/columns — peeks the STORED file's header on demand (fix round 1)
+// ---------------------------------------------------------------------------
+//
+// Task-11 controller context, fix round 1 (FIX 1): the operator whose
+// export is NOT a recognised preset — exactly who hand-mapping exists
+// for — had no way to see their own file's column names, on a file that
+// can be gigabytes and that they may not be able to open locally. A
+// misspelled column name passes `validateMapping` (it only checks
+// canonical-field coverage, never that a source column actually exists)
+// and would otherwise only surface as a dry run where every row lands in
+// `invalidRow`, with nothing naming the bad column.
+//
+// Deliberately NOT persisted on the job row: that would need a schema
+// migration, and Docker is down while this is being written, so a
+// migration could not be verified. Instead this re-peeks the STORED
+// object on every call, reusing the EXACT SAME `peekHeaderPrefix` /
+// `detectHeaderFromPrefix` pair the upload route already uses for preset
+// detection (module comment above), rather than a second parser. Only
+// the bounded `HEADER_PEEK_BYTES` prefix is ever read — never the whole
+// file — and the object stream is destroyed immediately after, so a
+// repeated poll of this route never re-downloads a multi-gigabyte file
+// past its header line.
+//
+// Same capability gate and project-scoped 404 as every other route in
+// this file, and the READ rate-limit budget (`statusPollRateLimit`) —
+// this is a peek, not a mutation. A retention-expired (or otherwise
+// missing) object gets the SAME clean 404 the report-download route
+// uses below, rather than a 500: the dashboard degrades to free-text
+// entry in that case (see task-11 fix round 1's dashboard-side report).
+
+importsRoute.get("/:id/columns", statusPollRateLimit, async (c) => {
+  const projectId = c.req.param("projectId");
+  const id = c.req.param("id");
+  if (!projectId || !id) {
+    throw new HTTPException(400, { message: "Missing projectId or id" });
+  }
+  const user = c.get("user");
+  await requireImportAccess(projectId, user.id);
+
+  const job = await requireImportJob(projectId, id);
+
+  const exists = await importStore.objectExists(job.storageKey);
+  if (!exists) {
+    throw new HTTPException(404, {
+      message: "This file has been deleted by the retention sweep",
+    });
+  }
+
+  const objectStream = await importStore.getObject(job.storageKey);
+  let header: string[] | null;
+  try {
+    const { prefix, sawNewline } = await peekHeaderPrefix(objectStream, HEADER_PEEK_BYTES);
+    // Same "too-long-or-absent header is a normal outcome, not an error"
+    // posture as the upload route's own peek (module comment at the top
+    // of this file) — an empty `columns` array, not a 4xx, tells the
+    // dashboard detection found nothing usable so it should fall back to
+    // free text.
+    header = sawNewline ? await detectHeaderFromPrefix(prefix) : null;
+  } finally {
+    objectStream.destroy();
+  }
+
+  return c.json(ok({ columns: header ?? [] }));
+});
+
+// ---------------------------------------------------------------------------
 // GET /:id/report — streams the report (Task 8 durable-parts contract)
 // ---------------------------------------------------------------------------
 //
