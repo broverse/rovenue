@@ -24,7 +24,7 @@ const NOW = new Date("2026-08-31T00:00:00.000Z");
 const RETENTION_MS = IMPORT_FILE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 async function seedJob(args: {
-  status: "COMPLETED" | "FAILED" | "CANCELLED" | "RUNNING";
+  status: "COMPLETED" | "FAILED" | "CANCELLED" | "RUNNING" | "VERIFICATION_INCOMPLETE";
   finishedAt: Date | null;
   reportStorageKey?: string | null;
 }): Promise<{ jobId: string; storageKey: string; reportStorageKey: string | null }> {
@@ -106,6 +106,28 @@ describe("runImportRetention", () => {
     const { storageKey, reportStorageKey } = await seedJob({
       status: "RUNNING",
       finishedAt: null,
+    });
+
+    const deleteSpy = vi.spyOn(importStore, "deleteObject").mockResolvedValue(undefined);
+
+    await runImportRetention(NOW);
+
+    expect(deleteSpy).not.toHaveBeenCalledWith(storageKey);
+    expect(deleteSpy).not.toHaveBeenCalledWith(reportStorageKey);
+
+    deleteSpy.mockRestore();
+  });
+
+  it("does NOT delete a VERIFICATION_INCOMPLETE job's files, regardless of age (Task 9 fix round 1, FIX 7)", async () => {
+    // Phase A sets `finishedAt` before Phase B ever runs, so a job Phase B
+    // later left VERIFICATION_INCOMPLETE can have an OLD finishedAt from
+    // day one — age alone must not make it eligible. The job's source
+    // file is the ONLY place a Google purchase token lives; sweeping it
+    // would strand this job unable to ever finish Phase B.
+    const oldFinishedAt = new Date(NOW.getTime() - RETENTION_MS - 24 * 60 * 60 * 1000);
+    const { storageKey, reportStorageKey } = await seedJob({
+      status: "VERIFICATION_INCOMPLETE",
+      finishedAt: oldFinishedAt,
     });
 
     const deleteSpy = vi.spyOn(importStore, "deleteObject").mockResolvedValue(undefined);

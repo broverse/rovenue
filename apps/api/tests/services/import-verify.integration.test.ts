@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { parseCsvStream, type CanonicalField } from "@rovenue/shared";
 import { PurchaseStatus } from "@rovenue/db";
@@ -10,6 +10,7 @@ import {
   products,
   projects,
   purchases,
+  subscriberAccess,
   subscribers,
 } from "../../../../packages/db/src/drizzle/schema";
 import * as importJobRepo from "../../../../packages/db/src/drizzle/repositories/import-jobs";
@@ -60,6 +61,10 @@ const APPLE_STORE_PRODUCT_ID = "com.example.pro.monthly";
 
 const PURCHASE_DATE = "2026-01-15 10:00:00";
 const FUTURE_EXPIRY = "2028-12-01 00:00:00";
+/** Before "now" (this session's clock is 2026-08-31) but still a normal
+ *  post-purchase date — Phase A derives EXPIRED from this, the same way
+ *  a real historical, already-lapsed subscription would import. */
+const PAST_EXPIRY = "2026-02-01 00:00:00";
 
 const SOURCE_COLUMNS = [
   "subscriber_id",
@@ -182,6 +187,21 @@ function fakeDeps(overrides: Partial<ImportVerifyDeps> = {}): ImportVerifyDeps {
 
 async function findPurchases() {
   return db.select().from(purchases).where(eq(purchases.projectId, PROJECT_ID));
+}
+
+/** FIX 1: subscriber_access is the table that actually decides whether a
+ *  customer gets access — never written directly, only by syncAccess. */
+async function findAccessRow(subscriberId: string) {
+  const rows = await db
+    .select()
+    .from(subscriberAccess)
+    .where(
+      and(
+        eq(subscriberAccess.subscriberId, subscriberId),
+        eq(subscriberAccess.accessId, ACCESS_ID),
+      ),
+    );
+  return rows[0] ?? null;
 }
 
 beforeAll(async () => {
@@ -406,5 +426,175 @@ describe("verifyImportedAnchors — the store no longer recognises the row", () 
     expect(after[0]!.id).toBe(before!.id);
     expect(after[0]!.verifiedAt).toBeNull();
     expect(after[0]!.status).toBe(before!.status);
+  });
+});
+
+// =============================================================
+// Fix round 1, FIX 1 (Critical) — subscriber_access actually moves
+// =============================================================
+//
+// applyVerifiedResult only ever touched `purchases`; subscriber_access is
+// pure derived state that only `syncAccess` recomputes (write.ts's own
+// rule 5). Both directions matter: the store upgrading an expired-looking
+// row to ACTIVE must actually grant access, and the store downgrading an
+// active-looking row must actually revoke it — access-engine.ts flips
+// `isActive`, it never deletes the row.
+
+describe("verifyImportedAnchors — subscriber_access moves in both directions", () => {
+  it("store says ACTIVE, file said expired: an access row appears", async () => {
+    const subscriberId = `rc_verify_access_up_${createId()}`;
+    const anchor = `apple_orig_access_up_${createId()}`;
+    const csv = csvOf([
+      {
+        subscriberId,
+        storeTxnId: `${anchor}_txn_1`,
+        originalTransactionId: anchor,
+        priceUsd: "9.99",
+        expiresDate: PAST_EXPIRY,
+      },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+    const [purchaseBefore] = await findPurchases();
+    expect(purchaseBefore!.status).toBe(PurchaseStatus.EXPIRED);
+    expect(await findAccessRow(purchaseBefore!.subscriberId)).toBeNull();
+
+    const deps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async () => ({
+        kind: "verified" as const,
+        status: PurchaseStatus.ACTIVE,
+        expiresDate: new Date(FUTURE_EXPIRY),
+        autoRenewStatus: true,
+      })),
+    });
+    await verifyImportedAnchors(jobId, deps);
+
+    const [purchaseAfter] = await findPurchases();
+    expect(purchaseAfter!.status).toBe(PurchaseStatus.ACTIVE);
+    const accessRow = await findAccessRow(purchaseAfter!.subscriberId);
+    expect(accessRow).not.toBeNull();
+    expect(accessRow!.isActive).toBe(true);
+  });
+
+  it("store says EXPIRED, file said active: the access row is deactivated", async () => {
+    const subscriberId = `rc_verify_access_down_${createId()}`;
+    const anchor = `apple_orig_access_down_${createId()}`;
+    const csv = csvOf([
+      {
+        subscriberId,
+        storeTxnId: `${anchor}_txn_1`,
+        originalTransactionId: anchor,
+        priceUsd: "9.99",
+      },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+    const [purchaseBefore] = await findPurchases();
+    expect(purchaseBefore!.status).toBe(PurchaseStatus.ACTIVE);
+    const accessBefore = await findAccessRow(purchaseBefore!.subscriberId);
+    expect(accessBefore).not.toBeNull();
+    expect(accessBefore!.isActive).toBe(true);
+
+    const deps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async () => ({
+        kind: "verified" as const,
+        status: PurchaseStatus.EXPIRED,
+        expiresDate: new Date(PAST_EXPIRY),
+        autoRenewStatus: false,
+      })),
+    });
+    await verifyImportedAnchors(jobId, deps);
+
+    // This is the failure that does NOT self-heal: expiry-checker only
+    // sweeps ACTIVE|TRIAL|GRACE_PERIOD, and this purchase just left that
+    // set — if syncAccess weren't called here, the access row would keep
+    // granting paid access forever.
+    const accessAfter = await findAccessRow(purchaseBefore!.subscriberId);
+    expect(accessAfter).not.toBeNull(); // deactivated, never deleted.
+    expect(accessAfter!.id).toBe(accessBefore!.id);
+    expect(accessAfter!.isActive).toBe(false);
+  });
+});
+
+// =============================================================
+// Fix round 1, FIX 4 — run-level give-up and cancellation
+// =============================================================
+
+describe("verifyImportedAnchors — run-level give-up on sustained throttling", () => {
+  it("stops dispatching new store calls once the run-level throttle budget is exhausted", async () => {
+    const ANCHOR_COUNT = 12; // > RUN_GIVE_UP_CONSECUTIVE_THROTTLES (10)
+    const rows: SourceRow[] = Array.from({ length: ANCHOR_COUNT }, (_, i) => ({
+      subscriberId: `rc_verify_giveup_${i}_${createId()}`,
+      storeTxnId: `apple_giveup_${i}_${createId()}`,
+      originalTransactionId: `apple_giveup_orig_${i}_${createId()}`,
+      priceUsd: "9.99",
+    }));
+    const jobId = await seedCompletedPhaseA(csvOf(rows));
+    expect(await findPurchases()).toHaveLength(ANCHOR_COUNT);
+
+    let callCount = 0;
+    const deps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async () => {
+        callCount++;
+        return { kind: "throttled" as const };
+      }),
+    });
+
+    const summary = await verifyImportedAnchors(jobId, deps);
+
+    expect(summary.status).toBe("VERIFICATION_INCOMPLETE");
+    expect(summary.anchorsPending).toBe(ANCHOR_COUNT);
+    // Without a run-level give-up, every one of the 12 anchors would burn
+    // its own full 5-attempt budget (60 calls). The give-up fires after
+    // 10 consecutive throttles, well short of that.
+    expect(callCount).toBeLessThan(ANCHOR_COUNT * 5);
+  });
+});
+
+describe("verifyImportedAnchors — respects an operator's Cancel", () => {
+  it("makes no store calls and leaves the job CANCELLED when it is already cancelled", async () => {
+    const subscriberId = `rc_verify_cancel_${createId()}`;
+    const anchor = `apple_orig_cancel_${createId()}`;
+    const csv = csvOf([
+      { subscriberId, storeTxnId: `${anchor}_txn_1`, originalTransactionId: anchor, priceUsd: "9.99" },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+    await importJobRepo.setImportJobStatus(db, PROJECT_ID, jobId, { status: "CANCELLED" });
+
+    const deps = fakeDeps(); // every verify*Anchor throws if called at all.
+
+    const summary = await verifyImportedAnchors(jobId, deps);
+
+    expect(summary.status).toBe("CANCELLED");
+    expect(deps.verifyAppleAnchor).not.toHaveBeenCalled();
+    const jobRow = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    expect(jobRow!.status).toBe("CANCELLED");
+  });
+});
+
+// =============================================================
+// Fix round 1, FIX 6 — notFound/pending counters do not inflate
+// =============================================================
+
+describe("verifyImportedAnchors — counters reflect current state, not an accumulating total", () => {
+  it("re-running against a still-not-found anchor does not double the notFound counter", async () => {
+    const subscriberId = `rc_verify_counter_${createId()}`;
+    const anchor = `apple_orig_counter_${createId()}`;
+    const csv = csvOf([
+      { subscriberId, storeTxnId: `${anchor}_txn_1`, originalTransactionId: anchor, priceUsd: "9.99" },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+
+    const notFoundDeps = () =>
+      fakeDeps({ verifyAppleAnchor: vi.fn(async () => ({ kind: "notFound" as const })) });
+
+    await verifyImportedAnchors(jobId, notFoundDeps());
+    const jobAfterFirst = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    expect(jobAfterFirst!.counters.verifyAnchorNotFound).toBe(1);
+
+    await verifyImportedAnchors(jobId, notFoundDeps());
+    const jobAfterSecond = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    // Not 2: notFound is never checkpointed, so every call re-discovers
+    // the SAME anchor — the counter reports current state, not a running
+    // total across resumed attempts.
+    expect(jobAfterSecond!.counters.verifyAnchorNotFound).toBe(1);
   });
 });

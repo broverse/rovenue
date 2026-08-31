@@ -65,10 +65,13 @@ export async function sendConsumptionInfo(
 // Apple's numeric `status` on each `lastTransactions` entry — the public
 // `Status` enum from the same docs page. Distinct from
 // `purchases.status` (this repo's own enum); mapped onto it by the
-// caller (services/import/verify-store-clients.ts), which also verifies
-// the accompanying `signedTransactionInfo` JWS through the SAME verifier
-// chain `services/receipt-verify.ts` uses for a live receipt, rather
-// than trusting the unsigned status code alone.
+// caller (services/import/verify-store-clients.ts). This unsigned status
+// code IS what drives that mapping — Apple does not sign it. The
+// accompanying `signedTransactionInfo` is separately verified through the
+// SAME verifier chain `services/receipt-verify.ts` uses for a live
+// receipt, but only to source `expiresDate` (and, via
+// `signedRenewalInfo`, `autoRenewStatus`) — it does not corroborate or
+// replace the status code above.
 export const APPLE_SUBSCRIPTION_STATUS = {
   ACTIVE: 1,
   EXPIRED: 2,
@@ -111,7 +114,7 @@ export async function getAppleSubscriptionStatuses(
   const token = await getAppleAuthToken(ctx);
   const base = ctx.environment === "PRODUCTION" ? PROD_BASE : SANDBOX_BASE;
   const res = await fetch(
-    `${base}/inApps/v1/subscriptions/${originalTransactionId}`,
+    `${base}/inApps/v1/subscriptions/${encodeURIComponent(originalTransactionId)}`,
     {
       method: "GET",
       headers: {

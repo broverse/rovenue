@@ -26,6 +26,7 @@ import {
 import { requireConnectedStripe } from "../../lib/stripe-platform";
 import {
   APPLE_ENVIRONMENT,
+  APPLE_OFFER_TYPE,
   type AppleJwsRenewalInfoPayload,
 } from "../apple/apple-types";
 import { createAppleVerifier } from "../apple/apple-verify";
@@ -138,9 +139,23 @@ async function verifyAppleAnchor(
       }
     }
 
+    // Fix round 1, FIX 3: Apple's numeric subscriptionStatus has no TRIAL
+    // member (1 = ACTIVE covers a live trial too) — the decoded
+    // transaction is what actually says so, the same signal
+    // receipt-verify.ts derives TRIAL from for a live purchase. Without
+    // this, a row imported as TRIAL that is STILL in trial at Apple gets
+    // permanently rewritten to ACTIVE, losing trial→paid conversion truth
+    // for migrated data.
+    let status = mapAppleSubscriptionStatus(txn.status);
+    const isTrial =
+      decoded.offerType === APPLE_OFFER_TYPE.INTRODUCTORY && (decoded.price ?? 0) === 0;
+    if (isTrial && status === PurchaseStatus.ACTIVE) {
+      status = PurchaseStatus.TRIAL;
+    }
+
     return {
       kind: "verified",
-      status: mapAppleSubscriptionStatus(txn.status),
+      status,
       expiresDate:
         decoded.expiresDate !== undefined ? new Date(decoded.expiresDate) : null,
       autoRenewStatus,
@@ -185,14 +200,34 @@ async function verifyGoogleAnchor(
       verifyGoogleSubscription(config, input.purchaseToken),
     );
     const state = subscription.subscriptionState as GoogleSubscriptionState;
+
+    // Fix round 1, FIX 2: receipt-verify.ts's own rule — "the matching
+    // line item, never blindly lineItems[0]" — applies here too. A
+    // multi-line-item subscription has one line item per product; the
+    // imported row's product identifier (already threaded through as
+    // `input.productIdentifier`, previously plumbed but never read) says
+    // which one this purchase actually is. A subscription that was
+    // upgraded/downgraded since the file was exported may no longer carry
+    // a line item for that exact product — that is a legitimate outcome,
+    // not an error, so it falls back to the first line item (logged)
+    // rather than failing the whole anchor.
+    const lineItems = subscription.lineItems ?? [];
+    const matchingLineItem = lineItems.find(
+      (item) => item.productId === input.productIdentifier,
+    );
+    if (lineItems.length > 0 && !matchingLineItem) {
+      log.warn(
+        "google anchor: no line item matches the imported product identifier — using the subscription's first line item (it may have been upgraded/downgraded since import)",
+        { projectId: input.projectId, productIdentifier: input.productIdentifier },
+      );
+    }
+    const lineItem = matchingLineItem ?? lineItems[0];
+
     return {
       kind: "verified",
       status: mapSubscriptionStateToStatus(state),
-      expiresDate: subscription.lineItems?.[0]?.expiryTime
-        ? new Date(subscription.lineItems[0].expiryTime)
-        : null,
-      autoRenewStatus:
-        subscription.lineItems?.[0]?.autoRenewingPlan?.autoRenewEnabled ?? null,
+      expiresDate: lineItem?.expiryTime ? new Date(lineItem.expiryTime) : null,
+      autoRenewStatus: lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
     };
   } catch (err) {
     const status = (err as { code?: number; response?: { status?: number } })
@@ -209,6 +244,9 @@ async function verifyGoogleAnchor(
 // =============================================================
 // Stripe
 // =============================================================
+
+const STRIPE_NOT_FOUND_STATUS = 404;
+const STRIPE_TOO_MANY_REQUESTS_STATUS = 429;
 
 async function verifyStripeAnchor(
   input: VerifyStripeAnchorInput,
@@ -228,8 +266,8 @@ async function verifyStripeAnchor(
     };
   } catch (err) {
     const status = (err as { statusCode?: number })?.statusCode;
-    if (status === 404) return { kind: "notFound" };
-    if (status === 429) return { kind: "throttled" };
+    if (status === STRIPE_NOT_FOUND_STATUS) return { kind: "notFound" };
+    if (status === STRIPE_TOO_MANY_REQUESTS_STATUS) return { kind: "throttled" };
     if (stripeCircuit.state === "OPEN") return { kind: "throttled" };
     throw err;
   }

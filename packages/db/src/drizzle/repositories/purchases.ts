@@ -237,6 +237,32 @@ export async function updatePurchasesByOriginalTransaction(
     );
 }
 
+/**
+ * Every distinct subscriber a transaction chain belongs to (normally
+ * exactly one, but the chain-wide update this pairs with does not itself
+ * know or care). Task 9 (Phase B store re-validation): after
+ * `updateChainStatusGuarded` changes a chain's status/expiry, the caller
+ * needs to know which subscriber(s) to run `syncAccess` for —
+ * `subscriber_access` is derived state that only `syncAccess` recomputes,
+ * never written directly.
+ */
+export async function findSubscriberIdsByOriginalTransaction(
+  db: DbOrTx,
+  projectId: string,
+  originalTransactionId: string,
+): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ subscriberId: purchases.subscriberId })
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.projectId, projectId),
+        eq(purchases.originalTransactionId, originalTransactionId),
+      ),
+    );
+  return rows.map((r) => r.subscriberId);
+}
+
 export interface GuardedChainUpdateResult {
   /** ids of rows the patch was actually applied to. */
   updatedIds: string[];

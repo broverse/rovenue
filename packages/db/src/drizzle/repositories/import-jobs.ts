@@ -236,6 +236,55 @@ export async function incrementImportJobCounters(
 }
 
 // ---------------------------------------------------------------------------
+// setImportJobCounters — OVERWRITE, not additive
+// ---------------------------------------------------------------------------
+//
+// Task 9 fix round 1, FIX 6: Phase B's `verifyAnchorNotFound` and
+// `verifyAnchorPending` counts are NOT checkpointed the way
+// `verifyAnchorVerified` is (a not-found or still-throttled anchor never
+// gets `purchases.verifiedAt` set — that is the whole point of rule 1: it
+// must look exactly like an unverified imported row). So every resumed
+// `verifyImportedAnchors` call rediscovers the SAME not-found/pending
+// anchors from scratch — additively incrementing those two keys would
+// inflate them without bound across resumes, and Task 10/11 surface these
+// numbers to the operator. This sets specific keys to the CALLER-SUPPLIED
+// value (this call's fresh, complete count), leaving every other key in
+// the jsonb object — including `verifyAnchorVerified` and every Phase-A
+// outcome bucket — untouched.
+
+export async function setImportJobCounters(
+  db: Db,
+  projectId: string,
+  id: string,
+  values: Record<string, number>,
+): Promise<ImportJob> {
+  const entries = Object.entries(values);
+  if (entries.length === 0) {
+    const existing = await getImportJob(db, projectId, id);
+    if (!existing) {
+      throw new Error(`setImportJobCounters: id=${id} not found`);
+    }
+    return existing;
+  }
+
+  const pairs = sql.join(
+    entries.map(([key, value]) => sql`${key}::text, ${value}::bigint`),
+    sql`, `,
+  );
+
+  const [row] = await db
+    .update(importJobs)
+    .set({
+      counters: sql`${importJobs.counters} || jsonb_build_object(${pairs})`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(importJobs.projectId, projectId), eq(importJobs.id, id)))
+    .returning();
+  if (!row) throw new Error(`setImportJobCounters: id=${id} not found`);
+  return row;
+}
+
+// ---------------------------------------------------------------------------
 // listImportJobsEligibleForFileRetention
 // ---------------------------------------------------------------------------
 //
@@ -248,6 +297,16 @@ export async function incrementImportJobCounters(
 // reliable signal the job isn't finished yet, not a data gap to guess
 // around.
 
+// Task 9 fix round 1, FIX 7 (deliberate, not an oversight):
+// `VERIFICATION_INCOMPLETE` is NOT in this list. A job left there is
+// resumable — a later `verifyImportedAnchors` call can still finish
+// Phase B — and that resume needs to re-read the job's SOURCE FILE
+// (the Google purchase token lives nowhere else; see
+// services/import/verify.ts). Sweeping a `VERIFICATION_INCOMPLETE`
+// job's file the same way as a truly terminal one would delete the one
+// copy of that data and strand the job incomplete forever. Only once a
+// resumed Phase B call moves the job to COMPLETED does it become
+// eligible here.
 const TERMINAL_IMPORT_JOB_STATUSES: readonly ImportJobStatus[] = [
   "COMPLETED",
   "FAILED",

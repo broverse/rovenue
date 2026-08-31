@@ -75,12 +75,13 @@ import {
 //   6. Task 9: Phase B (store re-validation, services/import/verify.ts)
 //      runs as a SECOND phase of this SAME job, immediately after Phase A
 //      reaches COMPLETED — never as a separate job, never invoked from
-//      anywhere else. It can only move the job's terminal status FORWARD
-//      from COMPLETED to VERIFICATION_INCOMPLETE, and only after Phase
-//      A's own writes already succeeded; a Phase B crash is caught
-//      separately so it can never relabel a successful import as FAILED.
-
-/** BullMQ worker concurrency — the number of DIFFERENT projects' import
+//      anywhere else. From there it settles at COMPLETED (verification
+//      fully resolved, only after Phase A's own writes already
+//      succeeded), VERIFICATION_INCOMPLETE (anchors still pending after
+//      its retry/give-up budget — fix round 1, FIX 4), or CANCELLED (an
+//      operator cancelled the job while Phase B was running — also FIX
+//      4). A Phase B crash is caught separately so it can never relabel a
+//      successful import as FAILED.
 
 /** BullMQ worker concurrency — the number of DIFFERENT projects' import
  *  jobs this process may run at once. Per-project serialisation is a
@@ -382,21 +383,24 @@ async function processImportJob(
 
     // Task 9, Phase B: store re-validation runs as a SECOND phase of this
     // SAME job, after Phase A's writes (above) have already succeeded.
-    // `verifyImportedAnchors` persists its own counters and — only when
-    // it leaves anchors pending — flips the job's status forward to
-    // `VERIFICATION_INCOMPLETE`, overriding the `COMPLETED` just written.
-    // A crash or thrown error HERE must never relabel Phase A's already-
-    // successful import as FAILED (the catch block below would do exactly
-    // that), so it gets its own try/catch: the worst a broken verifier can
-    // do is leave the job resumable at VERIFICATION_INCOMPLETE, which a
-    // later `verifyImportedAnchors` call (this function, called again) can
+    // `verifyImportedAnchors` persists its own counters and status:
+    // COMPLETED (verification fully resolved, INCLUDING a resumed call
+    // clearing an earlier VERIFICATION_INCOMPLETE — fix round 1, minor 1),
+    // VERIFICATION_INCOMPLETE (anchors still pending after this call's
+    // retry/give-up budget), or CANCELLED (an operator cancelled the job
+    // while this call was running — fix round 1, FIX 4). A crash or
+    // thrown error HERE must never relabel Phase A's already-successful
+    // import as FAILED (the catch block below would do exactly that), so
+    // it gets its own try/catch: the worst a broken verifier can do is
+    // leave the job resumable at VERIFICATION_INCOMPLETE, which a later
+    // `verifyImportedAnchors` call (this function, called again) can
     // always retry — every anchor it already resolved is skipped via the
     // `verifiedAt` checkpoint (see verify.ts).
     let finalStatus: ImportRunStatus = "COMPLETED";
     try {
       const verifySummary = await verifyImportedAnchors(jobId, verifyDeps);
-      if (verifySummary.status === "VERIFICATION_INCOMPLETE") {
-        finalStatus = "VERIFICATION_INCOMPLETE";
+      if (verifySummary.status !== "COMPLETED") {
+        finalStatus = verifySummary.status;
       }
     } catch (verifyErr) {
       logger.error(
