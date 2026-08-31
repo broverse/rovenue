@@ -65,6 +65,8 @@ vi.mock("../../src/lib/import-store", () => ({
 
 import { runImportJob } from "../../src/workers/import-runner";
 import type { ImportVerifyDeps } from "../../src/services/import/verify";
+import { buildCanonicalRow } from "../../src/services/import/plan";
+import { writeImportBatch } from "../../src/services/import/write";
 
 // This file's subject is Phase A (batching/checkpoint/cancel/the
 // per-project lock) — Task 9's Phase B has its own dedicated test file
@@ -115,20 +117,17 @@ const CANONICAL_MAPPING: Record<string, CanonicalField> = {
 
 const CSV_HEADER = SOURCE_COLUMNS.join(",");
 
+/** One row's raw field VALUES, in `SOURCE_COLUMNS` order — factored out
+ *  of `csvOf` so fix round 2's crash test (below) can build the exact
+ *  same row shape without going through a real CSV parse. */
+function rowValuesFor(subId: string): string[] {
+  return [subId, "app_store", PRODUCT_IDENTIFIER, `txn_${subId}`, PURCHASE_DATE, FUTURE_EXPIRY, "9.99"];
+}
+
 /** One row per subscriber, ACTIVE, non-sandbox, revenue-eligible — the
  *  "everything succeeds" shape every scenario below builds on. */
 function csvOf(subscriberIds: string[]): string {
-  const lines = subscriberIds.map((subId) =>
-    [
-      subId,
-      "app_store",
-      PRODUCT_IDENTIFIER,
-      `txn_${subId}`,
-      PURCHASE_DATE,
-      FUTURE_EXPIRY,
-      "9.99",
-    ].join(","),
-  );
+  const lines = subscriberIds.map((subId) => rowValuesFor(subId).join(","));
   return `${CSV_HEADER}\n${lines.join("\n")}\n`;
 }
 
@@ -601,6 +600,90 @@ describe("runImportJob — completion audit reflects the true final status (fix 
     const result = await runImportJob(jobId, { verifyDeps: NOOP_VERIFY_DEPS });
 
     expect(result.status).toBe("COMPLETED");
+    expect(await countImportCompletedAudits(jobId)).toBe(1);
+    const payload = await getImportCompletedAuditPayload(jobId);
+    expect(payload.status).toBe("COMPLETED");
+  });
+});
+
+// =============================================================
+// Scenario 5 (fix round 2, FIX A) — a HARD crash during Phase B leaves
+// the row at VERIFYING, and a later run resumes it correctly
+// =============================================================
+//
+// "Hard crash" (OOM, a deploy restart, `kill -9`) means NEITHER of
+// `processImportJob`'s try/catch blocks ever runs — the whole point of
+// FIX A is that this used to leave the row stuck at COMPLETED (Phase A's
+// old write), permanently unrecoverable. Simulating that live, inside
+// this ONE Node test process, is not tractable: `runImportJob` holds the
+// per-project Postgres advisory lock (`withProjectImportLock`) for its
+// ENTIRE call, released only in a `finally` that — by construction —
+// never runs if the awaited call never settles. Abandoning a live,
+// never-resolving `runImportJob` call to "simulate" the crash would
+// therefore leave that lock held for the rest of THIS TEST PROCESS'S
+// life (a real crash instead kills the OS connection, which is what
+// actually frees a session-level advisory lock — Postgres has no other
+// way to revoke one), and a second `runImportJob` call for the SAME
+// project (needed for the "resume" half of this test) would hang
+// forever waiting for a lock nothing will ever release.
+//
+// So instead of a live abandoned call, this test constructs the EXACT
+// row state a crash leaves behind, using the same primitives
+// `processImportJob` itself calls: `writeImportBatch` (Task 8's real
+// Phase-A writer — the same purchase/subscriber/revenue-event write path
+// a real run uses, not a stand-in) for the one row, then the identical
+// `setImportJobStatus({ status: "VERIFYING" })` write `processImportJob`
+// performs immediately before calling Phase B. That write IS the
+// boundary FIX A added; constructing the state on its far side is a
+// faithful proxy for "the process died right there," not a shortcut
+// around what the fix changed.
+describe("runImportJob — a hard crash during Phase B leaves VERIFYING, resumable (fix round 2, FIX A)", () => {
+  it("resumes from VERIFYING: Phase B completes, the audit fires exactly once, and Phase A is not re-written", async () => {
+    const subId = "hard_crash_a";
+    const jobId = await seedJob(csvOf([subId]));
+
+    // ---- Simulate "Phase A finished for real, then the process died
+    // ---- before Phase B ever ran" ----
+    const canonicalRow = buildCanonicalRow([...SOURCE_COLUMNS], rowValuesFor(subId), CANONICAL_MAPPING);
+    const lineNumber = 2; // header occupies line 1
+    const outcome = await writeImportBatch(jobId, [{ lineNumber, row: canonicalRow }]);
+    await importJobRepo.incrementImportJobCounters(db, PROJECT_ID, jobId, outcome.outcomes);
+    await importJobRepo.saveImportJobCheckpoint(db, PROJECT_ID, jobId, outcome.lastLineNumber);
+    await importJobRepo.setImportJobStatus(db, PROJECT_ID, jobId, {
+      status: "VERIFYING",
+      reportPartCount: 0,
+    });
+
+    // Prove the "crash" actually happened where this test claims: real
+    // Phase-A writes landed, but NOTHING was ever audited — the exact
+    // gap FIX A closes (before it, this state was UNREACHABLE for a
+    // resume because Phase A used to write COMPLETED here instead).
+    expect(await countPurchases()).toBe(1);
+    expect(await countSubscribers()).toBe(1);
+    const crashedJob = await importJobRepo.getImportJobById(db, jobId);
+    expect(crashedJob?.status).toBe("VERIFYING");
+    expect(await countImportCompletedAudits(jobId)).toBe(0);
+
+    // ---- "Restart the worker": a fresh runImportJob call for the same
+    // ---- job, exactly what a retry or an operator's /resume triggers.
+    const result = await runImportJob(jobId, { verifyDeps: NOOP_VERIFY_DEPS });
+
+    expect(result.status).toBe("COMPLETED");
+
+    // Phase A fast-forwarded from its checkpoint as a genuine no-op —
+    // the one purchase/subscriber from the "crash" setup is not doubled.
+    expect(await countPurchases()).toBe(1);
+    expect(await countSubscribers()).toBe(1);
+
+    // Phase B actually ran this time and resolved the anchor for real.
+    const finalJob = await importJobRepo.getImportJobById(db, jobId);
+    expect(finalJob?.status).toBe("COMPLETED");
+    expect(finalJob?.finishedAt).not.toBeNull();
+    expect((finalJob?.counters as Record<string, number>).verifyAnchorNotFound).toBe(1);
+
+    // The audit fires EXACTLY once — never during the crashed attempt
+    // (proven above), exactly once now that the run truly finished — and
+    // with the run's true final status.
     expect(await countImportCompletedAudits(jobId)).toBe(1);
     const payload = await getImportCompletedAuditPayload(jobId);
     expect(payload.status).toBe("COMPLETED");

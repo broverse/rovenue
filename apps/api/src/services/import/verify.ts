@@ -816,8 +816,17 @@ export async function verifyImportedAnchors(
     });
   } else {
     status = "COMPLETED";
+    // Task 10 fix round 2 (FIX A): `finishedAt` is set HERE now, not by
+    // Phase A — Phase A writes VERIFYING, not COMPLETED, before calling
+    // this function (workers/import-runner.ts), specifically so a job
+    // isn't marked "finished" while Phase B is still actively running or
+    // crash-interrupted. This is the run's true completion moment, and
+    // the ONLY place COMPLETED is persisted with `finishedAt` set —
+    // required for `listImportJobsEligibleForFileRetention`'s `finishedAt
+    // IS NOT NULL` filter, which gates the retention sweep.
     await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
       status: "COMPLETED",
+      finishedAt: new Date(),
     });
   }
 

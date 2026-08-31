@@ -1,0 +1,30 @@
+-- Task 10 fix round 2 (FIX A): Phase B (store re-validation) needs its
+-- OWN persisted status, distinct from COMPLETED, for the whole duration
+-- it runs. Before this migration, Phase A wrote COMPLETED and Phase B
+-- ran underneath that same status with nothing of its own persisted
+-- until the very end of its loop (each anchor group can involve
+-- external Apple/Google/Stripe calls with retry and backoff, so this
+-- window can be long). A HARD crash in that window — OOM, a deploy
+-- restart, `kill -9`, not a catchable JS exception — left the row
+-- reading COMPLETED with verification silently abandoned:
+-- `processImportJob`'s top guard early-returns on COMPLETED, so a retry
+-- never re-entered Phase B, and `/resume` only ever accepted
+-- VERIFICATION_INCOMPLETE, so there was no operator-triggerable recovery
+-- either. VERIFYING closes that: Phase A now writes VERIFYING instead of
+-- COMPLETED before Phase B begins, and Phase B resolves it to COMPLETED
+-- or VERIFICATION_INCOMPLETE at the end — a row left at VERIFYING by a
+-- crash is NOT the top guard's early-return status, so a retry re-enters
+-- and resumes exactly like a VERIFICATION_INCOMPLETE resume does today.
+--
+-- hand-written, NOT `drizzle-kit generate` output — same reason
+-- 0107_import_verification_incomplete.sql was: with only enums.ts
+-- touched, `generate`'s diff against this repo's drifted meta snapshot
+-- has repeatedly proposed dropping/recreating the enum type rather than
+-- a plain ADD VALUE. This file and its snapshot were hand-authored from
+-- 0107_snapshot.json instead.
+--
+-- PG16 allows ADD VALUE inside a transaction as long as the new value is
+-- not used in the same transaction — nothing in this migration uses it
+-- (same precedent as 0104_integrations_provider_text.sql and
+-- 0107_import_verification_incomplete.sql).
+ALTER TYPE "public"."ImportJobStatus" ADD VALUE IF NOT EXISTS 'VERIFYING';

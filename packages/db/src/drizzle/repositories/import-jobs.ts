@@ -307,6 +307,11 @@ export async function setImportJobCounters(
 // copy of that data and strand the job incomplete forever. Only once a
 // resumed Phase B call moves the job to COMPLETED does it become
 // eligible here.
+//
+// Task 10 fix round 2, FIX A: `VERIFYING` is NOT in this list either, for
+// the identical reason — it is Phase B ACTIVELY running (or crashed
+// mid-run and awaiting a retry/`/resume`), never a terminal outcome. A
+// job sitting at `VERIFYING` still needs its source file to resume from.
 const TERMINAL_IMPORT_JOB_STATUSES: readonly ImportJobStatus[] = [
   "COMPLETED",
   "FAILED",

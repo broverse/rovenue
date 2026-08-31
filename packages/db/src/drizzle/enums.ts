@@ -385,6 +385,19 @@ export const refundShieldAppleEnvironmentEnum = pgEnum(
 // store-side throttling that never resolved within one run's retry
 // budget. That is a real, resumable terminal-for-now outcome, never
 // COMPLETED and never FAILED (Phase A's own writes already succeeded).
+//
+// Task 10 fix round 2 (FIX A, migration 0108): VERIFYING is Phase B's
+// OWN in-progress status, written before it begins and resolved to
+// COMPLETED or VERIFICATION_INCOMPLETE at the end. Before this, Phase A
+// wrote COMPLETED and Phase B ran underneath that same status with
+// nothing of its own persisted until its very last write — a hard crash
+// (OOM, deploy restart, kill -9) during that window left the row reading
+// COMPLETED with verification silently abandoned: the top-of-run guard
+// treats COMPLETED as "nothing left to do", so a retry never re-entered
+// Phase B, and `/resume` only accepted VERIFICATION_INCOMPLETE. VERIFYING
+// is never the guard's skip-status, so a crash-interrupted run resumes
+// exactly like a VERIFICATION_INCOMPLETE one does — Phase A fast-forwards
+// its checkpoint as a no-op, Phase B resumes off `purchases.verifiedAt`.
 export const importJobStatus = pgEnum("ImportJobStatus", [
   "PENDING_MAPPING",
   "DRY_RUN_RUNNING",
@@ -394,4 +407,5 @@ export const importJobStatus = pgEnum("ImportJobStatus", [
   "FAILED",
   "CANCELLED",
   "VERIFICATION_INCOMPLETE",
+  "VERIFYING",
 ]);

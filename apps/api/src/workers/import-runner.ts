@@ -77,14 +77,21 @@ import {
 //      over one shared, overwritable key — see `ensureReportWriter`.
 //   6. Task 9: Phase B (store re-validation, services/import/verify.ts)
 //      runs as a SECOND phase of this SAME job, immediately after Phase A
-//      reaches COMPLETED — never as a separate job, never invoked from
-//      anywhere else. From there it settles at COMPLETED (verification
-//      fully resolved, only after Phase A's own writes already
-//      succeeded), VERIFICATION_INCOMPLETE (anchors still pending after
-//      its retry/give-up budget — fix round 1, FIX 4), or CANCELLED (an
-//      operator cancelled the job while Phase B was running — also FIX
-//      4). A Phase B crash is caught separately so it can never relabel a
-//      successful import as FAILED.
+//      reaches VERIFYING (Task 10 fix round 2, FIX A — Phase A used to
+//      write COMPLETED here, which left a hard-crash-during-Phase-B run
+//      permanently stuck: the top guard below treats COMPLETED as
+//      nothing-left-to-do, so a retry never re-entered Phase B and the
+//      completion audit never fired) — never as a separate job, never
+//      invoked from anywhere else. From there it settles at COMPLETED
+//      (verification fully resolved, only after Phase A's own writes
+//      already succeeded — this is also where `finishedAt` is finally
+//      set, fix round 2, FIX A), VERIFICATION_INCOMPLETE (anchors still
+//      pending after its retry/give-up budget — fix round 1, FIX 4), or
+//      CANCELLED (an operator cancelled the job while Phase B was running
+//      — also FIX 4). A Phase B crash is caught separately so it can
+//      never relabel a successful import as FAILED — a VERIFYING row is
+//      recoverable by a later retry or an operator's `/resume`, the exact
+//      same paths a VERIFICATION_INCOMPLETE row already used.
 
 /** BullMQ worker concurrency — the number of DIFFERENT projects' import
  *  jobs this process may run at once. Per-project serialisation is a
@@ -372,26 +379,41 @@ async function processImportJob(
       };
     }
 
-    const completedJob = await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
-      status: "COMPLETED",
+    // Task 10 fix round 2 (FIX A): VERIFYING, not COMPLETED, and no
+    // `finishedAt` — the run is NOT finished yet, Phase B is about to
+    // start. Before this fix, this write said COMPLETED and stayed that
+    // way for Phase B's ENTIRE duration (each anchor group can involve
+    // external Apple/Google/Stripe calls with retry and backoff, so this
+    // can be a long window) — a HARD crash in that window (OOM, a deploy
+    // restart, `kill -9`, never a catchable JS exception) left the row
+    // reading COMPLETED with verification silently abandoned: the guard
+    // at the top of this function treats COMPLETED as "nothing left to
+    // do", so a retry never re-entered Phase B, and the audit below never
+    // fired at all. VERIFYING is never that guard's skip-status, so a
+    // crash-interrupted run resumes exactly like a VERIFICATION_INCOMPLETE
+    // one does — Phase A fast-forwards its checkpoint as a no-op (this
+    // very write, re-run, is idempotent) and Phase B resumes off
+    // `purchases.verifiedAt`.
+    const verifyingJob = await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
+      status: "VERIFYING",
       reportPartCount: finalReportPartCount,
-      finishedAt: new Date(),
     });
     // FIX 1: audit from the PERSISTED, cumulative counters (see rule 2
     // above) — never a call-scoped accumulator, which would report only
     // this invocation's slice on any job that took more than one call
     // to finish.
-    const finalOutcomes = (completedJob.counters ?? {}) as Record<ImportOutcome, number>;
+    const finalOutcomes = (verifyingJob.counters ?? {}) as Record<ImportOutcome, number>;
 
     // Task 9, Phase B: store re-validation runs as a SECOND phase of this
     // SAME job, after Phase A's writes (above) have already succeeded.
     // `verifyImportedAnchors` persists its own counters and status:
     // COMPLETED (verification fully resolved, INCLUDING a resumed call
-    // clearing an earlier VERIFICATION_INCOMPLETE — fix round 1, minor 1),
-    // VERIFICATION_INCOMPLETE (anchors still pending after this call's
-    // retry/give-up budget), or CANCELLED (an operator cancelled the job
-    // while this call was running — fix round 1, FIX 4). A crash or
-    // thrown error HERE must never relabel Phase A's already-successful
+    // clearing an earlier VERIFICATION_INCOMPLETE — fix round 1, minor 1;
+    // this is also where `finishedAt` finally gets set — fix round 2, FIX
+    // A), VERIFICATION_INCOMPLETE (anchors still pending after this
+    // call's retry/give-up budget), or CANCELLED (an operator cancelled
+    // the job while this call was running — fix round 1, FIX 4). A crash
+    // or thrown error HERE must never relabel Phase A's already-successful
     // import as FAILED (the catch block below would do exactly that), so
     // it gets its own try/catch: the worst a broken verifier can do is
     // leave the job resumable at VERIFICATION_INCOMPLETE, which a later
@@ -406,7 +428,7 @@ async function processImportJob(
       }
     } catch (verifyErr) {
       logger.error(
-        "import job: phase B store re-validation crashed (the import itself already completed)",
+        "import job: phase B store re-validation crashed (Phase A's own writes already succeeded)",
         {
           jobId,
           err: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),

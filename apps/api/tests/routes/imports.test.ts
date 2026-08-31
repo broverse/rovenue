@@ -428,7 +428,7 @@ describe("POST /:id/commit", () => {
 // =============================================================
 
 describe("POST /:id/resume", () => {
-  it("409s unless the job is VERIFICATION_INCOMPLETE", async () => {
+  it("409s unless the job is VERIFICATION_INCOMPLETE or VERIFYING", async () => {
     getImportJob.mockResolvedValue(makeJob({ status: "DRY_RUN_COMPLETE" }));
 
     const res = await req("/job_1/resume", { method: "POST" });
@@ -441,6 +441,18 @@ describe("POST /:id/resume", () => {
     getImportJob.mockResolvedValue(
       makeJob({ status: "VERIFICATION_INCOMPLETE", counters: { verifyAnchorPending: 40 } }),
     );
+
+    const res = await req("/job_1/resume", { method: "POST" });
+
+    expect(res.status).toBe(202);
+    expect(enqueueImportJobMock).toHaveBeenCalledWith("job_1");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "import.resumed" }),
+    );
+  });
+
+  it("Task 10 fix round 2 (FIX A): also accepts VERIFYING, recovering a crash-interrupted run", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "VERIFYING" }));
 
     const res = await req("/job_1/resume", { method: "POST" });
 
@@ -486,6 +498,15 @@ describe("POST /:id/cancel", () => {
 
   it("allows cancelling a VERIFICATION_INCOMPLETE job", async () => {
     getImportJob.mockResolvedValue(makeJob({ status: "VERIFICATION_INCOMPLETE" }));
+    setImportJobStatus.mockResolvedValue(makeJob({ status: "CANCELLED" }));
+
+    const res = await req("/job_1/cancel", { method: "POST" });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("Task 10 fix round 2 (FIX A): allows cancelling a VERIFYING job", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "VERIFYING" }));
     setImportJobStatus.mockResolvedValue(makeJob({ status: "CANCELLED" }));
 
     const res = await req("/job_1/cancel", { method: "POST" });
@@ -556,6 +577,20 @@ describe("GET /:id", () => {
 
     const body = (await res.json()) as { data: { job: Record<string, unknown> } };
     expect(body.data.job.verificationCountersScope).toBe("wholeFile");
+  });
+
+  it("Task 10 fix round 2 (FIX A): labels counters null while VERIFYING, even with stale counters from an earlier attempt", async () => {
+    getImportJob.mockResolvedValue(
+      makeJob({
+        status: "VERIFYING",
+        counters: { verifyAnchorVerified: 5, verifyAnchorNotFound: 0, verifyAnchorPending: 3 },
+      }),
+    );
+
+    const res = await req("/job_1");
+
+    const body = (await res.json()) as { data: { job: Record<string, unknown> } };
+    expect(body.data.job.verificationCountersScope).toBeNull();
   });
 });
 

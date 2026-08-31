@@ -104,18 +104,27 @@ const uploadQuerySchema = z.object({
 //      `runImportJob` already treats any non-COMPLETED job as "keep
 //      going from the checkpoint" (workers/import-runner.ts), and
 //      `verifyImportedAnchors` resumes Phase B from `purchases.verifiedAt`
-//      with no separate state to thread through.
+//      with no separate state to thread through. Fix round 2 (FIX A)
+//      widened `/resume` to also accept `VERIFYING` — see
+//      `RESUMABLE_STATUSES`'s own comment.
 //   2. `auditImportRunCompleted` (write.ts, called from
 //      workers/import-runner.ts) used to fire before Phase B even
 //      started, so the audit trail could say COMPLETED for a run that
 //      went on to end VERIFICATION_INCOMPLETE. FIXED AT THE SOURCE in
 //      Task 10 fix round 1 (FIX 3): the call now happens after Phase B
-//      resolves, with the run's true final status. This file's own
-//      mitigation stays regardless — every read here still comes
-//      straight from the `import_jobs` row's own `status` column, never
-//      from the audit log (`requireImportJob` and every handler below:
-//      none of them ever consult `audit_logs`) — belt-and-suspenders,
-//      not a replacement for the source-level fix.
+//      resolves, with the run's true final status. Fix round 1's own
+//      ruling then surfaced a WORSE gap (fix round 2, FIX A): Phase A
+//      wrote COMPLETED before handing off to Phase B, so a hard crash
+//      (not a catchable error — OOM/deploy-restart/`kill -9`) during
+//      Phase B's whole run left the row permanently reading COMPLETED,
+//      never re-entered by a retry, never audited at all. Phase A now
+//      writes a dedicated `VERIFYING` status instead (migration 0108),
+//      resolved to COMPLETED/VERIFICATION_INCOMPLETE by Phase B exactly
+//      as before. This file's own mitigation stays regardless — every
+//      read here still comes straight from the `import_jobs` row's own
+//      `status` column, never from the audit log (`requireImportJob` and
+//      every handler below: none of them ever consult `audit_logs`) —
+//      belt-and-suspenders, not a replacement for the source-level fix.
 //
 // A third carry-forward (task-9 RE-REVIEW, binding) concerns the
 // counters this file surfaces. Phase B's `verifyAnchorNotFound` /
@@ -152,7 +161,8 @@ type ImportJobStatus =
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED"
-  | "VERIFICATION_INCOMPLETE";
+  | "VERIFICATION_INCOMPLETE"
+  | "VERIFYING";
 
 /** A mapping may be revised any time the job is NOT actively processing
  *  data under the CURRENT mapping — before a dry run, after one
@@ -176,13 +186,30 @@ const DRY_RUN_STARTABLE_STATUSES: ReadonlySet<ImportJobStatus> = MAPPING_EDITABL
 /** Cancellable iff the job is doing (or about to do) something —
  *  everything that is NOT already a terminal outcome. Matches
  *  workers/import-runner.ts's own cancellation check, which polls this
- *  same `status` column at batch/anchor boundaries. */
+ *  same `status` column at batch/anchor boundaries. `VERIFYING` (Task 10
+ *  fix round 2, FIX A) is Phase B actively running — cancellable for the
+ *  same reason `RUNNING`/`VERIFICATION_INCOMPLETE` already are. */
 const CANCELLABLE_STATUSES: ReadonlySet<ImportJobStatus> = new Set([
   "PENDING_MAPPING",
   "DRY_RUN_RUNNING",
   "DRY_RUN_COMPLETE",
   "RUNNING",
   "VERIFICATION_INCOMPLETE",
+  "VERIFYING",
+]);
+
+/** Statuses `/resume` accepts (Task 10 carry-forward 1, widened by fix
+ *  round 2 FIX A). `VERIFICATION_INCOMPLETE` is Phase B's own reported
+ *  "ran out of retry budget" outcome; `VERIFYING` is Phase B either still
+ *  actively running RIGHT NOW (re-enqueueing is a harmless no-op — see
+ *  `enqueueImportJob`'s BullMQ jobId-dedup) or crash-interrupted with no
+ *  retry guaranteed to ever come (a hard `kill -9`/OOM/deploy-restart
+ *  never runs BullMQ's own retry — that only fires for a THROWN error).
+ *  Without accepting `VERIFYING` here, a crash-interrupted run would have
+ *  no operator-triggerable recovery at all. */
+const RESUMABLE_STATUSES: ReadonlySet<ImportJobStatus> = new Set([
+  "VERIFICATION_INCOMPLETE",
+  "VERIFYING",
 ]);
 
 const CANONICAL_FIELD_KEYS: ReadonlySet<string> = new Set(
@@ -203,19 +230,27 @@ const listQuerySchema = z.object({
 
 /** See the module comment (carry-forward 3, task-9 re-review). `null`
  *  when Phase B has never run for this job (no `verifyAnchor*` key in
- *  `counters` yet) — there is nothing to label. `"inspectedSubset"`
- *  covers exactly the one combination that can ONLY be explained by
- *  `anchorCapReached` (verify.ts never persists that flag itself):
- *  `VERIFICATION_INCOMPLETE` is reached iff `anchorsPending > 0 ||
- *  anchorCapReached` (verify.ts), so `VERIFICATION_INCOMPLETE` with a
- *  persisted `verifyAnchorPending` of zero cannot be anything else. Every
- *  other combination — including plain `VERIFICATION_INCOMPLETE` with
- *  pending > 0 — reflects a call that scanned (or is resuming to scan)
- *  the whole file, so it is labelled `"wholeFile"`. */
+ *  `counters` yet) — there is nothing to label. Also `null` while
+ *  `status === "VERIFYING"` (Task 10 fix round 2, FIX A): Phase B is
+ *  ACTIVELY running (or crash-interrupted and awaiting a retry/`/resume`)
+ *  in that state, so whatever `counters` currently hold — possibly
+ *  nothing yet, possibly a stale snapshot from an earlier incomplete
+ *  attempt — do not describe a concluded scan; labelling them
+ *  "wholeFile" or "inspectedSubset" would claim a conclusion that hasn't
+ *  happened. `"inspectedSubset"` covers exactly the one combination that
+ *  can ONLY be explained by `anchorCapReached` (verify.ts never persists
+ *  that flag itself): `VERIFICATION_INCOMPLETE` is reached iff
+ *  `anchorsPending > 0 || anchorCapReached` (verify.ts), so
+ *  `VERIFICATION_INCOMPLETE` with a persisted `verifyAnchorPending` of
+ *  zero cannot be anything else. Every other combination — including
+ *  plain `VERIFICATION_INCOMPLETE` with pending > 0 — reflects a call
+ *  that scanned (or is resuming to scan) the whole file, so it is
+ *  labelled `"wholeFile"`. */
 function verificationCountersScope(
   status: string,
   counters: Record<string, number>,
 ): "wholeFile" | "inspectedSubset" | null {
+  if (status === "VERIFYING") return null;
   const touchedPhaseB =
     "verifyAnchorVerified" in counters ||
     "verifyAnchorNotFound" in counters ||
@@ -741,6 +776,11 @@ importsRoute.post("/:id/commit", uploadMutationRateLimit, async (c) => {
 // going from the checkpoint" (workers/import-runner.ts's own module
 // comment), so Phase A fast-forwards past every already-checkpointed
 // line and Phase B resumes verification where it left off.
+//
+// Task 10 fix round 2 (FIX A): also accepts `VERIFYING` — see
+// `RESUMABLE_STATUSES`'s own comment for why a crash-interrupted
+// `VERIFYING` row needs an operator-triggerable path just as much as a
+// `VERIFICATION_INCOMPLETE` one does.
 
 importsRoute.post("/:id/resume", uploadMutationRateLimit, async (c) => {
   const projectId = c.req.param("projectId");
@@ -752,9 +792,9 @@ importsRoute.post("/:id/resume", uploadMutationRateLimit, async (c) => {
   await requireImportAccess(projectId, user.id);
 
   const job = await requireImportJob(projectId, id);
-  if (job.status !== "VERIFICATION_INCOMPLETE") {
+  if (!RESUMABLE_STATUSES.has(job.status as ImportJobStatus)) {
     throw new HTTPException(409, {
-      message: `Cannot resume: job is ${job.status}, expected VERIFICATION_INCOMPLETE`,
+      message: `Cannot resume: job is ${job.status}, expected VERIFICATION_INCOMPLETE or VERIFYING`,
     });
   }
 
