@@ -46,6 +46,24 @@ export async function getImportJob(
 }
 
 // ---------------------------------------------------------------------------
+// getImportJobById — plain lookup by the cuid2 id alone
+// ---------------------------------------------------------------------------
+//
+// Not project-scoped, matching integration-deliveries.ts's `getDeliveryById`
+// precedent: `id` is already a full, unguessable scope on its own, and the
+// dry-run planner / writer are internal job processors that only ever have
+// the jobId (picked up from `import_jobs` itself, not from a caller-supplied
+// URL param that would need tenant-membership re-checking).
+
+export async function getImportJobById(
+  db: Db,
+  id: string,
+): Promise<ImportJob | null> {
+  const rows = await db.select().from(importJobs).where(eq(importJobs.id, id));
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // listImportJobs — project-scoped, newest first
 // ---------------------------------------------------------------------------
 

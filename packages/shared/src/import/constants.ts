@@ -14,12 +14,26 @@
  * and for the same reason: the root app's global 1 MiB body limit would
  * otherwise shadow it (see apps/api/src/app.ts's `ROUTE_OWNED_BODY_LIMIT_PATH`).
  *
- * 500 MiB comfortably covers a multi-million-row RevenueCat Transactions
- * export (each row is a few hundred bytes) while staying a bounded,
- * defensible ceiling for a raw-body HTTP upload rather than an unbounded
- * one. Streamed to object storage while hashing, never buffered whole.
+ * 2 GiB (raised from an initial 500 MiB — task-6 controller context,
+ * carried-forward item 1): the design spec itself says a real export can
+ * run into the gigabytes, and the route already streams the body straight
+ * to object storage while hashing (never buffers it whole), so nothing
+ * about the implementation caps out earlier than this number does.
+ *
+ * A cap is only as real as the layer in front of it. Checked at the same
+ * time this was raised: `deploy/caddy/Caddyfile` (the edge proxy in front
+ * of `api:3000` in every deploy topology this repo ships) sets no
+ * `request_body { max_size ... }` directive anywhere, so Caddy imposes NO
+ * body-size ceiling of its own on this path — the app's own bodyLimit
+ * registration below is the only limit an upload actually hits. Had Caddy
+ * capped the request body lower than this constant, that lower number
+ * would need to be the real value here instead: a larger app-level cap
+ * behind a smaller proxy cap fails silently as a truncated/reset upload,
+ * which is the same class of bug `apps/api/src/app.ts`'s
+ * `ROUTE_OWNED_BODY_LIMIT_PATH` comment already documents for the
+ * global-vs-route-owned `bodyLimit` shadowing incident.
  */
-export const IMPORT_MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+export const IMPORT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
 /**
  * Upload is a rare, heavy, whole-project operation (one-time history

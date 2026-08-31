@@ -48,11 +48,16 @@ import * as importStore from "../../lib/import-store";
 //
 // Membership is resolved in TWO steps rather than one
 // `assertProjectCapability` call, deliberately: a caller with NO
-// membership row gets 404 ("Project not found"), not 403, matching the
-// GDPR subscriber handlers' cross-project convention — an actor with no
-// relationship to the project should not be able to distinguish "this
+// membership row gets 404 ("Project not found"), not 403 — an actor with
+// no relationship to the project should not be able to distinguish "this
 // project doesn't exist" from "you're not on it" via the status code. A
 // caller who IS a member but lacks the capability gets the ordinary 403.
+// This is NOT the GDPR handlers' convention re-applied: the GDPR *routes*
+// return 403 for a non-member, and reserve 404 for a cross-tenant
+// sub-resource id instead. The 404-for-no-membership posture here is a
+// deliberate, NEW convention for this route (arguably a better one), not
+// a match to an existing one — this route is currently the only dashboard
+// route that does it this way.
 
 /** Enough to hold the header line of any real CSV export (hundreds of
  *  columns, generously quoted) without risking buffering a meaningful

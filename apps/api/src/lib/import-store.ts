@@ -1,5 +1,9 @@
 import type { Readable } from "node:stream";
-import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  DeleteObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { IMPORT_STORAGE_PREFIX } from "@rovenue/shared";
 import { env } from "./env";
@@ -44,6 +48,16 @@ export function buildStorageKey(
   fileName: string,
 ): string {
   return `${IMPORT_STORAGE_PREFIX}/${projectId}/${jobId}/${fileName}`;
+}
+
+/** `{IMPORT_STORAGE_PREFIX}/{projectId}/{jobId}/report.ndjson` — the
+ *  dry-run/writer report artefact for one job, keyed the same way as the
+ *  uploaded source object (scoped by project and job) so the two never
+ *  collide and a human can find both from the job id alone. Owned here,
+ *  not in services/import/report.ts, so this module stays the single
+ *  place that knows the shape of every key in this bucket. */
+export function buildReportStorageKey(projectId: string, jobId: string): string {
+  return `${IMPORT_STORAGE_PREFIX}/${projectId}/${jobId}/report.ndjson`;
 }
 
 export function isStorageConfigured(): boolean {
@@ -95,6 +109,25 @@ export async function putObject(
       ContentType: contentType,
     },
   }).done();
+}
+
+/**
+ * Streams an object back out as a Readable — used by the dry-run planner
+ * (Task 6) to read the uploaded CSV back through the same streaming
+ * parser (`parseCsvStream`) it was validated with at upload time, and by
+ * the writer (Task 7) for the same reason. `res.Body` is typed loosely by
+ * the SDK (`StreamingBlobPayloadOutputTypes`, a union covering browser and
+ * Node runtimes); this module only ever runs under Node, where it is
+ * always a `Readable`.
+ */
+export async function getObject(key: string): Promise<Readable> {
+  const res = await s3().send(
+    new GetObjectCommand({ Bucket: env.IMPORT_STORAGE_BUCKET!, Key: key }),
+  );
+  if (!res.Body) {
+    throw new Error(`import-store: getObject returned an empty body for key ${key}`);
+  }
+  return res.Body as unknown as Readable;
 }
 
 /** Used by the retention sweep once a job reaches a terminal state (see

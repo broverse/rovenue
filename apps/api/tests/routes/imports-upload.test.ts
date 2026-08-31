@@ -235,8 +235,8 @@ describe("POST /dashboard/projects/:projectId/imports", () => {
     // node_modules/hono/dist/middleware/body-limit: `contentLength >
     // maxSize ? onError(c) : next()`, no body read at all) — so a tiny
     // real body with a declared length one byte over the cap exercises
-    // the same rejection path a real 500 MiB+1 upload would, without
-    // this test allocating 500 MB. The declared length is what a real
+    // the same rejection path a real over-the-cap upload would, without
+    // this test allocating gigabytes. The declared length is what a real
     // client's Content-Length header would carry for an over-limit file.
     const res = await upload(
       csvBytes("a"),
@@ -299,6 +299,33 @@ describe("POST /dashboard/projects/:projectId/imports", () => {
     };
     expect(body.data.job.presetId).toBeNull();
     expect(body.data.job.mapping).toEqual({});
+  });
+
+  it("cleans up the stored object when the job insert fails after the upload committed (orphan-path)", async () => {
+    // The common path (object stored, then createImportJob/audit fails) is
+    // already safe in the route's own catch block — it best-effort deletes
+    // the object it just wrote so a failed upload never leaves an
+    // untracked PII object behind. This pins that behavior with a forced
+    // failure (task-6 controller context, carried-forward item 2) rather
+    // than leaving it proven only by reading the code.
+    createImportJob.mockRejectedValueOnce(new Error("insert boom"));
+
+    const res = await upload(csvBytes(RC_TRANSACTIONS_CSV));
+
+    expect(res.status).toBe(500);
+    expect(buildStorageKey).toHaveBeenCalledTimes(1);
+    const expectedKey = buildStorageKey.mock.results[0]?.value as string;
+    expect(expectedKey).toBeTruthy();
+    expect(deleteObject).toHaveBeenCalledWith(expectedKey);
+    // The original failure is what the caller sees. `loggerError` here
+    // also captures the shared errorHandler's own generic "unhandled
+    // error" log (same mocked logger module) — what matters is that the
+    // cleanup path itself succeeded silently, i.e. it never logged its
+    // OWN "failed to clean up" message.
+    expect(loggerError).not.toHaveBeenCalledWith(
+      expect.stringContaining("failed to clean up"),
+      expect.anything(),
+    );
   });
 
   it("returns 503 when import storage is not configured", async () => {

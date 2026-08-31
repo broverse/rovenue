@@ -117,6 +117,32 @@ export async function upsertPurchase(
 }
 
 /**
+ * Plain (non-locking) lookup of the full purchase row by its natural key.
+ * Used by the data-import dry-run planner (Task 6) to decide whether a
+ * row will create a new purchase or update an existing one — a dry run
+ * must never take a row lock (`lockPurchaseStatusByStoreTransaction`'s
+ * `FOR UPDATE`, below) since it writes nothing and holds no transaction
+ * open across the whole file.
+ */
+export async function findPurchaseByStoreTransaction(
+  db: Db,
+  store: Store,
+  storeTransactionId: string,
+): Promise<Purchase | null> {
+  const rows = await db
+    .select()
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.store, store),
+        eq(purchases.storeTransactionId, storeTransactionId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
  * Reads the current status of a purchase by natural key, taking a
  * row lock so concurrent webhook deliveries of the same transaction
  * serialize. Returns null when the row does not yet exist (first
