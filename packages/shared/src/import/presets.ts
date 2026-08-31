@@ -15,9 +15,6 @@ import type { CanonicalField } from "./canonical";
 export const REVENUECAT_TRANSACTIONS_PRESET_ID = "revenuecat_transactions";
 export const REVENUECAT_GOOGLE_TOKEN_PRESET_ID = "revenuecat_google_token";
 
-/** Minimum number of matched columns before a preset is proposed at all. */
-const MIN_MATCHED_COLUMNS = 1;
-
 const REVENUECAT_TRANSACTIONS_COLUMNS: Record<string, CanonicalField> = {
   rc_original_app_user_id: "subscriberExternalId",
   rc_last_seen_app_user_id_alias: "subscriberAliasId",
@@ -60,6 +57,16 @@ const REVENUECAT_GOOGLE_TOKEN_COLUMNS: Record<string, CanonicalField> = {
   google_product_id: "productIdentifier",
 };
 
+// Columns that genuinely identify a vendor's export, as opposed to a
+// column name generic enough to appear in any CSV (`store`, `country`).
+// detectPreset requires at least one anchor before proposing a preset at
+// all — without this, a header whose only recognized column is
+// something generic gets reported as a confident match for a vendor
+// it isn't, and a caller that checks `presetId !== null` tells the
+// operator their unrelated file is a RevenueCat export.
+const REVENUECAT_TRANSACTIONS_ANCHOR_COLUMNS = ["rc_original_app_user_id", "store_transaction_id"];
+const REVENUECAT_GOOGLE_TOKEN_ANCHOR_COLUMNS = ["google_purchase_token"];
+
 // Deliberately no Adapty preset (spec §3): Adapty's own export column
 // table could not be confirmed from first-party docs this session.
 // Shipping a guessed table would be fabrication; Adapty users go
@@ -68,11 +75,23 @@ const REVENUECAT_GOOGLE_TOKEN_COLUMNS: Record<string, CanonicalField> = {
 export type ImportPreset = {
   presetId: string;
   columns: Record<string, CanonicalField>;
+  /** At least one of these must be present in the header for this
+   *  preset to be proposed at all — see the comment above the anchor
+   *  column lists. */
+  anchorColumns: string[];
 };
 
 export const IMPORT_PRESETS: ImportPreset[] = [
-  { presetId: REVENUECAT_TRANSACTIONS_PRESET_ID, columns: REVENUECAT_TRANSACTIONS_COLUMNS },
-  { presetId: REVENUECAT_GOOGLE_TOKEN_PRESET_ID, columns: REVENUECAT_GOOGLE_TOKEN_COLUMNS },
+  {
+    presetId: REVENUECAT_TRANSACTIONS_PRESET_ID,
+    columns: REVENUECAT_TRANSACTIONS_COLUMNS,
+    anchorColumns: REVENUECAT_TRANSACTIONS_ANCHOR_COLUMNS,
+  },
+  {
+    presetId: REVENUECAT_GOOGLE_TOKEN_PRESET_ID,
+    columns: REVENUECAT_GOOGLE_TOKEN_COLUMNS,
+    anchorColumns: REVENUECAT_GOOGLE_TOKEN_ANCHOR_COLUMNS,
+  },
 ];
 
 export type PresetDetection = {
@@ -84,19 +103,22 @@ export type PresetDetection = {
 
 /**
  * Fingerprints an uploaded file's header against every known preset and
- * returns the best match, or null if no preset shares even one column
- * name with the header. The returned mapping only ever contains columns
- * that are BOTH in the header and in the chosen preset's column table —
- * unrecognized header columns (e.g. a customer's own extra fields) are
- * never included, and never guessed at.
+ * returns the best match, or null if no preset has even one of its
+ * anchor columns present in the header. A preset is never proposed on
+ * the strength of generic columns alone (`store`, `country`, ...) — see
+ * the anchor-column comment above IMPORT_PRESETS. The returned mapping
+ * only ever contains columns that are BOTH in the header and in the
+ * chosen preset's column table — unrecognized header columns (e.g. a
+ * customer's own extra fields) are never included, and never guessed at.
  */
 export function detectPreset(header: string[]): PresetDetection | null {
   const headerSet = new Set(header);
 
   let best: { preset: ImportPreset; matched: number } | undefined;
   for (const preset of IMPORT_PRESETS) {
+    const hasAnchor = preset.anchorColumns.some((col) => headerSet.has(col));
+    if (!hasAnchor) continue;
     const matched = Object.keys(preset.columns).filter((col) => headerSet.has(col)).length;
-    if (matched < MIN_MATCHED_COLUMNS) continue;
     if (!best || matched > best.matched) {
       best = { preset, matched };
     }

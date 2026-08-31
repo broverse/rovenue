@@ -64,4 +64,30 @@ describe("detectPreset", () => {
       detectPreset(["user_id", "google_purchase_token", "google_product_id"])?.presetId,
     ).toBe(REVENUECAT_GOOGLE_TOKEN_PRESET_ID);
   });
+
+  // Carry-forward from the Task 2 review: a header whose only recognised
+  // column is something generic (here, `country`) must not be reported as
+  // a confident RevenueCat detection — `country` appears in the RC
+  // Transactions column table but identifies nothing about the vendor.
+  // A caller that checks `presetId !== null` would otherwise tell an
+  // operator their unrelated file is a RevenueCat export.
+  it("detects nothing from a header carrying only a generic column", () => {
+    expect(detectPreset(["country"])).toBeNull();
+  });
+
+  it("detects nothing from a header of generic columns even when several are recognised", () => {
+    expect(detectPreset(["store", "country", "updated_at"])).toBeNull();
+  });
+
+  it("still detects with a partial match when an anchor column is present alongside generic ones", () => {
+    const r = detectPreset(["store_transaction_id", "country", "updated_at"]);
+    expect(r?.presetId).toBe(REVENUECAT_TRANSACTIONS_PRESET_ID);
+    expect(r!.matched).toBeLessThan(r!.total);
+    expect(r!.matched).toBeGreaterThan(0);
+  });
+
+  it("detects the Google-token preset via its anchor even with no other columns matched", () => {
+    const r = detectPreset(["google_purchase_token", "some_unrelated_column"]);
+    expect(r?.presetId).toBe(REVENUECAT_GOOGLE_TOKEN_PRESET_ID);
+  });
 });
