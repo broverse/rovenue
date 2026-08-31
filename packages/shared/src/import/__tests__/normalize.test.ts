@@ -1,0 +1,215 @@
+import { describe, expect, it } from "vitest";
+import type { CanonicalRow } from "../canonical";
+import {
+  STORE_VALUE_MAP,
+  deriveStatus,
+  normalizeMoney,
+  normalizeRow,
+  parseSourceTimestamp,
+  type NormalizedRow,
+} from "../normalize";
+
+const NOW = new Date("2026-08-31T00:00:00Z");
+const d = (s: string) => new Date(s);
+
+// A minimal, realistic canonical row: a live App Store subscription, one
+// row into its chain, not a trial, no refund/cancellation/grace. Every
+// test below overrides only the fields it's exercising.
+//
+// NOTE (ruling 1 of the task-3 controller context): normalizeRow consumes
+// CanonicalRow, keyed by the canonical field names from Task 1 — never
+// source column names. The mapping layer (Task 2) is the only place
+// source column names exist.
+const rcRow: CanonicalRow = {
+  subscriberExternalId: "user_1",
+  store: "app_store",
+  storeTransactionId: "txn_base",
+  productIdentifier: "pro_monthly",
+  purchaseDate: "2026-01-01 00:00:00",
+  expiresDate: "2026-12-01 00:00:00",
+  isTrial: "false",
+};
+
+describe("STORE_VALUE_MAP", () => {
+  it("maps every documented source store value", () => {
+    expect(STORE_VALUE_MAP.app_store).toBe("APP_STORE");
+    expect(STORE_VALUE_MAP.play_store).toBe("PLAY_STORE");
+    expect(STORE_VALUE_MAP.stripe).toBe("STRIPE");
+    expect(STORE_VALUE_MAP.promotional).toBe("MANUAL");
+  });
+});
+
+describe("deriveStatus", () => {
+  const base = { isTrial: false, refundedAt: null, gracePeriodEndDate: null };
+
+  it("uses effective_end_time in preference to end_time", () => {
+    expect(
+      deriveStatus(
+        { ...base, expiresDate: d("2030-01-01T00:00:00Z"), effectiveEndDate: d("2020-01-01T00:00:00Z") },
+        NOW,
+      ),
+    ).toBe("EXPIRED");
+  });
+
+  it("treats a refund as terminal regardless of dates", () => {
+    expect(
+      deriveStatus(
+        {
+          ...base,
+          refundedAt: d("2026-01-01T00:00:00Z"),
+          expiresDate: d("2030-01-01T00:00:00Z"),
+          effectiveEndDate: null,
+        },
+        NOW,
+      ),
+    ).toBe("REFUNDED");
+  });
+
+  it("reports grace period only while the grace window is still open", () => {
+    expect(
+      deriveStatus(
+        {
+          ...base,
+          expiresDate: d("2026-08-01T00:00:00Z"),
+          effectiveEndDate: d("2026-08-01T00:00:00Z"),
+          gracePeriodEndDate: d("2026-09-30T00:00:00Z"),
+        },
+        NOW,
+      ),
+    ).toBe("GRACE_PERIOD");
+    expect(
+      deriveStatus(
+        {
+          ...base,
+          expiresDate: d("2026-08-01T00:00:00Z"),
+          effectiveEndDate: d("2026-08-01T00:00:00Z"),
+          gracePeriodEndDate: d("2026-08-10T00:00:00Z"),
+        },
+        NOW,
+      ),
+    ).toBe("EXPIRED");
+  });
+
+  it("treats a lifetime purchase (no end date at all) as live", () => {
+    expect(deriveStatus({ ...base, expiresDate: null, effectiveEndDate: null }, NOW)).toBe("ACTIVE");
+    expect(deriveStatus({ ...base, isTrial: true, expiresDate: null, effectiveEndDate: null }, NOW)).toBe("TRIAL");
+  });
+
+  it("reports TRIAL instead of ACTIVE while a trial's end date is still in the future", () => {
+    expect(
+      deriveStatus(
+        { ...base, isTrial: true, expiresDate: d("2030-01-01T00:00:00Z"), effectiveEndDate: null },
+        NOW,
+      ),
+    ).toBe("TRIAL");
+  });
+});
+
+describe("normalizeMoney", () => {
+  it("maps price_in_usd to a USD amount", () => {
+    expect(normalizeMoney({ priceUsd: "9.99" })).toEqual({ priceAmount: "9.99", priceCurrency: "USD" });
+  });
+
+  it("stores a refund amount positive", () => {
+    expect(normalizeMoney({ priceUsd: "-9.99" })).toEqual({ priceAmount: "9.99", priceCurrency: "USD" });
+  });
+
+  it("emits no money at all rather than guessing a currency", () => {
+    expect(normalizeMoney({})).toEqual({ priceAmount: null, priceCurrency: null });
+  });
+
+  it("emits no money for a value that doesn't parse as a decimal, rather than passing garbage through", () => {
+    expect(normalizeMoney({ priceUsd: "not-a-number" })).toEqual({ priceAmount: null, priceCurrency: null });
+  });
+});
+
+describe("parseSourceTimestamp", () => {
+  it("parses RevenueCat's space-separated UTC timestamps as UTC", () => {
+    expect(parseSourceTimestamp("2023-01-01 08:27:06")).toEqual(new Date("2023-01-01T08:27:06Z"));
+  });
+
+  it("rejects an ambiguous timestamp instead of guessing a zone", () => {
+    expect(() => parseSourceTimestamp("01/02/2023")).toThrow();
+  });
+});
+
+describe("normalizeRow", () => {
+  it("normalizes a plain live App Store row to ACTIVE", () => {
+    const row = normalizeRow(rcRow, { now: NOW }) as NormalizedRow;
+    expect("error" in row).toBe(false);
+    expect(row.status).toBe("ACTIVE");
+    expect(row.store).toBe("APP_STORE");
+    expect(row.storeTransactionId).toBe("txn_base");
+    expect(row.priceAmount).toBeNull();
+    expect(row.priceCurrency).toBeNull();
+  });
+
+  // Ruling 1: written against canonical keys (purchaseDate / expiresDate),
+  // not the brief's source-column name (start_time_mapped) — that was a
+  // defect in the brief per the task-3 controller context.
+  it("treats Google's end_time-before-start_time as expired, not malformed", () => {
+    const row = normalizeRow(
+      { ...rcRow, store: "play_store", purchaseDate: "2026-05-01 00:00:00", expiresDate: "2026-04-01 00:00:00" },
+      { now: NOW },
+    );
+    expect("error" in row).toBe(false);
+    expect((row as NormalizedRow).status).toBe("EXPIRED");
+  });
+
+  it("keeps a cancelled-but-unexpired subscription ACTIVE and records auto-renew off", () => {
+    const row = normalizeRow(
+      { ...rcRow, unsubscribeDetectedAt: "2026-08-01 00:00:00", expiresDate: "2026-12-01 00:00:00" },
+      { now: NOW },
+    ) as NormalizedRow;
+    expect(row.status).toBe("ACTIVE");
+    expect(row.autoRenewStatus).toBe(false);
+    expect(row.cancellationDate).toEqual(d("2026-08-01T00:00:00Z"));
+  });
+
+  it("marks FAMILY_SHARED rows as revenue-excluded", () => {
+    const row = normalizeRow({ ...rcRow, ownershipType: "FAMILY_SHARED" }, { now: NOW }) as NormalizedRow;
+    expect(row.excludeFromRevenue).toBe(true);
+  });
+
+  it("does not mark an ordinary row as revenue-excluded", () => {
+    const row = normalizeRow(rcRow, { now: NOW }) as NormalizedRow;
+    expect(row.excludeFromRevenue).toBe(false);
+  });
+
+  it("maps price_in_usd through to the normalized row", () => {
+    const row = normalizeRow({ ...rcRow, priceUsd: "9.99" }, { now: NOW }) as NormalizedRow;
+    expect(row.priceAmount).toBe("9.99");
+    expect(row.priceCurrency).toBe("USD");
+  });
+
+  it("treats a promotional row as anchorless: no storeTransactionId is fabricated here", () => {
+    const row = normalizeRow(
+      { ...rcRow, store: "promotional", storeTransactionId: undefined },
+      { now: NOW },
+    ) as NormalizedRow;
+    expect("error" in row).toBe(false);
+    expect(row.store).toBe("MANUAL");
+    expect(row.isAnchorless).toBe(true);
+    expect(row.storeTransactionId).toBeNull();
+  });
+
+  it("rejects an unknown store value rather than silently dropping the row", () => {
+    const row = normalizeRow({ ...rcRow, store: "some_new_store_we_dont_know" }, { now: NOW });
+    expect("error" in row).toBe(true);
+  });
+
+  it("rejects a real (non-anchorless) row with no store transaction id", () => {
+    const row = normalizeRow({ ...rcRow, storeTransactionId: undefined }, { now: NOW });
+    expect("error" in row).toBe(true);
+  });
+
+  it("rejects a row with an unparseable purchase date", () => {
+    const row = normalizeRow({ ...rcRow, purchaseDate: "not-a-date" }, { now: NOW });
+    expect("error" in row).toBe(true);
+  });
+
+  it("rejects a row missing a required field", () => {
+    const row = normalizeRow({ ...rcRow, subscriberExternalId: undefined }, { now: NOW });
+    expect("error" in row).toBe(true);
+  });
+});
