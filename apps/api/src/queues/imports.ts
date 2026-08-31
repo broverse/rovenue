@@ -78,15 +78,35 @@ export const IMPORT_JOB_OPTIONS: JobsOptions = {
 };
 
 /**
- * BullMQ job options for one enqueue call. `jobId` is the import_jobs
- * row's own cuid2 id — one BullMQ job per import job, so re-enqueueing
- * the same id (e.g. an operator resuming a cancelled run) naturally
- * coalesces with a still-active job under BullMQ's own dedup-by-jobId
- * behaviour, and is directly traceable back to the `import_jobs` row
- * from a queue dashboard.
+ * BullMQ job options for one enqueue call.
+ *
+ * Final-fix-wave FIX 1: this used to pin `jobId` to the import_jobs row's
+ * own cuid2 id, reasoning that re-enqueueing the same id (an operator
+ * resuming a cancelled run) would "naturally coalesce" with a
+ * still-active job. That reasoning missed BullMQ's actual dedup
+ * semantics: `addStandardJob`'s Lua checks `EXISTS jobIdKey` and, on a
+ * hit, calls `handleDuplicatedJob` — which emits a `duplicated` event and
+ * returns the id WITHOUT QUEUEING ANYTHING — for a *completed or failed*
+ * job still inside its `removeOnComplete`/`removeOnFail` retention
+ * window, not just an active one. With a 7-day completed / 30-day failed
+ * retention, `/resume` on `VERIFICATION_INCOMPLETE`, re-running a dry run
+ * after a mapping fix, and cancel-then-rerun all deduped against a
+ * terminal job and silently ran nothing — `queue.add()` resolves
+ * normally, so nothing surfaced. No other enqueue site in this repo pins
+ * `jobId`; this was not a pattern worth preserving.
+ *
+ * Every enqueue is now a genuinely distinct BullMQ job (no `jobId`, so
+ * BullMQ assigns its own unique id). The idempotency this system
+ * actually needs comes from elsewhere, not from job-id coalescing:
+ * `IMPORT_JOB_CONCURRENCY_PER_PROJECT`'s Postgres advisory lock
+ * (workers/import-runner.ts) already serializes concurrent runs for one
+ * project, and `processImportJob`'s own `status === "COMPLETED"` guard
+ * makes a second run over an already-finished job a harmless no-op once
+ * that lock is released — so a redundant re-enqueue costs at most one
+ * blocked worker slot, never corruption or silence.
  */
-export function buildImportJobOptions(importJobId: string): JobsOptions {
-  return { ...IMPORT_JOB_OPTIONS, jobId: importJobId };
+export function buildImportJobOptions(): JobsOptions {
+  return { ...IMPORT_JOB_OPTIONS };
 }
 
 /**
@@ -104,22 +124,20 @@ export function buildImportJobOptions(importJobId: string): JobsOptions {
  * which is dry-run-startable again; the operator's own explicit retry
  * (another `POST .../dry-run`) is what reruns it, never an automatic one.
  *
- * `jobId` is prefixed (`dry-run:${id}`), NOT the bare import-job id
- * `buildImportJobOptions` uses for a commit/resume run — the two must
- * never collide in BullMQ's id space: a completed dry-run job lingering
- * under `removeOnComplete`'s grace window must never make a same-id
- * commit enqueue silently coalesce with it. The SAME prefixed id across
- * repeated dry-run attempts for ONE job is deliberate — the same
- * "re-enqueueing the same id coalesces with a still-active job" property
- * `buildImportJobOptions` documents, belt-and-suspenders alongside the
- * route's own status-gate 409 for "a second dry-run request while
- * DRY_RUN_RUNNING must not start a second scan".
+ * Final-fix-wave FIX 1: no longer pins a `jobId` (see
+ * `buildImportJobOptions`'s comment for why that was actively harmful —
+ * a re-run of the dry run after a mapping fix used to dedupe against the
+ * PREVIOUS completed dry-run job and brick the row for 7 days).
+ * Duplicate concurrent scans are already prevented one layer up: the
+ * route only calls this from `DRY_RUN_STARTABLE_STATUSES` and
+ * synchronously flips the row to `DRY_RUN_RUNNING` before enqueueing, so
+ * a second `POST .../dry-run` while one is in flight 409s before it ever
+ * reaches here.
  */
-export function buildImportDryRunJobOptions(importJobId: string): JobsOptions {
+export function buildImportDryRunJobOptions(): JobsOptions {
   return {
     attempts: 1,
     removeOnComplete: { age: 7 * 86_400, count: 1_000 },
     removeOnFail: { age: 30 * 86_400 },
-    jobId: `dry-run:${importJobId}`,
   };
 }

@@ -201,12 +201,18 @@ const CANCELLABLE_STATUSES: ReadonlySet<ImportJobStatus> = new Set([
 /** Statuses `/resume` accepts (Task 10 carry-forward 1, widened by fix
  *  round 2 FIX A). `VERIFICATION_INCOMPLETE` is Phase B's own reported
  *  "ran out of retry budget" outcome; `VERIFYING` is Phase B either still
- *  actively running RIGHT NOW (re-enqueueing is a harmless no-op — see
- *  `enqueueImportJob`'s BullMQ jobId-dedup) or crash-interrupted with no
- *  retry guaranteed to ever come (a hard `kill -9`/OOM/deploy-restart
- *  never runs BullMQ's own retry — that only fires for a THROWN error).
- *  Without accepting `VERIFYING` here, a crash-interrupted run would have
- *  no operator-triggerable recovery at all. */
+ *  actively running RIGHT NOW (re-enqueueing is a harmless no-op — the
+ *  new job blocks on `withProjectImportLock`'s Postgres advisory lock
+ *  until the in-flight run releases it, then `processImportJob`'s own
+ *  `status === "COMPLETED"` guard makes it a no-op; final-fix-wave FIX 1
+ *  removed the BullMQ jobId pinning this comment used to rely on,
+ *  because that pinning was ALSO what made `/resume` unreachable in the
+ *  first place — see `queues/imports.ts`'s `buildImportJobOptions`) or
+ *  crash-interrupted with no retry guaranteed to ever come (a hard
+ *  `kill -9`/OOM/deploy-restart never runs BullMQ's own retry — that only
+ *  fires for a THROWN error). Without accepting `VERIFYING` here, a
+ *  crash-interrupted run would have no operator-triggerable recovery at
+ *  all. */
 const RESUMABLE_STATUSES: ReadonlySet<ImportJobStatus> = new Set([
   "VERIFICATION_INCOMPLETE",
   "VERIFYING",
@@ -675,10 +681,12 @@ importsRoute.post("/:id/dry-run", uploadMutationRateLimit, async (c) => {
   // job already in DRY_RUN_RUNNING must not start a second scan" (Task 10
   // fix round 1, FIX 2) — DRY_RUN_RUNNING is deliberately excluded from
   // this set, so a second request 409s here and never reaches the
-  // enqueue call below. `enqueueImportDryRun`'s own jobId-dedup
-  // (`dry-run:${id}` — queues/imports.ts) is a second, redundant layer
-  // for the same guarantee under a genuine race between two concurrent
-  // requests.
+  // enqueue call below. Final-fix-wave FIX 1 removed
+  // `enqueueImportDryRun`'s BullMQ jobId pinning (it was silently
+  // bricking re-runs, not just guarding this race), so this status-gate
+  // check is the ONLY defence now — a genuine race between two
+  // concurrent requests reading the status before either write lands is
+  // a pre-existing, narrower gap, unrelated to this fix.
   if (!DRY_RUN_STARTABLE_STATUSES.has(job.status as ImportJobStatus)) {
     throw new HTTPException(409, {
       message: `Cannot start a dry run while the job is ${job.status}`,

@@ -495,14 +495,16 @@ export function getImportQueue(): Queue<ImportRunJobData> {
   return cachedQueue;
 }
 
-/** Enqueues (or re-enqueues, e.g. after a cancel) one import job's run. */
+/**
+ * Enqueues (or re-enqueues, e.g. after a cancel or a `/resume`) one
+ * import job's run. Final-fix-wave FIX 1: each call is now a genuinely
+ * distinct BullMQ job (see `buildImportJobOptions`'s comment) — a
+ * retained completed/failed job from an earlier attempt can no longer
+ * silently swallow this one.
+ */
 export async function enqueueImportJob(importJobId: string): Promise<void> {
   const queue = getImportQueue();
-  await queue.add(
-    IMPORT_RUN_JOB_NAME,
-    { importJobId },
-    buildImportJobOptions(importJobId),
-  );
+  await queue.add(IMPORT_RUN_JOB_NAME, { importJobId }, buildImportJobOptions());
 }
 
 /**
@@ -510,15 +512,21 @@ export async function enqueueImportJob(importJobId: string): Promise<void> {
  * queue as a commit run, distinguished by BullMQ job NAME
  * (`IMPORT_DRY_RUN_JOB_NAME`) — see `createImportRunnerWorker`'s dispatch
  * below and `buildImportDryRunJobOptions`'s own comment for why this
- * needs its own (single-attempt, separately-namespaced-id) job options
- * rather than reusing `buildImportJobOptions`.
+ * needs its own (single-attempt) job options rather than reusing
+ * `buildImportJobOptions`.
+ *
+ * Final-fix-wave FIX 1: no longer pins a `jobId` — see
+ * `buildImportDryRunJobOptions`'s comment. Duplicate concurrent scans
+ * stay prevented by the route's own status-gate 409 ("a second dry-run
+ * request while DRY_RUN_RUNNING must not start a second scan"), not by
+ * BullMQ id coalescing.
  */
 export async function enqueueImportDryRun(importJobId: string): Promise<void> {
   const queue = getImportQueue();
   await queue.add(
     IMPORT_DRY_RUN_JOB_NAME,
     { importJobId },
-    buildImportDryRunJobOptions(importJobId),
+    buildImportDryRunJobOptions(),
   );
 }
 
