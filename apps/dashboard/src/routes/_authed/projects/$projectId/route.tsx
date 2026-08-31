@@ -26,6 +26,7 @@ function useBreadcrumbTitleKey(): string {
   if (id.includes("/live-events")) return "breadcrumb.liveEvents";
   if (id.includes("/products")) return "breadcrumb.products";
   if (id.includes("/transactions")) return "breadcrumb.transactions";
+  if (id.includes("/imports")) return "breadcrumb.imports";
   if (id.includes("/feature-flags")) return "breadcrumb.featureFlags";
   if (id.includes("/experiments")) return "breadcrumb.experiments";
   if (id.includes("/apps")) return "breadcrumb.apps";

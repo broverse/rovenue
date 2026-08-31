@@ -234,6 +234,7 @@
       "subscribers": "Customers",
       "subscriptions": "Subscriptions",
       "transactions": "Transactions",
+      "imports": "Imports",
       "funnels": "Funnels",
       "experiments": "Experiments",
       "flags": "Remote Config",
@@ -251,6 +252,10 @@
       "settings": "Settings",
       "refundShield": "Refund Shield"
     }
+  },
+  "imports": {
+    "title": "Data import",
+    "subtitle": "Bring subscriber history in from RevenueCat, Adapty, or a plain CSV export."
   },
   "stores": {
     "title": "Stores",
@@ -373,6 +378,7 @@
     "offerings": "Offerings",
     "access": "Access",
     "transactions": "Transactions",
+    "imports": "Imports",
     "featureFlags": "Remote Config",
     "experiments": "Experiments",
     "credits": "Credits",
