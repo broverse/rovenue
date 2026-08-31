@@ -1,8 +1,9 @@
 import { Readable } from "node:stream";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { parseCsvStream, type CanonicalField } from "@rovenue/shared";
+import { drizzle } from "@rovenue/db";
 import { db } from "../../../../packages/db/src/drizzle/client";
 import {
   access,
@@ -57,15 +58,20 @@ const PRODUCT_ID = `prod_import_write_${createId()}`;
 const PRODUCT_IDENTIFIER = "pro_monthly";
 const APPLE_STORE_PRODUCT_ID = "com.example.pro.monthly";
 
-/** Every fixture date sits inside the `revenue_events` partition range
- *  (2024-01 .. 2028-12, migration 0015) — a range-partitioned table has
- *  no DEFAULT partition, so a date outside it is an insert error, not a
- *  silently misfiled row. */
+/** Every fixture date in THIS file's other describe blocks sits inside
+ *  the `revenue_events` partition range (2024-01 .. 2028-12, migration
+ *  0015) — a range-partitioned table has no DEFAULT partition, so a date
+ *  outside it is an insert error, not a silently misfiled row. */
 const PURCHASE_DATE = "2026-01-15 10:00:00";
 const SECOND_PURCHASE_DATE = "2026-02-15 10:00:00";
 /** Far enough out that every fixture purchase is live (ACTIVE), which is
  *  what makes `syncAccess` observable. */
 const FUTURE_EXPIRY = "2028-12-01 00:00:00";
+/** Task 8a — deliberately BEFORE the 2024-01 partition floor above. The
+ *  "partition provisioning" describe block below exists specifically to
+ *  prove a date here no longer dies with "no partition of relation
+ *  found for row". */
+const PRE_2024_PURCHASE_DATE = "2011-05-10 10:00:00";
 
 const SOURCE_COLUMNS = [
   "subscriber_id",
@@ -203,6 +209,29 @@ async function sumRevenueUsd(): Promise<string> {
     .from(revenueEvents)
     .where(eq(revenueEvents.projectId, PROJECT_ID));
   return row?.total ?? "0";
+}
+
+async function countRevenueEvents(): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(revenueEvents)
+    .where(eq(revenueEvents.projectId, PROJECT_ID));
+  return row?.n ?? 0;
+}
+
+/** True once `revenue_events` has a real child partition covering
+ *  `month` (a UTC month-start Date) — used to prove
+ *  `ensureRevenueEventPartitions` actually ran, not just that the
+ *  insert happened to succeed some other way. */
+async function hasRevenueEventPartitionFor(month: Date): Promise<boolean> {
+  const yyyy = month.getUTCFullYear();
+  const mm = String(month.getUTCMonth() + 1).padStart(2, "0");
+  const qualifiedName = `public.revenue_events_${yyyy}_${mm}`;
+  const result = await db.execute(
+    sql`SELECT to_regclass(${qualifiedName}) IS NOT NULL AS present`,
+  );
+  const rows = (result as unknown as { rows: Array<{ present: boolean }> }).rows;
+  return rows[0]?.present === true;
 }
 
 async function projectStateSnapshot() {
@@ -756,5 +785,125 @@ describe("writeImportBatch — non-writable rows", () => {
     expect(outcome.outcomes.invalidRow).toBe(1);
     expect(await countPurchases()).toBe(0);
     expect(await countSubscribers()).toBe(0);
+  });
+});
+
+// =============================================================
+// Task 8a — revenue_events partition provisioning
+// =============================================================
+//
+// `revenue_events` (migration 0015) is range-partitioned on `eventDate`
+// with monthly partitions covering only 2024-01..2028-12 and NO default
+// partition — an import whose earliest history predates 2024 used to
+// die outright with "no partition of relation ... found for row". This
+// is the acceptance test for the fix: the feature's whole promise (carry
+// over years of history a competitor's importer drops) is worthless if
+// this doesn't pass.
+
+describe("writeImportBatch — revenue_events partition provisioning", () => {
+  it("imports a purchase and revenue event dated before the 2024 partition floor, and the row is really there afterwards", async () => {
+    const jobId = await seedJob();
+    const preMonth = new Date(Date.UTC(2011, 4, 1)); // 2011-05
+
+    expect(await hasRevenueEventPartitionFor(preMonth)).toBe(false);
+
+    const outcome = await runFile(
+      jobId,
+      csvOf([
+        {
+          subscriberId: "rc_sub_pre2024",
+          storeTxnId: "apple_txn_pre2024",
+          priceUsd: "9.99",
+          purchaseDate: PRE_2024_PURCHASE_DATE,
+        },
+      ]),
+    );
+
+    expect(outcome.outcomes.willCreate).toBe(1);
+    expect(await hasRevenueEventPartitionFor(preMonth)).toBe(true);
+    expect(await countPurchases()).toBe(1);
+    expect(await countRevenueEvents()).toBe(1);
+
+    // Queryable, not just present as a row count: the actual purchase
+    // and revenue event carry the pre-2024 date this test asked for.
+    const [purchaseRow] = await findPurchases();
+    expect(purchaseRow?.purchaseDate.toISOString()).toBe(
+      new Date(`${PRE_2024_PURCHASE_DATE.replace(" ", "T")}Z`).toISOString(),
+    );
+    const [revenueRow] = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, PROJECT_ID));
+    expect(revenueRow?.eventDate.toISOString()).toBe(
+      new Date(`${PRE_2024_PURCHASE_DATE.replace(" ", "T")}Z`).toISOString(),
+    );
+    expect(Number(revenueRow?.amountUsd)).toBeCloseTo(9.99, 2);
+  });
+
+  it("provisions partitions before Phase A writes anything: a second, overlapping import does not error", async () => {
+    const jobId1 = await seedJob();
+    await runFile(
+      jobId1,
+      csvOf([
+        {
+          subscriberId: "rc_sub_pre2024_overlap_a",
+          storeTxnId: "apple_txn_pre2024_overlap_a",
+          priceUsd: "9.99",
+          purchaseDate: PRE_2024_PURCHASE_DATE,
+        },
+      ]),
+    );
+
+    // A second job whose file touches the SAME month — provisioning must
+    // be a safe no-op the second time, per the ruling's idempotency
+    // requirement (imports overlap).
+    const jobId2 = await seedJob();
+    await expect(
+      runFile(
+        jobId2,
+        csvOf([
+          {
+            subscriberId: "rc_sub_pre2024_overlap_b",
+            storeTxnId: "apple_txn_pre2024_overlap_b",
+            priceUsd: "4.99",
+            purchaseDate: PRE_2024_PURCHASE_DATE,
+          },
+        ]),
+      ),
+    ).resolves.toMatchObject({ outcomes: { willCreate: 1 } });
+
+    expect(await countPurchases()).toBe(2);
+  });
+
+  it("fails the batch cleanly with zero purchases and zero revenue events written when provisioning fails", async () => {
+    const jobId = await seedJob();
+    const provisionSpy = vi
+      .spyOn(drizzle.revenueEventPartitionRepo, "ensureRevenueEventPartitions")
+      .mockRejectedValueOnce(new Error("provisioning boom (test-injected)"));
+
+    try {
+      await expect(
+        runFile(
+          jobId,
+          csvOf([
+            {
+              subscriberId: "rc_sub_provision_fail",
+              storeTxnId: "apple_txn_provision_fail",
+              priceUsd: "9.99",
+              purchaseDate: PRE_2024_PURCHASE_DATE,
+            },
+          ]),
+        ),
+      ).rejects.toThrow(/provisioning boom/);
+
+      // The whole point: a provisioning failure must be caught BEFORE
+      // Phase A writes a single row, never mid-batch. Assert real table
+      // state, not the thrown error's type or message.
+      expect(await countSubscribers()).toBe(0);
+      expect(await countPurchases()).toBe(0);
+      expect(await countRevenueEvents()).toBe(0);
+    } finally {
+      provisionSpy.mockRestore();
+    }
   });
 });

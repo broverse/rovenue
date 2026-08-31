@@ -211,6 +211,10 @@ export { getDb, createDb, db } from "./drizzle";
 // Exported top-level so webhook/receipt callers import it directly rather
 // than through the (test-mocked) `drizzle.revenueEventRepo` namespace.
 export { revenueDedupeKind } from "./drizzle";
+export {
+  monthStartsUtc,
+  describeRequiredPartitionSpan,
+} from "./drizzle";
 
 // =============================================================
 // Schema table objects — convenience re-exports so integration

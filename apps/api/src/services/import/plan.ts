@@ -8,7 +8,13 @@
 // a structural blocker (an unresolvable product, a purchases.NOT NULL
 // violation waiting to happen) before the real run commits anything.
 import type { Readable } from "node:stream";
-import { drizzle, type Db, type Product, type Purchase } from "@rovenue/db";
+import {
+  drizzle,
+  describeRequiredPartitionSpan,
+  type Db,
+  type Product,
+  type Purchase,
+} from "@rovenue/db";
 import {
   parseCsvStream,
   normalizeRow,
@@ -48,6 +54,27 @@ export type ImportPlanSummary = {
    * this honestly rather than the summary silently going quiet on it.
    */
   duplicateTrackingDisabledAfterKeys: number | null;
+  /**
+   * Observed [min, max] `purchaseDate` (the value the writer uses as
+   * `revenue_events.eventDate` — write.ts) across every row this dry run
+   * could normalize a date for, regardless of which outcome bucket the
+   * row landed in. Null when the file had no row with a normalizable
+   * date at all (task 8a: the operator must see this range BEFORE
+   * committing, since `revenue_events` is range-partitioned with no
+   * default partition and a row outside every provisioned partition
+   * fails the write outright).
+   */
+  observedEventDateRange: { min: string; max: string } | null;
+  /**
+   * The monthly partition span `ensureRevenueEventPartitions`
+   * (@rovenue/db) would provision to cover `observedEventDateRange` —
+   * not narrowed to only the months that don't already have a
+   * partition, since provisioning an existing month is a safe no-op and
+   * checking "already exists" here would cost a round trip this dry run
+   * doesn't otherwise need. Null exactly when `observedEventDateRange`
+   * is null.
+   */
+  requiredPartitionSpan: { fromMonth: string; toMonth: string; monthCount: number } | null;
   reportStorageKey: string;
 };
 
@@ -291,13 +318,28 @@ async function classifyRow(args: {
   now: Date;
   skipSandbox: boolean;
   duplicateTracker: DuplicateTracker;
-}): Promise<{ outcome: ImportOutcome; reason: string | null; existingSubscriberId: string | null }> {
+}): Promise<{
+  outcome: ImportOutcome;
+  reason: string | null;
+  existingSubscriberId: string | null;
+  /** The row's `purchaseDate` (== the eventDate a write would use), or
+   *  null when the row never normalized far enough to have one. Task
+   *  8a: `planImport` tracks the min/max of this across the whole file
+   *  to report the partition span the import would need. */
+  eventDate: Date | null;
+}> {
   const { db, projectId, canonicalRow, now, skipSandbox, duplicateTracker } = args;
 
   const normalized = normalizeRow(canonicalRow, { now });
   if ("error" in normalized) {
-    return { outcome: "invalidRow", reason: normalized.error.message, existingSubscriberId: null };
+    return {
+      outcome: "invalidRow",
+      reason: normalized.error.message,
+      existingSubscriberId: null,
+      eventDate: null,
+    };
   }
+  const eventDate = normalized.purchaseDate;
 
   // Identity resolution (design spec §"resolve identities"): the SAME
   // merge-chain-following resolver every SDK write path uses
@@ -321,6 +363,7 @@ async function classifyRow(args: {
         outcome: "duplicateInFile",
         reason: `duplicate (store, storeTransactionId) already seen earlier in this file: ${dedupeKey}`,
         existingSubscriberId,
+        eventDate,
       };
     }
   }
@@ -339,6 +382,7 @@ async function classifyRow(args: {
         `${productResolution.matchCount} catalog products — fix the catalog's storeIds mapping ` +
         `so only one product claims this id`,
       existingSubscriberId,
+      eventDate,
     };
   }
   if (productResolution.kind === "unresolved") {
@@ -346,6 +390,7 @@ async function classifyRow(args: {
       outcome: "unresolvedProduct",
       reason: `product not found: no catalog product matches product identifier "${normalized.productIdentifier}"`,
       existingSubscriberId,
+      eventDate,
     };
   }
   // productResolution.kind === "resolved" past this point — the product
@@ -353,7 +398,7 @@ async function classifyRow(args: {
   // succeeded (Task 7's writer does its own lookup at write time).
 
   if (normalized.isAnchorless) {
-    return { outcome: "anchorless", reason: null, existingSubscriberId };
+    return { outcome: "anchorless", reason: null, existingSubscriberId, eventDate };
   }
 
   if (normalized.store === "PLAY_STORE" && !normalized.googlePurchaseToken) {
@@ -361,11 +406,12 @@ async function classifyRow(args: {
       outcome: "androidNoToken",
       reason: "PLAY_STORE row has no Google purchase token mapped — access cannot be granted live",
       existingSubscriberId,
+      eventDate,
     };
   }
 
   if (normalized.isSandbox && skipSandbox) {
-    return { outcome: "skippedSandbox", reason: null, existingSubscriberId };
+    return { outcome: "skippedSandbox", reason: null, existingSubscriberId, eventDate };
   }
 
   // Guaranteed non-null here: normalizeRow rejects a non-anchorless row
@@ -381,6 +427,7 @@ async function classifyRow(args: {
     outcome: existingPurchase ? "willUpdate" : "willCreate",
     reason: null,
     existingSubscriberId,
+    eventDate,
   };
 }
 
@@ -410,6 +457,10 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
   const duplicateTracker = createDuplicateTracker();
   let totalRows = 0;
   const now = new Date();
+  // Task 8a: observed span across every row with a normalizable date,
+  // regardless of outcome bucket — see ImportPlanSummary's field docs.
+  let minEventDate: Date | null = null;
+  let maxEventDate: Date | null = null;
 
   const reportWriter = createReportWriter(job.projectId, job.id);
 
@@ -432,7 +483,7 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
         entitlementShapeCounts[shape] = (entitlementShapeCounts[shape] ?? 0) + 1;
       }
 
-      const { outcome, reason, existingSubscriberId } = await classifyRow({
+      const { outcome, reason, existingSubscriberId, eventDate } = await classifyRow({
         db,
         projectId: job.projectId,
         canonicalRow,
@@ -442,6 +493,15 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
       });
 
       outcomes[outcome] += 1;
+
+      if (eventDate !== null) {
+        if (minEventDate === null || eventDate.getTime() < minEventDate.getTime()) {
+          minEventDate = eventDate;
+        }
+        if (maxEventDate === null || eventDate.getTime() > maxEventDate.getTime()) {
+          maxEventDate = eventDate;
+        }
+      }
 
       const reportRow: ReportRow = {
         lineNumber: event.lineNumber,
@@ -465,12 +525,23 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
       finishedAt: new Date(),
     });
 
+    const observedEventDateRange =
+      minEventDate !== null && maxEventDate !== null
+        ? { min: minEventDate.toISOString(), max: maxEventDate.toISOString() }
+        : null;
+    const requiredPartitionSpan =
+      minEventDate !== null && maxEventDate !== null
+        ? describeRequiredPartitionSpan(minEventDate, maxEventDate)
+        : null;
+
     return {
       jobId: job.id,
       totalRows,
       outcomes,
       entitlementShapeCounts,
       duplicateTrackingDisabledAfterKeys: duplicateTracker.disabledAfterKeys,
+      observedEventDateRange,
+      requiredPartitionSpan,
       reportStorageKey,
     };
   } catch (err) {

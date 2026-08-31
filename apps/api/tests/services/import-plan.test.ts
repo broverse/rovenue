@@ -11,6 +11,7 @@ import {
   revenueEvents,
 } from "../../../../packages/db/src/drizzle/schema";
 import * as importJobRepo from "../../../../packages/db/src/drizzle/repositories/import-jobs";
+import { monthStartsUtc } from "../../../../packages/db/src/drizzle/repositories/revenue-event-partitions";
 
 // =============================================================
 // planImport — dry-run planner (Task 6)
@@ -401,6 +402,61 @@ describe("planImport", () => {
     const summary = await planImport(jobId);
 
     expect(summary.duplicateTrackingDisabledAfterKeys).toBeNull();
+  });
+
+  // ===========================================================
+  // Task 8a — the dry run surfaces the partition-provisioning span
+  // ===========================================================
+
+  it("reports the observed event date range and the partition span provisioning would need", async () => {
+    await seedProduct("span_product", { apple: "span_product" });
+
+    const jobId = await seedJob({
+      csv: csvOf([
+        // Deliberately predates revenue_events' existing partition floor
+        // (2024-01, migration 0015) — this is the exact case task 8a's
+        // ruling exists for: the operator must see this BEFORE committing.
+        "user_span_1,app_store,span_product,txn_span_1,2019-06-15 00:00:00,false,,",
+        "user_span_2,app_store,span_product,txn_span_2,2026-01-10 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId);
+
+    expect(summary.observedEventDateRange).toEqual({
+      min: new Date("2019-06-15T00:00:00Z").toISOString(),
+      max: new Date("2026-01-10T00:00:00Z").toISOString(),
+    });
+    expect(summary.requiredPartitionSpan).not.toBeNull();
+    expect(summary.requiredPartitionSpan?.fromMonth).toBe("2019-06");
+    expect(summary.requiredPartitionSpan?.toMonth).toBe("2026-01");
+    // Cross-checked against the same month-math helper
+    // ensureRevenueEventPartitions itself uses (independently unit-tested
+    // in packages/db/tests/revenue-event-partitions.test.ts) — this test's
+    // own job is proving plan.ts tracks min/max from the file and wires
+    // them through, not re-proving the month arithmetic.
+    expect(summary.requiredPartitionSpan?.monthCount).toBe(
+      monthStartsUtc(
+        new Date("2019-06-15T00:00:00Z"),
+        new Date("2026-01-10T00:00:00Z"),
+      ).length,
+    );
+  });
+
+  it("reports a null observed range and null partition span when no row has a normalizable date", async () => {
+    const jobId = await seedJob({
+      // Missing productIdentifier -> invalidRow before a date is ever
+      // parsed, so this file has zero rows with a usable eventDate.
+      csv: csvOf([
+        "user_no_date,app_store,,txn_no_date,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId);
+
+    expect(summary.outcomes.invalidRow).toBe(1);
+    expect(summary.observedEventDateRange).toBeNull();
+    expect(summary.requiredPartitionSpan).toBeNull();
   });
 });
 

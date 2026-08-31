@@ -349,10 +349,56 @@ export async function writeImportBatch(
     reportRows.push(reportRowFor(input, outcome, reason, subscriberId));
   };
 
-  for (const input of rows) {
+  // -----------------------------------------------------------
+  // Task 8a pre-flight: normalize every row FIRST — purely, with no I/O
+  // — before this batch performs a single write. `revenue_events`
+  // (migration 0015) is range-partitioned on `eventDate` with no
+  // DEFAULT partition, so a row whose eventDate misses every existing
+  // partition fails outright ("no partition of relation ... found for
+  // row"). Provisioning the partitions this batch's rows need, BEFORE
+  // the write loop below starts, is what turns that failure mode into
+  // "the batch fails cleanly with nothing written" instead of "row
+  // 400,000 dies mid-file after 399,999 rows already committed".
+  //
+  // The span covers every row that normalized successfully, not only
+  // the subset that will actually record revenue: narrowing it further
+  // would need each row's product resolved first (a DB round trip),
+  // re-introducing the very cost this pure pre-pass exists to stay
+  // ahead of. Over-provisioning an unused monthly partition is cheap
+  // and was already the accepted trade-off in 0015's own bulk-create
+  // ("safe to over-provision here"); silently under-provisioning is the
+  // failure mode that actually matters.
+  const normalizedRows = rows.map((input) => ({
+    input,
+    normalized: normalizeRow(input.row, { now }),
+  }));
+
+  let minEventDate: Date | null = null;
+  let maxEventDate: Date | null = null;
+  for (const { normalized } of normalizedRows) {
+    if ("error" in normalized) continue;
+    const eventDate = normalized.purchaseDate;
+    if (minEventDate === null || eventDate.getTime() < minEventDate.getTime()) {
+      minEventDate = eventDate;
+    }
+    if (maxEventDate === null || eventDate.getTime() > maxEventDate.getTime()) {
+      maxEventDate = eventDate;
+    }
+  }
+  if (minEventDate !== null && maxEventDate !== null) {
+    // Deliberately NOT wrapped in try/catch: a provisioning failure
+    // must propagate and abort the whole batch before the loop below
+    // runs — that IS "failing cleanly", not a condition to recover
+    // from here.
+    await drizzle.revenueEventPartitionRepo.ensureRevenueEventPartitions(db, {
+      minEventDate,
+      maxEventDate,
+    });
+  }
+
+  for (const { input, normalized } of normalizedRows) {
     lastLineNumber = Math.max(lastLineNumber, input.lineNumber);
 
-    const normalized = normalizeRow(input.row, { now });
     if ("error" in normalized) {
       record(input, "invalidRow", normalized.error.message);
       continue;
