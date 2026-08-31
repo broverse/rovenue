@@ -136,7 +136,10 @@ export type AuditAction =
   | "font.deleted"
   // --- paywall assets (CDN) ---
   | "asset.uploaded"
-  | "asset.deleted";
+  | "asset.deleted"
+  // --- data import (design spec §4) ---
+  | "import.started"
+  | "import.completed";
 
 export type AuditResource =
   | "audience"
@@ -163,7 +166,8 @@ export type AuditResource =
   | "virtual_currency"
   | "font_face"
   | "font_family"
-  | "paywall_asset";
+  | "paywall_asset"
+  | "import_job";
 
 export interface AuditEntry {
   projectId: string;

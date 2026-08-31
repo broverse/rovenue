@@ -20,7 +20,8 @@ export type Capability =
   | "virtual-currency:manage"
   | "refunds:write"
   | "fonts:write"
-  | "assets:write";
+  | "assets:write"
+  | "subscribers:import";
 
 const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
   "project:read":           ["OWNER", "ADMIN", "DEVELOPER", "GROWTH", "CUSTOMER_SUPPORT"],
@@ -52,6 +53,14 @@ const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
   // Asset uploads are a project asset like fonts and products —
   // DEVELOPER and above, not GROWTH.
   "assets:write":           ["OWNER", "ADMIN", "DEVELOPER"],
+  // Bulk-importing subscriber/purchase history (data-import tool, design
+  // spec §4) is at least as consequential as the GDPR export/anonymize
+  // pair above — it bulk-creates subscribers and purchases from an
+  // operator-supplied file, and a mistaken mapping can misattribute
+  // revenue or grant access at scale. Kept at the same ADMIN-and-above
+  // tier as `subscribers:gdpr` rather than the everyday
+  // `subscribers:write` (attribute edits) CS may perform.
+  "subscribers:import":     ["OWNER", "ADMIN"],
 };
 
 export function roleHasCapability(role: MemberRole, cap: Capability): boolean {

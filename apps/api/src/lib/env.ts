@@ -252,6 +252,15 @@ const envSchema = z
     ASSET_STORAGE_ACCESS_KEY_ID: z.string().optional(),
     ASSET_STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
     ASSET_PUBLIC_BASE_URL: z.string().url().optional(),
+    // ---- Data-import upload storage (design spec §4) ----------------------
+    // A DEDICATED, PRIVATE bucket for operator-uploaded PII exports — never
+    // the public paywall-asset bucket above (see lib/import-store.ts's
+    // module comment for why those must never share a bucket). Reuses the
+    // SAME S3-compatible endpoint/region/credentials as the asset bucket
+    // (one MinIO instance, or one R2 account) — only the bucket NAME
+    // differs, since a bucket policy is the actual security boundary and
+    // credentials do not need to drift per-bucket.
+    IMPORT_STORAGE_BUCKET: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;

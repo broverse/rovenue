@@ -19,6 +19,7 @@ import { featureFlagsRoute } from "./feature-flags";
 import { fontsRoute } from "./fonts";
 import { funnelTemplatesRoute } from "./funnel-templates";
 import { funnelsRoute } from "./funnels";
+import { importsRoute } from "./imports";
 import { integrationsRoute } from "./integrations";
 import { leaderboardsRoute } from "./leaderboards";
 import { meRoute } from "./me";
@@ -86,6 +87,7 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/events", eventsStreamRoute)
   .route("/projects/:projectId/fonts", fontsRoute)
   .route("/projects/:projectId/funnels", funnelsRoute)
+  .route("/projects/:projectId/imports", importsRoute)
   .route("/projects/:projectId/integrations", integrationsRoute)
   .route("/projects/:projectId/leaderboards", leaderboardsRoute)
   .route("/projects/:projectId/invitations", invitationsRoute)

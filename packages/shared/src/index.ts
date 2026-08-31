@@ -60,6 +60,14 @@ export const ERROR_CODE = {
   // HTTPException.cause through middleware/error.ts.
   ASSET_IN_USE: "asset_in_use",
   ASSET_MISSING: "asset_missing",
+  // Data-import tool (design spec §4, migration-import plan Task 5).
+  // IMPORT_FILE_TOO_LARGE: `bodyLimit`'s onError for the upload route's
+  // own cap — same pattern as ASSET_FILE_TOO_LARGE above. IMPORT_STORAGE_
+  // UNAVAILABLE: the dedicated private import bucket (never the public
+  // paywall-asset one — see lib/import-store.ts) is unconfigured or
+  // unreachable.
+  IMPORT_FILE_TOO_LARGE: "IMPORT_FILE_TOO_LARGE",
+  IMPORT_STORAGE_UNAVAILABLE: "IMPORT_STORAGE_UNAVAILABLE",
   // Google Play receipt for a purchase the user has not (yet) paid for —
   // subscriptionState PENDING on subscriptions, purchaseState PENDING on
   // one-time products. The purchase may still complete: the client should

@@ -426,6 +426,18 @@ services:
   # Exits 0 and does not restart; `api`/`dispatcher` do not gate on it,
   # matching the "storage unconfigured degrades, does not block boot"
   # contract.
+  #
+  # ALSO creates the data-import upload bucket ($$IMPORT_STORAGE_BUCKET,
+  # apps/api/src/lib/import-store.ts) in the SAME step, on the SAME MinIO
+  # instance/credentials — but deliberately gets NO `mc anonymous set-json`
+  # call at all. Uploaded import files are customer PII exports, and the
+  # asset bucket's policy above is bucket-WIDE (`.../$$ASSET_STORAGE_BUCKET/*`),
+  # not prefix-scoped — reusing that bucket under a different key prefix
+  # would make every PII export anonymously downloadable the instant it
+  # landed. A second, separate bucket with no policy at all is the only
+  # boundary that actually holds; MinIO denies both GetObject and
+  # ListBucket to anonymous requests by default absent a policy, which is
+  # the s3:GetObject-only-or-less shape this bucket must never exceed.
   minio-init:
     image: minio/mc:RELEASE.2025-04-08T15-39-49Z
     depends_on:
@@ -435,6 +447,7 @@ services:
       MINIO_ROOT_USER: ${ASSET_STORAGE_ACCESS_KEY_ID:-rovenue-assets}
       MINIO_ROOT_PASSWORD: ${ASSET_STORAGE_SECRET_ACCESS_KEY:-rovenue-assets-dev-secret}
       ASSET_STORAGE_BUCKET: ${ASSET_STORAGE_BUCKET:-rovenue-assets}
+      IMPORT_STORAGE_BUCKET: ${IMPORT_STORAGE_BUCKET:-rovenue-imports}
     # `command` is given as a 2-element list ([-c, <script>]), not a bare
     # string — compose shell-splits a scalar `command:` string into argv
     # BEFORE it ever reaches `sh -c`, which silently turns everything
@@ -461,7 +474,9 @@ services:
         }
         POLICY
         mc anonymous set-json /tmp/anon-read-policy.json "local/$$ASSET_STORAGE_BUCKET" &&
-        echo "minio-init: bucket $$ASSET_STORAGE_BUCKET ready — anonymous GetObject only, ListBucket denied"
+        echo "minio-init: bucket $$ASSET_STORAGE_BUCKET ready — anonymous GetObject only, ListBucket denied" &&
+        mc mb --ignore-existing "local/$$IMPORT_STORAGE_BUCKET" &&
+        echo "minio-init: bucket $$IMPORT_STORAGE_BUCKET ready — no anonymous policy, private (GetObject AND ListBucket both denied)"
     restart: "no"
 
   clickhouse:

@@ -89,6 +89,7 @@ describe("global body limit", () => {
     [`${PROJECT_PATH}/assets/video`],
     [`${PROJECT_PATH}/assets/lottie`],
     [`${PROJECT_PATH}/fonts`],
+    [`${PROJECT_PATH}/imports`],
   ])("does not reject %s for exceeding the 1 MiB global cap", async (path) => {
     const res = await post(path, OVER_GLOBAL_UNDER_ROUTE_BYTES);
 
