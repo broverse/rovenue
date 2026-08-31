@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { importJobs, type ImportJob, type NewImportJob } from "../schema";
 import { importJobStatus } from "../enums";
@@ -225,4 +225,50 @@ export async function incrementImportJobCounters(
     .returning();
   if (!row) throw new Error(`incrementImportJobCounters: id=${id} not found`);
   return row;
+}
+
+// ---------------------------------------------------------------------------
+// listImportJobsEligibleForFileRetention
+// ---------------------------------------------------------------------------
+//
+// Task 8's retention sweep (IMPORT_FILE_RETENTION_DAYS): the uploaded
+// source file and its report artefact are end-user PII sitting in object
+// storage, so once a job is DONE (terminal) and has been for longer than
+// the retention window, its files are deleted. A job that is still
+// RUNNING (or hasn't started) is never eligible regardless of age — the
+// worker is the only writer of `finishedAt`, so a null value here is a
+// reliable signal the job isn't finished yet, not a data gap to guess
+// around.
+
+const TERMINAL_IMPORT_JOB_STATUSES: readonly ImportJobStatus[] = [
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+];
+
+export interface RetentionEligibleImportJob {
+  id: string;
+  projectId: string;
+  storageKey: string;
+  reportStorageKey: string | null;
+}
+
+export async function listImportJobsEligibleForFileRetention(
+  db: Db,
+  cutoff: Date,
+): Promise<RetentionEligibleImportJob[]> {
+  return db
+    .select({
+      id: importJobs.id,
+      projectId: importJobs.projectId,
+      storageKey: importJobs.storageKey,
+      reportStorageKey: importJobs.reportStorageKey,
+    })
+    .from(importJobs)
+    .where(
+      and(
+        inArray(importJobs.status, TERMINAL_IMPORT_JOB_STATUSES),
+        sql`${importJobs.finishedAt} IS NOT NULL AND ${importJobs.finishedAt} < ${cutoff}`,
+      ),
+    );
 }

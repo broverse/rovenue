@@ -78,6 +78,11 @@ import {
   createRefundShieldResponderWorker,
   scheduleRefundShieldResponder,
 } from "./workers/refund-shield-responder";
+import { createImportRunnerWorker } from "./workers/import-runner";
+import {
+  createImportRetentionWorker,
+  scheduleImportRetention,
+} from "./workers/import-retention";
 import { bootIntegrations } from "./integrations-boot";
 import { checkConnectWebhookEvents } from "./services/stripe/connect-endpoint-check";
 import { applySharpHardening } from "./services/assets/sharp-hardening";
@@ -249,6 +254,22 @@ scheduleRoviRetention().catch((err: unknown) => {
 createRefundShieldResponderWorker();
 scheduleRefundShieldResponder().catch((err: unknown) => {
   logger.error("failed to schedule refund shield responder", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Data-import runner (Task 8) — consumes rovenue-imports jobs enqueued
+// by the dashboard's import flow. Per-project serialisation is enforced
+// inside runImportJob itself (a Postgres advisory lock), not by worker
+// concurrency, so this is safe to run on every API replica.
+createImportRunnerWorker();
+
+// Data-import file retention — nightly sweep that deletes a terminal
+// job's uploaded file (and report) once IMPORT_FILE_RETENTION_DAYS has
+// passed. See workers/import-retention.ts.
+createImportRetentionWorker();
+scheduleImportRetention().catch((err: unknown) => {
+  logger.error("failed to schedule import file retention", {
     err: err instanceof Error ? err.message : String(err),
   });
 });
