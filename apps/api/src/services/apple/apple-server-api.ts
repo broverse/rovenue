@@ -4,6 +4,13 @@ import type { ConsumptionRequest } from "./refund-shield-buckets";
 const PROD_BASE = "https://api.storekit.itunes.apple.com";
 const SANDBOX_BASE = "https://api.storekit-sandbox.itunes.apple.com";
 
+/** HTTP status Apple returns for a 429/"you're calling this too fast"
+ *  response. Used by Task 9's Phase B re-validation client to tell
+ *  "the store doesn't know this anchor" apart from "ask again later" —
+ *  the two are never interchangeable (see services/import/verify.ts). */
+export const APPLE_TOO_MANY_REQUESTS_STATUS = 429;
+export const APPLE_TRANSACTION_NOT_FOUND_STATUS = 404;
+
 export class AppleServerApiError extends Error {
   constructor(
     public readonly status: number,
@@ -47,4 +54,75 @@ export async function sendConsumptionInfo(
     throw new AppleServerApiError(res.status, body);
   }
   return { status: 202 };
+}
+
+// =============================================================
+// Get All Subscription Statuses (Task 9 — Phase B re-validation)
+// =============================================================
+//
+// Docs: https://developer.apple.com/documentation/appstoreserverapi/get_all_subscription_statuses
+//
+// Apple's numeric `status` on each `lastTransactions` entry — the public
+// `Status` enum from the same docs page. Distinct from
+// `purchases.status` (this repo's own enum); mapped onto it by the
+// caller (services/import/verify-store-clients.ts), which also verifies
+// the accompanying `signedTransactionInfo` JWS through the SAME verifier
+// chain `services/receipt-verify.ts` uses for a live receipt, rather
+// than trusting the unsigned status code alone.
+export const APPLE_SUBSCRIPTION_STATUS = {
+  ACTIVE: 1,
+  EXPIRED: 2,
+  BILLING_RETRY: 3,
+  BILLING_GRACE_PERIOD: 4,
+  REVOKED: 5,
+} as const;
+
+export interface AppleSubscriptionStatusTransaction {
+  originalTransactionId: string;
+  status: number;
+  signedTransactionInfo: string;
+  signedRenewalInfo?: string;
+}
+
+export interface AppleSubscriptionStatusGroup {
+  subscriptionGroupIdentifier: string;
+  lastTransactions: AppleSubscriptionStatusTransaction[];
+}
+
+export interface AppleSubscriptionStatusesResponse {
+  data: AppleSubscriptionStatusGroup[];
+  environment: "Sandbox" | "Production";
+  bundleId: string;
+}
+
+/**
+ * Fetches the live status of every transaction in an originalTransactionId's
+ * subscription group. Apple responds 404 when the id is unknown to this
+ * app (`APPLE_TRANSACTION_NOT_FOUND_STATUS`) and 429 when the caller is
+ * rate-limited (`APPLE_TOO_MANY_REQUESTS_STATUS`) — callers distinguish
+ * those via `AppleServerApiError.status` rather than a thrown message.
+ *
+ * Endpoint: `GET /inApps/v1/subscriptions/{originalTransactionId}`
+ */
+export async function getAppleSubscriptionStatuses(
+  ctx: ProjectAppleContext,
+  originalTransactionId: string,
+): Promise<AppleSubscriptionStatusesResponse> {
+  const token = await getAppleAuthToken(ctx);
+  const base = ctx.environment === "PRODUCTION" ? PROD_BASE : SANDBOX_BASE;
+  const res = await fetch(
+    `${base}/inApps/v1/subscriptions/${originalTransactionId}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    },
+  );
+  if (res.status !== 200) {
+    const body = await res.text().catch(() => "");
+    throw new AppleServerApiError(res.status, body);
+  }
+  return (await res.json()) as AppleSubscriptionStatusesResponse;
 }

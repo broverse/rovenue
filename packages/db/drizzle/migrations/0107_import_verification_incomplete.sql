@@ -1,0 +1,17 @@
+-- Task 9: Phase B (store re-validation) needs a terminal-for-now status
+-- distinct from COMPLETED and FAILED — a run whose anchors could not all
+-- be re-verified within one attempt's throttle-retry budget (store-side
+-- quota exhaustion). Phase A's writes already succeeded by the time Phase
+-- B runs, so this is never FAILED; it is a real, resumable outcome.
+--
+-- hand-written, NOT `drizzle-kit generate` output: with only enums.ts
+-- touched, generate's diff against this repo's drifted meta snapshot
+-- proposed `DROP TYPE "public"."ImportJobStatus"` — the enum's OWN
+-- snapshot entry was absent from the generated 0107 snapshot entirely
+-- (see task-9 report). Discarded; this file and its snapshot were
+-- authored by hand from 0106_snapshot.json instead.
+--
+-- PG16 allows ADD VALUE inside a transaction as long as the new value is
+-- not used in the same transaction — nothing in this migration uses it
+-- (same precedent as 0104_integrations_provider_text.sql).
+ALTER TYPE "public"."ImportJobStatus" ADD VALUE IF NOT EXISTS 'VERIFICATION_INCOMPLETE';

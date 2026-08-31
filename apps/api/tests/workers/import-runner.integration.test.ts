@@ -64,6 +64,22 @@ vi.mock("../../src/lib/import-store", () => ({
 }));
 
 import { runImportJob } from "../../src/workers/import-runner";
+import type { ImportVerifyDeps } from "../../src/services/import/verify";
+
+// This file's subject is Phase A (batching/checkpoint/cancel/the
+// per-project lock) — Task 9's Phase B has its own dedicated test file
+// (import-verify.integration.test.ts). The test project here has no real
+// store credentials configured, so the PRODUCTION verify deps would
+// throw and leave every job `VERIFICATION_INCOMPLETE` instead of
+// `COMPLETED`, which is not what any test below is about. This fake
+// always reports "the store doesn't recognise it" — a real, definitive
+// (non-pending) outcome — so Phase B finishes instantly without
+// affecting the status assertions that are this file's actual point.
+const NOOP_VERIFY_DEPS: ImportVerifyDeps = {
+  verifyAppleAnchor: async () => ({ kind: "notFound" }),
+  verifyGoogleAnchor: async () => ({ kind: "notFound" }),
+  verifyStripeAnchor: async () => ({ kind: "notFound" }),
+};
 
 const PROJECT_ID = `proj_import_runner_${createId()}`;
 const ACCESS_ID = `acc_import_runner_${createId()}`;
@@ -283,7 +299,9 @@ describe("runImportJob — crash mid-batch and resume", () => {
         return originalUpsert(...args);
       });
 
-    await expect(runImportJob(jobId)).rejects.toThrow("simulated worker kill mid-batch");
+    await expect(runImportJob(jobId, { verifyDeps: NOOP_VERIFY_DEPS })).rejects.toThrow(
+      "simulated worker kill mid-batch",
+    );
 
     // The batch never completed, so the checkpoint must NOT have moved —
     // this is the invariant that makes "replay the whole batch" safe.
@@ -298,7 +316,7 @@ describe("runImportJob — crash mid-batch and resume", () => {
     upsertSpy.mockRestore();
 
     // "Restart the worker": call runImportJob again for the same job.
-    const result = await runImportJob(jobId);
+    const result = await runImportJob(jobId, { verifyDeps: NOOP_VERIFY_DEPS });
 
     // Line numbers are 1-based over the WHOLE file (the header occupies
     // line 1), so the last data row's line number is subs.length + 1 —
@@ -363,7 +381,7 @@ describe("runImportJob — crash mid-batch and resume", () => {
         return row;
       });
 
-    await expect(runImportJob(jobId, { batchSize: 3 })).rejects.toThrow(
+    await expect(runImportJob(jobId, { batchSize: 3, verifyDeps: NOOP_VERIFY_DEPS })).rejects.toThrow(
       "simulated crash right after batch 1's checkpoint committed",
     );
     checkpointSpy.mockRestore();
@@ -377,7 +395,7 @@ describe("runImportJob — crash mid-batch and resume", () => {
     // still closed its own report part rather than losing it.
     expect(afterCrash?.reportPartCount).toBe(1);
 
-    const result = await runImportJob(jobId, { batchSize: 3 });
+    const result = await runImportJob(jobId, { batchSize: 3, verifyDeps: NOOP_VERIFY_DEPS });
     expect(result.status).toBe("COMPLETED");
     expect(await countPurchases()).toBe(subs.length);
 
@@ -436,7 +454,7 @@ describe("runImportJob — cancellation", () => {
         return row;
       });
 
-    const result = await runImportJob(jobId, { batchSize: 2 });
+    const result = await runImportJob(jobId, { batchSize: 2, verifyDeps: NOOP_VERIFY_DEPS });
     checkpointSpy.mockRestore();
 
     // The header occupies line 1, so the first 2-row batch's rows are on
@@ -458,7 +476,7 @@ describe("runImportJob — cancellation", () => {
 
     // Re-running the same file (e.g. the operator resumes it) picks up
     // from the checkpoint and finishes.
-    const resumed = await runImportJob(jobId, { batchSize: 2 });
+    const resumed = await runImportJob(jobId, { batchSize: 2, verifyDeps: NOOP_VERIFY_DEPS });
 
     expect(resumed.status).toBe("COMPLETED");
     expect(resumed.checkpointLine).toBe(lastLineNumber);
@@ -502,8 +520,8 @@ describe("runImportJob — per-project serialisation", () => {
       });
 
     const [resultA, resultB] = await Promise.all([
-      runImportJob(jobA),
-      runImportJob(jobB),
+      runImportJob(jobA, { verifyDeps: NOOP_VERIFY_DEPS }),
+      runImportJob(jobB, { verifyDeps: NOOP_VERIFY_DEPS }),
     ]);
 
     // Read the call count BEFORE mockRestore() — restoring also resets
@@ -514,7 +532,12 @@ describe("runImportJob — per-project serialisation", () => {
     expect(resultA.status).toBe("COMPLETED");
     expect(resultB.status).toBe("COMPLETED");
     expect(maxActive).toBe(1);
-    expect(incrementCallCount).toBe(2);
+    // 2 calls per job (4 total): Phase A's own batch increment, plus
+    // Task 9's Phase B (`verifyImportedAnchors`) incrementing its own
+    // verify-outcome counters through the SAME primitive once each job
+    // reaches COMPLETED. The real point of this test — that the two jobs
+    // never overlap — is `maxActive` above, unaffected by Phase B running.
+    expect(incrementCallCount).toBe(4);
 
     // Both jobs actually ran to completion despite being serialised.
     expect(await countPurchases()).toBe(8);

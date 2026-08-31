@@ -1098,7 +1098,10 @@ const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> =
     PurchaseStatus.GRACE_PERIOD,
   ]);
 
-function mapStripeSubscriptionStatus(
+// Exported for Task 9 (services/import/verify.ts): Phase B re-verifying an
+// imported Stripe anchor needs the SAME live-status mapping the webhook
+// path already uses — a second copy is how the two paths drift apart.
+export function mapStripeSubscriptionStatus(
   status: Stripe.Subscription.Status,
 ): PurchaseStatus {
   switch (status) {

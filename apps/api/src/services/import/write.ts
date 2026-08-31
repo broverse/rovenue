@@ -193,8 +193,15 @@ function shouldRecordRevenue(normalized: NormalizedRow): boolean {
  * `buildSyntheticTransactionId` needs `projectId`, which the pure
  * normalizer deliberately does not have — which is why this call lives in
  * the writer rather than in normalizeRow.
+ *
+ * Exported for Task 9 (services/import/verify.ts): Phase B re-parses the
+ * same source file to discover which store anchors need re-verification,
+ * and must land on the SAME storeTransactionId this writer used, or its
+ * `findPurchaseByStoreTransaction` / `updatePurchase*` calls would miss
+ * the row (or worse, a synthetic id computed differently would look like
+ * a second purchase). One implementation, never two.
  */
-function resolveStoreTransactionId(
+export function resolveStoreTransactionId(
   projectId: string,
   normalized: NormalizedRow,
 ): string {

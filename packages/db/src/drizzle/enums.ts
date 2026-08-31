@@ -380,9 +380,11 @@ export const refundShieldAppleEnvironmentEnum = pgEnum(
 // Data-import pgEnums
 // =============================================================
 
-// Task 9 will add a "verification incomplete" terminal outcome; that
-// member is intentionally NOT included yet — this enum only carries
-// states this branch of the importer actually sets.
+// Task 9: Phase B (store re-validation) runs after Phase A's writer sets
+// COMPLETED, and can leave the job at VERIFICATION_INCOMPLETE instead —
+// store-side throttling that never resolved within one run's retry
+// budget. That is a real, resumable terminal-for-now outcome, never
+// COMPLETED and never FAILED (Phase A's own writes already succeeded).
 export const importJobStatus = pgEnum("ImportJobStatus", [
   "PENDING_MAPPING",
   "DRY_RUN_RUNNING",
@@ -391,4 +393,5 @@ export const importJobStatus = pgEnum("ImportJobStatus", [
   "COMPLETED",
   "FAILED",
   "CANCELLED",
+  "VERIFICATION_INCOMPLETE",
 ]);

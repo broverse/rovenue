@@ -13,6 +13,8 @@ import {
   type BatchOutcome,
 } from "../services/import/write";
 import { createReportWriter, type ImportOutcome, type ReportWriter } from "../services/import/report";
+import { verifyImportedAnchors, type ImportVerifyDeps } from "../services/import/verify";
+import { createProductionImportVerifyDeps } from "../services/import/verify-store-clients";
 import {
   IMPORT_QUEUE_NAME,
   IMPORT_BATCH_SIZE,
@@ -70,6 +72,15 @@ import {
 //      real work writes its own numbered report PART
 //      (`buildReportPartStorageKey`) instead of every attempt fighting
 //      over one shared, overwritable key — see `ensureReportWriter`.
+//   6. Task 9: Phase B (store re-validation, services/import/verify.ts)
+//      runs as a SECOND phase of this SAME job, immediately after Phase A
+//      reaches COMPLETED — never as a separate job, never invoked from
+//      anywhere else. It can only move the job's terminal status FORWARD
+//      from COMPLETED to VERIFICATION_INCOMPLETE, and only after Phase
+//      A's own writes already succeeded; a Phase B crash is caught
+//      separately so it can never relabel a successful import as FAILED.
+
+/** BullMQ worker concurrency — the number of DIFFERENT projects' import
 
 /** BullMQ worker concurrency — the number of DIFFERENT projects' import
  *  jobs this process may run at once. Per-project serialisation is a
@@ -155,7 +166,10 @@ async function withProjectImportLock<T>(
 // runImportJob
 // ---------------------------------------------------------------
 
-export type ImportRunStatus = "COMPLETED" | "CANCELLED";
+// Task 9: `VERIFICATION_INCOMPLETE` is Phase B's outcome, never Phase A's —
+// it can only replace a Phase-A `COMPLETED` result, after Phase A's own
+// writes have already succeeded (see the call site below).
+export type ImportRunStatus = "COMPLETED" | "CANCELLED" | "VERIFICATION_INCOMPLETE";
 
 export interface ImportRunResult {
   jobId: string;
@@ -177,6 +191,15 @@ export interface RunImportJobOptions {
    *  hundreds of real rows, the same "inject a smaller unit" seam
    *  `runWebhookRetention(now)` uses for its cutoff. */
   batchSize?: number;
+  /** Override for testing only — production callers always get
+   *  `createProductionImportVerifyDeps()`. Exists so a test whose subject
+   *  is Phase A (batching/checkpoint/cancel/the per-project lock) can
+   *  give Phase B a trivial fake and assert on Phase A's own behaviour
+   *  without it being reclassified as `VERIFICATION_INCOMPLETE` purely
+   *  because the test project has no real store credentials configured.
+   *  Task 9's own tests exercise Phase B directly via
+   *  `verifyImportedAnchors`, not through this seam. */
+  verifyDeps?: ImportVerifyDeps;
 }
 
 /**
@@ -201,9 +224,10 @@ export async function runImportJob(
   }
   const projectId = initial.projectId;
   const batchSize = options.batchSize ?? IMPORT_BATCH_SIZE;
+  const verifyDeps = options.verifyDeps ?? createProductionImportVerifyDeps();
 
   return withProjectImportLock(projectId, () =>
-    processImportJob(db, jobId, projectId, batchSize),
+    processImportJob(db, jobId, projectId, batchSize, verifyDeps),
   );
 }
 
@@ -212,6 +236,7 @@ async function processImportJob(
   jobId: string,
   projectId: string,
   batchSize: number,
+  verifyDeps: ImportVerifyDeps,
 ): Promise<ImportRunResult> {
   let job = await drizzle.importJobRepo.getImportJobById(db, jobId);
   if (!job) {
@@ -354,7 +379,40 @@ async function processImportJob(
     // to finish.
     const finalOutcomes = (completedJob.counters ?? {}) as Record<ImportOutcome, number>;
     await auditImportRunCompleted(jobId, finalOutcomes);
-    return { jobId, status: "COMPLETED", outcomes: finalOutcomes, checkpointLine };
+
+    // Task 9, Phase B: store re-validation runs as a SECOND phase of this
+    // SAME job, after Phase A's writes (above) have already succeeded.
+    // `verifyImportedAnchors` persists its own counters and — only when
+    // it leaves anchors pending — flips the job's status forward to
+    // `VERIFICATION_INCOMPLETE`, overriding the `COMPLETED` just written.
+    // A crash or thrown error HERE must never relabel Phase A's already-
+    // successful import as FAILED (the catch block below would do exactly
+    // that), so it gets its own try/catch: the worst a broken verifier can
+    // do is leave the job resumable at VERIFICATION_INCOMPLETE, which a
+    // later `verifyImportedAnchors` call (this function, called again) can
+    // always retry — every anchor it already resolved is skipped via the
+    // `verifiedAt` checkpoint (see verify.ts).
+    let finalStatus: ImportRunStatus = "COMPLETED";
+    try {
+      const verifySummary = await verifyImportedAnchors(jobId, verifyDeps);
+      if (verifySummary.status === "VERIFICATION_INCOMPLETE") {
+        finalStatus = "VERIFICATION_INCOMPLETE";
+      }
+    } catch (verifyErr) {
+      logger.error(
+        "import job: phase B store re-validation crashed (the import itself already completed)",
+        {
+          jobId,
+          err: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+        },
+      );
+      finalStatus = "VERIFICATION_INCOMPLETE";
+      await drizzle.importJobRepo
+        .setImportJobStatus(db, projectId, jobId, { status: "VERIFICATION_INCOMPLETE" })
+        .catch(() => undefined);
+    }
+
+    return { jobId, status: finalStatus, outcomes: finalOutcomes, checkpointLine };
   } catch (err) {
     // Close the report stream so a crash mid-run doesn't leave the
     // underlying multipart upload open indefinitely — the part's rows
