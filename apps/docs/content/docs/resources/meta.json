@@ -1,5 +1,5 @@
 {
   "title": "Resources",
   "icon": "Library",
-  "pages": ["versioning", "migrating-from-revenuecat", "using-with-ai"]
+  "pages": ["versioning", "migrating-from-revenuecat", "migrating-from-adapty", "using-with-ai"]
 }

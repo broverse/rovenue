@@ -1,9 +1,12 @@
 ---
 title: Migrating from RevenueCat
-description: Concept mapping from RevenueCat to Rovenue.
+description: Concept mapping and step-by-step history import from RevenueCat to Rovenue.
 ---
 
-Rovenue covers the same subscription-management use cases as RevenueCat but runs on your own infrastructure. This page maps familiar RevenueCat concepts to their Rovenue equivalents so you can orient quickly.
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Rovenue covers the same subscription-management use cases as RevenueCat but runs on your own infrastructure. This page maps familiar RevenueCat concepts to their Rovenue equivalents so you can orient quickly, then walks through importing your existing subscriber and transaction history with the built-in data import tool.
 
 ## Concept mapping
 
@@ -49,3 +52,150 @@ await Rovenue.restorePurchases();
 - **Virtual currencies built-in.** Rovenue ships a first-class multi-currency ledger for consumable products, loyalty systems, and metered billing. Balances are read client-side; spending is a server-side operation via `POST /v1/virtual-currencies/:appUserId/:code/transactions`.
 - **Identity model.** `identify(appUserId)` performs a server-side bind and automatically transfers any prior install's purchases and credits to the current device (similar to RevenueCat's "transfer to new ID" behaviour). Call `logOut()` on sign-out to mint a fresh `rovenueId`. Bulk or programmatic merges are available via the secret-key backend API.
 - **Open source (AGPLv3).** You can read, audit, and fork the full stack.
+
+## Importing your history
+
+Rovenue's data import tool is a column-mapping engine with vendor presets, not
+a hand-written RevenueCat parser — it reads a CSV, maps its columns onto a
+fixed set of canonical fields (subscriber id, store, product identifier,
+purchase date, and so on), and writes the result as history. RevenueCat's
+export shape is one of two built-in presets (the other is the Google
+purchase-token supplemental file described below); if a column layout ever
+drifts, the import falls back to the generic mapper below instead of
+guessing.
+
+<Steps>
+<Step>
+### Export from RevenueCat
+
+From the RevenueCat dashboard, request a **Transactions export**. This is a
+CSV with one row per transaction (initial purchase, renewal, refund, and so
+on) — the closest RevenueCat gets to a full history dump.
+
+<Callout type="warn">
+The standard Transactions export does **not** include `google_purchase_token`.
+Android rows from it import as history only and will not grant live
+entitlements until you complete the supplemental import in the next step.
+</Callout>
+
+Every other row-level field the exporter needs — subscriber id, store,
+product identifier, transaction id, purchase/expiry dates, trial and intro
+flags, USD price, entitlement identifiers — is present in the standard
+export and is picked up automatically once the file is uploaded, because its
+header matches the RevenueCat Transactions preset.
+</Step>
+<Step>
+### Request the Google purchase-token file (Android only)
+
+If you have Android subscribers, ask RevenueCat support for the
+supplemental purchase-token CSV — a separate, three-column file
+(`user_id`, `google_purchase_token`, `google_product_id`) that RevenueCat
+hand-delivers on request. It is not part of the standard export because
+RevenueCat does not surface Google purchase tokens through self-service
+channels.
+
+You don't need this before your first import — the two files are imported
+as two separate passes (next step) — but plan for the request's turnaround
+time if you have any Android revenue you care about restoring live.
+</Step>
+<Step>
+### Two-pass import
+
+Upload the Transactions export first. Its header carries the RevenueCat
+Transactions preset's anchor columns (`rc_original_app_user_id`,
+`store_transaction_id`), so the import tool proposes that preset's mapping
+automatically — review it, adjust anything you've customized, and run it
+through the dry run and commit steps below. This pass imports every row —
+iOS, Android, Stripe — as history, and grants live access for every row that
+already carries a usable store anchor (everything except Android rows,
+which have none yet).
+
+Once the Google purchase-token file arrives, upload it as a **second**
+job on the same project. Its header carries the Google-token preset's
+anchor column (`google_purchase_token`), so it's detected the same way.
+This pass matches each row to the Android purchase the first pass already
+imported (by subscriber id and product) and upgrades it with the token
+needed to re-verify against the Play Developer API — turning an
+Android history-only row into a live one.
+</Step>
+<Step>
+### Map anything the presets don't cover
+
+If your export has been customized (extra columns, a renamed subscriber
+attribute) or a column doesn't match either preset by name, the import tool
+falls back to the generic mapper: you assign each source column to one of
+the canonical fields yourself. `subscriberExternalId`, `store`,
+`productIdentifier`, and `purchaseDate` are required; everything else is
+optional and simply isn't imported if left unmapped. Preset detection is
+anchor-gated — a file with no vendor-identifying column detects nothing,
+which is expected, not an error, and just means you map by hand.
+</Step>
+<Step>
+### Dry run
+
+Every import runs a dry run before it can commit — there's no way to skip
+it. Starting one queues an asynchronous job (the dashboard polls for
+completion); on a large export this can take a while, exactly because it
+reads the whole file. The dry run reports, per row, whether it will create
+a new purchase, update an existing one, or be skipped (unresolved product,
+sandbox, no Android token, invalid data) — including the count of rows that
+will import as history-only pending the Google purchase-token pass. Review
+those numbers before committing.
+</Step>
+<Step>
+### Verify and commit
+
+Committing runs two phases. Phase A writes every row the file carries as
+history — subscribers, purchases, revenue events — without contacting Apple,
+Google, or Stripe. Phase B then re-validates every row that carries a real
+store anchor against the store itself and sets its live status. A row the
+store no longer recognises is left alone as history, never deleted — this
+is a deliberate difference from how some other importers handle a stale
+transaction, and it means your data is never silently discarded because a
+transaction predates what the store API still remembers.
+
+Large imports can outrun a single verification pass — store APIs are
+rate-limited, and Android in particular is a documented quota hazard. If
+Phase B runs out of budget partway through, the job ends in
+`VERIFICATION_INCOMPLETE` rather than failing outright; every anchor already
+resolved is remembered, so resuming the job continues from where it left
+off instead of re-verifying from scratch. A job the tool is still actively
+verifying shows as `VERIFYING`.
+</Step>
+<Step>
+### Cut the SDK over
+
+Once you're satisfied with the import, point your app at Rovenue: install
+the SDK for your platform, call `configure()`, and call `identify(appUserId)`
+with the same id your export used as `rc_original_app_user_id` /
+`subscriberExternalId` so the SDK resolves to the subscriber your import
+created. `restorePurchases()` re-validates any purchase the store still
+knows about, which is a useful sanity check immediately after cutover.
+</Step>
+</Steps>
+
+## What doesn't survive the move
+
+Rovenue's import is a best-effort history reconstruction, not a full data
+migration, and no importer — in either direction — can promise otherwise.
+Specifically, the following are **not** carried over:
+
+- **Full event history.** The import writes purchases and revenue events
+  from the export's transaction rows; it does not reconstruct every
+  underlying lifecycle event (webhooks, state transitions) RevenueCat ever
+  recorded.
+- **Original historical prices** where the export itself doesn't carry
+  them — the import only ever uses the price a row actually reports; it
+  never estimates or backfills one.
+- **Full renewal chains** beyond what the export lists as individual rows.
+  If RevenueCat's export doesn't include a renewal, Rovenue has no way to
+  know it happened.
+- **Promotional entitlements with no underlying store transaction**
+  import as a `MANUAL` grant with a deterministic id (so re-running the
+  import doesn't duplicate them) — but only when the export's `store`
+  column marks the row `promotional`. A grant made outside RevenueCat's
+  own exported data model has nothing to import from.
+
+Uploaded export files are end-user PII and are deleted automatically after
+a retention window once a job finishes — plan your import and verification
+within that window; a job that can still resume is never swept.
