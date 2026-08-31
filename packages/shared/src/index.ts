@@ -251,3 +251,10 @@ export * from "./fonts";
 // =============================================================
 
 export * from "./assets";
+
+// =============================================================
+// Data import — canonical row contract and streaming CSV parser
+// (RevenueCat/Adapty subscriber-history import)
+// =============================================================
+
+export * from "./import";
