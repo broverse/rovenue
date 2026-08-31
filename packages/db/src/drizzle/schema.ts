@@ -3004,9 +3004,26 @@ export const importJobs = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
     reportStorageKey: text("report_storage_key"),
+    // Number of Phase-A writer report PARTS written so far (Task 8 fix
+    // round 1, FIX 5) — one immutable object per `runImportJob` attempt
+    // that did real work, named via `buildReportPartStorageKey`. A
+    // reader enumerates 1..reportPartCount to reconstruct the full
+    // report across a crash-and-resume, instead of every attempt
+    // fighting over one shared, overwritable key (`reportStorageKey`
+    // above, which stays the DRY-RUN report's single object — untouched
+    // by this counter). Zero means no Phase-A attempt has written
+    // anything yet.
+    reportPartCount: integer("report_part_count").notNull().default(0),
     errorMessage: text("error_message"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
+    // Set once the retention sweep (workers/import-retention.ts) has
+    // deleted this job's uploaded file, dry-run report and every report
+    // part. Excludes an already-swept job from the eligibility query
+    // forever after, instead of it matching (and being handed to
+    // `deleteObject` again, a harmless but wasted no-op call) on every
+    // future nightly run.
+    filesDeletedAt: timestamp("files_deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -3018,6 +3035,13 @@ export const importJobs = pgTable(
     projectCreatedAtIdx: index("import_jobs_project_created_at_idx").on(
       t.projectId,
       t.createdAt,
+    ),
+    // Supports the retention sweep's eligibility query (status IN
+    // (...) AND finishedAt < cutoff), which is otherwise a full
+    // sequential scan of the whole cross-project table (FIX 3).
+    statusFinishedAtIdx: index("import_jobs_status_finished_at_idx").on(
+      t.status,
+      t.finishedAt,
     ),
   }),
 );

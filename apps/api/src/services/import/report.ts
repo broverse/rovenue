@@ -82,9 +82,25 @@ export interface ReportWriter {
  * (an S3 multipart `Upload`, same as the upload route's own streamed
  * write) so bytes flow to the bucket as `writeReportRow` produces them,
  * rather than being buffered here and written once at the end.
+ *
+ * `partNumber` is omitted by the dry-run planner (plan.ts), which keeps
+ * writing the single, overwritable `buildReportStorageKey` object it
+ * always has — a dry run is one synchronous call with no crash-resume
+ * concern. The Phase-A writer (workers/import-runner.ts) always passes
+ * one: each `runImportJob` attempt that does real work gets its own
+ * immutable numbered part (`buildReportPartStorageKey`), which is what
+ * makes a crash-and-resume unable to destroy an earlier attempt's report
+ * (Task 8 fix round 1, FIX 5).
  */
-export function createReportWriter(projectId: string, jobId: string): ReportWriter {
-  const storageKey = importStore.buildReportStorageKey(projectId, jobId);
+export function createReportWriter(
+  projectId: string,
+  jobId: string,
+  partNumber?: number,
+): ReportWriter {
+  const storageKey =
+    partNumber === undefined
+      ? importStore.buildReportStorageKey(projectId, jobId)
+      : importStore.buildReportPartStorageKey(projectId, jobId, partNumber);
   const stream = new PassThrough();
   const uploadDone = importStore.putObject(storageKey, stream, "application/x-ndjson");
   let finalized = false;

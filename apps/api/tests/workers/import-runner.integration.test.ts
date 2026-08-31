@@ -43,6 +43,11 @@ vi.mock("../../src/lib/import-store", () => ({
     `imports/${projectId}/${jobId}/${fileName}`,
   buildReportStorageKey: (projectId: string, jobId: string) =>
     `imports/${projectId}/${jobId}/report.ndjson`,
+  // Mirrors lib/import-store.ts's real implementation exactly — the
+  // Phase-A writer (workers/import-runner.ts) always calls this, never
+  // buildReportStorageKey above (see report.ts's createReportWriter).
+  buildReportPartStorageKey: (projectId: string, jobId: string, partNumber: number) =>
+    `imports/${projectId}/${jobId}/report.part-${String(partNumber).padStart(4, "0")}.ndjson`,
   putObject: async (key: string, body: AsyncIterable<Buffer | Uint8Array>) => {
     const chunks: Buffer[] = [];
     for await (const chunk of body) {
@@ -157,6 +162,38 @@ async function countRevenueEvents(): Promise<number> {
   return row?.n ?? 0;
 }
 
+/** Fix round 1, FIX 2: the branch's acceptance criterion is that SUMMED
+ *  REVENUE is unchanged across a re-run — the number a customer would
+ *  actually notice being wrong — not just row-count equality. */
+async function sumRevenueUsd(): Promise<number> {
+  const [row] = await db
+    .select({
+      total: sql<string>`COALESCE(SUM("revenue_events"."amountUsd"), 0)::text`,
+    })
+    .from(revenueEvents)
+    .where(eq(revenueEvents.projectId, PROJECT_ID));
+  return Number(row?.total ?? "0");
+}
+
+/** Fix round 1, FIX 5: reads a report PART back out of the fake object
+ *  store and returns its parsed NDJSON rows — used to prove a
+ *  crash-and-resume across two invocations leaves BOTH attempts'
+ *  reports intact as separate, readable parts, instead of the second
+ *  attempt silently destroying the first's. */
+function readReportPartRows(
+  jobId: string,
+  partNumber: number,
+): Array<Record<string, unknown>> {
+  const key = `imports/${PROJECT_ID}/${jobId}/report.part-${String(partNumber).padStart(4, "0")}.ndjson`;
+  const buf = fakeObjects.get(key);
+  if (!buf) throw new Error(`no report part object stored for key ${key}`);
+  return buf
+    .toString("utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 async function countImportCompletedAudits(jobId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
@@ -169,6 +206,26 @@ async function countImportCompletedAudits(jobId: string): Promise<number> {
       ),
     );
   return row?.n ?? 0;
+}
+
+/** The `import.completed` audit row's `after` payload — the actual bug
+ *  surface for FIX 1: this is the append-only, hash-chained record a
+ *  wrong count would corrupt permanently. */
+async function getImportCompletedAuditPayload(
+  jobId: string,
+): Promise<Record<string, number>> {
+  const rows = await db
+    .select()
+    .from(auditLogs)
+    .where(
+      and(
+        eq(auditLogs.projectId, PROJECT_ID),
+        eq(auditLogs.action, "import.completed"),
+        eq(auditLogs.resourceId, jobId),
+      ),
+    )
+    .limit(1);
+  return (rows[0]?.after ?? {}) as Record<string, number>;
 }
 
 beforeAll(async () => {
@@ -256,6 +313,9 @@ describe("runImportJob — crash mid-batch and resume", () => {
     expect(await countSubscribers()).toBe(subs.length);
     expect(await countPurchases()).toBe(subs.length);
     expect(await countRevenueEvents()).toBe(subs.length);
+    // FIX 2: summed revenue, not just row counts — the number a
+    // customer would actually notice being wrong.
+    expect(await sumRevenueUsd()).toBeCloseTo(9.99 * subs.length, 2);
 
     const finalJob = await importJobRepo.getImportJobById(db, jobId);
     expect(finalJob?.status).toBe("COMPLETED");
@@ -268,6 +328,84 @@ describe("runImportJob — crash mid-batch and resume", () => {
     // auditImportRunCompleted fires exactly once for the whole job, on
     // the run that actually finished — never on the interrupted attempt.
     expect(await countImportCompletedAudits(jobId)).toBe(1);
+  });
+
+  // ===========================================================
+  // FIX 1 (fix round 1) — the audit must reflect the FULL job, not
+  // just the last invocation's contribution.
+  // ===========================================================
+  //
+  // The test above is NOT sufficient to catch FIX 1's bug: its whole
+  // file fits in one batch that is ENTIRELY re-run on resume, so a
+  // call-scoped accumulator and the persisted cumulative counters
+  // coincidentally agree. This test forces two invocations that do
+  // GENUINELY DIFFERENT work — batch 1 commits for real (checkpoint +
+  // counters persisted) before the crash, so the resume only processes
+  // batch 2's rows. A call-scoped `totals` would then audit only
+  // batch 2's 3 rows; the fix must audit all 6.
+  it("audits the FULL persisted counters across two invocations, not just the last leg", async () => {
+    const subs = ["span_a", "span_b", "span_c", "span_d", "span_e", "span_f"];
+    const jobId = await seedJob(csvOf(subs));
+
+    // Crash AFTER batch 1's checkpoint genuinely commits, BEFORE batch 2
+    // starts — unlike Scenario 1's mid-batch throw, nothing here gets
+    // replayed; batch 2 is entirely new work.
+    const originalSaveCheckpoint = importJobRepo.saveImportJobCheckpoint;
+    let calls = 0;
+    const checkpointSpy = vi
+      .spyOn(importJobRepo, "saveImportJobCheckpoint")
+      .mockImplementation(async (...args) => {
+        calls += 1;
+        const row = await originalSaveCheckpoint(...args);
+        if (calls === 1) {
+          throw new Error("simulated crash right after batch 1's checkpoint committed");
+        }
+        return row;
+      });
+
+    await expect(runImportJob(jobId, { batchSize: 3 })).rejects.toThrow(
+      "simulated crash right after batch 1's checkpoint committed",
+    );
+    checkpointSpy.mockRestore();
+
+    // Batch 1 (3 rows) genuinely landed before the crash.
+    const firstBatchLastLine = 4; // header(1) + 3 rows
+    const afterCrash = await importJobRepo.getImportJobById(db, jobId);
+    expect(afterCrash?.checkpointLine).toBe(firstBatchLastLine);
+    expect(await countPurchases()).toBe(3);
+    // FIX 5 side effect, verified properly below: the crashed attempt
+    // still closed its own report part rather than losing it.
+    expect(afterCrash?.reportPartCount).toBe(1);
+
+    const result = await runImportJob(jobId, { batchSize: 3 });
+    expect(result.status).toBe("COMPLETED");
+    expect(await countPurchases()).toBe(subs.length);
+
+    // The bug: a call-scoped accumulator would report only batch 2's 3
+    // rows here. The fix: the FULL 6-row file.
+    const totalFromResult = Object.values(result.outcomes).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    expect(totalFromResult).toBe(subs.length);
+
+    // The actual bug surface: the append-only, hash-chained audit row
+    // itself must carry the full count.
+    const auditPayload = await getImportCompletedAuditPayload(jobId);
+    const auditedTotal = Object.values(auditPayload).reduce(
+      (a, b) => a + (typeof b === "number" ? b : 0),
+      0,
+    );
+    expect(auditedTotal).toBe(subs.length);
+    expect(await countImportCompletedAudits(jobId)).toBe(1);
+
+    // FIX 5: both attempts' reports survive as separate, readable parts
+    // — the crash did not destroy batch 1's report when batch 2 wrote
+    // its own.
+    const finalJob = await importJobRepo.getImportJobById(db, jobId);
+    expect(finalJob?.reportPartCount).toBe(2);
+    expect(readReportPartRows(jobId, 1)).toHaveLength(3);
+    expect(readReportPartRows(jobId, 2)).toHaveLength(3);
   });
 });
 
@@ -326,6 +464,8 @@ describe("runImportJob — cancellation", () => {
     expect(resumed.checkpointLine).toBe(lastLineNumber);
     expect(await countPurchases()).toBe(subs.length);
     expect(await countSubscribers()).toBe(subs.length);
+    // FIX 2: summed revenue, not just row counts.
+    expect(await sumRevenueUsd()).toBeCloseTo(9.99 * subs.length, 2);
 
     const finalJob = await importJobRepo.getImportJobById(db, jobId);
     expect(finalJob?.status).toBe("COMPLETED");

@@ -51,13 +51,43 @@ export function buildStorageKey(
 }
 
 /** `{IMPORT_STORAGE_PREFIX}/{projectId}/{jobId}/report.ndjson` — the
- *  dry-run/writer report artefact for one job, keyed the same way as the
- *  uploaded source object (scoped by project and job) so the two never
- *  collide and a human can find both from the job id alone. Owned here,
- *  not in services/import/report.ts, so this module stays the single
- *  place that knows the shape of every key in this bucket. */
+ *  dry-run planner's report artefact for one job (services/import/plan.ts),
+ *  keyed the same way as the uploaded source object (scoped by project and
+ *  job) so the two never collide and a human can find both from the job id
+ *  alone. Owned here, not in services/import/report.ts, so this module
+ *  stays the single place that knows the shape of every key in this
+ *  bucket.
+ *
+ *  The Phase-A WRITER (workers/import-runner.ts) does NOT use this key —
+ *  see `buildReportPartStorageKey` below for why, and for the key it
+ *  actually uses. */
 export function buildReportStorageKey(projectId: string, jobId: string): string {
   return `${IMPORT_STORAGE_PREFIX}/${projectId}/${jobId}/report.ndjson`;
+}
+
+/** `{IMPORT_STORAGE_PREFIX}/{projectId}/{jobId}/report.part-{NNNN}.ndjson`
+ *  — one immutable report object per `runImportJob` ATTEMPT that did real
+ *  work (Task 8 fix round 1, FIX 5), numbered from 1.
+ *
+ *  The Phase-A writer used to share ONE overwritable key
+ *  (`buildReportStorageKey`) across every attempt at a job, so a
+ *  crash-and-resume permanently lost the per-row skip reasons
+ *  (`invalidRow` / `unresolvedProduct` / `anchorless` / `androidNoToken`)
+ *  from every earlier, already-checkpointed batch — the only place those
+ *  reasons are recorded at all; nothing else in the database has them.
+ *  Numbering parts instead means an attempt can never destroy a previous
+ *  one's report. `import_jobs.reportPartCount` records how many parts
+ *  exist; a reader (Task 10's download endpoint) enumerates
+ *  `1..reportPartCount` through this same function, in order, to
+ *  reconstruct the full report — see workers/import-runner.ts's
+ *  `ensureReportWriter` for the writing side of this contract. */
+export function buildReportPartStorageKey(
+  projectId: string,
+  jobId: string,
+  partNumber: number,
+): string {
+  const padded = String(partNumber).padStart(4, "0");
+  return `${IMPORT_STORAGE_PREFIX}/${projectId}/${jobId}/report.part-${padded}.ndjson`;
 }
 
 export function isStorageConfigured(): boolean {

@@ -1,5 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
-import { drizzle, getPool, type Db } from "@rovenue/db";
+import type { Pool } from "pg";
+import { drizzle, createPool, type Db } from "@rovenue/db";
 import { parseCsvStream, type CanonicalField } from "@rovenue/shared";
 import { createBullConnection } from "../lib/redis";
 import { logger } from "../lib/logger";
@@ -11,7 +12,7 @@ import {
   type ImportWriteRow,
   type BatchOutcome,
 } from "../services/import/write";
-import { IMPORT_OUTCOMES, createReportWriter, type ImportOutcome } from "../services/import/report";
+import { createReportWriter, type ImportOutcome, type ReportWriter } from "../services/import/report";
 import {
   IMPORT_QUEUE_NAME,
   IMPORT_BATCH_SIZE,
@@ -45,7 +46,13 @@ import {
 //      never processes a batch at row granularity, exactly so that
 //      reasoning keeps holding.
 //   2. `auditImportRunCompleted` is called exactly once per run, when
-//      the whole file is done — never per batch (see write.ts's rule 4).
+//      the whole file is done — never per batch (see write.ts's rule 4)
+//      — and (fix round 1, FIX 1) with the job's PERSISTED, cumulative
+//      `counters`, never a call-scoped accumulator. A job that spans
+//      more than one `runImportJob` invocation (exactly the
+//      crash-resume and cancel-resume paths this task exists for) would
+//      otherwise audit only the LAST invocation's contribution into an
+//      append-only, hash-chained log — permanently and silently wrong.
 //   3. Partition provisioning: `writeImportBatch` itself provisions the
 //      `revenue_events` partitions a batch's rows need, BEFORE that
 //      batch performs its first write (Task 8a, called from inside
@@ -58,6 +65,18 @@ import {
 //      (IMPORT_JOB_CONCURRENCY_PER_PROJECT = 1) — enforced below by a
 //      blocking Postgres session advisory lock, not by BullMQ (which has
 //      no per-key group concurrency in its open-source edition).
+//   5. A crash-and-resume must never destroy the only record of why a
+//      row was skipped (fix round 1, FIX 5). Each invocation that does
+//      real work writes its own numbered report PART
+//      (`buildReportPartStorageKey`) instead of every attempt fighting
+//      over one shared, overwritable key — see `ensureReportWriter`.
+
+/** BullMQ worker concurrency — the number of DIFFERENT projects' import
+ *  jobs this process may run at once. Per-project serialisation is a
+ *  separate axis (IMPORT_JOB_CONCURRENCY_PER_PROJECT, enforced by the
+ *  advisory lock below), so this can safely be > 1. Declared up top
+ *  because the lock pool below is sized from it. */
+const WORKER_CONCURRENCY = 5;
 
 // ---------------------------------------------------------------
 // Per-project mutex
@@ -70,15 +89,43 @@ import {
 // This lock needs to be held for the run's entire wall-clock duration
 // and released deterministically when it ends, so it uses the SESSION
 // variant (`pg_advisory_lock` / `pg_advisory_unlock`) on a single
-// dedicated connection checked out from the pool for the duration —
-// Drizzle's pooled `db` hands out a different underlying connection per
-// query, which would silently drop the lock the moment the "locking"
-// connection went back to the pool.
+// dedicated connection checked out for the duration — Drizzle's pooled
+// `db` hands out a different underlying connection per query, which
+// would silently drop the lock the moment the "locking" connection went
+// back to the pool.
 //
 // A real `kill -9` of the worker process never runs the `finally` below,
 // but that is fine: Postgres releases every advisory lock a session held
 // the moment that session's connection closes, which happens as soon as
 // the OS notices the process is gone.
+//
+// Fix round 1, FIX 4: that dedicated connection must NOT come from
+// `getPool()` — the shared pool the whole API process uses for every
+// other query (default `max: 10`). An import run can hold its lock
+// connection for hours; `WORKER_CONCURRENCY` concurrent imports would
+// each permanently park one of those 10 connections, starving unrelated
+// API request traffic long before any import finishes. This module owns
+// a SEPARATE, small, dedicated pool instead, sized from
+// `WORKER_CONCURRENCY` (the max number of import runs this process's
+// BullMQ worker drives at once) plus a little headroom for callers
+// outside the worker (a direct `runImportJob` call, tests). If this pool
+// is ever exhausted — more concurrent `runImportJob` calls than it has
+// connections for — `.connect()` queues and then REJECTS after
+// `createPool`'s default `connectionTimeoutMillis` (5s) rather than
+// hanging forever; the run fails with that error and BullMQ retries it
+// under the queue's normal backoff. The shared pool is never touched
+// either way.
+const IMPORT_LOCK_POOL_SIZE = WORKER_CONCURRENCY + 2;
+
+let cachedLockPool: Pool | undefined;
+
+function getImportLockPool(): Pool {
+  if (!cachedLockPool) {
+    cachedLockPool = createPool({ max: IMPORT_LOCK_POOL_SIZE });
+  }
+  return cachedLockPool;
+}
+
 const IMPORT_PROJECT_LOCK_PREFIX = "import:project:";
 
 async function withProjectImportLock<T>(
@@ -86,7 +133,7 @@ async function withProjectImportLock<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const lockKey = `${IMPORT_PROJECT_LOCK_PREFIX}${projectId}`;
-  const client = await getPool().connect();
+  const client = await getImportLockPool().connect();
   try {
     await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
       lockKey,
@@ -113,6 +160,9 @@ export type ImportRunStatus = "COMPLETED" | "CANCELLED";
 export interface ImportRunResult {
   jobId: string;
   status: ImportRunStatus;
+  /** The job's full, PERSISTED, cumulative outcome breakdown — not just
+   *  this invocation's contribution (fix round 1, FIX 1). Read straight
+   *  from `import_jobs.counters` after the final checkpoint. */
   outcomes: Record<ImportOutcome, number>;
   /** Highest source line number checkpointed by the time this call
    *  returned — equal to the file's last line on COMPLETED, or the last
@@ -127,13 +177,6 @@ export interface RunImportJobOptions {
    *  hundreds of real rows, the same "inject a smaller unit" seam
    *  `runWebhookRetention(now)` uses for its cutoff. */
   batchSize?: number;
-}
-
-function emptyOutcomeTotals(): Record<ImportOutcome, number> {
-  return Object.fromEntries(IMPORT_OUTCOMES.map((o) => [o, 0])) as Record<
-    ImportOutcome,
-    number
-  >;
 }
 
 /**
@@ -191,10 +234,35 @@ async function processImportJob(
 
   const mapping = job.mapping as Record<string, CanonicalField>;
   const checkpointAtStart = job.checkpointLine;
-  const reportWriter = createReportWriter(projectId, jobId);
-  const totals = emptyOutcomeTotals();
+  const reportPartCountAtStart = job.reportPartCount;
   let checkpointLine = checkpointAtStart;
   let cancelled = false;
+
+  // Fix round 1, FIX 5: lazily opened on the FIRST batch this invocation
+  // actually writes, as its own numbered part — never the single shared
+  // key every earlier attempt used to fight over. An invocation that
+  // turns out to have nothing left to do never allocates a part it
+  // would leave empty.
+  //
+  // Held as properties on one object, not two bare `let`s, because a
+  // bare outer `let` reassigned inside a nested function (`ensureReportWriter`
+  // below) hits a real TypeScript control-flow-narrowing limitation:
+  // every later `if (reportWriter)` check in this function resolves to
+  // `never` instead of `ReportWriter` (reproduced in isolation; not
+  // specific to this codebase). Property access on an object sidesteps
+  // it.
+  const reportState: { writer: ReportWriter | null; partNumber: number | null } = {
+    writer: null,
+    partNumber: null,
+  };
+
+  function ensureReportWriter(): ReportWriter {
+    if (!reportState.writer) {
+      reportState.partNumber = reportPartCountAtStart + 1;
+      reportState.writer = createReportWriter(projectId, jobId, reportState.partNumber);
+    }
+    return reportState.writer;
+  }
 
   try {
     const objectStream = await importStore.getObject(job.storageKey);
@@ -204,11 +272,9 @@ async function processImportJob(
     const flushBatch = async (): Promise<void> => {
       if (batch.length === 0) return;
       const outcome: BatchOutcome = await writeImportBatch(jobId, batch);
+      const writer = ensureReportWriter();
       for (const row of outcome.reportRows) {
-        await reportWriter.writeReportRow(row);
-      }
-      for (const key of IMPORT_OUTCOMES) {
-        totals[key] += outcome.outcomes[key];
+        await writer.writeReportRow(row);
       }
       await drizzle.importJobRepo.incrementImportJobCounters(
         db,
@@ -253,31 +319,61 @@ async function processImportJob(
       await flushBatch();
     }
 
-    const reportStorageKey = await reportWriter.finalizeReport();
-
-    if (cancelled) {
-      logger.info("import job cancelled mid-run", { jobId, checkpointLine });
-      return { jobId, status: "CANCELLED", outcomes: totals, checkpointLine };
+    // Close THIS attempt's report part (if one was opened) and work out
+    // the new cumulative part count. A run that did nothing this
+    // invocation (e.g. resuming a job whose checkpoint already covers
+    // the whole file) leaves the count untouched.
+    let finalReportPartCount = reportPartCountAtStart;
+    if (reportState.writer) {
+      await reportState.writer.finalizeReport();
+      finalReportPartCount = reportState.partNumber!;
     }
 
-    await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
+    if (cancelled) {
+      const persisted = await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
+        status: "CANCELLED",
+        reportPartCount: finalReportPartCount,
+      });
+      logger.info("import job cancelled mid-run", { jobId, checkpointLine });
+      return {
+        jobId,
+        status: "CANCELLED",
+        outcomes: (persisted.counters ?? {}) as Record<ImportOutcome, number>,
+        checkpointLine,
+      };
+    }
+
+    const completedJob = await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
       status: "COMPLETED",
-      reportStorageKey,
+      reportPartCount: finalReportPartCount,
       finishedAt: new Date(),
     });
-    await auditImportRunCompleted(jobId, totals);
-    return { jobId, status: "COMPLETED", outcomes: totals, checkpointLine };
+    // FIX 1: audit from the PERSISTED, cumulative counters (see rule 2
+    // above) — never a call-scoped accumulator, which would report only
+    // this invocation's slice on any job that took more than one call
+    // to finish.
+    const finalOutcomes = (completedJob.counters ?? {}) as Record<ImportOutcome, number>;
+    await auditImportRunCompleted(jobId, finalOutcomes);
+    return { jobId, status: "COMPLETED", outcomes: finalOutcomes, checkpointLine };
   } catch (err) {
     // Close the report stream so a crash mid-run doesn't leave the
-    // underlying multipart upload open indefinitely — the report itself
-    // is incomplete/discardable on a FAILED run (the next attempt opens
-    // a fresh one), but the upload resource still needs to be released.
-    await reportWriter.finalizeReport().catch(() => undefined);
+    // underlying multipart upload open indefinitely — the part's rows
+    // written so far are usable (unlike the pre-fix single-key design,
+    // a part is never overwritten by the next attempt), so it's worth
+    // finalizing rather than discarding.
+    let finalReportPartCount: number | undefined;
+    if (reportState.writer) {
+      await reportState.writer.finalizeReport().catch(() => undefined);
+      finalReportPartCount = reportState.partNumber!;
+    }
     await drizzle.importJobRepo
       .setImportJobStatus(db, projectId, jobId, {
         status: "FAILED",
         errorMessage: err instanceof Error ? err.message : String(err),
         finishedAt: new Date(),
+        ...(finalReportPartCount !== undefined
+          ? { reportPartCount: finalReportPartCount }
+          : {}),
       })
       .catch(() => undefined);
     throw err;
@@ -312,12 +408,6 @@ export async function enqueueImportJob(importJobId: string): Promise<void> {
     buildImportJobOptions(importJobId),
   );
 }
-
-/** BullMQ worker concurrency — the number of DIFFERENT projects' import
- *  jobs this process may run at once. Per-project serialisation is a
- *  separate axis (IMPORT_JOB_CONCURRENCY_PER_PROJECT, enforced by the
- *  advisory lock above), so this can safely be > 1. */
-const WORKER_CONCURRENCY = 5;
 
 let cachedWorker: Worker<ImportRunJobData> | undefined;
 

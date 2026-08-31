@@ -34,12 +34,18 @@ const REPEAT_EVERY_MS = 24 * 60 * 60 * 1000; // nightly
 const REPEATABLE_JOB_NAME = "import:retention";
 const REPEATABLE_JOB_ID = "import-retention-repeatable";
 
+// Fix round 1, FIX 6: hoisted out of getImportRetentionQueue's inline
+// object literal, matching this file's own RETENTION_WINDOW_MS /
+// REPEAT_EVERY_MS convention.
+const JOB_RETENTION_KEEP_COUNT = 30;
+const FAILED_JOB_RETENTION_KEEP_COUNT = 100;
+const JOB_RETENTION_KEEP_AGE_SECONDS = 30 * 24 * 60 * 60;
+
 export interface ImportRetentionResult {
   /** Number of import_jobs rows whose files were swept this run. */
   deletedJobs: number;
-  /** Number of individual objects deleted (source file + report, when
-   *  the job has one — a job that never reached DRY_RUN_COMPLETE has no
-   *  reportStorageKey). */
+  /** Number of individual objects deleted (source file + the dry-run
+   *  report, when the job has one, + every Phase-A writer report part). */
   deletedFiles: number;
   cutoff: string; // ISO8601, for log inspection
 }
@@ -61,6 +67,19 @@ export async function runImportRetention(
       await importStore.deleteObject(job.reportStorageKey);
       deletedFiles += 1;
     }
+    // Fix round 1, FIX 5: the Phase-A writer's report is one or more
+    // numbered PARTS, not the single `reportStorageKey` object above —
+    // every part this job ever wrote needs its own delete call.
+    for (let partNumber = 1; partNumber <= job.reportPartCount; partNumber++) {
+      await importStore.deleteObject(
+        importStore.buildReportPartStorageKey(job.projectId, job.id, partNumber),
+      );
+      deletedFiles += 1;
+    }
+    // Fix round 1, FIX 3: mark this job's files handled so it drops out
+    // of `listImportJobsEligibleForFileRetention` on every future run —
+    // without this, the eligible set only ever grows.
+    await drizzle.importJobRepo.markImportJobFilesDeleted(drizzle.db, job.id, now);
   }
 
   log.info("import file retention sweep complete", {
@@ -78,8 +97,14 @@ export function getImportRetentionQueue(): Queue {
   cachedQueue = new Queue(IMPORT_RETENTION_QUEUE_NAME, {
     connection: createBullConnection("import-retention"),
     defaultJobOptions: {
-      removeOnComplete: { count: 30, age: 30 * 24 * 60 * 60 },
-      removeOnFail: { count: 100, age: 30 * 24 * 60 * 60 },
+      removeOnComplete: {
+        count: JOB_RETENTION_KEEP_COUNT,
+        age: JOB_RETENTION_KEEP_AGE_SECONDS,
+      },
+      removeOnFail: {
+        count: FAILED_JOB_RETENTION_KEEP_COUNT,
+        age: JOB_RETENTION_KEEP_AGE_SECONDS,
+      },
     },
   });
   return cachedQueue;

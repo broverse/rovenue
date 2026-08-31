@@ -118,6 +118,11 @@ export interface SetImportJobStatusInput {
   status: ImportJobStatus;
   errorMessage?: string | null;
   reportStorageKey?: string | null;
+  /** Cumulative count of Phase-A writer report PARTS written so far
+   *  (Task 8 fix round 1, FIX 5) — see `import-runner.ts`'s
+   *  `ensureReportWriter`. Distinct from `reportStorageKey`, which stays
+   *  the dry-run planner's single report object. */
+  reportPartCount?: number;
   startedAt?: Date | null;
   finishedAt?: Date | null;
 }
@@ -135,6 +140,9 @@ export async function setImportJobStatus(
   if (input.errorMessage !== undefined) patch.errorMessage = input.errorMessage;
   if (input.reportStorageKey !== undefined) {
     patch.reportStorageKey = input.reportStorageKey;
+  }
+  if (input.reportPartCount !== undefined) {
+    patch.reportPartCount = input.reportPartCount;
   }
   if (input.startedAt !== undefined) patch.startedAt = input.startedAt;
   if (input.finishedAt !== undefined) patch.finishedAt = input.finishedAt;
@@ -251,8 +259,16 @@ export interface RetentionEligibleImportJob {
   projectId: string;
   storageKey: string;
   reportStorageKey: string | null;
+  reportPartCount: number;
 }
 
+// `filesDeletedAt IS NULL` (fix round 1, FIX 3) excludes a job the sweep
+// already handled — without it, a terminal job past the window matches
+// this query FOREVER, so every nightly run re-selects the entire history
+// of swept jobs and re-issues (harmless but wasted) `deleteObject` calls
+// against objects that no longer exist. Paired with
+// `import_jobs_status_finished_at_idx` (status, finishedAt) so this is an
+// index scan, not a full table scan, as the table grows.
 export async function listImportJobsEligibleForFileRetention(
   db: Db,
   cutoff: Date,
@@ -263,12 +279,36 @@ export async function listImportJobsEligibleForFileRetention(
       projectId: importJobs.projectId,
       storageKey: importJobs.storageKey,
       reportStorageKey: importJobs.reportStorageKey,
+      reportPartCount: importJobs.reportPartCount,
     })
     .from(importJobs)
     .where(
       and(
         inArray(importJobs.status, TERMINAL_IMPORT_JOB_STATUSES),
         sql`${importJobs.finishedAt} IS NOT NULL AND ${importJobs.finishedAt} < ${cutoff}`,
+        sql`${importJobs.filesDeletedAt} IS NULL`,
       ),
     );
+}
+
+// ---------------------------------------------------------------------------
+// markImportJobFilesDeleted
+// ---------------------------------------------------------------------------
+//
+// Called by the retention sweep once it has deleted a job's uploaded
+// file, dry-run report and every report part — excludes the job from
+// `listImportJobsEligibleForFileRetention` on every future run. Not
+// project-scoped, matching `getImportJobById`'s precedent: the sweep is
+// an internal worker process with the id already in hand, not a
+// caller-supplied URL param.
+
+export async function markImportJobFilesDeleted(
+  db: Db,
+  id: string,
+  deletedAt: Date,
+): Promise<void> {
+  await db
+    .update(importJobs)
+    .set({ filesDeletedAt: deletedAt, updatedAt: new Date() })
+    .where(eq(importJobs.id, id));
 }

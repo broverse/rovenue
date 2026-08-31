@@ -206,7 +206,7 @@ export { accessIdSchema } from "./drizzle/validators";
 
 export const drizzle = drizzleNamespace;
 export type { Db } from "./drizzle";
-export { getDb, createDb, db, getPool } from "./drizzle";
+export { getDb, createDb, db, getPool, createPool } from "./drizzle";
 // Pure helper: classify a RevenueEventType into a coarse dedup-key segment.
 // Exported top-level so webhook/receipt callers import it directly rather
 // than through the (test-mocked) `drizzle.revenueEventRepo` namespace.
