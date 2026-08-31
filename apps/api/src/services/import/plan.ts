@@ -61,7 +61,7 @@ const DEFAULT_SKIP_SANDBOX = true;
  *  confirmed mapping. Columns with no mapped canonical field are simply
  *  dropped — the mapping is the single gate a column must pass through,
  *  same as the mapping-validation module (mapping.ts) treats it. */
-function buildCanonicalRow(
+export function buildCanonicalRow(
   header: string[],
   row: string[],
   mapping: Record<string, CanonicalField>,
@@ -147,7 +147,11 @@ export type ProductResolution =
   | { kind: "unresolved" }
   | { kind: "ambiguous"; matchCount: number };
 
-async function resolveProduct(
+/** Exported so the Phase A writer (`write.ts`) resolves products through
+ *  the EXACT same rules the dry run previewed. A second, subtly different
+ *  resolver would let the writer bind a purchase to a product the report
+ *  told the operator was unresolvable. */
+export async function resolveProduct(
   db: Db,
   projectId: string,
   store: StoreValue,
