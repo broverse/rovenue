@@ -605,12 +605,30 @@ export async function writeImportBatch(
  * per batch, so auditing inside it would produce one entry per batch —
  * the per-row-ish shape rule 4 forbids. `import.started` is written by
  * the upload route (routes/dashboard/imports.ts); this is its counterpart
- * and the run's caller (Task 8's worker) invokes it exactly once, when
- * the whole file is done.
+ * and the run's caller (workers/import-runner.ts) invokes it exactly
+ * once, when the whole run — Phase A AND Phase B — has settled.
+ *
+ * Task 10 fix round 1 (FIX 3): `status` is the run's TRUE final outcome
+ * (`"COMPLETED" | "CANCELLED" | "VERIFICATION_INCOMPLETE"`), embedded in
+ * the `after` payload alongside the Phase-A outcome buckets. Before this
+ * fix, the caller invoked this function right after Phase A's own
+ * `COMPLETED` write and BEFORE Phase B (store re-validation) ever ran —
+ * so the append-only, hash-chained audit log could permanently record
+ * `import.completed` for a run that went on to end
+ * `VERIFICATION_INCOMPLETE`. `status` is typed as a plain string union
+ * here, not imported from `workers/import-runner.ts`'s `ImportRunStatus`,
+ * to avoid a circular import (that file imports THIS function) — the two
+ * are kept structurally identical by convention, not by a shared type.
+ * `outcomes` stays exactly what it always was: Phase-A's own outcome
+ * buckets (`ImportOutcome`), never Phase-B's separately-namespaced verify
+ * counters (see verify.ts's own module comment on why those never
+ * collide with this key space) — only the terminal `status` needed to
+ * become honest, not what this function considers "outcomes".
  */
 export async function auditImportRunCompleted(
   jobId: string,
   outcomes: Record<ImportOutcome, number>,
+  status: "COMPLETED" | "CANCELLED" | "VERIFICATION_INCOMPLETE",
 ): Promise<void> {
   const job = await drizzle.importJobRepo.getImportJobById(drizzle.db, jobId);
   if (!job) {
@@ -625,7 +643,7 @@ export async function auditImportRunCompleted(
     resource: "import_job",
     resourceId: job.id,
     before: null,
-    after: { ...outcomes },
+    after: { ...outcomes, status },
     ipAddress: null,
     userAgent: null,
   });

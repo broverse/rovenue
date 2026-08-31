@@ -39,8 +39,28 @@ export const IMPORT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
  * Upload is a rare, heavy, whole-project operation (one-time history
  * migration), not routine traffic — stricter than
  * `ASSET_UPLOAD_RATE_LIMIT_PER_MINUTE` (20) on purpose.
+ *
+ * Task 10 fix round 1 (FIX 1): this limit gates the job-lifecycle
+ * MUTATION routes (upload, mapping edits, dry-run/commit/resume/cancel)
+ * only — see `IMPORT_STATUS_POLL_RATE_LIMIT_PER_MINUTE` below for the
+ * separate, much larger budget the READ routes (list, status, report)
+ * use. A dashboard's polling loop sharing THIS budget would burn it in
+ * the first 10-15 seconds of any run.
  */
 export const IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE = 5;
+
+/**
+ * Task 10 fix round 1 (FIX 1): a SEPARATE, much more generous budget for
+ * the job-lifecycle READ routes (`GET /`, `GET /:id`, `GET /:id/report`)
+ * — `GET /:id` in particular is the route the dashboard is meant to poll
+ * while a dry-run/commit/verify is in flight (routes/dashboard/imports.ts's
+ * module comment). Sized for a client polling as often as twice a
+ * second (well above any sane dashboard poll interval, which is
+ * expected to be several seconds) with headroom for more than one
+ * browser tab/viewer on the same project — 120/min, i.e. a rolling
+ * 60-second window with room for 2 req/s sustained.
+ */
+export const IMPORT_STATUS_POLL_RATE_LIMIT_PER_MINUTE = 120;
 
 /**
  * Uploaded files are end-user PII (design spec §4). Once a job reaches a

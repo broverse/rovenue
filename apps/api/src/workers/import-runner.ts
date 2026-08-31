@@ -5,7 +5,7 @@ import { parseCsvStream, type CanonicalField } from "@rovenue/shared";
 import { createBullConnection } from "../lib/redis";
 import { logger } from "../lib/logger";
 import * as importStore from "../lib/import-store";
-import { buildCanonicalRow } from "../services/import/plan";
+import { buildCanonicalRow, planImport } from "../services/import/plan";
 import {
   writeImportBatch,
   auditImportRunCompleted,
@@ -17,9 +17,12 @@ import { verifyImportedAnchors, type ImportVerifyDeps } from "../services/import
 import { createProductionImportVerifyDeps } from "../services/import/verify-store-clients";
 import {
   IMPORT_QUEUE_NAME,
+  IMPORT_RUN_JOB_NAME,
+  IMPORT_DRY_RUN_JOB_NAME,
   IMPORT_BATCH_SIZE,
   IMPORT_JOB_OPTIONS,
   buildImportJobOptions,
+  buildImportDryRunJobOptions,
 } from "../queues/imports";
 
 // =============================================================
@@ -379,7 +382,6 @@ async function processImportJob(
     // this invocation's slice on any job that took more than one call
     // to finish.
     const finalOutcomes = (completedJob.counters ?? {}) as Record<ImportOutcome, number>;
-    await auditImportRunCompleted(jobId, finalOutcomes);
 
     // Task 9, Phase B: store re-validation runs as a SECOND phase of this
     // SAME job, after Phase A's writes (above) have already succeeded.
@@ -415,6 +417,16 @@ async function processImportJob(
         .setImportJobStatus(db, projectId, jobId, { status: "VERIFICATION_INCOMPLETE" })
         .catch(() => undefined);
     }
+
+    // Task 10 fix round 1 (FIX 3): audited AFTER Phase B has settled, with
+    // the run's TRUE final status — never unconditionally "COMPLETED".
+    // Before this fix, the call sat right after Phase A's own COMPLETED
+    // write (above), so a run that Phase B then downgraded to
+    // VERIFICATION_INCOMPLETE (or, in principle, CANCELLED) still
+    // permanently audited COMPLETED into the append-only, hash-chained
+    // log. `outcomes` is unchanged (Phase A's own buckets); only the
+    // `status` field embedded in the payload needed to become honest.
+    await auditImportRunCompleted(jobId, finalOutcomes, finalStatus);
 
     return { jobId, status: finalStatus, outcomes: finalOutcomes, checkpointLine };
   } catch (err) {
@@ -465,9 +477,26 @@ export function getImportQueue(): Queue<ImportRunJobData> {
 export async function enqueueImportJob(importJobId: string): Promise<void> {
   const queue = getImportQueue();
   await queue.add(
-    "import:run",
+    IMPORT_RUN_JOB_NAME,
     { importJobId },
     buildImportJobOptions(importJobId),
+  );
+}
+
+/**
+ * Task 10 fix round 1 (FIX 2): enqueues a dry-run-only scan on the SAME
+ * queue as a commit run, distinguished by BullMQ job NAME
+ * (`IMPORT_DRY_RUN_JOB_NAME`) — see `createImportRunnerWorker`'s dispatch
+ * below and `buildImportDryRunJobOptions`'s own comment for why this
+ * needs its own (single-attempt, separately-namespaced-id) job options
+ * rather than reusing `buildImportJobOptions`.
+ */
+export async function enqueueImportDryRun(importJobId: string): Promise<void> {
+  const queue = getImportQueue();
+  await queue.add(
+    IMPORT_DRY_RUN_JOB_NAME,
+    { importJobId },
+    buildImportDryRunJobOptions(importJobId),
   );
 }
 
@@ -479,6 +508,15 @@ export function createImportRunnerWorker(): Worker<ImportRunJobData> {
   cachedWorker = new Worker<ImportRunJobData>(
     IMPORT_QUEUE_NAME,
     async (job: Job<ImportRunJobData>) => {
+      // Task 10 fix round 1 (FIX 2): a dry-run job is a single read-only
+      // scan (`planImport`) with none of `runImportJob`'s checkpoint/
+      // resume/per-project-lock machinery — it doesn't need any of that
+      // (no writes to serialize against, no partial-batch state to
+      // resume from), so it is dispatched straight to `planImport`
+      // rather than through `runImportJob`.
+      if (job.name === IMPORT_DRY_RUN_JOB_NAME) {
+        return planImport(job.data.importJobId);
+      }
       return runImportJob(job.data.importJobId);
     },
     {

@@ -10,6 +10,7 @@ import {
   ERROR_CODE,
   IMPORT_MAX_UPLOAD_BYTES,
   IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE,
+  IMPORT_STATUS_POLL_RATE_LIMIT_PER_MINUTE,
   CANONICAL_FIELDS,
   detectPreset,
   parseCsvStream,
@@ -24,8 +25,7 @@ import { audit, extractRequestContext } from "../../lib/audit";
 import { fail, ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 import * as importStore from "../../lib/import-store";
-import { planImport } from "../../services/import/plan";
-import { enqueueImportJob } from "../../workers/import-runner";
+import { enqueueImportJob, enqueueImportDryRun } from "../../workers/import-runner";
 
 // =============================================================
 // Dashboard: data import — upload + create job (Task 5)
@@ -106,14 +106,16 @@ const uploadQuerySchema = z.object({
 //      `verifyImportedAnchors` resumes Phase B from `purchases.verifiedAt`
 //      with no separate state to thread through.
 //   2. `auditImportRunCompleted` (write.ts, called from
-//      workers/import-runner.ts) fires before Phase B even starts, so
-//      the audit trail can say COMPLETED for a run that goes on to end
-//      VERIFICATION_INCOMPLETE. That is out of this file's reach (it
-//      would mean touching workers/import-runner.ts / write.ts, outside
-//      Task 10's scope) — what IS in reach is making sure every read
-//      here comes straight from the `import_jobs` row's own `status`
-//      column, never from the audit log. See `requireImportJob` and
-//      every handler below: none of them ever consult `audit_logs`.
+//      workers/import-runner.ts) used to fire before Phase B even
+//      started, so the audit trail could say COMPLETED for a run that
+//      went on to end VERIFICATION_INCOMPLETE. FIXED AT THE SOURCE in
+//      Task 10 fix round 1 (FIX 3): the call now happens after Phase B
+//      resolves, with the run's true final status. This file's own
+//      mitigation stays regardless — every read here still comes
+//      straight from the `import_jobs` row's own `status` column, never
+//      from the audit log (`requireImportJob` and every handler below:
+//      none of them ever consult `audit_logs`) — belt-and-suspenders,
+//      not a replacement for the source-level fix.
 //
 // A third carry-forward (task-9 RE-REVIEW, binding) concerns the
 // counters this file surfaces. Phase B's `verifyAnchorNotFound` /
@@ -126,17 +128,21 @@ const uploadQuerySchema = z.object({
 // inference this route makes since `anchorCapReached` itself is never
 // persisted to the row.
 //
-// Dry run is awaited SYNCHRONOUSLY inside the POST handler, unlike
-// commit/resume (which enqueue onto the existing BullMQ import queue —
-// workers/import-runner.ts). This is deliberate, not an oversight: Task
-// 10's scope is this route file only, planImport (Task 6) has no queue
-// wired to it at all today, and planImport is read-only (no
-// subscriber/purchase/revenue-event writes — see plan.ts's own module
-// comment), so there is nothing here that a crash mid-run could corrupt
-// the way a Phase-A write could. `GET /:id` is what a dashboard should
-// actually poll while this call is in flight for a large file; the
-// synchronous await is a known scaling limit for a future task to move
-// onto the queue, not a design this route claims is unbounded.
+// Dry run is QUEUED (Task 10 fix round 1, FIX 2), the same way
+// commit/resume enqueue onto the existing BullMQ import queue
+// (workers/import-runner.ts) — reusing that same queue, dispatched by
+// BullMQ job NAME (`IMPORT_DRY_RUN_JOB_NAME` vs `IMPORT_RUN_JOB_NAME` —
+// queues/imports.ts) rather than a second queue, since dry-run and
+// commit are two phases of one job-lifecycle system. This route was
+// ORIGINALLY written to await `planImport` synchronously in-request
+// (no queue existed for it yet); that was wrong on the largest files —
+// the upload cap is 2 GiB, a dry run reads the whole file, and it is
+// mandatory before commit by design, so the main path could run past a
+// proxy/load-balancer idle timeout. `ImportJobStatus` already carried
+// `DRY_RUN_RUNNING` as a distinct persisted status, which only means
+// something for asynchronous work. `GET /:id` (its own, generous
+// rate-limit budget — see `statusPollRateLimit` below) is what the
+// dashboard polls to observe DRY_RUN_COMPLETE / FAILED.
 
 type ImportJobStatus =
   | "PENDING_MAPPING"
@@ -357,19 +363,48 @@ async function detectHeaderFromPrefix(prefix: Buffer): Promise<string[] | null> 
   return null;
 }
 
-export const importsRoute = new Hono()
-  .use("*", requireDashboardAuth)
-  .use(
-    "*",
-    endpointRateLimit({
-      name: "import-upload",
-      max: IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE,
-      identify: (c) => c.req.param("projectId") ?? "unknown",
-    }),
-  );
+// Task 10 fix round 1 (FIX 1): TWO separate rate limiters, not one
+// blanket `.use("*", ...)`.
+//
+// Before this fix, a single `.use("*", endpointRateLimit({name:
+// "import-upload", max: 5, ...}))` sat here and applied to the WHOLE
+// sub-app — harmless when the upload route (Task 5) was the only route
+// in it, but Task 10 added `GET /:id` specifically for the dashboard to
+// POLL while a run is in flight, and that same 5-per-rolling-minute
+// budget would exhaust in the first 10-15 seconds of any poll loop,
+// shared with every mapping-edit/dry-run/commit/cancel/resume click on
+// top. The upload route's own limiter OBJECT is unchanged bit-for-bit
+// (same `name`, `max`, `identify`) and its EFFECTIVE budget is unchanged
+// (still 5/min, still keyed by projectId) — only WHERE it is mounted
+// moved, from blanket to the specific mutation routes it was actually
+// sized for. `uploadMutationRateLimit` is constructed exactly once,
+// first (matching the existing "called once at module load, and this is
+// calls[0]" assumption in imports-upload.test.ts's Ruling-3 test), and
+// the SAME middleware instance is reused across every mutation route
+// below — `endpointRateLimit`'s bucket key is derived from `name` +
+// `identify(c)` in Redis (middleware/rate-limit.ts), not from JS closure
+// identity, so reusing one instance across routes and constructing a
+// second, differently-named one for reads share nothing by accident.
+const uploadMutationRateLimit = endpointRateLimit({
+  name: "import-upload",
+  max: IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE,
+  identify: (c) => c.req.param("projectId") ?? "unknown",
+});
+
+/** New in this fix round: gates ONLY `GET /`, `GET /:id` and
+ *  `GET /:id/report` — sized for polling (`IMPORT_STATUS_POLL_RATE_LIMIT_PER_MINUTE`),
+ *  never shared with the upload/mutation budget above. */
+const statusPollRateLimit = endpointRateLimit({
+  name: "import-status-poll",
+  max: IMPORT_STATUS_POLL_RATE_LIMIT_PER_MINUTE,
+  identify: (c) => c.req.param("projectId") ?? "unknown",
+});
+
+export const importsRoute = new Hono().use("*", requireDashboardAuth);
 
 importsRoute.post(
   "/",
+  uploadMutationRateLimit,
   bodyLimit({
     maxSize: IMPORT_MAX_UPLOAD_BYTES,
     onError: (c) =>
@@ -505,7 +540,7 @@ importsRoute.post(
 // GET /  — list, newest first
 // ---------------------------------------------------------------------------
 
-importsRoute.get("/", validate("query", listQuerySchema), async (c) => {
+importsRoute.get("/", statusPollRateLimit, validate("query", listQuerySchema), async (c) => {
   const projectId = c.req.param("projectId");
   if (!projectId) {
     throw new HTTPException(400, { message: "Missing projectId" });
@@ -528,6 +563,7 @@ importsRoute.get("/", validate("query", listQuerySchema), async (c) => {
 
 importsRoute.patch(
   "/:id/mapping",
+  uploadMutationRateLimit,
   validate("json", mappingBodySchema),
   async (c) => {
     const projectId = c.req.param("projectId");
@@ -590,7 +626,7 @@ importsRoute.patch(
 // POST /:id/dry-run
 // ---------------------------------------------------------------------------
 
-importsRoute.post("/:id/dry-run", async (c) => {
+importsRoute.post("/:id/dry-run", uploadMutationRateLimit, async (c) => {
   const projectId = c.req.param("projectId");
   const id = c.req.param("id");
   if (!projectId || !id) {
@@ -600,6 +636,14 @@ importsRoute.post("/:id/dry-run", async (c) => {
   await requireImportAccess(projectId, user.id);
 
   const job = await requireImportJob(projectId, id);
+  // Also the route's own defence against "a second dry-run request for a
+  // job already in DRY_RUN_RUNNING must not start a second scan" (Task 10
+  // fix round 1, FIX 2) — DRY_RUN_RUNNING is deliberately excluded from
+  // this set, so a second request 409s here and never reaches the
+  // enqueue call below. `enqueueImportDryRun`'s own jobId-dedup
+  // (`dry-run:${id}` — queues/imports.ts) is a second, redundant layer
+  // for the same guarantee under a genuine race between two concurrent
+  // requests.
   if (!DRY_RUN_STARTABLE_STATUSES.has(job.status as ImportJobStatus)) {
     throw new HTTPException(409, {
       message: `Cannot start a dry run while the job is ${job.status}`,
@@ -613,6 +657,30 @@ importsRoute.post("/:id/dry-run", async (c) => {
     });
   }
 
+  // Task 10 fix round 1 (FIX 2): queued, not awaited in-request. The
+  // upload cap is 2 GiB and a dry run reads the ENTIRE file — on the
+  // largest files (exactly the customers this feature targets) an
+  // in-request await could run past a typical proxy/load-balancer idle
+  // timeout, and a dry run is mandatory before commit by design, so this
+  // sits on the MAIN path, not an edge case. `DRY_RUN_RUNNING` existing
+  // as its own persisted `ImportJobStatus` only makes sense for
+  // asynchronous work — that was always the intent.
+  //
+  // The transition to DRY_RUN_RUNNING happens HERE, synchronously,
+  // before enqueueing — not left to `planImport`'s own first write
+  // (services/import/plan.ts still does that too, redundantly and
+  // harmlessly, when the worker picks the job up) — so the response this
+  // call returns already reflects it, rather than racing the worker's
+  // pickup. `GET /:id` (now on its own, generous rate-limit budget — see
+  // the module comment on `statusPollRateLimit`) is what the dashboard
+  // polls from here to observe DRY_RUN_COMPLETE / FAILED.
+  const started = await drizzle.importJobRepo.setImportJobStatus(
+    drizzle.db,
+    projectId,
+    id,
+    { status: "DRY_RUN_RUNNING", startedAt: new Date() },
+  );
+  await enqueueImportDryRun(id);
   await audit({
     projectId,
     userId: user.id,
@@ -623,33 +691,14 @@ importsRoute.post("/:id/dry-run", async (c) => {
     ...extractRequestContext(c),
   });
 
-  // planImport (Task 6) owns its own status bookkeeping end to end
-  // (DRY_RUN_RUNNING -> DRY_RUN_COMPLETE, or FAILED on error — see
-  // plan.ts's own catch block). A thrown error here means planImport
-  // already tried to persist FAILED before rethrowing; that is a
-  // DOMAIN outcome the operator reads off `job.status`/`errorMessage`
-  // (this response, or a later GET :id), never an HTTP failure of this
-  // endpoint — the endpoint's own job (validating and starting the run)
-  // succeeded. See the module comment for why this is awaited
-  // synchronously rather than queued.
-  try {
-    await planImport(id);
-  } catch (err) {
-    logger.error("import dry-run: planImport failed", {
-      jobId: id,
-      err: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  const finished = await drizzle.importJobRepo.getImportJob(drizzle.db, projectId, id);
-  return c.json(ok({ job: toDto(finished ?? job) }));
+  return c.json(ok({ job: toDto(started) }), 202);
 });
 
 // ---------------------------------------------------------------------------
 // POST /:id/commit
 // ---------------------------------------------------------------------------
 
-importsRoute.post("/:id/commit", async (c) => {
+importsRoute.post("/:id/commit", uploadMutationRateLimit, async (c) => {
   const projectId = c.req.param("projectId");
   const id = c.req.param("id");
   if (!projectId || !id) {
@@ -693,7 +742,7 @@ importsRoute.post("/:id/commit", async (c) => {
 // comment), so Phase A fast-forwards past every already-checkpointed
 // line and Phase B resumes verification where it left off.
 
-importsRoute.post("/:id/resume", async (c) => {
+importsRoute.post("/:id/resume", uploadMutationRateLimit, async (c) => {
   const projectId = c.req.param("projectId");
   const id = c.req.param("id");
   if (!projectId || !id) {
@@ -727,7 +776,7 @@ importsRoute.post("/:id/resume", async (c) => {
 // POST /:id/cancel
 // ---------------------------------------------------------------------------
 
-importsRoute.post("/:id/cancel", async (c) => {
+importsRoute.post("/:id/cancel", uploadMutationRateLimit, async (c) => {
   const projectId = c.req.param("projectId");
   const id = c.req.param("id");
   if (!projectId || !id) {
@@ -775,7 +824,7 @@ importsRoute.post("/:id/cancel", async (c) => {
 // GET /:id — status + counters, for dashboard polling
 // ---------------------------------------------------------------------------
 
-importsRoute.get("/:id", async (c) => {
+importsRoute.get("/:id", statusPollRateLimit, async (c) => {
   const projectId = c.req.param("projectId");
   const id = c.req.param("id");
   if (!projectId || !id) {
@@ -805,7 +854,7 @@ importsRoute.get("/:id", async (c) => {
 // are the authoritative record of what the commit actually did, so they
 // take precedence over the (by then stale) dry-run preview.
 
-importsRoute.get("/:id/report", async (c) => {
+importsRoute.get("/:id/report", statusPollRateLimit, async (c) => {
   const projectId = c.req.param("projectId");
   const id = c.req.param("id");
   if (!projectId || !id) {

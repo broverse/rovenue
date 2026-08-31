@@ -14,6 +14,19 @@ import type { JobsOptions } from "bullmq";
 export const IMPORT_QUEUE_NAME = "rovenue-imports";
 
 /**
+ * BullMQ job NAMEs (not ids) distinguishing a full commit run from a
+ * dry-run-only scan — both share the SAME queue/worker
+ * (`workers/import-runner.ts`'s `createImportRunnerWorker` dispatches on
+ * this), since they are two phases of one job-lifecycle system, not two
+ * separate ones. Task 10 fix round 1 (FIX 2): the dry run used to be
+ * awaited synchronously inside the dashboard route because no queue
+ * existed for it — moved onto this same queue so a 2 GiB file's scan
+ * can't run past a proxy/load-balancer idle timeout.
+ */
+export const IMPORT_RUN_JOB_NAME = "import:run";
+export const IMPORT_DRY_RUN_JOB_NAME = "import:dry-run";
+
+/**
  * Rows processed per checkpoint (services/import/write.ts's
  * `writeImportBatch` / workers/import-runner.ts's `runImportJob`).
  *
@@ -74,4 +87,39 @@ export const IMPORT_JOB_OPTIONS: JobsOptions = {
  */
 export function buildImportJobOptions(importJobId: string): JobsOptions {
   return { ...IMPORT_JOB_OPTIONS, jobId: importJobId };
+}
+
+/**
+ * Task 10 fix round 1 (FIX 2): job options for a QUEUED dry run.
+ *
+ * `attempts: 1`, no backoff — deliberately NOT `IMPORT_JOB_OPTIONS`.
+ * `planImport` (services/import/plan.ts) is read-only but has none of
+ * Phase A/B's checkpoint/resume machinery: a partial attempt cannot be
+ * safely continued from where it left off. If it threw partway through
+ * (say, after `incrementImportJobCounters` but before the final
+ * `DRY_RUN_COMPLETE` status write), a BullMQ auto-retry would re-run the
+ * WHOLE scan and additively re-increment those counters on top of the
+ * failed attempt's partial contribution — double-counting. A failed dry
+ * run instead lands the job at `FAILED` (plan.ts's own catch block),
+ * which is dry-run-startable again; the operator's own explicit retry
+ * (another `POST .../dry-run`) is what reruns it, never an automatic one.
+ *
+ * `jobId` is prefixed (`dry-run:${id}`), NOT the bare import-job id
+ * `buildImportJobOptions` uses for a commit/resume run — the two must
+ * never collide in BullMQ's id space: a completed dry-run job lingering
+ * under `removeOnComplete`'s grace window must never make a same-id
+ * commit enqueue silently coalesce with it. The SAME prefixed id across
+ * repeated dry-run attempts for ONE job is deliberate — the same
+ * "re-enqueueing the same id coalesces with a still-active job" property
+ * `buildImportJobOptions` documents, belt-and-suspenders alongside the
+ * route's own status-gate 409 for "a second dry-run request while
+ * DRY_RUN_RUNNING must not start a second scan".
+ */
+export function buildImportDryRunJobOptions(importJobId: string): JobsOptions {
+  return {
+    attempts: 1,
+    removeOnComplete: { age: 7 * 86_400, count: 1_000 },
+    removeOnFail: { age: 30 * 86_400 },
+    jobId: `dry-run:${importJobId}`,
+  };
 }

@@ -227,9 +227,13 @@ async function countImportCompletedAudits(jobId: string): Promise<number> {
 /** The `import.completed` audit row's `after` payload — the actual bug
  *  surface for FIX 1: this is the append-only, hash-chained record a
  *  wrong count would corrupt permanently. */
+// Fix round 1, FIX 3: the payload now also carries a `status` STRING
+// (the run's true final status) alongside the numeric outcome buckets —
+// `number | string` reflects that honestly rather than lying via a
+// same-as-before `Record<string, number>` cast.
 async function getImportCompletedAuditPayload(
   jobId: string,
-): Promise<Record<string, number>> {
+): Promise<Record<string, number | string>> {
   const rows = await db
     .select()
     .from(auditLogs)
@@ -241,7 +245,7 @@ async function getImportCompletedAuditPayload(
       ),
     )
     .limit(1);
-  return (rows[0]?.after ?? {}) as Record<string, number>;
+  return (rows[0]?.after ?? {}) as Record<string, number | string>;
 }
 
 beforeAll(async () => {
@@ -542,5 +546,63 @@ describe("runImportJob — per-project serialisation", () => {
     // Both jobs actually ran to completion despite being serialised.
     expect(await countPurchases()).toBe(8);
     expect(await countSubscribers()).toBe(8);
+  });
+});
+
+// =============================================================
+// Scenario 4 (fix round 1, FIX 3) — the completion audit must reflect
+// the run's TRUE final status, not unconditionally COMPLETED
+// =============================================================
+//
+// Before this fix, `auditImportRunCompleted` fired right after Phase A's
+// own COMPLETED write and BEFORE Phase B ever ran, so a run that Phase B
+// went on to downgrade to VERIFICATION_INCOMPLETE still permanently
+// audited `import.completed` with no hint anything was incomplete. The
+// fix moves the call to AFTER Phase B resolves and threads the run's
+// real final status into the audited payload.
+describe("runImportJob — completion audit reflects the true final status (fix round 1, FIX 3)", () => {
+  it("audits VERIFICATION_INCOMPLETE, not COMPLETED, when Phase B never resolves every anchor", async () => {
+    const jobId = await seedJob(csvOf(["audit_incomplete_a"]));
+
+    // Every anchor is definitively throttled, forever — with `sleep`
+    // faked to skip the real backoff wait, this exhausts
+    // THROTTLE_RETRY_MAX_ATTEMPTS almost instantly and leaves the one
+    // anchor "pending", landing the run at VERIFICATION_INCOMPLETE
+    // without needing real wall-clock time or a real store.
+    const throttledForever: ImportVerifyDeps = {
+      verifyAppleAnchor: async () => ({ kind: "throttled" }),
+      verifyGoogleAnchor: async () => ({ kind: "throttled" }),
+      verifyStripeAnchor: async () => ({ kind: "throttled" }),
+      sleep: async () => undefined,
+    };
+
+    const result = await runImportJob(jobId, { verifyDeps: throttledForever });
+
+    expect(result.status).toBe("VERIFICATION_INCOMPLETE");
+
+    // The audit fires exactly once (same invariant as every other
+    // scenario in this file) — the bug was never about the COUNT, only
+    // about what status it claimed.
+    expect(await countImportCompletedAudits(jobId)).toBe(1);
+
+    const payload = await getImportCompletedAuditPayload(jobId);
+    expect(payload.status).toBe("VERIFICATION_INCOMPLETE");
+
+    // The persisted row itself must agree — belt-and-suspenders, proving
+    // the audited status isn't just coincidentally right while the row
+    // disagrees.
+    const finalJob = await importJobRepo.getImportJobById(db, jobId);
+    expect(finalJob?.status).toBe("VERIFICATION_INCOMPLETE");
+  });
+
+  it("still audits COMPLETED for an ordinary run where Phase B resolves everything", async () => {
+    const jobId = await seedJob(csvOf(["audit_complete_a"]));
+
+    const result = await runImportJob(jobId, { verifyDeps: NOOP_VERIFY_DEPS });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(await countImportCompletedAudits(jobId)).toBe(1);
+    const payload = await getImportCompletedAuditPayload(jobId);
+    expect(payload.status).toBe("COMPLETED");
   });
 });

@@ -1,6 +1,10 @@
 import { Readable } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import {
+  IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE,
+  IMPORT_STATUS_POLL_RATE_LIMIT_PER_MINUTE,
+} from "@rovenue/shared";
 
 // =============================================================
 // Job lifecycle routes for the data-import tool (Task 10)
@@ -26,8 +30,32 @@ vi.mock("../../src/middleware/dashboard-auth", () => ({
   },
 }));
 
+// Task 10 fix round 1 (FIX 1): a REAL (if simplified) counting fake, not
+// an unconditional pass-through — the whole point of the new tests below
+// is to prove the upload/mutation limiter and the read limiter draw from
+// SEPARATE budgets (keyed by `opts.name`), which an always-pass-through
+// mock could never distinguish. No window/decay logic (tests are
+// synchronous and fast) — just "the Nth call for this name, past its
+// max, 429s" — enough to prove wiring AND enforcement without a real
+// Redis.
+const rateLimitCallCounts = vi.hoisted(() => new Map<string, number>());
 vi.mock("../../src/middleware/rate-limit", () => ({
-  endpointRateLimit: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  endpointRateLimit:
+    (opts: { name: string; max: number }) =>
+    async (
+      c: { json: (body: unknown, status?: number) => unknown },
+      next: () => Promise<void>,
+    ) => {
+      const count = (rateLimitCallCounts.get(opts.name) ?? 0) + 1;
+      rateLimitCallCounts.set(opts.name, count);
+      if (count > opts.max) {
+        return c.json(
+          { error: { code: "RATE_LIMITED", message: "Too many requests" } },
+          429,
+        );
+      }
+      return next();
+    },
 }));
 
 const auditMock = vi.hoisted(() => vi.fn());
@@ -66,14 +94,11 @@ vi.mock("../../src/lib/import-store", async (importOriginal) => {
   };
 });
 
-const planImportMock = vi.hoisted(() => vi.fn());
-vi.mock("../../src/services/import/plan", () => ({
-  planImport: (...args: unknown[]) => planImportMock(...args),
-}));
-
 const enqueueImportJobMock = vi.hoisted(() => vi.fn());
+const enqueueImportDryRunMock = vi.hoisted(() => vi.fn());
 vi.mock("../../src/workers/import-runner", () => ({
   enqueueImportJob: (...args: unknown[]) => enqueueImportJobMock(...args),
+  enqueueImportDryRun: (...args: unknown[]) => enqueueImportDryRunMock(...args),
 }));
 
 const findMembership = vi.hoisted(() => vi.fn());
@@ -174,13 +199,14 @@ function req(
 }
 
 beforeEach(() => {
+  rateLimitCallCounts.clear();
   auditMock.mockReset().mockResolvedValue(undefined);
   loggerError.mockReset();
   loggerWarn.mockReset();
   getObjectMock.mockReset();
   objectExistsMock.mockReset();
-  planImportMock.mockReset().mockResolvedValue(undefined);
   enqueueImportJobMock.mockReset().mockResolvedValue(undefined);
+  enqueueImportDryRunMock.mockReset().mockResolvedValue(undefined);
 
   findMembership.mockReset().mockResolvedValue({ id: "m1", role: "OWNER" });
   getImportJob.mockReset();
@@ -311,7 +337,7 @@ describe("POST /:id/dry-run", () => {
     const res = await req("/job_1/dry-run", { method: "POST" });
 
     expect(res.status).toBe(404);
-    expect(planImportMock).not.toHaveBeenCalled();
+    expect(enqueueImportDryRunMock).not.toHaveBeenCalled();
   });
 
   it("409s when the job is already running", async () => {
@@ -320,10 +346,19 @@ describe("POST /:id/dry-run", () => {
     const res = await req("/job_1/dry-run", { method: "POST" });
 
     expect(res.status).toBe(409);
-    expect(planImportMock).not.toHaveBeenCalled();
+    expect(enqueueImportDryRunMock).not.toHaveBeenCalled();
   });
 
-  it("400s when the current mapping is missing required fields, without calling planImport", async () => {
+  it("409s when the job is already DRY_RUN_RUNNING (must not start a second scan)", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "DRY_RUN_RUNNING" }));
+
+    const res = await req("/job_1/dry-run", { method: "POST" });
+
+    expect(res.status).toBe(409);
+    expect(enqueueImportDryRunMock).not.toHaveBeenCalled();
+  });
+
+  it("400s when the current mapping is missing required fields, without enqueueing", async () => {
     getImportJob.mockResolvedValue(
       makeJob({ status: "PENDING_MAPPING", mapping: INCOMPLETE_MAPPING }),
     );
@@ -331,41 +366,33 @@ describe("POST /:id/dry-run", () => {
     const res = await req("/job_1/dry-run", { method: "POST" });
 
     expect(res.status).toBe(400);
-    expect(planImportMock).not.toHaveBeenCalled();
+    expect(enqueueImportDryRunMock).not.toHaveBeenCalled();
   });
 
-  it("calls planImport and returns the job's post-run state", async () => {
-    getImportJob
-      .mockResolvedValueOnce(makeJob({ status: "PENDING_MAPPING" }))
-      .mockResolvedValueOnce(
-        makeJob({ status: "DRY_RUN_COMPLETE", counters: { willCreate: 10 } }),
-      );
+  it("Task 10 fix round 1 (FIX 2): transitions to DRY_RUN_RUNNING, enqueues, and returns 202 immediately", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "PENDING_MAPPING" }));
+    setImportJobStatus.mockResolvedValue(
+      makeJob({ status: "DRY_RUN_RUNNING", startedAt: new Date("2026-08-31T01:00:00Z") }),
+    );
 
     const res = await req("/job_1/dry-run", { method: "POST" });
 
-    expect(res.status).toBe(200);
-    expect(planImportMock).toHaveBeenCalledWith("job_1");
+    expect(res.status).toBe(202);
+    // The transition happens in THIS request, synchronously — not left
+    // for the worker to eventually report — so the response already
+    // reflects it.
+    expect(setImportJobStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      "p1",
+      "job_1",
+      expect.objectContaining({ status: "DRY_RUN_RUNNING", startedAt: expect.any(Date) }),
+    );
+    expect(enqueueImportDryRunMock).toHaveBeenCalledWith("job_1");
     const body = (await res.json()) as { data: { job: Record<string, unknown> } };
-    expect(body.data.job.status).toBe("DRY_RUN_COMPLETE");
+    expect(body.data.job.status).toBe("DRY_RUN_RUNNING");
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "import.dry_run_started" }),
     );
-  });
-
-  it("swallows a planImport failure and still returns 200 with the refreshed row", async () => {
-    getImportJob
-      .mockResolvedValueOnce(makeJob({ status: "PENDING_MAPPING" }))
-      .mockResolvedValueOnce(
-        makeJob({ status: "FAILED", errorMessage: "storage unreachable" }),
-      );
-    planImportMock.mockRejectedValue(new Error("storage unreachable"));
-
-    const res = await req("/job_1/dry-run", { method: "POST" });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { job: Record<string, unknown> } };
-    expect(body.data.job.status).toBe("FAILED");
-    expect(loggerError).toHaveBeenCalled();
   });
 });
 
@@ -631,5 +658,70 @@ describe("GET /:id/report", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('{"line":1}\n');
     expect(loggerWarn).toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// Rate limiting — Task 10 fix round 1, FIX 1
+//
+// The read routes (GET /:id, GET /) must NOT share the upload/mutation
+// route's tight budget (IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE = 5) — that
+// was the whole bug: a dashboard polling GET /:id would exhaust it in
+// the first 10-15 seconds. `rateLimitCallCounts` (the fake limiter
+// above) proves this with real enforcement, keyed by the SAME `name`
+// `endpointRateLimit` is actually called with in the route
+// (`import-upload` vs `import-status-poll`) — not just that two
+// DIFFERENT-looking calls happened.
+// =============================================================
+
+describe("rate limiting (Task 10 fix round 1, FIX 1)", () => {
+  it("does not throttle GET /:id even well past the mutation budget's call count", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "DRY_RUN_COMPLETE" }));
+
+    const callCount = IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE + 20;
+    expect(callCount).toBeLessThan(IMPORT_STATUS_POLL_RATE_LIMIT_PER_MINUTE);
+
+    for (let i = 0; i < callCount; i++) {
+      const res = await req("/job_1");
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("does not throttle GET / (list) on the mutation budget either", async () => {
+    listImportJobs.mockResolvedValue([]);
+
+    for (let i = 0; i < IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE + 5; i++) {
+      const res = await req("");
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("still throttles a mutation route (commit) at the upload budget", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "DRY_RUN_COMPLETE" }));
+
+    const statuses: number[] = [];
+    for (let i = 0; i < IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE + 1; i++) {
+      const res = await req("/job_1/commit", { method: "POST" });
+      statuses.push(res.status);
+    }
+
+    expect(statuses.slice(0, IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE)).toEqual(
+      Array(IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE).fill(202),
+    );
+    expect(statuses.at(-1)).toBe(429);
+  });
+
+  it("mutation and read budgets are independent: exhausting one leaves the other untouched", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "DRY_RUN_COMPLETE" }));
+
+    // Exhaust the mutation budget via commit.
+    for (let i = 0; i < IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE; i++) {
+      const res = await req("/job_1/commit", { method: "POST" });
+      expect(res.status).toBe(202);
+    }
+    expect((await req("/job_1/commit", { method: "POST" })).status).toBe(429);
+
+    // GET /:id (the read budget) is completely unaffected.
+    expect((await req("/job_1")).status).toBe(200);
   });
 });
