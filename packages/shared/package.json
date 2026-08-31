@@ -33,6 +33,10 @@
     "./i18n": {
       "types": "./src/i18n/index.ts",
       "default": "./src/i18n/index.ts"
+    },
+    "./import/keys": {
+      "types": "./src/import/keys.ts",
+      "default": "./src/import/keys.ts"
     }
   },
   "scripts": {

@@ -64,8 +64,17 @@ const REVENUECAT_GOOGLE_TOKEN_COLUMNS: Record<string, CanonicalField> = {
 // something generic gets reported as a confident match for a vendor
 // it isn't, and a caller that checks `presetId !== null` tells the
 // operator their unrelated file is a RevenueCat export.
-const REVENUECAT_TRANSACTIONS_ANCHOR_COLUMNS = ["rc_original_app_user_id", "store_transaction_id"];
-const REVENUECAT_GOOGLE_TOKEN_ANCHOR_COLUMNS = ["google_purchase_token"];
+//
+// Typed against each preset's own column table (`keyof typeof …`)
+// rather than plain `string[]` so a typo here fails to compile instead
+// of silently disabling detection for that anchor.
+const REVENUECAT_TRANSACTIONS_ANCHOR_COLUMNS: (keyof typeof REVENUECAT_TRANSACTIONS_COLUMNS)[] = [
+  "rc_original_app_user_id",
+  "store_transaction_id",
+];
+const REVENUECAT_GOOGLE_TOKEN_ANCHOR_COLUMNS: (keyof typeof REVENUECAT_GOOGLE_TOKEN_COLUMNS)[] = [
+  "google_purchase_token",
+];
 
 // Deliberately no Adapty preset (spec §3): Adapty's own export column
 // table could not be confirmed from first-party docs this session.

@@ -90,4 +90,13 @@ describe("detectPreset", () => {
     const r = detectPreset(["google_purchase_token", "some_unrelated_column"]);
     expect(r?.presetId).toBe(REVENUECAT_GOOGLE_TOKEN_PRESET_ID);
   });
+
+  // Fix round 1, FIX 4d: only store_transaction_id had a lone-anchor test
+  // before; rc_original_app_user_id is the RC Transactions preset's other
+  // anchor and needs its own coverage.
+  it("detects via the rc_original_app_user_id anchor alone (no store_transaction_id present)", () => {
+    const r = detectPreset(["rc_original_app_user_id", "country"]);
+    expect(r?.presetId).toBe(REVENUECAT_TRANSACTIONS_PRESET_ID);
+    expect(r!.matched).toBeGreaterThan(0);
+  });
 });

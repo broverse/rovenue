@@ -11,7 +11,7 @@
 // database (they live in later tasks — the dry-run planner and the
 // writer). This module only ever sees one CanonicalRow (the Task 1
 // contract) and a clock.
-import type { CanonicalField, CanonicalRow } from "./canonical";
+import { CANONICAL_FIELDS, type CanonicalField, type CanonicalRow } from "./canonical";
 
 // =============================================================
 // Store mapping
@@ -49,14 +49,28 @@ export type NormalizedDates = {
 /**
  * Status precedence (binding — task-3 controller context, ruling 2):
  *  1. `refundedAt` set → REFUNDED, unconditionally.
- *  2. An OPEN grace window (`end <= now < gracePeriodEndDate`) → GRACE_PERIOD.
+ *  2. An OPEN grace window (`expiresDate <= now < gracePeriodEndDate`) → GRACE_PERIOD.
  *  3. No end date at all (lifetime) → live (TRIAL if isTrial, else ACTIVE).
  *  4. `effectiveEndDate ?? expiresDate` in the future → live.
  *  5. Otherwise → EXPIRED.
  *
- * `effective_end_time` is preferred over `end_time` because RevenueCat
- * documents it as the normalized "when does access end" value that
- * already accounts for each store's own refund/grace-period logic.
+ * `effective_end_time` is preferred over `end_time` for rule 4 because
+ * RevenueCat documents it as the normalized "when does access end" value
+ * that already accounts for each store's own refund/grace-period logic.
+ *
+ * The grace check in rule 2 deliberately uses `expiresDate` alone, NOT
+ * `effectiveEndDate ?? expiresDate`. `expiresDate` is the actual billing
+ * expiry and `gracePeriodEndDate` marks the dunning/retry window that
+ * follows it, so that pair is what reproduces a genuine grace state. On
+ * a real RC billing-grace row, `effective_end_time` is set to the grace
+ * window's own end (matching `gracePeriodEndDate`), so using
+ * `effectiveEndDate ?? expiresDate` for the grace check would read as
+ * "in the future" and the row would wrongly land ACTIVE — GRACE_PERIOD
+ * would be unreachable for that shape. (Fix round 1, FIX 3: an earlier
+ * version of this function used `effectiveEndDate ?? expiresDate` here,
+ * which was a deviation from ruling 2, not a reading of it — flagged in
+ * review because the existing tests happened to always set
+ * `effectiveEndDate === expiresDate` and couldn't catch the difference.)
  *
  * `unsubscribeDetectedAt` never appears here — it is NOT a status input.
  * It only sets `autoRenewStatus = false` and `cancellationDate` in
@@ -72,13 +86,18 @@ export type NormalizedDates = {
 export function deriveStatus(r: NormalizedDates & { isTrial: boolean }, now: Date): PurchaseStatusName {
   if (r.refundedAt) return "REFUNDED";
 
-  const end = r.effectiveEndDate ?? r.expiresDate;
   const nowMs = now.getTime();
 
-  if (end && r.gracePeriodEndDate && end.getTime() <= nowMs && nowMs < r.gracePeriodEndDate.getTime()) {
+  if (
+    r.expiresDate &&
+    r.gracePeriodEndDate &&
+    r.expiresDate.getTime() <= nowMs &&
+    nowMs < r.gracePeriodEndDate.getTime()
+  ) {
     return "GRACE_PERIOD";
   }
 
+  const end = r.effectiveEndDate ?? r.expiresDate;
   if (!end || end.getTime() > nowMs) {
     return r.isTrial ? "TRIAL" : "ACTIVE";
   }
@@ -93,6 +112,14 @@ export function deriveStatus(r: NormalizedDates & { isTrial: boolean }, now: Dat
 export type NormalizedMoney = {
   priceAmount: string | null;
   priceCurrency: string | null;
+  /** true when `priceUsd` was present but not parseable as a plain
+   *  decimal (e.g. "$9.99", "1,234.56") — the amount was dropped rather
+   *  than guessed at, but that is a different situation from a row that
+   *  genuinely carried no price at all, and a dry-run summary (Task 6)
+   *  needs to be able to tell a customer their export uses a format
+   *  this importer can't read rather than silently reporting $0 of
+   *  revenue for that row. */
+  moneyDropped: boolean;
 };
 
 /** A bare, optionally-signed decimal. Rejects anything that isn't
@@ -120,11 +147,14 @@ const DECIMAL_AMOUNT_PATTERN = /^-?\d+(\.\d+)?$/;
  */
 export function normalizeMoney(p: { priceUsd?: string | null }): NormalizedMoney {
   const raw = p.priceUsd?.trim();
-  if (!raw || !DECIMAL_AMOUNT_PATTERN.test(raw)) {
-    return { priceAmount: null, priceCurrency: null };
+  if (!raw) {
+    return { priceAmount: null, priceCurrency: null, moneyDropped: false };
+  }
+  if (!DECIMAL_AMOUNT_PATTERN.test(raw)) {
+    return { priceAmount: null, priceCurrency: null, moneyDropped: true };
   }
   const positiveAmount = raw.startsWith("-") ? raw.slice(1) : raw;
-  return { priceAmount: positiveAmount, priceCurrency: "USD" };
+  return { priceAmount: positiveAmount, priceCurrency: "USD", moneyDropped: false };
 }
 
 // =============================================================
@@ -210,9 +240,14 @@ export type NormalizedRow = {
   subscriberExternalId: string;
   subscriberAliasId: string | null;
   store: StoreValue;
-  /** Null only for anchorless (MANUAL) rows — the writer (task 7) fills
-   *  this in via buildSyntheticTransactionId, which needs the project
-   *  scope this pure function deliberately doesn't have. */
+  /** Null only when the source row genuinely carried no transaction id
+   *  — including an anchorless (MANUAL) row, where that is expected. A
+   *  promotional row that happens to carry a real store_transaction_id
+   *  keeps it here rather than having it discarded: it's the only value
+   *  that could later match a store webhook. The writer (task 7) mints
+   *  a synthetic id via buildSyntheticTransactionId ONLY when this is
+   *  null — it needs the project scope this pure function deliberately
+   *  doesn't have. */
   storeTransactionId: string | null;
   originalTransactionId: string | null;
   googlePurchaseToken: string | null;
@@ -231,14 +266,20 @@ export type NormalizedRow = {
   autoRenewStatus: boolean | null;
   priceAmount: string | null;
   priceCurrency: string | null;
+  /** See NormalizedMoney.moneyDropped: true when priceUsd was present
+   *  but not a parseable plain decimal, distinct from a row that simply
+   *  had no price. */
+  moneyDropped: boolean;
   isTrial: boolean;
   isIntroOffer: boolean;
   isSandbox: boolean;
   isAutoRenewable: boolean | null;
   renewalNumber: string | null;
   ownershipType: string | null;
-  /** true for ownershipType === "FAMILY_SHARED" (spec §4.3 / RC's own
-   *  sample queries exclude family-shared access from revenue). */
+  /** true for ownershipType case-insensitively equal to "FAMILY_SHARED"
+   *  (spec §4.3 / RC's own sample queries exclude family-shared access
+   *  from revenue). The comparison is case-insensitive; the stored
+   *  `ownershipType` value itself is left as the source wrote it. */
   excludeFromRevenue: boolean;
   /** Raw passthrough — validation input for the catalog resolver (a
    *  later task), never authority. Left unparsed: entitlement_identifiers'
@@ -263,11 +304,18 @@ function emptyToNull(value: string | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-function missingFieldError(field: CanonicalField, label: string): { error: NormalizeError } {
+/** Single source of truth for a field's human-readable label: Task 1's
+ *  own CANONICAL_FIELDS table, not a second hardcoded copy that could
+ *  drift out of sync with it. */
+const CANONICAL_FIELD_LABELS: Record<CanonicalField, string> = Object.fromEntries(
+  CANONICAL_FIELDS.map((field) => [field.key, field.label]),
+) as Record<CanonicalField, string>;
+
+function missingFieldError(field: CanonicalField): { error: NormalizeError } {
   return {
     error: {
       code: "MISSING_REQUIRED_FIELD",
-      message: `row is missing a value for required field "${label}"`,
+      message: `row is missing a value for required field "${CANONICAL_FIELD_LABELS[field]}"`,
       field,
     },
   };
@@ -292,12 +340,12 @@ export function normalizeRow(
 ): NormalizedRow | { error: NormalizeError } {
   const subscriberExternalId = emptyToNull(raw.subscriberExternalId);
   if (!subscriberExternalId) {
-    return missingFieldError("subscriberExternalId", "Subscriber ID");
+    return missingFieldError("subscriberExternalId");
   }
 
   const sourceStore = emptyToNull(raw.store);
   if (!sourceStore) {
-    return missingFieldError("store", "Store");
+    return missingFieldError("store");
   }
   const store = STORE_VALUE_MAP[sourceStore];
   if (!store) {
@@ -313,12 +361,12 @@ export function normalizeRow(
 
   const productIdentifier = emptyToNull(raw.productIdentifier);
   if (!productIdentifier) {
-    return missingFieldError("productIdentifier", "Product identifier");
+    return missingFieldError("productIdentifier");
   }
 
   const rawPurchaseDate = emptyToNull(raw.purchaseDate);
   if (!rawPurchaseDate) {
-    return missingFieldError("purchaseDate", "Purchase date");
+    return missingFieldError("purchaseDate");
   }
 
   const storeTransactionIdRaw = emptyToNull(raw.storeTransactionId);
@@ -375,7 +423,12 @@ export function normalizeRow(
     subscriberExternalId,
     subscriberAliasId: emptyToNull(raw.subscriberAliasId),
     store,
-    storeTransactionId: isAnchorless ? null : storeTransactionIdRaw,
+    // Kept as-is even for anchorless rows: a promotional row that
+    // carries a real store_transaction_id should keep it (FIX 4c) —
+    // minting a synthetic id over it would discard the one value that
+    // could later match a store webhook. The writer mints a synthetic
+    // id only when this is null.
+    storeTransactionId: storeTransactionIdRaw,
     originalTransactionId: emptyToNull(raw.originalTransactionId),
     googlePurchaseToken: emptyToNull(raw.googlePurchaseToken),
     stripeSubscriptionId: emptyToNull(raw.stripeSubscriptionId),
@@ -390,13 +443,14 @@ export function normalizeRow(
     autoRenewStatus: unsubscribeDetectedAt ? false : parseOptionalBoolean(raw.isAutoRenewable),
     priceAmount: money.priceAmount,
     priceCurrency: money.priceCurrency,
+    moneyDropped: money.moneyDropped,
     isTrial,
     isIntroOffer: parseBoolean(raw.isIntroOffer),
     isSandbox: parseBoolean(raw.isSandbox),
     isAutoRenewable: parseOptionalBoolean(raw.isAutoRenewable),
     renewalNumber: emptyToNull(raw.renewalNumber),
     ownershipType,
-    excludeFromRevenue: ownershipType === "FAMILY_SHARED",
+    excludeFromRevenue: ownershipType?.toLowerCase() === "family_shared",
     entitlementIdentifiers: emptyToNull(raw.entitlementIdentifiers),
     country: emptyToNull(raw.country),
     customAttributes: emptyToNull(raw.customAttributes),

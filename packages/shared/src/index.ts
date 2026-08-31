@@ -253,8 +253,14 @@ export * from "./fonts";
 export * from "./assets";
 
 // =============================================================
-// Data import — canonical row contract and streaming CSV parser
+// Data import — canonical row contract, streaming CSV parser,
+// preset detection, mapping validation, and the row normalizer
 // (RevenueCat/Adapty subscriber-history import)
 // =============================================================
 
+// `./import`'s own barrel (src/import/index.ts) deliberately excludes
+// `./import/keys` — it depends on `node:crypto` and would crash the
+// dashboard Vite bundle the same way `./crypto` and the experiments
+// bucketing helpers would. Server-side callers import it explicitly via
+// `@rovenue/shared/import/keys`.
 export * from "./import";

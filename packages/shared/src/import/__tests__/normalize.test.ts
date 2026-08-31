@@ -95,6 +95,29 @@ describe("deriveStatus", () => {
     expect(deriveStatus({ ...base, isTrial: true, expiresDate: null, effectiveEndDate: null }, NOW)).toBe("TRIAL");
   });
 
+  // Fix round 1, FIX 3: the real-world RC billing-grace shape. expiresDate
+  // (the actual billing expiry) is in the past; effectiveEndDate is set to
+  // the grace window's own end (RC's documented behavior — effective_end_time
+  // already accounts for grace), matching gracePeriodEndDate; both are in
+  // the future. The earlier `effectiveEndDate ?? expiresDate` grace check
+  // would read `end` as future here and wrongly return ACTIVE, making
+  // GRACE_PERIOD unreachable for exactly the shape a real export produces.
+  // The pre-existing grace tests above always set
+  // effectiveEndDate === expiresDate, which is why they didn't catch this.
+  it("reports GRACE_PERIOD for the real RC billing-grace shape (expiresDate past, effectiveEndDate/gracePeriodEndDate future)", () => {
+    expect(
+      deriveStatus(
+        {
+          ...base,
+          expiresDate: d("2026-08-01T00:00:00Z"),
+          effectiveEndDate: d("2026-09-30T00:00:00Z"),
+          gracePeriodEndDate: d("2026-09-30T00:00:00Z"),
+        },
+        NOW,
+      ),
+    ).toBe("GRACE_PERIOD");
+  });
+
   it("reports TRIAL instead of ACTIVE while a trial's end date is still in the future", () => {
     expect(
       deriveStatus(
@@ -107,19 +130,51 @@ describe("deriveStatus", () => {
 
 describe("normalizeMoney", () => {
   it("maps price_in_usd to a USD amount", () => {
-    expect(normalizeMoney({ priceUsd: "9.99" })).toEqual({ priceAmount: "9.99", priceCurrency: "USD" });
+    expect(normalizeMoney({ priceUsd: "9.99" })).toEqual({
+      priceAmount: "9.99",
+      priceCurrency: "USD",
+      moneyDropped: false,
+    });
   });
 
   it("stores a refund amount positive", () => {
-    expect(normalizeMoney({ priceUsd: "-9.99" })).toEqual({ priceAmount: "9.99", priceCurrency: "USD" });
+    expect(normalizeMoney({ priceUsd: "-9.99" })).toEqual({
+      priceAmount: "9.99",
+      priceCurrency: "USD",
+      moneyDropped: false,
+    });
   });
 
-  it("emits no money at all rather than guessing a currency", () => {
-    expect(normalizeMoney({})).toEqual({ priceAmount: null, priceCurrency: null });
+  it("emits no money at all rather than guessing a currency, and does not flag it as dropped (nothing was there to drop)", () => {
+    expect(normalizeMoney({})).toEqual({ priceAmount: null, priceCurrency: null, moneyDropped: false });
   });
 
-  it("emits no money for a value that doesn't parse as a decimal, rather than passing garbage through", () => {
-    expect(normalizeMoney({ priceUsd: "not-a-number" })).toEqual({ priceAmount: null, priceCurrency: null });
+  // Fix round 1, FIX 4a: a value that WAS present but unusable must be
+  // distinguishable from a row that simply had no price — otherwise a
+  // customer whose export uses thousands separators or a currency symbol
+  // imports with silently zeroed revenue and nothing surfaces it.
+  it("flags a value that doesn't parse as a decimal as dropped, rather than passing garbage through or treating it as merely absent", () => {
+    expect(normalizeMoney({ priceUsd: "not-a-number" })).toEqual({
+      priceAmount: null,
+      priceCurrency: null,
+      moneyDropped: true,
+    });
+  });
+
+  it("flags a currency-symbol amount as dropped", () => {
+    expect(normalizeMoney({ priceUsd: "$9.99" })).toEqual({
+      priceAmount: null,
+      priceCurrency: null,
+      moneyDropped: true,
+    });
+  });
+
+  it("flags a thousands-separated amount as dropped", () => {
+    expect(normalizeMoney({ priceUsd: "1,234.56" })).toEqual({
+      priceAmount: null,
+      priceCurrency: null,
+      moneyDropped: true,
+    });
   });
 });
 
@@ -171,6 +226,14 @@ describe("normalizeRow", () => {
     expect(row.excludeFromRevenue).toBe(true);
   });
 
+  // Fix round 1, FIX 4b: the comparison must be case-insensitive, or a
+  // source using different casing silently counts family-shared access
+  // as revenue.
+  it("marks a lower-cased family_shared ownershipType as revenue-excluded too", () => {
+    const row = normalizeRow({ ...rcRow, ownershipType: "family_shared" }, { now: NOW }) as NormalizedRow;
+    expect(row.excludeFromRevenue).toBe(true);
+  });
+
   it("does not mark an ordinary row as revenue-excluded", () => {
     const row = normalizeRow(rcRow, { now: NOW }) as NormalizedRow;
     expect(row.excludeFromRevenue).toBe(false);
@@ -180,9 +243,16 @@ describe("normalizeRow", () => {
     const row = normalizeRow({ ...rcRow, priceUsd: "9.99" }, { now: NOW }) as NormalizedRow;
     expect(row.priceAmount).toBe("9.99");
     expect(row.priceCurrency).toBe("USD");
+    expect(row.moneyDropped).toBe(false);
   });
 
-  it("treats a promotional row as anchorless: no storeTransactionId is fabricated here", () => {
+  it("flags moneyDropped on the normalized row when priceUsd is unparseable", () => {
+    const row = normalizeRow({ ...rcRow, priceUsd: "$9.99" }, { now: NOW }) as NormalizedRow;
+    expect(row.priceAmount).toBeNull();
+    expect(row.moneyDropped).toBe(true);
+  });
+
+  it("treats a promotional row with no store transaction id as anchorless: no storeTransactionId is fabricated here", () => {
     const row = normalizeRow(
       { ...rcRow, store: "promotional", storeTransactionId: undefined },
       { now: NOW },
@@ -191,6 +261,19 @@ describe("normalizeRow", () => {
     expect(row.store).toBe("MANUAL");
     expect(row.isAnchorless).toBe(true);
     expect(row.storeTransactionId).toBeNull();
+  });
+
+  // Fix round 1, FIX 4c: a promotional row that DOES carry a real
+  // store_transaction_id must keep it rather than have it discarded —
+  // it's the only value that could later match a store webhook. The
+  // writer (a later task) only mints a synthetic id when this is null.
+  it("keeps a promotional row's real store_transaction_id instead of discarding it", () => {
+    const row = normalizeRow(
+      { ...rcRow, store: "promotional", storeTransactionId: "txn_real_promo" },
+      { now: NOW },
+    ) as NormalizedRow;
+    expect(row.isAnchorless).toBe(true);
+    expect(row.storeTransactionId).toBe("txn_real_promo");
   });
 
   it("rejects an unknown store value rather than silently dropping the row", () => {
