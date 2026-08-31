@@ -8,9 +8,14 @@
 // character — may straddle a chunk boundary; both are handled by keeping
 // decode/parse state across `for await` iterations rather than treating
 // each chunk in isolation.
-
-/** UTF-8 byte-order-mark, decoded to its single-codepoint text form. */
-const UTF8_BOM = "﻿";
+//
+// BOM handling: a leading UTF-8 byte-order-mark is stripped by
+// `TextDecoder` itself — its default `ignoreBOM: false` already removes
+// a leading BOM during `decode()`, before this module ever sees the
+// text. There is deliberately no BOM-stripping code here; adding one
+// would be dead code shadowing behavior `TextDecoder` already provides
+// (see the BOM test in csv.test.ts, which exercises this decoder
+// behavior end-to-end rather than an in-module code path).
 
 const COMMA = ",";
 const DOUBLE_QUOTE = '"';
@@ -35,8 +40,6 @@ type ParserState = {
   rowStarted: boolean;
   /** 1-based number of the source line the row-in-progress starts on. */
   lineNumber: number;
-  /** True until the very first character of the whole stream is seen. */
-  atStreamStart: boolean;
   /** Header row, once seen; rows are validated against its length. */
   header: string[] | undefined;
 };
@@ -48,13 +51,8 @@ function createParserState(): ParserState {
     inQuotes: false,
     rowStarted: false,
     lineNumber: FIRST_LINE_NUMBER,
-    atStreamStart: true,
     header: undefined,
   };
-}
-
-function stripLeadingBom(text: string): string {
-  return text.startsWith(UTF8_BOM) ? text.slice(UTF8_BOM.length) : text;
 }
 
 /**
@@ -77,7 +75,7 @@ function* finishRow(state: ParserState): Generator<CsvEvent> {
   state.lineNumber += 1;
 
   if (!state.header) {
-    state.header = row.map(stripLeadingBom);
+    state.header = row;
     yield { header: state.header };
     return;
   }
@@ -100,11 +98,7 @@ function* consumeChunk(state: ParserState, text: string): Generator<CsvEvent> {
   let i = 0;
   const len = text.length;
   while (i < len) {
-    let ch = text[i];
-
-    if (state.atStreamStart) {
-      state.atStreamStart = false;
-    }
+    const ch = text[i];
 
     if (state.inQuotes) {
       if (ch === DOUBLE_QUOTE) {
