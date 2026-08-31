@@ -63,6 +63,23 @@
 // the way Phase A is). What's bounded is the per-anchor blowup a single
 // huge chain used to cause: see `AnchorGroup`'s own comment and the
 // report for the resulting memory profile.
+//
+// Fix round 2, FIX B: the DISTINCT ANCHOR COUNT itself is now ALSO
+// bounded (`IMPORT_VERIFY_MAX_ANCHORS_PER_RUN`), the same way plan.ts's
+// `IMPORT_DUPLICATE_TRACKING_MAX_KEYS` bounds its own tracking — a named
+// cap, disclosed on the summary (`anchorCapReached`), never a silent
+// truncation. Hitting it forces `VERIFICATION_INCOMPLETE` for the whole
+// run regardless of how the capped subset resolved, and — critically —
+// an anchor `buildAnchorGroups` finds ALREADY verified during the scan
+// costs no cap slot at all, so a resumed call's budget goes toward
+// anchors that still need work rather than re-discovering the same first
+// N anchors forever (see `buildAnchorGroups`'s own comment).
+//
+// Fix round 2, FIX C: `deps.isCancelled` is the same kind of test seam
+// `deps.sleep` already is — production leaves it unset and gets the real
+// DB-polling check; a test can inject a scripted predicate to prove
+// cancellation is noticed BETWEEN two specific anchors without needing
+// real wall-clock time to pass.
 import {
   drizzle,
   type Db,
@@ -136,6 +153,20 @@ const CANCELLATION_CHECK_INTERVAL_MS = 2_000;
  *  what this leaves unbounded. */
 const IMPORT_VERIFY_MAX_TRACKED_ROWS_PER_ANCHOR = 2_000;
 
+/** Fix round 2, FIX B: bounds the number of DISTINCT anchors this call
+ *  holds in `AnchorGroup` form at once. This repo's own
+ *  `IMPORT_DUPLICATE_TRACKING_MAX_KEYS` comment puts a 2 GiB file at "on
+ *  the order of ten million" distinct transaction keys — a file with
+ *  little renewal-chain sharing (mostly one-time purchases) pushes the
+ *  distinct-anchor count to that same order. At roughly 300-500 bytes per
+ *  `AnchorGroup` with V8/Map overhead, ten million would be several GB
+ *  resident, potentially more than the file itself. 100,000 anchors caps
+ *  that at ~50MB — comfortably safe — while still being far larger than
+ *  any real single-project import is expected to need in one call.
+ *  Reached anchors are verified what fits, resumed the rest: see
+ *  `buildAnchorGroups`. */
+const IMPORT_VERIFY_MAX_ANCHORS_PER_RUN = 100_000;
+
 /** Keys this module writes under `import_jobs.counters` (the same jsonb
  *  column report.ts's IMPORT_OUTCOMES bucket list lives in) —
  *  deliberately namespaced so they can never collide with a Phase-A
@@ -203,6 +234,19 @@ export interface ImportVerifyDeps {
    *  wait seconds of real backoff). Production default is a real
    *  timer-based sleep. */
   sleep?: (ms: number) => Promise<void>;
+  /** Fix round 2, FIX C: overridable for tests — production leaves this
+   *  unset and gets the real, rate-limited DB-polling check
+   *  (`checkCancelled`). A test can inject a scripted predicate (e.g.
+   *  "false" on the first call, "true" from the second call on) to prove
+   *  a mid-run Cancel between two specific anchors is noticed
+   *  deterministically, without needing real wall-clock time to pass. */
+  isCancelled?: () => Promise<boolean>;
+  /** Override for tests only — production always gets
+   *  IMPORT_VERIFY_MAX_ANCHORS_PER_RUN. Exists so a cap/resume test can
+   *  prove the behaviour with a handful of anchors instead of 100,000,
+   *  the same "inject a smaller unit" seam `RunImportJobOptions.batchSize`
+   *  uses for Phase A. */
+  maxAnchorsPerRun?: number;
 }
 
 // =============================================================
@@ -216,10 +260,24 @@ export interface VerifySummary {
    *  in that case. `CANCELLED` when an operator cancelled the job while
    *  this call was running — see FIX 4. */
   status: "COMPLETED" | "VERIFICATION_INCOMPLETE" | "CANCELLED";
-  /** Distinct (store, anchor) pairs found in the file this call. */
+  /** Distinct (store, anchor) pairs this call actually inspected — bounded
+   *  by `IMPORT_VERIFY_MAX_ANCHORS_PER_RUN` (fix round 2, FIX B). When
+   *  `anchorCapReached` is true, the file has MORE distinct anchors than
+   *  this — never treat this as "the whole file's anchor count". */
   anchorsTotal: number;
-  /** Anchors now confirmed live (this call's work plus anything an
-   *  earlier call already resolved). */
+  /** Fix round 2, FIX B: true the moment this call stopped scanning the
+   *  file because it hit `IMPORT_VERIFY_MAX_ANCHORS_PER_RUN` distinct,
+   *  not-yet-verified anchors. Forces `status` to
+   *  `VERIFICATION_INCOMPLETE` regardless of how the inspected subset
+   *  resolved — the run definitively did NOT cover the whole file, so it
+   *  must never report `COMPLETED`. A later call resumes from wherever
+   *  this one left off (anchors it already verified cost no cap slot on
+   *  the next scan). */
+  anchorCapReached: boolean;
+  /** Anchors this call confirmed live, OR found already verified by an
+   *  earlier call while scanning (those cost no cap slot — see
+   *  `anchorCapReached`). Not necessarily every verified anchor in the
+   *  whole file when `anchorCapReached` is true. */
   anchorsVerified: number;
   /** Anchors the store said it no longer recognises this call — left as
    *  history, never deleted (rule 1). NOT checkpointed (see
@@ -284,14 +342,30 @@ type AnchorGroup = {
   storeTransactionIds?: Set<string>;
 };
 
+interface BuildAnchorGroupsResult {
+  groups: Map<string, AnchorGroup>;
+  rowsSkippedAnchorless: number;
+  /** Fix round 2, FIX B: anchors the scan found ALREADY verified
+   *  (`purchases.verifiedAt` set by an earlier call) before ever adding
+   *  them to `groups` — these cost no cap slot. */
+  alreadyVerifiedDuringScan: number;
+  /** Fix round 2, FIX B: true iff the scan stopped early because
+   *  `groups` reached `IMPORT_VERIFY_MAX_ANCHORS_PER_RUN` distinct,
+   *  not-yet-verified anchors — there is more of the file left unread. */
+  capReached: boolean;
+}
+
 async function buildAnchorGroups(
   db: Db,
   projectId: string,
   storageKey: string,
   mapping: Record<string, CanonicalField>,
-): Promise<{ groups: Map<string, AnchorGroup>; rowsSkippedAnchorless: number }> {
+  maxAnchorsPerRun: number,
+): Promise<BuildAnchorGroupsResult> {
   const groups = new Map<string, AnchorGroup>();
   let rowsSkippedAnchorless = 0;
+  let alreadyVerifiedDuringScan = 0;
+  let capReached = false;
   const now = new Date();
 
   const objectStream = await importStore.getObject(storageKey);
@@ -301,6 +375,8 @@ async function buildAnchorGroups(
       header = event.header;
       continue;
     }
+    if (capReached) break; // This call's anchor budget is spent — stop reading.
+
     const canonicalRow = buildCanonicalRow(header, event.row, mapping);
     const normalized = normalizeRow(canonicalRow, { now });
     if ("error" in normalized) continue; // Phase A never persisted this row.
@@ -334,27 +410,51 @@ async function buildAnchorGroups(
 
     const key = `${normalized.store}:${anchor}`;
     const existingGroup = groups.get(key);
-    if (!existingGroup) {
-      groups.set(key, {
-        store: normalized.store,
-        anchor,
-        productIdentifier: normalized.productIdentifier,
-        isSandbox: normalized.isSandbox,
-        representativeStoreTransactionId: storeTransactionId,
-        storeTransactionIds:
-          normalized.store === "APP_STORE" ? undefined : new Set([storeTransactionId]),
-      });
+    if (existingGroup) {
+      if (
+        existingGroup.storeTransactionIds &&
+        existingGroup.storeTransactionIds.size < IMPORT_VERIFY_MAX_TRACKED_ROWS_PER_ANCHOR
+      ) {
+        existingGroup.storeTransactionIds.add(storeTransactionId);
+      }
       continue;
     }
-    if (
-      existingGroup.storeTransactionIds &&
-      existingGroup.storeTransactionIds.size < IMPORT_VERIFY_MAX_TRACKED_ROWS_PER_ANCHOR
-    ) {
-      existingGroup.storeTransactionIds.add(storeTransactionId);
+
+    // Fix round 2, FIX B: this is a NEWLY discovered distinct anchor — the
+    // resume checkpoint is resolved HERE, before it can cost a cap slot.
+    // Without this, a resumed call would re-discover the SAME first
+    // IMPORT_VERIFY_MAX_ANCHORS_PER_RUN anchors on every call (the file is
+    // always scanned from the start, in the same order) and NEVER reach
+    // anchors further into the file — a cap that returns the same
+    // anchors forever, which the fix explicitly must not do.
+    const existingPurchase = await drizzle.purchaseRepo.findPurchaseByStoreTransaction(
+      db,
+      normalized.store,
+      storeTransactionId,
+    );
+    if (!existingPurchase) continue; // Phase A never wrote this row.
+    if (existingPurchase.verifiedAt) {
+      alreadyVerifiedDuringScan++;
+      continue; // Already resolved by an earlier call — no slot needed.
     }
+
+    if (groups.size >= maxAnchorsPerRun) {
+      capReached = true;
+      break;
+    }
+
+    groups.set(key, {
+      store: normalized.store,
+      anchor,
+      productIdentifier: normalized.productIdentifier,
+      isSandbox: normalized.isSandbox,
+      representativeStoreTransactionId: storeTransactionId,
+      storeTransactionIds:
+        normalized.store === "APP_STORE" ? undefined : new Set([storeTransactionId]),
+    });
   }
 
-  return { groups, rowsSkippedAnchorless };
+  return { groups, rowsSkippedAnchorless, alreadyVerifiedDuringScan, capReached };
 }
 
 // =============================================================
@@ -386,14 +486,26 @@ function noteResolved(runState: RunState): void {
 /** Cheap, rate-limited check for an operator's Cancel — at most one DB
  *  read per CANCELLATION_CHECK_INTERVAL_MS regardless of anchor volume,
  *  and none at all once cancellation is confirmed (the flag is sticky
- *  for the rest of this call). */
+ *  for the rest of this call). Fix round 2, FIX C: `isCancelledOverride`
+ *  (from `deps.isCancelled`) bypasses the DB and the interval throttle
+ *  entirely when present — the injectable seam a test uses to prove
+ *  cancellation is noticed between two specific anchors deterministically. */
 async function checkCancelled(
   db: Db,
   projectId: string,
   jobId: string,
   runState: RunState,
+  isCancelledOverride?: () => Promise<boolean>,
 ): Promise<boolean> {
   if (runState.cancelled) return true;
+
+  if (isCancelledOverride) {
+    if (await isCancelledOverride()) {
+      runState.cancelled = true;
+    }
+    return runState.cancelled;
+  }
+
   const now = Date.now();
   if (now - runState.lastCancelCheckAt < CANCELLATION_CHECK_INTERVAL_MS) {
     return false;
@@ -602,16 +714,25 @@ export async function verifyImportedAnchors(
   const mapping = job.mapping as Record<string, CanonicalField>;
   const sleep = deps.sleep ?? defaultSleep;
 
-  const { groups, rowsSkippedAnchorless } = await buildAnchorGroups(
-    db,
-    projectId,
-    job.storageKey,
-    mapping,
-  );
+  const { groups, rowsSkippedAnchorless, alreadyVerifiedDuringScan, capReached } =
+    await buildAnchorGroups(
+      db,
+      projectId,
+      job.storageKey,
+      mapping,
+      deps.maxAnchorsPerRun ?? IMPORT_VERIFY_MAX_ANCHORS_PER_RUN,
+    );
 
   const runState = newRunState();
   const touchedSubscriberIds = new Set<string>();
-  let anchorsVerified = 0;
+  // Fix round 2, FIX B: anchors buildAnchorGroups already confirmed
+  // verified during the scan (no cap slot spent) count toward this call's
+  // reported total immediately — every anchor that DID take a slot in
+  // `groups` is, by construction, one `findPurchaseByStoreTransaction`
+  // already showed is NOT yet verified, so the pacing loop below no
+  // longer needs to re-check that (fix round 1's redundant per-anchor
+  // checkpoint read is gone).
+  let anchorsVerified = alreadyVerifiedDuringScan;
   let anchorsNotFound = 0;
   let anchorsPending = 0;
   let newlyVerified = 0;
@@ -625,25 +746,7 @@ export async function verifyImportedAnchors(
       // FIX 4: an operator's Cancel wins over everything else — stop
       // touching anchors entirely and leave them exactly as-is for a
       // future resume (this run's counters simply won't cover them).
-      if (await checkCancelled(db, projectId, jobId, runState)) return;
-
-      // Resume checkpoint: `verifiedAt` on an already-written purchase IS
-      // the record that an earlier `verifyImportedAnchors` call already
-      // resolved this anchor — no separate checkpoint column needed. This
-      // check is ALWAYS made, even after the run has given up (below),
-      // so an anchor resolved by an earlier call is never miscounted as
-      // pending just because quota ran out later in the same file.
-      const representativeId = group.representativeStoreTransactionId;
-      const existing = await drizzle.purchaseRepo.findPurchaseByStoreTransaction(
-        db,
-        group.store,
-        representativeId,
-      );
-      if (!existing) return; // Phase A never wrote this row.
-      if (existing.verifiedAt) {
-        anchorsVerified++;
-        return;
-      }
+      if (await checkCancelled(db, projectId, jobId, runState, deps.isCancelled)) return;
 
       // FIX 4: once the run has given up, every remaining anchor is
       // reported pending immediately, with no further store calls.
@@ -696,12 +799,17 @@ export async function verifyImportedAnchors(
   // successful RESUME (this call clears a prior VERIFICATION_INCOMPLETE)
   // must actually flip the persisted row to COMPLETED, not just say so in
   // the returned summary.
+  //
+  // Fix round 2, FIX B: `capReached` forces VERIFICATION_INCOMPLETE even
+  // when the inspected subset itself has zero anchorsPending — the run
+  // definitively did not cover the whole file, so claiming COMPLETED
+  // would be a false all-clear.
   let status: VerifySummary["status"];
   if (runState.cancelled) {
     // Already CANCELLED at the DB (that is how it was detected) —
     // nothing to write.
     status = "CANCELLED";
-  } else if (anchorsPending > 0) {
+  } else if (anchorsPending > 0 || capReached) {
     status = "VERIFICATION_INCOMPLETE";
     await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
       status: "VERIFICATION_INCOMPLETE",
@@ -717,6 +825,7 @@ export async function verifyImportedAnchors(
     jobId,
     status,
     anchorsTotal: groups.size,
+    anchorCapReached: capReached,
     anchorsVerified,
     anchorsNotFound,
     anchorsPending,

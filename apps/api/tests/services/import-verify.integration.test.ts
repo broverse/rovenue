@@ -598,3 +598,209 @@ describe("verifyImportedAnchors — counters reflect current state, not an accum
     expect(jobAfterSecond!.counters.verifyAnchorNotFound).toBe(1);
   });
 });
+
+// =============================================================
+// Fix round 2, FIX B — the anchor cap, and genuine resume progress
+// =============================================================
+
+describe("verifyImportedAnchors — bounded anchor map (maxAnchorsPerRun)", () => {
+  it("reports verification incomplete when the cap is reached, even though the capped subset itself resolved cleanly", async () => {
+    const anchors = Array.from({ length: 3 }, () => `apple_orig_cap_${createId()}`);
+    const rows: SourceRow[] = anchors.map((anchor, i) => ({
+      subscriberId: `rc_verify_cap_${i}_${createId()}`,
+      storeTxnId: `${anchor}_txn`,
+      originalTransactionId: anchor,
+      priceUsd: "9.99",
+    }));
+    const jobId = await seedCompletedPhaseA(csvOf(rows));
+    expect(await findPurchases()).toHaveLength(3);
+
+    const deps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async () => ({
+        kind: "verified" as const,
+        status: PurchaseStatus.ACTIVE,
+        expiresDate: new Date(FUTURE_EXPIRY),
+        autoRenewStatus: true,
+      })),
+      maxAnchorsPerRun: 2, // strictly less than the 3 distinct anchors in the file.
+    });
+
+    const summary = await verifyImportedAnchors(jobId, deps);
+
+    expect(summary.anchorCapReached).toBe(true);
+    expect(summary.anchorsTotal).toBe(2); // only the capped subset was inspected.
+    expect(summary.anchorsPending).toBe(0); // the two it DID inspect both verified fine...
+    expect(summary.status).toBe("VERIFICATION_INCOMPLETE"); // ...but the cap still forces incomplete.
+    expect(deps.verifyAppleAnchor).toHaveBeenCalledTimes(2);
+
+    const jobRow = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    expect(jobRow!.status).toBe("VERIFICATION_INCOMPLETE");
+  });
+
+  it("a resumed call makes genuine progress: it does NOT re-discover the same capped anchors forever", async () => {
+    const anchors = Array.from({ length: 4 }, () => `apple_orig_progress_${createId()}`);
+    const rows: SourceRow[] = anchors.map((anchor, i) => ({
+      subscriberId: `rc_verify_progress_${i}_${createId()}`,
+      storeTxnId: `${anchor}_txn`,
+      originalTransactionId: anchor,
+      priceUsd: "9.99",
+    }));
+    const jobId = await seedCompletedPhaseA(csvOf(rows));
+
+    const verifiedResult = {
+      kind: "verified" as const,
+      status: PurchaseStatus.ACTIVE,
+      expiresDate: new Date(FUTURE_EXPIRY),
+      autoRenewStatus: true,
+    };
+
+    // First call: cap of 2 out of 4 distinct anchors.
+    const firstCalledAnchors: string[] = [];
+    const firstDeps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async (input) => {
+        firstCalledAnchors.push(input.originalTransactionId);
+        return verifiedResult;
+      }),
+      maxAnchorsPerRun: 2,
+    });
+    const first = await verifyImportedAnchors(jobId, firstDeps);
+    expect(first.anchorCapReached).toBe(true);
+    expect(first.status).toBe("VERIFICATION_INCOMPLETE");
+    expect(firstCalledAnchors).toHaveLength(2);
+    expect(new Set(firstCalledAnchors).size).toBe(2); // two DISTINCT anchors, not one twice.
+
+    // Second call, same cap: must process the OTHER two anchors, not
+    // re-verify (or even re-inspect) the first two — genuine progress,
+    // not "the same first N anchors forever".
+    const secondCalledAnchors: string[] = [];
+    const secondDeps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async (input) => {
+        secondCalledAnchors.push(input.originalTransactionId);
+        return verifiedResult;
+      }),
+      maxAnchorsPerRun: 2,
+    });
+    const second = await verifyImportedAnchors(jobId, secondDeps);
+
+    expect(secondCalledAnchors).toHaveLength(2);
+    expect(new Set(secondCalledAnchors).size).toBe(2);
+    // No overlap with the first call's anchors — real forward progress.
+    for (const anchor of secondCalledAnchors) {
+      expect(firstCalledAnchors).not.toContain(anchor);
+    }
+    // All 4 anchors are now covered, so this call is NOT capped anymore.
+    expect(second.anchorCapReached).toBe(false);
+    expect(second.status).toBe("COMPLETED");
+
+    const verifiedRows = await findPurchases();
+    expect(verifiedRows.every((p) => p.verifiedAt !== null)).toBe(true);
+    expect(verifiedRows).toHaveLength(4);
+  });
+});
+
+// =============================================================
+// Fix round 2, FIX C — a deterministic mid-run cancellation seam
+// =============================================================
+
+describe("verifyImportedAnchors — cancellation discovered mid-run (deps.isCancelled seam)", () => {
+  it("stops calling the store once cancellation is discovered between anchors, and reports cancelled", async () => {
+    const anchor1 = `apple_orig_midcancel_1_${createId()}`;
+    const anchor2 = `apple_orig_midcancel_2_${createId()}`;
+    const csv = csvOf([
+      {
+        subscriberId: `rc_midcancel_a_${createId()}`,
+        storeTxnId: `${anchor1}_txn`,
+        originalTransactionId: anchor1,
+        priceUsd: "9.99",
+      },
+      {
+        subscriberId: `rc_midcancel_b_${createId()}`,
+        storeTxnId: `${anchor2}_txn`,
+        originalTransactionId: anchor2,
+        priceUsd: "9.99",
+      },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+
+    let checkCount = 0;
+    const deps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async () => ({
+        kind: "verified" as const,
+        status: PurchaseStatus.ACTIVE,
+        expiresDate: new Date(FUTURE_EXPIRY),
+        autoRenewStatus: true,
+      })),
+      // Deterministic seam (fix round 2, FIX C): the FIRST anchor's check
+      // sees "not cancelled yet"; every check after that sees the
+      // operator's Cancel having landed in the meantime — and actually
+      // performs it, so the persisted job status is genuinely CANCELLED,
+      // not just an in-memory flag this test invented.
+      isCancelled: vi.fn(async () => {
+        checkCount++;
+        if (checkCount === 1) return false;
+        await importJobRepo.setImportJobStatus(db, PROJECT_ID, jobId, {
+          status: "CANCELLED",
+        });
+        return true;
+      }),
+    });
+
+    const summary = await verifyImportedAnchors(jobId, deps);
+
+    expect(summary.status).toBe("CANCELLED");
+    // Exactly one anchor got through before cancellation was discovered.
+    expect(deps.verifyAppleAnchor).toHaveBeenCalledTimes(1);
+
+    const jobRow = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    expect(jobRow!.status).toBe("CANCELLED");
+  });
+});
+
+// =============================================================
+// Fix round 2, FIX D — the quiet ACTIVE→ACTIVE later-expiry case
+// =============================================================
+
+describe("verifyImportedAnchors — ACTIVE stays ACTIVE but the live expiry is later", () => {
+  it("moves the access row's expiry forward even though status never changed", async () => {
+    const subscriberId = `rc_verify_later_expiry_${createId()}`;
+    const anchor = `apple_orig_later_expiry_${createId()}`;
+    const csv = csvOf([
+      { subscriberId, storeTxnId: `${anchor}_txn_1`, originalTransactionId: anchor, priceUsd: "9.99" },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+    const [purchaseBefore] = await findPurchases();
+    expect(purchaseBefore!.status).toBe(PurchaseStatus.ACTIVE);
+    const accessBefore = await findAccessRow(purchaseBefore!.subscriberId);
+    expect(accessBefore).not.toBeNull();
+    // Compare against the purchase's OWN persisted expiresDate (not a
+    // re-parse of the source string) — avoids a timezone-parsing mismatch
+    // between this test's Date construction and the app's CSV parser.
+    expect(accessBefore!.expiresDate?.toISOString()).toBe(
+      purchaseBefore!.expiresDate?.toISOString(),
+    );
+
+    const laterExpiry = new Date("2030-06-01T00:00:00.000Z");
+    const deps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async () => ({
+        kind: "verified" as const,
+        status: PurchaseStatus.ACTIVE, // same status both sides — the quiet case.
+        expiresDate: laterExpiry,
+        autoRenewStatus: true,
+      })),
+    });
+
+    await verifyImportedAnchors(jobId, deps);
+
+    const [purchaseAfter] = await findPurchases();
+    expect(purchaseAfter!.status).toBe(PurchaseStatus.ACTIVE);
+    expect(purchaseAfter!.expiresDate?.toISOString()).toBe(laterExpiry.toISOString());
+
+    // The quiet failure mode this test exists for: both sides "look"
+    // active, so nothing SIGNALS a problem if the access row is never
+    // actually moved off the stale imported date.
+    const accessAfter = await findAccessRow(purchaseAfter!.subscriberId);
+    expect(accessAfter).not.toBeNull();
+    expect(accessAfter!.id).toBe(accessBefore!.id); // same row, updated in place.
+    expect(accessAfter!.expiresDate?.toISOString()).toBe(laterExpiry.toISOString());
+  });
+});
