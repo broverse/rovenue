@@ -375,3 +375,20 @@ export const refundShieldAppleEnvironmentEnum = pgEnum(
   "refund_shield_apple_environment",
   ["PRODUCTION", "SANDBOX"],
 );
+
+// =============================================================
+// Data-import pgEnums
+// =============================================================
+
+// Task 9 will add a "verification incomplete" terminal outcome; that
+// member is intentionally NOT included yet — this enum only carries
+// states this branch of the importer actually sets.
+export const importJobStatus = pgEnum("ImportJobStatus", [
+  "PENDING_MAPPING",
+  "DRY_RUN_RUNNING",
+  "DRY_RUN_COMPLETE",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);

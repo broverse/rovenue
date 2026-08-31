@@ -41,6 +41,7 @@ import {
   funnelSessionState,
   funnelStatus,
   funnelTemplateScope,
+  importJobStatus,
   integrationDeliveryStatus,
   invitationDeliveryStatus,
   memberRole,
@@ -2943,6 +2944,86 @@ export const integrationDeliveries = pgTable(
 
 export type IntegrationDelivery = typeof integrationDeliveries.$inferSelect;
 export type NewIntegrationDelivery = typeof integrationDeliveries.$inferInsert;
+
+// =============================================================
+// import_jobs (bulk-import of subscriber/purchase history from a
+// competitor's export — RevenueCat first)
+// =============================================================
+//
+// Column names are snake_case, matching the integration_connections /
+// integration_deliveries family immediately above — the domain this
+// table's background worker and dashboard routes sit closest to.
+//
+// Row-level import outcomes are deliberately NOT rows here: a
+// million-row import would double the write volume for data nobody
+// queries. Outcomes stream to a report file in object storage
+// (`reportStorageKey`); this table holds only aggregate `counters`.
+//
+// `checkpointLine` is what lets a crashed/restarted worker resume
+// instead of re-processing already-imported rows — callers must only
+// ever move it forward (see `saveImportJobCheckpoint`).
+//
+// `sourceLabel` is free text the operator typed/selected (e.g. "
+// RevenueCat") — a label, never schema; nothing may branch on it.
+// `presetId` is the machine-readable preset key and is nullable
+// (a mapping-only import has no preset).
+
+export const importJobs = pgTable(
+  "import_jobs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    // Audit trail survives the user being removed from the project.
+    createdByUserId: text("created_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    sourceLabel: text("source_label").notNull(),
+    presetId: text("preset_id"),
+    storageKey: text("storage_key").notNull(),
+    fileName: text("file_name").notNull(),
+    fileBytes: integer("file_bytes").notNull(),
+    fileSha256: text("file_sha256").notNull(),
+    mapping: jsonb("mapping")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    options: jsonb("options")
+      .$type<{ skipSandbox?: boolean; importAnchorless?: boolean }>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    status: importJobStatus("status").notNull().default("PENDING_MAPPING"),
+    checkpointLine: integer("checkpoint_line").notNull().default(0),
+    // One key per outcome bucket (willCreate, willUpdate, skippedSandbox,
+    // unresolvedProduct, anchorless, androidNoToken, invalidRow,
+    // duplicateInFile — bucket list owned by Task 6). Incremented
+    // additively, never overwritten wholesale.
+    counters: jsonb("counters")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    reportStorageKey: text("report_storage_key"),
+    errorMessage: text("error_message"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectCreatedAtIdx: index("import_jobs_project_created_at_idx").on(
+      t.projectId,
+      t.createdAt,
+    ),
+  }),
+);
+
+export type ImportJob = typeof importJobs.$inferSelect;
+export type NewImportJob = typeof importJobs.$inferInsert;
 
 // =============================================================
 // warehouse_query_runs (ad-hoc SQL query execution log)
