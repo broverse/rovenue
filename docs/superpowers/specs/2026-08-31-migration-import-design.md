@@ -8,7 +8,7 @@
 
 ## 1. Context (from the 2026-08-31 exploration)
 
-**Research file:** `.superpowers/research/2026-08-31-rc-adapty-export-formats.md` — every vendor claim below is sourced there, with unconfirmed items labelled. Read it before implementing a parser.
+**Research file:** `docs/superpowers/research/2026-08-31-rc-adapty-export-formats.md` — every vendor claim below is sourced there, with unconfirmed items labelled. Read it before implementing a parser.
 
 ### What the vendors actually give a departing customer
 
