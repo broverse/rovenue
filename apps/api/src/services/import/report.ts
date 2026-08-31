@@ -59,7 +59,17 @@ export type ReportRow = {
 };
 
 export interface ReportWriter {
-  writeReportRow(row: ReportRow): void;
+  /**
+   * Writes one line and resolves once the stream is ready for more.
+   * `PassThrough.write()` returns `false` when its internal buffer is
+   * full — ignoring that (fix round 1, minor 1) works today only because
+   * the per-row DB round trips in `classifyRow` happen to throttle the
+   * loop; a leaner caller (Task 8's writer) would otherwise let this
+   * stream's buffer grow without bound, exactly the unbounded-memory
+   * mistake this module exists to avoid for the rows themselves. Callers
+   * MUST `await` this.
+   */
+  writeReportRow(row: ReportRow): Promise<void>;
   /** Ends the stream, waits for the upload to finish, and returns the
    *  storage key the finished report was written under. Calling
    *  `writeReportRow` after this throws — the stream is already closed. */
@@ -84,7 +94,13 @@ export function createReportWriter(projectId: string, jobId: string): ReportWrit
       if (finalized) {
         throw new Error("createReportWriter: writeReportRow called after finalizeReport");
       }
-      stream.write(`${JSON.stringify(row)}\n`);
+      const canWriteMore = stream.write(`${JSON.stringify(row)}\n`);
+      if (canWriteMore) {
+        return Promise.resolve();
+      }
+      // Backpressure: the internal buffer is full. Wait for Node to drain
+      // it to the underlying S3 Upload before accepting the next row.
+      return new Promise((resolve) => stream.once("drain", resolve));
     },
     async finalizeReport() {
       finalized = true;

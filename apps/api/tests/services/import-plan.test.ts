@@ -49,7 +49,7 @@ vi.mock("../../src/lib/import-store", () => ({
   deleteObject: async () => undefined,
 }));
 
-import { planImport } from "../../src/services/import/plan";
+import { planImport, createDuplicateTracker, isDuplicateAndTrack } from "../../src/services/import/plan";
 
 const PROJECT_ID = `proj_import_plan_${createId()}`;
 
@@ -106,6 +106,20 @@ async function seedJob(args: {
   });
 
   return jobId;
+}
+
+/** Reads a report artefact back out of the fake object store and parses
+ *  its NDJSON lines, for tests that need to check the actual `reason`
+ *  text a row was reported with (fix round 1: "product not found" and
+ *  "product ambiguous" must stay distinguishable). */
+function readReportRows(storageKey: string): Array<Record<string, unknown>> {
+  const buf = fakeObjects.get(storageKey);
+  if (!buf) throw new Error(`no report object stored for key ${storageKey}`);
+  return buf
+    .toString("utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 beforeAll(async () => {
@@ -283,5 +297,150 @@ describe("planImport", () => {
       curly_braces: 1,
       semicolon_delimited: 1,
     });
+  });
+
+  it("classifies a row missing a required field (productIdentifier) as invalidRow", async () => {
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_invalid,app_store,,txn_invalid,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId);
+
+    expect(summary.outcomes.invalidRow).toBe(1);
+    const reportRows = readReportRows(summary.reportStorageKey);
+    expect(reportRows[0]?.outcome).toBe("invalidRow");
+    expect(reportRows[0]?.reason).toMatch(/Product identifier/);
+  });
+
+  // ===========================================================
+  // Fix round 1, FIX 1 — product resolution fails closed
+  // ===========================================================
+
+  it("reports unresolvedProduct with an AMBIGUOUS reason when two catalog products share a Stripe parent id", async () => {
+    // Two distinct plans built on the same underlying Stripe Product,
+    // misconfigured so BOTH hold the coarser prod_ id under storeIds.stripe
+    // (a real operator mistake this design must never silently pick a
+    // side on).
+    await seedProduct("stripe_monthly_ambiguous", { stripe: "prod_shared_ambiguous" });
+    await seedProduct("stripe_annual_ambiguous", { stripe: "prod_shared_ambiguous" });
+
+    const beforeCount = (
+      await db.select().from(purchases).where(eq(purchases.projectId, PROJECT_ID))
+    ).length;
+
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_ambiguous,stripe,prod_shared_ambiguous,txn_ambiguous,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId);
+
+    expect(summary.outcomes.unresolvedProduct).toBe(1);
+    expect(summary.outcomes.willCreate).toBe(0);
+    const reportRows = readReportRows(summary.reportStorageKey);
+    expect(reportRows[0]?.reason).toMatch(/ambiguous/i);
+    expect(reportRows[0]?.reason).toContain("2 catalog products");
+
+    const afterCount = (
+      await db.select().from(purchases).where(eq(purchases.projectId, PROJECT_ID))
+    ).length;
+    expect(afterCount).toBe(beforeCount);
+  });
+
+  it("does NOT let a store-shaped identifier (price_.../prod_...) resolve through the products.identifier fallback", async () => {
+    // A catalog product whose CANONICAL identifier happens to be a string
+    // shaped like a Stripe id — no storeIds.stripe mapping at all, so a
+    // pre-fix resolver would only reach it via the identifier fallback.
+    await seedProduct("price_coincidental_shape", {});
+
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_gate,stripe,price_coincidental_shape,txn_gate,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId);
+
+    expect(summary.outcomes.unresolvedProduct).toBe(1);
+    expect(summary.outcomes.willCreate).toBe(0);
+    const reportRows = readReportRows(summary.reportStorageKey);
+    expect(reportRows[0]?.reason).toMatch(/product not found/i);
+    expect(reportRows[0]?.reason).not.toMatch(/ambiguous/i);
+  });
+
+  it("still resolves a genuinely custom (non-store-shaped) Stripe product_identifier through the identifier fallback", async () => {
+    // Regression guard: the fallback gate must only block STORE-SHAPED
+    // values, not the legitimate custom-string case the two-step design
+    // exists for.
+    await seedProduct("custom_slug_pro", {});
+
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_custom_slug,stripe,custom_slug_pro,txn_custom_slug,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId);
+
+    expect(summary.outcomes.willCreate).toBe(1);
+    expect(summary.outcomes.unresolvedProduct).toBe(0);
+  });
+
+  it("reports duplicateTrackingDisabledAfterKeys as null for an ordinary run under the cap", async () => {
+    await seedProduct("tracking_ok_product", { apple: "tracking_ok_product" });
+
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_tracking_ok,app_store,tracking_ok_product,txn_tracking_ok,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId);
+
+    expect(summary.duplicateTrackingDisabledAfterKeys).toBeNull();
+  });
+});
+
+// =================================================================
+// Fix round 1, FIX 2 — bounded duplicate-key tracking
+// =================================================================
+//
+// Unit-level, not planImport-level: proving the real cap
+// (IMPORT_DUPLICATE_TRACKING_MAX_KEYS, ~2,000,000) via a real CSV/DB run
+// would mean generating millions of rows, which the throttle rule this
+// task operates under rules out. The cap is injected into
+// `isDuplicateAndTrack` as a plain parameter specifically so its
+// bounding behavior is exercised here, fast and deterministically, with
+// a tiny cap standing in for the real one — planImport always calls it
+// with the real named constant (see plan.ts).
+describe("isDuplicateAndTrack / createDuplicateTracker", () => {
+  it("flags an exact repeat of an already-tracked key", () => {
+    const tracker = createDuplicateTracker();
+    expect(isDuplicateAndTrack(tracker, "a", 10)).toBe(false);
+    expect(isDuplicateAndTrack(tracker, "a", 10)).toBe(true);
+    expect(tracker.disabledAfterKeys).toBeNull();
+  });
+
+  it("stops tracking new keys past the cap without ever falsely flagging one as a duplicate", () => {
+    const tracker = createDuplicateTracker();
+    const cap = 2;
+
+    expect(isDuplicateAndTrack(tracker, "k1", cap)).toBe(false);
+    expect(isDuplicateAndTrack(tracker, "k2", cap)).toBe(false);
+    expect(tracker.disabledAfterKeys).toBeNull();
+
+    // Cap reached (2 keys tracked). A brand-new third key is left
+    // untracked — and, critically, NOT flagged as a duplicate.
+    expect(isDuplicateAndTrack(tracker, "k3", cap)).toBe(false);
+    expect(tracker.disabledAfterKeys).toBe(cap);
+
+    // Repeating that untracked key still never produces a false positive.
+    expect(isDuplicateAndTrack(tracker, "k3", cap)).toBe(false);
+
+    // A key captured BEFORE the cap was hit is still correctly detected.
+    expect(isDuplicateAndTrack(tracker, "k1", cap)).toBe(true);
   });
 });

@@ -12,6 +12,7 @@ import { drizzle, type Db, type Product, type Purchase } from "@rovenue/db";
 import {
   parseCsvStream,
   normalizeRow,
+  IMPORT_DUPLICATE_TRACKING_MAX_KEYS,
   type CanonicalField,
   type CanonicalRow,
   type StoreValue,
@@ -36,6 +37,17 @@ export type ImportPlanSummary = {
    *  their real data, rather than re-guessed. Rows with no entitlement
    *  cell at all are not counted in any shape bucket. */
   entitlementShapeCounts: Record<string, number>;
+  /**
+   * Null while every distinct `(store, storeTransactionId)` key seen so
+   * far was tracked exactly; set to `IMPORT_DUPLICATE_TRACKING_MAX_KEYS`
+   * the moment the tracker hit that cap and stopped accepting new keys
+   * (fix round 1, FIX 2). A non-null value here means `duplicateInFile`
+   * detection was NOT exhaustive for the remainder of the file — some
+   * later in-file duplicates may have been missed (never falsely
+   * flagged; see `isDuplicateAndTrack`). Surfaced so the operator sees
+   * this honestly rather than the summary silently going quiet on it.
+   */
+  duplicateTrackingDisabledAfterKeys: number | null;
   reportStorageKey: string;
 };
 
@@ -88,41 +100,130 @@ function classifyEntitlementShape(raw: string): string {
 // price id from a Stripe product id (`products.storeIds.stripe` holds
 // whichever single string the operator configured for that store).
 //
-// Rather than guess which of the three shapes a value is, this tries the
-// two catalog fields a value could plausibly match, in order, and takes
-// the first hit — never fabricating a product for a value that matches
-// neither:
-//   1. `products.storeIds[<canonical store key>]` — the native mapping
-//      every other store (Apple bundle id, Google SKU) already resolves
-//      through (`offeringRepo.findProductByStoreId`, used by every store
-//      webhook). Covers a Stripe price id when that's what the operator
-//      configured, and is the ONLY path for Apple/Google rows.
-//   2. `products.identifier` — our own canonical catalog identifier.
-//      Covers a Stripe product id or a custom string that happens to
-//      equal how the operator named the product in their own catalog.
+// Fix round 1, FIX 1 (critical): the original two-step "try storeIds,
+// then fall back to products.identifier" resolver could silently bind a
+// purchase to the WRONG product. `prod_...` (a Stripe PARENT id) is
+// inherently coarser than a plan — two catalog products (e.g. "Monthly"
+// and "Annual") can be built on one Stripe Product while holding distinct
+// Price ids, and `products.storeIds` is unconstrained jsonb, so nothing
+// stops an operator from entering that shared `prod_...` on only one of
+// them. Every purchase row carrying that coarser id would then
+// exact-match that ONE product regardless of which plan it actually
+// belongs to — real customers silently granted the wrong entitlements,
+// strictly worse than the `unresolvedProduct` bucket this design fails
+// closed into everywhere else.
+//
+// Ruling (binding): resolution must be unambiguous or it must fail
+// closed. Two rules, both enforced below:
+//   1. A storeIds match must be UNIQUE. `findProductsByStoreId` (no
+//      `.limit(1)`) returns every matching product; more than one means
+//      ambiguous, not resolved — report it as such rather than picking
+//      one.
+//   2. The `products.identifier` fallback NEVER resolves a value shaped
+//      like a Stripe id (`price_...`/`prod_...`). `products.identifier`
+//      is a Rovenue-side slug; a value shaped like a Stripe id matching
+//      it is coincidence, not identity. A genuinely custom string (RC's
+//      third documented shape) still falls back normally — only the
+//      store-shaped case is gated off, and only for STRIPE rows, since
+//      Apple bundle ids / Google SKUs have no documented coincidental-
+//      shape risk the way Stripe's product_identifier does.
 const STORE_TO_PRODUCT_STORE_KEY: Partial<Record<StoreValue, "apple" | "google" | "stripe">> = {
   APP_STORE: "apple",
   PLAY_STORE: "google",
   STRIPE: "stripe",
 };
 
+/** Stripe's own id namespace signature — a Price id or a (legacy) Product
+ *  id. A value shaped like this did NOT come from an operator typing
+ *  their own catalog slug; it came from Stripe. */
+const STRIPE_ID_PATTERN = /^(price_|prod_)/;
+
+function looksLikeStripeId(value: string): boolean {
+  return STRIPE_ID_PATTERN.test(value);
+}
+
+export type ProductResolution =
+  | { kind: "resolved"; product: Product }
+  | { kind: "unresolved" }
+  | { kind: "ambiguous"; matchCount: number };
+
 async function resolveProduct(
   db: Db,
   projectId: string,
   store: StoreValue,
   productIdentifier: string,
-): Promise<Product | null> {
+): Promise<ProductResolution> {
   const storeKey = STORE_TO_PRODUCT_STORE_KEY[store];
   if (storeKey) {
-    const byStoreId = await drizzle.offeringRepo.findProductByStoreId(
+    const matches = await drizzle.offeringRepo.findProductsByStoreId(
       db,
       projectId,
       storeKey,
       productIdentifier,
     );
-    if (byStoreId) return byStoreId;
+    if (matches.length > 1) {
+      return { kind: "ambiguous", matchCount: matches.length };
+    }
+    if (matches.length === 1) {
+      return { kind: "resolved", product: matches[0]! };
+    }
   }
-  return drizzle.productRepo.findProductByIdentifier(db, projectId, productIdentifier);
+
+  // No unique storeIds match. Fall back to our own canonical identifier —
+  // unless the value is shaped like a Stripe id, in which case a
+  // coincidental match against products.identifier is not identity (rule
+  // 2 above). products.identifier is unique per project (schema), so this
+  // branch can never itself be ambiguous.
+  if (store === "STRIPE" && looksLikeStripeId(productIdentifier)) {
+    return { kind: "unresolved" };
+  }
+  const byIdentifier = await drizzle.productRepo.findProductByIdentifier(
+    db,
+    projectId,
+    productIdentifier,
+  );
+  return byIdentifier ? { kind: "resolved", product: byIdentifier } : { kind: "unresolved" };
+}
+
+// =============================================================
+// Duplicate-key tracking (fix round 1, FIX 2 — bounded)
+// =============================================================
+//
+// Tracking every distinct (store, storeTransactionId) key for the whole
+// run is unbounded: at the 2 GiB upload cap and realistic row sizes that
+// is on the order of ten million keys (hundreds of MB to a GB resident).
+// `duplicateInFile` is informational, not a correctness guarantee — the
+// writer upserts on (store, storeTransactionId) regardless, so a missed
+// in-file duplicate costs a redundant upsert, never a wrong one. So: track
+// up to a named cap, and past it STOP tracking new keys rather than
+// guess via a lossy hash (a false "duplicate" would wrongly skip a real
+// row — a correctness failure in the wrong direction, unlike a missed
+// one). `disabledAfterKeys` records, once, that the cap was hit, so the
+// summary can say so rather than silently going quiet.
+export type DuplicateTracker = {
+  seen: Set<string>;
+  disabledAfterKeys: number | null;
+};
+
+export function createDuplicateTracker(): DuplicateTracker {
+  return { seen: new Set(), disabledAfterKeys: null };
+}
+
+/** Returns true when `key` was already tracked (a genuine duplicate).
+ *  Never returns true for a key it hasn't actually seen before — once the
+ *  cap is reached, a brand-new key is simply left untracked, not flagged. */
+export function isDuplicateAndTrack(
+  tracker: DuplicateTracker,
+  key: string,
+  cap: number,
+): boolean {
+  if (tracker.seen.has(key)) return true;
+  if (tracker.seen.size < cap) {
+    tracker.seen.add(key);
+  } else if (tracker.disabledAfterKeys === null) {
+    tracker.disabledAfterKeys = cap;
+  }
+  return false;
 }
 
 // =============================================================
@@ -185,9 +286,9 @@ async function classifyRow(args: {
   canonicalRow: CanonicalRow;
   now: Date;
   skipSandbox: boolean;
-  seenTransactionKeys: Set<string>;
+  duplicateTracker: DuplicateTracker;
 }): Promise<{ outcome: ImportOutcome; reason: string | null; existingSubscriberId: string | null }> {
-  const { db, projectId, canonicalRow, now, skipSandbox, seenTransactionKeys } = args;
+  const { db, projectId, canonicalRow, now, skipSandbox, duplicateTracker } = args;
 
   const normalized = normalizeRow(canonicalRow, { now });
   if ("error" in normalized) {
@@ -209,29 +310,43 @@ async function classifyRow(args: {
 
   if (normalized.storeTransactionId) {
     const dedupeKey = `${normalized.store}:${normalized.storeTransactionId}`;
-    if (seenTransactionKeys.has(dedupeKey)) {
+    if (
+      isDuplicateAndTrack(duplicateTracker, dedupeKey, IMPORT_DUPLICATE_TRACKING_MAX_KEYS)
+    ) {
       return {
         outcome: "duplicateInFile",
         reason: `duplicate (store, storeTransactionId) already seen earlier in this file: ${dedupeKey}`,
         existingSubscriberId,
       };
     }
-    seenTransactionKeys.add(dedupeKey);
   }
 
-  const product = await resolveProduct(
+  const productResolution = await resolveProduct(
     db,
     projectId,
     normalized.store,
     normalized.productIdentifier,
   );
-  if (!product) {
+  if (productResolution.kind === "ambiguous") {
     return {
       outcome: "unresolvedProduct",
-      reason: `no catalog product matches product identifier "${normalized.productIdentifier}"`,
+      reason:
+        `product ambiguous: product identifier "${normalized.productIdentifier}" matches ` +
+        `${productResolution.matchCount} catalog products — fix the catalog's storeIds mapping ` +
+        `so only one product claims this id`,
       existingSubscriberId,
     };
   }
+  if (productResolution.kind === "unresolved") {
+    return {
+      outcome: "unresolvedProduct",
+      reason: `product not found: no catalog product matches product identifier "${normalized.productIdentifier}"`,
+      existingSubscriberId,
+    };
+  }
+  // productResolution.kind === "resolved" past this point — the product
+  // row itself isn't needed downstream, only the fact that resolution
+  // succeeded (Task 7's writer does its own lookup at write time).
 
   if (normalized.isAnchorless) {
     return { outcome: "anchorless", reason: null, existingSubscriberId };
@@ -288,7 +403,7 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
     IMPORT_OUTCOMES.map((outcome) => [outcome, 0]),
   ) as Record<ImportOutcome, number>;
   const entitlementShapeCounts: Record<string, number> = {};
-  const seenTransactionKeys = new Set<string>();
+  const duplicateTracker = createDuplicateTracker();
   let totalRows = 0;
   const now = new Date();
 
@@ -319,7 +434,7 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
         canonicalRow,
         now,
         skipSandbox,
-        seenTransactionKeys,
+        duplicateTracker,
       });
 
       outcomes[outcome] += 1;
@@ -334,7 +449,7 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
         storeTransactionId: canonicalRow.storeTransactionId ?? null,
         reason,
       };
-      reportWriter.writeReportRow(reportRow);
+      await reportWriter.writeReportRow(reportRow);
     }
 
     const reportStorageKey = await reportWriter.finalizeReport();
@@ -351,6 +466,7 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
       totalRows,
       outcomes,
       entitlementShapeCounts,
+      duplicateTrackingDisabledAfterKeys: duplicateTracker.disabledAfterKeys,
       reportStorageKey,
     };
   } catch (err) {

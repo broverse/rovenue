@@ -56,3 +56,30 @@ export const IMPORT_FILE_RETENTION_DAYS = 7;
  *  bucket — see apps/api/src/lib/import-store.ts's module comment for
  *  why those must never share a bucket). */
 export const IMPORT_STORAGE_PREFIX = "imports";
+
+/**
+ * Upper bound on how many distinct `(store, storeTransactionId)` keys the
+ * dry-run planner (and, later, the writer) will hold in memory to detect
+ * an in-file duplicate row (task-6 fix round 1, FIX 2 — flagged in
+ * review: tracking every key for the whole run is unbounded, and at the
+ * 2 GiB upload cap and realistic row sizes that is on the order of ten
+ * million keys).
+ *
+ * Each tracked key is a short string (store name + a store transaction
+ * id, typically well under 64 chars) plus V8's per-string and Set-entry
+ * overhead — roughly 150-200 bytes all in. 2,000,000 keys bounds resident
+ * memory for this one data structure to a few hundred MB even on a
+ * worst-case file, while comfortably covering every realistic single
+ * import (a multi-million-SUBSCRIBER migration's transaction count is
+ * usually a low multiple of its subscriber count, not this cap's size).
+ *
+ * `duplicateInFile` detection is informational, not a correctness
+ * guarantee this cap is allowed to break: the writer upserts on
+ * `(store, storeTransactionId)` regardless, so a duplicate missed past
+ * this cap costs a redundant upsert, never a wrong one. Past the cap,
+ * tracking simply STOPS for new keys (never guesses via a lossy hash,
+ * which could produce a false positive and wrongly skip a real row) and
+ * the dry-run summary records that duplicate detection was disabled
+ * partway through, rather than silently going quiet.
+ */
+export const IMPORT_DUPLICATE_TRACKING_MAX_KEYS = 2_000_000;

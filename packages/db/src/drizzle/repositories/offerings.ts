@@ -101,6 +101,34 @@ export async function findProductByStoreId(
   return rows[0] ?? null;
 }
 
+/**
+ * Same lookup as `findProductByStoreId`, but returns EVERY matching
+ * product rather than the first one — no `.limit(1)`. `products.storeIds`
+ * is unconstrained jsonb, so nothing in the schema stops two catalog
+ * products from holding the same value under the same store key (an
+ * operator mistake, or a coarser id — e.g. a Stripe parent Product id —
+ * entered on more than one product built from it). Callers that need to
+ * fail closed on an ambiguous match (the data-import dry-run planner,
+ * `services/import/plan.ts`) need the full match count, not just a
+ * single row a `.limit(1)` happened to pick.
+ */
+export async function findProductsByStoreId(
+  db: Db,
+  projectId: string,
+  store: ProductStore,
+  storeId: string,
+): Promise<Product[]> {
+  return db
+    .select()
+    .from(products)
+    .where(
+      and(
+        eq(products.projectId, projectId),
+        sql`${products.storeIds}->>${sql.param(store)} = ${sql.param(storeId)}`,
+      ),
+    );
+}
+
 // =============================================================
 // Dashboard mutations
 // =============================================================
