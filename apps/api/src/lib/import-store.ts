@@ -3,6 +3,7 @@ import {
   S3Client,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { IMPORT_STORAGE_PREFIX } from "@rovenue/shared";
@@ -167,4 +168,37 @@ export async function deleteObject(key: string): Promise<void> {
   await s3().send(
     new DeleteObjectCommand({ Bucket: env.IMPORT_STORAGE_BUCKET!, Key: key }),
   );
+}
+
+/**
+ * AWS SDK v3 names a missing key's rejection differently per operation —
+ * `HeadObjectCommand` throws `NotFound`, `GetObjectCommand` throws the
+ * modeled `NoSuchKey` — so both names are treated as "the object is
+ * gone", never just one. Exported so Task 10's report route can tell
+ * "retention already deleted this" (expected, not a bug) apart from a
+ * genuine failure (auth, network, a broken bucket) when a `getObject`
+ * call fails mid-stream, the same way `objectExists` below already does
+ * for its own `HeadObjectCommand` call.
+ */
+export function isObjectNotFoundError(err: unknown): boolean {
+  return err instanceof Error && (err.name === "NotFound" || err.name === "NoSuchKey");
+}
+
+/**
+ * Cheap existence probe (HEAD, not GET) — used by Task 10's report
+ * download route to tell "retention already deleted this" apart from a
+ * genuine bug BEFORE it commits to a streamed 200 response (once
+ * `c.body()` starts emitting bytes, the status code can no longer
+ * change). Mirrors `asset-store.ts`'s `getObjectLastModified`.
+ */
+export async function objectExists(key: string): Promise<boolean> {
+  try {
+    await s3().send(
+      new HeadObjectCommand({ Bucket: env.IMPORT_STORAGE_BUCKET!, Key: key }),
+    );
+    return true;
+  } catch (err) {
+    if (isObjectNotFoundError(err)) return false;
+    throw err;
+  }
 }

@@ -139,7 +139,13 @@ export type AuditAction =
   | "asset.deleted"
   // --- data import (design spec §4) ---
   | "import.started"
-  | "import.completed";
+  | "import.completed"
+  // --- data import job lifecycle (Task 10) ---
+  | "import.mapping_updated"
+  | "import.dry_run_started"
+  | "import.commit_started"
+  | "import.cancelled"
+  | "import.resumed";
 
 export type AuditResource =
   | "audience"
