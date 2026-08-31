@@ -52,6 +52,8 @@ That last bullet is the opening. A migration that keeps history *and* re-validat
 - **A shipped "Adapty preset" built on unverified columns.** Adapty's column table could not be confirmed; shipping a preset that claims to know it would be fabrication. Adapty users go through the generic mapper, and the guide walks them through it. If the columns are confirmed later, a preset is a small follow-up.
 - **Migrating from any third vendor by name.** The generic mapper serves them; we make no per-vendor claim we have not verified.
 - **Backfilling ClickHouse directly.** Imported revenue reaches analytics the same way live revenue does — through the outbox. No second path to the same table.
+- **Parquet input.** RevenueCat can deliver Parquet; v1 ingests CSV, which every documented path (including Adapty's own support-mediated import) already uses. Adding a Parquet reader later does not disturb the mapper contract.
+- **Auto-creating catalog entries.** An import resolves products against the existing catalog and reports what it cannot resolve; it does not invent products or offerings as a side effect of loading transactions.
 
 ---
 
@@ -82,7 +84,34 @@ Then `syncAccess(subscriberId)` derives `subscriber_access` from the resulting p
 
 Supporting that second, token-only file is a first-class case, not an afterthought: the mapper must accept a file whose only useful columns are an identity and an anchor.
 
-### 4.3 Side-effect discipline (the rules the writer obeys)
+**Phase B is rate-limited against the stores, and must be.** Re-verifying a million rows means a million calls to Apple's and Google's APIs on the customer's own credentials. Adapty's docs warn that large Android imports need a Google Play Developer API quota increase — so this is a known, documented hazard, not a hypothetical. Phase B therefore runs at a bounded concurrency with a paced request rate, treats store-side throttling as a **retryable** condition that pauses and resumes rather than failing rows, and surfaces "verification incomplete — store quota exhausted, resume later" as a real, resumable job outcome. Only one Phase-B job may run per project at a time. Verification is deduplicated per store anchor: a subscription chain of 40 renewals sharing one Apple `originalTransactionId` is verified once, not 40 times.
+
+### 4.3 Row semantics: what one CSV row becomes
+
+A RevenueCat export carries **one row per transaction**, so a single subscription appears as a chain of rows sharing a subscriber and distinguished by `renewal_number`. Getting this mapping wrong is how an import grants everyone access or no one, so it is specified here rather than left to the implementer:
+
+- **One row → one `purchases` row**, upserted on `(store, storeTransactionId)`. RC's own guidance is that Stripe does not guarantee a unique transaction id, so the canonical key is **`store_transaction_id` + `renewal_number`**; the mapping to our single-column unique key must be decided against the real `purchases` schema and stated in the plan, not improvised.
+- **Status is derived, per row, from `effective_end_time` first** — RC documents it as the normalized "when does access end" field that already accounts for each store's refund and grace-period logic. `refunded_at` and `unsubscribe_detected_at` override it. Superseded renewals in a chain are historical and must not present as live.
+- **Never resurrect a terminal state.** `upsertPurchase` already guards `REFUNDED`/`REVOKED`; the importer must not defeat that guard when re-running over a file that predates a refund.
+- **Google's inverted-interval quirk is real data, not corruption**: `end_time` before `start_time` is how Play invalidates a transaction. Treat it as expired, do not reject the row as malformed.
+- **`ownership_type = FAMILY_SHARED`** rows are imported but must not be counted as revenue — RC's own sample queries exclude them.
+
+**Products and entitlements are resolved through our catalog, not taken from the file.** Access is derived by `syncAccess` from purchases → products → access ids; the CSV's `entitlement_identifiers` are therefore **validation input, not authority**. The importer resolves each row's `product_identifier` against the project's own products and, where the file's entitlement ids disagree with what our catalog would grant, reports the mismatch rather than silently trusting either side. Rows whose product is not in the catalog are reported as unresolved with a pointer to the existing products import — the importer does **not** invent catalog entries as a side effect. RC's Stripe `product_identifier` is documented to be a mix of `price_...`, `prod_...` and custom strings within one file, so the resolver must handle all three.
+
+**Anchorless rows** — RC `store = promotional`, and manually granted entitlements generally — have no store transaction to verify or key on. These are exactly the rows Adapty imports as "profiles without transactions." The importer reports them in their own outcome bucket with a count, and the docs tell the operator to re-grant them through the existing entitlement-granting path. It does not fabricate a synthetic transaction id to make them fit.
+
+**Imported subscribers have no platform.** `subscribers.platform` is first-install truth set from the SDK's `X-Rovenue-Platform` header and is deliberately *not* purchase-derived; the importer leaves it unset rather than guessing from a row's store, and the guides say so.
+
+### 4.4 Money rules
+
+The money path has already caused one production incident in this repo (a negated refund amount overflowed `toUInt64` in a ClickHouse view and inflated net MRR/LTV), so these are hard rules:
+
+- **Never fabricate a currency.** RC's export ships `price_in_usd`; whether a raw local-currency + ISO-4217 pair is also present is **unconfirmed**. If a row yields an amount with no currency, the importer stores the USD amount only — it does not assume the amount is in some default currency.
+- **Refund amounts are stored POSITIVE**, matching the repo-wide convention; a source field that is negative is normalised, never passed through.
+- **Do not re-convert historical prices with today's FX rates.** The project has an FX service; using it on a two-year-old purchase would reproduce exactly the flaw we call out in Adapty's importer ("the current price will be used, which may result in incorrect pricing"). Imported revenue keeps the amount the export states, at the date the export states.
+- Timestamps in RC exports are **UTC**; the parser states its assumption and rejects ambiguous values rather than guessing a zone.
+
+### 4.5 Side-effect discipline (the rules the writer obeys)
 
 1. **Never** write a `SUBSCRIPTION`-aggregate outbox row, and never enqueue an outgoing webhook. Import writes go through repository functions and `syncAccess`, never through `runPostProcessing`.
 2. **Do** create revenue events, always with a **stable `dedupeKey` derived only from the source transaction** — never from the import-job id, or a re-run doubles the customer's revenue. Shape: `import:<store>:<storeTransactionId>:<renewalNumber>`.
@@ -90,7 +119,7 @@ Supporting that second, token-only file is a first-class case, not an afterthoug
 4. Write **one** audit entry per import job (started / completed, with counts), not one per row. This needs a new `AuditAction` literal.
 5. Sandbox rows are **skipped by default**, with an explicit opt-in toggle, and counted in the report either way.
 
-### 4.4 Job model and data changes
+### 4.6 Job model and data changes
 
 A new `import_jobs` table (project-scoped): source vendor label, uploaded file reference, the confirmed column mapping, options (skip-sandbox, dry-run), status, per-phase counters, error-report reference, who started it, timestamps. Status is a closed enum covering upload → mapping → dry-run-complete → running → completed / failed / cancelled.
 
@@ -100,24 +129,39 @@ Processing runs on a **new BullMQ queue** (the repo has no queue factory; each w
 
 **Uploaded files contain end-user PII.** They are stored under a dedicated key prefix, never publicly readable (note: `mc anonymous set download` also grants public `ListBucket` — the bucket policy must be `s3:GetObject`-only and verified in both directions), and are deleted on a documented retention window after the job reaches a terminal state.
 
-### 4.5 Dry run
+**Cancellation stops, it does not roll back.** A cancelled or failed import leaves what it already wrote in place — those rows are correct, just incomplete. Because every write is idempotent, the remedy is to re-run the same file: already-imported rows resolve to no-ops and processing continues. The UI says this in words rather than implying a transactional all-or-nothing that the design deliberately does not provide (a single transaction spanning a million rows is not an option). An import job is never silently retried by BullMQ into a second concurrent pass over the same file — job-level concurrency is one per project.
+
+**Input format is CSV in v1.** RC also offers Parquet; supporting it is a non-goal here (see §3). The parser follows RFC 4180, tolerates a UTF-8 BOM, and handles Adapty's documented "values are not quote-enclosed" style — CSV dialect quirks are a parsing concern to test explicitly, not to assume.
+
+### 4.7 Dry run
 
 A dry run is mandatory before commit and does everything the real run does except write: parse, map, validate, resolve identities, classify each row (would-create / would-update / would-skip + reason), and count what Phase B could and could not verify. It produces the same report artefact as a real run. This is what makes the Google-token gap visible *before* a customer commits a migration.
 
-### 4.6 Auth
+### 4.8 Auth
 
 Dashboard-initiated, project-scoped, gated by a **new capability at ADMIN+** — bulk creation of subscribers and purchases is at least as sensitive as the GDPR operations, which are already ADMIN-only. The service re-checks `projectId` server-side and 404s (not 403s) on cross-tenant ids, matching the GDPR export/anonymize discipline. No S2S secret-key surface in v1; `apiKeyAuth` is wired only to `/v1/*` SDK routes today and a bulk-admin secret-key path is new territory that this sub-project does not need.
 
-### 4.7 Dashboard UX
+### 4.9 Dashboard UX
 
 A project-scoped Migration page: upload → mapping table (source column ↔ canonical field, with the preset pre-filled and every unmapped required field blocking) → dry-run summary (counts by outcome, the Android history-only warning where applicable) → commit → live progress → completion summary with a downloadable report. Progress is polled; the codebase has no job-progress SSE pattern and introducing one is not justified by this feature.
 
-### 4.8 Docs deliverables
+### 4.10 Docs deliverables
 
 - **Extend `resources/migrating-from-revenuecat.mdx`** — it exists and is lean (concept-mapping table + key differences). It gains the actual migration procedure: export from RC, what the export does and does not contain, the Google-purchase-token support request and the two-pass import, the mapping step, the dry run, verification, and SDK cutover. It must not contradict its existing claims.
 - **New `resources/migrating-from-adapty.mdx`**, registered in `resources/meta.json` — same structure, honest that Adapty's export columns are mapped by hand through the generic mapper.
 - Both pages state, plainly, **what does not survive any migration** (event history, original historical prices, full renewal chains, promotional entitlements without a store transaction) — symmetric with what Adapty publishes about importing our competitors' data. A guide that overpromises here is a support burden and a credibility loss.
 - Docs conventions are fixed by the existing corpus: two frontmatter fields only, no top-level `#`, `Tabs`/`Steps`/`Callout` imported per page, `Cards`/`Accordion` unused anywhere, and **generic angle brackets only ever inside code spans** (bare `<T>` in prose is parsed as JSX and breaks the prerender).
+
+### 4.11 Testing
+
+The standing rule on this codebase is that a self-confirming test proves nothing — a catch exercised with a hand-built error, a rollback asserted over a mocked transaction, a concurrency claim without real Postgres. This feature is unusually easy to test badly, so:
+
+- **Fixtures use real export headers, not invented ones.** The RC preset's fixture is built from the column names recorded in the research file, and any column the research marks unconfirmed is either verified first-party before it enters a fixture or left out. A fixture that invents a column would make the preset test assert its own assumption.
+- **The idempotency claim is tested by running the import twice against real Postgres** (testcontainers) and asserting subscriber, purchase and revenue totals are identical after the second run — not by asserting a `dedupeKey` string is well-formed.
+- **The "no side effects" claim is tested by asserting on the outbox table and the outgoing-webhook queue** after an import, not by reading the code and concluding it does not call them. It must catch a future regression that adds such a call.
+- **Resume is tested by killing the worker mid-file** and asserting the second pass completes the job without duplicating rows.
+- **Phase B is tested against a faked store client** for the throttle/quota-exhaustion path, and the anchorless/promotional and Android-without-token paths get their own explicit outcome-bucket assertions — those are the cases that decide whether a real migration is honest.
+- Dashboard tests cover the mapping UI's blocking behaviour (an unmapped required field cannot be committed) and the dry-run summary rendering the Android warning with a count.
 
 ---
 
@@ -148,8 +192,11 @@ A project-scoped Migration page: upload → mapping table (source column ↔ can
 3. An import emits **zero** `SUBSCRIPTION` outbox rows and **zero** outgoing webhooks — proven by a test that asserts on the outbox and the outgoing-webhook queue, not by inspection.
 4. Rows with a usable store anchor are re-validated against the store and grant live entitlements via `syncAccess`; rows without one are imported as history and are visibly counted as history-only.
 5. An RC export with no Google purchase-token column produces an explicit, quantified Android warning in the dry run, and a subsequent token-only import upgrades those rows.
-6. A worker restart mid-import resumes from its checkpoint without duplicating work.
-7. Sandbox rows are skipped by default and counted; the opt-in imports them.
-8. The capability gate rejects non-ADMIN members; cross-tenant ids 404.
-9. Both docs guides build (`apps/docs` prerender) and state the migration's real limits; `resources/meta.json` registers the new page. The pre-existing `check:links` failure is not made worse.
-10. Zero changes to the SDKs, the store-webhook processing path, or `render-fixtures.json`.
+6. A worker restart mid-import resumes from its checkpoint without duplicating work; a cancelled import is completed by re-running the same file.
+7. A row whose product is not in the project's catalog, and an anchorless/promotional row, each land in their own reported outcome bucket with a count — neither is silently dropped, and neither causes a fabricated product or a synthetic transaction id.
+8. Refund amounts are stored positive; a row with an amount but no currency stores the USD amount without assuming one; no historical price is re-converted at today's FX rate.
+9. Store-side throttling during Phase B pauses and resumes rather than failing rows, and the job reports verification as incomplete rather than as complete.
+10. Sandbox rows are skipped by default and counted; the opt-in imports them.
+11. The capability gate rejects non-ADMIN members; cross-tenant ids 404.
+12. Both docs guides build (`apps/docs` prerender) and state the migration's real limits; `resources/meta.json` registers the new page. The pre-existing `check:links` failure is not made worse.
+13. Zero changes to the SDKs, the store-webhook processing path, or `render-fixtures.json`.
