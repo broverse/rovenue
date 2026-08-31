@@ -104,6 +104,12 @@ export type ImportWriteRow = {
  *   - `anchorless` counts anchorless rows the job SKIPPED because
  *     `options.importAnchorless` is false. An anchorless row that is
  *     imported is counted as the create/update it actually performed.
+ *   - `androidNoToken` (final-fix-wave FIX 2) is UNLIKE `anchorless`: it
+ *     always means "written, but as history only" — the purchase and its
+ *     revenue event ARE created/updated (same as willCreate/willUpdate),
+ *     just with `verifiedAt` left null and excluded from Phase B, because
+ *     a PLAY_STORE row with no Google purchase token can never be
+ *     re-verified against the store. It is never a skip.
  *   - `duplicateInFile` is never produced: a repeated
  *     (store, storeTransactionId) within one file resolves to the same
  *     upsert target, so the second occurrence is a redundant write, not a
@@ -432,14 +438,27 @@ export async function writeImportBatch(
       continue;
     }
 
-    if (normalized.store === "PLAY_STORE" && !normalized.googlePurchaseToken) {
-      record(
-        input,
-        "androidNoToken",
-        "PLAY_STORE row has no Google purchase token mapped — access cannot be granted live",
-      );
-      continue;
-    }
+    // Final-fix-wave FIX 2: a PLAY_STORE row with no Google purchase
+    // token used to `continue` here — writing NEITHER a purchase NOR a
+    // revenue event. RevenueCat's standard export has no
+    // `google_purchase_token` column, so on the flagship input that
+    // dropped 100% of Android history: purchases, revenue, LTV, cohorts.
+    // Spec §4.2's whole bet is "every accepted row becomes a purchases
+    // row… nothing is dropped merely because the store no longer
+    // recognises it" — this row IS accepted (the mapping produced a
+    // valid, non-anchorless row); a missing token only means Phase B has
+    // nothing to re-verify it against, not that the row's history is
+    // fictional. So it is written exactly like any other row below, with
+    // `verifiedAt` left null (Phase A never contacts a store for ANY
+    // row — this is not a special case), and counted in the
+    // `androidNoToken` bucket instead of willCreate/willUpdate so the
+    // operator can still see how many rows have no live entitlement.
+    // verify.ts's Phase A rescan (`groups.get`/anchor discovery) still
+    // skips PLAY_STORE-no-token rows on its own — there is no anchor to
+    // verify without a token — so this does not add these rows to
+    // Phase B.
+    const isAndroidNoToken =
+      normalized.store === "PLAY_STORE" && !normalized.googlePurchaseToken;
 
     if (normalized.isSandbox && skipSandbox) {
       record(input, "skippedSandbox");
@@ -570,8 +589,14 @@ export async function writeImportBatch(
     touchedSubscriberIds.add(subscriber.id);
     record(
       input,
-      existingPurchase ? "willUpdate" : "willCreate",
-      null,
+      isAndroidNoToken
+        ? "androidNoToken"
+        : existingPurchase
+          ? "willUpdate"
+          : "willCreate",
+      isAndroidNoToken
+        ? "PLAY_STORE row has no Google purchase token mapped — imported as history only, no live entitlement"
+        : null,
       subscriber.id,
     );
   }

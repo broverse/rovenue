@@ -386,7 +386,11 @@ async function buildAnchorGroups(
       continue; // rule 2 — never sent to verification.
     }
     if (normalized.store === "PLAY_STORE" && !normalized.googlePurchaseToken) {
-      // Phase A itself refused this row (androidNoToken) — never persisted.
+      // Final-fix-wave FIX 2: Phase A now DOES persist this row (as
+      // history, `androidNoToken` bucket, `verifiedAt` left null) — but
+      // there is nothing to verify without a token, so it is still
+      // excluded from Phase B's anchor discovery here. This is a
+      // deliberate "no anchor" skip, not "Phase A never wrote it".
       continue;
     }
 

@@ -789,6 +789,80 @@ describe("writeImportBatch — non-writable rows", () => {
 });
 
 // =============================================================
+// Final-fix-wave FIX 2 — Android rows with no purchase token import
+// as history, not silently dropped
+// =============================================================
+//
+// Before this fix, `writeImportBatch` `continue`d on a PLAY_STORE row
+// with no `googlePurchaseToken` — writing NEITHER a purchase NOR a
+// revenue event. RevenueCat's standard Transactions export has no
+// `google_purchase_token` column at all, so on that flagship input this
+// dropped 100% of Android history: purchases, revenue, LTV, cohorts.
+// Spec §4.2 and the dashboard's own warning copy both promise these
+// rows "import as history only" — this describe block is the writer-level
+// test that promise didn't have before it shipped.
+
+describe("writeImportBatch — androidNoToken rows (final-fix-wave FIX 2)", () => {
+  it("writes the purchase and its revenue event as history, with verifiedAt null, and counts the androidNoToken bucket", async () => {
+    const jobId = await seedJob();
+
+    const outcome = await runFile(
+      jobId,
+      csvOf([
+        {
+          subscriberId: "rc_sub_android_no_token",
+          store: "play_store",
+          storeTxnId: "google_txn_no_token_1",
+          priceUsd: "9.99",
+        },
+      ]),
+    );
+
+    // Counted in its own bucket, NOT willCreate/willUpdate and NOT
+    // dropped as a skip — this bucket means "written, but unverifiable".
+    expect(outcome.outcomes.androidNoToken).toBe(1);
+    expect(outcome.outcomes.willCreate).toBe(0);
+
+    const rows = await findPurchases();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.store).toBe("PLAY_STORE");
+    expect(rows[0]!.storeTransactionId).toBe("google_txn_no_token_1");
+    // Never verified — there is no token to re-verify it against.
+    expect(rows[0]!.verifiedAt).toBeNull();
+
+    expect(await countRevenueEvents()).toBe(1);
+    expect(await sumRevenueUsd()).toBe("9.99");
+
+    const reportRow = outcome.reportRows.find(
+      (r) => r.storeTransactionId === "google_txn_no_token_1",
+    );
+    expect(reportRow?.outcome).toBe("androidNoToken");
+  });
+
+  it("keeps updating the same history row (idempotent) on a second run, still with no live entitlement", async () => {
+    const jobId = await seedJob();
+    const file = csvOf([
+      {
+        subscriberId: "rc_sub_android_no_token_2",
+        store: "play_store",
+        storeTxnId: "google_txn_no_token_2",
+        priceUsd: "4.99",
+      },
+    ]);
+
+    const first = await runFile(jobId, file);
+    const second = await runFile(jobId, file);
+
+    expect(first.outcomes.androidNoToken).toBe(1);
+    expect(second.outcomes.androidNoToken).toBe(1);
+    expect(await countPurchases()).toBe(1);
+    // Revenue is deduped on (store, storeTransactionId, renewalNumber) —
+    // the second run must not double the customer's revenue.
+    expect(await countRevenueEvents()).toBe(1);
+  });
+});
+
+// =============================================================
 // Task 8a — revenue_events partition provisioning
 // =============================================================
 //
