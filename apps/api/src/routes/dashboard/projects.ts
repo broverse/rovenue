@@ -85,6 +85,7 @@ type ProjectRow = {
   webhookSecret: string | null;
   webhookEventCategories: unknown;
   settings: unknown;
+  holdoutPercentage: number;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -156,6 +157,7 @@ function toProjectDetail(
       ? (project.webhookEventCategories as WebhookEventCategory[])
       : [],
     settings: sanitizeSettings(project.settings),
+    holdoutPercentage: project.holdoutPercentage,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
     counts: { ...counts, activeApiKeys: apiKeys.length },
@@ -214,6 +216,10 @@ export const updateProjectBodySchema = z
     webhookUrl: z.string().url().nullable().optional(),
     webhookEventCategories: z.array(z.enum(WEBHOOK_EVENT_CATEGORIES)).optional(),
     settings: z.record(z.unknown()).optional(),
+    // Mirrors `projects_holdout_percentage_range` (packages/db/src/drizzle/
+    // schema.ts) so an out-of-range value is a crisp 400 here rather than a
+    // Postgres CHECK violation surfacing as a 500.
+    holdoutPercentage: z.number().int().min(0).max(100).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: "At least one field required",
@@ -379,6 +385,9 @@ export const projectsRoute = new Hono()
         webhookEventCategories: body.webhookEventCategories,
       }),
       ...(body.settings !== undefined && { settings: body.settings }),
+      ...(body.holdoutPercentage !== undefined && {
+        holdoutPercentage: body.holdoutPercentage,
+      }),
     });
     if (!updated) {
       throw new HTTPException(404, { message: "Project not found" });

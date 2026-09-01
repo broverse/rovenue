@@ -49,14 +49,24 @@ export const placementsRoute = new Hono().get("/:identifier", async (c) => {
   // audienceId:null rows can match then).
   const appUserId = c.req.query("subscriberId") ?? c.req.header(SUBSCRIBER_HEADER);
   let attributes: Record<string, unknown> = {};
+  let subscriberId: string | null = null;
   if (appUserId) {
     const subscriber = await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(
       drizzle.db,
       { projectId: project.id, key: appUserId },
     );
-    if (subscriber) attributes = flattenAttributes(subscriber.attributes);
+    if (subscriber) {
+      attributes = flattenAttributes(subscriber.attributes);
+      subscriberId = subscriber.id;
+    }
   }
 
-  const data = await resolvePlacement(project.id, placement, attributes, requestedLocale);
+  const data = await resolvePlacement(
+    project.id,
+    placement,
+    attributes,
+    requestedLocale,
+    subscriberId,
+  );
   return c.json(ok(data));
 });

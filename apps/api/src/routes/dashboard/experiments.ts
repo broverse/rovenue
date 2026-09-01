@@ -23,6 +23,7 @@ import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { ok } from "../../lib/response";
 import {
   assertElementVariantsValid,
+  assertNoReservedVariantId,
   assertPaywallVariantsValid,
   createExperimentValidated,
   generateFreeExperimentKey,
@@ -266,6 +267,7 @@ export const experimentsRoute = new Hono()
       }
 
       if (body.variants) {
+        assertNoReservedVariantId(body.variants);
         const finalType = (body.type ?? existing.type) as ExperimentType;
         await assertPaywallVariantsValid(
           drizzle.db,

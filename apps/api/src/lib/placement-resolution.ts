@@ -5,9 +5,14 @@ import { elementVariantValueSchema, placementRowsSchema } from "@rovenue/shared"
 // the top-level @rovenue/shared barrel (which the dashboard's browser
 // bundle also consumes) — server callers import it via the subpath below,
 // mirroring services/experiment-engine.ts.
-import { matchesAudience } from "@rovenue/shared/experiments";
+import { isInRollout, matchesAudience } from "@rovenue/shared/experiments";
 import { applyTreeOp, TreeOpError, type BuilderConfig } from "@rovenue/shared/paywall";
 import { hydrateOffering } from "./offering-hydration";
+import { HOLDOUT_BUCKET_SEED } from "./experiment-constants";
+import { eventBus } from "../services/event-bus";
+import { logger } from "./logger";
+
+const log = logger.child("placement-resolution");
 
 // =============================================================
 // Placement row-walk — shared between /v1/placements/:identifier
@@ -253,12 +258,21 @@ async function materializeElementVariants(
  * Never throws for a resolution failure — a dangling/inactive reference,
  * a deleted audience, or a non-RUNNING/non-PAYWALL experiment just falls
  * through to the next row, same semantics as the SDK-facing route.
+ *
+ * `subscriberId` (Task 8) is the resolved DB subscriber id, when the
+ * caller has one — omitted entirely for anonymous resolution (no
+ * `subscriberId` header/query param) and for the dashboard's fallback-
+ * file export, which resolves every ACTIVE placement anonymously. A
+ * held-out DECISION requires a real subscriber to hash, so without one
+ * the row-walk behaves exactly as it always has: an experiment row
+ * serves its full variant menu for the client to draw from.
  */
 export async function resolvePlacement(
   projectId: string,
   placement: PlacementRow,
   attributes: Record<string, unknown>,
   requestedLocale?: string,
+  subscriberId?: string | null,
 ): Promise<ResolvedPlacementData> {
   const placementInfo = { identifier: placement.identifier, revision: placement.revision };
   const rows = placementRowsSchema.safeParse(placement.rows);
@@ -310,6 +324,45 @@ export async function resolvePlacement(
     );
     if (!experiment || experiment.status !== "RUNNING") continue;
     if (experiment.type !== "PAYWALL" && experiment.type !== "ELEMENT") continue;
+
+    // Task 8 — project-level holdout. The variant draw is client-side
+    // (selectVariant, packages/shared/src/experiments/bucketing.ts), so
+    // the server must decide holdout HERE and omit the experiment
+    // entirely rather than shipping a menu and asking the client to
+    // compute membership itself. `continue` falls through to the next
+    // placement row with NO new envelope field — an experiment-free
+    // envelope is already a supported shape (the terminal
+    // `{ paywall: null, experiment: null }` below, or a subsequent row's
+    // own paywall). Same reserved-seed reasoning as evaluateExperiments:
+    // HOLDOUT_BUCKET_SEED is never an experiment's own `key`.
+    const holdoutPercentage = subscriberId
+      ? await drizzle.projectRepo.findProjectHoldoutPercentage(drizzle.db, projectId)
+      : 0;
+    if (
+      subscriberId &&
+      holdoutPercentage > 0 &&
+      isInRollout(subscriberId, HOLDOUT_BUCKET_SEED, holdoutPercentage / 100)
+    ) {
+      try {
+        await drizzle.db.transaction((tx) =>
+          eventBus.publishHoldoutExposure(tx, {
+            experimentId: experiment.id,
+            projectId,
+            subscriberId,
+            placementId: placement.id,
+          }),
+        );
+      } catch (err) {
+        log.warn("holdout exposure publish failed", {
+          projectId,
+          experimentId: experiment.id,
+          subscriberId,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+      continue;
+    }
+
     const variants = (experiment.variants as Array<{ id: string; weight: number; value: unknown }>) ?? [];
 
     if (experiment.type === "ELEMENT") {

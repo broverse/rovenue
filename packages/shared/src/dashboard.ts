@@ -60,6 +60,13 @@ export interface ProjectDetail {
   webhookUrl: string | null;
   hasWebhookSecret: boolean;
   webhookEventCategories: WebhookEventCategory[];
+  /** 0..100. Project-level experiment holdout (spec §4.4) — this
+   *  percentage of subscribers is withheld from every experiment and
+   *  receives control everywhere, so the experimentation programme's
+   *  cumulative value can be measured against everyone else. Raising it
+   *  only adds members; lowering it retroactively mixes cohorts (see
+   *  `SettingsForm`'s lowering warning). */
+  holdoutPercentage: number;
   settings: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -117,6 +124,8 @@ export interface UpdateProjectRequest {
   webhookUrl?: string | null;
   webhookEventCategories?: WebhookEventCategory[];
   settings?: Record<string, unknown>;
+  /** 0..100. See `ProjectDetail.holdoutPercentage`. */
+  holdoutPercentage?: number;
 }
 
 export interface RotateWebhookSecretResponse {

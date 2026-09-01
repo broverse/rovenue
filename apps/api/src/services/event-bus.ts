@@ -1,4 +1,5 @@
 import { drizzle, type Db } from "@rovenue/db";
+import { HOLDOUT_COHORT_ID } from "../lib/experiment-constants";
 
 // =============================================================
 // event-bus
@@ -46,6 +47,41 @@ async function publishExposure(
     aggregateId: input.experimentId,
     eventType: "experiment.exposure.recorded",
     payload,
+  });
+}
+
+export interface PublishHoldoutExposureInput {
+  /** The REAL experiment the subscriber would otherwise have been
+   *  evaluated against — kept precise (not a synthetic id) so a future
+   *  per-experiment holdout breakdown is queryable, not just the
+   *  project-wide aggregate. */
+  experimentId: string;
+  projectId: string;
+  subscriberId: string;
+  placementId?: string | null;
+}
+
+/**
+ * Task 8 project-level holdout: a held-out subscriber never draws a real
+ * variant, so there is no real `variantId` to stamp the exposure with.
+ * Reuses `publishExposure` with the reserved `HOLDOUT_COHORT_ID` in that
+ * slot instead — safe only because experiment create/update rejects any
+ * user-chosen variant id equal to it (`assertNoReservedVariantId`,
+ * experiment-create.ts), so this can never collide with a real arm of
+ * `experimentId` in the same per-variant analytics. Recording this is
+ * the entire point of the feature: an unmeasured holdout is just a
+ * smaller audience, not a comparison.
+ */
+async function publishHoldoutExposure(
+  tx: Db,
+  input: PublishHoldoutExposureInput,
+): Promise<void> {
+  await publishExposure(tx, {
+    experimentId: input.experimentId,
+    variantId: HOLDOUT_COHORT_ID,
+    projectId: input.projectId,
+    subscriberId: input.subscriberId,
+    placementId: input.placementId ?? null,
   });
 }
 
@@ -136,6 +172,7 @@ async function publishCreditLedgerEntry(
 
 export const eventBus = {
   publishExposure,
+  publishHoldoutExposure,
   publishRevenueEvent,
   publishCreditLedgerEntry,
 };

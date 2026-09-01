@@ -4,9 +4,17 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
+const {
+  dbMock,
+  drizzleMock,
+  redisMock,
+  redisStore,
+  setRedisMode,
+  publishHoldoutExposureMock,
+} = vi.hoisted(() => {
   const store = new Map<string, string>();
   let mode: "ok" | "get-fail" = "ok";
+  const publishHoldoutExposureMock = vi.fn(async () => {});
 
   const redisMock = {
     get: vi.fn(async (key: string) => {
@@ -47,7 +55,9 @@ const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(
   };
 
   const drizzleMock = {
-    db: {} as unknown,
+    db: {
+      transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb({ __tx: true })),
+    },
     experimentRepo: {
       findRunningExperimentsByProject: vi.fn(
         async (_db: unknown, projectId: string) =>
@@ -164,6 +174,10 @@ const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(
     accessRepo: {
       findActiveAccess: vi.fn(async () => []),
     },
+    // Task 8 — default to 0 (today's behaviour) unless a test overrides it.
+    projectRepo: {
+      findProjectHoldoutPercentage: vi.fn(async () => 0),
+    },
     creditLedgerRepo: {
       findLatestBalance: vi.fn(async () => null),
     },
@@ -181,6 +195,7 @@ const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(
     setRedisMode: (m: typeof mode) => {
       mode = m;
     },
+    publishHoldoutExposureMock,
   };
 });
 
@@ -196,6 +211,13 @@ vi.mock("@rovenue/db", () => ({
 }));
 
 vi.mock("../src/lib/redis", () => ({ redis: redisMock }));
+
+vi.mock("../src/services/event-bus", () => ({
+  eventBus: {
+    publishExposure: vi.fn(async () => {}),
+    publishHoldoutExposure: publishHoldoutExposureMock,
+  },
+}));
 
 // =============================================================
 // System under test (after mocks)
@@ -298,6 +320,11 @@ beforeEach(() => {
   dbMock.audience.findMany.mockResolvedValue([]);
   dbMock.experimentAssignment.findMany.mockResolvedValue([]);
   dbMock.experimentAssignment.createMany.mockResolvedValue({ count: 0 });
+  // `vi.clearAllMocks()` above clears call history but NOT a resolved
+  // value set via `.mockResolvedValue(...)` in a prior test — reset the
+  // Task 8 holdout default explicitly so one test's `mockResolvedValue(100)`
+  // can't leak into every test that runs after it in this file.
+  drizzleMock.projectRepo.findProjectHoldoutPercentage.mockResolvedValue(0);
 });
 
 // =============================================================
@@ -459,6 +486,98 @@ describe("evaluateExperiments — mutual exclusion", () => {
     const keys = Object.keys(result);
     expect(keys).toHaveLength(1);
     expect(keys[0]).toBe("test_a");
+  });
+});
+
+// =============================================================
+// Task 8 — project-level holdout
+// =============================================================
+//
+// `findProjectHoldoutPercentage` is stubbed at 100 for "held out" tests
+// (isInRollout(subscriberId, seed, 1) is unconditionally true for any
+// subscriberId — see bucketing.ts's `percentage >= 1` short-circuit) so
+// these tests don't depend on the specific SHA-256 bucket a subscriber
+// id happens to hash into. 0 (the default set in the top-level mock
+// factory) covers "holdout off" and is exercised by every OTHER
+// describe block in this file, which must keep passing unmodified.
+
+describe("evaluateExperiments — holdout", () => {
+  test("held-out subscriber gets no result for any experiment it would otherwise match, and no assignment is written", async () => {
+    drizzleMock.projectRepo.findProjectHoldoutPercentage.mockResolvedValue(100);
+    dbMock.experiment.findMany.mockResolvedValue([
+      experiment({ key: "pricing-test", type: "OFFERING" }),
+      experiment({ id: "exp_2", key: "another-test" }),
+    ]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+
+    const result = await evaluateExperiments("proj_a", "sub_holdout", {});
+
+    expect(result).toEqual({});
+    expect(dbMock.experimentAssignment.createMany).not.toHaveBeenCalled();
+  });
+
+  test("held-out subscriber still gets an exposure recorded, against HOLDOUT_COHORT_ID, per applicable experiment", async () => {
+    drizzleMock.projectRepo.findProjectHoldoutPercentage.mockResolvedValue(100);
+    dbMock.experiment.findMany.mockResolvedValue([
+      experiment({ key: "pricing-test", type: "OFFERING" }),
+    ]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+
+    await evaluateExperiments("proj_a", "sub_holdout", {});
+
+    expect(publishHoldoutExposureMock).toHaveBeenCalledTimes(1);
+    expect(publishHoldoutExposureMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        experimentId: "exp_1",
+        projectId: "proj_a",
+        subscriberId: "sub_holdout",
+      }),
+    );
+  });
+
+  test("an experiment whose audience the held-out subscriber doesn't match records no exposure", async () => {
+    drizzleMock.projectRepo.findProjectHoldoutPercentage.mockResolvedValue(100);
+    dbMock.experiment.findMany.mockResolvedValue([
+      experiment({ key: "tr-only", audienceId: "aud_tr" }),
+    ]);
+    dbMock.audience.findMany.mockResolvedValue([
+      audience("aud_tr", { country: "TR" }),
+    ]);
+
+    const result = await evaluateExperiments("proj_a", "sub_holdout", {
+      country: "DE",
+    });
+
+    expect(result).toEqual({});
+    expect(publishHoldoutExposureMock).not.toHaveBeenCalled();
+  });
+
+  test("holdoutPercentage=0 withholds nobody — a non-held-out subscriber is assigned normally", async () => {
+    drizzleMock.projectRepo.findProjectHoldoutPercentage.mockResolvedValue(0);
+    dbMock.experiment.findMany.mockResolvedValue([
+      experiment({ key: "pricing-test", type: "OFFERING" }),
+    ]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+
+    const result = await evaluateExperiments("proj_a", "sub_1", {});
+
+    expect(result["pricing-test"]).toBeDefined();
+    expect(publishHoldoutExposureMock).not.toHaveBeenCalled();
+  });
+
+  test("a holdout exposure publish failure is swallowed — the subscriber still gets control, not an error", async () => {
+    drizzleMock.projectRepo.findProjectHoldoutPercentage.mockResolvedValue(100);
+    publishHoldoutExposureMock.mockRejectedValueOnce(new Error("outbox down"));
+    dbMock.experiment.findMany.mockResolvedValue([
+      experiment({ key: "pricing-test", type: "OFFERING" }),
+    ]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+
+    const result = await evaluateExperiments("proj_a", "sub_holdout", {});
+
+    expect(result).toEqual({});
+    expect(dbMock.experimentAssignment.createMany).not.toHaveBeenCalled();
   });
 });
 

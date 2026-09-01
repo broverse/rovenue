@@ -36,6 +36,23 @@ export async function findProjectById(
   return rows[0] ?? null;
 }
 
+/** Scoped read for the experiment engine's hot path (Task 8 holdout) —
+ *  only `holdoutPercentage`. Falls back to `0` (today's behaviour, every
+ *  subscriber included) if the project row is somehow gone by the time
+ *  this runs, rather than throwing on what is otherwise a read-only
+ *  evaluation path. */
+export async function findProjectHoldoutPercentage(
+  db: Db,
+  id: string,
+): Promise<number> {
+  const rows = await db
+    .select({ holdoutPercentage: projects.holdoutPercentage })
+    .from(projects)
+    .where(eq(projects.id, id))
+    .limit(1);
+  return rows[0]?.holdoutPercentage ?? 0;
+}
+
 /** Scoped read for webhook-processor — only webhookUrl. */
 export async function findProjectWebhookUrl(
   db: Db,
@@ -237,6 +254,10 @@ export interface UpdateProjectInput {
   webhookUrl?: string | null;
   webhookEventCategories?: string[];
   settings?: unknown;
+  /** 0..100, `projects_holdout_percentage_range` CHECK enforces the
+   *  bound in Postgres too. See Task 8 — the dashboard route validates
+   *  the range with Zod before this ever runs. */
+  holdoutPercentage?: number;
 }
 
 /**
@@ -272,6 +293,9 @@ export async function updateProject(
   }
   if (input.settings !== undefined) {
     patch.settings = input.settings as typeof projects.$inferInsert.settings;
+  }
+  if (input.holdoutPercentage !== undefined) {
+    patch.holdoutPercentage = input.holdoutPercentage;
   }
   if (Object.keys(patch).length === 0) return null;
   const rows = await db

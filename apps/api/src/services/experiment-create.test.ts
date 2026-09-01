@@ -41,12 +41,14 @@ vi.mock("@rovenue/db", async () => {
 });
 
 import {
+  assertNoReservedVariantId,
   createExperimentValidated,
   findOrCreateEveryoneAudience,
   EVERYONE_AUDIENCE_NAME,
   EXPERIMENT_KEY_MAX_ATTEMPTS,
   type CreateExperimentInput,
 } from "./experiment-create";
+import { HOLDOUT_COHORT_ID } from "../lib/experiment-constants";
 
 const db = drizzleMock.db as never;
 
@@ -136,6 +138,24 @@ describe("createExperimentValidated", () => {
     expect(drizzleMock.experimentRepo.createExperiment).not.toHaveBeenCalled();
   });
 
+  it("rejects a variant id equal to the reserved holdout cohort id (Task 8)", async () => {
+    const input = flagInput({
+      variants: [
+        { id: HOLDOUT_COHORT_ID, name: "Control", value: false, weight: 0.5 },
+        { id: "v2", name: "Treatment", value: true, weight: 0.5 },
+      ],
+    });
+
+    await expect(createExperimentValidated(db, input)).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(drizzleMock.experimentRepo.createExperiment).not.toHaveBeenCalled();
+    // Rejected before the audience lookup — same "fail before any DB
+    // write" posture as the weight-sum and audience-ownership checks
+    // above, so a reserved-id collision never reaches the insert.
+    expect(drizzleMock.audienceRepo.findAudienceInProject).not.toHaveBeenCalled();
+  });
+
   it("regenerates the key when the precheck finds a collision", async () => {
     drizzleMock.experimentRepo.generateExperimentKey
       .mockReturnValueOnce("exp_collide1")
@@ -166,6 +186,23 @@ describe("createExperimentValidated", () => {
       EXPERIMENT_KEY_MAX_ATTEMPTS,
     );
     expect(drizzleMock.experimentRepo.createExperiment).not.toHaveBeenCalled();
+  });
+});
+
+describe("assertNoReservedVariantId", () => {
+  it("throws a 400 when a variant id equals HOLDOUT_COHORT_ID", () => {
+    expect(() =>
+      assertNoReservedVariantId([
+        { id: HOLDOUT_COHORT_ID },
+        { id: "v2" },
+      ]),
+    ).toThrowError(expect.objectContaining({ status: 400 }));
+  });
+
+  it("does not throw for ordinary variant ids", () => {
+    expect(() =>
+      assertNoReservedVariantId([{ id: "control" }, { id: "treatment" }]),
+    ).not.toThrow();
   });
 });
 

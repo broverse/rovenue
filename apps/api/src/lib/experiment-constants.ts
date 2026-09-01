@@ -82,3 +82,21 @@ export const MINIMUM_CONVERTERS_FOR_VALUE_MODEL = 2;
  *  prices differing in their fifth decimal place. Nothing real lands in
  *  the gap. */
 export const DEGENERATE_VARIANCE_RELATIVE_TOLERANCE = 1e-9;
+
+/** Reserved synthetic cohort id for the project-level holdout (spec §4.4).
+ *  No user-chosen variant id may equal this — `assertNoReservedVariantId`
+ *  (experiment-create.ts) rejects it at experiment create/update time — so
+ *  it can safely stand in for "no variant drawn" as the `variantId` on a
+ *  held-out subscriber's exposure event without ever colliding with a real
+ *  arm of whichever experiment they were withheld from. */
+export const HOLDOUT_COHORT_ID = "__rovenue_holdout__";
+
+/** Dedicated bucketing seed for holdout-cohort membership. `assignBucket`
+ *  (packages/shared/src/experiments/bucketing.ts) is reused as-is — no new
+ *  hash — but keyed on THIS seed rather than any experiment's own `key`.
+ *  A distinct seed is the entire mechanism: it is what makes holdout
+ *  membership statistically independent of every experiment's variant
+ *  assignment, which is the property the whole holdout-vs-everyone
+ *  revenue comparison rests on. Never reuse an experiment key (or this
+ *  seed) as the other's seed. */
+export const HOLDOUT_BUCKET_SEED = "__rovenue_holdout_seed__";

@@ -5,8 +5,11 @@ import {
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
 import { publishConfigInvalidation } from "../lib/config-invalidation";
+import { HOLDOUT_BUCKET_SEED } from "../lib/experiment-constants";
+import { eventBus } from "./event-bus";
 import {
   assignBucket,
+  isInRollout,
   matchesAudience,
   selectVariant,
 } from "@rovenue/shared/experiments";
@@ -56,12 +59,22 @@ interface CachedExperiment {
   metrics: string[] | null;
 }
 
-const BUNDLE_SCHEMA_VERSION = 1;
+// Bumped 1 -> 2 for Task 8: the bundle shape gained `holdoutPercentage`,
+// and a cached v1 entry would silently read it as `undefined` (falsy,
+// same as "no holdout") for up to CACHE_TTL_SECONDS after a deploy that
+// sets holdoutPercentage > 0 — a brief window where the feature looks
+// like it isn't working. Bumping forces one re-hydration from Postgres
+// per project on first evaluation, via the schema-mismatch branch below.
+const BUNDLE_SCHEMA_VERSION = 2;
 
 interface ExperimentBundle {
   schemaVersion: number;
   experiments: CachedExperiment[];
   audiences: Record<string, Record<string, unknown>>;
+  /** `projects.holdoutPercentage`, 0..100. Cached alongside the
+   *  experiments/audiences it gates so a holdout-percentage change
+   *  takes effect on the same TTL as any other experiment change. */
+  holdoutPercentage: number;
 }
 
 export interface ExperimentResult {
@@ -85,16 +98,18 @@ async function loadBundleFromDb(projectId: string): Promise<ExperimentBundle> {
   // Phase 6 cutover: Drizzle canonical for the running-experiment
   // bundle + audience rules used by evaluateExperiments. Bundle
   // is Redis-cached so repeated evaluations don't hit Postgres.
-  const [experiments, audiences] = await Promise.all([
+  const [experiments, audiences, holdoutPercentage] = await Promise.all([
     drizzle.experimentRepo.findRunningExperimentsByProject(
       drizzle.db,
       projectId,
     ),
     drizzle.featureFlagRepo.findAudiencesByProject(drizzle.db, projectId),
+    drizzle.projectRepo.findProjectHoldoutPercentage(drizzle.db, projectId),
   ]);
 
   return {
     schemaVersion: BUNDLE_SCHEMA_VERSION,
+    holdoutPercentage,
     experiments: experiments.map((exp) => ({
       id: exp.id,
       key: exp.key,
@@ -215,6 +230,17 @@ export async function evaluateExperiments(
     hashVersion: number;
   }> = [];
 
+  // Task 8 — project-level holdout. `HOLDOUT_BUCKET_SEED` is a seed
+  // distinct from every experiment's own `key` (used as ITS seed just
+  // below at the real assignment draw), which is what makes holdout
+  // membership statistically independent of any experiment's variant
+  // assignment. Computed once per call, not per experiment: membership
+  // is a property of (subscriberId, project), not of which experiment is
+  // being considered.
+  const isHeldOut =
+    bundle.holdoutPercentage > 0 &&
+    isInRollout(subscriberId, HOLDOUT_BUCKET_SEED, bundle.holdoutPercentage / 100);
+
   for (const exp of bundle.experiments) {
     // 1. Audience targeting
     const audienceRules = bundle.audiences[exp.audienceId];
@@ -226,6 +252,37 @@ export async function evaluateExperiments(
       continue;
     }
     if (!matchesAudience(attributes, audienceRules)) continue;
+
+    // Held out: this experiment WOULD have applied (audience matched),
+    // but the subscriber is withheld into the project-level holdout
+    // cohort instead. No assignment is written and no result is
+    // returned — the caller gets whatever default/control behaviour
+    // applies when an experiment key has no override, exactly as if
+    // this experiment did not exist for them. The exposure is still
+    // recorded (against the reserved HOLDOUT_COHORT_ID) because an
+    // unmeasured holdout is just a smaller audience, not a comparison.
+    // Best-effort: a publish failure here must not break config
+    // evaluation for the caller, so it's logged and swallowed exactly
+    // like the assignment batch write below.
+    if (isHeldOut) {
+      try {
+        await drizzle.db.transaction((tx) =>
+          eventBus.publishHoldoutExposure(tx, {
+            experimentId: exp.id,
+            projectId,
+            subscriberId,
+          }),
+        );
+      } catch (err) {
+        log.warn("holdout exposure publish failed", {
+          projectId,
+          experimentId: exp.id,
+          subscriberId,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+      continue;
+    }
 
     // 2. Mutual exclusion — skip if subscriber already landed in
     //    another experiment of the same namespace (either from a

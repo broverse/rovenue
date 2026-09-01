@@ -2981,6 +2981,11 @@
       "cumulativeUnavailableTitle": "Cumulative trend",
       "cumulativeUnavailableDescription": "Day-by-day cumulative rate isn't available from live results yet — this card will populate once a time-series endpoint ships."
     },
+    "holdout": {
+      "label": "Holdout percentage",
+      "hint": "Withholds this percentage of subscribers from every experiment so they see control everywhere. Compares the experimentation programme's cumulative value against everyone else.",
+      "loweringWarning": "Lowering the holdout removes subscribers whose exposure is already recorded, retroactively mixing treated and held-out revenue in the same comparison. Raising it is always safe."
+    },
     "new": {
       "back": "Back to experiments",
       "title": "New experiment",

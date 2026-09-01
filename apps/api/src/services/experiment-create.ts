@@ -12,6 +12,7 @@ import {
   type Variant as ExperimentVariant,
 } from "@rovenue/shared";
 import { OVERRIDABLE_PROP_KEYS, findNode, type BuilderConfig } from "@rovenue/shared/paywall";
+import { HOLDOUT_COHORT_ID } from "../lib/experiment-constants";
 
 // DB or Drizzle tx handle — every write here can run standalone or
 // inside a caller's transaction (Task 2 wraps both createExperimentValidated
@@ -207,6 +208,27 @@ export async function assertElementVariantsValid(
 }
 
 /**
+ * Task 8 — `HOLDOUT_COHORT_ID` is the reserved synthetic variantId a
+ * held-out subscriber's exposure is stamped with (evaluateExperiments /
+ * resolvePlacement). If a user could create a real variant with that same
+ * id, a held-out exposure and a real assignment to that variant would be
+ * indistinguishable in downstream per-variant analytics. Called at every
+ * site that can introduce a NEW variant id — create (below) and the DRAFT
+ * update path (routes/dashboard/experiments.ts). The RUNNING weight-only
+ * update path can't add ids (it rejects any id outside the existing set),
+ * so there is nothing to check there.
+ */
+export function assertNoReservedVariantId(
+  variants: ReadonlyArray<{ id: string }>,
+): void {
+  if (variants.some((v) => v.id === HOLDOUT_COHORT_ID)) {
+    throw new HTTPException(400, {
+      message: `variant id "${HOLDOUT_COHORT_ID}" is reserved for the holdout cohort`,
+    });
+  }
+}
+
+/**
  * Generates a free experiment key for a project: generate → SELECT-precheck,
  * up to EXPERIMENT_KEY_MAX_ATTEMPTS. This works inside a caller's transaction
  * where an insert-then-catch-unique-violation retry loop cannot — a unique
@@ -253,6 +275,7 @@ export async function createExperimentValidated(
     key: "_",
     variants: input.variants,
   });
+  assertNoReservedVariantId(input.variants);
 
   const audience = await drizzle.audienceRepo.findAudienceInProject(
     db,
