@@ -77,6 +77,8 @@ export type AuditAction =
   | "subscription.cancel_failed"
   | "subscription.transition_rejected"
   | "subscriptions.exported"
+  // --- metrics ---
+  | "metrics.exported"
   // --- members ---
   | "member.invited"
   | "member.role_changed"

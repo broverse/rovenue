@@ -7,6 +7,7 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
+import { audit } from "../../lib/audit";
 import {
   __chartsConstants,
   readChannels,
@@ -16,6 +17,7 @@ import {
   readHeatmap,
   readProceeds,
 } from "../../services/metrics/charts";
+import { streamMetricsExportCsv } from "../../services/metrics/export";
 import {
   isSystemChartId,
   listSystemChartEntries,
@@ -39,6 +41,7 @@ import type {
 //   GET    /funnel               INITIAL → trial → paid → renewal
 //   GET    /heatmap              DOW × hour grid
 //   GET    /series/:chartId      chartId → { points, unit, supported }
+//   GET    /export.csv           customer-BI export — streamed CSV built on the readers above
 //
 //   GET    /saved-views          list (per-user)
 //   POST   /saved-views          create
@@ -402,6 +405,83 @@ export const chartsRoute = new Hono()
       await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
       const { windowDays } = c.req.valid("query");
       return c.json(ok(await readChartSeries(projectId, chartId, windowDays)));
+    },
+  )
+  // ------------------------------------------------------------
+  // Metrics export — customer BI (Task 6, 2026-09-01 plan, spec §4.4)
+  // ------------------------------------------------------------
+  .get(
+    "/export.csv",
+    validate("query", windowQuerySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      // Same role gate as every other read endpoint on this route —
+      // this export carries aggregate metrics, not end-user PII, so
+      // it does not warrant a stricter capability than the charts it
+      // is built from.
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+      const { windowDays } = c.req.valid("query");
+
+      const generator = streamMetricsExportCsv({ projectId, windowDays });
+
+      const datePart = new Date()
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, "");
+      const filename = `metrics-${projectId}-${datePart}.csv`;
+
+      c.header("Content-Type", "text/csv; charset=utf-8");
+      c.header("Content-Disposition", `attachment; filename="${filename}"`);
+
+      return c.body(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const enc = new TextEncoder();
+            let summary: { rowCount: number; truncated: boolean } = {
+              rowCount: 0,
+              truncated: false,
+            };
+            try {
+              while (true) {
+                const next = await generator.next();
+                if (next.done) {
+                  summary = next.value ?? summary;
+                  break;
+                }
+                controller.enqueue(enc.encode(next.value));
+              }
+            } catch (err) {
+              controller.enqueue(
+                enc.encode(`# error: ${(err as Error).message}\n`),
+              );
+              throw err;
+            } finally {
+              controller.close();
+              try {
+                await audit({
+                  projectId,
+                  userId: user.id,
+                  action: "metrics.exported",
+                  resource: "project",
+                  resourceId: projectId,
+                  before: null,
+                  after: {
+                    windowDays,
+                    rowCount: summary.rowCount,
+                    truncated: summary.truncated,
+                  },
+                });
+              } catch {
+                // Audit failure must not poison the response.
+              }
+            }
+          },
+        }),
+      );
     },
   )
   // ------------------------------------------------------------
