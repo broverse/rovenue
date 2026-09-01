@@ -157,38 +157,54 @@ export interface ResolvedPlacementData {
  * the SAME paywallId — save-time validation
  * (apps/api/src/services/experiment-create.ts `assertElementVariantsValid`)
  * enforces both that shape and that `nodeId`/`props` are legal against that
- * paywall's builder-config tree. Here we hydrate that target paywall
- * exactly ONCE, then apply each variant's patch via
+ * paywall's PUBLISHED builder-config tree. Here we hydrate that target
+ * paywall exactly ONCE, then apply each variant's patch via
  * `applyTreeOp({ kind: "updateProps" })` — a PURE tree op — to build an
  * independent patched copy per variant. Patching immutably (never
  * mutating the shared hydrated snapshot) is load-bearing: a shared mutable
  * base would let variant B's patch stick to variant A's copy too.
  *
- * A variant is silently dropped, never thrown, when: its `value` fails the
- * shape check, it disagrees with the majority on `paywallId` (should never
- * happen post-validation, but is not trusted blindly), or its `nodeId` has
- * since disappeared from the paywall (edited out after the experiment
- * started — save-time validation is the real guard, this is the backstop).
- * If every variant drops out, the caller sees `[]` and falls through to
- * the next placement row exactly like a dangling paywall reference.
+ * ALL-OR-NOTHING, not per-variant: if ANY variant fails to materialise
+ * (bad shape, a disagreeing `paywallId`, or a `nodeId` that has since
+ * vanished from the published paywall), the WHOLE result is `[]` and the
+ * caller falls through to the next placement row — same contract as a
+ * dangling paywall reference. Dropping only the bad variant and shipping
+ * the rest would be worse than falling through: the placement variant
+ * draw is CLIENT-SIDE (`selectVariant`,
+ * packages/shared/src/experiments/bucketing.ts), and it falls through to
+ * the LAST variant for any bucket past the cumulative weight total. Ship
+ * variant A alone after dropping variant B (weight 0.5 each) and every
+ * bucket — including B's 5000-9999 — lands on A: 100% of traffic sees A,
+ * every exposure is logged as a normal split, and the experiment looks
+ * like it's running instead of looking broken. SRM eventually catches
+ * that, but only after the data is poisoned. A partial variant set must
+ * never reach a client.
  */
 async function materializeElementVariants(
   projectId: string,
   variants: Array<{ id: string; weight: number; value: unknown }>,
   requestedLocale: string | undefined,
 ): Promise<Array<{ variantId: string; weight: number; paywall: HydratedPaywall }>> {
-  const parsed = variants.flatMap((v) => {
-    const value = elementVariantValueSchema.safeParse(v.value);
-    return value.success ? [{ variantId: v.id, weight: v.weight, value: value.data }] : [];
-  });
-  if (parsed.length === 0) return [];
+  if (variants.length === 0) return [];
+
+  const parsedResults = variants.map((v) => elementVariantValueSchema.safeParse(v.value));
+  // Any one variant with a malformed value corrupts bucketing exactly like
+  // a vanished node would — drop the whole experiment, not just that
+  // variant.
+  if (parsedResults.some((r) => !r.success)) return [];
+  const parsed = variants.map((v, i) => ({
+    variantId: v.id,
+    weight: v.weight,
+    value: (parsedResults[i] as { success: true; data: z.infer<typeof elementVariantValueSchema> })
+      .data,
+  }));
 
   // Every variant of one ELEMENT experiment targets the same paywallId —
-  // enforced at save time. Trust the first valid variant's id as THE
-  // target and drop any variant that disagrees, rather than resolving
-  // against whichever paywall each variant happens to name.
+  // enforced at save time, but not trusted blindly here: a variant that
+  // disagrees means the data is inconsistent, which is drop-the-whole-
+  // experiment territory just like everything else in this function.
   const paywallId = parsed[0]!.value.paywallId;
-  const targeted = parsed.filter((p) => p.value.paywallId === paywallId);
+  if (parsed.some((p) => p.value.paywallId !== paywallId)) return [];
 
   const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, paywallId);
   if (!paywall || !paywall.isActive) return []; // dangling ref → next row
@@ -204,21 +220,26 @@ async function materializeElementVariants(
   const baseConfig = (base as { builderConfig?: unknown }).builderConfig;
   if (typeof baseConfig !== "object" || baseConfig === null) return []; // nothing to patch
 
-  return targeted.flatMap(({ variantId, weight, value }) => {
+  const results: Array<{ variantId: string; weight: number; paywall: HydratedPaywall }> = [];
+  for (const { variantId, weight, value } of parsed) {
     try {
       const patchedConfig = applyTreeOp(baseConfig as BuilderConfig, {
         kind: "updateProps",
         nodeId: value.nodeId,
         patch: value.props,
       });
-      return [{ variantId, weight, paywall: { ...base, builderConfig: patchedConfig } }];
+      results.push({ variantId, weight, paywall: { ...base, builderConfig: patchedConfig } });
     } catch (err) {
       if (err instanceof TreeOpError && err.code === "TARGET_NOT_FOUND") {
-        return []; // nodeId vanished since save-time validation → drop this variant
+        // nodeId vanished since save-time validation — drop the WHOLE
+        // experiment (see the doc comment above for why a partial set is
+        // worse than none).
+        return [];
       }
       throw err;
     }
-  });
+  }
+  return results;
 }
 
 /**

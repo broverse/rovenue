@@ -190,7 +190,19 @@ describe("resolvePlacement — ELEMENT experiments", () => {
     expect(resolved.paywall!.id).toBe(fallbackPaywall.id);
   });
 
-  it("drops only the variant whose nodeId vanished, keeping the rest", async () => {
+  it("drops the WHOLE experiment — not just the affected variant — when only one variant's nodeId has vanished", async () => {
+    // A partial variant set is more dangerous than none. The placement
+    // variant draw is CLIENT-SIDE (selectVariant,
+    // packages/shared/src/experiments/bucketing.ts): it walks cumulative
+    // weights and falls through to the LAST variant for any bucket past
+    // the cumulative total. If "control" (weight 0.5) shipped alone after
+    // "variant_a" (weight 0.5) was dropped, buckets 0-4999 land on control
+    // correctly, but buckets 5000-9999 exceed the cumulative total and
+    // fall through to control too — 100% of traffic sees control, every
+    // exposure is logged as a normal 50/50 split, and the experiment looks
+    // like it's running instead of looking broken. So ANY variant failing
+    // to materialise must drop the WHOLE experiment, exactly like the
+    // all-vanished case above.
     const paywall = await createPublishedPaywall("partial-vanished");
     const experiment = await createRunningElementExperiment(
       `key-partial-vanished-${RUN_ID}`,
@@ -200,17 +212,22 @@ describe("resolvePlacement — ELEMENT experiments", () => {
       ],
       paywall.id,
     );
+    const fallbackPaywall = await createPublishedPaywall("partial-vanished-fallback");
     const placement = await drizzle.placementRepo.createPlacement(db, {
       projectId,
       identifier: `pl-elem-partial-${RUN_ID}`,
       name: "Partially-vanished element placement",
-      rows: [{ audienceId: null, target: { type: "experiment", experimentId: experiment.id } }],
+      rows: [
+        { audienceId, target: { type: "experiment", experimentId: experiment.id } },
+        { audienceId: null, target: { type: "paywall", paywallId: fallbackPaywall.id } },
+      ],
     });
 
     const resolved = await resolvePlacement(projectId, placement, {});
 
-    expect(resolved.experiment).not.toBeNull();
-    expect(resolved.experiment!.variants).toHaveLength(1);
-    expect(resolved.experiment!.variants[0]!.variantId).toBe("control");
+    // Falls through to the next row — NOT a 1-variant experiment.
+    expect(resolved.experiment).toBeNull();
+    expect(resolved.paywall).not.toBeNull();
+    expect(resolved.paywall!.id).toBe(fallbackPaywall.id);
   });
 });
