@@ -118,6 +118,24 @@ export interface ExperimentVariantRow {
    *  (REFUND/CHARGEBACK, `abs()`'d defensively even though the house
    *  convention stores them positive already). */
   refunds_usd: number;
+  /** Sum, over ALL mature subscribers, of their windowed NET revenue
+   *  (gross minus refunds). Together with `mature_users` and
+   *  `net_revenue_sq` these are the sufficient statistics (n, Sum(x),
+   *  Sum(x^2)) for a Welch's t-test on raw per-subscriber revenue — the
+   *  assumption-free cross-check against the log-normal value model (spec
+   *  §4.1). DELIBERATELY over every mature subscriber, not only
+   *  converters: the quantity being compared is revenue per USER, and
+   *  restricting to converters would condition on an outcome the
+   *  experiment influences. Non-converters contribute 0, and a subscriber
+   *  who was net-refunded contributes a NEGATIVE amount — which is
+   *  correct here and is why this is not derivable from the
+   *  converter-only `sum_log_value` pair, whose log is undefined for
+   *  non-positive values. */
+  net_revenue_usd: number;
+  /** Sum, over all mature subscribers, of their windowed net revenue
+   *  SQUARED. Paired with `net_revenue_usd` to reconstruct the sample
+   *  variance without shipping a per-subscriber array. */
+  net_revenue_sq: number;
   /** Count of subscribers first exposed to this variant whose window has
    *  NOT yet elapsed as of query time — excluded from every aggregate
    *  above, reported here so the exclusion is visible rather than a
@@ -307,6 +325,8 @@ export async function runAnalyticsQuery(
             ifNull(wv.sum_log_value_sq, 0) AS sum_log_value_sq,
             ifNull(wv.revenue_usd, 0) AS revenue_usd,
             ifNull(wv.refunds_usd, 0) AS refunds_usd,
+            ifNull(wv.net_revenue_usd, 0) AS net_revenue_usd,
+            ifNull(wv.net_revenue_sq, 0) AS net_revenue_sq,
             toUInt32(ifNull(wv.excluded_immature, 0)) AS excluded_immature,
             toUInt32(ifNull(wv.excluded_crossover, 0)) AS excluded_crossover
           FROM (
@@ -358,6 +378,14 @@ export async function runAnalyticsQuery(
               sumIf(pow(log(toFloat64(gross - refunds)), 2), bucket = 'mature' AND gross - refunds > 0)    AS sum_log_value_sq,
               sumIf(toFloat64(gross), bucket = 'mature')                                                   AS revenue_usd,
               sumIf(toFloat64(refunds), bucket = 'mature')                                                 AS refunds_usd,
+              -- Welch cross-check sufficient statistics. Same
+              -- bucket = 'mature' gate as every aggregate above, but over
+              -- ALL mature subscribers rather than converters only: the
+              -- quantity is revenue per USER. No positivity gate either,
+              -- so a net-refunded subscriber contributes a negative
+              -- amount, exactly as a raw per-subscriber series would.
+              sumIf(toFloat64(gross - refunds), bucket = 'mature')                                          AS net_revenue_usd,
+              sumIf(pow(toFloat64(gross - refunds), 2), bucket = 'mature')                                  AS net_revenue_sq,
               countIf(bucket = 'immature')                                                                 AS excluded_immature,
               countIf(bucket = 'crossover')                                                                AS excluded_crossover
             FROM per_subscriber

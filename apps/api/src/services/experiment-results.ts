@@ -1,6 +1,7 @@
 import { drizzle } from "@rovenue/db";
 import type { Store } from "@rovenue/db";
 import type {
+  ExperimentCrossCheck,
   ExperimentDecisionGate,
   ExperimentPrimaryMetric,
   ExperimentRecommendation,
@@ -22,6 +23,7 @@ import {
 } from "../lib/experiment-constants";
 import {
   analyzeConversion,
+  analyzeRevenueFromAggregates,
   checkSRM,
   estimateSampleSize,
 } from "../lib/experiment-stats";
@@ -140,6 +142,10 @@ interface VariantAgg {
   refundRate: number | null;
   excludedImmature: number;
   excludedCrossover: number;
+  /** Welch cross-check sufficient statistics over MATURE SUBSCRIBERS
+   *  (not converters) — the quantity is revenue per user. */
+  netRevenueSum: number;
+  netRevenueSumSq: number;
 }
 
 export async function computeExperimentResults(
@@ -240,6 +246,13 @@ export async function computeExperimentResults(
   // -----------------------------------------------------------
   const control = resolveControl(aggregates, declared);
   const conversion = buildPairwiseConversion(aggregates, control);
+  const revenue = buildWelchCrossCheck(aggregates, control);
+  const crossCheck = compareModelToRawData(
+    revenue,
+    variants,
+    control,
+    primaryMetric,
+  );
 
   // -----------------------------------------------------------
   // Sample size — the experiment's OWN minimum detectable effect
@@ -269,11 +282,8 @@ export async function computeExperimentResults(
     primaryMetric,
     variants,
     conversion,
-    // Welch's t-test needs a per-subscriber revenue series, which the
-    // aggregate reader deliberately does not ship (it returns sufficient
-    // statistics, not per-row arrays). Left null rather than fitted to a
-    // stand-in series that would look like a cross-check and not be one.
-    revenue: null,
+    revenue,
+    crossCheck,
     integrity: { srm, crossoverRate },
     sampleSize,
     runtimeDays,
@@ -305,6 +315,8 @@ function toAggregate(r: ExperimentVariantRow): VariantAgg {
     refundRate: revenueUsd > 0 ? refundsUsd / revenueUsd : null,
     excludedImmature: Number(r.excluded_immature),
     excludedCrossover: Number(r.excluded_crossover),
+    netRevenueSum: Number(r.net_revenue_usd),
+    netRevenueSumSq: Number(r.net_revenue_sq),
   };
 }
 
@@ -557,6 +569,105 @@ function buildPairwiseConversion(
     { users: control.matureUsers, conversions: control.converters },
     { users: treatment.matureUsers, conversions: treatment.converters },
   );
+}
+
+/**
+ * The assumption-free cross-check (spec §4.1): Welch's t-test on RAW
+ * per-subscriber net revenue, which makes no distributional assumption at
+ * all, against the log-normal value model the posterior is fitted with.
+ *
+ * The reader returns sufficient statistics rather than a row per
+ * subscriber — and Welch needs only an n, a mean and a sample variance per
+ * group, all three recoverable from `(n, Sum(x), Sum(x^2))`. So this costs
+ * two extra aggregates in the ClickHouse query, not a per-subscriber
+ * result set.
+ *
+ * The n here is MATURE SUBSCRIBERS, not converters: the quantity compared
+ * is revenue per USER, and conditioning on conversion would condition on
+ * an outcome the experiment itself moves.
+ */
+function buildWelchCrossCheck(
+  aggregates: VariantAgg[],
+  control: VariantAgg | null,
+): ExperimentResultsResponse["revenue"] {
+  // Welch is a two-sample test; with more than two arms the decision
+  // engine's pairwise-against-control framing would need a multiplicity
+  // correction this module deliberately does not apply.
+  if (aggregates.length !== 2 || control === null) return null;
+  const treatment = aggregates.find((a) => a.variantId !== control.variantId);
+  if (!treatment) return null;
+  if (control.matureUsers < 2 || treatment.matureUsers < 2) return null;
+  return analyzeRevenueFromAggregates(
+    {
+      n: control.matureUsers,
+      sum: control.netRevenueSum,
+      sumSq: control.netRevenueSumSq,
+    },
+    {
+      n: treatment.matureUsers,
+      sum: treatment.netRevenueSum,
+      sumSq: treatment.netRevenueSumSq,
+    },
+  );
+}
+
+/**
+ * Shows where the model-based and assumption-free estimates disagree.
+ * Deliberately does NOT resolve the disagreement and does not touch any
+ * gate — a heavy-tailed revenue distribution can make the log-normal fit
+ * and the raw sample means point opposite ways, and an operator seeing
+ * that is better served than one shown a single reconciled number.
+ *
+ * The posterior lift is only comparable for a REVENUE-VALUED primary
+ * metric. For CONVERSION the posterior estimates a rate and Welch
+ * estimates revenue per user; those are different quantities, so no sign
+ * comparison is made. (For PROCEEDS_PER_USER the posterior carries the
+ * commission factor and Welch does not — a positive scale that only shifts
+ * the lift's magnitude, not its sign, unless the two arms sell through
+ * materially different store mixes.)
+ */
+function compareModelToRawData(
+  revenue: ExperimentResultsResponse["revenue"],
+  variants: ExperimentResultsVariant[],
+  control: VariantAgg | null,
+  metric: ExperimentPrimaryMetric,
+): ExperimentCrossCheck {
+  const welchRelativeLift = revenue?.lift ?? null;
+  const empty: ExperimentCrossCheck = {
+    posteriorRelativeLift: null,
+    welchRelativeLift,
+    signDisagreement: false,
+  };
+
+  if (metric === "CONVERSION") return empty;
+  if (variants.length !== 2 || control === null) return empty;
+
+  const controlVariant = variants.find(
+    (v) => v.variantId === control.variantId,
+  );
+  const treatment = variants.find((v) => v.variantId !== control.variantId);
+  if (!controlVariant || !treatment) return empty;
+  if (
+    controlVariant.posteriorMean === null ||
+    treatment.posteriorMean === null ||
+    controlVariant.posteriorMean === 0
+  ) {
+    return empty;
+  }
+
+  const posteriorRelativeLift =
+    (treatment.posteriorMean - controlVariant.posteriorMean) /
+    controlVariant.posteriorMean;
+
+  return {
+    posteriorRelativeLift,
+    welchRelativeLift,
+    signDisagreement:
+      welchRelativeLift !== null &&
+      Math.sign(posteriorRelativeLift) !== 0 &&
+      Math.sign(welchRelativeLift) !== 0 &&
+      Math.sign(posteriorRelativeLift) !== Math.sign(welchRelativeLift),
+  };
 }
 
 /**

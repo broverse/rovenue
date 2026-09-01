@@ -67,6 +67,11 @@ function makeResults(
     variants,
     conversion: null,
     revenue: null,
+    crossCheck: {
+      posteriorRelativeLift: null,
+      welchRelativeLift: null,
+      signDisagreement: false,
+    },
     integrity: { srm: null, crossoverRate: null },
     sampleSize: null,
     runtimeDays: null,

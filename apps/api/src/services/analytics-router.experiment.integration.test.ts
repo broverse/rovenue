@@ -162,6 +162,8 @@ const V_CROSSOVER_B = "v_crossover_b";
 const V_REFUNDED = "v_refunded";
 const V_DUP_EVENT = "v_dup_event";
 const V_STORE_SPLIT = "v_store_split";
+/** Net-NEGATIVE subscriber: refunded past their gross. */
+const V_NET_NEGATIVE = "v_net_negative";
 
 async function waitFor(
   fn: () => Promise<boolean>,
@@ -419,6 +421,17 @@ beforeAll(async () => {
         subscriberId: `sub_dup_event_${RUN_ID}`,
         exposedAt: matureExposedAt,
       }),
+      // Welch cross-check: a subscriber refunded PAST their gross, so their
+      // windowed net revenue is negative. Not representable in the
+      // converter-only log aggregates (log of a non-positive value is
+      // undefined), which is why the raw sufficient statistics are a
+      // separate pair of columns rather than derived from them.
+      exposureRow({
+        suffix: "net_negative",
+        variantId: V_NET_NEGATIVE,
+        subscriberId: `sub_net_negative_${RUN_ID}`,
+        exposedAt: matureExposedAt,
+      }),
       // Per-store breakdown: two subscribers, two different stores.
       exposureRow({
         suffix: "store_split_apple",
@@ -484,6 +497,21 @@ beforeAll(async () => {
         subscriberId: `sub_refunded_${RUN_ID}`,
         type: "REFUND",
         amountUsd: 50, // house convention: refunds stored POSITIVE
+        eventDate: daysAgo(MATURE_EXPOSURE_DAYS_AGO - 1),
+      }),
+      // Welch cross-check: gross 10, refunded 25 -> net -15.
+      revenueRow({
+        eventId: `rev_net_negative_initial_${RUN_ID}`,
+        subscriberId: `sub_net_negative_${RUN_ID}`,
+        type: "INITIAL",
+        amountUsd: 10,
+        eventDate: daysAgo(MATURE_EXPOSURE_DAYS_AGO - 1),
+      }),
+      revenueRow({
+        eventId: `rev_net_negative_refund_${RUN_ID}`,
+        subscriberId: `sub_net_negative_${RUN_ID}`,
+        type: "REFUND",
+        amountUsd: 25, // house convention: refunds stored POSITIVE
         eventDate: daysAgo(MATURE_EXPOSURE_DAYS_AGO - 1),
       }),
       // Per-store breakdown fixtures.
@@ -602,6 +630,50 @@ describe("runAnalyticsQuery experiment_results — subscriber-level windowed val
     expect(row.revenue_usd).toBeCloseTo(50, 4);
     expect(row.refunds_usd).toBeCloseTo(50, 4);
     expect(row.sum_log_value).toBeCloseTo(0, 6);
+  });
+
+  it("emits Welch sufficient statistics over MATURE SUBSCRIBERS, not converters", () => {
+    // One mature subscriber netting 30: n comes from mature_users, so
+    // Sum(x) = 30 and Sum(x^2) = 900.
+    const row = rowFor(V_THREE_RENEWALS);
+    expect(row.mature_users).toBe(1);
+    expect(row.net_revenue_usd).toBeCloseTo(30, 4);
+    expect(row.net_revenue_sq).toBeCloseTo(900, 4);
+  });
+
+  it("counts a fully-refunded subscriber in the Welch statistics as a zero, not an absence", () => {
+    // The SAME subscriber is excluded from `converters` and from the log
+    // aggregates (spec 4.1: a fully-refunded purchase is not a
+    // conversion) but must still appear in the raw revenue-per-USER
+    // statistics contributing 0 — dropping them would silently shrink the
+    // denominator of the assumption-free cross-check.
+    const row = rowFor(V_REFUNDED);
+    expect(row.mature_users).toBe(1);
+    expect(row.converters).toBe(0);
+    expect(row.sum_log_value).toBeCloseTo(0, 6);
+    expect(row.net_revenue_usd).toBeCloseTo(0, 4);
+    expect(row.net_revenue_sq).toBeCloseTo(0, 4);
+  });
+
+  it("carries a NEGATIVE net revenue through the Welch statistics", () => {
+    // Gross 10, refunded 25 -> net -15. Sum(x) is negative and Sum(x^2) is
+    // 225. This is the case the converter-only log aggregates structurally
+    // cannot express, and clamping it to 0 would bias revenue per user
+    // upward for exactly the arm that is losing money.
+    const row = rowFor(V_NET_NEGATIVE);
+    expect(row.mature_users).toBe(1);
+    expect(row.converters).toBe(0);
+    expect(row.net_revenue_usd).toBeCloseTo(-15, 4);
+    expect(row.net_revenue_sq).toBeCloseTo(225, 4);
+  });
+
+  it("excludes immature and crossover subscribers from the Welch statistics too", () => {
+    for (const variantId of [V_IMMATURE, V_CROSSOVER_A, V_CROSSOVER_B]) {
+      const row = rowFor(variantId);
+      expect(row.mature_users).toBe(0);
+      expect(row.net_revenue_usd).toBeCloseTo(0, 4);
+      expect(row.net_revenue_sq).toBeCloseTo(0, 4);
+    }
   });
 
   it("Ruling 5: a duplicate eventId (at-least-once redelivery) is deduped, not double-summed", () => {

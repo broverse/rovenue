@@ -112,25 +112,102 @@ export function analyzeRevenue(
     throw new Error("analyzeRevenue: need at least 2 samples per group");
   }
 
-  const meanC = mean(controlRevenues);
-  const meanV = mean(variantRevenues);
-  const varC = sampleVariance(controlRevenues);
-  const varV = sampleVariance(variantRevenues);
-  const nC = controlRevenues.length;
-  const nV = variantRevenues.length;
+  return welch(
+    {
+      n: controlRevenues.length,
+      mean: mean(controlRevenues),
+      variance: sampleVariance(controlRevenues),
+    },
+    {
+      n: variantRevenues.length,
+      mean: mean(variantRevenues),
+      variance: sampleVariance(variantRevenues),
+    },
+    alpha,
+  );
+}
 
-  const se = Math.sqrt(varC / nC + varV / nV);
-  const tStatistic = se === 0 ? 0 : (meanV - meanC) / se;
+/**
+ * Welch's t-test from SUFFICIENT STATISTICS — `(n, Sum(x), Sum(x^2))` per
+ * group — rather than from a per-observation array.
+ *
+ * Identical test, identical output, computed through the same `welch`
+ * core as `analyzeRevenue`; the only difference is where the mean and
+ * variance come from. It exists because the ClickHouse reader returns
+ * aggregates, not per-subscriber rows, and Welch needs nothing more than
+ * an n, a mean and a sample variance per group — so the spec's
+ * assumption-free cross-check on raw per-subscriber revenue is computable
+ * without shipping a row per subscriber over the wire.
+ *
+ * `analyzeRevenue`'s signature and behaviour are deliberately unchanged.
+ */
+export interface RevenueSufficientStats {
+  /** Observations in the group — here, mature subscribers (not
+   *  converters): the quantity is revenue per USER. */
+  n: number;
+  /** Sum of the per-subscriber values. May be negative if refunds
+   *  dominate. */
+  sum: number;
+  /** Sum of the per-subscriber values squared. */
+  sumSq: number;
+}
+
+export function analyzeRevenueFromAggregates(
+  control: RevenueSufficientStats,
+  variant: RevenueSufficientStats,
+  alpha = 0.05,
+): RevenueAnalysis {
+  if (control.n < 2 || variant.n < 2) {
+    throw new Error(
+      "analyzeRevenueFromAggregates: need at least 2 observations per group",
+    );
+  }
+  return welch(
+    toMeanAndVariance(control),
+    toMeanAndVariance(variant),
+    alpha,
+  );
+}
+
+interface GroupMoments {
+  n: number;
+  mean: number;
+  variance: number;
+}
+
+/** Sample mean and variance from `(n, Sum(x), Sum(x^2))`. The variance is
+ *  floored at 0: `Sum(x^2) - Sum(x)^2/n` cancels catastrophically when
+ *  every observation is equal — a real case here, since a single-price
+ *  paywall's mature subscribers take one of two values and can degenerate
+ *  to one — and can land a hair below zero, which is not a variance. */
+function toMeanAndVariance(stats: RevenueSufficientStats): GroupMoments {
+  const { n, sum, sumSq } = stats;
+  return {
+    n,
+    mean: sum / n,
+    variance: Math.max(0, (sumSq - (sum * sum) / n) / (n - 1)),
+  };
+}
+
+/** The shared Welch core. Both entry points above route through here, so
+ *  the aggregate-input variant cannot drift from the array-input one. */
+function welch(
+  control: GroupMoments,
+  variant: GroupMoments,
+  alpha: number,
+): RevenueAnalysis {
+  const se = Math.sqrt(control.variance / control.n + variant.variance / variant.n);
+  const tStatistic = se === 0 ? 0 : (variant.mean - control.mean) / se;
   // Normal approximation to Student's t CDF — accurate for Welch's
-  // with n ≥ 30 per group. For smaller cohorts treat the p-value as
+  // with n >= 30 per group. For smaller cohorts treat the p-value as
   // a conservative lower bound.
   const pValue =
     2 * (1 - cumulativeStdNormalProbability(Math.abs(tStatistic)));
 
   return {
-    controlMean: meanC,
-    variantMean: meanV,
-    lift: meanC === 0 ? 0 : (meanV - meanC) / meanC,
+    controlMean: control.mean,
+    variantMean: variant.mean,
+    lift: control.mean === 0 ? 0 : (variant.mean - control.mean) / control.mean,
     tStatistic,
     pValue,
     isSignificant: pValue < alpha,

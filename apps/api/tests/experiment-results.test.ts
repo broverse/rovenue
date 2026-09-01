@@ -480,3 +480,121 @@ describe("computeExperimentResults — PROCEEDS_PER_USER", () => {
     expect(res.recommendation.leadingVariantId).toBe("treatment");
   });
 });
+
+// -------------------------------------------------------------
+// The assumption-free cross-check (spec 4.1)
+// -------------------------------------------------------------
+
+describe("computeExperimentResults — Welch cross-check", () => {
+  /** Builds one variant row whose raw per-subscriber sufficient statistics
+   *  and log-value sufficient statistics are both stated explicitly, so a
+   *  test can make the two models genuinely disagree. */
+  function arm(overrides: {
+    variant_id: string;
+    converters: number;
+    /** [count, value] pairs over converters; non-converters contribute 0. */
+    values: Array<[number, number]>;
+    varLog: number;
+  }): Record<string, unknown> {
+    const { variant_id, converters, values, varLog } = overrides;
+    const netSum = values.reduce((acc, [c, v]) => acc + c * v, 0);
+    const netSumSq = values.reduce((acc, [c, v]) => acc + c * v * v, 0);
+    const sumLog = values.reduce((acc, [c, v]) => acc + c * Math.log(v), 0);
+    const meanLog = sumLog / converters;
+    return variantRow({
+      variant_id,
+      converters,
+      net_revenue_usd: netSum,
+      net_revenue_sq: netSumSq,
+      sum_log_value: sumLog,
+      // Reconstructed from the stated mean and the requested variance, so
+      // the log model's spread is a property of the fixture rather than an
+      // accident of the value list.
+      sum_log_value_sq:
+        converters * meanLog * meanLog + (converters - 1) * varLog,
+      revenue_usd: netSum,
+      refunds_usd: 0,
+    });
+  }
+
+  it("agrees with the posterior when the revenue distribution is well behaved", async () => {
+    setExperiment({ primaryMetric: "ARPU" });
+    respondWith([
+      arm({
+        variant_id: "control",
+        converters: 2_000,
+        values: [[2_000, 20]],
+        varLog: 0.2,
+      }),
+      arm({
+        variant_id: "treatment",
+        converters: 2_600,
+        values: [[2_600, 20]],
+        varLog: 0.2,
+      }),
+    ]);
+
+    const res = await computeExperimentResults("exp_1", "proj_test");
+
+    expect(res.revenue).not.toBeNull();
+    // Welch runs over MATURE SUBSCRIBERS, not converters: revenue per USER.
+    expect(res.revenue!.controlMean).toBeCloseTo((2_000 * 20) / 20_000, 6);
+    expect(res.revenue!.variantMean).toBeCloseTo((2_600 * 20) / 20_000, 6);
+
+    expect(res.crossCheck.welchRelativeLift!).toBeGreaterThan(0);
+    expect(res.crossCheck.posteriorRelativeLift!).toBeGreaterThan(0);
+    expect(res.crossCheck.signDisagreement).toBe(false);
+  });
+
+  it("flags the disagreement when a heavy tail carries control's revenue", async () => {
+    // Control's raw revenue is carried by 10 whales at $2 000 among 1 990
+    // converters at $20. The log-normal fit shrinks those toward the
+    // median, so the MODEL prefers treatment while the RAW sample means
+    // prefer control. That is exactly the disagreement the spec wants
+    // surfaced rather than silently resolved.
+    setExperiment({ primaryMetric: "ARPU" });
+    respondWith([
+      arm({
+        variant_id: "control",
+        converters: 2_000,
+        values: [
+          [1_990, 20],
+          [10, 2_000],
+        ],
+        varLog: 0.1055,
+      }),
+      arm({
+        variant_id: "treatment",
+        converters: 2_200,
+        values: [[2_200, 22]],
+        varLog: 0.05,
+      }),
+    ]);
+
+    const res = await computeExperimentResults("exp_1", "proj_test");
+
+    // Raw data: control ahead on revenue per user.
+    expect(res.revenue!.controlMean).toBeGreaterThan(res.revenue!.variantMean);
+    expect(res.crossCheck.welchRelativeLift!).toBeLessThan(0);
+    // Model: treatment ahead.
+    expect(res.crossCheck.posteriorRelativeLift!).toBeGreaterThan(0);
+
+    expect(res.crossCheck.signDisagreement).toBe(true);
+    // Shown, not resolved: the flag changes no gate and suppresses nothing.
+    expect(res.recommendation.blockedBy).not.toContain("REFUND_GUARDRAIL");
+    expect(res.recommendation.leadingVariantId).toBe("treatment");
+  });
+
+  it("makes no sign comparison for a CONVERSION experiment", async () => {
+    // The posterior estimates a rate and Welch estimates revenue per user
+    // — different quantities. Welch is still reported on its own.
+    setExperiment({ primaryMetric: "CONVERSION" });
+    respondWith(happyPathRows());
+
+    const res = await computeExperimentResults("exp_1", "proj_test");
+    expect(res.revenue).not.toBeNull();
+    expect(res.crossCheck.welchRelativeLift).not.toBeNull();
+    expect(res.crossCheck.posteriorRelativeLift).toBeNull();
+    expect(res.crossCheck.signDisagreement).toBe(false);
+  });
+});

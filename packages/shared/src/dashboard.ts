@@ -625,6 +625,40 @@ export interface ExperimentResultsVariant {
   sufficientData: boolean;
 }
 
+/**
+ * The assumption-free cross-check (spec §4.1). Welch's t-test on RAW
+ * per-subscriber net revenue makes no distributional assumption, so
+ * agreement with the log-normal value model is informative and
+ * disagreement is a signal about the model's fit. It is SHOWN, never
+ * resolved — the engine does not pick a winner between the two.
+ */
+export interface ExperimentCrossCheck {
+  /**
+   * Relative lift (treatment − control) / control taken from the BAYESIAN
+   * posterior on the primary metric.
+   *
+   * `null` unless the comparison is meaningful: exactly two variants, both
+   * with a fitted posterior, a non-zero control mean, and a REVENUE-VALUED
+   * primary metric. For a CONVERSION experiment the posterior estimates a
+   * rate while Welch estimates revenue per user — different quantities, so
+   * no sign comparison is made rather than one that would look like a
+   * cross-check and not be one.
+   */
+  posteriorRelativeLift: number | null;
+  /** Relative lift from Welch's t-test on raw per-subscriber net revenue.
+   *  `null` when it could not be computed. Populated for every metric,
+   *  including CONVERSION, where it is still worth seeing on its own. */
+  welchRelativeLift: number | null;
+  /**
+   * True when the model-based and assumption-free estimates disagree about
+   * the SIGN of treatment − control. It does not suppress the
+   * recommendation and does not alter any gate — the stopping rule is
+   * unchanged. It is a flag for the operator that the log-normal fit and
+   * the raw data point opposite ways, which usually means a heavy tail.
+   */
+  signDisagreement: boolean;
+}
+
 export interface ExperimentIntegrity {
   /** Sample-ratio-mismatch check over the EXPOSED-user split
    *  (`uniqueUsers`), never over the windowed denominator. `null` with
@@ -658,7 +692,12 @@ export interface ExperimentResultsResponse {
   /** Fixed-horizon frequentist cross-checks. Valid at the planned sample
    *  size and only there — the recommendation is never made on these. */
   conversion: ExperimentConversionAnalysis | null;
+  /** Welch's t-test on raw per-subscriber NET revenue over mature
+   *  subscribers, computed from sufficient statistics. `null` when either
+   *  arm has fewer than two mature subscribers, or there are not exactly
+   *  two variants (Welch is a two-sample test). */
   revenue: ExperimentRevenueAnalysis | null;
+  crossCheck: ExperimentCrossCheck;
   integrity: ExperimentIntegrity;
   sampleSize: {
     required: number;

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   analyzeConversion,
   analyzeRevenue,
+  analyzeRevenueFromAggregates,
   checkSRM,
   estimateSampleSize,
   type ConfidenceLabel,
@@ -268,5 +269,82 @@ describe("edge cases", () => {
   test("estimateSampleSize: throws for non-positive MDE", () => {
     expect(() => estimateSampleSize(0.1, 0)).toThrow();
     expect(() => estimateSampleSize(0.1, -0.1)).toThrow();
+  });
+});
+
+// =============================================================
+// analyzeRevenueFromAggregates — same test, sufficient statistics in
+// =============================================================
+
+describe("analyzeRevenueFromAggregates", () => {
+  function stats(xs: number[]): { n: number; sum: number; sumSq: number } {
+    return {
+      n: xs.length,
+      sum: xs.reduce((a, x) => a + x, 0),
+      sumSq: xs.reduce((a, x) => a + x * x, 0),
+    };
+  }
+
+  test("matches analyzeRevenue exactly on the same data", () => {
+    // The point of the aggregate entry point is that it is the SAME test,
+    // not a similar one — the ClickHouse reader just cannot ship a row per
+    // subscriber. Asserting equality against the array-input function is
+    // what makes drift between the two impossible to land silently.
+    const control = [0, 0, 9.99, 0, 19.99, 0, 9.99, 49.99, 0, 0];
+    const variant = [0, 14.99, 0, 0, 29.99, 9.99, 0, 0, 19.99, 4.99];
+
+    const fromArrays = analyzeRevenue(control, variant);
+    const fromAggregates = analyzeRevenueFromAggregates(
+      stats(control),
+      stats(variant),
+    );
+
+    expect(fromAggregates.controlMean).toBeCloseTo(fromArrays.controlMean, 12);
+    expect(fromAggregates.variantMean).toBeCloseTo(fromArrays.variantMean, 12);
+    expect(fromAggregates.lift).toBeCloseTo(fromArrays.lift, 12);
+    expect(fromAggregates.tStatistic).toBeCloseTo(fromArrays.tStatistic, 10);
+    expect(fromAggregates.pValue).toBeCloseTo(fromArrays.pValue, 10);
+    expect(fromAggregates.isSignificant).toBe(fromArrays.isSignificant);
+  });
+
+  test("handles negative per-subscriber values (net refunds)", () => {
+    // A subscriber refunded past their gross has NEGATIVE net revenue.
+    // That is real and must not be clamped away — it is precisely what the
+    // converter-only log aggregates cannot represent.
+    const control = [0, 0, 19.99, -9.99, 0, 39.99];
+    const variant = [0, 9.99, 9.99, 0, -19.99, 0];
+
+    const fromArrays = analyzeRevenue(control, variant);
+    const fromAggregates = analyzeRevenueFromAggregates(
+      stats(control),
+      stats(variant),
+    );
+
+    expect(fromAggregates.controlMean).toBeCloseTo(fromArrays.controlMean, 12);
+    expect(fromAggregates.tStatistic).toBeCloseTo(fromArrays.tStatistic, 10);
+  });
+
+  test("reports a zero variance rather than a negative one when every value is equal", () => {
+    // Sum(x^2) - Sum(x)^2/n cancels catastrophically here and can land a
+    // hair below zero, which is not a variance. Both groups constant means
+    // se = 0, which the shared core maps to t = 0 — never NaN.
+    const n = 5000;
+    const value = 19.99;
+    const group = { n, sum: n * value, sumSq: n * value * value };
+
+    const result = analyzeRevenueFromAggregates(group, group);
+    expect(Number.isFinite(result.tStatistic)).toBe(true);
+    expect(result.tStatistic).toBe(0);
+    expect(result.controlMean).toBeCloseTo(value, 9);
+    expect(result.lift).toBeCloseTo(0, 12);
+  });
+
+  test("throws below two observations per group", () => {
+    expect(() =>
+      analyzeRevenueFromAggregates(
+        { n: 1, sum: 10, sumSq: 100 },
+        { n: 30, sum: 300, sumSq: 3000 },
+      ),
+    ).toThrow(/at least 2/);
   });
 });
