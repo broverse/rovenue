@@ -24,6 +24,7 @@ import {
   JoseAppleNotificationVerifier,
   type AppleNotificationVerifier,
 } from "./apple/apple-verify";
+import { appleStorefrontToCountry } from "./apple/apple-country";
 import {
   APPLE_ENVIRONMENT,
   APPLE_OFFER_TYPE,
@@ -320,9 +321,12 @@ async function verifyAppleReceipt(
       metadata: args.presentedContext
         ? { presentedContext: args.presentedContext }
         : undefined,
-      // The store's own per-transaction country (never the subscriber's
-      // last-known SDK-reported one — see CreateRevenueEventInput.country).
-      country: transaction.storefront || null,
+      // The store's own per-transaction country, normalised from Apple's
+      // alpha-3 storefront to the house alpha-2 format (never the
+      // subscriber's last-known SDK-reported one — see
+      // CreateRevenueEventInput.country). Fails closed to no country on
+      // an unrecognised code.
+      country: appleStorefrontToCountry(transaction.storefront),
       eventDate: new Date(transaction.purchaseDate),
       dedupeKey: `apple:${transaction.transactionId}:${revenueDedupeKind(type)}`,
     });

@@ -19,6 +19,7 @@ import {
 import { loadAppleCredentials } from "../../lib/project-credentials";
 import { convertToUsd } from "../fx";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
+import { appleStorefrontToCountry } from "./apple-country";
 import {
   APPLE_ENVIRONMENT,
   APPLE_NOTIFICATION_SUBTYPE,
@@ -1098,9 +1099,12 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
     currency: tx.currency,
     amountUsd: amountUsd.toString(),
     store: Store.APP_STORE,
-    // The store's own per-transaction country (never the subscriber's
-    // last-known SDK-reported one — see CreateRevenueEventInput.country).
-    country: tx.storefront || null,
+    // The store's own per-transaction country, normalised from Apple's
+    // alpha-3 storefront to the house alpha-2 format (never the
+    // subscriber's last-known SDK-reported one — see
+    // CreateRevenueEventInput.country). Fails closed to no country on
+    // an unrecognised code.
+    country: appleStorefrontToCountry(tx.storefront),
     eventDate: new Date(tx.purchaseDate),
     // transactionId is unique per Apple transaction (renewals get a new
     // one); the coarse kind lets the receipt-verify path converge on the

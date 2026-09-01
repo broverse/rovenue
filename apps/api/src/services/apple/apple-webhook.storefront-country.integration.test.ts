@@ -12,6 +12,13 @@
 // reading the real Postgres row back, not by asserting on
 // `createRevenueEvent`'s return value or a hand-inserted row.
 //
+// Fix round 1: Apple's `storefront` is ISO 3166-1 ALPHA-3 ("USA"); the
+// house format (matching `raw_exposures.country`, alpha-2) is ALPHA-2.
+// `appleStorefrontToCountry` (./apple-country.ts) normalises at the
+// point the transaction is read, so this suite also proves the stored
+// payload carries "US", not the raw "USA", and that an unrecognised
+// code fails closed to no country rather than the raw value.
+//
 // Integration: hits the dev Postgres 16 (docker-compose host port 5433).
 // We seed project / subscriber / product inline and inject a stub
 // verifier so no crypto / network runs (same technique as
@@ -149,7 +156,7 @@ describe("handleAppleNotification — store-supplied country on revenue events",
     await getDb().delete(projects).where(eq(projects.id, PROJECT_ID));
   });
 
-  it("a transaction carrying a storefront produces a revenue event whose stored payload carries the country", async () => {
+  it("a transaction carrying a storefront produces a revenue event whose stored payload carries the country, normalised to alpha-2", async () => {
     const otxn = `otxn_with_sf_${RUN_ID}`;
     const transaction = makeTransaction({
       transactionId: `txn_with_sf_${RUN_ID}`,
@@ -166,7 +173,31 @@ describe("handleAppleNotification — store-supplied country on revenue events",
     expect(result.status).toBe("processed");
 
     const payload = await readRevenueOutboxPayload(otxn);
-    expect(payload.country).toBe("USA");
+    // Apple's alpha-3 "USA" must land as the house alpha-2 "US" — never
+    // the raw alpha-3 value, which would silently split from
+    // raw_exposures.country's alpha-2 buckets in any comparison.
+    expect(payload.country).toBe("US");
+  });
+
+  it("a transaction with an unrecognised storefront code produces a revenue event whose payload carries no country key (fail closed, not the raw code)", async () => {
+    const otxn = `otxn_bad_sf_${RUN_ID}`;
+    const transaction = makeTransaction({
+      transactionId: `txn_bad_sf_${RUN_ID}`,
+      originalTransactionId: otxn,
+      storefront: "ZZZ",
+      storefrontId: "999999",
+    });
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier: makeStubVerifier(transaction, `nfn_bad_sf_${RUN_ID}`),
+    });
+    expect(result.status).toBe("processed");
+
+    const payload = await readRevenueOutboxPayload(otxn);
+    expect(payload).not.toHaveProperty("country");
+    expect(payload.country).not.toBe("ZZZ");
   });
 
   it("a transaction with no storefront produces a revenue event whose payload carries no country key", async () => {
