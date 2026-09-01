@@ -430,6 +430,82 @@ describe("verifyImportedAnchors — the store no longer recognises the row", () 
 });
 
 // =============================================================
+// Final-fix-wave FIX 4 — a per-anchor store failure never aborts the
+// whole run
+// =============================================================
+//
+// verify-store-clients.ts's per-store clients throw synchronously for a
+// condition this module never modelled as notFound/throttled — most
+// commonly, `requireConnectedStripe`/the Apple/Google credential loaders
+// throwing because the project has no credentials connected for that
+// store yet, a very likely mid-migration state. Before this fix, that
+// throw escaped straight out of `verifyWithPacing`'s `Promise.all` and
+// aborted verification for EVERY anchor in the call — including anchors
+// for stores that ARE fully configured.
+
+describe("verifyImportedAnchors — a per-anchor store failure degrades only that anchor (final-fix-wave FIX 4)", () => {
+  it("a Stripe anchor with no credentials connected does not stop an Apple anchor in the SAME run from verifying", async () => {
+    const appleSubscriberId = `rc_verify_unverifiable_apple_${createId()}`;
+    const appleAnchor = `apple_orig_unverifiable_${createId()}`;
+    const stripeSubscriberId = `rc_verify_unverifiable_stripe_${createId()}`;
+    const csv = csvOf([
+      {
+        subscriberId: appleSubscriberId,
+        storeTxnId: `${appleAnchor}_txn_1`,
+        originalTransactionId: appleAnchor,
+        priceUsd: "9.99",
+      },
+      {
+        subscriberId: stripeSubscriberId,
+        store: "stripe",
+        storeTxnId: `stripe_txn_unverifiable_1`,
+        stripeSubscriptionId: "sub_unverifiable_1",
+        priceUsd: "19.99",
+      },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+    expect(await findPurchases()).toHaveLength(2);
+
+    const deps = fakeDeps({
+      verifyAppleAnchor: vi.fn(async () => ({
+        kind: "verified" as const,
+        status: PurchaseStatus.ACTIVE,
+        expiresDate: new Date(FUTURE_EXPIRY),
+        autoRenewStatus: true,
+      })),
+      // Mirrors requireConnectedStripe's real behaviour for a project
+      // with no Stripe credentials configured: throws, rather than
+      // returning a modelled notFound/throttled result.
+      verifyStripeAnchor: vi.fn(async () => {
+        throw new Error("requireConnectedStripe: project has no connected Stripe account");
+      }),
+    });
+
+    const summary = await verifyImportedAnchors(jobId, deps);
+
+    // The run did not throw, and it inspected BOTH anchors.
+    expect(summary.anchorsTotal).toBe(2);
+    expect(summary.anchorsVerified).toBe(1);
+    expect(summary.anchorsUnverifiable).toBe(1);
+    // Not a definitive answer from the store — must not claim COMPLETED.
+    expect(summary.status).toBe("VERIFICATION_INCOMPLETE");
+
+    const purchases = await findPurchases();
+    const applePurchase = purchases.find((p) => p.storeTransactionId === `${appleAnchor}_txn_1`);
+    const stripePurchase = purchases.find((p) => p.storeTransactionId === "stripe_txn_unverifiable_1");
+
+    // The configured store's anchor verified normally.
+    expect(applePurchase!.verifiedAt).not.toBeNull();
+    expect(applePurchase!.status).toBe(PurchaseStatus.ACTIVE);
+
+    // The unconfigured store's row stays exactly as Phase A left it:
+    // history, never deleted, never marked verified.
+    expect(stripePurchase).toBeDefined();
+    expect(stripePurchase!.verifiedAt).toBeNull();
+  });
+});
+
+// =============================================================
 // Fix round 1, FIX 1 (Critical) — subscriber_access actually moves
 // =============================================================
 //

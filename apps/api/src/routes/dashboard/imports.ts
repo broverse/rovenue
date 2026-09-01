@@ -129,14 +129,15 @@ const uploadQuerySchema = z.object({
 //
 // A third carry-forward (task-9 RE-REVIEW, binding) concerns the
 // counters this file surfaces. Phase B's `verifyAnchorNotFound` /
-// `verifyAnchorPending` counters are OVERWRITTEN each call with that
+// `verifyAnchorPending` / `verifyAnchorUnverifiable` (final-fix-wave
+// FIX 4 added the third) counters are OVERWRITTEN each call with that
 // call's fresh, complete count (verify.ts) — ordinarily that covers the
 // WHOLE file. The exception: `IMPORT_VERIFY_MAX_ANCHORS_PER_RUN` forces
 // `VERIFICATION_INCOMPLETE` the instant the anchor cap is hit, even when
-// the inspected subset itself resolved with zero pending anchors. See
-// `verificationCountersScope` below for the (exact, not heuristic)
-// inference this route makes since `anchorCapReached` itself is never
-// persisted to the row.
+// the inspected subset itself resolved with zero pending/unverifiable
+// anchors. See `verificationCountersScope` below for the (exact, not
+// heuristic) inference this route makes since `anchorCapReached` itself
+// is never persisted to the row.
 //
 // Dry run is QUEUED (Task 10 fix round 1, FIX 2), the same way
 // commit/resume enqueue onto the existing BullMQ import queue
@@ -247,12 +248,15 @@ const listQuerySchema = z.object({
  *  happened. `"inspectedSubset"` covers exactly the one combination that
  *  can ONLY be explained by `anchorCapReached` (verify.ts never persists
  *  that flag itself): `VERIFICATION_INCOMPLETE` is reached iff
- *  `anchorsPending > 0 || anchorCapReached` (verify.ts), so
- *  `VERIFICATION_INCOMPLETE` with a persisted `verifyAnchorPending` of
- *  zero cannot be anything else. Every other combination — including
- *  plain `VERIFICATION_INCOMPLETE` with pending > 0 — reflects a call
- *  that scanned (or is resuming to scan) the whole file, so it is
- *  labelled `"wholeFile"`. */
+ *  `anchorsPending > 0 || anchorsUnverifiable > 0 || anchorCapReached`
+ *  (verify.ts, final-fix-wave FIX 4 added the middle term for a per-anchor
+ *  store failure — e.g. missing credentials — that must not silently
+ *  claim `COMPLETED`), so `VERIFICATION_INCOMPLETE` with a persisted
+ *  `verifyAnchorPending` AND `verifyAnchorUnverifiable` both zero cannot
+ *  be anything else. Every other combination — including plain
+ *  `VERIFICATION_INCOMPLETE` with pending > 0 OR unverifiable > 0 —
+ *  reflects a call that scanned (or is resuming to scan) the whole file,
+ *  so it is labelled `"wholeFile"`. */
 function verificationCountersScope(
   status: string,
   counters: Record<string, number>,
@@ -264,7 +268,8 @@ function verificationCountersScope(
     "verifyAnchorPending" in counters;
   if (!touchedPhaseB) return null;
   const pending = counters.verifyAnchorPending ?? 0;
-  return status === "VERIFICATION_INCOMPLETE" && pending === 0
+  const unverifiable = counters.verifyAnchorUnverifiable ?? 0;
+  return status === "VERIFICATION_INCOMPLETE" && pending === 0 && unverifiable === 0
     ? "inspectedSubset"
     : "wholeFile";
 }

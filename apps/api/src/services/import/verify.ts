@@ -180,6 +180,13 @@ const VERIFY_COUNTER_KEYS = {
   ANCHOR_VERIFIED: "verifyAnchorVerified",
   ANCHOR_NOT_FOUND: "verifyAnchorNotFound",
   ANCHOR_PENDING: "verifyAnchorPending",
+  /** Final-fix-wave FIX 4: a per-anchor store failure this module never
+   *  modelled as `notFound`/`throttled` — most commonly, the project has
+   *  no credentials connected for that anchor's store, a very likely
+   *  mid-migration state. NOT checkpointed, same reasoning as
+   *  ANCHOR_NOT_FOUND/ANCHOR_PENDING: connecting the missing credentials
+   *  and resuming should re-attempt it, not skip it forever. */
+  ANCHOR_UNVERIFIABLE: "verifyAnchorUnverifiable",
 } as const;
 
 // =============================================================
@@ -286,6 +293,19 @@ export interface VerifySummary {
   /** Anchors still unresolved after this call's throttle-retry/give-up
    *  budget. NOT checkpointed: re-discovered fresh on every call. */
   anchorsPending: number;
+  /** Final-fix-wave FIX 4: anchors whose store call failed with something
+   *  this module never modelled as `notFound`/`throttled` — most
+   *  commonly, no credentials connected yet for that anchor's store. Left
+   *  as history (never marked verified, never marked notFound); counted
+   *  separately so the operator sees WHY these differ from a plain
+   *  `notFound`/`pending` and can act (connect the store, then resume).
+   *  Forces `VERIFICATION_INCOMPLETE` the same way `anchorsPending` does
+   *  — unlike `notFound`, this is not a definitive answer from the store,
+   *  so it must not be reported as if the run had concluded normally.
+   *  NOT checkpointed: re-discovered fresh on every call, so a resume
+   *  after connecting credentials re-attempts it rather than skipping it
+   *  forever. */
+  anchorsUnverifiable: number;
   /** Rows skipped because they carried no store anchor at all (rule 2). */
   rowsSkippedAnchorless: number;
 }
@@ -665,7 +685,7 @@ async function applyVerifiedResult(
   return [...subscriberIds];
 }
 
-type AnchorOutcome = "verified" | "notFound" | "pending";
+type AnchorOutcome = "verified" | "notFound" | "pending" | "unverifiable";
 
 async function verifyOneAnchor(
   db: Db,
@@ -679,7 +699,29 @@ async function verifyOneAnchor(
   for (let attempt = 1; attempt <= THROTTLE_RETRY_MAX_ATTEMPTS; attempt++) {
     if (runState.giveUp) return { outcome: "pending", subscriberIds: [] };
 
-    const result = await callStoreClient(group, deps, projectId);
+    let result: StoreAnchorVerificationResult;
+    try {
+      result = await callStoreClient(group, deps, projectId);
+    } catch (err) {
+      // Final-fix-wave FIX 4: `verify-store-clients.ts`'s per-store
+      // clients throw synchronously for a condition neither `notFound`
+      // nor `throttled` models — most commonly `requireConnectedStripe`/
+      // the Apple/Google credential loaders throwing because this
+      // project has no credentials connected for that store yet, a very
+      // likely mid-migration state. Before this fix, an unmodelled throw
+      // escaped straight out of `Promise.all` (verifyWithPacing) and
+      // aborted verification for EVERY anchor in this call, including
+      // anchors for stores that ARE fully configured. This is a per-anchor
+      // outcome, not a run-ending one: the row degrades to history-only
+      // (already true — Phase A never set verifiedAt) and is counted
+      // under its own bucket instead of taking anything else down.
+      const reason = err instanceof Error ? err.message : String(err);
+      log.warn(
+        "phase B: anchor verification failed with an unmodelled error; leaving it as history-only rather than aborting the run",
+        { projectId, store: group.store, anchor: group.anchor, reason },
+      );
+      return { outcome: "unverifiable", subscriberIds: [] };
+    }
     if (result.kind === "throttled") {
       noteThrottled(runState);
       if (runState.giveUp || attempt === THROTTLE_RETRY_MAX_ATTEMPTS) {
@@ -739,6 +781,7 @@ export async function verifyImportedAnchors(
   let anchorsVerified = alreadyVerifiedDuringScan;
   let anchorsNotFound = 0;
   let anchorsPending = 0;
+  let anchorsUnverifiable = 0;
   let newlyVerified = 0;
 
   await verifyWithPacing(
@@ -775,6 +818,8 @@ export async function verifyImportedAnchors(
         newlyVerified++;
       } else if (outcome === "notFound") {
         anchorsNotFound++;
+      } else if (outcome === "unverifiable") {
+        anchorsUnverifiable++;
       } else {
         anchorsPending++;
       }
@@ -797,6 +842,7 @@ export async function verifyImportedAnchors(
   await drizzle.importJobRepo.setImportJobCounters(db, projectId, jobId, {
     [VERIFY_COUNTER_KEYS.ANCHOR_NOT_FOUND]: anchorsNotFound,
     [VERIFY_COUNTER_KEYS.ANCHOR_PENDING]: anchorsPending,
+    [VERIFY_COUNTER_KEYS.ANCHOR_UNVERIFIABLE]: anchorsUnverifiable,
   });
 
   // Minor fix: the status is always written back explicitly — a
@@ -813,7 +859,7 @@ export async function verifyImportedAnchors(
     // Already CANCELLED at the DB (that is how it was detected) —
     // nothing to write.
     status = "CANCELLED";
-  } else if (anchorsPending > 0 || capReached) {
+  } else if (anchorsPending > 0 || anchorsUnverifiable > 0 || capReached) {
     status = "VERIFICATION_INCOMPLETE";
     await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
       status: "VERIFICATION_INCOMPLETE",
@@ -842,6 +888,7 @@ export async function verifyImportedAnchors(
     anchorsVerified,
     anchorsNotFound,
     anchorsPending,
+    anchorsUnverifiable,
     rowsSkippedAnchorless,
   };
 }
