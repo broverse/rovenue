@@ -1547,8 +1547,16 @@ export interface ChartFilterOption {
 export interface ChartFilterOptionsResponse {
   windowDays: number;
   platform: ChartFilterOption[];
+  // `country` is currently always `[]` — `raw_revenue_events` carries no
+  // store-supplied country column yet. See
+  // docs/superpowers/specs/2026-09-01-analytics-integrity-and-proceeds-design.md
+  // §4.2: a follow-up task adds a per-transaction country sourced from the
+  // store (Apple's `storefront`/`storefrontId`, confirmed available), never
+  // the subscriber's last-known SDK-reported country.
   country: ChartFilterOption[];
-  productGroup: ChartFilterOption[];
+  // `productGroup` was removed: `productGroupId` never existed in the
+  // ClickHouse schema (see the same spec §4.2) and had no consumer anywhere
+  // in the dashboard.
 }
 
 // =============================================================

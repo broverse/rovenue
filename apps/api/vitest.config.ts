@@ -32,6 +32,7 @@ const CONTAINER_SUITES = [
   "tests/notifier.integration.test.ts",
   "tests/notifier-entry.integration.test.ts",
   "tests/outbox-dispatcher.integration.test.ts",
+  "src/services/metrics/schema-contract.integration.test.ts",
 ];
 
 /** Second pass. Set by the `test` script; not meant to be used by hand. */

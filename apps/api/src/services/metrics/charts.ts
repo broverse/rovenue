@@ -232,13 +232,24 @@ export async function readHeatmap(
 // =============================================================
 //
 // Powers the right-rail Filters card on /charts. We surface the
-// distinct (platform, country, productGroupId) values that are
-// actually present in the project's CH data so users aren't
-// presented with options that can't match anything.
+// distinct values that are actually present in the project's CH
+// data so users aren't presented with options that can't match
+// anything.
 //
-// `country` falls back to `subscriberCountry` when the event
-// payload didn't carry one — same convention used by the
-// overview cohort heatmap.
+// `productGroupId` was removed entirely (2026-09-01): it never
+// existed on `raw_revenue_events` — querying it always raised CH
+// error 47 (UNKNOWN_IDENTIFIER) — and had no consumer anywhere in
+// the dashboard. Do not reintroduce it without a real column.
+//
+// `country` also referenced a non-existent column (`subscriberCountry`)
+// and is left returning an empty list rather than removed, because a
+// real per-transaction country DOES belong here — see
+// docs/superpowers/specs/2026-09-01-analytics-integrity-and-proceeds-design.md
+// §4.2 (Task 2 of that plan adds it, sourced from the store's own
+// per-transaction country, e.g. Apple's `storefront`/`storefrontId` —
+// never the subscriber's last-known SDK-reported country, which is a
+// different fact). Do not query a column that does not exist to fill
+// this in the meantime.
 
 interface ChDistinctRow {
   value: string;
@@ -285,26 +296,18 @@ export async function readFilterOptions(
   const from = toDateOnly(w.from);
   const to = toDateOnly(w.to);
 
-  const [platform, country, productGroup] = await Promise.all([
-    // `store` is the platform discriminator in raw events.
-    distinctDimension(projectId, "store", from, to),
-    distinctDimension(
-      projectId,
-      "ifNull(nullIf(subscriberCountry, ''), country)",
-      from,
-      to,
-    ),
-    // Product group identifier travels on the event as
-    // `productGroupId`; some legacy rows are NULL — the filter on
-    // `expr != ''` strips them.
-    distinctDimension(projectId, "ifNull(productGroupId, '')", from, to),
-  ]);
+  const platform = await distinctDimension(projectId, "store", from, to);
+
+  // `country`: no column on `raw_revenue_events` supplies this yet — see
+  // the doc comment above the section header. Returning `[]` rather than
+  // querying a non-existent column is the whole fix; do not "restore" this
+  // with `subscriberCountry` or any subscriber-attribute fallback.
+  const country: ChartFilterOption[] = [];
 
   return {
     windowDays: w.days,
     platform,
     country,
-    productGroup,
   };
 }
 
