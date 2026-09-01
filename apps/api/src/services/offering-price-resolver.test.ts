@@ -31,8 +31,13 @@ import {
   purgeResolvedPriceCache,
 } from "./offering-price-resolver";
 
-const APPLE_CACHE_KEY = "paywall:resolved:apple:proj1:off1";
-const GOOGLE_CACHE_KEY = "paywall:resolved:google:proj1:off1";
+// Cache keys now carry a fourth segment — the credential digest — so the
+// key itself changes when the underlying stored credential does (task 2:
+// key the price cache on the credential that produced it).
+const CREDENTIAL_DIGEST_A = "digestA";
+const CREDENTIAL_DIGEST_B = "digestB";
+const APPLE_CACHE_KEY = `paywall:resolved:apple:proj1:off1:${CREDENTIAL_DIGEST_A}`;
+const GOOGLE_CACHE_KEY = `paywall:resolved:google:proj1:off1:${CREDENTIAL_DIGEST_A}`;
 const OLD_FETCHED_AT = "2020-01-01T00:00:00.000Z";
 
 function baseOffering(packages: unknown) {
@@ -98,6 +103,9 @@ const baseOverrides = {
   listAppStorePrices: vi.fn(async () => new Map([["apple_sku", applePrice]])),
   listGooglePlayPrices: vi.fn(async () => new Map([["google_sku:base1", googlePrice]])),
   resolveStripePrices: vi.fn(async () => ({ pkg_monthly: stripeResolved })),
+  // Stands in for `defaultCredentialDigest` — a fixed digest so existing
+  // cases can assert against a stable cache key.
+  getCredentialDigest: vi.fn(async () => CREDENTIAL_DIGEST_A),
 };
 
 const onePackage = [{ identifier: "pkg_monthly", productId: "prod1", order: 0, isPromoted: false }];
@@ -358,6 +366,86 @@ describe("resolveOfferingPrices", () => {
 
     expect(result!.packages).toHaveLength(1);
     expect(result!.packages[0]!.packageIdentifier).toBe("pkg_active");
+  });
+
+  it("(m) rotating the apple credential (new digest) does not return the previous credential's cached prices", async () => {
+    let digest = CREDENTIAL_DIGEST_A;
+    const listAppStorePrices = vi.fn(async () => new Map([["apple_sku", applePrice]]));
+    const overrides = {
+      findOffering: async () => baseOffering(onePackage),
+      findProducts: async () => [subscriptionProduct()],
+      ...baseOverrides,
+      listAppStorePrices,
+      getCredentialDigest: async () => digest,
+    };
+
+    const first = await resolveOfferingPrices("proj1", "off1", overrides);
+    expect(first!.packages[0]!.stores.apple).toEqual({
+      status: "ok",
+      amountMinor: 999,
+      currency: "USD",
+      period: "P1M",
+      trialDays: 7,
+    });
+    expect(listAppStorePrices).toHaveBeenCalledTimes(1);
+    expect(store.has(APPLE_CACHE_KEY)).toBe(true);
+
+    // Simulate a credential rotation: the stored blob (and therefore its
+    // digest) changed, and the account behind it now reports a different
+    // live price.
+    digest = CREDENTIAL_DIGEST_B;
+    const rotatedPrice = { ...applePrice, amountMinor: 1499 };
+    listAppStorePrices.mockResolvedValueOnce(new Map([["apple_sku", rotatedPrice]]));
+
+    const second = await resolveOfferingPrices("proj1", "off1", overrides);
+
+    // Not served from the old digest's cache entry: a live fetch happened
+    // again, and the returned price is the new account's, not the old one's.
+    expect(listAppStorePrices).toHaveBeenCalledTimes(2);
+    expect(second!.packages[0]!.stores.apple).toEqual({
+      status: "ok",
+      amountMinor: 1499,
+      currency: "USD",
+      period: "P1M",
+      trialDays: 7,
+    });
+    expect(second!.packages[0]!.stores.apple).not.toEqual(first!.packages[0]!.stores.apple);
+  });
+
+  it("(n) a disconnected apple credential resolves as not_configured, never falling back to a previous digest's cached entry", async () => {
+    // A cache entry left behind under the OLD (still-connected) digest —
+    // proves disconnect does not fall back to it.
+    store.set(
+      APPLE_CACHE_KEY,
+      JSON.stringify({ fetchedAt: OLD_FETCHED_AT, entries: { apple_sku: applePrice } }),
+    );
+
+    const result = await resolveOfferingPrices("proj1", "off1", {
+      findOffering: async () => baseOffering(onePackage),
+      findProducts: async () => [subscriptionProduct()],
+      ...baseOverrides,
+      loadApple: async () => null, // the decrypted-credentials loader sees the nulled column
+    });
+
+    expect(result!.packages[0]!.stores.apple).toEqual({ status: "not_configured" });
+    expect(baseOverrides.listAppStorePrices).not.toHaveBeenCalled();
+  });
+
+  it("(o) the raw credential column going null between the decrypt read and the digest read is treated the same as disconnect", async () => {
+    // Covers the TOCTOU branch inside resolveAppleEntries: loadApple (the
+    // decrypted loader) still returns valid creds, but the raw-blob digest
+    // lookup comes back null — e.g. a disconnect landed in between the two
+    // reads. No digest means no key, so this must not read or write cache.
+    const result = await resolveOfferingPrices("proj1", "off1", {
+      findOffering: async () => baseOffering(onePackage),
+      findProducts: async () => [subscriptionProduct()],
+      ...baseOverrides,
+      getCredentialDigest: async () => null,
+    });
+
+    expect(result!.packages[0]!.stores.apple).toEqual({ status: "not_configured" });
+    expect(baseOverrides.listAppStorePrices).not.toHaveBeenCalled();
+    expect(redis.set).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,5 @@
-import { drizzle } from "@rovenue/db";
+import { createHash } from "node:crypto";
+import { drizzle, isEncryptedCredential } from "@rovenue/db";
 import type {
   OfferingResolvedPrices,
   ResolvedPackageInfo,
@@ -62,8 +63,52 @@ function intervalToIso(
   return `P${intervalCount ?? 1}${unit}`;
 }
 
-function cacheKey(store: "apple" | "google", projectId: string, offeringId: string): string {
-  return `paywall:resolved:${store}:${projectId}:${offeringId}`;
+function cacheKey(
+  store: "apple" | "google",
+  projectId: string,
+  offeringId: string,
+  credentialDigest: string,
+): string {
+  return `paywall:resolved:${store}:${projectId}:${offeringId}:${credentialDigest}`;
+}
+
+/**
+ * Digest of the STORED, ENCRYPTED credential blob (`projects.appleCredentials`
+ * / `projects.googleCredentials` — see `findProjectCredentials`), never the
+ * decrypted secret. It is the cache-key component that keys a resolved price
+ * to the account it came from: rotate a key, fix a wrong account, or
+ * reconnect a store, and the stored ciphertext changes (AES-256-GCM mixes in
+ * a fresh random IV per encryption, so even re-encrypting an unchanged
+ * credential yields new bytes), so the digest changes, so the cache key
+ * changes, and the old entry is simply never looked up again — no purge call
+ * needed and none to forget. A SHA-256 digest of already-encrypted bytes
+ * discloses nothing about the plaintext underneath it, so it is NOT
+ * credential material and is safe to place in a Redis key that anyone with
+ * Redis access can read (a legacy plaintext row, pre-dating the encryption
+ * migration, is the one case where the digested bytes are the plaintext
+ * itself — but a one-way SHA-256 truncated to 64 bits still does not hand
+ * that plaintext back to a key-reader).
+ */
+function digestOfCredentialBlob(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const material = isEncryptedCredential(value) ? value.enc : JSON.stringify(value);
+  return createHash("sha256").update(material).digest("hex").slice(0, 16);
+}
+
+/**
+ * Reads the raw (still-encrypted) credential column and digests it. Null
+ * means "no stored credential" — disconnected, or never connected — and is
+ * the ONLY signal callers need: no digest means no cache key can be formed,
+ * which means nothing is read from or written to the resolved-price cache
+ * for that store. That is disconnect's entire effect on this cache; there is
+ * no separate disconnect branch to maintain.
+ */
+async function defaultCredentialDigest(
+  projectId: string,
+  store: "apple" | "google",
+): Promise<string | null> {
+  const row = await drizzle.projectRepo.findProjectCredentials(drizzle.db, projectId, store);
+  return digestOfCredentialBlob(row?.value ?? null);
 }
 
 /** Redis SCAN page size for `purgeResolvedPriceCache` — non-blocking on a busy instance, unlike KEYS. */
@@ -115,6 +160,11 @@ interface Overrides {
   findProducts?: typeof drizzle.productRepo.findProductsByIds;
   loadApple?: typeof loadAppleCredentials;
   loadGoogle?: typeof loadGoogleCredentials;
+  /** Overridable for tests; production default is `defaultCredentialDigest`. */
+  getCredentialDigest?: (
+    projectId: string,
+    store: "apple" | "google",
+  ) => Promise<string | null>;
   listAppStorePrices?: (
     config: AppStoreConnectConfig,
     wantedProductIds: ReadonlyArray<string>,
@@ -202,6 +252,17 @@ async function resolveAppleEntries(
       return { entries, fetchedAt: null };
     }
 
+    const getCredentialDigest = o.getCredentialDigest ?? defaultCredentialDigest;
+    const credentialDigest = await getCredentialDigest(projectId, "apple");
+    if (!credentialDigest) {
+      // The decrypted creds above were readable a moment ago, but the raw
+      // column is now null (a disconnect landed mid-request) — there is no
+      // encrypted blob to key a cache entry on. Same outcome as the missing-
+      // creds branch above: nothing cached, nothing served from a stale key.
+      for (const row of mapped) entries.set(row.packageIdentifier, { status: "not_configured" });
+      return { entries, fetchedAt: null };
+    }
+
     const config: AppStoreConnectConfig = {
       keyId: creds.keyId,
       issuerId: creds.issuerId,
@@ -210,7 +271,7 @@ async function resolveAppleEntries(
       appAppleId: creds.appAppleId,
     };
 
-    const key = cacheKey("apple", projectId, offeringId);
+    const key = cacheKey("apple", projectId, offeringId, credentialDigest);
     let priceMap: Map<string, AppleSubscriptionPrice> | undefined;
     let fetchedAt: string | null = null;
 
@@ -281,7 +342,17 @@ async function resolveGoogleEntries(
       return { entries, fetchedAt: null };
     }
 
-    const key = cacheKey("google", projectId, offeringId);
+    const getCredentialDigest = o.getCredentialDigest ?? defaultCredentialDigest;
+    const credentialDigest = await getCredentialDigest(projectId, "google");
+    if (!credentialDigest) {
+      // Mirrors the Apple branch: the raw column went null after the
+      // decrypted creds above were read, so there is nothing to key a cache
+      // entry on. Not a special case — just no digest, so no key.
+      for (const row of mapped) entries.set(row.packageIdentifier, { status: "not_configured" });
+      return { entries, fetchedAt: null };
+    }
+
+    const key = cacheKey("google", projectId, offeringId, credentialDigest);
     let priceMap: Map<string, GooglePlanPrice> | undefined;
     let fetchedAt: string | null = null;
 
