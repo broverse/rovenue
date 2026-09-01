@@ -35,6 +35,16 @@ import {
 export type ImportPlanSummary = {
   jobId: string;
   totalRows: number;
+  /** Final-fix-wave minor fix: true when an operator's `/cancel` was
+   *  noticed mid-scan (checked at `DRY_RUN_CANCELLATION_CHECK_INTERVAL_MS`
+   *  intervals — see the module comment). Before this fix, `planImport`
+   *  never checked cancellation at all: `/cancel` on a `DRY_RUN_RUNNING`
+   *  job wrote `CANCELLED` immediately, but the still-running scan wrote
+   *  `DRY_RUN_COMPLETE` right over it moments later, on its own read-then-
+   *  write with no status guard. When true, every field below reflects
+   *  only the PARTIAL scan up to the moment cancellation was noticed, and
+   *  nothing was persisted to the job row — the row stays `CANCELLED`. */
+  cancelled: boolean;
   outcomes: Record<ImportOutcome, number>;
   /** Observed shapes of the raw `entitlement_identifiers` cell across the
    *  file, keyed by shape name with a count each (task-6 controller
@@ -76,10 +86,24 @@ export type ImportPlanSummary = {
    * is null.
    */
   requiredPartitionSpan: { fromMonth: string; toMonth: string; monthCount: number } | null;
-  reportStorageKey: string;
+  /** Null iff `cancelled` — a cancelled scan never finishes a report the
+   *  job row can point at. */
+  reportStorageKey: string | null;
 };
 
 const DEFAULT_SKIP_SANDBOX = true;
+
+/** Final-fix-wave minor fix: how often (at most) `planImport` re-reads
+ *  the job's own status to notice an operator's `/cancel` — same
+ *  wall-clock-cadence reasoning as verify.ts's own
+ *  `CANCELLATION_CHECK_INTERVAL_MS` (a dry-run scan has no natural
+ *  "batch" boundary to check at, and checking every row would cost one
+ *  extra DB round trip per row on a huge file). Before this fix,
+ *  `planImport` never checked cancellation at all — `/cancel` on a
+ *  `DRY_RUN_RUNNING` job wrote `CANCELLED` immediately, but the
+ *  still-running scan clobbered it moments later with `DRY_RUN_COMPLETE`
+ *  on its own unconditional status write. */
+const DRY_RUN_CANCELLATION_CHECK_INTERVAL_MS = 2_000;
 
 // =============================================================
 // Canonical-row assembly
@@ -436,7 +460,20 @@ async function classifyRow(args: {
 // planImport
 // =============================================================
 
-export async function planImport(jobId: string): Promise<ImportPlanSummary> {
+export interface PlanImportOptions {
+  /** Overridable for tests only — production always gets the real,
+   *  interval-paced DB status check. Mirrors verify.ts's own
+   *  `deps.isCancelled` seam (fix round 2, FIX C there): a test can
+   *  inject a scripted predicate to prove cancellation is noticed
+   *  mid-scan without waiting on real wall-clock time
+   *  (`DRY_RUN_CANCELLATION_CHECK_INTERVAL_MS`). */
+  isCancelled?: () => Promise<boolean>;
+}
+
+export async function planImport(
+  jobId: string,
+  options: PlanImportOptions = {},
+): Promise<ImportPlanSummary> {
   const db = drizzle.db;
   const job = await drizzle.importJobRepo.getImportJobById(db, jobId);
   if (!job) {
@@ -465,6 +502,9 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
 
   const reportWriter = createReportWriter(job.projectId, job.id);
 
+  let cancelled = false;
+  let lastCancelCheckAt = 0;
+
   try {
     const objectStream: Readable = await importStore.getObject(job.storageKey);
     let header: string[] = [];
@@ -474,6 +514,24 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
         header = event.header;
         continue;
       }
+
+      if (options.isCancelled) {
+        if (await options.isCancelled()) {
+          cancelled = true;
+          break;
+        }
+      } else {
+        const nowMs = Date.now();
+        if (nowMs - lastCancelCheckAt >= DRY_RUN_CANCELLATION_CHECK_INTERVAL_MS) {
+          lastCancelCheckAt = nowMs;
+          const fresh = await drizzle.importJobRepo.getImportJob(db, job.projectId, job.id);
+          if (fresh?.status === "CANCELLED") {
+            cancelled = true;
+            break;
+          }
+        }
+      }
+
       totalRows += 1;
 
       const canonicalRow = buildCanonicalRow(header, event.row, mapping);
@@ -517,8 +575,6 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
       await reportWriter.writeReportRow(reportRow);
     }
 
-    const reportStorageKey = await reportWriter.finalizeReport();
-
     const observedEventDateRange =
       minEventDate !== null && maxEventDate !== null
         ? { min: minEventDate.toISOString(), max: maxEventDate.toISOString() }
@@ -527,6 +583,29 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
       minEventDate !== null && maxEventDate !== null
         ? describeRequiredPartitionSpan(minEventDate, maxEventDate)
         : null;
+
+    if (cancelled) {
+      // Close the report stream for cleanliness (avoid a dangling
+      // multipart upload) but do NOT point the job at it, and do NOT
+      // touch counters/dryRunSummary/status — the row is already
+      // CANCELLED (that is how this was detected), and every value
+      // computed above reflects only the PARTIAL scan up to the moment
+      // cancellation was noticed.
+      await reportWriter.finalizeReport().catch(() => undefined);
+      return {
+        jobId: job.id,
+        cancelled: true,
+        totalRows,
+        outcomes,
+        entitlementShapeCounts,
+        duplicateTrackingDisabledAfterKeys: duplicateTracker.disabledAfterKeys,
+        observedEventDateRange,
+        requiredPartitionSpan,
+        reportStorageKey: null,
+      };
+    }
+
+    const reportStorageKey = await reportWriter.finalizeReport();
 
     // Final-fix-wave FIX 3: OVERWRITE this job's dry-run counter
     // namespace, never additive — a dry-run attempt is always a
@@ -562,6 +641,7 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
 
     return {
       jobId: job.id,
+      cancelled: false,
       totalRows,
       outcomes,
       entitlementShapeCounts,

@@ -511,6 +511,63 @@ describe("planImport", () => {
 });
 
 // =================================================================
+// Final-fix-wave minor fix — planImport notices an operator's /cancel
+// =================================================================
+//
+// Before this fix, planImport never checked cancellation at all: /cancel
+// on a DRY_RUN_RUNNING job wrote CANCELLED immediately, but the
+// still-running scan clobbered it moments later with its own
+// unconditional DRY_RUN_COMPLETE write. `isCancelled` is a test-only seam
+// (mirrors verify.ts's own `deps.isCancelled`) so this doesn't need a
+// real 2-second wall-clock wait to prove.
+
+describe("planImport — notices cancellation mid-scan (final-fix-wave minor fix)", () => {
+  it("stops scanning and never reaches DRY_RUN_COMPLETE or touches counters/summary once cancellation is noticed", async () => {
+    await seedProduct("cancel_product", { apple: "cancel_product" });
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_cancel_1,app_store,cancel_product,txn_cancel_1,2026-01-01 00:00:00,false,,",
+        "user_cancel_2,app_store,cancel_product,txn_cancel_2,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    // Simulates an operator's /cancel landing on the DB while this scan
+    // is mid-flight — that write is the real route's job, not this
+    // test's; here it's stood in for by the injected predicate so the
+    // scenario doesn't need a real, concurrent /cancel request.
+    const summary = await planImport(jobId, { isCancelled: async () => true });
+
+    expect(summary.cancelled).toBe(true);
+    expect(summary.reportStorageKey).toBeNull();
+    expect(summary.totalRows).toBe(0); // stopped before ever counting the first row
+
+    const persisted = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    // The bug this fixes: an unconditional DRY_RUN_COMPLETE write here
+    // would have clobbered whatever a real /cancel had just set.
+    expect(persisted!.status).not.toBe("DRY_RUN_COMPLETE");
+    expect(persisted!.counters).toEqual({});
+    expect(persisted!.dryRunSummary).toBeNull();
+  });
+
+  it("does not cancel when isCancelled reports false — a normal run still completes", async () => {
+    await seedProduct("nocancel_product", { apple: "nocancel_product" });
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_nocancel_1,app_store,nocancel_product,txn_nocancel_1,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId, { isCancelled: async () => false });
+
+    expect(summary.cancelled).toBe(false);
+    expect(summary.outcomes.willCreate).toBe(1);
+
+    const persisted = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    expect(persisted!.status).toBe("DRY_RUN_COMPLETE");
+  });
+});
+
+// =================================================================
 // Final-fix-wave FIX 7 — the dry run's disclosures are persisted
 // =================================================================
 //
