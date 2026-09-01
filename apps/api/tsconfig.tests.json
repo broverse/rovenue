@@ -1,0 +1,35 @@
+// Type-checking for the test tree.
+//
+// `tsconfig.json` sets `include: ["src/**/*"]`, so the repo's own
+// `typecheck` script has never looked at `tests/**` at all. That was
+// invisible until a review noticed that "typecheck clean" was the only
+// evidence backing a change set whose tests could not be executed —
+// and the claim turned out to cover none of them.
+//
+// Running this config today reports 344 errors across 52 files. They
+// are a mix of two things:
+//
+//   * genuine looseness in test code — implicit `any`, wrong argument
+//     counts, over-broad casts on partial mocks;
+//   * scope artifacts — tests that reach into `packages/db/src/...`
+//     by relative path, which vitest resolves at runtime (those tests
+//     pass) but which this config cannot see.
+//
+// This file exists so the number is measurable and can ratchet down,
+// NOT as a gate: wiring it into CI today would simply be red. Fix
+// errors opportunistically in files you are already touching, and drop
+// the baseline in the script's comment when you do.
+//
+//   pnpm --filter @rovenue/api typecheck:tests
+//
+// `rootDir` is widened to the package root because `tsconfig.json`
+// pins it to `src`, which would otherwise report every test file as
+// "not under rootDir" and mask the real errors.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["src/**/*", "tests/**/*"]
+}

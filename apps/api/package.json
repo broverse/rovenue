@@ -15,6 +15,7 @@
     "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
     "build": "tsup && tsc --noEmit",
     "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "start": "node dist/index.js",
     "apple-pay:backfill": "tsx --env-file-if-exists=../../.env src/scripts/backfill-apple-pay-domains.ts",
     "test": "vitest run && VITEST_CONTAINER_PASS=1 vitest run"
