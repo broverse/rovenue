@@ -12,6 +12,7 @@ import {
   buildFunnelStages,
   hasLiveResultsData,
   isPaywallExperimentGroup,
+  mapApiExperiment,
   mapResultsVariants,
 } from "./format";
 import type { AllocationSlice, ExperimentSummary, VariantColorToken } from "./types";
@@ -61,6 +62,18 @@ export function ExperimentDetailPanel({
   const hasData = hasLiveResultsData(results);
   const funnelStages = buildFunnelStages(variantRows, showAttributed);
 
+  // Re-derive the summary with the live results folded in: `experiment`
+  // (the prop) was built from a bare list item with no decision fields —
+  // `confidence`/`leadingVariant`/`shipRecommended`/`lift` on it are the
+  // NO_DECISION_YET neutrals. This is the one place both the raw item
+  // (`experimentData`) and the live results (`results`) are available
+  // together, so it's the one place that can honestly hydrate them —
+  // falling back to the un-hydrated prop only until `experimentData`
+  // itself has loaded.
+  const hydratedExperiment = experimentData?.experiment
+    ? mapApiExperiment(experimentData.experiment, results ?? null)
+    : experiment;
+
   const allocationSlices: ReadonlyArray<AllocationSlice> | null =
     experimentData?.experiment.variants.map((v, i) => ({
       id: v.id,
@@ -71,7 +84,7 @@ export function ExperimentDetailPanel({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <ExperimentHero
-        experiment={experiment}
+        experiment={hydratedExperiment}
         projectId={projectId}
         showDetailsLink={showDetailsLink}
       />
@@ -114,7 +127,7 @@ export function ExperimentDetailPanel({
         ) : (
           <LoadingState />
         )}
-        <ExperimentAnalysisCard experiment={experiment} results={results ?? null} />
+        <ExperimentAnalysisCard experiment={hydratedExperiment} results={results ?? null} />
       </div>
     </div>
   );

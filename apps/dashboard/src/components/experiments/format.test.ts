@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type {
+  ExperimentDecisionGate,
+  ExperimentListItem,
+  ExperimentRecommendation,
   ExperimentResultsResponse,
   ExperimentResultsVariant,
 } from "@rovenue/shared";
 import {
   buildFunnelStages,
+  decisionState,
   hasLiveResultsData,
   isPaywallExperimentGroup,
+  mapApiExperiment,
   mapResultsVariants,
 } from "./format";
 import type { ExperimentGroup } from "./types";
@@ -177,5 +182,145 @@ describe("buildFunnelStages", () => {
 
     expect(stages.map((s) => s.key)).toEqual(["exposures", "uniqueUsers", "attributed"]);
     expect(stages[2]!.values[0]).toMatchObject({ variantId: "control", value: 10 });
+  });
+});
+
+// =============================================================
+// Task 5 — mapApiExperiment's decision hydration + decisionState
+// =============================================================
+
+function makeListItem(overrides: Partial<ExperimentListItem> = {}): ExperimentListItem {
+  return {
+    id: "exp_1",
+    projectId: "proj_1",
+    name: "Pricing test",
+    description: null,
+    type: "OFFERING",
+    key: "pricing_test",
+    audienceId: "aud_1",
+    status: "RUNNING",
+    variants: [
+      { id: "control", name: "Control", value: null, weight: 0.5 },
+      { id: "variant_a", name: "Variant A", value: null, weight: 0.5 },
+    ],
+    metrics: ["conversion_rate"],
+    mutualExclusionGroup: null,
+    startedAt: "2026-08-01T00:00:00Z",
+    completedAt: null,
+    winnerVariantId: null,
+    createdAt: "2026-08-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("mapApiExperiment — decision hydration (Task 5, Step 1)", () => {
+  it("never returns a fabricated zero confidence or a guessed leader with no results", () => {
+    const summary = mapApiExperiment(makeListItem());
+
+    expect(summary.confidence).toBeNull();
+    expect(summary.leadingVariant).toBeNull();
+    expect(summary.shipRecommended).toBe(false);
+  });
+
+  it("hydrates confidence from the leading variant's probabilityBest, never a bare 0", () => {
+    const results = makeResults([
+      variant({ variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 10 }),
+      variant({
+        variantId: "variant_a",
+        exposures: 100,
+        uniqueUsers: 90,
+        attributedConversions: 20,
+      }),
+    ]);
+    results.variants[1]!.probabilityBest = 0.91;
+    results.variants[1]!.sufficientData = true;
+    results.recommendation = {
+      leadingVariantId: "variant_a",
+      shipRecommended: true,
+      blockedBy: [],
+    };
+
+    const summary = mapApiExperiment(makeListItem(), results);
+
+    expect(summary.confidence).toBe(0.91);
+    expect(summary.leadingVariant).toBe("variant_a");
+    expect(summary.shipRecommended).toBe(true);
+  });
+
+  it("hydrates a real signed lift from the leader vs control posterior means", () => {
+    const results = makeResults([
+      variant({ variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 10 }),
+      variant({ variantId: "variant_a", exposures: 100, uniqueUsers: 90, attributedConversions: 20 }),
+    ]);
+    results.variants[0]!.posteriorMean = 0.1;
+    results.variants[1]!.posteriorMean = 0.15;
+    results.recommendation = {
+      leadingVariantId: "variant_a",
+      shipRecommended: true,
+      blockedBy: [],
+    };
+
+    const summary = mapApiExperiment(makeListItem(), results);
+
+    expect(summary.lift).toBeCloseTo(50, 5); // (0.15 - 0.1) / 0.1 * 100
+  });
+
+  it("withholds confidence when the leader is suppressed (SRM/CROSSOVER/REFUND_GUARDRAIL fired)", () => {
+    const results = makeResults([
+      variant({ variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 10 }),
+    ]);
+    results.recommendation = {
+      leadingVariantId: null,
+      shipRecommended: false,
+      blockedBy: ["SRM"],
+    };
+
+    const summary = mapApiExperiment(makeListItem(), results);
+
+    expect(summary.confidence).toBeNull();
+    expect(summary.leadingVariant).toBeNull();
+    expect(summary.shipRecommended).toBe(false);
+  });
+});
+
+describe("decisionState — the four verdict buckets (Task 5, Step 3)", () => {
+  function recommendation(
+    blockedBy: ExperimentDecisionGate[],
+    shipRecommended = false,
+  ): ExperimentRecommendation {
+    return { leadingVariantId: null, shipRecommended, blockedBy };
+  }
+
+  it("is 'ship' whenever shipRecommended is true, regardless of blockedBy", () => {
+    expect(decisionState(recommendation([], true))).toBe("ship");
+  });
+
+  it.each<ExperimentDecisionGate>(["SAMPLE_SIZE", "RUNTIME", "NO_LEADER"])(
+    "is 'insufficientData' when the primary gate is %s",
+    (gate) => {
+      expect(decisionState(recommendation([gate]))).toBe("insufficientData");
+    },
+  );
+
+  it.each<ExperimentDecisionGate>([
+    "SRM",
+    "CROSSOVER",
+    "REFUND_GUARDRAIL",
+    "PROCEEDS_RATE_UNCONFIGURED",
+  ])("is 'integrityBlocked' when the primary gate is %s", (gate) => {
+    expect(decisionState(recommendation([gate]))).toBe("integrityBlocked");
+  });
+
+  it("is 'noDifference' when the only blocking gate is EXPECTED_LOSS", () => {
+    expect(decisionState(recommendation(["EXPECTED_LOSS"]))).toBe("noDifference");
+  });
+
+  it("classifies by the PRIMARY (first) gate, not a later one in the array", () => {
+    // SAMPLE_SIZE evaluates before EXPECTED_LOSS — still gathering data
+    // takes precedence over "not confident enough" when both are present.
+    expect(decisionState(recommendation(["SAMPLE_SIZE", "EXPECTED_LOSS"]))).toBe(
+      "insufficientData",
+    );
   });
 });

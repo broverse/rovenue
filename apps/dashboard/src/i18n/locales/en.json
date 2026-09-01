@@ -3165,6 +3165,7 @@
         "acrossVariants": "across {{count}} variants",
         "confidence": "Confidence",
         "confidenceTarget": "target ≥ 80%",
+        "confidenceUnavailable": "—",
         "lift": "Est. lift",
         "vsControl": "vs control",
         "power": "Sample power",
@@ -3185,8 +3186,13 @@
         "exposures": "Exposures",
         "users": "Users",
         "attributed": "Attributed",
-        "rate": "Rate"
-      }
+        "rate": "Rate",
+        "posteriorMean": "Posterior mean",
+        "credibleInterval": "Credible interval",
+        "probabilityBest": "P(best)",
+        "expectedLoss": "Expected loss"
+      },
+      "notEnoughData": "Not enough data yet"
     },
     "funnel": {
       "title": "Conversion funnel",
@@ -3209,7 +3215,7 @@
     "analysis": {
       "title": "Analysis",
       "metric": "Metric",
-      "conversion": "Conversion lift",
+      "conversion": "Conversion lift (fixed-horizon)",
       "conversionUnavailable": "Needs exactly 2 variants with recorded data",
       "srm": "SRM check",
       "srmPassed": "passed · p={{pValue}}",
@@ -3219,7 +3225,29 @@
       "sampleSizeProgress": "{{required}} required · {{reached}}",
       "sampleSizeReached": "reached",
       "sampleSizeNotReached": "not reached",
-      "sampleSizeUnavailable": "Not available yet"
+      "sampleSizeUnavailable": "Not available yet",
+      "crossCheck": {
+        "title": "Cross-check",
+        "posterior": "Posterior:",
+        "welch": "Welch (raw):",
+        "disagreement": "Model and raw-revenue estimates disagree on direction — treat the recommendation with extra caution."
+      },
+      "decision": {
+        "ship": "Ready to ship — every gate passed.",
+        "insufficientData": "Not enough data yet — still gathering exposures. Check back once more traffic has been observed.",
+        "noDifference": "No meaningful difference detected — enough data has come in, but the expected loss from shipping either arm is still above the safety threshold.",
+        "integrityBlocked": "Recommendation withheld — a data-integrity check failed, so the leading variant isn't shown even though data has been collected."
+      },
+      "blockedBy": {
+        "SAMPLE_SIZE": "Sample size not yet reached for one or more variants.",
+        "RUNTIME": "The experiment hasn't run for the minimum number of whole weekly cycles yet.",
+        "EXPECTED_LOSS": "The leader's expected loss is still above the caution threshold — too close to call safely.",
+        "NO_LEADER": "Fewer than two variants have enough data to compare.",
+        "PROCEEDS_RATE_UNCONFIGURED": "A store contributing revenue has no configured commission rate, so proceeds-per-user is undefined.",
+        "SRM": "Sample ratio mismatch — the observed traffic split doesn't match the configured weights.",
+        "CROSSOVER": "Too many subscribers were exposed to more than one variant.",
+        "REFUND_GUARDRAIL": "The leading variant's refund rate is materially worse than control's."
+      }
     },
     "metric": {
       "trialStartRate": {

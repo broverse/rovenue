@@ -1,7 +1,9 @@
 import type {
   DashboardExperimentStatus,
   DashboardExperimentType,
+  ExperimentDecisionGate,
   ExperimentListItem,
+  ExperimentRecommendation,
   ExperimentResultsResponse,
 } from "@rovenue/shared";
 import type {
@@ -94,18 +96,75 @@ function ageLabel(
 }
 
 /**
+ * The decision-derived slice of `ExperimentSummary` — `confidence`,
+ * `leadingVariant`, `shipRecommended` — computed from the live results
+ * endpoint. Pulled out of `mapApiExperiment` so there is exactly one
+ * place that can produce these three fields, and exactly one neutral
+ * default (`NO_DECISION_YET`) for "results aren't hydrated yet" that
+ * every caller shares instead of each re-inventing its own zero/null.
+ */
+type DecisionFields = Pick<
+  ExperimentSummary,
+  "confidence" | "leadingVariant" | "shipRecommended" | "lift"
+>;
+
+// `lift: 0` already means "no known lift" throughout this module (see
+// `mapApiExperiment`'s un-hydrated default) — `experiments-list.tsx` hides
+// the lift pill entirely at 0, so reusing it here for "not computed" is
+// consistent with the rest of the file, not a new fabricated flat value.
+const NO_DECISION_YET: DecisionFields = {
+  confidence: null,
+  leadingVariant: null,
+  shipRecommended: false,
+  lift: 0,
+};
+
+function decisionFieldsFromResults(
+  results: ExperimentResultsResponse | null | undefined,
+): DecisionFields {
+  if (!results) return NO_DECISION_YET;
+  const { recommendation } = results;
+  const leader = recommendation.leadingVariantId
+    ? results.variants.find(
+        (v) => v.variantId === recommendation.leadingVariantId,
+      )
+    : undefined;
+  const control = results.variants.find((v) => v.variantId === "control");
+  const lift =
+    leader?.posteriorMean != null && control?.posteriorMean
+      ? ((leader.posteriorMean - control.posteriorMean) /
+          control.posteriorMean) *
+        100
+      : 0;
+  return {
+    // `probabilityBest` is the leader's own posterior probability of
+    // being best — the only number honestly called "confidence" here.
+    confidence: leader?.probabilityBest ?? null,
+    leadingVariant: recommendation.leadingVariantId,
+    shipRecommended: recommendation.shipRecommended,
+    lift,
+  };
+}
+
+/**
  * Maps an `ExperimentListItem` from the API to the richer
  * `ExperimentSummary` shape the dashboard's list + hero render
- * against. Fields the API does not surface yet (`assigned`,
- * `confidence`, `outcome`, `lift`) default to neutral values so
- * the UI degrades gracefully — Phase 3 will hydrate them from
- * the results endpoint.
+ * against. `results` is optional because most callers (the experiments
+ * list, the sidebar) only have the list item — for those, the decision
+ * fields come back `null`/`false` from `NO_DECISION_YET` rather than a
+ * fabricated zero. The one call site that has fetched live results
+ * (`ExperimentDetailPanel`) passes them so the hero and "ship winner"
+ * banner see the real decision instead of a permanently-hidden one.
  */
-export function mapApiExperiment(item: ExperimentListItem): ExperimentSummary {
+export function mapApiExperiment(
+  item: ExperimentListItem,
+  results?: ExperimentResultsResponse | null,
+): ExperimentSummary {
   const status = uiStatus(item.status);
   const metric = item.metrics?.[0] ?? "";
   const description = item.description ?? "";
   const age = ageLabel(status, item.startedAt, item.completedAt);
+  const decision = decisionFieldsFromResults(results);
 
   return {
     id: item.id,
@@ -119,14 +178,11 @@ export function mapApiExperiment(item: ExperimentListItem): ExperimentSummary {
     ...(age.ageLabelValues ? { ageLabelValues: age.ageLabelValues } : {}),
     variantCount: item.variants.length,
     assigned: 0,
-    confidence: 0,
     outcome: "",
     group: groupFromType(item.type),
-    lift: 0,
     winner: item.winnerVariantId,
-    // Phase 3 hydrates this from the results endpoint; until then there is
-    // no real leader, so the "ship winner" banner stays hidden.
-    leadingVariant: null,
+    // confidence, leadingVariant, shipRecommended, lift
+    ...decision,
   };
 }
 
@@ -188,7 +244,66 @@ export function mapResultsVariants(
     // variantId placeholder) — purely cosmetic (badge suffix), never
     // used to pick which numbers to show.
     isControl: v.variantId === "control",
+    sufficientData: v.sufficientData,
+    posteriorMean: v.posteriorMean,
+    credibleIntervalLow: v.credibleIntervalLow,
+    credibleIntervalHigh: v.credibleIntervalHigh,
+    probabilityBest: v.probabilityBest,
+    expectedLoss: v.expectedLoss,
   }));
+}
+
+// =============================================================
+// The decision verdict — "not enough data" vs "no difference"
+// =============================================================
+//
+// `recommendation.blockedBy` is ordered by evaluation (see
+// `ExperimentDecisionGate` in packages/shared/src/dashboard.ts), so
+// `blockedBy[0]` is the primary reason there is no recommendation. The
+// three buckets below turn that single gate into the one thing a reader
+// actually needs to know: is the experiment still collecting evidence,
+// or has it collected enough to say the variants don't differ, or is
+// something wrong with the data itself. `EXPECTED_LOSS` is the only gate
+// left once the data-volume and integrity buckets are excluded, and it
+// means exactly "we looked, and it's too close to call" — the opposite
+// of "we haven't looked long enough".
+
+const DATA_VOLUME_GATES: ReadonlySet<ExperimentDecisionGate> = new Set([
+  "SAMPLE_SIZE",
+  "RUNTIME",
+  "NO_LEADER",
+]);
+
+const INTEGRITY_GATES: ReadonlySet<ExperimentDecisionGate> = new Set([
+  "SRM",
+  "CROSSOVER",
+  "REFUND_GUARDRAIL",
+  "PROCEEDS_RATE_UNCONFIGURED",
+]);
+
+export type ExperimentDecisionState =
+  | "ship"
+  | "insufficientData"
+  | "noDifference"
+  | "integrityBlocked";
+
+/**
+ * Classifies a recommendation into the four verdict states the analysis
+ * card renders with distinct copy and treatment. Never called on a
+ * `null` results payload — the card has its own "no live results" branch
+ * for that, so this only ever sees a real, evaluated recommendation.
+ */
+export function decisionState(
+  recommendation: ExperimentRecommendation,
+): ExperimentDecisionState {
+  if (recommendation.shipRecommended) return "ship";
+  const primary = recommendation.blockedBy[0];
+  if (primary && INTEGRITY_GATES.has(primary)) return "integrityBlocked";
+  if (primary && DATA_VOLUME_GATES.has(primary)) return "insufficientData";
+  // Nothing left but EXPECTED_LOSS (or an empty list on a recommendation
+  // that is somehow not shipRecommended — treated the same way: enough
+  // data and runtime, still not confident enough to call a winner).
+  return "noDifference";
 }
 
 /**

@@ -15,12 +15,19 @@ type Props = {
   showAttributed: boolean;
 };
 
+/** Posterior columns span the width of the five data columns below when a
+ *  variant lacks the data to fit them — one merged "not enough data yet"
+ *  cell rather than five separate dashes that would read as five computed
+ *  zeroes. */
+const POSTERIOR_COLUMN_COUNT = 4;
+
 /**
- * Live variant comparison table — exposures, exposed users, and (when
- * gated) precisely-attributed conversions + the rate derived from
- * them. Every number here comes straight off `ExperimentResultsResponse`;
- * there's no per-variant ARPU/lift/CI in that payload, so those columns
- * from the old mock table are gone rather than fabricated.
+ * Live variant comparison table — exposures, exposed users, (when gated)
+ * precisely-attributed conversions + the rate derived from them, and the
+ * Bayesian posterior on the primary metric: mean, credible interval,
+ * P(best), and expected loss. Every number here comes straight off
+ * `ExperimentResultsResponse`; there's no per-variant ARPU/lift/CI beyond
+ * what's rendered, so nothing here is fabricated.
  */
 export function VariantsTable({ variants, showAttributed }: Props) {
   const { t } = useTranslation();
@@ -35,7 +42,7 @@ export function VariantsTable({ variants, showAttributed }: Props) {
         <table className="w-full border-collapse text-[12px]">
           <thead>
             <tr>
-              <Th width="30%">{t("experiments.variants.cols.variant")}</Th>
+              <Th width="22%">{t("experiments.variants.cols.variant")}</Th>
               <Th align="right">{t("experiments.variants.cols.exposures")}</Th>
               <Th align="right">{t("experiments.variants.cols.users")}</Th>
               {showAttributed && (
@@ -46,6 +53,18 @@ export function VariantsTable({ variants, showAttributed }: Props) {
               {showAttributed && (
                 <Th align="right">{t("experiments.variants.cols.rate")}</Th>
               )}
+              <Th align="right">
+                {t("experiments.variants.cols.posteriorMean")}
+              </Th>
+              <Th align="right">
+                {t("experiments.variants.cols.credibleInterval")}
+              </Th>
+              <Th align="right">
+                {t("experiments.variants.cols.probabilityBest")}
+              </Th>
+              <Th align="right">
+                {t("experiments.variants.cols.expectedLoss")}
+              </Th>
             </tr>
           </thead>
           <tbody>
@@ -87,6 +106,26 @@ export function VariantsTable({ variants, showAttributed }: Props) {
                   {showAttributed && (
                     <NumCell>{rate === null ? "—" : `${rate.toFixed(2)}%`}</NumCell>
                   )}
+                  {v.sufficientData ? (
+                    <>
+                      <NumCell>{formatMetric(v.posteriorMean)}</NumCell>
+                      <NumCell>
+                        {formatCredibleInterval(
+                          v.credibleIntervalLow,
+                          v.credibleIntervalHigh,
+                        )}
+                      </NumCell>
+                      <NumCell>{formatProbability(v.probabilityBest)}</NumCell>
+                      <NumCell>{formatMetric(v.expectedLoss)}</NumCell>
+                    </>
+                  ) : (
+                    <td
+                      colSpan={POSTERIOR_COLUMN_COUNT}
+                      className="px-3.5 py-3.5 text-right align-middle font-rv-mono text-rv-mute-500"
+                    >
+                      {t("experiments.variants.notEnoughData")}
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -95,6 +134,21 @@ export function VariantsTable({ variants, showAttributed }: Props) {
       </div>
     </section>
   );
+}
+
+function formatMetric(value: number | null): string {
+  if (value === null) return "—";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+}
+
+function formatProbability(value: number | null): string {
+  if (value === null) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatCredibleInterval(low: number | null, high: number | null): string {
+  if (low === null || high === null) return "—";
+  return `${formatMetric(low)} – ${formatMetric(high)}`;
 }
 
 type ThProps = {

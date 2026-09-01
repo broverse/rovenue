@@ -32,8 +32,13 @@ export type ExperimentSummary = {
   ageLabelValues?: Readonly<Record<string, string | number>>;
   variantCount: number;
   assigned: number;
-  /** 0..1 confidence value. */
-  confidence: number;
+  /**
+   * The leading variant's `probabilityBest` from the results endpoint
+   * (0..1), or `null` when there is no live decision yet — no results,
+   * or no leader identified. Never a fabricated `0`, which would read
+   * as "confidently against" rather than "unknown".
+   */
+  confidence: number | null;
   /** "win" / "loss" / "" — drives the confidence bar tint. */
   outcome: "win" | "loss" | "";
   group: ExperimentGroup;
@@ -42,11 +47,20 @@ export type ExperimentSummary = {
   /** Variant id of the shipped winner, "control" if control prevailed. */
   winner: string | null;
   /**
-   * Variant id currently leading on the primary metric (pre-ship), used
-   * by the "ship winner" banner. `null` until the results endpoint
-   * hydrates it — the banner stays hidden rather than naming a guess.
+   * `recommendation.leadingVariantId` from the results endpoint, used by
+   * the "ship winner" banner to name a variant. `null` until results are
+   * hydrated, or when a suppression gate withholds the leader entirely —
+   * the banner stays hidden rather than naming a guess.
    */
   leadingVariant: string | null;
+  /**
+   * `recommendation.shipRecommended` from the results endpoint — `true`
+   * only once every clause of the decision engine's stopping rule
+   * passed. This is the ONLY value allowed to gate the "ship winner"
+   * banner — never a bare confidence number, never a p-value. Defaults
+   * to `false` (never a guess) until results are hydrated.
+   */
+  shipRecommended: boolean;
 };
 
 export type VariantColorToken = "default" | "primary" | "violet";
@@ -66,6 +80,19 @@ export type ResultVariantRow = {
   attributedConversions: number | null;
   colorToken: VariantColorToken;
   isControl: boolean;
+  /**
+   * `false` when the posterior could not be fitted for this variant — the
+   * five fields below are then all `null` on the wire (see
+   * `ExperimentResultsVariant.sufficientData`). A row with `false` here
+   * gets its own "not enough data yet" treatment rather than rendering
+   * `null` as a dash next to numbers that look computed.
+   */
+  sufficientData: boolean;
+  posteriorMean: number | null;
+  credibleIntervalLow: number | null;
+  credibleIntervalHigh: number | null;
+  probabilityBest: number | null;
+  expectedLoss: number | null;
 };
 
 /**

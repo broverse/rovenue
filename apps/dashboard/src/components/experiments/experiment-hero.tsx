@@ -81,11 +81,17 @@ export function ExperimentHero({
   const lifecycleBusy =
     pause.isPending || resume.isPending || stop.isPending;
   // "Ship winner" can only promote a concrete variant; until the results
-  // endpoint hydrates a leader (Phase 3) there's nothing to ship.
+  // endpoint hydrates a leader there's nothing to ship.
   const canShipWinner =
     isRunning && !experiment.winner && experiment.leadingVariant !== null;
+  // The ONLY thing allowed to gate this banner is the decision engine's
+  // own verdict — never a p-value, never a bare confidence number. A
+  // blocked gate (sample size, SRM, refund guardrail, ...) means
+  // `shipRecommended` is false regardless of how high `confidence` reads,
+  // so this stays hidden exactly when Step 4's blocked-gate list would
+  // otherwise contradict it.
   const showWinner =
-    experiment.confidence >= 0.8 &&
+    experiment.shipRecommended &&
     !experiment.winner &&
     experiment.status === "running" &&
     experiment.leadingVariant !== null;
@@ -353,13 +359,21 @@ export function ExperimentHero({
         <HeroMeta
           label={t("experiments.hero.meta.confidence")}
           value={
-            <span
-              className={cn(
-                experiment.confidence >= 0.8 ? "text-rv-success" : "text-foreground",
-              )}
-            >
-              {(experiment.confidence * 100).toFixed(0)}%
-            </span>
+            experiment.confidence === null ? (
+              <span className="text-rv-mute-500">
+                {t("experiments.hero.meta.confidenceUnavailable")}
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  experiment.confidence >= 0.8
+                    ? "text-rv-success"
+                    : "text-foreground",
+                )}
+              >
+                {(experiment.confidence * 100).toFixed(0)}%
+              </span>
+            )
           }
           detail={t("experiments.hero.meta.confidenceTarget")}
         />
@@ -395,7 +409,15 @@ export function ExperimentHero({
             <Trans
               i18nKey="experiments.hero.winnerBanner.message"
               values={{
-                confidence: (experiment.confidence * 100).toFixed(0),
+                // `showWinner` only gates this block on `shipRecommended`,
+                // which the results endpoint never sets without a fitted
+                // leader — confidence is non-null in practice, but this
+                // stays honest (an em dash, not a fabricated "0%") if that
+                // invariant is ever violated.
+                confidence:
+                  experiment.confidence === null
+                    ? "—"
+                    : (experiment.confidence * 100).toFixed(0),
                 variant: experiment.leadingVariant ?? "",
               }}
               components={[

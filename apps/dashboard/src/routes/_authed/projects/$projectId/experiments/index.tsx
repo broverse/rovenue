@@ -87,7 +87,7 @@ export function ExperimentsPage({ projectId }: { projectId: string }) {
   const setSelectedId = (id: string) => updateSearch({ selected: id });
 
   const summaries = useMemo<ReadonlyArray<ExperimentSummary>>(
-    () => experiments.map(mapApiExperiment),
+    () => experiments.map((item) => mapApiExperiment(item)),
     [experiments],
   );
 

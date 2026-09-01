@@ -122,7 +122,12 @@ export function ExperimentsList({
                   </span>
                 )}
               </div>
-              {e.status === "running" && (
+              {/* `confidence` is only ever hydrated on the selected
+                  experiment's own detail panel (it needs a live results
+                  fetch per row) — every OTHER row here has `null`, so the
+                  track renders empty rather than a fabricated 0% fill
+                  that would read as "confidently against". */}
+              {e.status === "running" && e.confidence !== null && (
                 <div className="mt-2 h-[3px] overflow-hidden rounded-full bg-rv-c3">
                   <span
                     className={cn(
