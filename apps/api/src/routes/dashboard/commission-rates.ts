@@ -23,17 +23,24 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { validate } from "../../lib/validate";
-import { drizzle } from "@rovenue/db";
+import { Store, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 
-// `drizzle.store` is the raw Drizzle pgEnum (re-exported via
-// `./drizzle/index.ts`'s `export * from "./enums"`), whose `.enumValues`
-// is the on-disk variant tuple — the top-level `Store` object export is a
-// plain string-literal map, not a tuple, so it can't feed `z.enum`.
+// `Store` is the top-level string-literal map, and `z.nativeEnum` takes
+// exactly that — no tuple needed, so this does not have to reach for
+// `drizzle.store.enumValues`.
+//
+// That distinction is load-bearing, not stylistic. This schema is built at
+// MODULE scope, and the dashboard router imports this file, so reading
+// `drizzle.<anything>` here executes on every import of the router. Many
+// existing tests stub the db module (`vi.mock("@rovenue/db", () => ({ drizzle: {} }))`),
+// which made `drizzle.store` undefined and crashed 21 unrelated test files
+// at import time with "Cannot read properties of undefined (reading
+// 'enumValues')". Keep module-scope code off the `drizzle` namespace.
 const storeParamSchema = z.object({
-  store: z.enum(drizzle.store.enumValues),
+  store: z.nativeEnum(Store),
 });
 
 const putBodySchema = z

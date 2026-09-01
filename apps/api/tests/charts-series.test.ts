@@ -42,10 +42,21 @@ vi.mock("../src/lib/capabilities", () => ({
   assertProjectCapability: vi.fn(async () => undefined),
 }));
 
-vi.mock("@rovenue/db", () => ({
-  MemberRole: { CUSTOMER_SUPPORT: "CUSTOMER_SUPPORT" },
-  drizzle: {},
-}));
+// Spread the real module and override only `MemberRole` — do NOT replace
+// it wholesale. `drizzle: {}` used to be enough, but the charts route now
+// pulls in `audit.ts`, which destructures `drizzle.schema` at MODULE
+// scope; an empty stub makes that undefined and the file dies at import
+// before a single test runs. Keeping the real `drizzle` namespace is safe
+// here — it is a plain object of repositories, no connection is opened at
+// import, and this file already mocks `assertProjectAccess` and
+// `assertProjectCapability`, so nothing reaches the database.
+vi.mock("@rovenue/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@rovenue/db")>();
+  return {
+    ...actual,
+    MemberRole: { ...actual.MemberRole, CUSTOMER_SUPPORT: "CUSTOMER_SUPPORT" },
+  };
+});
 
 import { Hono } from "hono";
 import { chartsRoute } from "../src/routes/dashboard/charts";
