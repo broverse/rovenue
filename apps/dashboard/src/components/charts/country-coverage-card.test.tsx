@@ -65,6 +65,13 @@ describe("CountryCoverageCard", () => {
     expect(note).toHaveTextContent("30%");
     // No fabricated "Unknown" country row sitting alongside real ones.
     expect(screen.queryByText(/^unknown$/i)).toBeNull();
+    // The prose names the gaps Task 3's matrix actually found. It listed
+    // Stripe renewals and the pre-migration boundary but silently dropped
+    // Google's voided-purchase refunds — an incomplete list presented as
+    // if it were the whole story.
+    expect(note).toHaveTextContent(/stripe/i);
+    expect(note).toHaveTextContent(/voided-purchase/i);
+    expect(note).toHaveTextContent(/before country tracking began/i);
   });
 
   it("renders each known country as its own row", async () => {

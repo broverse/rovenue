@@ -3699,7 +3699,7 @@
     "countryCoverage": {
       "title": "Revenue by country",
       "subtitle": "last {{days}}d",
-      "partialNote": "Country is known for {{pct}}% of events in this window. Stripe subscription renewals and events recorded before country tracking began carry none — treat the rest as unmeasured, not as a small \"Unknown\" country.",
+      "partialNote": "Country is known for {{pct}}% of events in this window. The rest are events whose store sent no country — most often Stripe subscription renewals, Google voided-purchase refunds, or events recorded before country tracking began. Treat them as unmeasured, not as a small \"Unknown\" country.",
       "fullNote": "Country is known for every event in this window.",
       "noKnownCountries": "No events in this window have a known country.",
       "loading": "Loading…",
