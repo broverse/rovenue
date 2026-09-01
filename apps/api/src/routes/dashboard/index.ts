@@ -10,6 +10,7 @@ import { auditLogsRoute } from "./audit-logs";
 import { billingSubRouter } from "./billing";
 import { chartsRoute } from "./charts";
 import { cohortsRoute } from "./cohorts";
+import { commissionRatesRoute } from "./commission-rates";
 import { credentialsRoute } from "./credentials";
 import { customDomainsRoute } from "./custom-domains";
 import { creditsRoute } from "./credits";
@@ -81,6 +82,7 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/billing", billingSubRouter)
   .route("/projects/:projectId/charts", chartsRoute)
   .route("/projects/:projectId/cohorts", cohortsRoute)
+  .route("/projects/:projectId/commission-rates", commissionRatesRoute)
   .route("/projects/:projectId/credentials", credentialsRoute)
   .route("/projects/:projectId/credits", creditsRoute)
   .route("/projects/:projectId/custom-domains", customDomainsRoute)

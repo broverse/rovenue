@@ -1,0 +1,197 @@
+import { drizzle } from "@rovenue/db";
+import type { Db, Store } from "@rovenue/db";
+
+// =============================================================
+// Proceeds after store commission — query-time only
+// =============================================================
+//
+// Design (spec §4.3, .superpowers/sdd/2026-09-01-analytics-integrity-and-
+// proceeds/task-4-context.md):
+//
+//   1. Query time only. A proceeds figure is NEVER written into
+//      `raw_revenue_events` or any aggregate — every function here is
+//      pure or a read, and nothing in this module writes anything. A rate
+//      change must re-compute history, not require rewriting it.
+//   2. Refunds net first, then the rate applies:
+//        proceeds = (gross − refunds) × (1 − rate)
+//      NOT gross × (1 − rate) − refunds. The store returns its own
+//      commission on a refund, so netting before applying the rate is the
+//      economically correct order. See proceeds.test.ts for the pinned
+//      regression covering this.
+//   3. The rate is the customer's statement of their own situation. Apple's
+//      Small Business Program tier depends on the developer's prior-year
+//      proceeds across their WHOLE account (invisible to us), and both
+//      stores apply per-country tax/currency handling we cannot see. We
+//      never infer a rate from revenue, thresholds, or anything else —
+//      doing so would produce a number that looks authoritative and is
+//      not, the same class of error as fabricating a currency.
+//   4. Any caller presenting this number must label it an ESTIMATE with
+//      the applied rate visible next to it — never as a store payout.
+//
+// The rate itself is configured per project per store in
+// `project_store_commission_rates` (packages/db/src/drizzle/schema.ts).
+// No row for a (projectId, store) pair means "no rate configured", which
+// this module surfaces as `null` — never a silently-assumed 0%.
+
+// =============================================================
+// Commission rate presets
+// =============================================================
+//
+// Values are the currently published headline rates, cited at the point
+// of use below. These are PRESETS the dashboard may offer to prefill a
+// custom rate field — they are never applied automatically, and a
+// project always needs an explicit configured row (see rule 3 above).
+
+export const COMMISSION_RATE_PRESETS = {
+  /**
+   * App Store Small Business Program: 15% commission (85% net revenue)
+   * for developers who earned ≤$1M USD in proceeds account-wide in the
+   * prior calendar year (re-qualifies annually).
+   * Source: https://developer.apple.com/app-store/small-business-program/
+   * ("a reduced commission rate of 15% on paid apps and In-App
+   * Purchases") and https://developer.apple.com/app-store/subscriptions/
+   * ("If you're currently enrolled in the App Store Small Business
+   * Program, you receive 85% of the subscription price at each billing
+   * cycle... regardless of whether or not the subscription has
+   * accumulated one year of paid service."). Fetched 2026-09-01.
+   */
+  APPLE_SMALL_BUSINESS: 0.15,
+  /**
+   * App Store standard commission: 30% (70% net revenue) during a
+   * subscriber's first year of paid service (and the default rate for
+   * one-time IAP/paid apps outside the Small Business Program).
+   * Source: https://developer.apple.com/app-store/subscriptions/
+   * ("During a subscriber's first year of service, you receive 70% of
+   * the subscription price at each billing cycle, minus applicable
+   * taxes."). Fetched 2026-09-01. (Apple also drops subscriptions to a
+   * 15% rate after a full year of paid service — a THIRD tier this
+   * module deliberately does not add a dedicated preset for, matching
+   * the brief's "two Apple tiers"; a project in that state uses a
+   * CUSTOM rate.)
+   */
+  APPLE_STANDARD: 0.3,
+  /**
+   * Google Play service fee for auto-renewing subscriptions: a flat 15%
+   * regardless of the developer's annual revenue (unlike Google's
+   * non-subscription tiers, which step from 15% to 30% at the $1M/year
+   * mark). Chosen as "the Google equivalent" preset because Rovenue is a
+   * subscription/credit-management product — this is the rate that
+   * applies to the transactions this project actually tracks.
+   * Source: https://support.google.com/googleplay/android-developer/answer/112622
+   * ("Subscriptions: 15% for automatically renewing subscription
+   * products purchased by subscribers, regardless of revenue earned by
+   * the developer each year."). Fetched 2026-09-01.
+   */
+  GOOGLE_STANDARD: 0.15,
+} as const;
+
+export type CommissionRatePreset = keyof typeof COMMISSION_RATE_PRESETS;
+
+// =============================================================
+// Pure arithmetic
+// =============================================================
+
+function assertValidRate(rate: number): void {
+  if (!Number.isFinite(rate) || rate < 0 || rate > 1) {
+    throw new Error(
+      `computeProceeds: rate must be a finite number in [0, 1], got ${rate}`,
+    );
+  }
+}
+
+/**
+ * proceeds = netRevenue × (1 − rate).
+ *
+ * `netRevenue` must already have refunds subtracted — see
+ * `computeNetRevenue` / `computeProceedsFromGrossAndRefunds` for the
+ * caller-facing helper that gets the ordering right.
+ */
+export function computeProceeds(netRevenue: number, rate: number): number {
+  assertValidRate(rate);
+  return netRevenue * (1 - rate);
+}
+
+/** gross − refunds. Refunds are expected as a positive amount (this
+ * codebase's convention — see `refund_amountusd_positive_convention`). */
+export function computeNetRevenue(gross: number, refunds: number): number {
+  return gross - refunds;
+}
+
+/**
+ * The composed, caller-facing helper: nets refunds from gross FIRST, then
+ * applies the commission rate. This is the one function callers should
+ * reach for — it makes the correct ordering the only option.
+ */
+export function computeProceedsFromGrossAndRefunds(
+  gross: number,
+  refunds: number,
+  rate: number,
+): number {
+  return computeProceeds(computeNetRevenue(gross, refunds), rate);
+}
+
+// =============================================================
+// Rate resolution (Postgres-backed)
+// =============================================================
+
+/**
+ * Read the configured commission rate for a project+store. Returns
+ * `null` when nothing has been configured — the caller's signal to
+ * render "no proceeds estimate available", never a silently-assumed 0%.
+ */
+export async function resolveCommissionRate(
+  db: Db,
+  projectId: string,
+  store: Store,
+): Promise<number | null> {
+  const row = await drizzle.commissionRateRepo.getCommissionRate(
+    db,
+    projectId,
+    store,
+  );
+  return row ? Number(row.rate) : null;
+}
+
+export interface ComputeProceedsForProjectInput {
+  projectId: string;
+  store: Store;
+  gross: number;
+  refunds: number;
+}
+
+export interface ProceedsEstimate {
+  /** The configured rate actually applied, or `null` if none is configured. */
+  rate: number | null;
+  /**
+   * The estimate, or `null` when no rate is configured for this
+   * project+store — deliberately NOT 0, which would misrepresent an
+   * unconfigured project as a 100%-proceeds one.
+   */
+  proceeds: number | null;
+}
+
+/**
+ * Resolve the configured rate for (projectId, store) and compute the
+ * proceeds estimate from it, at query time, from the caller-supplied
+ * gross/refunds for whatever period they're asking about. Nothing here
+ * is persisted — call it again after the customer edits their configured
+ * rate and the same historical gross/refunds re-compute under the new
+ * rate.
+ */
+export async function computeProceedsForProject(
+  db: Db,
+  input: ComputeProceedsForProjectInput,
+): Promise<ProceedsEstimate> {
+  const rate = await resolveCommissionRate(db, input.projectId, input.store);
+  if (rate === null) {
+    return { rate: null, proceeds: null };
+  }
+  return {
+    rate,
+    proceeds: computeProceedsFromGrossAndRefunds(
+      input.gross,
+      input.refunds,
+      rate,
+    ),
+  };
+}

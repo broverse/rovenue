@@ -1249,6 +1249,61 @@ export const revenueEventDedupe = pgTable(
 );
 
 // =============================================================
+// project_store_commission_rates (Task 4: query-time proceeds)
+// =============================================================
+//
+// Home chosen over a `projects` column: this is per-project *and*
+// per-store (a project selling on both App Store and Play Store can
+// run different rates on each), so a single scalar column would have
+// to hold a map — a dedicated table with `store` in the key gets one
+// typed row per (project, store) instead, plus a normal FK/cascade
+// and a CHECK constraint the DB enforces on every writer.
+//
+// The rate is the customer's own statement of their situation — Apple's
+// Small Business Program tier depends on the developer's prior-year
+// proceeds across their WHOLE account (invisible to us), and both stores
+// apply per-country tax/currency handling we cannot see. We never infer
+// this value from revenue, thresholds, or anything else; see
+// apps/api/src/services/metrics/proceeds.ts for the preset constants and
+// the query-time arithmetic. Absence of a row for (projectId, store) means
+// "no rate configured" — callers must render "no estimate available", never
+// silently substitute 0%.
+export const projectStoreCommissionRates = pgTable(
+  "project_store_commission_rates",
+  {
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    store: store("store").notNull(),
+    // Fraction in [0, 1] (0.15 == 15%). precision/scale mirror other
+    // rate-shaped numerics in this file (e.g. billingTierLimits.mtrMin).
+    rate: numeric("rate", { precision: 5, scale: 4 }).notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    // One configured rate per (project, store) — query-time proceeds needs
+    // an unambiguous answer, and a second row for the same store would be
+    // one. Composite PK also matches this file's convention for pure
+    // per-project config rows (see billingTierLimits' (tier, cycle) PK).
+    pk: primaryKey({ columns: [t.projectId, t.store] }),
+    rateBounds: check(
+      "project_store_commission_rates_rate_bounds",
+      sql`${t.rate} >= 0 AND ${t.rate} <= 1`,
+    ),
+  }),
+);
+
+export type ProjectStoreCommissionRate =
+  typeof projectStoreCommissionRates.$inferSelect;
+export type NewProjectStoreCommissionRate =
+  typeof projectStoreCommissionRates.$inferInsert;
+
+// =============================================================
 // audiences (sift-style targeting rules)
 // =============================================================
 
