@@ -47,16 +47,60 @@ export interface PartitionMaintenanceResult {
 export async function runPartitionMaintenance(): Promise<PartitionMaintenanceResult> {
   const db = getDb();
 
-  // pg_partman handles revenue_events + credit_ledger
-  // (premake & retention).
-  await db.execute(sql`SELECT partman.run_maintenance_proc()`);
-  log.info("partman.run_maintenance_proc completed");
+  // pg_partman handles revenue_events + credit_ledger (premake &
+  // retention) — but ONLY on databases that actually ran migration
+  // 0019. A fresh-install database never does: `fresh-install.ts`
+  // marks the TimescaleDB-era migrations applied-without-executing,
+  // and 0019 falls in that range. So self-hosted installs, CI and the
+  // test databases have no `partman` schema at all, and calling
+  // run_maintenance_proc() there throws before this worker reaches
+  // the outgoing_webhooks step below. Skip it when absent rather than
+  // failing the whole run — the hand-rolled partitions are exactly
+  // what those databases depend on.
+  const partmanRan = await runPartmanMaintenanceIfInstalled(db);
 
   // Hand-roll the next-month partition for outgoing_webhooks. This
   // is idempotent — `IF NOT EXISTS` guards re-runs.
   const manualPartitionsCreated = await createOutgoingWebhooksPartition();
 
-  return { partmanRan: true, manualPartitionsCreated };
+  return { partmanRan, manualPartitionsCreated };
+}
+
+async function runPartmanMaintenanceIfInstalled(
+  db: ReturnType<typeof getDb>,
+): Promise<boolean> {
+  const installed = await db.execute<{ present: boolean }>(
+    sql`SELECT EXISTS (
+          SELECT 1 FROM pg_namespace WHERE nspname = 'partman'
+        ) AS present`,
+  );
+  if (!installed.rows[0]?.present) {
+    log.info("partman schema absent — skipping run_maintenance_proc", {
+      reason: "migration 0019 does not execute on fresh-install databases",
+    });
+    return false;
+  }
+  // `run_maintenance_proc` is a PROCEDURE, not a function — `SELECT`
+  // on it fails with 42809 "To call a procedure, use CALL". This was
+  // the third independent reason this worker had never completed.
+  await db.execute(sql`CALL partman.run_maintenance_proc()`);
+  log.info("partman.run_maintenance_proc completed");
+  return true;
+}
+
+// Partition bounds are inlined rather than bound (see below), so the
+// value is checked against the exact shape Date#toISOString() emits
+// before it ever reaches the statement. Anything else is a bug in the
+// caller, not a value to escape.
+const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+function assertIsoTimestamp(value: string): string {
+  if (!ISO_TIMESTAMP_PATTERN.test(value)) {
+    throw new Error(
+      `partition-maintenance: refusing to inline a non-ISO timestamp: ${value}`,
+    );
+  }
+  return value;
 }
 
 async function createOutgoingWebhooksPartition(): Promise<number> {
@@ -87,10 +131,20 @@ async function createOutgoingWebhooksPartition(): Promise<number> {
     const endIso = end.toISOString();
     // CREATE TABLE IF NOT EXISTS ... PARTITION OF is supported on
     // PG 11+; the IF NOT EXISTS clause makes this idempotent.
+    //
+    // Partition bounds must be CONSTANTS. Interpolating them through
+    // drizzle's `sql` tag binds them as $1/$2, which Postgres rejects
+    // at PARSE time — before IF NOT EXISTS can short-circuit — so the
+    // original form threw on the very first loop iteration whether or
+    // not the partition already existed. That is why this worker had
+    // never once completed. The values are machine-generated from
+    // Date#toISOString(), never user input, and are asserted below
+    // before being inlined.
     const result = await db.execute(sql`
       CREATE TABLE IF NOT EXISTS ${sql.raw(`"${partition}"`)}
         PARTITION OF "outgoing_webhooks"
-        FOR VALUES FROM (${startIso}) TO (${endIso})
+        FOR VALUES FROM (${sql.raw(`'${assertIsoTimestamp(startIso)}'`)})
+                     TO (${sql.raw(`'${assertIsoTimestamp(endIso)}'`)})
     `);
     // node-postgres CREATE TABLE returns command without rowCount;
     // count "created" loosely — log per partition for ops audit.
