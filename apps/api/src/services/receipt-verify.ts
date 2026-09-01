@@ -320,6 +320,9 @@ async function verifyAppleReceipt(
       metadata: args.presentedContext
         ? { presentedContext: args.presentedContext }
         : undefined,
+      // The store's own per-transaction country (never the subscriber's
+      // last-known SDK-reported one — see CreateRevenueEventInput.country).
+      country: transaction.storefront || null,
       eventDate: new Date(transaction.purchaseDate),
       dedupeKey: `apple:${transaction.transactionId}:${revenueDedupeKind(type)}`,
     });

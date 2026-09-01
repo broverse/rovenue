@@ -163,6 +163,73 @@ describe("createRevenueEvent", () => {
     expect(outboxRows[0]!.eventType).toBe("revenue.event.recorded");
   });
 
+  it("folds a store-supplied country into the outbox payload as a top-level field", async () => {
+    const project = await seedProject();
+    const subscriber = await seedSubscriber(project.id);
+    const product = await seedProduct(project.id);
+    const purchase = await seedPurchase(project.id, subscriber.id, product.id);
+
+    const inserted = await createRevenueEvent(db, {
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      purchaseId: purchase.id,
+      productId: product.id,
+      type: "INITIAL",
+      amount: "9.9900",
+      currency: "USD",
+      amountUsd: "9.9900",
+      store: "APP_STORE",
+      eventDate: new Date("2026-04-24T00:00:00Z"),
+      country: "USA",
+    });
+
+    // Assert on the real stored row, not createRevenueEvent's return value.
+    const [outboxRow] = await db
+      .select()
+      .from(schema.outboxEvents)
+      .where(
+        and(
+          eq(schema.outboxEvents.aggregateType, "REVENUE_EVENT"),
+          eq(schema.outboxEvents.aggregateId, inserted.id),
+        ),
+      );
+    const payload = outboxRow!.payload as Record<string, unknown>;
+    expect(payload.country).toBe("USA");
+  });
+
+  it("omits the country key entirely when the store supplied none — no empty-string stand-in", async () => {
+    const project = await seedProject();
+    const subscriber = await seedSubscriber(project.id);
+    const product = await seedProduct(project.id);
+    const purchase = await seedPurchase(project.id, subscriber.id, product.id);
+
+    const inserted = await createRevenueEvent(db, {
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      purchaseId: purchase.id,
+      productId: product.id,
+      type: "INITIAL",
+      amount: "9.9900",
+      currency: "USD",
+      amountUsd: "9.9900",
+      store: "APP_STORE",
+      eventDate: new Date("2026-04-24T00:00:00Z"),
+      // country omitted — mirrors a store transaction with no storefront.
+    });
+
+    const [outboxRow] = await db
+      .select()
+      .from(schema.outboxEvents)
+      .where(
+        and(
+          eq(schema.outboxEvents.aggregateType, "REVENUE_EVENT"),
+          eq(schema.outboxEvents.aggregateId, inserted.id),
+        ),
+      );
+    const payload = outboxRow!.payload as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("country");
+  });
+
   it("findRevenueEventById returns the row by id, scoped fields intact", async () => {
     const project = await seedProject();
     const subscriber = await seedSubscriber(project.id);

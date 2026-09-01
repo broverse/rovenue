@@ -122,6 +122,21 @@ export interface CreateRevenueEventInput {
    * the CH revenue pipeline.
    */
   metadata?: Record<string, unknown> | null;
+  /**
+   * The store's own per-transaction country — e.g. Apple's `storefront`
+   * (a 3-letter storefront code on the decoded JWS transaction). This is
+   * a fact about where THIS transaction happened, sourced from the store
+   * itself; it must never be filled in from a subscriber's last-known
+   * SDK-reported country, which is a different fact and can be stale or
+   * absent entirely. Folded into the co-located outbox row's payload as
+   * a top-level `country` field (alongside `store`/`currency`) so
+   * `mv_revenue_to_raw` can extract it directly — never written to
+   * ClickHouse directly, the outbox is the only path. Omit (or pass
+   * null/empty) when the store didn't supply one for this transaction;
+   * a missing payload key resolves to `raw_revenue_events.country`'s
+   * `DEFAULT ''`, the same absence convention `placementId` etc. use.
+   */
+  country?: string | null;
 }
 
 /**
@@ -237,6 +252,7 @@ async function insertRevenueRow(
       amountUsd: inserted.amountUsd,
       currency: inserted.currency,
       eventDate: inserted.eventDate.toISOString(),
+      ...(input.country ? { country: input.country } : {}),
       ...(input.metadata ? { metadata: input.metadata } : {}),
     },
   });

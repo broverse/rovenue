@@ -1098,6 +1098,9 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
     currency: tx.currency,
     amountUsd: amountUsd.toString(),
     store: Store.APP_STORE,
+    // The store's own per-transaction country (never the subscriber's
+    // last-known SDK-reported one — see CreateRevenueEventInput.country).
+    country: tx.storefront || null,
     eventDate: new Date(tx.purchaseDate),
     // transactionId is unique per Apple transaction (renewals get a new
     // one); the coarse kind lets the receipt-verify path converge on the

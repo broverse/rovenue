@@ -241,15 +241,13 @@ export async function readHeatmap(
 // error 47 (UNKNOWN_IDENTIFIER) — and had no consumer anywhere in
 // the dashboard. Do not reintroduce it without a real column.
 //
-// `country` also referenced a non-existent column (`subscriberCountry`)
-// and is left returning an empty list rather than removed, because a
-// real per-transaction country DOES belong here — see
-// docs/superpowers/specs/2026-09-01-analytics-integrity-and-proceeds-design.md
-// §4.2 (Task 2 of that plan adds it, sourced from the store's own
-// per-transaction country, e.g. Apple's `storefront`/`storefrontId` —
+// `country` previously referenced a non-existent column
+// (`subscriberCountry`). It is real now (migration 0023): sourced from
+// the store's own per-transaction country — e.g. Apple's `storefront` —
 // never the subscriber's last-known SDK-reported country, which is a
-// different fact). Do not query a column that does not exist to fill
-// this in the meantime.
+// different fact. See
+// docs/superpowers/specs/2026-09-01-analytics-integrity-and-proceeds-design.md
+// §4.2. Do not reintroduce a subscriber-attribute fallback for this.
 
 interface ChDistinctRow {
   value: string;
@@ -297,12 +295,7 @@ export async function readFilterOptions(
   const to = toDateOnly(w.to);
 
   const platform = await distinctDimension(projectId, "store", from, to);
-
-  // `country`: no column on `raw_revenue_events` supplies this yet — see
-  // the doc comment above the section header. Returning `[]` rather than
-  // querying a non-existent column is the whole fix; do not "restore" this
-  // with `subscriberCountry` or any subscriber-attribute fallback.
-  const country: ChartFilterOption[] = [];
+  const country = await distinctDimension(projectId, "country", from, to);
 
   return {
     windowDays: w.days,
