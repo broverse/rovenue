@@ -1670,8 +1670,7 @@
         "kind": {
           "label": "Test type",
           "paywall": "Paywall",
-          "element": "Element",
-          "elementComingSoon": "Coming soon"
+          "element": "Element"
         },
         "name": {
           "label": "Name"
@@ -1714,6 +1713,18 @@
           "viewResultsLink": "View results",
           "darkPlacementWarning": "This experiment completed without a winner and a placement row still targets it — that row won't serve until you repoint it.",
           "darkPlacementWarningWithWinner": "This placement still targets a completed experiment — point it at a paywall to resume serving."
+        },
+        "element": {
+          "label": "Element",
+          "loading": "Reading the published version…",
+          "neverPublished": "This paywall has never been published, so there is nothing for an element test to change. Publish it first.",
+          "noSelection": "Select an element on the canvas to test it.",
+          "notPublished": "This element is not in the published version yet, so a test on it could never reach devices. Publish the paywall first.",
+          "noOverridableProps": "This element has no properties that can be varied per variant.",
+          "selected": "Testing {{type}} “{{id}}” from the published version.",
+          "prop": "Property",
+          "variantA": "A (published)",
+          "variantB": "B (candidate)"
         }
       },
       "locales": {

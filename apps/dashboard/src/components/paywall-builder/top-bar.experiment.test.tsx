@@ -74,6 +74,8 @@ vi.mock("./start-modal", () => ({ StartModal: () => null }));
 vi.mock("./device-preview-modal", () => ({ DevicePreviewModal: () => null }));
 
 vi.mock("../../lib/hooks/useExperiments", () => ({
+  // The popover creates ELEMENT experiments through the shared endpoint.
+  useCreateExperiment: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useExperiments: vi.fn(),
   useStartExperiment: vi.fn(),
 }));

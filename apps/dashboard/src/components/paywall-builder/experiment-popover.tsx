@@ -20,12 +20,19 @@ import { useExperiments, useStartExperiment } from "../../lib/hooks/useExperimen
 import { useProjectPaywalls } from "../../lib/hooks/useProjectPaywalls";
 import { useProjectPlacements } from "../../lib/hooks/useProjectPlacements";
 import { useAudiences } from "../../lib/hooks/useProjectAdmin";
+import { useCreateExperiment } from "../../lib/hooks/useExperiments";
+import { usePublishedPaywallConfig } from "../../lib/hooks/usePublishedPaywallConfig";
+import { findNode, OVERRIDABLE_PROP_KEYS } from "@rovenue/shared/paywall";
 
 type Props = { onClose: () => void };
 
 /** Server-assigned variant ids for a builder-launched A/B (paywalls.ts §6.19) — never client-chosen. */
 const VARIANT_A_ID = "a";
 const VARIANT_B_ID = "b";
+
+/** An element test is a straight 50/50 between the published value and the
+ *  candidate — there is no third thing to weight. */
+const ELEMENT_VARIANT_WEIGHT = 0.5;
 
 /** `<select>` sentinel meaning "no match-all audience exists yet — one will be created". */
 const EVERYONE_WILL_BE_CREATED_VALUE = "";
@@ -143,6 +150,7 @@ function statusLabel(
  */
 export const ExperimentPopover = component(({ onClose }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
+  const createElementExperiment = useCreateExperiment();
   const { t } = useTranslation();
 
   const projectId = vm.projectId;
@@ -157,6 +165,11 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
   const launchExperiment = useLaunchExperiment(projectId, paywallId);
 
   const [kind, setKind] = useState<ExperimentKind>("PAYWALL");
+  // Element mode varies ONE prop of the node the designer already selected
+  // on the canvas — the natural builder gesture, and the only node we can
+  // be sure they mean.
+  const [elementProp, setElementProp] = useState<string | null>(null);
+  const [elementVariantB, setElementVariantB] = useState("");
   const [name, setName] = useState<string | null>(null);
   const [variantBKind, setVariantBKind] = useState<VariantBKind>("duplicate");
   const [duplicateName, setDuplicateName] = useState<string | null>(null);
@@ -225,20 +238,136 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
 
   const defaultName = paywall ? `${paywall.name} A/B` : "";
   const defaultDuplicateName = paywall ? `${paywall.name} (B)` : "";
+  // ----- Element mode -----
+  // The builder canvas edits the DRAFT, but an element experiment is
+  // validated server-side against the PUBLISHED version, because a patch
+  // can only apply to what `/v1/placements` actually serves. Building the
+  // picker from the draft would offer nodes the API rejects at submit, so
+  // everything below reads the published tree.
+  const published = usePublishedPaywallConfig(
+    projectId,
+    paywall?.id,
+    kind === "ELEMENT",
+  );
+  const selectedNodeId = vm.selectedNodeId;
+  const publishedNode =
+    published.config && selectedNodeId
+      ? findNode(published.config.root, selectedNodeId)
+      : null;
+  const overridableProps: readonly string[] = publishedNode
+    ? OVERRIDABLE_PROP_KEYS[publishedNode.type]
+    : [];
+  const elementPropValue =
+    elementProp ?? (overridableProps.length > 0 ? overridableProps[0]! : null);
+  const variantAValue =
+    publishedNode && elementPropValue
+      ? String(
+          (publishedNode as unknown as Record<string, unknown>)[
+            elementPropValue
+          ] ?? "",
+        )
+      : "";
+  /** Why the element form cannot be submitted yet, or null when it can. */
+  const elementBlocker: string | null = (() => {
+    if (published.isLoading) return null;
+    if (!published.hasPublishedVersion) {
+      return t(
+        "paywalls.builder.experiment.element.neverPublished",
+        "This paywall has never been published, so there is nothing for an element test to change. Publish it first.",
+      );
+    }
+    if (!selectedNodeId) {
+      return t(
+        "paywalls.builder.experiment.element.noSelection",
+        "Select an element on the canvas to test it.",
+      );
+    }
+    if (!publishedNode) {
+      return t(
+        "paywalls.builder.experiment.element.notPublished",
+        "This element is not in the published version yet, so a test on it could never reach devices. Publish the paywall first.",
+      );
+    }
+    if (overridableProps.length === 0) {
+      return t(
+        "paywalls.builder.experiment.element.noOverridableProps",
+        "This element has no properties that can be varied per variant.",
+      );
+    }
+    return null;
+  })();
+
   const nameValue = name ?? defaultName;
   const duplicateNameValue = duplicateName ?? defaultDuplicateName;
 
   const otherPaywalls = paywall ? paywalls.filter((p) => p.id !== paywall.id) : paywalls;
 
-  const canCreate =
+  const canCreateElement =
     Boolean(paywall) &&
     nameValue.trim().length > 0 &&
-    (variantBKind === "duplicate"
-      ? duplicateNameValue.trim().length > 0
-      : existingPaywallId.length > 0);
+    elementBlocker === null &&
+    !published.isLoading &&
+    elementPropValue !== null &&
+    elementVariantB.trim().length > 0 &&
+    elementVariantB.trim() !== variantAValue;
+
+  const canCreate =
+    kind === "ELEMENT"
+      ? canCreateElement
+      : Boolean(paywall) &&
+        nameValue.trim().length > 0 &&
+        (variantBKind === "duplicate"
+          ? duplicateNameValue.trim().length > 0
+          : existingPaywallId.length > 0);
 
   const handleCreate = () => {
     if (!paywall || !canCreate) return;
+    if (kind === "ELEMENT") {
+      if (!selectedNodeId || !elementPropValue) return;
+      // Launching an element experiment must NOT write to the paywall: the
+      // builder autosaves, and a server-side write to the body would be
+      // clobbered by the next autosave (the client-side-apply invariant).
+      // This creates an experiment that REFERENCES the paywall.
+      createElementExperiment.mutate(
+        {
+          projectId,
+          name: nameValue.trim(),
+          type: "ELEMENT",
+          audienceId: selectedAudienceId,
+          variants: [
+            {
+              id: VARIANT_A_ID,
+              name: "A",
+              value: {
+                paywallId: paywall.id,
+                nodeId: selectedNodeId,
+                props: { [elementPropValue]: variantAValue },
+              },
+              weight: ELEMENT_VARIANT_WEIGHT,
+            },
+            {
+              id: VARIANT_B_ID,
+              name: "B",
+              value: {
+                paywallId: paywall.id,
+                nodeId: selectedNodeId,
+                props: { [elementPropValue]: elementVariantB.trim() },
+              },
+              weight: ELEMENT_VARIANT_WEIGHT,
+            },
+          ],
+        },
+        {
+          // `useCreateExperiment` already returns `{ experiment }`, the same
+          // shape the PAYWALL launch returns, so the success panel is shared.
+          // An element test creates no paywall — it patches nodes of the one
+          // already open, which is the point of the mode.
+          onSuccess: (created) =>
+            setJustCreated({ ...created, createdPaywallId: null }),
+        },
+      );
+      return;
+    }
     const vars: LaunchExperimentVars = {
       name: nameValue.trim(),
       variantB:
@@ -460,19 +589,22 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                     />
                     {t("paywalls.builder.experiment.kind.paywall", "Paywall")}
                   </label>
-                  <label className="flex-1 cursor-not-allowed rounded-md border border-rv-divider bg-rv-c2 px-3 py-2 text-[12px] text-rv-mute-500 opacity-60">
+                  <label
+                    className={cn(
+                      "flex-1 cursor-pointer rounded-md border px-3 py-2 text-[12px] transition",
+                      kind === "ELEMENT"
+                        ? "border-rv-accent-500 bg-rv-accent-500/10 text-foreground"
+                        : "border-rv-divider bg-rv-c2 text-rv-mute-600",
+                    )}
+                  >
                     <input
                       type="radio"
                       name="experiment-kind"
                       className="mr-1.5"
-                      checked={false}
-                      disabled
-                      readOnly
+                      checked={kind === "ELEMENT"}
+                      onChange={() => setKind("ELEMENT")}
                     />
                     {t("paywalls.builder.experiment.kind.element", "Element")}
-                    <span className="ml-1.5 rounded bg-rv-c4 px-1 py-0.5 text-[10px]">
-                      {t("paywalls.builder.experiment.kind.elementComingSoon", "Coming soon")}
-                    </span>
                   </label>
                 </div>
               </div>
@@ -484,6 +616,71 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                 <Input value={nameValue} onChange={(e) => setName(e.target.value)} />
               </label>
 
+              {kind === "ELEMENT" ? (
+                <div className="flex flex-col gap-2">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-rv-mute-500">
+                    {t("paywalls.builder.experiment.element.label", "Element")}
+                  </span>
+                  {published.isLoading ? (
+                    <p className="m-0 text-[12px] text-rv-mute-500">
+                      {t(
+                        "paywalls.builder.experiment.element.loading",
+                        "Reading the published version…",
+                      )}
+                    </p>
+                  ) : elementBlocker ? (
+                    <p
+                      role="status"
+                      className="m-0 rounded-md border border-rv-warning/40 bg-rv-warning/10 px-3 py-2 text-[12px] text-foreground"
+                    >
+                      {elementBlocker}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="m-0 text-[12px] text-rv-mute-600">
+                        {t(
+                          "paywalls.builder.experiment.element.selected",
+                          "Testing {{type}} “{{id}}” from the published version.",
+                          { type: publishedNode!.type, id: selectedNodeId },
+                        )}
+                      </p>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-[11px] text-rv-mute-500">
+                          {t("paywalls.builder.experiment.element.prop", "Property")}
+                        </span>
+                        <NativeSelect
+                          value={elementPropValue ?? ""}
+                          onChange={(e) => {
+                            setElementProp(e.target.value);
+                            setElementVariantB("");
+                          }}
+                        >
+                          {overridableProps.map((prop) => (
+                            <option key={prop} value={prop}>
+                              {prop}
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      </label>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-[11px] text-rv-mute-500">
+                          {t("paywalls.builder.experiment.element.variantA", "A (published)")}
+                        </span>
+                        <Input value={variantAValue} readOnly disabled />
+                      </label>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-[11px] text-rv-mute-500">
+                          {t("paywalls.builder.experiment.element.variantB", "B (candidate)")}
+                        </span>
+                        <Input
+                          value={elementVariantB}
+                          onChange={(e) => setElementVariantB(e.target.value)}
+                        />
+                      </label>
+                    </>
+                  )}
+                </div>
+              ) : (
               <div className="flex flex-col gap-2">
                 <span className="text-[11px] font-medium uppercase tracking-wide text-rv-mute-500">
                   {t("paywalls.builder.experiment.variantB.label", "Variant B")}
@@ -540,6 +737,7 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                   </NativeSelect>
                 )}
               </div>
+              )}
 
               <label className="flex flex-col gap-1.5">
                 <span className="text-[11px] font-medium uppercase tracking-wide text-rv-mute-500">

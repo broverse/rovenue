@@ -8,17 +8,26 @@ import "../../i18n/config";
 import { ExperimentPopover } from "./experiment-popover";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../lib/services/paywall-builder-api";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
-import { emptyBuilderConfig } from "@rovenue/shared/paywall";
+import {
+  emptyBuilderConfig,
+  OVERRIDABLE_PROP_KEYS,
+  type BuilderConfig,
+} from "@rovenue/shared/paywall";
 import type {
   AudienceRow,
   DashboardPaywallRow,
   DashboardPlacementRow,
   ExperimentListItem,
 } from "@rovenue/shared";
-import { useExperiments, useStartExperiment } from "../../lib/hooks/useExperiments";
+import {
+  useCreateExperiment,
+  useExperiments,
+  useStartExperiment,
+} from "../../lib/hooks/useExperiments";
 import { useProjectPaywalls } from "../../lib/hooks/useProjectPaywalls";
 import { useProjectPlacements } from "../../lib/hooks/useProjectPlacements";
 import { useAudiences } from "../../lib/hooks/useProjectAdmin";
+import { usePublishedPaywallConfig } from "../../lib/hooks/usePublishedPaywallConfig";
 
 // =============================================================
 // ExperimentPopover — atomic paywall A/B launch (§3.1). Mounting idiom
@@ -77,6 +86,9 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../../lib/hooks/useExperiments", () => ({
   useExperiments: vi.fn(),
   useStartExperiment: vi.fn(),
+  // Element mode creates through the SHARED experiments endpoint, not the
+  // popover's file-local paywall-launch mutation.
+  useCreateExperiment: vi.fn(),
 }));
 vi.mock("../../lib/hooks/useProjectPaywalls", () => ({
   useProjectPaywalls: vi.fn(),
@@ -86,6 +98,12 @@ vi.mock("../../lib/hooks/useProjectPlacements", () => ({
 }));
 vi.mock("../../lib/hooks/useProjectAdmin", () => ({
   useAudiences: vi.fn(),
+}));
+// Element mode reads the PUBLISHED tree (not the draft the canvas edits),
+// so the tests drive that hook directly rather than faking two version
+// endpoints through the transport mock.
+vi.mock("../../lib/hooks/usePublishedPaywallConfig", () => ({
+  usePublishedPaywallConfig: vi.fn(),
 }));
 
 const launchPost = vi.hoisted(() => vi.fn());
@@ -110,6 +128,15 @@ const mockedUseStartExperiment = vi.mocked(useStartExperiment);
 const mockedUseProjectPaywalls = vi.mocked(useProjectPaywalls);
 const mockedUseProjectPlacements = vi.mocked(useProjectPlacements);
 const mockedUseAudiences = vi.mocked(useAudiences);
+const mockedUseCreateExperiment = vi.mocked(useCreateExperiment);
+const mockedUsePublishedConfig = vi.mocked(usePublishedPaywallConfig);
+const createElementMutate = vi.fn();
+
+function createExperimentResult() {
+  return { mutate: createElementMutate, isPending: false, isError: false } as unknown as ReturnType<
+    typeof useCreateExperiment
+  >;
+}
 
 function experimentsResult(data: ExperimentListItem[]) {
   return { data, isLoading: false, error: null } as unknown as ReturnType<typeof useExperiments>;
@@ -279,10 +306,16 @@ beforeEach(() => {
     experiment: fakeExperiment(),
     createdPaywallId: "pw_b",
   });
+  mockedUseCreateExperiment.mockReturnValue(createExperimentResult());
+  mockedUsePublishedConfig.mockReturnValue({
+    config: null,
+    hasPublishedVersion: false,
+    isLoading: false,
+  });
 });
 
 describe("ExperimentPopover — create-form branch", () => {
-  it("renders with duplicate variant B preselected and ELEMENT disabled", async () => {
+  it("renders with duplicate variant B preselected and ELEMENT selectable", async () => {
     await renderPopover();
 
     expect(screen.getByDisplayValue("Main paywall A/B")).toBeInTheDocument();
@@ -293,9 +326,12 @@ describe("ExperimentPopover — create-form branch", () => {
     expect(existingRadio).not.toBeChecked();
     expect(screen.getByDisplayValue("Main paywall (B)")).toBeInTheDocument();
 
+    // Element mode is live as of the decision-engine work; it used to be a
+    // disabled radio labelled "Coming soon".
     const elementRadio = screen.getByRole("radio", { name: /element/i });
-    expect(elementRadio).toBeDisabled();
-    expect(screen.getByText("Coming soon")).toBeInTheDocument();
+    expect(elementRadio).toBeEnabled();
+    expect(elementRadio).not.toBeChecked();
+    expect(screen.queryByText("Coming soon")).not.toBeInTheDocument();
   });
 });
 
@@ -578,5 +614,124 @@ describe("ExperimentPopover — multi-candidate placement selection", () => {
         }),
       }),
     );
+  });
+});
+
+// =============================================================
+// Element mode
+// =============================================================
+//
+// The builder canvas edits the DRAFT; an element experiment is validated
+// server-side against the PUBLISHED version, because a patch can only
+// apply to what /v1/placements serves. So the picker is built from the
+// published tree, and the two blocked states below are the ones a designer
+// would otherwise only discover as a rejection at submit.
+
+function publishedConfigWithDivider(): BuilderConfig {
+  const cfg = emptyBuilderConfig("en");
+  return {
+    ...cfg,
+    root: {
+      ...cfg.root,
+      children: [{ type: "divider", id: "n_div", thickness: 1 }],
+    },
+  } as BuilderConfig;
+}
+
+async function renderInElementMode(
+  published: ReturnType<typeof usePublishedPaywallConfig>,
+  selectedNodeId: string | null,
+) {
+  mockedUsePublishedConfig.mockReturnValue(published);
+  const r = await renderPopover();
+  await act(async () => {
+    // `selectedNodeId` is a read-only reactive getter — go through the VM's
+    // own selection method, as the canvas does.
+    r.vm.selectNode(selectedNodeId);
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("radio", { name: /element/i }));
+  });
+  return r;
+}
+
+describe("ExperimentPopover — element mode", () => {
+  it("blocks and explains when the paywall has never been published", async () => {
+    await renderInElementMode(
+      { config: null, hasPublishedVersion: false, isLoading: false },
+      "n_div",
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(/never been published/i);
+    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
+  });
+
+  it("blocks when the selected node exists only in the draft, naming the reason", async () => {
+    // The canvas shows the node, the published tree does not — the exact
+    // gap that would otherwise surface as an opaque 400 at submit.
+    await renderInElementMode(
+      {
+        config: publishedConfigWithDivider(),
+        hasPublishedVersion: true,
+        isLoading: false,
+      },
+      "n_added_in_draft",
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /not in the published version yet/i,
+    );
+    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
+  });
+
+  it("offers only props from OVERRIDABLE_PROP_KEYS and posts a patch for the selected node WITHOUT mutating the paywall", async () => {
+    await renderInElementMode(
+      {
+        config: publishedConfigWithDivider(),
+        hasPublishedVersion: true,
+        isLoading: false,
+      },
+      "n_div",
+    );
+
+    // Derived from the schema, never a hand-written list — the override
+    // editor's hand-written union is exactly how trialLabelKey went missing.
+    const options = screen
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value)
+      .filter((v) => OVERRIDABLE_PROP_KEYS.divider.includes(v as never));
+    expect(options).toEqual([...OVERRIDABLE_PROP_KEYS.divider]);
+
+    // Switch off the first-listed prop ("color") to prove the selector
+    // drives the payload, and that switching resets the candidate value.
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/property/i), {
+        target: { value: "thickness" },
+      });
+    });
+
+    const candidate = screen.getByLabelText(/B \(candidate\)/i);
+    await act(async () => {
+      fireEvent.change(candidate, { target: { value: "8" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /create/i }));
+    });
+
+    expect(createElementMutate).toHaveBeenCalledTimes(1);
+    const vars = createElementMutate.mock.calls[0]![0] as {
+      type: string;
+      variants: Array<{ id: string; value: unknown; weight: number }>;
+    };
+    expect(vars.type).toBe("ELEMENT");
+    expect(vars.variants.map((v) => v.value)).toEqual([
+      { paywallId: "pw_a", nodeId: "n_div", props: { thickness: "1" } },
+      { paywallId: "pw_a", nodeId: "n_div", props: { thickness: "8" } },
+    ]);
+
+    // The builder autosaves, so a server-side write to the paywall body
+    // would be clobbered by the next autosave. Launching an element test
+    // must only CREATE AN EXPERIMENT that references the paywall.
+    expect(launchPost).not.toHaveBeenCalled();
   });
 });
