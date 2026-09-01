@@ -49,6 +49,20 @@ export type ImportOutcome =
 
 export type VerificationCountersScope = "wholeFile" | "inspectedSubset" | null;
 
+/**
+ * Final-fix-wave FIX 7: mirrors packages/db's `ImportJob["dryRunSummary"]`
+ * jsonb column (apps/api's `toDto` passes it through unchanged) — the
+ * disclosures `planImport` always computed but, before this fix, never
+ * persisted anywhere a client could read. Null until the first dry run
+ * for this job completes.
+ */
+export interface ImportDryRunSummary {
+  entitlementShapeCounts: Record<string, number>;
+  duplicateTrackingDisabledAfterKeys: number | null;
+  observedEventDateRange: { min: string; max: string } | null;
+  requiredPartitionSpan: { fromMonth: string; toMonth: string; monthCount: number } | null;
+}
+
 export interface ImportJob {
   id: string;
   projectId: string;
@@ -63,6 +77,7 @@ export interface ImportJob {
   status: ImportJobStatus;
   checkpointLine: number;
   counters: Partial<Record<ImportOutcome, number>> & Record<string, number>;
+  dryRunSummary: ImportDryRunSummary | null;
   reportStorageKey: string | null;
   reportPartCount: number;
   errorMessage: string | null;

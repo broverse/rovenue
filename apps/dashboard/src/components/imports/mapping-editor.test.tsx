@@ -45,6 +45,7 @@ function makeJob(overrides: Partial<ImportJob> = {}): ImportJob {
     status: "PENDING_MAPPING",
     checkpointLine: 0,
     counters: {},
+    dryRunSummary: null,
     reportStorageKey: null,
     reportPartCount: 0,
     errorMessage: null,

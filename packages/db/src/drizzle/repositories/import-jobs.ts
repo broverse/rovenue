@@ -314,6 +314,37 @@ export async function setImportJobCounters(
 }
 
 // ---------------------------------------------------------------------------
+// setImportJobDryRunSummary — final-fix-wave FIX 7
+// ---------------------------------------------------------------------------
+//
+// `planImport` (services/import/plan.ts) always computed
+// entitlementShapeCounts/duplicateTrackingDisabledAfterKeys/
+// observedEventDateRange/requiredPartitionSpan, but its return value's
+// only consumer was BullMQ's `returnvalue`, which nothing reads — every
+// one of these disclosures was computed and discarded, including the
+// partition span plan.ts's own doc comments say the operator must see
+// BEFORE committing. A wholesale OVERWRITE, not a merge: one dry-run
+// attempt is a complete, from-scratch scan (same reasoning as
+// `setImportJobCounters` above and `buildDryRunCounters`'s counter
+// namespace), so a re-run must replace the previous attempt's
+// disclosures, not merge stale fields into fresh ones.
+
+export async function setImportJobDryRunSummary(
+  db: Db,
+  projectId: string,
+  id: string,
+  summary: NonNullable<ImportJob["dryRunSummary"]>,
+): Promise<ImportJob> {
+  const [row] = await db
+    .update(importJobs)
+    .set({ dryRunSummary: summary, updatedAt: new Date() })
+    .where(and(eq(importJobs.projectId, projectId), eq(importJobs.id, id)))
+    .returning();
+  if (!row) throw new Error(`setImportJobDryRunSummary: id=${id} not found`);
+  return row;
+}
+
+// ---------------------------------------------------------------------------
 // listImportJobsEligibleForFileRetention
 // ---------------------------------------------------------------------------
 //

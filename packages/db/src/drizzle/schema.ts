@@ -3004,6 +3004,26 @@ export const importJobs = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
     reportStorageKey: text("report_storage_key"),
+    // Final-fix-wave FIX 7: `planImport` (services/import/plan.ts) always
+    // computed `entitlementShapeCounts`, `duplicateTrackingDisabledAfterKeys`,
+    // `observedEventDateRange` and `requiredPartitionSpan` on its returned
+    // `ImportPlanSummary` — but that return value's ONLY consumer was
+    // BullMQ's `returnvalue`, which nothing reads (workers/import-runner.ts
+    // dispatches a dry-run job and never inspects what it resolved to).
+    // Every one of these disclosures was computed and then thrown away,
+    // including the one plan.ts's own doc comments say "the operator must
+    // see BEFORE committing" (the partition span — revenue_events has no
+    // default partition). Null until the first dry run completes;
+    // overwritten wholesale by each subsequent one (same "one attempt,
+    // complete snapshot" reasoning as `dryRun_`-prefixed `counters` keys —
+    // see report.ts's `buildDryRunCounters`), never merged with a prior
+    // attempt's stale disclosures.
+    dryRunSummary: jsonb("dry_run_summary").$type<{
+      entitlementShapeCounts: Record<string, number>;
+      duplicateTrackingDisabledAfterKeys: number | null;
+      observedEventDateRange: { min: string; max: string } | null;
+      requiredPartitionSpan: { fromMonth: string; toMonth: string; monthCount: number } | null;
+    }>(),
     // Number of Phase-A writer report PARTS written so far (Task 8 fix
     // round 1, FIX 5) — one immutable object per `runImportJob` attempt
     // that did real work, named via `buildReportPartStorageKey`. A

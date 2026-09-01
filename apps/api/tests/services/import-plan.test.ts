@@ -511,6 +511,70 @@ describe("planImport", () => {
 });
 
 // =================================================================
+// Final-fix-wave FIX 7 — the dry run's disclosures are persisted
+// =================================================================
+//
+// entitlementShapeCounts/duplicateTrackingDisabledAfterKeys/
+// observedEventDateRange/requiredPartitionSpan were all computed and
+// returned by planImport, but that return value's only consumer was
+// BullMQ's returnvalue, which nothing reads. This proves they now land
+// on the job row itself, not just in the (still correct, still tested
+// above) in-memory return value.
+
+describe("planImport — persists its disclosures (final-fix-wave FIX 7)", () => {
+  it("persists observedEventDateRange/requiredPartitionSpan/entitlementShapeCounts onto the job row", async () => {
+    await seedProduct("disclosed_product", { apple: "disclosed_product" });
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_disclosed_1,app_store,disclosed_product,txn_disclosed_1,2019-06-15 00:00:00,false,,[a]",
+        "user_disclosed_2,app_store,disclosed_product,txn_disclosed_2,2026-01-10 00:00:00,false,,",
+      ]),
+    });
+
+    const summary = await planImport(jobId);
+    const persisted = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    const dryRunSummary = persisted!.dryRunSummary as {
+      entitlementShapeCounts: Record<string, number>;
+      duplicateTrackingDisabledAfterKeys: number | null;
+      observedEventDateRange: { min: string; max: string } | null;
+      requiredPartitionSpan: { fromMonth: string; toMonth: string; monthCount: number } | null;
+    };
+
+    expect(dryRunSummary.observedEventDateRange).toEqual(summary.observedEventDateRange);
+    expect(dryRunSummary.requiredPartitionSpan).toEqual(summary.requiredPartitionSpan);
+    expect(dryRunSummary.entitlementShapeCounts).toEqual(summary.entitlementShapeCounts);
+    expect(dryRunSummary.duplicateTrackingDisabledAfterKeys).toBe(
+      summary.duplicateTrackingDisabledAfterKeys,
+    );
+  });
+
+  it("overwrites (never merges) a previous attempt's disclosures on a re-run", async () => {
+    await seedProduct("redisclosed_product", { apple: "redisclosed_product" });
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_redisclosed_1,app_store,redisclosed_product,txn_redisclosed_1,2019-06-15 00:00:00,false,,[a]",
+      ]),
+    });
+
+    await planImport(jobId);
+
+    // A mapping fix that removes the entitlements column entirely for a
+    // re-run — the second attempt's disclosures must fully replace the
+    // first's, not merge stale shape counts into empty new ones.
+    const jobId2 = await seedJob({
+      csv: csvOf(["user_redisclosed_2,app_store,redisclosed_product,txn_redisclosed_2,2026-01-10 00:00:00,false,,"]),
+    });
+    await planImport(jobId2);
+
+    const persisted = await importJobRepo.getImportJob(db, PROJECT_ID, jobId2);
+    const dryRunSummary = persisted!.dryRunSummary as {
+      entitlementShapeCounts: Record<string, number>;
+    };
+    expect(dryRunSummary.entitlementShapeCounts).toEqual({});
+  });
+});
+
+// =================================================================
 // Fix round 1, FIX 2 — bounded duplicate-key tracking
 // =================================================================
 //

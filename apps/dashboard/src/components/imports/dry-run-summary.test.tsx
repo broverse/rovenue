@@ -35,6 +35,7 @@ function makeJob(overrides: Partial<ImportJob> = {}): ImportJob {
     status: "DRY_RUN_COMPLETE",
     checkpointLine: 0,
     counters: {},
+    dryRunSummary: null,
     reportStorageKey: "imports/p_1/job_1/dry-run-report.ndjson",
     reportPartCount: 0,
     errorMessage: null,
@@ -118,5 +119,114 @@ describe("DryRunSummary", () => {
 
     expect(screen.getByTestId("import-summary-empty")).toBeInTheDocument();
     expect(screen.queryByTestId("import-dry-run-summary")).not.toBeInTheDocument();
+  });
+});
+
+// =============================================================
+// Final-fix-wave FIX 7 — the dry run's disclosures are no longer thrown
+// away
+// =============================================================
+//
+// observedEventDateRange/requiredPartitionSpan/entitlementShapeCounts/
+// duplicateTrackingDisabledAfterKeys were computed by planImport but had
+// zero consumers repo-wide before this fix. This is the UI-side half of
+// closing that gap — the API side is `toDto` passing `dryRunSummary`
+// through unchanged (routes/dashboard/imports.ts).
+
+describe("DryRunSummary — disclosures (final-fix-wave FIX 7)", () => {
+  it("renders the observed event-date range and required partition span BEFORE the outcome buckets", () => {
+    render(
+      <DryRunSummary
+        job={makeJob({
+          counters: { willCreate: 10 },
+          dryRunSummary: {
+            entitlementShapeCounts: {},
+            duplicateTrackingDisabledAfterKeys: null,
+            observedEventDateRange: {
+              min: "2019-06-15T00:00:00.000Z",
+              max: "2026-01-10T00:00:00.000Z",
+            },
+            requiredPartitionSpan: { fromMonth: "2019-06", toMonth: "2026-01", monthCount: 80 },
+          },
+        })}
+      />,
+    );
+
+    const disclosures = screen.getByTestId("import-dry-run-disclosures");
+    expect(screen.getByTestId("import-observed-event-date-range")).toHaveTextContent("2019");
+    expect(screen.getByTestId("import-observed-event-date-range")).toHaveTextContent("2026");
+    expect(screen.getByTestId("import-required-partition-span")).toHaveTextContent("2019-06");
+    expect(screen.getByTestId("import-required-partition-span")).toHaveTextContent("2026-01");
+    expect(screen.getByTestId("import-required-partition-span")).toHaveTextContent("80 months");
+
+    // Disclosures precede the outcome bucket list in document order — the
+    // operator must see them BEFORE reading the row-level breakdown.
+    const summary = screen.getByTestId("import-dry-run-summary");
+    const disclosurePos = Array.from(summary.children).indexOf(disclosures);
+    const bucketListPos = Array.from(summary.children).findIndex((el) =>
+      el.tagName === "UL",
+    );
+    expect(disclosurePos).toBeLessThan(bucketListPos);
+  });
+
+  it("renders observed entitlement identifier shapes", () => {
+    render(
+      <DryRunSummary
+        job={makeJob({
+          counters: { willCreate: 10 },
+          dryRunSummary: {
+            entitlementShapeCounts: { bracketed: 900, commaSeparated: 100 },
+            duplicateTrackingDisabledAfterKeys: null,
+            observedEventDateRange: null,
+            requiredPartitionSpan: null,
+          },
+        })}
+      />,
+    );
+
+    const shapes = screen.getByTestId("import-entitlement-shape-counts");
+    expect(shapes).toHaveTextContent("bracketed (900)");
+    expect(shapes).toHaveTextContent("commaSeparated (100)");
+  });
+
+  it("discloses when duplicate-in-file tracking was capped, and stays silent when it wasn't", () => {
+    const { rerender } = render(
+      <DryRunSummary
+        job={makeJob({
+          counters: { willCreate: 10 },
+          dryRunSummary: {
+            entitlementShapeCounts: {},
+            duplicateTrackingDisabledAfterKeys: 2_000_000,
+            observedEventDateRange: null,
+            requiredPartitionSpan: null,
+          },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("import-duplicate-tracking-disclosure")).toHaveTextContent(
+      "2,000,000",
+    );
+
+    rerender(
+      <DryRunSummary
+        job={makeJob({
+          counters: { willCreate: 10 },
+          dryRunSummary: {
+            entitlementShapeCounts: {},
+            duplicateTrackingDisabledAfterKeys: null,
+            observedEventDateRange: null,
+            requiredPartitionSpan: null,
+          },
+        })}
+      />,
+    );
+    expect(screen.queryByTestId("import-duplicate-tracking-disclosure")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing extra when the job has no dryRunSummary yet", () => {
+    render(<DryRunSummary job={makeJob({ counters: { willCreate: 10 }, dryRunSummary: null })} />);
+
+    expect(screen.queryByTestId("import-dry-run-disclosures")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("import-duplicate-tracking-disclosure")).not.toBeInTheDocument();
   });
 });

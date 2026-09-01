@@ -140,6 +140,22 @@ export function androidNoTokenWarning(count: number): string {
   );
 }
 
+/**
+ * Final-fix-wave FIX 7: `job.dryRunSummary.duplicateTrackingDisabledAfterKeys`
+ * — disclosed, not silent (spec ruling: duplicate tracking is "bounded
+ * with a disclosed cap"). Null means every distinct (store,
+ * storeTransactionId) key in the file was tracked exactly; a number
+ * means tracking stopped at that many keys and later in-file duplicates
+ * past that point may have been missed (never falsely flagged).
+ */
+export function duplicateTrackingDisclosure(disabledAfterKeys: number): string {
+  return (
+    `Duplicate-in-file detection stopped after ${disabledAfterKeys.toLocaleString()} distinct ` +
+    `transaction keys (a safety cap for very large files). Duplicates beyond that point may not ` +
+    `have been flagged — they were never incorrectly flagged, only possibly missed.`
+  );
+}
+
 /** Human labels for the job-list rows and the header chip. */
 export const IMPORT_STATUS_LABELS: Record<ImportJobStatus, string> = {
   PENDING_MAPPING: "Needs mapping",

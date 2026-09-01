@@ -6,7 +6,60 @@ import {
   IMPORT_OUTCOME_ORDER,
   IMPORT_VERIFICATION_SCOPE_NOTE,
   androidNoTokenWarning,
+  duplicateTrackingDisclosure,
 } from "./constants";
+
+/**
+ * Final-fix-wave FIX 7: `job.dryRunSummary` was computed by `planImport`
+ * on every dry run but never persisted anywhere a client could read it
+ * — including the observed event-date range, whose own doc comment
+ * (services/import/plan.ts) says the operator must see it BEFORE
+ * committing (`revenue_events` has no default partition; a date outside
+ * every provisioned month fails the write outright). Rendered ABOVE the
+ * outcome buckets for exactly that reason — it belongs to the decision
+ * "is it safe to commit this file", not to the row-level breakdown.
+ */
+function DryRunDisclosures({ summary }: { summary: NonNullable<ImportJob["dryRunSummary"]> }) {
+  const { observedEventDateRange, requiredPartitionSpan, entitlementShapeCounts } = summary;
+  const entitlementShapes = Object.entries(entitlementShapeCounts).filter(
+    ([, count]) => count > 0,
+  );
+
+  if (!observedEventDateRange && !requiredPartitionSpan && entitlementShapes.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      data-testid="import-dry-run-disclosures"
+      className="mb-3 rounded-lg border border-rv-divider bg-rv-c2 px-3 py-2 text-[12.5px] text-rv-mute-700"
+    >
+      {observedEventDateRange && (
+        <p data-testid="import-observed-event-date-range">
+          <span className="font-medium">Observed purchase dates: </span>
+          {new Date(observedEventDateRange.min).toLocaleDateString()} –{" "}
+          {new Date(observedEventDateRange.max).toLocaleDateString()}
+        </p>
+      )}
+      {requiredPartitionSpan && (
+        <p data-testid="import-required-partition-span" className="mt-1">
+          <span className="font-medium">Revenue history spans: </span>
+          {requiredPartitionSpan.fromMonth} to {requiredPartitionSpan.toMonth} (
+          {requiredPartitionSpan.monthCount.toLocaleString()} month
+          {requiredPartitionSpan.monthCount === 1 ? "" : "s"})
+        </p>
+      )}
+      {entitlementShapes.length > 0 && (
+        <p data-testid="import-entitlement-shape-counts" className="mt-1">
+          <span className="font-medium">Entitlement identifier formats seen: </span>
+          {entitlementShapes
+            .map(([shape, count]) => `${shape} (${count.toLocaleString()})`)
+            .join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
 
 // =============================================================
 // Dry-run / verification outcome summary
@@ -29,6 +82,8 @@ export function DryRunSummary({ job }: { job: ImportJob }) {
   const scopeNote = job.verificationCountersScope
     ? IMPORT_VERIFICATION_SCOPE_NOTE[job.verificationCountersScope]
     : null;
+  const duplicateTrackingDisabledAfterKeys =
+    job.dryRunSummary?.duplicateTrackingDisabledAfterKeys ?? null;
 
   if (buckets.length === 0) {
     return (
@@ -40,6 +95,18 @@ export function DryRunSummary({ job }: { job: ImportJob }) {
 
   return (
     <div data-testid="import-dry-run-summary">
+      {job.dryRunSummary && <DryRunDisclosures summary={job.dryRunSummary} />}
+
+      {duplicateTrackingDisabledAfterKeys !== null && (
+        <p
+          role="alert"
+          data-testid="import-duplicate-tracking-disclosure"
+          className="mb-3 rounded-md border border-rv-warning/30 bg-rv-warning/5 px-3 py-2 text-[12.5px] text-rv-warning"
+        >
+          {duplicateTrackingDisclosure(duplicateTrackingDisabledAfterKeys)}
+        </p>
+      )}
+
       {scopeNote && (
         <p
           role="note"

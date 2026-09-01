@@ -519,6 +519,15 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
 
     const reportStorageKey = await reportWriter.finalizeReport();
 
+    const observedEventDateRange =
+      minEventDate !== null && maxEventDate !== null
+        ? { min: minEventDate.toISOString(), max: maxEventDate.toISOString() }
+        : null;
+    const requiredPartitionSpan =
+      minEventDate !== null && maxEventDate !== null
+        ? describeRequiredPartitionSpan(minEventDate, maxEventDate)
+        : null;
+
     // Final-fix-wave FIX 3: OVERWRITE this job's dry-run counter
     // namespace, never additive — a dry-run attempt is always a
     // complete, from-scratch scan of the whole file, so re-running it
@@ -533,20 +542,23 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
       job.id,
       buildDryRunCounters(outcomes),
     );
+    // Final-fix-wave FIX 7: persist the disclosures this dry run computed
+    // — before this, `entitlementShapeCounts`,
+    // `duplicateTrackingDisabledAfterKeys`, `observedEventDateRange` and
+    // `requiredPartitionSpan` were returned from this function and then
+    // thrown away (nothing reads a BullMQ job's `returnvalue`). Same
+    // overwrite reasoning as the counters call above.
+    await drizzle.importJobRepo.setImportJobDryRunSummary(db, job.projectId, job.id, {
+      entitlementShapeCounts,
+      duplicateTrackingDisabledAfterKeys: duplicateTracker.disabledAfterKeys,
+      observedEventDateRange,
+      requiredPartitionSpan,
+    });
     await drizzle.importJobRepo.setImportJobStatus(db, job.projectId, job.id, {
       status: "DRY_RUN_COMPLETE",
       reportStorageKey,
       finishedAt: new Date(),
     });
-
-    const observedEventDateRange =
-      minEventDate !== null && maxEventDate !== null
-        ? { min: minEventDate.toISOString(), max: maxEventDate.toISOString() }
-        : null;
-    const requiredPartitionSpan =
-      minEventDate !== null && maxEventDate !== null
-        ? describeRequiredPartitionSpan(minEventDate, maxEventDate)
-        : null;
 
     return {
       jobId: job.id,
