@@ -28,6 +28,7 @@ import type { ImportJob } from "../../lib/hooks/useImports";
 const PROJECT_ID = "p_1";
 const BASE = "http://localhost:3000";
 const columnsUrl = `${BASE}/dashboard/projects/${PROJECT_ID}/imports/job_1/columns`;
+const mappingUrl = `${BASE}/dashboard/projects/${PROJECT_ID}/imports/job_1/mapping`;
 
 function makeJob(overrides: Partial<ImportJob> = {}): ImportJob {
   return {
@@ -228,5 +229,99 @@ describe("MappingEditor — source-column picker (fix round 1)", () => {
 
     expect(screen.queryByTestId("import-columns-fallback-note")).not.toBeInTheDocument();
     expect(screen.getByLabelText(/^source column for store$/i).tagName).toBe("INPUT");
+  });
+});
+
+// =============================================================
+// Final-fix-wave FIX 6 — the sandbox/anchorless opt-in is reachable
+// =============================================================
+//
+// skipSandbox/importAnchorless were only ever READ server-side
+// (write.ts/plan.ts's DEFAULT_SKIP_SANDBOX/DEFAULT_IMPORT_ANCHORLESS) —
+// no route, repository setter or UI control wrote import_jobs.options,
+// so the opt-in acceptance criteria could never be exercised. These
+// checkboxes plus PATCH .../mapping's new optional `options` field close
+// that gap.
+
+const FULLY_MAPPED: ImportJob["mapping"] = {
+  app_user_id: "subscriberExternalId",
+  store: "store",
+  product_id: "productIdentifier",
+  purchase_date: "purchaseDate",
+};
+
+describe("MappingEditor — sandbox/anchorless options (final-fix-wave FIX 6)", () => {
+  it("defaults both checkboxes to checked (matching the server's own defaults) when the job has no options set yet", () => {
+    wrap(<MappingEditor projectId={PROJECT_ID} job={makeJob({ mapping: FULLY_MAPPED, options: {} })} />);
+
+    expect(screen.getByRole("checkbox", { name: /skip sandbox rows/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen.getByRole("checkbox", { name: /import anchorless/i }),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("reflects a previously-saved options value instead of the default", () => {
+    wrap(
+      <MappingEditor
+        projectId={PROJECT_ID}
+        job={makeJob({
+          mapping: FULLY_MAPPED,
+          options: { skipSandbox: false, importAnchorless: false },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("checkbox", { name: /skip sandbox rows/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(
+      screen.getByRole("checkbox", { name: /import anchorless/i }),
+    ).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("toggling a checkbox and saving PATCHes options alongside the mapping", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    server.use(
+      http.patch(mappingUrl, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          data: {
+            job: makeJob({
+              mapping: FULLY_MAPPED,
+              options: capturedBody.options as Record<string, boolean>,
+            }),
+          },
+        });
+      }),
+    );
+
+    wrap(<MappingEditor projectId={PROJECT_ID} job={makeJob({ mapping: FULLY_MAPPED })} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /skip sandbox rows/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save mapping/i }));
+
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody!.options).toEqual({ skipSandbox: false, importAnchorless: true });
+  });
+
+  it("disables both checkboxes once the mapping is no longer editable", () => {
+    wrap(
+      <MappingEditor
+        projectId={PROJECT_ID}
+        job={makeJob({ mapping: FULLY_MAPPED, status: "RUNNING" })}
+      />,
+    );
+
+    // Checkbox is a <button role="checkbox">; disabled-by-styling
+    // (pointer-events-none) is what this component uses everywhere else
+    // that isn't a native form control (see the source-column INPUT/SELECT
+    // for the same `!editable` pattern) — assert clicking it has no effect.
+    const checkbox = screen.getByRole("checkbox", { name: /skip sandbox rows/i });
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveAttribute("aria-checked", "true"); // unchanged
   });
 });

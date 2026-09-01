@@ -111,6 +111,35 @@ export async function updateImportJobMapping(
 }
 
 // ---------------------------------------------------------------------------
+// updateImportJobOptions — final-fix-wave FIX 6
+// ---------------------------------------------------------------------------
+//
+// `skipSandbox`/`importAnchorless` (write.ts/plan.ts's DEFAULT_SKIP_SANDBOX
+// / DEFAULT_IMPORT_ANCHORLESS) were only ever READ from `import_jobs.options`
+// — nothing wrote it, so the sandbox/anchorless opt-in acceptance criteria
+// could never actually be exercised by an operator. A jsonb MERGE (`||`),
+// not a wholesale overwrite: the caller may patch just one of the two keys
+// without having to first re-read and resend the other.
+
+export async function updateImportJobOptions(
+  db: Db,
+  projectId: string,
+  id: string,
+  patch: { skipSandbox?: boolean; importAnchorless?: boolean },
+): Promise<ImportJob> {
+  const [row] = await db
+    .update(importJobs)
+    .set({
+      options: sql`${importJobs.options} || ${JSON.stringify(patch)}::jsonb`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(importJobs.projectId, projectId), eq(importJobs.id, id)))
+    .returning();
+  if (!row) throw new Error(`updateImportJobOptions: id=${id} not found`);
+  return row;
+}
+
+// ---------------------------------------------------------------------------
 // setImportJobStatus
 // ---------------------------------------------------------------------------
 

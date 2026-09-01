@@ -65,6 +65,17 @@ export const IMPORT_MAPPING_EDITABLE_STATUSES: ReadonlySet<ImportJobStatus> = ne
   "CANCELLED",
 ]);
 
+/**
+ * Final-fix-wave FIX 6: mirrors the server's
+ * DEFAULT_SKIP_SANDBOX/DEFAULT_IMPORT_ANCHORLESS
+ * (apps/api/src/services/import/write.ts) — the mapping editor's opt-in
+ * controls start from the SAME defaults a job with no explicit
+ * `options` yet actually runs under, so the checkboxes never show a
+ * state the backend wouldn't otherwise be using.
+ */
+export const IMPORT_DEFAULT_SKIP_SANDBOX = true;
+export const IMPORT_DEFAULT_IMPORT_ANCHORLESS = true;
+
 /** Mirrors the server's `RESUMABLE_STATUSES` — see task-11 controller
  *  context honesty item 1: both are legitimate, non-error resting states
  *  that a resume can move forward, not failures. */

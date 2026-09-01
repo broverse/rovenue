@@ -257,13 +257,23 @@ function useJobAction(
   });
 }
 
+/** Final-fix-wave FIX 6: `options` rides the SAME PATCH the mapping
+ *  editor already sends — the natural home, since both are only
+ *  editable in the exact same job-status window
+ *  (`MAPPING_EDITABLE_STATUSES`, server-enforced) and both only matter
+ *  before the mapping they accompany is next read (the next dry run or
+ *  commit). Optional so a plain mapping edit does not need to resend
+ *  options it isn't changing. */
 export function useUpdateImportMapping(projectId: string, jobId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (mapping: Record<string, CanonicalField>) =>
+    mutationFn: (input: {
+      mapping: Record<string, CanonicalField>;
+      options?: { skipSandbox?: boolean; importAnchorless?: boolean };
+    }) =>
       api<JobEnvelope>(`${base(projectId)}/${jobId}/mapping`, {
         method: "PATCH",
-        body: JSON.stringify({ mapping }),
+        body: JSON.stringify(input),
       }),
     onSuccess: (data) => {
       qc.setQueryData(detailKey(projectId, jobId), data);

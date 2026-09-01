@@ -4,13 +4,18 @@ import { Input } from "../../ui/input";
 import { NativeSelect } from "../../ui/native-select";
 import { Button } from "../../ui/button";
 import { Chip } from "../../ui/chip";
+import { Checkbox } from "../../ui/checkbox";
 import { cn } from "../../lib/cn";
 import {
   useImportColumns,
   useUpdateImportMapping,
   type ImportJob,
 } from "../../lib/hooks/useImports";
-import { IMPORT_MAPPING_EDITABLE_STATUSES } from "./constants";
+import {
+  IMPORT_MAPPING_EDITABLE_STATUSES,
+  IMPORT_DEFAULT_SKIP_SANDBOX,
+  IMPORT_DEFAULT_IMPORT_ANCHORLESS,
+} from "./constants";
 
 // =============================================================
 // Mapping editor
@@ -62,6 +67,17 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
   const [columnByField, setColumnByField] = useState<Partial<Record<CanonicalField, string>>>(
     () => mappingToColumnByField(job.mapping),
   );
+  // Final-fix-wave FIX 6: the sandbox/anchorless opt-in was persisted on
+  // import_jobs.options and READ by write.ts/plan.ts, but nothing wrote
+  // it — no route, repository setter or UI control existed. This local
+  // state plus the two checkboxes below close that gap; `handleSave`
+  // sends it alongside the mapping on the SAME PATCH.
+  const [skipSandbox, setSkipSandbox] = useState(
+    job.options.skipSandbox ?? IMPORT_DEFAULT_SKIP_SANDBOX,
+  );
+  const [importAnchorless, setImportAnchorless] = useState(
+    job.options.importAnchorless ?? IMPORT_DEFAULT_IMPORT_ANCHORLESS,
+  );
   const updateMapping = useUpdateImportMapping(projectId, job.id);
   const editable = IMPORT_MAPPING_EDITABLE_STATUSES.has(job.status);
 
@@ -100,9 +116,10 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
 
   const handleSave = () => {
     if (!validation.ok) return;
-    updateMapping.mutate(mapping, {
-      onSuccess: (data) => onSaved?.(data.job),
-    });
+    updateMapping.mutate(
+      { mapping, options: { skipSandbox, importAnchorless } },
+      { onSuccess: (data) => onSaved?.(data.job) },
+    );
   };
 
   return (
@@ -195,6 +212,42 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
               : "This file's column names couldn't be detected — type them in exactly as they appear in your export."}
         </p>
       )}
+
+      <div className="mt-3 space-y-2" data-testid="import-options-controls">
+        <label className="flex cursor-pointer items-start gap-2 text-[13px]">
+          <Checkbox
+            checked={skipSandbox}
+            // `Checkbox` has no `disabled` prop — every other read-only
+            // usage in this repo is a plain visual toggle with nowhere
+            // that needs to block it, so the no-op guard belongs here,
+            // not on the (CSS-only, non-blocking) styling below.
+            onChange={() => editable && setSkipSandbox((prev) => !prev)}
+            ariaLabel="Skip sandbox rows"
+            className={cn(!editable && "pointer-events-none opacity-50")}
+          />
+          <span>
+            Skip sandbox rows
+            <span className="block text-[12px] text-rv-mute-500">
+              Test-environment purchases are excluded by default.
+            </span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 text-[13px]">
+          <Checkbox
+            checked={importAnchorless}
+            onChange={() => editable && setImportAnchorless((prev) => !prev)}
+            ariaLabel="Import anchorless (promotional / manual grant) rows"
+            className={cn(!editable && "pointer-events-none opacity-50")}
+          />
+          <span>
+            Import anchorless rows
+            <span className="block text-[12px] text-rv-mute-500">
+              Promotional / manual grants with no store transaction — imported as
+              history by default.
+            </span>
+          </span>
+        </label>
+      </div>
 
       {!validation.ok && (
         <p role="alert" className="mt-2 text-[13px] text-rv-danger">

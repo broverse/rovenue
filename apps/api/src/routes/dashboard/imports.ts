@@ -224,12 +224,26 @@ const CANONICAL_FIELD_KEYS: ReadonlySet<string> = new Set(
   CANONICAL_FIELDS.map((field) => field.key),
 );
 
+/** Final-fix-wave FIX 6: `options` is optional and, when present,
+ *  independently patched onto `import_jobs.options` (a jsonb MERGE, not
+ *  an overwrite — see `updateImportJobOptions`) alongside the mapping
+ *  update this same route already performs. This is "the mapping/options
+ *  PATCH" the fix names: skipSandbox/importAnchorless were previously
+ *  only ever read (write.ts/plan.ts), never written by any route,
+ *  repository setter or UI control — the opt-in acceptance criteria
+ *  could not be exercised at all. */
+const importJobOptionsPatchSchema = z.object({
+  skipSandbox: z.boolean().optional(),
+  importAnchorless: z.boolean().optional(),
+});
+
 const mappingBodySchema = z.object({
   mapping: z.record(
     z.string().refine((value) => CANONICAL_FIELD_KEYS.has(value), {
       message: "Unknown canonical field",
     }),
   ),
+  options: importJobOptionsPatchSchema.optional(),
 });
 
 const listQuerySchema = z.object({
@@ -656,8 +670,9 @@ importsRoute.patch(
     // (`mappingBodySchema`); `validateMapping` is the business-rule gate
     // on top of that — every REQUIRED field present, no two source
     // columns aimed at the same one.
-    const { mapping } = c.req.valid("json") as {
+    const { mapping, options } = c.req.valid("json") as {
       mapping: Record<string, CanonicalField>;
+      options?: { skipSandbox?: boolean; importAnchorless?: boolean };
     };
     const validation = validateMapping(mapping);
     if (!validation.ok) {
@@ -667,7 +682,7 @@ importsRoute.patch(
     }
 
     const updated = await drizzle.db.transaction(async (tx) => {
-      const row = await drizzle.importJobRepo.updateImportJobMapping(
+      let row = await drizzle.importJobRepo.updateImportJobMapping(
         tx,
         projectId,
         id,
@@ -686,6 +701,35 @@ importsRoute.patch(
         },
         tx,
       );
+
+      // Final-fix-wave FIX 6: same PATCH, same edit-window gate already
+      // checked above — a sandbox/anchorless opt-in only ever means
+      // anything before the mapping it accompanies is next read (the
+      // next dry run or commit), exactly the window MAPPING_EDITABLE_STATUSES
+      // already scopes mapping edits to.
+      if (options && Object.keys(options).length > 0) {
+        const before = job.options;
+        row = await drizzle.importJobRepo.updateImportJobOptions(
+          tx,
+          projectId,
+          id,
+          options,
+        );
+        await audit(
+          {
+            projectId,
+            userId: user.id,
+            action: "import.options_updated",
+            resource: "import_job",
+            resourceId: id,
+            before: { options: before },
+            after: { options: row.options },
+            ...extractRequestContext(c),
+          },
+          tx,
+        );
+      }
+
       return row;
     });
 

@@ -145,7 +145,9 @@ export type AuditAction =
   | "import.dry_run_started"
   | "import.commit_started"
   | "import.cancelled"
-  | "import.resumed";
+  | "import.resumed"
+  // --- final-fix-wave FIX 6: sandbox/anchorless opt-in actually wired ---
+  | "import.options_updated";
 
 export type AuditResource =
   | "audience"

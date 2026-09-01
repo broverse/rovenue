@@ -104,6 +104,7 @@ vi.mock("../../src/workers/import-runner", () => ({
 const findMembership = vi.hoisted(() => vi.fn());
 const getImportJob = vi.hoisted(() => vi.fn());
 const updateImportJobMapping = vi.hoisted(() => vi.fn());
+const updateImportJobOptions = vi.hoisted(() => vi.fn());
 const setImportJobStatus = vi.hoisted(() => vi.fn());
 const listImportJobs = vi.hoisted(() => vi.fn());
 const transaction = vi.hoisted(() => vi.fn());
@@ -122,6 +123,7 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         ...actual.drizzle.importJobRepo,
         getImportJob,
         updateImportJobMapping,
+        updateImportJobOptions,
         setImportJobStatus,
         listImportJobs,
       },
@@ -211,6 +213,7 @@ beforeEach(() => {
   findMembership.mockReset().mockResolvedValue({ id: "m1", role: "OWNER" });
   getImportJob.mockReset();
   updateImportJobMapping.mockReset();
+  updateImportJobOptions.mockReset();
   setImportJobStatus.mockReset();
   listImportJobs.mockReset().mockResolvedValue([]);
   transaction.mockReset().mockImplementation(async (cb: (tx: unknown) => unknown) =>
@@ -324,6 +327,87 @@ describe("PATCH /:id/mapping", () => {
       expect.objectContaining({ action: "import.mapping_updated", resourceId: "job_1" }),
       { __tx: "import-lifecycle-tx" },
     );
+  });
+
+  // ===========================================================
+  // Final-fix-wave FIX 6 — the sandbox/anchorless opt-in is reachable
+  // ===========================================================
+  //
+  // skipSandbox/importAnchorless were only ever READ (write.ts/plan.ts) —
+  // no route wrote import_jobs.options. This PATCH's optional `options`
+  // field is the fix.
+
+  it("does not touch options when the body omits it", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "PENDING_MAPPING", mapping: {} }));
+    updateImportJobMapping.mockResolvedValue(
+      makeJob({ status: "PENDING_MAPPING", mapping: VALID_MAPPING }),
+    );
+
+    const res = await req("/job_1/mapping", {
+      method: "PATCH",
+      body: { mapping: VALID_MAPPING },
+    });
+
+    expect(res.status).toBe(200);
+    expect(updateImportJobOptions).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "import.options_updated" }),
+      expect.anything(),
+    );
+  });
+
+  it("patches options alongside the mapping and audits it separately when present", async () => {
+    const existing = makeJob({
+      status: "PENDING_MAPPING",
+      mapping: {},
+      options: { skipSandbox: true, importAnchorless: true },
+    });
+    getImportJob.mockResolvedValue(existing);
+    updateImportJobMapping.mockResolvedValue(
+      makeJob({ status: "PENDING_MAPPING", mapping: VALID_MAPPING, options: existing.options }),
+    );
+    updateImportJobOptions.mockResolvedValue(
+      makeJob({
+        status: "PENDING_MAPPING",
+        mapping: VALID_MAPPING,
+        options: { skipSandbox: false, importAnchorless: true },
+      }),
+    );
+
+    const res = await req("/job_1/mapping", {
+      method: "PATCH",
+      body: { mapping: VALID_MAPPING, options: { skipSandbox: false } },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { job: { options: Record<string, boolean> } } };
+    expect(body.data.job.options).toEqual({ skipSandbox: false, importAnchorless: true });
+    expect(updateImportJobOptions).toHaveBeenCalledWith(
+      { __tx: "import-lifecycle-tx" },
+      "p1",
+      "job_1",
+      { skipSandbox: false },
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "import.options_updated",
+        resourceId: "job_1",
+        before: { options: existing.options },
+      }),
+      { __tx: "import-lifecycle-tx" },
+    );
+  });
+
+  it("409s before touching options when the job is not in an editable state", async () => {
+    getImportJob.mockResolvedValue(makeJob({ status: "RUNNING" }));
+
+    const res = await req("/job_1/mapping", {
+      method: "PATCH",
+      body: { mapping: VALID_MAPPING, options: { skipSandbox: false } },
+    });
+
+    expect(res.status).toBe(409);
+    expect(updateImportJobOptions).not.toHaveBeenCalled();
   });
 });
 
