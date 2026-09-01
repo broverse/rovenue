@@ -54,6 +54,10 @@ describe("ProceedsCard", () => {
     expect(cell).toHaveTextContent(/30(\.0)?%/);
     expect(cell).toHaveTextContent(/estimated/i);
     expect(cell).toHaveTextContent(/\$700/);
+    // "$700 estimated at 30.0%" reads as "proceeds ARE 30% of revenue",
+    // the opposite of what the rate means. The percentage is what the
+    // store took, so say so.
+    expect(cell).toHaveTextContent(/after 30(\.0)?% commission/i);
   });
 
   it("renders an unconfigured store's rate as unknown — never 0% and never a blended total", async () => {

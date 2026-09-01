@@ -3693,7 +3693,7 @@
       "disclaimer": "Estimated from the commission rate you configure per store — not a payout. Apple's actual tier depends on your whole-account history and both stores apply tax handling we can't see.",
       "loading": "Loading…",
       "empty": "No revenue in this window",
-      "estimatedAt": "{{amount}} estimated at {{rate}}",
+      "estimatedAt": "{{amount}} estimated after {{rate}} commission",
       "rateNotConfigured": "rate not configured — proceeds unknown"
     },
     "countryCoverage": {
