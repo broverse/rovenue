@@ -16,7 +16,26 @@ import type {
 //
 // `name` is a translation slug — the dashboard resolves it under
 // `charts.items.<id>`. For custom charts the literal user-typed
-// label is returned instead.
+// label is returned instead. An id with no `charts.items.<id>` string
+// renders as the raw key in the rail, so a new entry here is not
+// finished until en.json has its label.
+//
+// Selecting an entry renders the `/series/:chartId` panel. Most ids
+// here have no `readChartSeries` reader YET and show "not wired to a
+// data source" until one lands (ROADMAP §5 tracks that) — that is a
+// pending state, not a wrong one, because every id in this list is a
+// daily series the dispatcher will eventually serve.
+//
+// `estimated_proceeds` is deliberately NOT in this list, because it is
+// not that: it is a per-store breakdown whose whole point is showing a
+// store with a configured commission rate beside one without, which a
+// single blended daily line cannot express (see proceeds.ts and
+// charts.ts's readProceeds comment). It has its own reader and its own
+// always-visible `ProceedsCard`. Listing it here told users the figure
+// was unavailable while it sat two panels away — and, with no
+// `charts.items.estimated_proceeds` string, the rail rendered the raw
+// i18n key. An entry that can never be dispatched does not belong in
+// the dispatcher's catalog.
 
 interface SystemChart {
   id: string;
@@ -32,7 +51,6 @@ const SYSTEM_CATALOG: ReadonlyArray<SystemChart> = [
   { id: "arpu", category: "revenue", chartType: "line", range: "12M", config: {} },
   { id: "rev_per_install", category: "revenue", chartType: "line", range: "12M", config: {} },
   { id: "gross_vs_net", category: "revenue", chartType: "area", range: "12M", config: {} },
-  { id: "estimated_proceeds", category: "revenue", chartType: "bar", range: "12M", config: {} },
   { id: "new_subs", category: "growth", chartType: "bar", range: "6M", config: {} },
   { id: "trials_started", category: "growth", chartType: "bar", range: "6M", config: {} },
   { id: "reactivations", category: "growth", chartType: "line", range: "6M", config: {} },

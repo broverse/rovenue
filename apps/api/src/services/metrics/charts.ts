@@ -129,11 +129,12 @@ export async function readChannels(
 // PLAY_STORE, and summing them into one number would hide which part
 // is a real estimate and which part is undefined. So this is NOT
 // dispatched through `readChartSeries` (whose `ChartSeriesResponse` is
-// one line of daily points) — `estimated_proceeds` sits in the catalog
-// like every other not-yet-wired id (readChartSeries's `default` case
-// answers `supported: false` for it, at zero query cost) and is served
-// by its own route/reader instead, the same way `readChannels` already
-// is despite not being a catalog id at all.
+// one line of daily points), and for the same reason it is NOT a
+// chart-catalog id either: a catalog entry is selectable and renders the
+// series panel, so an id that dispatcher cannot serve dead-ends on "not
+// wired to a data source". It is served by its own route/reader instead,
+// the same way `readChannels` already is despite not being a catalog id
+// at all, and surfaced by the always-visible `ProceedsCard`.
 //
 // CHARGEBACK is netted out of gross alongside REFUND (both return the
 // money to the customer), matching `readChannels`'s existing gross

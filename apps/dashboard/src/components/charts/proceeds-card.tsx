@@ -11,10 +11,13 @@ import { fmtMoney, fmtPct } from "./format";
 // =============================================================
 //
 // Fetched from `GET /proceeds` (useChartProceeds), never from the
-// `/series/:chartId` catalog dispatcher — `estimated_proceeds` IS a
-// catalog entry but is deliberately not wired into it, because that
-// endpoint returns one blended daily line and cannot show a store
-// with a configured rate beside one without.
+// `/series/:chartId` catalog dispatcher: that endpoint returns one
+// blended daily line and cannot show a store with a configured rate
+// beside one without. There is deliberately no `estimated_proceeds`
+// chart-catalog entry either: catalog ids are daily series the
+// dispatcher serves (or will), and this one never can be — listing it
+// told users the figure was unwired while this card sat two panels
+// away. This card is always on the page instead.
 //
 // The honesty requirement this component exists to satisfy: a
 // proceeds figure is an ESTIMATE, not a payout. Apple's Small

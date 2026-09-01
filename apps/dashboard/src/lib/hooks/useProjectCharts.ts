@@ -132,12 +132,13 @@ export function useChartHeatmap({ projectId, windowDays }: DataParams) {
   });
 }
 
-// `estimated_proceeds` is a catalog entry but is NOT served by the
-// `/series/:chartId` dispatcher — that response is one blended daily
-// line, which cannot show a store with a configured commission rate
-// beside one without (spec §4.3, task-7-context.md). It has its own
-// per-store reader, `readProceeds` / `GET /proceeds`, mirroring how
-// channels/funnel/heatmap already sit outside the dispatcher above.
+// Proceeds is NOT served by the `/series/:chartId` dispatcher — that
+// response is one blended daily line, which cannot show a store with a
+// configured commission rate beside one without (spec §4.3,
+// task-7-context.md) — and for the same reason it is not a chart-catalog
+// id. It has its own per-store reader, `readProceeds` / `GET /proceeds`,
+// mirroring how channels/funnel/heatmap already sit outside the
+// dispatcher above, and is rendered by the always-visible ProceedsCard.
 export function useChartProceeds({ projectId, windowDays }: DataParams) {
   return useQuery({
     queryKey: ["charts", "proceeds", projectId, { windowDays }],
