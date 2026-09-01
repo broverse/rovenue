@@ -177,6 +177,19 @@ export async function transferSubscriber(
     if (!to) {
       throw new Error(`Target subscriber '${toAppUserId}' not found`);
     }
+    // Symmetric with the source guard above. `findSubscriberByAppUserId`
+    // does not filter `deletedAt`, so without this a transfer whose
+    // TARGET was itself already merged away would reassign every asset
+    // onto the retired row — silently losing the transfer into a
+    // subscriber nothing reads. Refusing is deliberate: following
+    // `mergedInto` to the survivor would redirect a transfer the caller
+    // never asked for, which is a semantic change worth making
+    // explicitly rather than as a side effect of a bug fix.
+    if (to.deletedAt) {
+      throw new Error(
+        `Target subscriber '${toAppUserId}' has already been transferred`,
+      );
+    }
 
     const creditsTransferred = await reassignAllAssets(
       tx,

@@ -263,3 +263,81 @@ describe("anonymizeSubscriberRow", () => {
     expect(after!.appleAppAccountToken).toBeNull();
   });
 });
+
+// =============================================================
+// Retired-target guard
+// =============================================================
+//
+// `findSubscriberByAppUserId` does NOT filter `deletedAt`. The source
+// lookup in `transferSubscriber` has always guarded against a retired
+// row; the TARGET lookup did not, so a transfer whose target had
+// itself already been merged away reassigned every asset onto the
+// dead row — silently losing the transfer into a subscriber nothing
+// reads, with no error to tell the caller.
+
+const GUARD_PROJECT_ID = `prj_stg_${RUN_ID}`;
+const GUARD_LIVE_ID = `sub_stg_live_${RUN_ID}`;
+const GUARD_RETIRED_ID = `sub_stg_retired_${RUN_ID}`;
+const GUARD_SURVIVOR_ID = `sub_stg_survivor_${RUN_ID}`;
+
+describe("transferSubscriber — retired target", () => {
+  afterAll(async () => {
+    await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(
+      drizzle.db,
+      async (tx) => {
+        await tx
+          .delete(drizzle.schema.projects)
+          .where(eq(drizzle.schema.projects.id, GUARD_PROJECT_ID));
+      },
+    );
+  });
+
+  it("refuses a transfer whose target was already merged away", async () => {
+    await drizzle.db
+      .insert(drizzle.schema.projects)
+      .values({ id: GUARD_PROJECT_ID, name: `STG ${RUN_ID}` });
+
+    await drizzle.db.insert(drizzle.schema.subscribers).values([
+      {
+        id: GUARD_LIVE_ID,
+        projectId: GUARD_PROJECT_ID,
+        rovenueId: `rov_stg_live_${RUN_ID}`,
+        appUserId: `user_stg_live_${RUN_ID}`,
+      },
+      {
+        id: GUARD_SURVIVOR_ID,
+        projectId: GUARD_PROJECT_ID,
+        rovenueId: `rov_stg_survivor_${RUN_ID}`,
+        appUserId: `user_stg_survivor_${RUN_ID}`,
+      },
+      {
+        // Already transferred into the survivor: soft-deleted, with the
+        // merge pointer set, exactly as `softDeleteSubscriberAsMerged`
+        // leaves it.
+        id: GUARD_RETIRED_ID,
+        projectId: GUARD_PROJECT_ID,
+        rovenueId: `rov_stg_retired_${RUN_ID}`,
+        appUserId: `user_stg_retired_${RUN_ID}`,
+        deletedAt: new Date(),
+        mergedInto: GUARD_SURVIVOR_ID,
+      },
+    ]);
+
+    await expect(
+      transferSubscriber(
+        GUARD_PROJECT_ID,
+        `user_stg_live_${RUN_ID}`,
+        `user_stg_retired_${RUN_ID}`,
+      ),
+    ).rejects.toThrow(/already been transferred/i);
+
+    // And the source is untouched — the refusal happens before any
+    // reassignment, so nothing is half-moved.
+    const [source] = await drizzle.db
+      .select()
+      .from(drizzle.schema.subscribers)
+      .where(eq(drizzle.schema.subscribers.id, GUARD_LIVE_ID));
+    expect(source?.deletedAt ?? null).toBeNull();
+    expect(source?.mergedInto ?? null).toBeNull();
+  });
+});
