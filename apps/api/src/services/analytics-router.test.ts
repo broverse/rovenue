@@ -21,6 +21,7 @@ vi.mock("../lib/clickhouse", () => ({
 }));
 
 import { runAnalyticsQuery } from "./analytics-router";
+import { MATURATION_WINDOW_DAYS } from "../lib/experiment-constants";
 
 describe("runAnalyticsQuery — experiment_results", () => {
   beforeEach(() => {
@@ -44,6 +45,7 @@ describe("runAnalyticsQuery — experiment_results", () => {
       projectId: "proj_1",
       experimentId: "exp_1",
       experimentKey: "checkout_paywall_v2",
+      windowDays: MATURATION_WINDOW_DAYS,
     });
 
     const sqlText = sql as string;
@@ -54,6 +56,14 @@ describe("runAnalyticsQuery — experiment_results", () => {
     expect(sqlText).toMatch(
       /raw_revenue_events\s+WHERE\s+projectId = \{projectId:String\}\s+AND experimentKey = \{experimentKey:String\}/,
     );
+    // Task 3: subscriber-level windowed value aggregates are bound in.
+    expect(sqlText).toContain("{windowDays:UInt16}");
+    expect(sqlText).toContain("ifNull(wv.converters, 0) AS converters");
+    expect(sqlText).toContain("ifNull(wv.excluded_immature, 0) AS excluded_immature");
+    expect(sqlText).toContain("ifNull(wv.excluded_crossover, 0) AS excluded_crossover");
+    // FINAL must follow the alias, never precede it (invalid CH syntax).
+    expect(sqlText).toContain("raw_revenue_events AS r FINAL");
+    expect(sqlText).not.toMatch(/raw_revenue_events\s+FINAL\s+AS\s+r/);
   });
 
   it("returns [] without querying ClickHouse when unconfigured", async () => {

@@ -82,6 +82,7 @@ import { Kafka } from "kafkajs";
 import { __resetClickHouseForTests } from "../../lib/clickhouse";
 import { env } from "../../lib/env";
 import { SYSTEM_CHART_IDS } from "./chart-catalog";
+import * as analyticsRouterModule from "../analytics-router";
 import * as chartsModule from "./charts";
 import * as creditsModule from "./credits";
 import * as engagementModule from "./engagement";
@@ -507,6 +508,40 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
           projectId: PROJECT,
           windowDays: WINDOW_DAYS,
         }),
+    },
+  },
+  {
+    // Not under services/metrics/ (it lives at services/analytics-router.ts)
+    // but registered here anyway: Task 3 of the experiments decision-engine
+    // plan added the subscriber-level windowed value aggregates this reader
+    // now runs, and this harness is exactly the guard that exists because a
+    // reader querying columns that never existed once shipped green in CI
+    // behind a mock (see this file's header). One invoker exercises all
+    // three AnalyticsQuery kinds so every branch of the dispatcher's switch
+    // gets schema-validated against the live ClickHouse, not just whichever
+    // kind happened to be called first.
+    moduleName: "analytics-router",
+    module: analyticsRouterModule as unknown as Record<string, unknown>,
+    exempt: {},
+    invokers: {
+      runAnalyticsQuery: async () => {
+        await analyticsRouterModule.runAnalyticsQuery({
+          kind: "experiment_results",
+          projectId: PROJECT,
+          experimentId: "exp_schema_contract",
+          experimentKey: "exp_schema_contract_key",
+        });
+        await analyticsRouterModule.runAnalyticsQuery({
+          kind: "experiment_revenue_by_store",
+          projectId: PROJECT,
+          experimentId: "exp_schema_contract",
+        });
+        await analyticsRouterModule.runAnalyticsQuery({
+          kind: "placement_metrics",
+          projectId: PROJECT,
+          placementId: "plc_schema_contract",
+        });
+      },
     },
   },
 ];

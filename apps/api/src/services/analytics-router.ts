@@ -1,4 +1,5 @@
 import { queryAnalytics, isClickHouseConfigured } from "../lib/clickhouse";
+import { MATURATION_WINDOW_DAYS } from "../lib/experiment-constants";
 import { logger } from "../lib/logger";
 
 // =============================================================
@@ -39,6 +40,11 @@ export type AnalyticsQuery =
       groupBy?: Array<"country" | "platform">;
     }
   | {
+      kind: "experiment_revenue_by_store";
+      experimentId: string;
+      projectId: string;
+    }
+  | {
       kind: "placement_metrics";
       placementId: string;
       projectId: string;
@@ -58,6 +64,92 @@ export interface ExperimentVariantRow {
    *  presentedContext) — no exposure-join heuristic. Only PAYWALL-flow
    *  purchases carry this; 0 for OFFERING/FLAG experiment types. */
   attributed_conversions: number;
+
+  // -----------------------------------------------------------
+  // Windowed, subscriber-level value aggregates (decision engine).
+  // -----------------------------------------------------------
+  //
+  // Everything below is computed by folding EACH SUBSCRIBER's revenue
+  // events into one net figure first (gross minus refunds over their own
+  // MATURATION_WINDOW_DAYS window), THEN aggregating subscribers into
+  // variants — never a raw order-level sum. The unit of analysis is the
+  // subscriber because the subscriber is the unit of randomisation: an
+  // order-level sum would let one subscriber with three renewals count
+  // three times in a comparison that randomised subscribers once.
+  //
+  // A subscriber contributes to exactly one of three buckets per variant:
+  // mature (counted below), excluded_immature (their window hasn't
+  // elapsed yet), or excluded_crossover (they were exposed to more than
+  // one variant of this experiment, so their revenue can't be attributed
+  // to either). All three counts are reported — a subscriber that was
+  // dropped from the value metrics must be visible, never silently
+  // absent.
+
+  /** Subscribers first exposed to this variant whose
+   *  MATURATION_WINDOW_DAYS window has fully elapsed AND who were never
+   *  exposed to another variant of the same experiment — the denominator
+   *  for `converters` and the log-value aggregates below. Distinct from
+   *  `unique_users`, which is the un-windowed, unexcluded exposure count
+   *  SRM still needs. */
+  mature_users: number;
+  /** Mature subscribers whose net revenue (gross minus refunds, over
+   *  their own window) is strictly positive. DELIBERATE SEMANTIC CHANGE
+   *  from `conversions`/`attributed_conversions` above: a subscriber who
+   *  purchased and was then fully refunded is NOT a converter here (spec
+   *  §4.1) — `conversions` counts the purchase event and does not net
+   *  refunds against it. */
+  converters: number;
+  /** Sum of `log(netRevenue)` over converters only (netRevenue > 0, so
+   *  the log is always defined). Sufficient statistic for the Bayesian
+   *  value-factor fit in `experiment-bayes.ts`; never computed over a
+   *  non-positive value. */
+  sum_log_value: number;
+  /** Sum of `log(netRevenue)^2` over converters only — paired with
+   *  `sum_log_value` to reconstruct the sample variance without shipping
+   *  a per-subscriber array. */
+  sum_log_value_sq: number;
+  /** Sum, over mature subscribers, of their windowed gross revenue
+   *  (purchase-class events only: INITIAL/RENEWAL/TRIAL_CONVERSION/
+   *  REACTIVATION). Deduplicated against outbox at-least-once replay via
+   *  `FINAL` on `raw_revenue_events` BEFORE summing — see the module
+   *  header. */
+  revenue_usd: number;
+  /** Sum, over mature subscribers, of their windowed refunds
+   *  (REFUND/CHARGEBACK, `abs()`'d defensively even though the house
+   *  convention stores them positive already). */
+  refunds_usd: number;
+  /** Count of subscribers first exposed to this variant whose window has
+   *  NOT yet elapsed as of query time — excluded from every aggregate
+   *  above, reported here so the exclusion is visible rather than a
+   *  silently shrunk denominator. */
+  excluded_immature: number;
+  /** Count of subscribers first exposed to this variant who were ALSO
+   *  exposed to at least one other variant of the same experiment
+   *  (contamination) — excluded from every aggregate above. A crossover
+   *  subscriber is counted once for each variant they touched, since
+   *  their revenue can't be cleanly attributed to any single one. */
+  excluded_crossover: number;
+}
+
+/**
+ * One row per (variant, store). Kept as a SEPARATE query/result shape
+ * from `ExperimentVariantRow` rather than folded in as a nested array or
+ * a `GROUP BY variantId, store` row on the main query, for the same
+ * reason `readProceeds` in `services/metrics/charts.ts` treats its own
+ * per-store breakdown as a dedicated query: a project can have a
+ * commission rate configured for one store and not another, and blending
+ * revenue across stores before applying rates would hide which part of
+ * the resulting proceeds figure is real and which is undefined. Callers
+ * that only need the variant-level metrics (SRM, conversion, ARPU) never
+ * pay for the extra JOIN and row fan-out this breakdown requires.
+ */
+export interface ExperimentStoreRevenueRow {
+  variant_id: string;
+  store: string;
+  /** Same subscriber-level, windowed, crossover/immature-excluded fold as
+   *  `ExperimentVariantRow.revenue_usd` — just grouped by store too. */
+  revenue_usd: number;
+  refunds_usd: number;
 }
 
 /**
@@ -76,11 +168,14 @@ export async function runAnalyticsQuery(
   q: Extract<AnalyticsQuery, { kind: "experiment_results" }>,
 ): Promise<ExperimentVariantRow[]>;
 export async function runAnalyticsQuery(
+  q: Extract<AnalyticsQuery, { kind: "experiment_revenue_by_store" }>,
+): Promise<ExperimentStoreRevenueRow[]>;
+export async function runAnalyticsQuery(
   q: Extract<AnalyticsQuery, { kind: "placement_metrics" }>,
 ): Promise<PlacementMetricsRow[]>;
 export async function runAnalyticsQuery(
   q: AnalyticsQuery,
-): Promise<ExperimentVariantRow[] | PlacementMetricsRow[]> {
+): Promise<ExperimentVariantRow[] | ExperimentStoreRevenueRow[] | PlacementMetricsRow[]> {
   if (!isClickHouseConfigured()) {
     log.warn("analytics query requested but ClickHouse is unconfigured", {
       kind: q.kind,
@@ -93,17 +188,127 @@ export async function runAnalyticsQuery(
       // One row per variant: exposures + exposed-user denominator + the
       // post-exposure conversion count (a query-time join with
       // raw_revenue_events — no separate MV, so no MV-recreate Kafka-gap
-      // risk). Scoped by projectId for tenant isolation. Validated against
-      // the live ClickHouse schema (raw_exposures / raw_revenue_events).
+      // risk), PLUS the windowed, subscriber-level value aggregates the
+      // decision engine consumes (`wv` below). Scoped by projectId for
+      // tenant isolation. Validated against the live ClickHouse schema
+      // (raw_exposures / raw_revenue_events).
+      //
+      // `wv`'s CTEs are the load-bearing part of this query — see the
+      // `ExperimentVariantRow` doc comment above for the "why" and
+      // task-3-report.md for the full design writeup:
+      //
+      //   - `exposure` collapses each subscriber's exposures to this
+      //     experiment down to ONE row per (variant, subscriber), keyed
+      //     by their FIRST exposure to that variant.
+      //   - `crossover` flags subscribers exposed to more than one
+      //     variant — their revenue can't be cleanly attributed to
+      //     either, so it's excluded and counted, never silently folded
+      //     into one side.
+      //   - `per_subscriber` folds each subscriber's revenue events into
+      //     ONE net (gross, refunds) pair over their own
+      //     MATURATION_WINDOW_DAYS window — BEFORE any cross-subscriber
+      //     aggregation, so a subscriber with three renewals counts once,
+      //     not three times, in a comparison that randomised subscribers.
+      //     `raw_revenue_events` is a ReplacingMergeTree fed by an
+      //     at-least-once outbox: a duplicate `eventId` is a real,
+      //     visible row until a background merge collapses it, so `AS r
+      //     FINAL` deduplicates BEFORE the sum — see migration
+      //     0012_idempotent_revenue_aggregates.sql, whose established
+      //     pattern this reuses. (`FINAL` must follow the alias:
+      //     `raw_revenue_events AS r FINAL`, not `... FINAL AS r`.)
+      //   - Every subscriber lands in exactly one of three buckets —
+      //     mature / immature / crossover — so `mature_users +
+      //     excluded_immature + excluded_crossover` accounts for every
+      //     exposed subscriber; nothing is dropped without being counted.
+      //   - `amountUsd` is `Decimal(12, 4)`; `log()` needs a float, hence
+      //     the explicit `toFloat64()` casts before `log()`/`pow()`.
+      //   - `gross - refunds > 0` gates every converter/value aggregate —
+      //     a fully-refunded subscriber is not a converter (spec §4.1).
       return queryAnalytics<ExperimentVariantRow>(
         q.projectId,
         `
+          WITH exposure AS (
+            SELECT variantId, subscriberId, min(exposedAt) AS firstExposedAt
+            FROM rovenue.raw_exposures
+            WHERE projectId = {projectId:String}
+              AND experimentId = {experimentId:String}
+            GROUP BY variantId, subscriberId
+          ),
+          crossover AS (
+            -- subscribers seen under more than one variant of this experiment
+            SELECT subscriberId
+            FROM exposure
+            GROUP BY subscriberId
+            HAVING uniqExact(variantId) > 1
+          ),
+          per_subscriber AS (
+            -- ClickHouse's default (hash) JOIN only accepts an ON expression
+            -- that is a pure equality between left/right columns — an
+            -- inequality that spans both tables (the window's date-range
+            -- bound, comparing e.firstExposedAt to r.eventDate) is rejected
+            -- with INVALID_JOIN_ON_EXPRESSION. So the ON clause carries ONLY
+            -- the subscriberId equality; projectId scoping moves into the
+            -- right-hand subquery's own WHERE (a single-table filter, safe
+            -- anywhere), and the per-subscriber window bound moves into each
+            -- sumIf's condition instead, where cross-table comparisons are
+            -- unrestricted. This keeps the LEFT JOIN's zero-revenue rows
+            -- intact (a subscriber with no purchases, or none inside their
+            -- window, still gets a row here with gross = refunds = 0) —
+            -- pushing the range check into WHERE instead would silently drop
+            -- that subscriber's entire group whenever ALL of their revenue
+            -- rows exist but happen to fall outside the window.
+            SELECT
+              e.variantId AS variantId,
+              e.subscriberId AS subscriberId,
+              multiIf(
+                e.subscriberId IN (SELECT subscriberId FROM crossover), 'crossover',
+                e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY > now(), 'immature',
+                'mature'
+              ) AS bucket,
+              sumIf(
+                r.amountUsd,
+                r.type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
+                  AND r.eventDate >= e.firstExposedAt
+                  AND r.eventDate <  e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY
+              ) AS gross,
+              sumIf(
+                abs(r.amountUsd),
+                r.type IN ('REFUND', 'CHARGEBACK')
+                  AND r.eventDate >= e.firstExposedAt
+                  AND r.eventDate <  e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY
+              ) AS refunds
+            FROM exposure e
+            LEFT JOIN (
+              SELECT subscriberId, type, amountUsd, eventDate
+              FROM rovenue.raw_revenue_events AS r FINAL
+              WHERE r.projectId = {projectId:String}
+            ) AS r
+              ON r.subscriberId = e.subscriberId
+            GROUP BY e.variantId, e.subscriberId, e.firstExposedAt
+          )
           SELECT
             exp.variantId AS variant_id,
             exp.exposures AS exposures,
             exp.unique_users AS unique_users,
             ifNull(c.conversions, 0) AS conversions,
-            ifNull(ac.attributed_conversions, 0) AS attributed_conversions
+            ifNull(ac.attributed_conversions, 0) AS attributed_conversions,
+            -- toUInt32(): count()/countIf() produce UInt64, which the
+            -- ClickHouse JSON formats quote as a STRING by default
+            -- (output_format_json_quote_64bit_integers) — fine for the
+            -- pre-existing UInt64 columns above (callers already Number()
+            -- them), but these four are typed as plain numbers on
+            -- ExperimentVariantRow and consumed directly by
+            -- experiment-bayes.ts, so the cast keeps
+            -- them genuinely numeric over the wire instead of pushing a
+            -- string/number split onto every caller.
+            toUInt32(ifNull(wv.mature_users, 0)) AS mature_users,
+            toUInt32(ifNull(wv.converters, 0)) AS converters,
+            ifNull(wv.sum_log_value, 0) AS sum_log_value,
+            ifNull(wv.sum_log_value_sq, 0) AS sum_log_value_sq,
+            ifNull(wv.revenue_usd, 0) AS revenue_usd,
+            ifNull(wv.refunds_usd, 0) AS refunds_usd,
+            toUInt32(ifNull(wv.excluded_immature, 0)) AS excluded_immature,
+            toUInt32(ifNull(wv.excluded_crossover, 0)) AS excluded_crossover
           FROM (
             SELECT
               variantId,
@@ -144,12 +349,96 @@ export async function runAnalyticsQuery(
               AND type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
             GROUP BY variantId
           ) ac ON exp.variantId = ac.variantId
+          LEFT JOIN (
+            SELECT
+              variantId,
+              countIf(bucket = 'mature')                                                                  AS mature_users,
+              countIf(bucket = 'mature' AND gross - refunds > 0)                                          AS converters,
+              sumIf(log(toFloat64(gross - refunds)), bucket = 'mature' AND gross - refunds > 0)            AS sum_log_value,
+              sumIf(pow(log(toFloat64(gross - refunds)), 2), bucket = 'mature' AND gross - refunds > 0)    AS sum_log_value_sq,
+              sumIf(toFloat64(gross), bucket = 'mature')                                                   AS revenue_usd,
+              sumIf(toFloat64(refunds), bucket = 'mature')                                                 AS refunds_usd,
+              countIf(bucket = 'immature')                                                                 AS excluded_immature,
+              countIf(bucket = 'crossover')                                                                AS excluded_crossover
+            FROM per_subscriber
+            GROUP BY variantId
+          ) wv ON exp.variantId = wv.variantId
           ORDER BY variant_id
         `,
         {
           projectId: q.projectId,
           experimentId: q.experimentId,
           experimentKey: q.experimentKey,
+          windowDays: MATURATION_WINDOW_DAYS,
+        },
+      );
+    case "experiment_revenue_by_store":
+      // Per-store split of the same subscriber-level, windowed, mature-only
+      // fold as "experiment_results" above — see `ExperimentStoreRevenueRow`
+      // for why this is a separate query rather than folded into the main
+      // row. Reuses the identical exposure/crossover/window CTE shape (same
+      // dedup-before-sum via `FINAL`, same crossover/immaturity exclusion);
+      // duplicated here rather than shared because each is an independent
+      // HTTP call to ClickHouse — there is no cross-query CTE reuse.
+      // INNER JOIN (not LEFT) because a subscriber with no revenue event in
+      // their window contributes nothing to any store's total, so there is
+      // no meaningful `store = NULL` row to emit for them.
+      return queryAnalytics<ExperimentStoreRevenueRow>(
+        q.projectId,
+        `
+          WITH exposure AS (
+            SELECT variantId, subscriberId, min(exposedAt) AS firstExposedAt
+            FROM rovenue.raw_exposures
+            WHERE projectId = {projectId:String}
+              AND experimentId = {experimentId:String}
+            GROUP BY variantId, subscriberId
+          ),
+          crossover AS (
+            SELECT subscriberId
+            FROM exposure
+            GROUP BY subscriberId
+            HAVING uniqExact(variantId) > 1
+          ),
+          per_subscriber_store AS (
+            -- Same ON-clause restriction as "experiment_results" above: the
+            -- hash JOIN's ON carries ONLY the subscriberId equality. Here the
+            -- window bound safely lives in WHERE (not sumIf) because this is
+            -- an INNER JOIN specifically meant to drop non-contributing rows
+            -- — a subscriber with no windowed revenue in a store has no
+            -- meaningful zero-row to emit for that store, unlike the
+            -- LEFT JOIN in "experiment_results" which must keep one.
+            SELECT
+              e.variantId AS variantId,
+              e.subscriberId AS subscriberId,
+              r.store AS store,
+              sumIf(r.amountUsd, r.type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')) AS gross,
+              sumIf(abs(r.amountUsd), r.type IN ('REFUND', 'CHARGEBACK'))                              AS refunds
+            FROM exposure e
+            INNER JOIN (
+              SELECT subscriberId, store, type, amountUsd, eventDate
+              FROM rovenue.raw_revenue_events AS r FINAL
+              WHERE r.projectId = {projectId:String}
+            ) AS r
+              ON r.subscriberId = e.subscriberId
+            WHERE e.subscriberId NOT IN (SELECT subscriberId FROM crossover)
+              AND e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY <= now()
+              AND r.eventDate >= e.firstExposedAt
+              AND r.eventDate <  e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY
+            GROUP BY e.variantId, e.subscriberId, r.store
+          )
+          SELECT
+            variantId               AS variant_id,
+            store                   AS store,
+            sum(toFloat64(gross))   AS revenue_usd,
+            sum(toFloat64(refunds)) AS refunds_usd
+          FROM per_subscriber_store
+          GROUP BY variantId, store
+          ORDER BY variant_id, store
+        `,
+        {
+          projectId: q.projectId,
+          experimentId: q.experimentId,
+          windowDays: MATURATION_WINDOW_DAYS,
         },
       );
     case "placement_metrics":
