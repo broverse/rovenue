@@ -71,7 +71,16 @@ Where the migrated ClickHouse comes from is an implementation choice between the
 
 Two dimensions, two different answers.
 
-**Country.** `raw_exposures` already carries `country`, so the concept exists in the pipeline but never reached revenue events. Revenue country must come from the subscriber's known country at event time and travel on the outbox payload — the outbox is the only path to Kafka, so a new dimension is added there and picked up by the `mv_revenue_to_raw` materialised view, exactly as `placementId`/`paywallId`/`variantId`/`experimentKey` were added by migration `0019`. **Historical rows will not have it**, and the UI must not imply otherwise: a country filter over a window that predates the column shows the rows it can and says so.
+**Country — and the source matters more than the plumbing.** `raw_exposures` carries `country`, so the concept exists in the pipeline, but tracing it changes the design:
+
+- The exposure country is a **runtime attribute the SDK supplies** on the experiments/config call (`country: z.string().length(2).optional()`). It is **not persisted on the subscriber** — there is no country column on `subscribers` and no `$country` in the reserved-attribute catalog — and on the live database only 1 of 15 exposures carries one. Revenue events are mostly born from webhooks and receipt validation, with no SDK call in the loop at all, so this source is absent exactly where revenue happens.
+- **Apple already gives us the authoritative answer per transaction.** `storefront` and `storefrontId` are typed on the decoded transaction (`apps/api/src/services/apple/apple-types.ts:108-109`) and are **read by nothing** in production code today. That is a per-transaction fact from the store itself — it cannot drift, unlike a last-known device attribute.
+
+So: revenue country comes from the **store's own per-transaction country** where the store provides it, added to the outbox payload and carried through `mv_revenue_to_raw` the way `0019` added the paywall dimensions. Apple is confirmed available. **Google and Stripe are unverified** — the plan must check each rather than assume, and a store that does not supply one records no country rather than borrowing one from somewhere else.
+
+What this design deliberately refuses: filling the gap with the subscriber's last-known SDK country. "The device reported this country at some point" and "this transaction happened in this storefront" are different facts, and presenting the first as the second is the same class of error as labelling an estimate a payout. A row without a store-supplied country has none.
+
+**Historical rows will not have it**, and the UI must not imply otherwise: a country filter over a window that predates the column shows the rows it can and says so.
 
 **Product group.** `productGroupId` exists nowhere in the ClickHouse schema and, unlike country, has no partial presence to build on. Unless the plan finds a real product-group concept in the Postgres model that belongs on a revenue event, **this dimension is removed from the endpoint and the UI** rather than shipped as an empty control. Removing a filter nobody can use is better than a dropdown that silently returns nothing.
 
@@ -101,14 +110,24 @@ Precedent for the response shape and streaming exists in `apps/api/src/services/
 ## 5. Data changes
 
 - One ClickHouse migration adding the country dimension to `raw_revenue_events` and its materialised view, following `0019`'s additive pattern (`ADD COLUMN IF NOT EXISTS ... DEFAULT ''`).
-- The revenue outbox payload gains the same field; the dispatcher and `mv_revenue_to_raw` carry it through.
-- Postgres gains per-project, per-store commission-rate configuration.
+- The revenue outbox payload gains the same field; the dispatcher and `mv_revenue_to_raw` carry it through. The value is sourced per store (§4.2), and the store paths that supply it need the field threaded from the decoded transaction — for Apple that means reading a `storefront` that is already typed and currently unused.
+- Postgres gains per-project, per-store commission-rate configuration. **No existing home was found** — there is no project-settings or store-config table to extend — so the plan chooses between a small dedicated table and a column on `projects`, and states why.
 - No change to existing aggregate targets, and no backfill.
+
+## 5a. Testing
+
+The schema-contract test is §4.1 and is the feature itself. The other three deliverables need their own coverage, and two of them are easy to test vacuously:
+
+- **Proceeds** is arithmetic over a configured rate, so it is unit-testable without ClickHouse: assert the rate is applied after refunds net, that a rate change re-computes historical periods (because nothing is written into the events), and that both Apple tiers and a custom rate produce the expected figure. A test that asserts a hardcoded product of two constants proves nothing — drive it from the configured rate.
+- **The metrics export** must be tested for its truncation marker, not only its happy path: cap the row count low in the test and assert the marker appears. A silently truncated export is the failure mode worth pinning.
+- **The filter-options repair** gets a test that would have caught the original bug — i.e. one that executes against the real schema, which is the schema-contract test doing its job on this endpoint specifically.
+- Dashboard work follows the existing chart convention (RTL + `QueryClientProvider`, `data-testid` points, explicit empty-state assertions) demonstrated by `series-chart-panel.test.tsx`.
 
 ## 6. Risks / decisions worth stating
 
 - **The schema-contract test is the deliverable most likely to be watered down** into "assert the query string contains the column name". That would restore exactly the false confidence that let this defect ship. It executes, or it is not worth writing.
 - **Adding a dimension to the revenue payload touches the outbox**, which is the single path to Kafka. The change is additive and defaulted, but it must not become a dual-write.
+- **Country coverage will be partial by store, and that is correct rather than a gap to paper over.** Apple supplies it per transaction today; Google and Stripe are unverified. A design that guarantees a country for every row could only do so by inventing one.
 - **Estimated proceeds will be read as real proceeds** unless the labelling is unambiguous. This is a copy problem with a correctness consequence.
 - **Removing the product-group filter is a visible regression** to anyone who saw the control. It never worked; saying so is better than leaving it.
 - Historical rows lack country forever. Any comparison spanning the migration boundary is partly blind, and the UI must say which part.
@@ -117,7 +136,7 @@ Precedent for the response shape and streaming exists in `apps/api/src/services/
 
 1. Every chart in the catalog has its real SQL executed against a real migrated ClickHouse schema in test; adding a chart with a bad column reference fails that test. Proven by introducing such a reference and observing the failure.
 2. `GET /charts/filter-options` returns without a ClickHouse exception, for every dimension it still advertises.
-3. Country revenue is queryable for events recorded after the migration, and the UI states that earlier events lack the dimension rather than showing them as unknown-but-equal.
+3. Country revenue is queryable for events recorded after the migration, sourced from the store's own per-transaction country and never from a last-known device attribute; a store that supplies none records none. The UI states that earlier events lack the dimension rather than showing them as unknown-but-equal.
 4. Product group is either genuinely queryable or absent from both API and UI — no dimension that returns nothing.
 5. Proceeds are computed at query time from a per-project, per-store configured rate, are labelled estimated with the rate visible, and refunds net before the rate is applied.
 6. The metrics export is project-scoped, capability-gated, reuses the chart readers, and marks truncation explicitly when it caps.
