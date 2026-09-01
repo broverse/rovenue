@@ -58,9 +58,9 @@ describe("runAnalyticsQuery — experiment_results", () => {
     );
     // Task 3: subscriber-level windowed value aggregates are bound in.
     expect(sqlText).toContain("{windowDays:UInt16}");
-    expect(sqlText).toContain("ifNull(wv.converters, 0) AS converters");
-    expect(sqlText).toContain("ifNull(wv.excluded_immature, 0) AS excluded_immature");
-    expect(sqlText).toContain("ifNull(wv.excluded_crossover, 0) AS excluded_crossover");
+    expect(sqlText).toContain("toUInt32(ifNull(wv.converters, 0)) AS converters");
+    expect(sqlText).toContain("toUInt32(ifNull(wv.excluded_immature, 0)) AS excluded_immature");
+    expect(sqlText).toContain("toUInt32(ifNull(wv.excluded_crossover, 0)) AS excluded_crossover");
     // FINAL must follow the alias, never precede it (invalid CH syntax).
     expect(sqlText).toContain("raw_revenue_events AS r FINAL");
     expect(sqlText).not.toMatch(/raw_revenue_events\s+FINAL\s+AS\s+r/);
