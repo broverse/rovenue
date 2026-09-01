@@ -14,6 +14,7 @@ import {
   readFilterOptions,
   readFunnel,
   readHeatmap,
+  readProceeds,
 } from "../../services/metrics/charts";
 import {
   isSystemChartId,
@@ -34,6 +35,7 @@ import type {
 // =============================================================
 //
 //   GET    /channels             store-share donut (CH)
+//   GET    /proceeds             estimated proceeds per store, rate-labelled (CH + Postgres)
 //   GET    /funnel               INITIAL → trial → paid → renewal
 //   GET    /heatmap              DOW × hour grid
 //   GET    /series/:chartId      chartId → { points, unit, supported }
@@ -353,6 +355,16 @@ export const chartsRoute = new Hono()
     await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
     const { windowDays } = c.req.valid("query");
     return c.json(ok(await readChannels(projectId, windowDays)));
+  })
+  .get("/proceeds", validate("query", windowQuerySchema), async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+    const { windowDays } = c.req.valid("query");
+    return c.json(ok(await readProceeds(projectId, windowDays)));
   })
   .get("/funnel", validate("query", windowQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");

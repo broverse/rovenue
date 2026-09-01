@@ -7,14 +7,18 @@ import type {
   ChartFunnelStep,
   ChartHeatmapCell,
   ChartHeatmapResponse,
+  ChartProceedsResponse,
+  ChartProceedsRow,
   ChartSeriesPoint,
   ChartSeriesResponse,
 } from "@rovenue/shared";
+import { drizzle, type Store } from "@rovenue/db";
 import {
   ClickHouseUnavailableError,
   isClickHouseConfigured,
   queryAnalytics,
 } from "../../lib/clickhouse";
+import { computeNetRevenue, computeProceedsForProject } from "./proceeds";
 
 // =============================================================
 // Charts service (Phase 3.5)
@@ -108,6 +112,84 @@ export async function readChannels(
     totalUsd: total.toFixed(4),
     rows: mapped,
   };
+}
+
+// =============================================================
+// Estimated proceeds — per-store gross/refunds from ClickHouse,
+// composed with the configured commission rate (Postgres)
+// =============================================================
+//
+// Design (spec §4.3, proceeds.ts's header comment): query time only,
+// refunds net first then the rate applies, and a project with no
+// configured rate for a store gets `null` — never a silent 0%.
+//
+// This is deliberately a PER-STORE breakdown, not a single blended
+// figure: a project can have a rate for APP_STORE and none for
+// PLAY_STORE, and summing them into one number would hide which part
+// is a real estimate and which part is undefined. So this is NOT
+// dispatched through `readChartSeries` (whose `ChartSeriesResponse` is
+// one line of daily points) — `estimated_proceeds` sits in the catalog
+// like every other not-yet-wired id (readChartSeries's `default` case
+// answers `supported: false` for it, at zero query cost) and is served
+// by its own route/reader instead, the same way `readChannels` already
+// is despite not being a catalog id at all.
+//
+// CHARGEBACK is netted out of gross alongside REFUND (both return the
+// money to the customer), matching `readChannels`'s existing gross
+// exclusion list — this module does not introduce a new convention.
+
+interface ChProceedsRow {
+  store: string;
+  gross_usd: string;
+  refunds_usd: string;
+}
+
+export async function readProceeds(
+  projectId: string,
+  windowDays: number,
+): Promise<ChartProceedsResponse> {
+  assertClickHouseReady();
+  const w = buildWindow(windowDays);
+  const rows = await queryAnalytics<ChProceedsRow>(
+    projectId,
+    `
+      SELECT
+        store,
+        toString(sumIf(amountUsd, type NOT IN ('REFUND','CHARGEBACK')))  AS gross_usd,
+        toString(sumIf(amountUsd, type IN ('REFUND','CHARGEBACK')))      AS refunds_usd
+      FROM rovenue.raw_revenue_events FINAL
+      WHERE projectId = {projectId:String}
+        AND toDate(eventDate) >= {from:Date}
+        AND toDate(eventDate) <= {to:Date}
+      GROUP BY store
+      ORDER BY store
+    `,
+    { from: toDateOnly(w.from), to: toDateOnly(w.to) },
+  );
+
+  const mapped: ChartProceedsRow[] = await Promise.all(
+    rows.map(async (r): Promise<ChartProceedsRow> => {
+      const gross = Number(r.gross_usd);
+      const refunds = Number(r.refunds_usd);
+      const estimate = await computeProceedsForProject(drizzle.db, {
+        projectId,
+        store: r.store as Store,
+        gross,
+        refunds,
+      });
+      return {
+        store: r.store,
+        grossUsd: r.gross_usd,
+        refundsUsd: r.refunds_usd,
+        netUsd: computeNetRevenue(gross, refunds).toFixed(4),
+        rate: estimate.rate,
+        proceedsUsd:
+          estimate.proceeds === null ? null : estimate.proceeds.toFixed(4),
+      };
+    }),
+  );
+
+  return { windowDays: w.days, rows: mapped };
 }
 
 // =============================================================

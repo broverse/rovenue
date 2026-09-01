@@ -358,6 +358,13 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
       readHeatmap: () => chartsModule.readHeatmap(PROJECT, WINDOW_DAYS),
       readFilterOptions: () =>
         chartsModule.readFilterOptions(PROJECT, WINDOW_DAYS),
+      // Mixes ClickHouse (gross/refunds per store) with Postgres
+      // (resolveCommissionRate) — same pattern as overview/credits/
+      // summary/ltv-prediction below. PROJECT is fresh and unseeded in
+      // both stores, so this exercises the CH query's schema validity
+      // with zero rows returned (a pass, per this file's header) and
+      // issues no Postgres call at all in that case.
+      readProceeds: () => chartsModule.readProceeds(PROJECT, WINDOW_DAYS),
     },
   },
   {

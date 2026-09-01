@@ -1411,6 +1411,47 @@ export interface ChartChannelsResponse {
   rows: ChartChannelsRow[];
 }
 
+// =============================================================
+// Charts — estimated proceeds after store commission (Task 5,
+// 2026-09-01 analytics-integrity-and-proceeds plan)
+// =============================================================
+//
+// A per-store breakdown, deliberately NOT a single blended figure: a
+// project can have a configured rate for one store and none for
+// another, and folding those into one number would hide which part is
+// a real estimate and which part is undefined. `rate`/`proceedsUsd`
+// are `null` together when the store has no configured commission
+// rate — never a silently-assumed 0%. See
+// apps/api/src/services/metrics/proceeds.ts for the arithmetic.
+
+export interface ChartProceedsRow {
+  store: string;
+  /** Decimal-as-string gross USD in the window, before refunds. */
+  grossUsd: string;
+  /** Decimal-as-string; refunds + chargebacks (always non-negative). */
+  refundsUsd: string;
+  /** Decimal-as-string; grossUsd - refundsUsd. */
+  netUsd: string;
+  /**
+   * The commission rate actually applied for this store, or `null`
+   * when nothing is configured — the caller's signal to render "no
+   * estimate available", never a store that takes nothing.
+   */
+  rate: number | null;
+  /**
+   * Decimal-as-string ESTIMATED proceeds (netUsd * (1 - rate)). Always
+   * `null` when `rate` is `null`. Any caller presenting this MUST
+   * label it an estimate with `rate` visible next to it — never as an
+   * actual store payout (see proceeds.ts's header comment).
+   */
+  proceedsUsd: string | null;
+}
+
+export interface ChartProceedsResponse {
+  windowDays: number;
+  rows: ChartProceedsRow[];
+}
+
 export interface ChartFunnelStep {
   /** Stable identifier, e.g. `purchase` / `trial` / `renewal`. */
   key: "purchase" | "trial" | "trial_to_paid" | "renewal";

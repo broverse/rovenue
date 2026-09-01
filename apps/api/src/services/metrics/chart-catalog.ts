@@ -32,6 +32,7 @@ const SYSTEM_CATALOG: ReadonlyArray<SystemChart> = [
   { id: "arpu", category: "revenue", chartType: "line", range: "12M", config: {} },
   { id: "rev_per_install", category: "revenue", chartType: "line", range: "12M", config: {} },
   { id: "gross_vs_net", category: "revenue", chartType: "area", range: "12M", config: {} },
+  { id: "estimated_proceeds", category: "revenue", chartType: "bar", range: "12M", config: {} },
   { id: "new_subs", category: "growth", chartType: "bar", range: "6M", config: {} },
   { id: "trials_started", category: "growth", chartType: "bar", range: "6M", config: {} },
   { id: "reactivations", category: "growth", chartType: "line", range: "6M", config: {} },
