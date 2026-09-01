@@ -5,6 +5,8 @@ import {
   IMPORT_OUTCOME_LABELS,
   IMPORT_OUTCOME_ORDER,
   IMPORT_VERIFICATION_SCOPE_NOTE,
+  IMPORT_VERIFY_COUNTER_LABELS,
+  IMPORT_VERIFY_COUNTER_ORDER,
   androidNoTokenWarning,
   duplicateTrackingDisclosure,
 } from "./constants";
@@ -61,6 +63,59 @@ function DryRunDisclosures({ summary }: { summary: NonNullable<ImportJob["dryRun
   );
 }
 
+/**
+ * Final-fix-wave minor fix: Phase B's own verification counters had no
+ * UI representation at all — `verificationCountersScope`'s scope note
+ * used to render directly above the Phase-A row buckets it does not
+ * describe, with nothing underneath actually showing the numbers the
+ * note was talking about. This section IS that: it renders ONLY once
+ * Phase B has touched this job (`scope` non-null), with the scope note
+ * directly above it, describing the counters immediately below rather
+ * than an unrelated list.
+ */
+function VerificationCounters({
+  job,
+  scope,
+}: {
+  job: ImportJob;
+  scope: NonNullable<ImportJob["verificationCountersScope"]>;
+}) {
+  const verifyBuckets = IMPORT_VERIFY_COUNTER_ORDER.map((key) => ({
+    key,
+    count: job.counters[key] ?? 0,
+  })).filter((bucket) => bucket.count > 0);
+
+  return (
+    <div className="mt-4" data-testid="import-verification-counters">
+      <p
+        role="note"
+        data-testid="import-verification-scope-note"
+        className="mb-3 rounded-md border border-rv-warning/30 bg-rv-warning/5 px-3 py-2 text-[12.5px] text-rv-warning"
+      >
+        {IMPORT_VERIFICATION_SCOPE_NOTE[scope]}
+      </p>
+      {/* All-zero is a real, if unusual, state (e.g. the anchor cap was
+          hit before this call resolved anything) — the scope note above
+          still needs to render; there just isn't a non-zero bucket to
+          list underneath it. */}
+      {verifyBuckets.length > 0 && (
+        <ul className="divide-y divide-rv-divider rounded-lg border border-rv-divider">
+          {verifyBuckets.map(({ key, count }) => (
+            <li
+              key={key}
+              data-testid={`import-verify-counter-${key}`}
+              className="flex items-center justify-between px-3 py-2 text-[13px]"
+            >
+              <span>{IMPORT_VERIFY_COUNTER_LABELS[key]}</span>
+              <Chip tone="default">{count.toLocaleString()}</Chip>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // =============================================================
 // Dry-run / verification outcome summary
 // =============================================================
@@ -79,9 +134,6 @@ export function DryRunSummary({ job }: { job: ImportJob }) {
   })).filter((bucket) => bucket.count > 0);
 
   const androidCount = job.counters[IMPORT_ANDROID_NO_TOKEN_OUTCOME] ?? 0;
-  const scopeNote = job.verificationCountersScope
-    ? IMPORT_VERIFICATION_SCOPE_NOTE[job.verificationCountersScope]
-    : null;
   const duplicateTrackingDisabledAfterKeys =
     job.dryRunSummary?.duplicateTrackingDisabledAfterKeys ?? null;
 
@@ -107,16 +159,6 @@ export function DryRunSummary({ job }: { job: ImportJob }) {
         </p>
       )}
 
-      {scopeNote && (
-        <p
-          role="note"
-          data-testid="import-verification-scope-note"
-          className="mb-3 rounded-md border border-rv-warning/30 bg-rv-warning/5 px-3 py-2 text-[12.5px] text-rv-warning"
-        >
-          {scopeNote}
-        </p>
-      )}
-
       <ul className="divide-y divide-rv-divider rounded-lg border border-rv-divider">
         {buckets.map(({ outcome, count }) => (
           <li
@@ -138,6 +180,10 @@ export function DryRunSummary({ job }: { job: ImportJob }) {
         >
           {androidNoTokenWarning(androidCount)}
         </p>
+      )}
+
+      {job.verificationCountersScope && (
+        <VerificationCounters job={job} scope={job.verificationCountersScope} />
       )}
     </div>
   );

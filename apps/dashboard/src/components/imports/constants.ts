@@ -132,6 +132,35 @@ export const IMPORT_OUTCOME_LABELS: Record<ImportOutcome, string> = {
 export const IMPORT_ANDROID_NO_TOKEN_OUTCOME: ImportOutcome = "androidNoToken";
 
 /**
+ * Final-fix-wave minor fix: Phase B's own verification counters
+ * (verify.ts's `VERIFY_COUNTER_KEYS`, a SEPARATE namespace from the
+ * Phase-A outcome buckets above) had NO UI representation at all —
+ * `verificationCountersScope`'s "inspected subset, not the whole file"
+ * note rendered directly above the Phase-A row buckets it doesn't
+ * describe, with nothing underneath it actually showing the numbers it
+ * WAS talking about. This is that missing section.
+ */
+export type ImportVerifyCounterKey =
+  | "verifyAnchorVerified"
+  | "verifyAnchorNotFound"
+  | "verifyAnchorPending"
+  | "verifyAnchorUnverifiable";
+
+export const IMPORT_VERIFY_COUNTER_ORDER: readonly ImportVerifyCounterKey[] = [
+  "verifyAnchorVerified",
+  "verifyAnchorNotFound",
+  "verifyAnchorPending",
+  "verifyAnchorUnverifiable",
+];
+
+export const IMPORT_VERIFY_COUNTER_LABELS: Record<ImportVerifyCounterKey, string> = {
+  verifyAnchorVerified: "Verified live",
+  verifyAnchorNotFound: "Store no longer recognises (kept as history)",
+  verifyAnchorPending: "Pending (throttled — will retry on resume)",
+  verifyAnchorUnverifiable: "Unverifiable (e.g. store not connected)",
+};
+
+/**
  * Final-fix-wave FIX 9: this used to tell the operator to "request the
  * supplemental Google purchase-token file... and run a second import" —
  * that second import cannot succeed today (the token file's 3 columns can

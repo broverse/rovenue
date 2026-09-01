@@ -115,9 +115,78 @@ describe("DryRunSummary", () => {
       />,
     );
 
+    // Final-fix-wave minor fix: the scope note must still render even
+    // when every verify counter happens to be zero/absent (e.g. the cap
+    // was hit before this call resolved anything) — it is not gated on
+    // there being a non-empty bucket list underneath it.
     expect(screen.getByTestId("import-verification-scope-note")).toHaveTextContent(
       /not the whole file/i,
     );
+  });
+
+  // ===========================================================
+  // Final-fix-wave minor fix — the scope note now sits directly above
+  // the verification counters it describes, not above the unrelated
+  // Phase-A row buckets
+  // ===========================================================
+
+  it("renders Phase B's own verification counters, with the scope note directly above them", () => {
+    render(
+      <DryRunSummary
+        job={makeJob({
+          status: "COMPLETED",
+          counters: {
+            willCreate: 500,
+            verifyAnchorVerified: 480,
+            verifyAnchorNotFound: 15,
+            verifyAnchorPending: 0,
+            verifyAnchorUnverifiable: 5,
+          },
+          verificationCountersScope: "wholeFile",
+        })}
+      />,
+    );
+
+    const section = screen.getByTestId("import-verification-counters");
+    const scopeNote = screen.getByTestId("import-verification-scope-note");
+    expect(section).toContainElement(scopeNote);
+
+    expect(screen.getByTestId("import-verify-counter-verifyAnchorVerified")).toHaveTextContent(
+      "480",
+    );
+    expect(screen.getByTestId("import-verify-counter-verifyAnchorNotFound")).toHaveTextContent(
+      "15",
+    );
+    expect(
+      screen.getByTestId("import-verify-counter-verifyAnchorUnverifiable"),
+    ).toHaveTextContent("5");
+    // Zero-count buckets are omitted, same convention as the Phase-A list.
+    expect(
+      screen.queryByTestId("import-verify-counter-verifyAnchorPending"),
+    ).not.toBeInTheDocument();
+
+    // The scope note precedes the verify buckets in document order, and
+    // the Phase-A row buckets render in a SEPARATE list entirely — the
+    // note no longer sits directly above a list it doesn't describe.
+    const verifyList = section.querySelector("ul");
+    expect(
+      scopeNote.compareDocumentPosition(verifyList!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("renders nothing extra when Phase B has never touched this job", () => {
+    render(
+      <DryRunSummary
+        job={makeJob({
+          status: "DRY_RUN_COMPLETE",
+          counters: { willCreate: 500 },
+          verificationCountersScope: null,
+        })}
+      />,
+    );
+
+    expect(screen.queryByTestId("import-verification-counters")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("import-verification-scope-note")).not.toBeInTheDocument();
   });
 
   it("shows an empty state instead of a summary when nothing has been scanned yet", () => {
