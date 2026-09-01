@@ -118,6 +118,12 @@ export const experimentStatus = pgEnum("ExperimentStatus", [
   "COMPLETED",
 ]);
 
+export const experimentPrimaryMetric = pgEnum("ExperimentPrimaryMetric", [
+  "CONVERSION",
+  "ARPU",
+  "PROCEEDS_PER_USER",
+]);
+
 export const featureFlagType = pgEnum("FeatureFlagType", [
   "BOOLEAN",
   "STRING",

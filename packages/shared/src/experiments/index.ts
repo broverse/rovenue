@@ -12,6 +12,8 @@
 
 export * from "./types";
 
+export { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "./constants";
+
 export {
   assignBucket,
   isInRollout,

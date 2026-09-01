@@ -1,6 +1,8 @@
 import { createId } from "@paralleldrive/cuid2";
+import { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "@rovenue/shared/experiments";
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -32,6 +34,7 @@ import {
   creditLedgerType,
   customDomainCertStatus,
   environment,
+  experimentPrimaryMetric,
   experimentStatus,
   experimentType,
   featureFlagEnv,
@@ -260,33 +263,46 @@ export type NewUserPreferences = typeof userPreferences.$inferInsert;
 // projects
 // =============================================================
 
-export const projects = pgTable("projects", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  name: text("name").notNull(),
-  description: text("description"),
-  appleCredentials: jsonb("appleCredentials"),
-  googleCredentials: jsonb("googleCredentials"),
-  webhookUrl: text("webhookUrl"),
-  webhookSecret: text("webhookSecret"),
-  webhookEventCategories: jsonb("webhookEventCategories")
-    .notNull()
-    .$type<string[]>()
-    .default(sql`'[]'::jsonb`),
-  settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
-  refundShieldEnabled: boolean("refund_shield_enabled").notNull().default(false),
-  refundShieldConsentAcknowledgedAt: timestamp("refund_shield_consent_acknowledged_at", { withTimezone: true }),
-  refundShieldConsentAcknowledgedBy: text("refund_shield_consent_acknowledged_by").references(() => user.id, { onDelete: "set null" }),
-  refundShieldResponseDelayMinutes: integer("refund_shield_response_delay_minutes").notNull().default(60),
-  // Set by the usage-cap sweeper when hard caps are exceeded two
-  // consecutive billing periods; dashboard guard reads it. Null = unlocked.
-  usageLockedAt: timestamp("usage_locked_at", { withTimezone: true }),
-  createdAt: timestamp("createdAt", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updatedAt", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const projects = pgTable(
+  "projects",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    name: text("name").notNull(),
+    description: text("description"),
+    appleCredentials: jsonb("appleCredentials"),
+    googleCredentials: jsonb("googleCredentials"),
+    webhookUrl: text("webhookUrl"),
+    webhookSecret: text("webhookSecret"),
+    webhookEventCategories: jsonb("webhookEventCategories")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
+    refundShieldEnabled: boolean("refund_shield_enabled").notNull().default(false),
+    refundShieldConsentAcknowledgedAt: timestamp("refund_shield_consent_acknowledged_at", { withTimezone: true }),
+    refundShieldConsentAcknowledgedBy: text("refund_shield_consent_acknowledged_by").references(() => user.id, { onDelete: "set null" }),
+    refundShieldResponseDelayMinutes: integer("refund_shield_response_delay_minutes").notNull().default(60),
+    // Set by the usage-cap sweeper when hard caps are exceeded two
+    // consecutive billing periods; dashboard guard reads it. Null = unlocked.
+    usageLockedAt: timestamp("usage_locked_at", { withTimezone: true }),
+    // Percentage of traffic permanently withheld from every experiment
+    // (0-100), used to measure the cumulative effect of running
+    // experiments at all. Enforced in Postgres via a CHECK constraint.
+    holdoutPercentage: integer("holdout_percentage").notNull().default(0),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    holdoutPercentageRange: check(
+      "projects_holdout_percentage_range",
+      sql`${t.holdoutPercentage} >= 0 AND ${t.holdoutPercentage} <= 100`,
+    ),
+  }),
+);
 
 // =============================================================
 // project_members
@@ -1359,6 +1375,26 @@ export const experiments = pgTable(
     startedAt: timestamp("startedAt", { withTimezone: true }),
     completedAt: timestamp("completedAt", { withTimezone: true }),
     winnerVariantId: text("winnerVariantId"),
+    // Decision-engine inputs: which metric the sequential test evaluates,
+    // and the smallest relative effect it should be powered to detect.
+    primaryMetric: experimentPrimaryMetric("primaryMetric")
+      .notNull()
+      .default("CONVERSION"),
+    minimumDetectableEffect: numeric("minimumDetectableEffect", {
+      precision: 5,
+      scale: 4,
+    })
+      .notNull()
+      .default(String(DEFAULT_MINIMUM_DETECTABLE_EFFECT)),
+    // Optional scheduling window and predecessor gate for auto-start;
+    // null means "no schedule" / "no dependency" respectively.
+    scheduledStartAt: timestamp("scheduledStartAt", { withTimezone: true }),
+    scheduledEndAt: timestamp("scheduledEndAt", { withTimezone: true }),
+    startAfterExperimentId: text("startAfterExperimentId").references(
+      (): AnyPgColumn => experiments.id,
+      { onDelete: "set null" },
+    ),
+    autoWinnerOnStop: boolean("autoWinnerOnStop").notNull().default(false),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2168,6 +2204,7 @@ export {
   creditLedgerType,
   customDomainCertStatus,
   environment,
+  experimentPrimaryMetric,
   experimentStatus,
   experimentType,
   featureFlagEnv,

@@ -785,6 +785,13 @@
       "when": 1788270707171,
       "tag": "0111_project_store_commission_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1788296618903,
+      "tag": "0112_quiet_wildside",
+      "breakpoints": true
     }
   ]
 }
