@@ -109,8 +109,9 @@ have connected to.
    metric, valid when read continuously, with expected loss as the stopping quantity.
 2. Winner selection on **revenue** metrics (ARPU and post-commission proceeds), not only
    on conversion rate.
-3. Credible intervals and an explicit minimum-sample warning on the results page, so no
-   decision is offered before it can be trusted.
+3. Credible intervals and explicit minimum-sample, minimum-runtime and data-integrity
+   warnings on the results page, so no decision is offered before it can be trusted — and
+   one refund-rate guardrail, because §4.5 can ship a winner without a human.
 4. Element-level experiments that actually change an element, on all three renderers,
    without touching any renderer.
 5. A project-level holdout that measures the cumulative value of experimentation.
@@ -128,6 +129,9 @@ have connected to.
   the assignment log means and deserve their own spec.
 - **No CUPED or other variance reduction.** Worth doing later; it is an optimisation of a
   decision rule that does not exist yet.
+- **No guardrail-metric framework.** §4.6 adds exactly one guardrail — refund rate —
+  because automated shipping without it is unsafe. Configurable guardrails, custom metric
+  definitions and metric libraries are a separate spec.
 - **No auto-shipping of winners by default.** See §4.6.
 - **Not rewriting the frequentist toolkit.** It stays, correctly labelled (§4.1).
 - **No SDK-side change.** Every decision in this spec is made server-side; the envelope
@@ -145,22 +149,57 @@ Add `apps/api/src/lib/experiment-bayes.ts` beside the existing stats module.
 is `Beta(1 + conversions, 1 + users − conversions)`. This is exact, conjugate, and needs
 only the two counts the ClickHouse query already returns.
 
-**Revenue per user — the standard two-part decomposition.** Revenue per exposed user is
-zero-inflated: most users pay nothing, a few pay a lot, so a t-test on it is badly behaved
-at realistic mobile sample sizes. Decompose it the way the literature does:
+**Revenue per user — two-part decomposition, log-normal value factor.** Revenue per exposed
+user is zero-inflated: most users pay nothing, a few pay a lot, so a t-test on it is badly
+behaved at realistic mobile sample sizes. Decompose it the way the literature does:
 
 ```
 revenue_per_user  =  P(convert)  ×  E[revenue | converted]
-                     Beta               Gamma
+                     Beta            log-Normal
 ```
 
-The converted-value factor uses a Gamma posterior over the rate of an exponential
-likelihood — conjugate, and computable from `(order_count, revenue_sum)` alone, which
-means no per-user revenue series has to leave ClickHouse. **The exponential assumption is
-an approximation** and must be stated in the module comment and in the docs page: real
-order values are closer to log-normal. It is a defensible one at this granularity, and the
-existing Welch t-test is retained as an independent cross-check that does not share the
-assumption.
+**The unit of analysis is the subscriber, because the subscriber is the unit of
+randomisation.** This is the rule the whole section turns on: an order-level model would
+let one user with three renewals count three times in a comparison that randomised users,
+which silently inflates the variance and can flip a decision. So the value factor is
+fitted over **net revenue per converting subscriber**, formed by aggregating that
+subscriber's revenue events first and the variants second.
+
+Model `log(net revenue per converter)` as Normal with unknown mean and variance
+(Normal-Inverse-Gamma, conjugate), so `E[revenue | converted] = exp(μ + σ²/2)` follows from
+the posterior. It needs exactly three aggregates per variant — `converters`,
+`sum(log x)`, `sum(log(x)²)` — so no per-user series ever leaves ClickHouse, and it does
+not carry the exponential model's `mean = sd` constraint, which is plainly false for
+subscription prices that cluster around a handful of price points.
+
+Two consequences to make explicit rather than discover:
+
+- **A fully refunded purchase is not a conversion.** A subscriber whose net revenue is ≤ 0
+  after refunds is excluded from both factors — the conversion numerator and the value
+  fit — rather than being counted as a conversion worth nothing. Counting it as a
+  conversion would reward a variant that drives purchases users immediately reverse, which
+  is the opposite of what the experiment is for. `log(x)` is only ever taken over strictly
+  positive values, so this is also what keeps the model defined.
+- The existing Welch t-test is retained as an independent cross-check on raw per-subscriber
+  revenue. It shares neither the log-normality nor the conjugacy assumption, so agreement
+  between them is informative and disagreement is a flag worth showing.
+
+**A maturation window, not "everything since exposure".** The current ClickHouse query
+joins revenue with `r.eventDate >= e.firstExposedAt` and **no upper bound**, so a
+subscriber exposed in week one has had weeks to accumulate revenue while one exposed
+yesterday has had a day. Comparing arms that ramped at different times — or comparing a
+holdout cohort against everyone else — then measures exposure age, not treatment. Fix it
+with a fixed per-subscriber observation window (a named constant, e.g. 7 days from first
+exposure): revenue counts only inside the window, and **a subscriber whose window has not
+fully elapsed is excluded from the revenue metric entirely** rather than contributing a
+partial sum. Conversion-rate metrics get the same treatment for the same reason.
+
+**Crossover contamination is detected, not assumed away.** Assignment is sticky, but
+subscriber merge and transfer can genuinely land one subscriber in two variants of the same
+experiment. Count subscribers with more than one variant assignment, exclude them from the
+analysis, and surface the count beside SRM. A silent crossover biases both arms toward each
+other, which makes a real winner look like a tie — the failure mode nobody goes looking
+for.
 
 **Decision quantities.** For each variant: `probabilityBest`, `expectedLoss` (the expected
 regret of shipping this variant when another is truly better), and an equal-tailed
@@ -174,16 +213,41 @@ user's trust in it. Draw count and seed derivation are named constants.
 
 **The stopping rule**, which is what §4 has actually been missing:
 
-> Declare a leader when its `expectedLoss` is below the caution threshold **and** the
-> minimum-sample gate has been passed.
+> Declare a leader when its `expectedLoss` is below the caution threshold, **and** the
+> minimum-sample gate has been passed, **and** the experiment has run for at least the
+> minimum number of whole weekly cycles, **and** no guardrail or integrity check has fired.
 
-Both halves are load-bearing. Expected loss alone will fire on tiny samples where the
-posterior is wide and the loss is small by accident. The threshold is a named constant
-expressed in the metric's own units (a fraction of baseline), not a bare number.
+Every clause is load-bearing:
 
-**The frequentist module stays**, with one change: its p-values are labelled in the API and
-UI as *fixed-horizon* — valid at the planned sample size, not as a continuous monitor. The
-existing `confidenceLabel` must not be used as a stopping signal anywhere.
+- Expected loss alone fires on tiny samples, where the posterior is wide and the loss is
+  small by accident.
+- The **runtime** gate is not implied by the sample gate. A high-traffic app can pass any
+  sample threshold inside a single day and ship a decision made entirely on one weekday's
+  mix of users — the classic novelty/day-of-week trap. Whole weekly cycles, as a named
+  constant.
+- Integrity and guardrails suppress, they do not annotate (§4.6).
+
+**What expected loss does and does not buy.** It bounds *expected regret under the model's
+prior* — it is not a Type-I error rate, and calling continuous monitoring "safe" without
+that qualifier would be the same overclaim in Bayesian clothing that the p-value made in
+frequentist clothing. Anyone who needs error-rate guarantees under continuous monitoring
+needs sequential frequentist machinery, which this spec deliberately does not build (§3).
+Say this in the module comment and on the docs page.
+
+**Every statistical parameter is named or configured, none are magic.** The dead path
+called `estimateSampleSize(baselineForSizing, 0.1)` — a bare `0.1` minimum detectable
+effect invented at the call site, which is both a magic value and the single input that
+most determines whether an experiment is adequately powered. The MDE becomes an
+experiment-level field set at creation (with a named default), and α, power, the credible
+level, the prior, the expected-loss threshold, the Monte Carlo draw count, the maturation
+window and the minimum weekly cycles are all named constants in one place.
+
+**The frequentist module stays**, with two changes: its p-values are labelled in the API and
+UI as *fixed-horizon* — valid at the planned sample size, not as a continuous monitor — and
+where an experiment has more than two variants, the pairwise tests are computed **against
+control only** and carry no multiplicity correction. Both facts are exactly why they are a
+cross-check and not a decision input; the existing `confidenceLabel` must not be used as a
+stopping signal anywhere.
 
 **The dead path is deleted.** `getExperimentResults` in `experiment-engine.ts` and the
 types it owns come out; anything valuable in it (the per-variant funnel, the sample-size
@@ -193,9 +257,22 @@ cleanup to do later — leaving two implementations is what produced this situat
 ### 4.2 Feeding the engine: revenue reaches the results service
 
 The ClickHouse `experiment_results` query returns counts only. Extend it — the exposure ⋈
-revenue join it already performs is where the numbers are — to also return, per variant:
-`order_count`, `revenue_sum`, and the same split **by store**, because proceeds need a
-per-store commission rate.
+revenue join it already performs is where the numbers are — but extend it **through a
+per-subscriber sub-aggregate**, per §4.1's unit rule: fold each subscriber's revenue events
+inside their maturation window into one net figure first, then aggregate subscribers into
+variants. The query already sub-aggregates by `(variantId, subscriberId)` to find
+`min(exposedAt)`, so this extends a shape that exists rather than introducing one.
+
+Per variant it must then return: `converters` (subscribers with net revenue > 0),
+`sum(log net)`, `sum(log(net)²)`, the raw `revenue_sum`, the count of subscribers excluded
+for an unelapsed maturation window, the count excluded for crossover, and the same figures
+**split by store**, because proceeds need a per-store commission rate.
+
+**This query must be registered in §5's schema-contract harness**
+(`services/metrics/schema-contract.integration.test.ts`), and its tests must not mock
+ClickHouse. That harness exists because §5 shipped a metrics reader querying columns that
+had never existed, green in CI and broken live, precisely because every test mocked the
+client. A new reader that skips the harness reproduces that failure exactly.
 
 Proceeds reuse §5's shipped work: `resolveCommissionRate` and `computeProceeds` in
 `services/metrics/proceeds.ts`. Do not re-derive commission logic. A project with no
@@ -276,6 +353,13 @@ never asked to compute holdout membership itself.
 The reserved cohort id must be a value no user-chosen variant id can collide with;
 validation must reject it at experiment creation.
 
+**Threshold bucketing makes growth safe and shrinkage lossy, and the UI must say which.**
+Because membership is "hash below the threshold", *raising* the percentage only ever adds
+subscribers and leaves every existing member in place, so the accumulated comparison stays
+valid. *Lowering* it removes members whose past exposure is already recorded, which
+retroactively mixes treated and held-out revenue in the same cohort. Both are audited; the
+lowering case warns explicitly rather than being treated as a symmetric edit.
+
 ### 4.5 Scheduling and per-placement sequencing
 
 Add to `experiments`: `scheduledStartAt`, `scheduledEndAt`, `startAfterExperimentId`, and
@@ -289,7 +373,11 @@ the same transaction, attributed to the scheduler rather than to a user, so the 
 answers "who started this" truthfully.
 
 Sequencing is `startAfterExperimentId`: the successor starts when its predecessor reaches
-`COMPLETED`. **Cycles must be rejected at write time**, not detected at run time.
+`COMPLETED`. **Cycles must be rejected at write time**, not detected at run time. A
+successor whose predecessor is deleted, or which has waited past its own
+`scheduledStartAt` by more than a named grace period, must be **surfaced as blocked** — a
+queued experiment that waits silently forever is indistinguishable from one that is
+working, and the operator finds out weeks later that nothing ran.
 
 `scheduledEndAt` stops the experiment. If `autoWinnerOnStop` is set, and only then, the
 scheduler applies §4.1's decision rule and stops *with* that winner, reusing the existing
@@ -308,8 +396,19 @@ Wire what the dashboard already renders:
   the existing `estimateSampleSize` (which today is only called from the dead path). "Not
   enough data yet" is a first-class answer and must be visually distinct from "no
   difference detected" — they mean opposite things to whoever is deciding.
-- SRM keeps its guardrail position: when SRM fires, the recommendation is **suppressed**,
-  not shown alongside a warning. A mis-split experiment's leader is not a leader.
+- **Three things suppress a recommendation rather than annotate it**: SRM, crossover
+  contamination above a named tolerance, and the refund-rate guardrail. A mis-split
+  experiment's leader is not a leader, and a recommendation shown next to a warning gets
+  shipped anyway.
+
+**One guardrail metric, deliberately scoped.** Alongside the primary metric, the results
+compute **refund rate per variant** and suppress the recommendation when the leader's
+refund rate is materially worse than control by a named margin. This is one extra metric,
+not a guardrail framework, and it earns its place for a specific reason: this product is
+about subscriptions, the refund data is already computed by §5's summary service, and §4.5
+can now stop an experiment and ship a winner *without a human in the loop*. A variant that
+wins on conversion by driving purchases users immediately reverse is the exact failure an
+automated shipper must not commit, and it is invisible to every other number on the page.
 
 **Auto-shipping stays opt-in and off by default.** The system recommends; a human ships,
 unless that human has explicitly asked otherwise per experiment. This is a money-affecting
@@ -327,12 +426,19 @@ and the offline-fallback-serves-control behaviour.
 Postgres (one migration):
 
 - `experiments.primaryMetric` — enum, default `CONVERSION`.
+- `experiments.minimumDetectableEffect` — numeric, defaulting to the named constant that
+  replaces the dead path's magic `0.1`.
 - `experiments.scheduledStartAt`, `scheduledEndAt` — nullable timestamptz.
 - `experiments.startAfterExperimentId` — nullable self-reference.
 - `experiments.autoWinnerOnStop` — boolean, default `false`.
-- `projects.holdoutPercentage` — integer, default `0`.
+- `projects.holdoutPercentage` — integer, default `0`, constrained to `0..100`.
 
 Every column defaults to today's behaviour, so the migration is inert on existing rows.
+
+**The new enum must be re-exported from `packages/db/src/drizzle/schema.ts`'s re-export
+block.** Seven enums were missing from it earlier this session, which made drizzle-kit
+emit `DROP TYPE` for each on the next generate — a repo-specific landmine that costs
+nothing to avoid and is expensive to discover in a generated migration.
 
 ClickHouse: **no migration.** §4.2 extends an existing query over existing columns; the
 per-store split reads `raw_revenue_events` fields that already exist. Confirm this against
@@ -344,10 +450,20 @@ files — that harness exists precisely because reading was not enough.
 - **Monte Carlo without a seed would be the worst possible bug here** — numbers that move
   on refresh destroy trust in a decision system faster than being wrong once. Seeded from
   the experiment id, asserted by a test that runs the same input twice.
-- **The exponential revenue model is an approximation.** Documented at the module, in the
-  API response, and on the docs page. Welch's t-test is retained as the cross-check.
-- **Expected loss is not a licence to peek without limit.** The minimum-sample gate is the
-  other half of the rule and must not be made optional.
+- **The log-normal value model is still a model.** It fits subscription price points far
+  better than an exponential would, but heavy tails and multi-modal price ladders can
+  strain it. Documented at the module, in the API response, and on the docs page; Welch's
+  t-test on raw per-subscriber revenue is the assumption-free cross-check, and a
+  disagreement between them is shown rather than resolved silently.
+- **Expected loss bounds expected regret, not Type-I error.** The sample, runtime and
+  guardrail gates are the other parts of the rule and must not be made optional.
+- **The maturation window trades freshness for validity.** A 7-day window means the revenue
+  metric ignores the most recent week of exposures. That is the correct trade — the
+  alternative measures how long ago a user was exposed — but it must be visible in the UI,
+  or an operator will read a stale-looking number as a broken one.
+- **Excluding fully-refunded converters changes the conversion rate** relative to what the
+  current endpoint reports. That is a deliberate semantic correction, not a silent one:
+  state it in the docs and in the API field's documentation.
 - **The conversion denominator for non-PAYWALL types is an exposure-join heuristic**,
   already documented on `ExperimentVariantRow`. The new metrics inherit that limitation and
   must not present it as precise attribution.
@@ -372,9 +488,19 @@ files — that harness exists precisely because reading was not enough.
 5. `experiment-engine.getExperimentResults` no longer exists, and exactly one results
    implementation is reachable from any route.
 6. `confidence` and `leadingVariant` are no longer hardcoded; the "ship the winner" banner
-   appears only when the full stopping rule passes, and never when SRM has fired.
+   appears only when the full stopping rule passes, and never when SRM, crossover, or the
+   refund guardrail has fired.
 7. An under-powered experiment shows a minimum-sample warning that is visually and
    textually distinct from "no significant difference".
+7a. An experiment that has passed its sample gate but not its minimum-runtime gate still
+   withholds a recommendation, proven by a test that supplies ample samples inside one day.
+7b. Revenue metrics are computed per subscriber, not per order: a test in which one
+   subscriber has several renewals must count that subscriber once.
+7c. Subscribers whose maturation window has not elapsed are excluded from the revenue
+   metric, and the excluded count is reported rather than dropped.
+7d. A subscriber assigned to two variants of one experiment is excluded and counted as
+   crossover; above the named tolerance the recommendation is suppressed.
+7e. A converter whose net revenue is ≤ 0 after refunds is not counted as a conversion.
 8. An ELEMENT experiment changes a single node's props on web, SwiftUI and Android Views
    with **no diff** in any renderer, in `render-fixtures.json`, or in the paywall model's
    emitted JSON — the envelope carries one materialised snapshot per variant.
@@ -387,6 +513,14 @@ files — that harness exists precisely because reading was not enough.
     rejects cycles at write time, cannot double-start under two instances, and writes an
     audit entry attributed to the scheduler for every transition.
 12. `autoWinnerOnStop` defaults to false; with it unset, a scheduled stop never selects a
-    winner on its own.
-13. An experiments docs page exists and states the decision rule, the revenue-model
-    approximation, holdout semantics, and that the offline fallback serves control.
+    winner on its own. With it set, a leader whose refund rate is materially worse than
+    control is not shipped.
+13. An experiments docs page exists and states the decision rule, what expected loss does
+    and does not guarantee, the log-normal revenue model, the maturation window, the
+    refunded-converter semantics, holdout semantics, and that the offline fallback serves
+    control.
+14. No statistical parameter appears as a literal at a call site: MDE, α, power, credible
+    level, prior, expected-loss threshold, Monte Carlo draws, maturation window and minimum
+    weekly cycles are each a named constant or an experiment field.
+15. The new ClickHouse reader is registered in the schema-contract harness and its tests
+    execute real SQL against a testcontainer ClickHouse rather than a mocked client.
