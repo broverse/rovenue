@@ -50,9 +50,11 @@
 //      credits.ts, transactions.ts) is reflected over at runtime
 //      (`Object.entries` on the imported namespace) against a REGISTRY of
 //      invokers below. A function can't be forgotten silently: the
-//      "harness completeness" test asserts every exported function is
+//      "harness completeness" test asserts every exported FUNCTION is
 //      either invoked or explicitly exempted with a stated reason (pure
-//      helper / cursor codec / constants bag / Postgres-only). Add a new
+//      helper / cursor codec / Postgres-only). Exported constants bags
+//      (`__chartsConstants` and friends) need no exemption — the check
+//      skips non-functions outright. Add a new
 //      exported query function without wiring an invoker and this suite
 //      goes red naming exactly which export is uncovered — it cannot drift
 //      back into the silently-mocked-forever state that shipped the
@@ -342,6 +344,19 @@ interface ModuleCoverage {
   invokers: Record<string, Invoker>;
 }
 
+// THE ONE HAND-KEPT EDGE
+// ----------------------
+// Enumeration is reflection-driven WITHIN each listed module — a new
+// export in any module below is caught by the completeness test at the
+// bottom. The MODULE LIST ITSELF is manual. A brand-new
+// `services/metrics/*.ts` that issues `queryAnalytics` and is never
+// added here is silently uncovered, and nothing in this file will say
+// so. Adding a metrics module means adding it to this array.
+//
+// (Globbing the directory instead would trade this gap for a worse one:
+// every module would need an invoker guessed from its signature, and a
+// module that cannot be invoked with a fresh project id — one needing
+// seeded rows, say — would have to be exempted anyway.)
 const REGISTRY: ReadonlyArray<ModuleCoverage> = [
   {
     moduleName: "charts",
@@ -350,7 +365,6 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
       readChartSeries: "covered above, once per SYSTEM_CHART_IDS entry",
       buildRatePoints:
         "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment",
-      __chartsConstants: "constants bag, not a query",
     },
     invokers: {
       readChannels: () => chartsModule.readChannels(PROJECT, WINDOW_DAYS),
@@ -451,9 +465,7 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
   {
     moduleName: "credits",
     module: creditsModule as unknown as Record<string, unknown>,
-    exempt: {
-      __creditsConstants: "constants bag, not a query",
-    },
+    exempt: {},
     invokers: {
       getCreditsRollup: () =>
         creditsModule.getCreditsRollup({
@@ -471,7 +483,6 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
       decodeOffsetCursor: "pure cursor codec, no ClickHouse query",
       syncTransactions:
         "Postgres-only outbox-lag probe (drizzle.schema.outboxEvents) — no ClickHouse query",
-      __transactionsConstants: "constants bag, not a query",
     },
     invokers: {
       listTransactions: () =>

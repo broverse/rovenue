@@ -6,7 +6,22 @@ import {
 } from "../schema";
 import { store as storeEnum } from "../enums";
 
-type DbOrTx = Db;
+/**
+ * The transaction proxy Drizzle hands `db.transaction(cb)`, derived from
+ * `Db` itself so it cannot drift from the client's version.
+ */
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/**
+ * Every function here takes `Db` OR a caller's transaction, and both are
+ * real call sites: the dashboard route runs the rate write and its audit
+ * chain entry in ONE transaction (see
+ * apps/api/src/routes/dashboard/commission-rates.ts), so a rolled-back
+ * rate change cannot leave an audit row claiming it happened. Spelling
+ * the union out means that caller does not have to cast its tx back to
+ * `Db` to satisfy the signature.
+ */
+type DbOrTx = Db | Tx;
 type Store = (typeof storeEnum.enumValues)[number];
 
 // =============================================================

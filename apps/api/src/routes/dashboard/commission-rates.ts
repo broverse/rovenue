@@ -33,11 +33,11 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { validate } from "../../lib/validate";
-import { Store, drizzle, type Db } from "@rovenue/db";
+import { Store, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
-import { audit, extractRequestContext, type AuditTx } from "../../lib/audit";
+import { audit, extractRequestContext } from "../../lib/audit";
 
 // `Store` is the top-level string-literal map, and `z.nativeEnum` takes
 // exactly that — no tuple needed, so this does not have to reach for
@@ -107,18 +107,17 @@ export const commissionRatesRoute = new Hono()
       const { rate } = c.req.valid("json");
 
       const row = await drizzle.db.transaction(async (tx) => {
-        const db = tx as unknown as Db;
         // Read the previous rate INSIDE the tx so the "from" recorded in
         // the chain is the value this write actually replaced, not one a
         // concurrent PUT already overwrote.
         const previous =
           await drizzle.commissionRateRepo.getCommissionRate(
-            db,
+            tx,
             projectId,
             store,
           );
         const updated =
-          await drizzle.commissionRateRepo.upsertCommissionRate(db, {
+          await drizzle.commissionRateRepo.upsertCommissionRate(tx, {
             projectId,
             store,
             rate: rate.toFixed(RATE_DECIMAL_PLACES),
@@ -137,7 +136,7 @@ export const commissionRatesRoute = new Hono()
             after: { store, rate: Number(updated.rate) },
             ...extractRequestContext(c),
           },
-          tx as unknown as AuditTx,
+          tx,
         );
         return updated;
       });
@@ -154,9 +153,8 @@ export const commissionRatesRoute = new Hono()
 
     const { store } = c.req.valid("param");
     await drizzle.db.transaction(async (tx) => {
-      const db = tx as unknown as Db;
       const previous = await drizzle.commissionRateRepo.getCommissionRate(
-        db,
+        tx,
         projectId,
         store,
       );
@@ -166,7 +164,7 @@ export const commissionRatesRoute = new Hono()
       if (!previous) return;
 
       await drizzle.commissionRateRepo.deleteCommissionRate(
-        db,
+        tx,
         projectId,
         store,
       );
@@ -181,7 +179,7 @@ export const commissionRatesRoute = new Hono()
           after: null,
           ...extractRequestContext(c),
         },
-        tx as unknown as AuditTx,
+        tx,
       );
     });
     return c.json(ok({ ok: true }));
