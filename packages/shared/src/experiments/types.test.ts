@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   EXPERIMENT_TYPE,
+  elementVariantValueSchema,
   experimentSchema,
   type Experiment,
   type FlagValue,
@@ -369,6 +370,69 @@ describe("experimentSchema variant-value distinctness", () => {
         ],
       }),
     ).not.toThrow();
+  });
+});
+
+// =============================================================
+// elementVariantValueSchema — the ELEMENT-specific value shape
+// =============================================================
+//
+// Applied only at the ELEMENT-specific boundaries (save-time validation,
+// resolve-time materialisation) — never inside `experimentSchema`/
+// `variantSchema` above, which must keep treating `value` as opaque JSON.
+
+describe("elementVariantValueSchema", () => {
+  test("accepts { paywallId, nodeId, props }", () => {
+    const parsed = elementVariantValueSchema.parse({
+      paywallId: "pw_1",
+      nodeId: "t1",
+      props: { color: { light: "#000" } },
+    });
+    expect(parsed.paywallId).toBe("pw_1");
+    expect(parsed.nodeId).toBe("t1");
+    expect(parsed.props).toEqual({ color: { light: "#000" } });
+  });
+
+  test("accepts an empty props object", () => {
+    expect(() =>
+      elementVariantValueSchema.parse({ paywallId: "pw_1", nodeId: "t1", props: {} }),
+    ).not.toThrow();
+  });
+
+  test("rejects a missing paywallId", () => {
+    expect(() =>
+      elementVariantValueSchema.parse({ nodeId: "t1", props: {} }),
+    ).toThrow();
+  });
+
+  test("rejects a missing nodeId", () => {
+    expect(() =>
+      elementVariantValueSchema.parse({ paywallId: "pw_1", props: {} }),
+    ).toThrow();
+  });
+
+  test("rejects a missing props", () => {
+    expect(() =>
+      elementVariantValueSchema.parse({ paywallId: "pw_1", nodeId: "t1" }),
+    ).toThrow();
+  });
+
+  test("rejects an empty-string paywallId or nodeId", () => {
+    expect(() =>
+      elementVariantValueSchema.parse({ paywallId: "", nodeId: "t1", props: {} }),
+    ).toThrow();
+    expect(() =>
+      elementVariantValueSchema.parse({ paywallId: "pw_1", nodeId: "", props: {} }),
+    ).toThrow();
+  });
+
+  test("leaves variantSchema.value as opaque unknown — arbitrary ELEMENT JSON still parses", () => {
+    // This is the existing "arbitrary small object" ELEMENT shape used
+    // elsewhere in this file (e.g. { ctaText: "Buy" }) — the generic
+    // engine must keep accepting it; elementVariantValueSchema is an
+    // ADDITIONAL, narrower check applied only at the ELEMENT-specific
+    // boundaries, not a replacement for variantSchema.value's z.unknown().
+    expect(() => variantSchema.parse({ id: "a", name: "A", value: { ctaText: "Buy" }, weight: 1 })).not.toThrow();
   });
 });
 

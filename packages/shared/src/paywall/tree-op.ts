@@ -96,9 +96,15 @@ function isContainerNode(node: PaywallNode): node is Extract<PaywallNode, { chil
   return node.type === "stack" || node.type === "carousel" || node.type === "stickyFooter";
 }
 
-/** Depth-first search for `id`, walking container children, `fallback`, and
- *  `packageList.cellTemplate` subtrees. */
-function findNode(node: PaywallNode, id: string): PaywallNode | null {
+/**
+ * Depth-first search for `id`, walking container children, `fallback`, and
+ * `packageList.cellTemplate` subtrees. Exported (in addition to being used
+ * internally by `applyTreeOp`) so callers that only need to LOOK UP a node
+ * — e.g. the ELEMENT-experiment save-time validator, which must inspect a
+ * node's `type` to check `props` against `OVERRIDABLE_PROP_KEYS[node.type]`
+ * before ever building a patch — don't need to duplicate this traversal.
+ */
+export function findNode(node: PaywallNode, id: string): PaywallNode | null {
   if (node.id === id) return node;
   if (isContainerNode(node)) {
     for (const child of node.children) {

@@ -140,6 +140,35 @@ export const experimentSchema = experimentObjectSchema
 export type Experiment = z.infer<typeof experimentSchema>;
 
 // =============================================================
+// ELEMENT variant value
+// =============================================================
+//
+// `variantSchema.value` above stays `z.unknown()` — the generic engine
+// (bucketing, weight-sum/duplicate-value refinements) never introspects
+// it. This schema is applied only at the ELEMENT-specific boundaries:
+// save-time validation (apps/api/src/services/experiment-create.ts
+// `assertElementVariantsValid`) and resolve-time materialisation
+// (apps/api/src/lib/placement-resolution.ts), never inside the engine
+// itself.
+//
+// `paywallId` names "the experiment's target paywall" — every variant of
+// one ELEMENT experiment must carry the SAME `paywallId` (there is
+// exactly one target per experiment, enforced at save time), mirroring
+// the existing PAYWALL variant convention (`value: { paywallId }`,
+// `assertPaywallVariantsValid`) rather than inventing a second way to
+// reference a paywall. `nodeId` must name a real node in that paywall's
+// builder-config tree, and every key in `props` must be in
+// `OVERRIDABLE_PROP_KEYS[node.type]` (packages/shared/src/paywall/
+// schema.ts) — both checked at save time, not resolve time.
+export const elementVariantValueSchema = z.object({
+  paywallId: z.string().min(1),
+  nodeId: z.string().min(1),
+  props: z.record(z.unknown()),
+});
+
+export type ElementVariantValue = z.infer<typeof elementVariantValueSchema>;
+
+// =============================================================
 // SDK-facing helper types
 // =============================================================
 //

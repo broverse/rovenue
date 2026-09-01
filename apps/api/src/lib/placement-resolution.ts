@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
-import { placementRowsSchema } from "@rovenue/shared";
+import { elementVariantValueSchema, placementRowsSchema } from "@rovenue/shared";
 // matchesAudience depends on node:crypto and is deliberately excluded from
 // the top-level @rovenue/shared barrel (which the dashboard's browser
 // bundle also consumes) — server callers import it via the subpath below,
 // mirroring services/experiment-engine.ts.
 import { matchesAudience } from "@rovenue/shared/experiments";
+import { applyTreeOp, TreeOpError, type BuilderConfig } from "@rovenue/shared/paywall";
 import { hydrateOffering } from "./offering-hydration";
 
 // =============================================================
@@ -150,6 +151,77 @@ export interface ResolvedPlacementData {
 }
 
 /**
+ * ELEMENT experiments: every variant's `value` is
+ * `{ paywallId, nodeId, props }` (packages/shared/src/experiments/types.ts
+ * `elementVariantValueSchema`) and all variants of one experiment target
+ * the SAME paywallId — save-time validation
+ * (apps/api/src/services/experiment-create.ts `assertElementVariantsValid`)
+ * enforces both that shape and that `nodeId`/`props` are legal against that
+ * paywall's builder-config tree. Here we hydrate that target paywall
+ * exactly ONCE, then apply each variant's patch via
+ * `applyTreeOp({ kind: "updateProps" })` — a PURE tree op — to build an
+ * independent patched copy per variant. Patching immutably (never
+ * mutating the shared hydrated snapshot) is load-bearing: a shared mutable
+ * base would let variant B's patch stick to variant A's copy too.
+ *
+ * A variant is silently dropped, never thrown, when: its `value` fails the
+ * shape check, it disagrees with the majority on `paywallId` (should never
+ * happen post-validation, but is not trusted blindly), or its `nodeId` has
+ * since disappeared from the paywall (edited out after the experiment
+ * started — save-time validation is the real guard, this is the backstop).
+ * If every variant drops out, the caller sees `[]` and falls through to
+ * the next placement row exactly like a dangling paywall reference.
+ */
+async function materializeElementVariants(
+  projectId: string,
+  variants: Array<{ id: string; weight: number; value: unknown }>,
+  requestedLocale: string | undefined,
+): Promise<Array<{ variantId: string; weight: number; paywall: HydratedPaywall }>> {
+  const parsed = variants.flatMap((v) => {
+    const value = elementVariantValueSchema.safeParse(v.value);
+    return value.success ? [{ variantId: v.id, weight: v.weight, value: value.data }] : [];
+  });
+  if (parsed.length === 0) return [];
+
+  // Every variant of one ELEMENT experiment targets the same paywallId —
+  // enforced at save time. Trust the first valid variant's id as THE
+  // target and drop any variant that disagrees, rather than resolving
+  // against whichever paywall each variant happens to name.
+  const paywallId = parsed[0]!.value.paywallId;
+  const targeted = parsed.filter((p) => p.value.paywallId === paywallId);
+
+  const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, paywallId);
+  if (!paywall || !paywall.isActive) return []; // dangling ref → next row
+  // No published version → nothing to serve, same as the "paywall" target branch.
+  if (!paywall.publishedVersionId) return [];
+  const version = await drizzle.paywallVersionRepo.findById(
+    drizzle.db,
+    paywall.publishedVersionId,
+  );
+  if (!version) return [];
+
+  const base = await hydratePaywall(projectId, paywall, version, requestedLocale);
+  const baseConfig = (base as { builderConfig?: unknown }).builderConfig;
+  if (typeof baseConfig !== "object" || baseConfig === null) return []; // nothing to patch
+
+  return targeted.flatMap(({ variantId, weight, value }) => {
+    try {
+      const patchedConfig = applyTreeOp(baseConfig as BuilderConfig, {
+        kind: "updateProps",
+        nodeId: value.nodeId,
+        patch: value.props,
+      });
+      return [{ variantId, weight, paywall: { ...base, builderConfig: patchedConfig } }];
+    } catch (err) {
+      if (err instanceof TreeOpError && err.code === "TARGET_NOT_FOUND") {
+        return []; // nodeId vanished since save-time validation → drop this variant
+      }
+      throw err;
+    }
+  });
+}
+
+/**
  * Resolve an (already-fetched, active) placement against the given
  * subscriber attributes: parses `rows`, walks them top-down evaluating
  * audience matches, and hydrates the winning paywall/experiment. Returns
@@ -215,8 +287,20 @@ export async function resolvePlacement(
       row.target.experimentId,
       projectId,
     );
-    if (!experiment || experiment.type !== "PAYWALL" || experiment.status !== "RUNNING") continue;
+    if (!experiment || experiment.status !== "RUNNING") continue;
+    if (experiment.type !== "PAYWALL" && experiment.type !== "ELEMENT") continue;
     const variants = (experiment.variants as Array<{ id: string; weight: number; value: unknown }>) ?? [];
+
+    if (experiment.type === "ELEMENT") {
+      const hydrated = await materializeElementVariants(projectId, variants, requestedLocale);
+      if (hydrated.length === 0) continue; // dangling target/nodeId → next row
+      return {
+        placement: placementInfo,
+        paywall: null,
+        experiment: { id: experiment.id, key: experiment.key, variants: hydrated },
+      };
+    }
+
     // Batch the variant paywall lookups (SDK hot path — the per-variant
     // sequential fetches were an N+1 flagged in the whole-phase review),
     // then hydrate in parallel. Order follows the variants array.

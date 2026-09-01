@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyTreeOp, paywallTreeOpSchema, TreeOpError, type PaywallTreeOp } from "./tree-op";
+import { applyTreeOp, findNode, paywallTreeOpSchema, TreeOpError, type PaywallTreeOp } from "./tree-op";
 import type { BuilderConfig, PaywallNode } from "./schema";
 
 function baseConfig(): BuilderConfig {
@@ -31,6 +31,24 @@ function baseConfig(): BuilderConfig {
 function snapshot(config: BuilderConfig): BuilderConfig {
   return JSON.parse(JSON.stringify(config)) as BuilderConfig;
 }
+
+describe("findNode", () => {
+  it("finds the root node by id", () => {
+    const config = baseConfig();
+    expect(findNode(config.root, "root")).toBe(config.root);
+  });
+
+  it("finds a nested node by id, walking container children", () => {
+    const config = baseConfig();
+    const found = findNode(config.root, "title");
+    expect(found?.type).toBe("text");
+  });
+
+  it("returns null for an unknown id", () => {
+    const config = baseConfig();
+    expect(findNode(config.root, "does-not-exist")).toBeNull();
+  });
+});
 
 describe("applyTreeOp", () => {
   it("insert: adds a new node into a container's children at the given index", () => {

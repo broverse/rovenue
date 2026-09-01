@@ -7,9 +7,11 @@ import {
   type ExperimentType,
 } from "@rovenue/db";
 import {
+  elementVariantValueSchema,
   experimentSchema as sharedExperimentSchema,
   type Variant as ExperimentVariant,
 } from "@rovenue/shared";
+import { OVERRIDABLE_PROP_KEYS, findNode, type BuilderConfig } from "@rovenue/shared/paywall";
 
 // DB or Drizzle tx handle — every write here can run standalone or
 // inside a caller's transaction (Task 2 wraps both createExperimentValidated
@@ -86,6 +88,105 @@ export async function assertPaywallVariantsValid(
 }
 
 /**
+ * The tree an ELEMENT experiment's `nodeId` is validated against: the
+ * paywall's current draft (`builderConfig`) when it has one — a designer
+ * is typically wiring the experiment up against changes not yet published
+ * — else its last published snapshot. Returns null when neither exists,
+ * which the caller turns into a rejection (nothing to target).
+ */
+async function resolveTargetBuilderConfig(
+  db: DbOrTx,
+  paywall: { builderConfig: unknown; publishedVersionId: string | null },
+): Promise<BuilderConfig | null> {
+  if (paywall.builderConfig !== null && typeof paywall.builderConfig === "object") {
+    return paywall.builderConfig as BuilderConfig;
+  }
+  if (!paywall.publishedVersionId) return null;
+  const version = await drizzle.paywallVersionRepo.findById(db, paywall.publishedVersionId);
+  if (!version || version.builderConfig === null || typeof version.builderConfig !== "object") {
+    return null;
+  }
+  return version.builderConfig as BuilderConfig;
+}
+
+/**
+ * ELEMENT experiments patch one node's props per variant against a single
+ * shared paywall — "the experiment's target paywall"
+ * (packages/shared/src/experiments/types.ts `elementVariantValueSchema`).
+ * Every variant's `value` must be `{ paywallId, nodeId, props }`, every
+ * variant of the SAME experiment must name the SAME `paywallId` (there is
+ * exactly one target per experiment), `nodeId` must exist in that
+ * paywall's builder-config tree, and every key in `props` must be in
+ * `OVERRIDABLE_PROP_KEYS[node.type]` — the same allowlist all three
+ * renderers already honour for the (unrelated, condition-evaluated)
+ * `overrides` field, so an ELEMENT variant can never target a prop some
+ * platform would silently ignore.
+ *
+ * Checked at both create and DRAFT-update — like `assertPaywallVariantsValid`,
+ * there is nothing left to re-check on the RUNNING weight-only update path
+ * (variant `value` is immutable once RUNNING).
+ */
+export async function assertElementVariantsValid(
+  db: DbOrTx,
+  projectId: string,
+  type: ExperimentType,
+  variants: ReadonlyArray<{ value?: unknown }>,
+): Promise<void> {
+  if (type !== "ELEMENT") return;
+
+  const parsed = variants.map((variant) => {
+    const result = elementVariantValueSchema.safeParse(variant.value);
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message:
+          "ELEMENT experiment variants must carry value: { paywallId, nodeId, props }",
+      });
+    }
+    return result.data;
+  });
+
+  const paywallIds = new Set(parsed.map((v) => v.paywallId));
+  if (paywallIds.size > 1) {
+    throw new HTTPException(400, {
+      message: `ELEMENT experiment variants must all target the same paywallId (got: ${[...paywallIds].join(", ")})`,
+    });
+  }
+  const [paywallId] = paywallIds;
+  if (!paywallId) return; // no variants — sharedExperimentSchema's min(2) already rejects this
+
+  const paywall = await drizzle.paywallRepo.findPaywallById(db, projectId, paywallId);
+  if (!paywall) {
+    throw new HTTPException(400, {
+      message: `Unknown paywallId in ELEMENT experiment variants: ${paywallId}`,
+    });
+  }
+
+  const builderConfig = await resolveTargetBuilderConfig(db, paywall);
+  if (!builderConfig) {
+    throw new HTTPException(400, {
+      message: `Paywall ${paywallId} has no builder config for an ELEMENT experiment to target`,
+    });
+  }
+
+  for (const value of parsed) {
+    const node = findNode(builderConfig.root, value.nodeId);
+    if (!node) {
+      throw new HTTPException(400, {
+        message: `Unknown nodeId in ELEMENT experiment variant: ${value.nodeId}`,
+      });
+    }
+    const allowed: readonly string[] = OVERRIDABLE_PROP_KEYS[node.type];
+    for (const propKey of Object.keys(value.props)) {
+      if (!allowed.includes(propKey)) {
+        throw new HTTPException(400, {
+          message: `Prop "${propKey}" is not overridable on node "${value.nodeId}" (type ${node.type})`,
+        });
+      }
+    }
+  }
+}
+
+/**
  * Generates a free experiment key for a project: generate → SELECT-precheck,
  * up to EXPERIMENT_KEY_MAX_ATTEMPTS. This works inside a caller's transaction
  * where an insert-then-catch-unique-violation retry loop cannot — a unique
@@ -145,6 +246,7 @@ export async function createExperimentValidated(
   }
 
   await assertPaywallVariantsValid(db, input.projectId, input.type, input.variants);
+  await assertElementVariantsValid(db, input.projectId, input.type, input.variants);
 
   const key = await generateFreeExperimentKey(db, input.projectId);
 

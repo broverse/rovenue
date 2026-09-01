@@ -22,6 +22,7 @@ import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { ok } from "../../lib/response";
 import {
+  assertElementVariantsValid,
   assertPaywallVariantsValid,
   createExperimentValidated,
   generateFreeExperimentKey,
@@ -267,6 +268,12 @@ export const experimentsRoute = new Hono()
       if (body.variants) {
         const finalType = (body.type ?? existing.type) as ExperimentType;
         await assertPaywallVariantsValid(
+          drizzle.db,
+          existing.projectId,
+          finalType,
+          body.variants,
+        );
+        await assertElementVariantsValid(
           drizzle.db,
           existing.projectId,
           finalType,
