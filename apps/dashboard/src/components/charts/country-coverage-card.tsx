@@ -18,13 +18,19 @@ import { useChartFilterOptions } from "../../lib/hooks/useProjectCharts";
 // Rather than hard-code that matrix (which drifts the moment any of
 // it changes) or render the gap as an "Unknown" bucket sitting next
 // to real countries as though it were one of them, this card DERIVES
-// coverage from the data actually returned: `platform` (the `store`
-// dimension) is populated on every revenue event, while `country` is
-// populated only when the store supplied one for that transaction.
-// The ratio of the two totals is a real, computed coverage figure
-// that reflects whichever gaps are currently true — store-specific
-// or the historical boundary alike — without the UI needing to know
-// which one is responsible.
+// coverage from `countryCoverage` — two uncapped counts over the same
+// window (`countIf(country != '')` and `count()`), computed by the API.
+// That is a real, computed coverage figure reflecting whichever gaps
+// are currently true — store-specific or the historical boundary alike
+// — without the UI needing to know which one is responsible.
+//
+// It must NOT be recomputed from the `country` / `platform` lists on
+// this same response: those feed a dropdown and the API caps them at 50
+// rows, so summing them understated coverage for any project selling in
+// more than 50 storefronts — a worldwide Apple-only project with full
+// coverage was shown a partial-coverage warning blaming stores it does
+// not use. The lists below are for DISPLAY; the statistic has its own
+// uncapped source.
 
 const DEFAULT_WINDOW_DAYS = 28;
 const MAX_COUNTRY_ROWS = 8;
@@ -41,17 +47,10 @@ export function CountryCoverageCard({ projectId }: Props) {
     windowDays: DEFAULT_WINDOW_DAYS,
   });
 
-  const platform = data?.platform ?? [];
   const country = data?.country ?? [];
 
-  const totalEvents = useMemo(
-    () => platform.reduce((sum, p) => sum + p.count, 0),
-    [platform],
-  );
-  const knownCountryEvents = useMemo(
-    () => country.reduce((sum, c) => sum + c.count, 0),
-    [country],
-  );
+  const totalEvents = data?.countryCoverage.totalEvents ?? 0;
+  const knownCountryEvents = data?.countryCoverage.eventsWithCountry ?? 0;
 
   const noRevenue = totalEvents === 0;
   const coveragePct = noRevenue

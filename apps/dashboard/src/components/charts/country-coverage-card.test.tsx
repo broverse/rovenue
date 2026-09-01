@@ -17,7 +17,22 @@ function wrap(ui: React.ReactNode) {
 function response(
   overrides: Partial<ChartFilterOptionsResponse> = {},
 ): ChartFilterOptionsResponse {
-  return { windowDays: 28, platform: [], country: [], ...overrides };
+  return {
+    windowDays: 28,
+    platform: [],
+    country: [],
+    countryCoverage: { eventsWithCountry: 0, totalEvents: 0 },
+    ...overrides,
+  };
+}
+
+/** Distinct-country rows, more than the dropdown's 50-row server cap. */
+function manyCountries(n: number, perCountry: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    value: `C${i}`,
+    label: `C${i}`,
+    count: perCountry,
+  }));
 }
 
 function arrange(
@@ -43,6 +58,7 @@ describe("CountryCoverageCard", () => {
           { value: "US", label: "US", count: 200 },
           { value: "DE", label: "DE", count: 100 },
         ],
+        countryCoverage: { eventsWithCountry: 300, totalEvents: 1000 },
       }),
     );
     const note = await screen.findByTestId("country-coverage-note");
@@ -56,6 +72,7 @@ describe("CountryCoverageCard", () => {
       response({
         platform: [{ value: "APP_STORE", label: "APP_STORE", count: 100 }],
         country: [{ value: "US", label: "US", count: 100 }],
+        countryCoverage: { eventsWithCountry: 100, totalEvents: 100 },
       }),
     );
     expect(await screen.findByTestId("country-row-US")).toBeInTheDocument();
@@ -66,10 +83,31 @@ describe("CountryCoverageCard", () => {
       response({
         platform: [{ value: "APP_STORE", label: "APP_STORE", count: 100 }],
         country: [{ value: "US", label: "US", count: 100 }],
+        countryCoverage: { eventsWithCountry: 100, totalEvents: 100 },
       }),
     );
     const note = await screen.findByTestId("country-coverage-note");
     expect(note).toHaveTextContent(/every event/i);
+  });
+
+  // Regression (final-fix-wave FIX 1): coverage used to be computed by
+  // summing `country[].count`, which the API caps at 50 rows because it
+  // also feeds a dropdown. A worldwide Apple-only project — full coverage
+  // by the store matrix — therefore rendered a partial-coverage warning
+  // naming Stripe and a pre-migration boundary that do not apply to it.
+  it("states full coverage for a project with more distinct countries than the dropdown cap", async () => {
+    arrange(
+      response({
+        platform: [{ value: "APP_STORE", label: "APP_STORE", count: 6000 }],
+        // What the API can return: the top 50 only, 5000 of the 6000.
+        country: manyCountries(50, 100),
+        // What the uncapped aggregate says: every event has a country.
+        countryCoverage: { eventsWithCountry: 6000, totalEvents: 6000 },
+      }),
+    );
+    const note = await screen.findByTestId("country-coverage-note");
+    expect(note).toHaveTextContent(/every event/i);
+    expect(note).not.toHaveTextContent("83%");
   });
 
   it("shows an empty state, not a coverage note, when there is no revenue at all in the window", async () => {
@@ -84,6 +122,7 @@ describe("CountryCoverageCard", () => {
       response({
         platform: [{ value: "STRIPE", label: "STRIPE", count: 500 }],
         country: [],
+        countryCoverage: { eventsWithCountry: 0, totalEvents: 500 },
       }),
     );
     const note = await screen.findByTestId("country-coverage-note");

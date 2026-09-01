@@ -1585,6 +1585,24 @@ export interface ChartFilterOption {
   count: number;
 }
 
+/**
+ * Country coverage over the SAME window as the filter options, counted
+ * without any row cap.
+ *
+ * Deliberately not derived from `country[]`: that list feeds a dropdown
+ * and is truncated to the top values by count, so summing it understates
+ * coverage for any project selling in more storefronts than the cap — and
+ * a coverage statistic that silently under-reports is the exact failure
+ * the feature exists to prevent. These two integers come from their own
+ * `countIf(country != '')` / `count()` aggregate.
+ */
+export interface ChartCountryCoverage {
+  /** Events in the window whose store supplied a country. */
+  eventsWithCountry: number;
+  /** All revenue events in the window, country or not. */
+  totalEvents: number;
+}
+
 export interface ChartFilterOptionsResponse {
   windowDays: number;
   platform: ChartFilterOption[];
@@ -1595,6 +1613,8 @@ export interface ChartFilterOptionsResponse {
   // store (Apple's `storefront`/`storefrontId`, confirmed available), never
   // the subscriber's last-known SDK-reported country.
   country: ChartFilterOption[];
+  /** Uncapped coverage counts for the same window — see `ChartCountryCoverage`. */
+  countryCoverage: ChartCountryCoverage;
   // `productGroup` was removed: `productGroupId` never existed in the
   // ClickHouse schema (see the same spec §4.2) and had no consumer anywhere
   // in the dashboard.

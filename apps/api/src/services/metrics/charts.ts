@@ -1,6 +1,7 @@
 import type {
   ChartChannelsResponse,
   ChartChannelsRow,
+  ChartCountryCoverage,
   ChartFilterOption,
   ChartFilterOptionsResponse,
   ChartFunnelResponse,
@@ -336,12 +337,23 @@ interface ChDistinctRow {
   c: string;
 }
 
+/**
+ * Row cap on a dropdown feed. A filter chip list has to end somewhere —
+ * the top values by count are the ones a user picks from.
+ *
+ * This cap is a DISPLAY concern and must never leak into a statistic:
+ * `countryCoverage` below is counted separately, uncapped, precisely
+ * because summing a truncated list understates coverage for any project
+ * selling in more than this many storefronts.
+ */
+const DISTINCT_OPTION_LIMIT = 50;
+
 async function distinctDimension(
   projectId: string,
   expr: string,
   from: string,
   to: string,
-  limit = 50,
+  limit = DISTINCT_OPTION_LIMIT,
 ): Promise<ChartFilterOption[]> {
   const rows = await queryAnalytics<ChDistinctRow>(
     projectId,
@@ -367,6 +379,50 @@ async function distinctDimension(
   }));
 }
 
+interface ChCountryCoverageRow {
+  known: string;
+  total: string;
+}
+
+/**
+ * Country coverage for the window: how many revenue events carry a
+ * store-supplied country, out of how many there are.
+ *
+ * Its own query on purpose. The obvious shortcut — sum `country[].count`
+ * and divide by the sum of `platform[].count` — reads the DROPDOWN feed,
+ * which stops at `DISTINCT_OPTION_LIMIT` rows. A project with more
+ * storefronts than that would report less than full coverage while having
+ * full coverage, i.e. the honesty feature would itself misreport. Two
+ * scalars over the whole window cannot truncate.
+ */
+async function readCountryCoverage(
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<ChartCountryCoverage> {
+  const rows = await queryAnalytics<ChCountryCoverageRow>(
+    projectId,
+    `
+      SELECT
+        toString(countIf(country != '')) AS known,
+        toString(count())                AS total
+      FROM rovenue.raw_revenue_events FINAL
+      WHERE projectId = {projectId:String}
+        AND toDate(eventDate) >= {from:Date}
+        AND toDate(eventDate) <= {to:Date}
+    `,
+    { from, to },
+  );
+  // An aggregate with no GROUP BY always returns exactly one row, but a
+  // ClickHouse client that returns none must not throw here: zero events
+  // is a legitimate empty window, which the UI renders as "no revenue".
+  const row = rows[0];
+  return {
+    eventsWithCountry: Number(row?.known ?? 0),
+    totalEvents: Number(row?.total ?? 0),
+  };
+}
+
 export async function readFilterOptions(
   projectId: string,
   windowDays: number,
@@ -378,10 +434,12 @@ export async function readFilterOptions(
 
   const platform = await distinctDimension(projectId, "store", from, to);
   const country = await distinctDimension(projectId, "country", from, to);
+  const countryCoverage = await readCountryCoverage(projectId, from, to);
 
   return {
     windowDays: w.days,
     platform,
+    countryCoverage,
     country,
   };
 }
