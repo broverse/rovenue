@@ -831,7 +831,11 @@ describe("writeImportBatch — androidNoToken rows (final-fix-wave FIX 2)", () =
     expect(rows[0]!.verifiedAt).toBeNull();
 
     expect(await countRevenueEvents()).toBe(1);
-    expect(await sumRevenueUsd()).toBe("9.99");
+    // sumRevenueUsd() returns the raw ::text of a numeric(12,4) SUM, so the
+    // scale is preserved ("9.9900"). Every other caller compares two snapshots
+    // of it against each other, where the scale cancels out; this is the only
+    // assertion against a hand-written literal, so it compares numerically.
+    expect(Number(await sumRevenueUsd())).toBeCloseTo(9.99);
 
     const reportRow = outcome.reportRows.find(
       (r) => r.storeTransactionId === "google_txn_no_token_1",
