@@ -7,7 +7,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 |---|------|-----|--------|
 | 1 | Store integrations & receipt validation | 75% | 95% |
 | 2 | Subscription state & entitlements | 85% | 95% |
-| 3 | Paywall builder & native rendering | 80% | 95% |
+| 3 | Paywall builder & native rendering | 85% | 95% |
 | 4 | A/B testing & experiments | 75% | 90%+ |
 | 5 | Analytics (MRR / LTV / cohorts) | 90% | 95% |
 | 6 | Third-party integrations | 90% | 95% |
@@ -55,15 +55,26 @@ the remaining analytics/experiments/integrations gaps on the way to 95%.
 - [ ] Apple Family Sharing + win-back offer states in the state machine
 - [ ] Continuous `subscriber_access` consistency checker (reconciliation job that detects drift)
 
-## 3. Paywall builder & native rendering (80 → 95)
+## 3. Paywall builder & native rendering (85 → 95)
 
-- [ ] trialLabelKey override UI (known gap)
+- [x] trialLabelKey override UI — the base editor already existed in the Binding tab; the
+      **override** editor omitted it because its prop union was hand-written. The union is now a
+      mapped type over `OVERRIDABLE_PROP_KEYS`, so a schema prop with no editor case fails the
+      build by name (2026-09-01)
+- [x] Commerce-binding cache invalidation — the earlier "no invalidation" framing was stale:
+      `purgeResolvedPriceCache` already fired from five routes (products, offerings, placements,
+      experiments, paywalls). What was missing was the **credential** case — `credentials.ts` never
+      purged, so rotating a key or disconnecting a store kept serving the previous account's prices
+      for up to 15 minutes. The cache is now keyed on a digest of the stored credential ciphertext,
+      so no purge call is needed and none can be forgotten (2026-09-01)
 - [ ] Element-level experiments (deferred from P7)
-- [ ] On-device smoke test session (pending)
-- [ ] New node types at RC Paywalls v2 parity: carousel, video hero, timeline/feature-list,
-      footer link group — each on all three platforms via `render-fixtures.json`
+- [ ] On-device smoke test session (pending) — needs physical iOS/Android devices and store sandbox
+      accounts; not automatable from this repo
+- [ ] New node types at RC Paywalls v2 parity — **recon 2026-09-01: mostly already done.**
+      `carousel`, `timeline` and `video` exist in the schema, in all three renderers and in
+      `render-fixtures.json`; only a **footer link group** appears genuinely absent. Scope this
+      sub-project from that finding, not from "four node types are missing"
 - [ ] Template gallery: 15–20 proven paywall templates (leverage App Store import)
-- [ ] Commerce-binding cache invalidation (known gap)
 - [ ] Localization workflow: in-builder translation management + auto-translate (Rovi)
 
 ## 4. A/B testing & experiments (75 → 90+)
