@@ -437,6 +437,34 @@ export const chartsRoute = new Hono()
       c.header("Content-Type", "text/csv; charset=utf-8");
       c.header("Content-Disposition", `attachment; filename="${filename}"`);
 
+      // ERROR BEHAVIOUR — deliberate, and it is not a 5xx.
+      //
+      // The status line and headers above are flushed the moment the
+      // stream starts producing, which is before the first ClickHouse
+      // reader has necessarily finished. A reader that throws after that
+      // point CANNOT change the status code: HTTP has no mechanism to
+      // retract a 200 already on the wire. The options are to cut the
+      // connection mid-body (the client sees a truncated CSV and cannot
+      // tell it from a short one) or to say so in the body.
+      //
+      // So a mid-stream failure enqueues a final `# error: <message>`
+      // line — `#` is a comment in every CSV reader we care about, and
+      // an export that stops early always carries a marker saying why
+      // (the row-cap path emits its own truncation marker for the same
+      // reason: a silently truncated export is a lying export). The
+      // rethrow after the enqueue is what stops the loop; the `finally`
+      // has already closed the controller by the time it propagates, so
+      // the client receives HTTP 200 with a body whose LAST LINE names
+      // the failure. Callers must treat a `#`-prefixed final line as a
+      // failed export, not as data.
+      //
+      // The audit row is written in the `finally` either way — a partial
+      // export is still an export of real data and must be recorded.
+      //
+      // NOT YET PINNED BY A TEST: there is no HTTP-level test for this
+      // route (nor for GET /proceeds). streamMetricsExportCsv's own
+      // tests cover the generator, including the truncation marker, but
+      // nothing exercises the 200-with-marker behaviour end to end.
       return c.body(
         new ReadableStream<Uint8Array>({
           async start(controller) {
