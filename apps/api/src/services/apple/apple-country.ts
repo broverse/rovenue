@@ -22,10 +22,12 @@
 // The table below is the standard ISO 3166-1 alpha-3 -> alpha-2
 // mapping (both forms are defined by the same standard for every
 // entry; this is not an Apple-specific format, just its other
-// representation). It is NOT guaranteed to be an exhaustive,
-// verified-against-Apple's-live-storefront-list enumeration — treat
-// it as best-effort coverage of the standard rather than a sourced
-// copy of Apple's own territory list. `appleStorefrontToCountry` fails
+// representation). It holds all 249 officially assigned ISO 3166-1
+// entries — a count pinned by apple-country.test.ts, because the table
+// shipped with 222 and the 27 missing ones were dropping real revenue.
+// It is still NOT a copy of Apple's own live storefront list: Apple may
+// use a subset, and a territory Apple sells in that ISO has not assigned
+// would not appear. `appleStorefrontToCountry` fails
 // CLOSED on anything not in it: no country is recorded, never a guess
 // and never the raw alpha-3 value. That mirrors the stance already
 // taken on a store that supplies nothing at all, and on the
@@ -254,6 +256,52 @@ const ISO_3166_ALPHA3_TO_ALPHA2: Readonly<Record<string, string>> = {
   YEM: "YE",
   ZMB: "ZM",
   ZWE: "ZW",
+
+  // --- entries missing from the original transcription -------------
+  // Added 2026-09-01. The table above shipped with 222 of ISO 3166-1's
+  // 249 officially assigned entries; these are the other 27. Because
+  // `ALPHA2_COUNTRY_CODES` is derived from this table's VALUES, their
+  // absence also made `../country.ts` reject a genuine Google/Stripe
+  // billing country — several of these are real store countries
+  // (CW, SX, MP, AS, YT, AX), so fail-closed was dropping real revenue
+  // and the loss was then misattributed to the store coverage matrix.
+  //
+  // Mostly dependencies and outlying territories, which is why a
+  // hand-typed list of "countries" skipped them. Kept as one block
+  // rather than merged into the alphabetical run above so the
+  // completion is visible and re-checkable.
+  //
+  // Source: ISO 3166-1, alpha-3/alpha-2 pairs as published in the ISO
+  // Online Browsing Platform (https://www.iso.org/obp/ui/#search/code/),
+  // cross-checked against the UN M49 country/area listing. Count pinned
+  // by apple-country.test.ts.
+  ALA: "AX", // Åland Islands
+  ASM: "AS", // American Samoa
+  ATA: "AQ", // Antarctica
+  BES: "BQ", // Bonaire, Sint Eustatius and Saba
+  BVT: "BV", // Bouvet Island
+  IOT: "IO", // British Indian Ocean Territory
+  CXR: "CX", // Christmas Island
+  CCK: "CC", // Cocos (Keeling) Islands
+  CUW: "CW", // Curaçao
+  FLK: "FK", // Falkland Islands (Malvinas)
+  ATF: "TF", // French Southern Territories
+  HMD: "HM", // Heard Island and McDonald Islands
+  MYT: "YT", // Mayotte
+  NFK: "NF", // Norfolk Island
+  MNP: "MP", // Northern Mariana Islands
+  PCN: "PN", // Pitcairn
+  BLM: "BL", // Saint Barthélemy
+  SHN: "SH", // Saint Helena, Ascension and Tristan da Cunha
+  MAF: "MF", // Saint Martin (French part)
+  SPM: "PM", // Saint Pierre and Miquelon
+  SXM: "SX", // Sint Maarten (Dutch part)
+  SGS: "GS", // South Georgia and the South Sandwich Islands
+  SJM: "SJ", // Svalbard and Jan Mayen
+  TKL: "TK", // Tokelau
+  UMI: "UM", // United States Minor Outlying Islands
+  WLF: "WF", // Wallis and Futuna
+  ESH: "EH", // Western Sahara
 };
 
 /**
@@ -275,7 +323,8 @@ export function appleStorefrontToCountry(
  * The set of house-format ISO 3166-1 alpha-2 codes — every VALUE in the
  * alpha-3 -> alpha-2 table above, which is a complete ISO 3166-1 alpha-2
  * enumeration in its own right (both forms are defined by the same
- * standard entry for entry). Exported so `../country.ts`'s
+ * standard entry for entry, and the table's completeness is pinned by
+ * apple-country.test.ts). Exported so `../country.ts`'s
  * `normalizeAlpha2Country` — used to validate Google's and Stripe's
  * already-alpha-2 store-supplied country fields — has exactly ONE
  * source of truth for "is this a real ISO 3166-1 alpha-2 code" rather
