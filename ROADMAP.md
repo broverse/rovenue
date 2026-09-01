@@ -216,11 +216,21 @@ else in the framework/provider-breadth dimension is done.
       walkthrough and added the new "Migrate from Adapty" guide, both under
       `apps/docs/content/docs/resources`)
 - [x] Data import tool (RC export CSV → subscriber/transaction import) — shipped: a
-      column-mapping engine with vendor presets (RevenueCat Transactions +
-      supplemental Google-token file), anchor-gated preset detection, a generic
-      hand-mapper for unconfirmed schemas (Adapty), async mandatory dry run, and a
-      two-phase commit (Phase A history import, Phase B store re-verification with
-      resumable `VERIFICATION_INCOMPLETE`)
+      column-mapping engine with vendor presets (RevenueCat Transactions), anchor-gated
+      preset detection, a generic hand-mapper for unconfirmed schemas (Adapty), async
+      mandatory dry run, and a two-phase commit (Phase A history import, Phase B store
+      re-verification with resumable `VERIFICATION_INCOMPLETE`)
+- [ ] Google purchase-token second pass (final-fix-wave FIX 9, 2026-09-01 review):
+      the `revenuecat_google_token` preset can be DETECTED but never actually IMPORTED —
+      its 3-column file can never satisfy the mapper's required `store`/`purchaseDate`
+      fields, so `PATCH /mapping` and `POST /dry-run` both 400 on it, and no code path
+      joins a token file to an existing purchase by `user_id` regardless. The guide and
+      this roadmap previously described this as a working two-pass import; corrected to
+      say "not yet available" in both places 2026-09-01. Real follow-up: either (a) give
+      this preset its own validation/commit path that patches `googlePurchaseToken` onto
+      an existing purchase found by (subscriberExternalId, productIdentifier) instead of
+      running through the normal create/update writer, or (b) drop the preset entirely
+      until that path exists — do not resurrect the "detected but broken" middle state.
 - [ ] Working example apps (iOS / Android / RN / Flutter demo repos)
 - [ ] Interactive API explorer
 - [ ] Error-code catalog

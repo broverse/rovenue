@@ -131,12 +131,23 @@ export const IMPORT_OUTCOME_LABELS: Record<ImportOutcome, string> = {
  *  is not actionable, a count plus next step is. */
 export const IMPORT_ANDROID_NO_TOKEN_OUTCOME: ImportOutcome = "androidNoToken";
 
+/**
+ * Final-fix-wave FIX 9: this used to tell the operator to "request the
+ * supplemental Google purchase-token file... and run a second import" —
+ * that second import cannot succeed today (the token file's 3 columns can
+ * never satisfy the mapper's required `store`/`purchaseDate` fields, and
+ * no code path joins it to an existing purchase by user id regardless;
+ * see the migrating-from-revenuecat guide and ROADMAP §11 for the
+ * follow-up). The count itself stays — it is accurate and valuable — but
+ * the recommended action is now one that actually works today.
+ */
 export function androidNoTokenWarning(count: number): string {
   const rows = count === 1 ? "subscription" : "subscriptions";
   return (
-    `${count.toLocaleString()} Android ${rows} will import as history only and will not ` +
-    `grant live access. Request the supplemental Google purchase-token file from ` +
-    `RevenueCat support and run a second import to grant access for these rows.`
+    `${count.toLocaleString()} Android ${rows} will import as history only — full ` +
+    `purchase/revenue history, no live entitlement grant. Cut that user's app over to ` +
+    `the Rovenue SDK and their next restorePurchases() call (or a live renewal) will ` +
+    `re-verify against Play and grant access from then on.`
   );
 }
 

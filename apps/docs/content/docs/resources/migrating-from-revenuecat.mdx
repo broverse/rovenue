@@ -58,11 +58,11 @@ await Rovenue.restorePurchases();
 Rovenue's data import tool is a column-mapping engine with vendor presets, not
 a hand-written RevenueCat parser — it reads a CSV, maps its columns onto a
 fixed set of canonical fields (subscriber id, store, product identifier,
-purchase date, and so on), and writes the result as history. RevenueCat's
-export shape is one of two built-in presets (the other is the Google
-purchase-token supplemental file described below); if a column layout ever
-drifts, the import falls back to the generic mapper below instead of
-guessing.
+purchase date, and so on), and writes the result as history. The
+Transactions export is the one preset you'll actually use end to end (see
+the note below on the supplemental Google-token file, which the tool can
+detect but cannot yet import); if a column layout ever drifts, the import
+falls back to the generic mapper below instead of guessing.
 
 <Steps>
 <Step>
@@ -74,49 +74,63 @@ on) — the closest RevenueCat gets to a full history dump.
 
 <Callout type="warn">
 The standard Transactions export does **not** include `google_purchase_token`.
-Android rows from it import as history only and will not grant live
-entitlements until you complete the supplemental import in the next step.
+Android rows from it import as history only — they still create a
+subscriber, purchase and revenue-event history, so your dashboards and LTV
+numbers are complete — but they cannot be re-verified against the Play
+Developer API, so they carry no live entitlement grant from this import.
+The dry run quantifies exactly how many rows this affects before you
+commit.
 </Callout>
 
 Every other row-level field the exporter needs — subscriber id, store,
-product identifier, transaction id, purchase/expiry dates, trial and intro
-flags, USD price, entitlement identifiers — is present in the standard
-export and is picked up automatically once the file is uploaded, because its
-header matches the RevenueCat Transactions preset.
+product identifier, purchase/expiry dates, trial and intro flags, USD
+price, entitlement identifiers — is present in the standard export and is
+picked up automatically once the file is uploaded, because its header
+matches the RevenueCat Transactions preset. `store_transaction_id`
+specifically is included on the strength of RevenueCat's own documented
+guidance that it's the transaction row's unique key, not confirmed
+column-by-column against a real export at the time this guide was
+written — if your export happens to lack it, preset detection simply
+won't match and you'll map by hand in the generic-mapper step below.
 </Step>
 <Step>
-### Request the Google purchase-token file (Android only)
+### Upload the export
 
-If you have Android subscribers, ask RevenueCat support for the
-supplemental purchase-token CSV — a separate, three-column file
-(`user_id`, `google_purchase_token`, `google_product_id`) that RevenueCat
-hand-delivers on request. It is not part of the standard export because
-RevenueCat does not surface Google purchase tokens through self-service
-channels.
-
-You don't need this before your first import — the two files are imported
-as two separate passes (next step) — but plan for the request's turnaround
-time if you have any Android revenue you care about restoring live.
+Upload the Transactions export to the import tool. Its header carries the
+RevenueCat Transactions preset's anchor columns
+(`rc_original_app_user_id`, `store_transaction_id`), so the tool proposes
+that preset's mapping automatically — review it, adjust anything you've
+customized, and continue to the dry run and commit steps below. This
+single pass imports every row — iOS, Android, Stripe — as history, and
+grants live access for every row that already carries a usable store
+anchor (everything except Android rows, covered next).
 </Step>
 <Step>
-### Two-pass import
+### Android live entitlements: not yet automated
 
-Upload the Transactions export first. Its header carries the RevenueCat
-Transactions preset's anchor columns (`rc_original_app_user_id`,
-`store_transaction_id`), so the import tool proposes that preset's mapping
-automatically — review it, adjust anything you've customized, and run it
-through the dry run and commit steps below. This pass imports every row —
-iOS, Android, Stripe — as history, and grants live access for every row that
-already carries a usable store anchor (everything except Android rows,
-which have none yet).
+RevenueCat can hand-deliver a supplemental three-column purchase-token CSV
+(`user_id`, `google_purchase_token`, `google_product_id`) on request, and
+Rovenue's import tool can detect its header (the `revenuecat_google_token`
+preset). **There is currently no working second pass that joins that file
+to the Android rows your first import already created** — the file's three
+columns can never satisfy the mapping tool's required fields (`store`,
+`purchaseDate` are required on every import and this file has neither), so
+uploading it fails validation before a dry run can even start, and no code
+path in Rovenue joins a token file to an existing purchase by user id
+today. This is tracked as a follow-up, not a hidden feature — do not
+request the file expecting a second-pass import to work yet.
 
-Once the Google purchase-token file arrives, upload it as a **second**
-job on the same project. Its header carries the Google-token preset's
-anchor column (`google_purchase_token`), so it's detected the same way.
-This pass matches each row to the Android purchase the first pass already
-imported (by subscriber id and product) and upgrades it with the token
-needed to re-verify against the Play Developer API — turning an
-Android history-only row into a live one.
+Your actual options today for Android entitlements:
+- **Leave them as history.** The import already gives you complete
+  purchase/revenue history and LTV for Android — only the LIVE
+  entitlement grant is missing until a user's device talks to the store
+  again.
+- **Let the SDK re-establish live access going forward.** Once you cut a
+  user's app over to the Rovenue SDK (last step below), their next
+  `restorePurchases()` call (or any live purchase/renewal webhook) will
+  re-verify directly against the Play Developer API and grant access from
+  then on — this does not require the supplemental file at all, it only
+  affects a device that never opens the app again.
 </Step>
 <Step>
 ### Map anything the presets don't cover
@@ -149,8 +163,9 @@ completion); on a large export this can take a while, exactly because it
 reads the whole file. The dry run reports, per row, whether it will create
 a new purchase, update an existing one, or be skipped (unresolved product,
 sandbox, no Android token, invalid data) — including the count of rows that
-will import as history-only pending the Google purchase-token pass. Review
-those numbers before committing.
+will import as history-only with no live entitlement (see the note above
+on why the Google-token file can't recover those yet). Review those
+numbers before committing.
 </Step>
 <Step>
 ### Verify and commit

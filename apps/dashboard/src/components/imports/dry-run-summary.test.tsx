@@ -93,9 +93,15 @@ describe("DryRunSummary", () => {
     const warning = screen.getByTestId("import-android-no-token-warning");
     expect(warning).toHaveTextContent("1,284");
     expect(warning).toHaveTextContent(/android/i);
-    expect(warning).toHaveTextContent(/will not grant live access/i);
-    // Actionable, not just a fact — the operator's actual next step.
-    expect(warning).toHaveTextContent(/revenuecat support/i);
+    // Final-fix-wave FIX 9: the recommended action must be one that
+    // actually works today — the old copy told the operator to "request
+    // the Google purchase-token file... and run a second import", which
+    // 400s on every attempt (the token file can never satisfy the
+    // mapper's required store/purchaseDate fields, and no code path
+    // joins it to an existing purchase regardless).
+    expect(warning).toHaveTextContent(/no live entitlement grant/i);
+    expect(warning).not.toHaveTextContent(/second import/i);
+    expect(warning).toHaveTextContent(/restorePurchases/);
   });
 
   it("labels the counters as an inspected subset, not a whole-file total, when the anchor cap was hit", () => {

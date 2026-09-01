@@ -120,12 +120,19 @@ importing.
 </Callout>
 
 <Callout type="warn">
-If your export doesn't have a usable value for `storeTransactionId` on a
-row, that row imports as history but won't be re-verified against the
-store or grant live access — the same "history-only" outcome the
-RevenueCat guide describes for Android rows missing a purchase token.
-There is no separate supplemental file for Adapty; if you can get a
-store-transaction-id column into your export before importing, do so.
+A row with no usable value for `storeTransactionId` at all is **not**
+imported — it fails as an invalid row (`MISSING_STORE_TRANSACTION_ID`,
+visible in the dry run's `invalidRow` count) because there is nothing to
+key a purchase on, and this importer never invents a value that claims to
+be a real store transaction identifier. This is different from a row that
+DOES have a transaction id but can't be re-verified live — the
+"history-only" outcome the RevenueCat guide describes for Android rows
+missing a purchase token — which imports fine, just without live-store
+re-verification. If your export can't reliably provide a
+`storeTransactionId`, get one into it before importing; there is no
+separate supplemental pass for Adapty the way there is for RevenueCat's
+Google-token file (and that supplemental pass isn't functional yet either
+— see that guide's note on it).
 </Callout>
 </Step>
 <Step>
