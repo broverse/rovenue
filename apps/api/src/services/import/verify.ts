@@ -36,7 +36,17 @@
 // documented quota hazard (Adapty's own docs warn of it). So:
 //
 //   - Deduplicate by store anchor FIRST. A subscription chain of 40
-//     renewals sharing one Apple originalTransactionId is verified once.
+//     renewals sharing one Apple originalTransactionId is verified once —
+//     true when the source data actually carries a real
+//     original_transaction_id. The shipped RevenueCat Transactions
+//     preset does not, so every renewal from THAT preset lands here as
+//     its own anchor; this module cannot invent a shared chain id from
+//     nothing. What it must not do (final-fix-wave FIX 5) is turn that
+//     structural limitation into a WORSE bug: `verify-store-clients.ts`
+//     no longer requires the anchor it queried Apple with to match the
+//     `originalTransactionId` Apple's response echoes back — Apple
+//     resolves any chain member to the correct group regardless, so
+//     each of those per-renewal calls still individually succeeds.
 //   - Bounded concurrency + a paced request rate (IMPORT_VERIFY_CONCURRENCY /
 //     IMPORT_VERIFY_RATE_PER_SECOND).
 //   - Store-side throttling is retryable, NOT a row failure: it pauses
@@ -362,6 +372,21 @@ type AnchorGroup = {
   storeTransactionIds?: Set<string>;
 };
 
+/** Stripe's own subscription-id namespace signature. The RevenueCat
+ *  Transactions preset has no `stripe_subscription_id` column, so
+ *  `normalized.stripeSubscriptionId` is null on every row from that
+ *  preset and the anchor falls back to `storeTransactionId` — which for
+ *  a Stripe row is an invoice or charge id (`in_…`/`ch_…`), never a
+ *  subscription id. `subscriptions.retrieve()` 404s on anything else,
+ *  which the store client maps to `notFound` — a store call spent only
+ *  to learn something the id's own shape already told us. Final-fix-wave
+ *  FIX 5. */
+const STRIPE_SUBSCRIPTION_ID_PATTERN = /^sub_/;
+
+function looksLikeStripeSubscriptionId(value: string): boolean {
+  return STRIPE_SUBSCRIPTION_ID_PATTERN.test(value);
+}
+
 interface BuildAnchorGroupsResult {
   groups: Map<string, AnchorGroup>;
   rowsSkippedAnchorless: number;
@@ -369,6 +394,14 @@ interface BuildAnchorGroupsResult {
    *  (`purchases.verifiedAt` set by an earlier call) before ever adding
    *  them to `groups` — these cost no cap slot. */
   alreadyVerifiedDuringScan: number;
+  /** Final-fix-wave FIX 5: STRIPE rows whose only available identifier
+   *  (no `stripeSubscriptionId` mapped, falling back to
+   *  `storeTransactionId`) does not even look like a Stripe subscription
+   *  id — classified as unverifiable WITHOUT ever calling the store,
+   *  rather than spending a call guaranteed to 404. Folded into
+   *  `VerifySummary.anchorsUnverifiable` by the caller, the same counted,
+   *  actionable bucket FIX 4 introduced for a per-anchor store failure. */
+  rowsUnverifiableAnchor: number;
   /** Fix round 2, FIX B: true iff the scan stopped early because
    *  `groups` reached `IMPORT_VERIFY_MAX_ANCHORS_PER_RUN` distinct,
    *  not-yet-verified anchors — there is more of the file left unread. */
@@ -385,6 +418,7 @@ async function buildAnchorGroups(
   const groups = new Map<string, AnchorGroup>();
   let rowsSkippedAnchorless = 0;
   let alreadyVerifiedDuringScan = 0;
+  let rowsUnverifiableAnchor = 0;
   let capReached = false;
   const now = new Date();
 
@@ -432,6 +466,16 @@ async function buildAnchorGroups(
     }
     if (!anchor) continue;
 
+    // Final-fix-wave FIX 5: never call Stripe with an identifier we
+    // cannot even recognise as a subscription id — that call is
+    // guaranteed to 404, and reporting the result as a plain `notFound`
+    // would claim Stripe gave a definitive answer it never had the
+    // chance to give. Classified up front, with no store call spent.
+    if (normalized.store === "STRIPE" && !looksLikeStripeSubscriptionId(anchor)) {
+      rowsUnverifiableAnchor++;
+      continue;
+    }
+
     const key = `${normalized.store}:${anchor}`;
     const existingGroup = groups.get(key);
     if (existingGroup) {
@@ -478,7 +522,13 @@ async function buildAnchorGroups(
     });
   }
 
-  return { groups, rowsSkippedAnchorless, alreadyVerifiedDuringScan, capReached };
+  return {
+    groups,
+    rowsSkippedAnchorless,
+    alreadyVerifiedDuringScan,
+    rowsUnverifiableAnchor,
+    capReached,
+  };
 }
 
 // =============================================================
@@ -760,14 +810,19 @@ export async function verifyImportedAnchors(
   const mapping = job.mapping as Record<string, CanonicalField>;
   const sleep = deps.sleep ?? defaultSleep;
 
-  const { groups, rowsSkippedAnchorless, alreadyVerifiedDuringScan, capReached } =
-    await buildAnchorGroups(
-      db,
-      projectId,
-      job.storageKey,
-      mapping,
-      deps.maxAnchorsPerRun ?? IMPORT_VERIFY_MAX_ANCHORS_PER_RUN,
-    );
+  const {
+    groups,
+    rowsSkippedAnchorless,
+    alreadyVerifiedDuringScan,
+    rowsUnverifiableAnchor,
+    capReached,
+  } = await buildAnchorGroups(
+    db,
+    projectId,
+    job.storageKey,
+    mapping,
+    deps.maxAnchorsPerRun ?? IMPORT_VERIFY_MAX_ANCHORS_PER_RUN,
+  );
 
   const runState = newRunState();
   const touchedSubscriberIds = new Set<string>();
@@ -781,7 +836,13 @@ export async function verifyImportedAnchors(
   let anchorsVerified = alreadyVerifiedDuringScan;
   let anchorsNotFound = 0;
   let anchorsPending = 0;
-  let anchorsUnverifiable = 0;
+  // Final-fix-wave FIX 5: seeded with the rows buildAnchorGroups already
+  // classified as unverifiable WITHOUT a store call (a Stripe anchor that
+  // doesn't even look like a subscription id) — folded into the SAME
+  // counted bucket FIX 4 introduced for a per-anchor store failure
+  // discovered DURING a call, since both describe the same thing to the
+  // operator: this anchor could not be checked, and here is why.
+  let anchorsUnverifiable = rowsUnverifiableAnchor;
   let newlyVerified = 0;
 
   await verifyWithPacing(

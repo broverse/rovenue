@@ -257,4 +257,87 @@ describe("verifyAppleAnchor (real function, fake getAppleSubscriptionStatuses + 
     if (result.kind !== "verified") throw new Error("unreachable");
     expect(result.status).toBe(PurchaseStatus.ACTIVE);
   });
+
+  // ===========================================================
+  // Final-fix-wave FIX 5 — a renewal's own transaction id never matches
+  // the TRUE originalTransactionId Apple's response carries
+  // ===========================================================
+  //
+  // The RevenueCat Transactions preset has no original_transaction_id
+  // column, so every imported row — including every renewal — is
+  // written with originalTransactionId = storeTransactionId (write.ts's
+  // carry-forward). Querying Apple with a renewal's OWN id still
+  // resolves to the correct chain (Apple accepts any chain member), but
+  // the response's own `originalTransactionId` field is the chain's
+  // TRUE original — a DIFFERENT value from what we queried with. The old
+  // exact-match `.find()` missed here and reported `notFound` for a
+  // transaction Apple had just confirmed it recognises.
+  it("still verifies when the queried id does not match the response's own originalTransactionId field", async () => {
+    // Apple's response echoes the chain's TRUE original ("orig_1"), not
+    // the renewal id ("renewal_txn_5") this call queried with.
+    getAppleSubscriptionStatuses.mockResolvedValue({
+      data: [
+        {
+          subscriptionGroupIdentifier: "grp_1",
+          lastTransactions: [
+            {
+              originalTransactionId: "orig_1",
+              status: APPLE_SUBSCRIPTION_STATUS.ACTIVE,
+              signedTransactionInfo: "signed-transaction-jws",
+            },
+          ],
+        },
+      ],
+      environment: "Production",
+      bundleId: "com.example.app",
+    });
+    appleVerifier.verifyTransaction.mockResolvedValue(baseDecodedTransaction({}));
+
+    const deps = createProductionImportVerifyDeps();
+    const result = await deps.verifyAppleAnchor({
+      projectId: PROJECT_ID,
+      originalTransactionId: "renewal_txn_5",
+      isSandbox: false,
+    });
+
+    expect(result.kind).toBe("verified");
+    if (result.kind !== "verified") throw new Error("unreachable");
+    expect(result.status).toBe(PurchaseStatus.ACTIVE);
+  });
+
+  it("logs a warning (but still resolves) when the store returns more than one transaction for the queried chain", async () => {
+    getAppleSubscriptionStatuses.mockResolvedValue({
+      data: [
+        {
+          subscriptionGroupIdentifier: "grp_1",
+          lastTransactions: [
+            {
+              originalTransactionId: "orig_1",
+              status: APPLE_SUBSCRIPTION_STATUS.ACTIVE,
+              signedTransactionInfo: "signed-transaction-jws",
+            },
+            {
+              originalTransactionId: "orig_2",
+              status: APPLE_SUBSCRIPTION_STATUS.EXPIRED,
+              signedTransactionInfo: "signed-transaction-jws-2",
+            },
+          ],
+        },
+      ],
+      environment: "Production",
+      bundleId: "com.example.app",
+    });
+    appleVerifier.verifyTransaction.mockResolvedValue(baseDecodedTransaction({}));
+
+    const deps = createProductionImportVerifyDeps();
+    const result = await deps.verifyAppleAnchor({
+      projectId: PROJECT_ID,
+      originalTransactionId: "orig_1",
+      isSandbox: false,
+    });
+
+    expect(result.kind).toBe("verified");
+    expect(mockLog.warn).toHaveBeenCalledTimes(1);
+    expect(mockLog.warn.mock.calls[0]![0]).toMatch(/more than one transaction/i);
+  });
 });

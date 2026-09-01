@@ -107,10 +107,38 @@ async function verifyAppleAnchor(
       getAppleSubscriptionStatuses(ctx, input.originalTransactionId),
     );
 
-    const txn = response.data
-      .flatMap((group) => group.lastTransactions)
-      .find((t) => t.originalTransactionId === input.originalTransactionId);
-    if (!txn) return { kind: "notFound" };
+    // Final-fix-wave FIX 5: Apple's Get All Subscription Statuses
+    // endpoint accepts ANY transaction id belonging to a renewal chain
+    // as the path parameter and returns that chain's group — it does
+    // NOT require (and will not necessarily echo back) the chain's TRUE
+    // originalTransactionId in the response. The RevenueCat Transactions
+    // preset has no original_transaction_id column, so every imported
+    // row — including every renewal — carries
+    // `originalTransactionId = storeTransactionId` (write.ts's own
+    // carry-forward): a real, useful value to QUERY Apple with (Apple
+    // resolves it to the correct chain regardless of whether it is the
+    // "true" original), but one that will almost never equal the
+    // `originalTransactionId` field on the transactions Apple's response
+    // carries back for that chain. The old
+    // `.find(t => t.originalTransactionId === input.originalTransactionId)`
+    // therefore missed on every renewal row, reporting `notFound` for a
+    // transaction Apple had just confirmed it recognises — worse than
+    // simply not deduplicating the chain. Since this call already scoped
+    // itself to one specific, known transaction, there is nothing left
+    // to filter for: take the transaction(s) Apple actually returned.
+    const transactions = response.data.flatMap((group) => group.lastTransactions);
+    if (transactions.length === 0) return { kind: "notFound" };
+    if (transactions.length > 1) {
+      log.warn(
+        "apple anchor: store returned more than one transaction for this chain; using the first",
+        {
+          projectId: input.projectId,
+          originalTransactionId: input.originalTransactionId,
+          count: transactions.length,
+        },
+      );
+    }
+    const txn = transactions[0]!;
 
     const verifier = createAppleVerifier({
       projectId: input.projectId,

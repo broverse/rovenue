@@ -506,6 +506,77 @@ describe("verifyImportedAnchors — a per-anchor store failure degrades only tha
 });
 
 // =============================================================
+// Final-fix-wave FIX 5 — a Stripe anchor that isn't a subscription id
+// is never sent to the store
+// =============================================================
+//
+// The RevenueCat Transactions preset has no stripe_subscription_id
+// column, so the anchor falls back to storeTransactionId — for Stripe,
+// an invoice/charge id (in_…/ch_…), never a sub_… id.
+// `subscriptions.retrieve()` would 404 on it every time; that 404 gets
+// mapped to `notFound`, silently claiming Stripe gave a definitive
+// answer it never had the chance to give. This must be recognised BEFORE
+// any store call is made.
+
+describe("verifyImportedAnchors — a Stripe row with no recognisable subscription id (final-fix-wave FIX 5)", () => {
+  it("never calls verifyStripeAnchor, and reports the row unverifiable", async () => {
+    const subscriberId = `rc_verify_stripe_bad_anchor_${createId()}`;
+    const csv = csvOf([
+      {
+        subscriberId,
+        store: "stripe",
+        // Shaped like a Stripe INVOICE id, never a subscription id —
+        // exactly what storeTransactionId looks like on the RC preset.
+        storeTxnId: "in_1AbCdEfGhIjKlMnO",
+        priceUsd: "19.99",
+      },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+    const [before] = await findPurchases();
+
+    const deps = fakeDeps();
+    const summary = await verifyImportedAnchors(jobId, deps);
+
+    expect(deps.verifyStripeAnchor).not.toHaveBeenCalled();
+    expect(summary.anchorsTotal).toBe(0); // never entered the anchor map at all
+    expect(summary.anchorsUnverifiable).toBe(1);
+    expect(summary.status).toBe("VERIFICATION_INCOMPLETE");
+
+    const [after] = await findPurchases();
+    expect(after!.id).toBe(before!.id);
+    expect(after!.verifiedAt).toBeNull();
+  });
+
+  it("a well-formed sub_… anchor IS sent to the store normally", async () => {
+    const subscriberId = `rc_verify_stripe_good_anchor_${createId()}`;
+    const csv = csvOf([
+      {
+        subscriberId,
+        store: "stripe",
+        storeTxnId: "in_good_1",
+        stripeSubscriptionId: "sub_good_1",
+        priceUsd: "19.99",
+      },
+    ]);
+    const jobId = await seedCompletedPhaseA(csv);
+
+    const deps = fakeDeps({
+      verifyStripeAnchor: vi.fn(async () => ({
+        kind: "verified" as const,
+        status: PurchaseStatus.ACTIVE,
+        expiresDate: new Date(FUTURE_EXPIRY),
+        autoRenewStatus: true,
+      })),
+    });
+    const summary = await verifyImportedAnchors(jobId, deps);
+
+    expect(deps.verifyStripeAnchor).toHaveBeenCalledTimes(1);
+    expect(summary.anchorsUnverifiable).toBe(0);
+    expect(summary.status).toBe("COMPLETED");
+  });
+});
+
+// =============================================================
 // Fix round 1, FIX 1 (Critical) — subscriber_access actually moves
 // =============================================================
 //
