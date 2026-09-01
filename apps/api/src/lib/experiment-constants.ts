@@ -58,3 +58,27 @@ export const REFUND_GUARDRAIL_MARGIN = 0.25;
 /** Minimum converters per variant before the value factor can be fitted —
  *  the log-variance needs at least two. */
 export const MINIMUM_CONVERTERS_FOR_VALUE_MODEL = 2;
+
+/** Relative tolerance separating a DEGENERATE log-value variance (every
+ *  converter paid the same price, so the true variance is exactly zero and
+ *  the value is known exactly) from a GENUINELY IMPOSSIBLE one (a negative
+ *  variance, which means the sufficient statistics are inconsistent and
+ *  nothing can be fitted).
+ *
+ *  A tolerance is needed at all because the sufficient-statistic form
+ *  `Σx² − (Σx)²/n` catastrophically cancels when every observation is
+ *  equal: the two terms agree to the last bit in exact arithmetic, so what
+ *  survives in floating point is pure rounding noise and can land either
+ *  side of zero. It is RELATIVE because that noise scales with the
+ *  magnitude of the values being cancelled (~`n · meanLog²`), so an
+ *  absolute epsilon would be too tight for large log-values and too loose
+ *  for small ones.
+ *
+ *  1e-9 is roughly seven orders of magnitude above double precision's
+ *  accumulated cancellation error at realistic cohort sizes (~n · 2.2e-16,
+ *  i.e. ~2e-10 even at a million converters), and still seven orders of
+ *  magnitude below any variance that could matter statistically — a
+ *  log-value variance of 1e-9 is a coefficient of variation of ~3e-5,
+ *  prices differing in their fifth decimal place. Nothing real lands in
+ *  the gap. */
+export const DEGENERATE_VARIANCE_RELATIVE_TOLERANCE = 1e-9;

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { analyzeBayesian, type AnalyzeBayesianInput } from "./experiment-bayes";
-import { CREDIBLE_LEVEL, MINIMUM_CONVERTERS_FOR_VALUE_MODEL } from "./experiment-constants";
+import {
+  CREDIBLE_LEVEL,
+  DEGENERATE_VARIANCE_RELATIVE_TOLERANCE,
+  MINIMUM_CONVERTERS_FOR_VALUE_MODEL,
+} from "./experiment-constants";
 
 // =============================================================
 // Closed-form oracle — Evan Miller's exact Beta(a,b) comparison
@@ -168,31 +172,38 @@ describe("analyzeBayesian — insufficient converters for the value model", () =
     expect(Number.isNaN(rich.mean!)).toBe(false);
   });
 
-  it("yields a null value factor when every converter paid the SAME price", () => {
-    // One product at one price is the common case for a mobile paywall, and
-    // it makes the log-value sample variance exactly zero. The textbook
-    // Sum(x^2) - Sum(x)^2/n form catastrophically cancels there and can land
-    // on a tiny NEGATIVE number, whose sqrt is NaN — which used to travel
-    // all the way out as a NaN posterior with sufficientData still `true`.
-    // A NaN expected loss compares `false` against any threshold, so the
-    // decision engine's stopping rule would have recommended shipping a
-    // variant whose posterior was never fitted.
+  it("fits a DEGENERATE but valid point mass when every converter paid the SAME price", () => {
+    // One product at one price, inside a 7-day maturation window in which
+    // essentially every converter has exactly one purchase, is the MODAL
+    // configuration for this product — not an edge case. Every mature
+    // converter then nets an identical amount, so the true log-value
+    // variance is exactly zero.
+    //
+    // Zero variance is INFORMATION, not missing data: the per-converter
+    // value is known exactly. With all n observations equal to mu0 the
+    // scaled-inverse-chi-square posterior on sigma^2 collapses to a point
+    // mass at 0, so E[value | convert] = exp(mu0) and all the remaining
+    // uncertainty sits in the conversion factor. Reporting
+    // `sufficientData: false` here would make Task 5 render "not enough
+    // data" for a paywall with 2 000 converters.
     const n = 2000;
-    const logPrice = Math.log(19.99);
+    const users = 20_000;
+    const price = 19.99;
+    const logPrice = Math.log(price);
     const result = analyzeBayesian({
       experimentId: "exp_single_price",
       metricType: "ARPU",
       variants: [
         {
           key: "control",
-          users: 20_000,
+          users,
           converters: n,
           sumLogValue: n * logPrice,
           sumLogValueSquared: n * logPrice ** 2,
         },
         {
           key: "treatment",
-          users: 20_000,
+          users,
           converters: n,
           sumLogValue: n * logPrice,
           sumLogValueSquared: n * logPrice ** 2,
@@ -200,13 +211,87 @@ describe("analyzeBayesian — insufficient converters for the value model", () =
       ],
     });
 
+    // Beta(1 + converters, 1 + non-converters) posterior mean, times the
+    // exactly-known price. Derived here from the conjugate update, not read
+    // back off the module.
+    const expectedMean = ((1 + n) / (2 + users)) * price;
+
     for (const v of result.variants) {
-      expect(v.sufficientData).toBe(false);
-      expect(v.mean).toBeNull();
-      expect(v.credibleInterval).toBeNull();
-      expect(v.probabilityBest).toBeNull();
-      expect(v.expectedLoss).toBeNull();
+      expect(v.sufficientData).toBe(true);
+      expect(v.mean).not.toBeNull();
+      expect(Number.isFinite(v.mean!)).toBe(true);
+      expect(v.mean!).toBeCloseTo(expectedMean, 2);
+
+      // Still a real posterior: the interval brackets the mean and the
+      // expected loss is usable, because the conversion factor is where
+      // the uncertainty legitimately lives.
+      expect(v.credibleInterval).not.toBeNull();
+      expect(v.credibleInterval![0]).toBeLessThan(v.mean!);
+      expect(v.credibleInterval![1]).toBeGreaterThan(v.mean!);
+      expect(v.expectedLoss).not.toBeNull();
+      expect(Number.isFinite(v.expectedLoss!)).toBe(true);
+      expect(v.expectedLoss!).toBeGreaterThan(0);
+      expect(Number.isFinite(v.probabilityBest!)).toBe(true);
     }
+  });
+
+  it("treats a variance negative only by rounding noise as degenerate, not impossible", () => {
+    // Sits just INSIDE the tolerance band: this is what floating-point
+    // cancellation actually produces for an equal-valued cohort.
+    const n = 10;
+    const meanLog = 3;
+    const sumLogValue = n * meanLog;
+    const tolerance =
+      DEGENERATE_VARIANCE_RELATIVE_TOLERANCE * meanLog * meanLog;
+    const targetVar = -tolerance / 2;
+    const sumLogValueSquared =
+      (sumLogValue * sumLogValue) / n + targetVar * (n - 1);
+
+    const result = analyzeBayesian({
+      experimentId: "exp_rounding_noise_variance",
+      metricType: "ARPU",
+      variants: [
+        { key: "control", users: 500, converters: n, sumLogValue, sumLogValueSquared },
+        { key: "treatment", users: 500, converters: n, sumLogValue, sumLogValueSquared },
+      ],
+    });
+
+    for (const v of result.variants) {
+      expect(v.sufficientData).toBe(true);
+      expect(Number.isFinite(v.mean!)).toBe(true);
+    }
+  });
+
+  it("yields a null value factor when the variance is negative BEYOND tolerance", () => {
+    // A variance cannot be negative. Beyond rounding noise it means the
+    // sufficient statistics are inconsistent, and nothing can honestly be
+    // fitted from them — distinct from the degenerate case above, which is
+    // a real answer.
+    const n = 10;
+    const sumLogValue = n * 3;
+    // Sum(x)^2/n is 90; 85 puts the sample variance at -0.5555.
+    const sumLogValueSquared = 85;
+    const result = analyzeBayesian({
+      experimentId: "exp_impossible_variance",
+      metricType: "ARPU",
+      variants: [
+        { key: "control", users: 500, converters: n, sumLogValue, sumLogValueSquared },
+        {
+          key: "treatment",
+          users: 500,
+          converters: 40,
+          sumLogValue: 40 * Math.log(9.99),
+          sumLogValueSquared: 40 * Math.log(9.99) ** 2 + 39 * 0.2,
+        },
+      ],
+    });
+
+    const impossible = result.variants.find((v) => v.key === "control")!;
+    expect(impossible.sufficientData).toBe(false);
+    expect(impossible.mean).toBeNull();
+    expect(impossible.credibleInterval).toBeNull();
+    expect(impossible.probabilityBest).toBeNull();
+    expect(impossible.expectedLoss).toBeNull();
   });
 
   it("yields a null value factor when the log-value variance is not finite", () => {

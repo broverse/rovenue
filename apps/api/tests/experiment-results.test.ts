@@ -433,31 +433,50 @@ describe("computeExperimentResults — PROCEEDS_PER_USER", () => {
     }
   });
 
-  it("never emits a NaN posterior for a single-price paywall", async () => {
-    // Every converter netted exactly the same amount (one product at one
-    // price — the common case for this product), so the log-value sample
-    // variance is zero and the textbook sum-of-squares form cancels to a
-    // tiny NEGATIVE number. That used to reach `sqrt` and produce NaN in
-    // every posterior field while `sufficientData` still said true, and a
-    // NaN expected loss compares `false` against the threshold, so the
-    // stopping rule would have recommended shipping an unfitted posterior.
+  it("reports a real posterior for a single-price paywall, never NaN", async () => {
+    // Every converter netted exactly the same amount — one product at one
+    // price inside the 7-day window, i.e. the modal configuration. The
+    // log-value variance is exactly zero, which the sufficient-statistic
+    // form computes as a tiny NEGATIVE number.
+    //
+    // Two ways to get this wrong, both regressions this pins: letting the
+    // negative through produces NaN posteriors with `sufficientData: true`
+    // (and a NaN expected loss compares `false` against the threshold, so
+    // the stopping rule would recommend shipping an unfitted posterior),
+    // while rejecting it outright reports "not enough data" for a paywall
+    // with 2 000 converters per arm. Neither is right: the value is known
+    // exactly, so the posterior is real and the uncertainty lives in the
+    // conversion factor.
     setExperiment({ primaryMetric: "ARPU" });
+    const price = 19.99;
+    const logPrice = Math.log(price);
     const rows = happyPathRows();
     for (const r of rows) {
       const n = r.converters as number;
-      r.sum_log_value = 3 * n;
-      r.sum_log_value_sq = 9 * n;
+      r.sum_log_value = n * logPrice;
+      r.sum_log_value_sq = n * logPrice ** 2;
     }
     respondWith(rows);
 
     const res = await computeExperimentResults("exp_1", "proj_test");
+    const byId = new Map(res.variants.map((v) => [v.variantId, v]));
+
     for (const v of res.variants) {
-      expect(v.sufficientData).toBe(false);
-      expect(v.posteriorMean).toBeNull();
-      expect(v.expectedLoss).toBeNull();
-      expect(v.probabilityBest).toBeNull();
+      expect(v.sufficientData).toBe(true);
+      expect(Number.isFinite(v.posteriorMean!)).toBe(true);
+      expect(Number.isFinite(v.expectedLoss!)).toBe(true);
+      expect(Number.isFinite(v.probabilityBest!)).toBe(true);
     }
-    expect(res.recommendation.shipRecommended).toBe(false);
-    expect(res.recommendation.blockedBy).toEqual(["NO_LEADER"]);
+    // Beta(1 + converters, 1 + non-converters) mean times the exact price.
+    expect(byId.get("control")!.posteriorMean!).toBeCloseTo(
+      ((1 + 2_000) / (2 + 20_000)) * price,
+      2,
+    );
+    expect(byId.get("treatment")!.posteriorMean!).toBeCloseTo(
+      ((1 + 2_600) / (2 + 20_000)) * price,
+      2,
+    );
+    expect(res.recommendation.blockedBy).toEqual([]);
+    expect(res.recommendation.leadingVariantId).toBe("treatment");
   });
 });

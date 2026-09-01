@@ -4,6 +4,7 @@ import {
   CONVERSION_PRIOR_ALPHA,
   CONVERSION_PRIOR_BETA,
   CREDIBLE_LEVEL,
+  DEGENERATE_VARIANCE_RELATIVE_TOLERANCE,
   MINIMUM_CONVERTERS_FOR_VALUE_MODEL,
   POSTERIOR_DRAWS,
 } from "./experiment-constants";
@@ -58,10 +59,15 @@ import {
 //   - The per-converter value model is a Normal-Inverse-Gamma / Jeffreys
 //     posterior fit to log(value) among converters only. A variant whose
 //     converter count is below MINIMUM_CONVERTERS_FOR_VALUE_MODEL, or
-//     whose log-value sample variance is not finite, gets `sufficientData:
-//     false` and every derived field `null` for that metric — never a
-//     fabricated point estimate standing in for a posterior that could
-//     not be fit.
+//     whose log-value sample variance is not finite or is negative beyond
+//     tolerance, gets `sufficientData: false` and every derived field
+//     `null` for that metric — never a fabricated point estimate standing
+//     in for a posterior that could not be fit. A variance of (or within
+//     tolerance of) ZERO is a different thing entirely and is NOT missing
+//     data: every converter paid the same price, so the per-converter
+//     value is known exactly. That fits as a degenerate-but-valid point
+//     mass at exp(meanLog) with `sufficientData: true` — see
+//     `fitValueFactor`.
 //   - `probabilityBest` / `expectedLoss` compare a variant only against
 //     the OTHER variants that also have sufficient data for the metric
 //     being analyzed; a variant lacking data is excluded from the
@@ -158,13 +164,44 @@ function drawChiSquare(rng: Rng, degreesOfFreedom: number): number {
 interface ValueFactorFit {
   n: number;
   meanLog: number;
+  /** Exactly 0 when `degenerate` — see `fitValueFactor`. */
   varLog: number;
+  /** Every converter had the same value, so the per-converter value is
+   *  known exactly and `drawValueFactor` returns a constant. */
+  degenerate: boolean;
 }
 
-/** Fits the log-value posterior from converter-only sufficient statistics.
- *  Returns `null` — never a fabricated point estimate — when there are
- *  too few converters to fit a variance, or the fitted variance is not
- *  finite. */
+/**
+ * Fits the log-value posterior from converter-only sufficient statistics.
+ *
+ * Three outcomes, and the distinction between the last two is load-bearing:
+ *
+ *   - too few converters, or a non-finite variance  -> `null`, never a
+ *     fabricated point estimate;
+ *   - a variance that is negative BEYOND TOLERANCE  -> `null`. A variance
+ *     cannot be negative, so the sufficient statistics are inconsistent
+ *     and nothing can honestly be fitted from them;
+ *   - a variance within tolerance of zero           -> a DEGENERATE BUT
+ *     VALID fit (`varLog = 0`, `degenerate: true`).
+ *
+ * That last case is not an error and must not be reported as missing data.
+ * With `MATURATION_WINDOW_DAYS = 7`, a paywall selling one product at one
+ * price gives every mature converter an identical net revenue, so the true
+ * log-value variance is exactly zero — the modal configuration for this
+ * product, not an edge case. Zero variance is INFORMATION: the value is
+ * known exactly. The statistics agree — with all n observations equal to
+ * mu0 the scaled-inverse-chi-square posterior on sigma^2 collapses to a
+ * point mass at 0, so `E[value | convert] = exp(mu0)` exactly and the
+ * metric's remaining uncertainty lives entirely in the conversion factor,
+ * which is where it belongs.
+ *
+ * The tolerance exists because `Sum(x^2) - Sum(x)^2/n` catastrophically
+ * cancels for equal observations: in exact arithmetic the two terms are
+ * identical, so in floating point what survives is rounding noise that can
+ * land either side of zero. It is scaled by `meanLog^2` because that noise
+ * scales with the magnitude of the terms being cancelled — see
+ * DEGENERATE_VARIANCE_RELATIVE_TOLERANCE.
+ */
 function fitValueFactor(
   converters: number,
   sumLogValue: number,
@@ -176,27 +213,35 @@ function fitValueFactor(
   const n = converters;
   const meanLog = sumLogValue / n;
   const varLog = (sumLogValueSquared - (sumLogValue * sumLogValue) / n) / (n - 1);
-  // A variance must be >= 0, and `Number.isFinite` alone does not enforce
-  // that here: the textbook Σx² − (Σx)²/n form catastrophically cancels
-  // when every converter has the SAME value, and returns a tiny NEGATIVE
-  // number instead of exactly 0. That case is not exotic in this product —
-  // it is a paywall selling one product at one price, i.e. the common
-  // case. Letting it through produced `sqrt` of a negative sigma², so
-  // every posterior field for that variant came back NaN while
-  // `sufficientData` still said `true`; downstream, `expectedLoss >=
-  // threshold` is `false` for NaN, so the stopping rule would have
-  // recommended shipping on a posterior that was never fitted. Rejecting a
-  // non-positive variance routes it to the same honest `null` path as too
-  // few converters.
-  if (!Number.isFinite(varLog) || varLog <= 0) {
+  if (!Number.isFinite(varLog)) {
     return null;
   }
-  return { n, meanLog, varLog };
+  // Relative to the scale of the cancelled terms, floored at 1 so a
+  // meanLog near zero (values near 1.0 in the metric's units) still gets a
+  // usable tolerance rather than one that collapses to nothing.
+  const tolerance =
+    DEGENERATE_VARIANCE_RELATIVE_TOLERANCE * Math.max(1, meanLog * meanLog);
+  if (varLog < -tolerance) {
+    return null;
+  }
+  if (varLog <= tolerance) {
+    return { n, meanLog, varLog: 0, degenerate: true };
+  }
+  return { n, meanLog, varLog, degenerate: false };
 }
 
 /** One posterior draw of E[value] under the fitted log-normal model —
  *  see the formulas in the task brief's Step 6. */
 function drawValueFactor(rng: Rng, fit: ValueFactorFit): number {
+  if (fit.degenerate) {
+    // Point mass: every converter's value was identical, so E[value] is
+    // exp(meanLog) on every draw. Returned directly rather than letting
+    // the general path evaluate to the same thing with sigma^2 = 0 — that
+    // route takes a sqrt and divides by a chi-square draw, so it burns
+    // entropy for a constant and would produce NaN on the (astronomically
+    // unlikely, but not impossible) chi-square draw of exactly 0.
+    return Math.exp(fit.meanLog);
+  }
   const degreesOfFreedom = fit.n - 1;
   const chi2 = drawChiSquare(rng, degreesOfFreedom);
   const sigma2 = (degreesOfFreedom * fit.varLog) / chi2;
