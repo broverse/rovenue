@@ -27,6 +27,7 @@ import * as importStore from "../../lib/import-store";
 import {
   IMPORT_OUTCOMES,
   createReportWriter,
+  buildDryRunCounters,
   type ImportOutcome,
   type ReportRow,
 } from "./report";
@@ -518,7 +519,20 @@ export async function planImport(jobId: string): Promise<ImportPlanSummary> {
 
     const reportStorageKey = await reportWriter.finalizeReport();
 
-    await drizzle.importJobRepo.incrementImportJobCounters(db, job.projectId, job.id, outcomes);
+    // Final-fix-wave FIX 3: OVERWRITE this job's dry-run counter
+    // namespace, never additive — a dry-run attempt is always a
+    // complete, from-scratch scan of the whole file, so re-running it
+    // (e.g. after fixing the mapping) must replace the previous attempt's
+    // counts, not stack on top of them. `buildDryRunCounters` also keeps
+    // these keys structurally separate from the commit run's own
+    // (`incrementImportJobCounters` in workers/import-runner.ts), which
+    // is what stops a dry-run-then-commit from ever doubling a bucket.
+    await drizzle.importJobRepo.setImportJobCounters(
+      db,
+      job.projectId,
+      job.id,
+      buildDryRunCounters(outcomes),
+    );
     await drizzle.importJobRepo.setImportJobStatus(db, job.projectId, job.id, {
       status: "DRY_RUN_COMPLETE",
       reportStorageKey,

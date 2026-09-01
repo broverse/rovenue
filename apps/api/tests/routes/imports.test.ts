@@ -593,6 +593,49 @@ describe("GET /:id", () => {
     const body = (await res.json()) as { data: { job: Record<string, unknown> } };
     expect(body.data.job.verificationCountersScope).toBeNull();
   });
+
+  // Final-fix-wave FIX 3: `import_jobs.counters` holds a
+  // `dryRun_`-prefixed namespace (the dry-run planner's own, never
+  // additive across attempts) separate from the plain `ImportOutcome`
+  // keys the commit run increments. The DTO must present the dry-run
+  // preview under the SAME plain keys the client already reads, sourced
+  // from the prefixed namespace, while the job is still in a pre-commit
+  // status — never a mix of both namespaces.
+  it("surfaces the dry-run planner's counters under plain outcome keys while DRY_RUN_COMPLETE", async () => {
+    getImportJob.mockResolvedValue(
+      makeJob({
+        status: "DRY_RUN_COMPLETE",
+        counters: { dryRun_willCreate: 42, dryRun_androidNoToken: 3 },
+      }),
+    );
+
+    const res = await req("/job_1");
+
+    const body = (await res.json()) as {
+      data: { job: { counters: Record<string, number> } };
+    };
+    expect(body.data.job.counters.willCreate).toBe(42);
+    expect(body.data.job.counters.androidNoToken).toBe(3);
+    // The prefixed key itself must not leak through to the client.
+    expect(body.data.job.counters.dryRun_willCreate).toBeUndefined();
+  });
+
+  it("does not remap counters once a commit has started — a leftover dryRun_ key from an earlier attempt stays hidden, the plain keys pass through as the commit's own", async () => {
+    getImportJob.mockResolvedValue(
+      makeJob({
+        status: "COMPLETED",
+        counters: { dryRun_willCreate: 42, willCreate: 100 },
+      }),
+    );
+
+    const res = await req("/job_1");
+
+    const body = (await res.json()) as {
+      data: { job: { counters: Record<string, number> } };
+    };
+    expect(body.data.job.counters.willCreate).toBe(100);
+    expect(body.data.job.counters.dryRun_willCreate).toBe(42);
+  });
 });
 
 // =============================================================

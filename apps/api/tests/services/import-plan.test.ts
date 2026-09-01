@@ -458,6 +458,56 @@ describe("planImport", () => {
     expect(summary.observedEventDateRange).toBeNull();
     expect(summary.requiredPartitionSpan).toBeNull();
   });
+
+  // ===========================================================
+  // Final-fix-wave FIX 3 — dry-run counters never accumulate, and never
+  // collide with the commit run's own counter keys
+  // ===========================================================
+  //
+  // Before this fix, `planImport` persisted its outcome counts through
+  // `incrementImportJobCounters` — additive — into the SAME
+  // `import_jobs.counters` keys the commit run (workers/import-runner.ts)
+  // also increments. A re-run of the dry run (e.g. after fixing the
+  // mapping) doubled its own previous count; a dry-run-then-commit on N
+  // rows left `willCreate` reading ≈2N.
+
+  it("does not accumulate on a second dry-run attempt for the same job", async () => {
+    await seedProduct("refresh_product", { apple: "refresh_product" });
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_refresh,app_store,refresh_product,txn_refresh,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    const first = await planImport(jobId);
+    expect(first.outcomes.willCreate).toBe(1);
+
+    const second = await planImport(jobId);
+    expect(second.outcomes.willCreate).toBe(1); // NOT 2 — overwritten, not added.
+
+    const persisted = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    expect((persisted!.counters as Record<string, number>).dryRun_willCreate).toBe(1);
+  });
+
+  it("persists under a dryRun_-prefixed key, never the commit run's plain outcome key", async () => {
+    await seedProduct("namespace_product", { apple: "namespace_product" });
+    const jobId = await seedJob({
+      csv: csvOf([
+        "user_namespace,app_store,namespace_product,txn_namespace,2026-01-01 00:00:00,false,,",
+      ]),
+    });
+
+    await planImport(jobId);
+
+    const persisted = await importJobRepo.getImportJob(db, PROJECT_ID, jobId);
+    const counters = persisted!.counters as Record<string, number>;
+    expect(counters.dryRun_willCreate).toBe(1);
+    // The plain key is the commit run's own namespace (import-runner.ts)
+    // — a dry run that never committed anything must leave it untouched,
+    // so a later commit starts its additive count from zero, not from
+    // whatever the dry run happened to see.
+    expect(counters.willCreate).toBeUndefined();
+  });
 });
 
 // =================================================================

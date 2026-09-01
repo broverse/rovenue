@@ -32,6 +32,58 @@ export const IMPORT_OUTCOMES = [
 
 export type ImportOutcome = (typeof IMPORT_OUTCOMES)[number];
 
+// =============================================================
+// Dry-run counter namespace (final-fix-wave FIX 3)
+// =============================================================
+//
+// plan.ts (the dry-run planner) and import-runner.ts (the commit run)
+// both classify rows into these SAME eight outcome buckets — but they
+// are two separate phases of a job's lifecycle, not one running total.
+// Before this fix both persisted their counts into the SAME
+// `import_jobs.counters` keys via `incrementImportJobCounters`, which is
+// strictly additive: an ordinary dry-run-then-commit on N rows left
+// `willCreate` reading ≈2N, permanently, in the append-only audit log
+// too. A re-run of the dry run after a mapping fix compounded the same
+// way on top of itself.
+//
+// The fix is structural, not a reset: the dry-run planner persists its
+// counts under THIS prefixed key set (via `setImportJobCounters` —
+// overwrite, not additive, since one dry-run attempt is always a
+// complete, from-scratch scan) while the commit run keeps the plain
+// `ImportOutcome` keys (via `incrementImportJobCounters`, additive
+// across its own checkpointed batches/resumes, which is correct and
+// unchanged). The two key sets can never collide, so there is no need to
+// detect "is this a genuinely fresh run start" — a question that
+// `checkpointLine` surviving a cancel-then-rerun cycle by design makes
+// unreliable to answer on the commit side anyway.
+const DRY_RUN_COUNTER_PREFIX = "dryRun_";
+
+export function dryRunCounterKey(outcome: ImportOutcome): string {
+  return `${DRY_RUN_COUNTER_PREFIX}${outcome}`;
+}
+
+/** Builds the full prefixed-key object `setImportJobCounters` persists
+ *  for one dry-run attempt — always the complete, from-scratch count for
+ *  every bucket, never a delta. */
+export function buildDryRunCounters(
+  outcomes: Record<ImportOutcome, number>,
+): Record<string, number> {
+  return Object.fromEntries(
+    IMPORT_OUTCOMES.map((outcome) => [dryRunCounterKey(outcome), outcomes[outcome]]),
+  );
+}
+
+/** Reverses `buildDryRunCounters` — reads the dry-run planner's own
+ *  counts back out of a job's persisted `counters` object, defaulting an
+ *  absent key to 0 (a job that has never had a dry run yet). */
+export function readDryRunCounters(
+  counters: Record<string, number>,
+): Record<ImportOutcome, number> {
+  return Object.fromEntries(
+    IMPORT_OUTCOMES.map((outcome) => [outcome, counters[dryRunCounterKey(outcome)] ?? 0]),
+  ) as Record<ImportOutcome, number>;
+}
+
 /** One line of the NDJSON report artefact. Deliberately narrow — enough
  *  for an operator to find and understand a flagged row in their own
  *  source file (line number + the identifying fields), not a full dump

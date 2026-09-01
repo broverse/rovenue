@@ -17,6 +17,7 @@ import {
   validateMapping,
   type CanonicalField,
 } from "@rovenue/shared";
+import { readDryRunCounters } from "../../services/import/report";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { validate } from "../../lib/validate";
@@ -268,12 +269,36 @@ function verificationCountersScope(
     : "wholeFile";
 }
 
+/**
+ * Final-fix-wave FIX 3: the persisted `import_jobs.counters` jsonb now
+ * holds TWO separate namespaces — the dry-run planner's own
+ * (`dryRun_`-prefixed, report.ts's `readDryRunCounters`) and the commit
+ * run's (plain `ImportOutcome` keys, unchanged) — so a dry-run-then-commit
+ * on the same job never doubles a bucket. This boundary is where that
+ * split gets collapsed back into the ONE coherent view the API contract
+ * (and every existing dashboard read of `job.counters[outcome]`) expects:
+ * before a commit has ever started for this job (`DRY_RUN_RUNNING` /
+ * `DRY_RUN_COMPLETE`), the plain outcome keys the client reads are
+ * reconstructed FROM the dry-run namespace; once a commit has started,
+ * the persisted plain keys already ARE the (correct, additive-across-
+ * resumes) commit counts, so they pass through unchanged. Either way the
+ * numbers describe exactly one phase, never both.
+ */
+const PRE_COMMIT_STATUSES: ReadonlySet<string> = new Set([
+  "DRY_RUN_RUNNING",
+  "DRY_RUN_COMPLETE",
+]);
+
 function toDto(job: { storageKey: string } & Record<string, unknown>) {
   const { storageKey: _storageKey, ...rest } = job;
-  const counters = (rest.counters ?? {}) as Record<string, number>;
+  const rawCounters = (rest.counters ?? {}) as Record<string, number>;
   const status = String(rest.status);
+  const counters = PRE_COMMIT_STATUSES.has(status)
+    ? readDryRunCounters(rawCounters)
+    : rawCounters;
   return {
     ...rest,
+    counters,
     verificationCountersScope: verificationCountersScope(status, counters),
   };
 }
