@@ -6,8 +6,10 @@ import type {
   ChartCatalogResponse,
   ChartCategory,
   ChartChannelsResponse,
+  ChartFilterOptionsResponse,
   ChartFunnelResponse,
   ChartHeatmapResponse,
+  ChartProceedsResponse,
   ChartRangeOption,
   ChartType,
 } from "@rovenue/shared";
@@ -126,6 +128,41 @@ export function useChartHeatmap({ projectId, windowDays }: DataParams) {
     queryFn: () =>
       api<ChartHeatmapResponse>(
         `/dashboard/projects/${projectId}/charts/heatmap${buildWindowQs(windowDays)}`,
+      ),
+  });
+}
+
+// `estimated_proceeds` is a catalog entry but is NOT served by the
+// `/series/:chartId` dispatcher — that response is one blended daily
+// line, which cannot show a store with a configured commission rate
+// beside one without (spec §4.3, task-7-context.md). It has its own
+// per-store reader, `readProceeds` / `GET /proceeds`, mirroring how
+// channels/funnel/heatmap already sit outside the dispatcher above.
+export function useChartProceeds({ projectId, windowDays }: DataParams) {
+  return useQuery({
+    queryKey: ["charts", "proceeds", projectId, { windowDays }],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      api<ChartProceedsResponse>(
+        `/dashboard/projects/${projectId}/charts/proceeds${buildWindowQs(windowDays)}`,
+      ),
+  });
+}
+
+// Powers the country-coverage note (spec §4.2): `platform` (the
+// `store` dimension) is populated on every revenue event, while
+// `country` is populated only when the store supplied one for that
+// transaction. Comparing the two totals — done by the consuming
+// component, not here — yields a real, data-derived coverage figure
+// instead of a claim that can drift from what the pipeline actually
+// captures.
+export function useChartFilterOptions({ projectId, windowDays }: DataParams) {
+  return useQuery({
+    queryKey: ["charts", "filter-options", projectId, { windowDays }],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      api<ChartFilterOptionsResponse>(
+        `/dashboard/projects/${projectId}/charts/filter-options${buildWindowQs(windowDays)}`,
       ),
   });
 }

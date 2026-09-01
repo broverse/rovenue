@@ -32,9 +32,11 @@ vi.mock("../../../../components/charts", () => ({
   ChannelDonut: () => null,
   ChartCatalog: () => null,
   ChartToolbar: () => null,
+  CountryCoverageCard: () => null,
   FunnelCard: () => null,
   HourDayHeatmap: () => null,
   NewChartDialog: () => null,
+  ProceedsCard: () => null,
   SqlPreviewCard: () => null,
   MrrChartPanel: () => <div data-testid="mock-mrr-chart-panel" />,
   SeriesChartPanel: ({ chartId }: { chartId: string }) => (

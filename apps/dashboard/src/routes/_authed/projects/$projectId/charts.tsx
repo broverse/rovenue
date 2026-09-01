@@ -9,10 +9,12 @@ import {
   ChannelDonut,
   ChartCatalog,
   ChartToolbar,
+  CountryCoverageCard,
   FunnelCard,
   HourDayHeatmap,
   MrrChartPanel,
   NewChartDialog,
+  ProceedsCard,
   SeriesChartPanel,
   SqlPreviewCard,
   type ChartType,
@@ -203,7 +205,9 @@ export function ChartsPage({ projectId }: { projectId: string }) {
 
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
             <ChannelDonut projectId={projectId} />
+            <ProceedsCard projectId={projectId} />
             <FunnelCard projectId={projectId} />
+            <CountryCoverageCard projectId={projectId} />
             <HourDayHeatmap projectId={projectId} />
           </div>
 

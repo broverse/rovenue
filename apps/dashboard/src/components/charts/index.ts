@@ -2,6 +2,7 @@ export { AnnotationsPanel } from "./annotations-panel";
 export { ChannelDonut } from "./channel-donut";
 export { ChartCatalog } from "./chart-catalog";
 export { ChartToolbar } from "./chart-toolbar";
+export { CountryCoverageCard } from "./country-coverage-card";
 export { FunnelCard } from "./funnel-card";
 export { HourDayHeatmap } from "./hour-day-heatmap";
 export { EngagementCard } from "./engagement-card";
@@ -11,6 +12,7 @@ export { MrrChartPanel } from "./mrr-chart-panel";
 export { RevenueKpisCard } from "./revenue-kpis-card";
 export { NewAnnotationDialog } from "./new-annotation-dialog";
 export { NewChartDialog } from "./new-chart-dialog";
+export { ProceedsCard } from "./proceeds-card";
 export { SeriesChartPanel } from "./series-chart-panel";
 export { SqlPreviewCard } from "./sql-preview-card";
 export {

@@ -3688,6 +3688,24 @@
       "paid": "Trial → paid",
       "renewal": "Renewal"
     },
+    "proceeds": {
+      "title": "Estimated proceeds by store",
+      "subtitle": "last {{days}}d",
+      "disclaimer": "Estimated from the commission rate you configure per store — not a payout. Apple's actual tier depends on your whole-account history and both stores apply tax handling we can't see.",
+      "loading": "Loading…",
+      "empty": "No revenue in this window",
+      "estimatedAt": "{{amount}} estimated at {{rate}}",
+      "rateNotConfigured": "rate not configured — proceeds unknown"
+    },
+    "countryCoverage": {
+      "title": "Revenue by country",
+      "subtitle": "last {{days}}d",
+      "partialNote": "Country is known for {{pct}}% of events in this window. Stripe subscription renewals and events recorded before country tracking began carry none — treat the rest as unmeasured, not as a small \"Unknown\" country.",
+      "fullNote": "Country is known for every event in this window.",
+      "noKnownCountries": "No events in this window have a known country.",
+      "loading": "Loading…",
+      "empty": "No revenue in this window"
+    },
     "heatmap": {
       "title": "Purchase volume by hour × day",
       "subtitle": "last {{days}}d · UTC",
