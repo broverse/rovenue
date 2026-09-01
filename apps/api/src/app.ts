@@ -67,10 +67,11 @@ const GLOBAL_BODY_LIMIT_BYTES = 1024 * 1024;
  * at one of these paths later would otherwise inherit an exemption
  * nobody wrote for it, silently and with no compile-time signal.
  *
- * The data-import upload (routes/dashboard/imports.ts, 500 MiB) joined
- * this exemption list for exactly the same reason as the two above —
- * added here deliberately rather than discovered the hard way again,
- * per tests/global-body-limit.test.ts's own regression history.
+ * The data-import upload (routes/dashboard/imports.ts,
+ * `IMPORT_MAX_UPLOAD_BYTES` — 2 GiB) joined this exemption list for
+ * exactly the same reason as the two above — added here deliberately
+ * rather than discovered the hard way again, per
+ * tests/global-body-limit.test.ts's own regression history.
  */
 const ROUTE_OWNED_BODY_LIMIT_PATH =
   /^\/dashboard\/projects\/[^/]+\/(?:assets\/(?:image|video|lottie)|fonts|imports)$/;
