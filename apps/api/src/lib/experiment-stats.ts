@@ -238,51 +238,6 @@ export function checkSRM(
 }
 
 // =============================================================
-// Funnel drop-off
-// =============================================================
-
-export interface FunnelStepResult {
-  step: string;
-  count: number;
-  /** Fraction retained from the previous step (step 0 is 1). */
-  rate: number;
-  /** Fraction lost from the previous step (step 0 is 0). */
-  dropOff: number;
-  /** Fraction retained from step 0. */
-  overallRate: number;
-}
-
-export function analyzeFunnel(
-  steps: Array<{ name: string; count: number }>,
-): FunnelStepResult[] {
-  if (steps.length === 0) return [];
-
-  const start = steps[0]!.count;
-  return steps.map((step, i) => {
-    if (i === 0) {
-      return {
-        step: step.name,
-        count: step.count,
-        rate: 1,
-        dropOff: 0,
-        overallRate: 1,
-      };
-    }
-
-    const prior = steps[i - 1]!.count;
-    const rate = prior === 0 ? 0 : step.count / prior;
-    const overallRate = start === 0 ? 0 : step.count / start;
-    return {
-      step: step.name,
-      count: step.count,
-      rate,
-      dropOff: 1 - rate,
-      overallRate,
-    };
-  });
-}
-
-// =============================================================
 // Inverse standard normal CDF via binary search
 // =============================================================
 //

@@ -176,7 +176,19 @@ function fitValueFactor(
   const n = converters;
   const meanLog = sumLogValue / n;
   const varLog = (sumLogValueSquared - (sumLogValue * sumLogValue) / n) / (n - 1);
-  if (!Number.isFinite(varLog)) {
+  // A variance must be >= 0, and `Number.isFinite` alone does not enforce
+  // that here: the textbook Σx² − (Σx)²/n form catastrophically cancels
+  // when every converter has the SAME value, and returns a tiny NEGATIVE
+  // number instead of exactly 0. That case is not exotic in this product —
+  // it is a paywall selling one product at one price, i.e. the common
+  // case. Letting it through produced `sqrt` of a negative sigma², so
+  // every posterior field for that variant came back NaN while
+  // `sufficientData` still said `true`; downstream, `expectedLoss >=
+  // threshold` is `false` for NaN, so the stopping rule would have
+  // recommended shipping on a posterior that was never fitted. Rejecting a
+  // non-positive variance routes it to the same honest `null` path as too
+  // few converters.
+  if (!Number.isFinite(varLog) || varLog <= 0) {
     return null;
   }
   return { n, meanLog, varLog };

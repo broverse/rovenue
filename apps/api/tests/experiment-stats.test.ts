@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
   analyzeConversion,
-  analyzeFunnel,
   analyzeRevenue,
   checkSRM,
   estimateSampleSize,
@@ -209,52 +208,6 @@ describe("checkSRM", () => {
 
   test("throws when fewer than 2 variants are provided", () => {
     expect(() => checkSRM([{ expected: 100, observed: 100 }])).toThrow();
-  });
-});
-
-// =============================================================
-// analyzeFunnel
-// =============================================================
-
-describe("analyzeFunnel", () => {
-  test("computes step-by-step drop-off for viewed → clicked → purchased", () => {
-    const funnel = analyzeFunnel([
-      { name: "viewed", count: 1000 },
-      { name: "clicked", count: 300 },
-      { name: "purchased", count: 50 },
-    ]);
-
-    expect(funnel).toHaveLength(3);
-
-    expect(funnel[0]!.step).toBe("viewed");
-    expect(funnel[0]!.count).toBe(1000);
-    expect(funnel[0]!.rate).toBe(1);
-    expect(funnel[0]!.dropOff).toBe(0);
-    expect(funnel[0]!.overallRate).toBe(1);
-
-    expect(funnel[1]!.step).toBe("clicked");
-    expect(funnel[1]!.rate).toBeCloseTo(0.3);
-    expect(funnel[1]!.dropOff).toBeCloseTo(0.7);
-    expect(funnel[1]!.overallRate).toBeCloseTo(0.3);
-
-    expect(funnel[2]!.step).toBe("purchased");
-    expect(funnel[2]!.rate).toBeCloseTo(0.1667, 3);
-    expect(funnel[2]!.dropOff).toBeCloseTo(0.8333, 3);
-    expect(funnel[2]!.overallRate).toBeCloseTo(0.05);
-  });
-
-  test("returns [] for empty input", () => {
-    expect(analyzeFunnel([])).toEqual([]);
-  });
-
-  test("handles zero counts without dividing by zero", () => {
-    const funnel = analyzeFunnel([
-      { name: "viewed", count: 0 },
-      { name: "clicked", count: 0 },
-    ]);
-
-    expect(funnel[1]!.rate).toBe(0);
-    expect(funnel[1]!.overallRate).toBe(0);
   });
 });
 

@@ -180,14 +180,6 @@ const { dbMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted(() =>
     recordEvent: vi.fn(async () => undefined),
     resolveProductGroup: vi.fn(async () => null),
     invalidateExperimentCache: vi.fn(async () => undefined),
-    getExperimentResults: vi.fn(async () => ({
-      experimentId: "exp_1",
-      key: "exp",
-      type: "FLAG",
-      variants: [],
-      srm: { chi2: 0, df: 0, pValue: 1, isMismatch: false, message: "" },
-      sampleSize: 100,
-    })),
   };
 
   return { dbMock, drizzleMock, authMock, flagMock, engineMock };

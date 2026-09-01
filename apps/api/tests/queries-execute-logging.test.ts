@@ -136,7 +136,6 @@ vi.mock("../src/services/experiment-engine", () => ({
   recordEvent: vi.fn(async () => undefined),
   resolveProductGroup: vi.fn(async () => null),
   invalidateExperimentCache: vi.fn(async () => undefined),
-  getExperimentResults: vi.fn(async () => null),
 }));
 
 // ---------------------------------------------------------------------------

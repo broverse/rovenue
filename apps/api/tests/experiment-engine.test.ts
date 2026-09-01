@@ -203,7 +203,6 @@ vi.mock("../src/lib/redis", () => ({ redis: redisMock }));
 
 import {
   evaluateExperiments,
-  getExperimentResults,
   invalidateExperimentCache,
   recordEvent,
   resolveProductGroup,
@@ -685,96 +684,5 @@ describe("recordEvent", () => {
     await recordEvent("sub_1", "paywall_viewed");
 
     expect(dbMock.experimentAssignment.update).not.toHaveBeenCalled();
-  });
-});
-
-// =============================================================
-// getExperimentResults
-// =============================================================
-
-describe("getExperimentResults", () => {
-  test("aggregates totalUsers, conversions, revenue per variant + SRM", async () => {
-    const expRow = experiment({
-      id: "exp_1",
-      key: "pricing",
-      metrics: ["purchase"],
-      variants: [
-        { id: "control", name: "Control", value: "default", weight: 0.5 },
-        {
-          id: "variant_a",
-          name: "Variant A",
-          value: "weekly",
-          weight: 0.5,
-        },
-      ],
-    });
-    dbMock.experiment.findMany.mockResolvedValue([expRow]);
-    dbMock.experiment.findUnique.mockResolvedValue(expRow as never);
-    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
-
-    // 100 control / 100 variant — 10% vs 20% conversion with revenue
-    const assignments: Record<string, unknown>[] = [];
-    for (let i = 0; i < 100; i += 1) {
-      assignments.push({
-        id: `asg_c_${i}`,
-        experimentId: "exp_1",
-        subscriberId: `sub_c_${i}`,
-        variantId: "control",
-        assignedAt: new Date(),
-        events:
-          i < 10
-            ? [
-                { type: "paywall_viewed", timestamp: "2026-01-01" },
-                { type: "purchase", timestamp: "2026-01-01" },
-              ]
-            : [{ type: "paywall_viewed", timestamp: "2026-01-01" }],
-        convertedAt: i < 10 ? new Date() : null,
-        purchaseId: i < 10 ? `pur_${i}` : null,
-        revenue: i < 10 ? { toNumber: () => 10 } : null,
-      });
-    }
-    for (let i = 0; i < 100; i += 1) {
-      assignments.push({
-        id: `asg_v_${i}`,
-        experimentId: "exp_1",
-        subscriberId: `sub_v_${i}`,
-        variantId: "variant_a",
-        assignedAt: new Date(),
-        events:
-          i < 20
-            ? [
-                { type: "paywall_viewed", timestamp: "2026-01-01" },
-                { type: "purchase", timestamp: "2026-01-01" },
-              ]
-            : [{ type: "paywall_viewed", timestamp: "2026-01-01" }],
-        convertedAt: i < 20 ? new Date() : null,
-        purchaseId: i < 20 ? `pur_v_${i}` : null,
-        revenue: i < 20 ? { toNumber: () => 15 } : null,
-      });
-    }
-
-    dbMock.experimentAssignment.findMany.mockResolvedValue(assignments);
-
-    const result = await getExperimentResults("exp_1");
-
-    expect(result.variants).toHaveLength(2);
-    const control = result.variants.find((v) => v.variantId === "control")!;
-    const variant = result.variants.find((v) => v.variantId === "variant_a")!;
-
-    expect(control.totalUsers).toBe(100);
-    expect(control.conversions).toBe(10);
-    expect(control.conversionRate).toBeCloseTo(0.1);
-    expect(control.totalRevenue).toBe(100);
-    expect(control.revenuePerUser).toBe(1);
-
-    expect(variant.totalUsers).toBe(100);
-    expect(variant.conversions).toBe(20);
-    expect(variant.conversionRate).toBeCloseTo(0.2);
-    expect(variant.totalRevenue).toBe(300);
-    expect(variant.stats.lift).toBeCloseTo(1, 0);
-    expect(variant.stats.isSignificant).toBe(true);
-
-    expect(result.srm.isMismatch).toBe(false);
-    expect(result.sampleSize).toBeGreaterThan(0);
   });
 });

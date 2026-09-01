@@ -145,8 +145,12 @@ describe("analyzeBayesian — insufficient converters for the value model", () =
           key: "treatment",
           users: 500,
           converters: 40,
+          // Mean log-value log(9.99) with a sample variance of 0.2 — a real
+          // spread of price points. NOT 40 converters all at exactly 9.99:
+          // that is a zero-variance cohort, which is a separate case with
+          // its own test below, not "enough data to fit".
           sumLogValue: 40 * Math.log(9.99),
-          sumLogValueSquared: 40 * Math.log(9.99) ** 2,
+          sumLogValueSquared: 40 * Math.log(9.99) ** 2 + 39 * 0.2,
         },
       ],
     });
@@ -162,6 +166,47 @@ describe("analyzeBayesian — insufficient converters for the value model", () =
     expect(rich.sufficientData).toBe(true);
     expect(rich.mean).not.toBeNull();
     expect(Number.isNaN(rich.mean!)).toBe(false);
+  });
+
+  it("yields a null value factor when every converter paid the SAME price", () => {
+    // One product at one price is the common case for a mobile paywall, and
+    // it makes the log-value sample variance exactly zero. The textbook
+    // Sum(x^2) - Sum(x)^2/n form catastrophically cancels there and can land
+    // on a tiny NEGATIVE number, whose sqrt is NaN — which used to travel
+    // all the way out as a NaN posterior with sufficientData still `true`.
+    // A NaN expected loss compares `false` against any threshold, so the
+    // decision engine's stopping rule would have recommended shipping a
+    // variant whose posterior was never fitted.
+    const n = 2000;
+    const logPrice = Math.log(19.99);
+    const result = analyzeBayesian({
+      experimentId: "exp_single_price",
+      metricType: "ARPU",
+      variants: [
+        {
+          key: "control",
+          users: 20_000,
+          converters: n,
+          sumLogValue: n * logPrice,
+          sumLogValueSquared: n * logPrice ** 2,
+        },
+        {
+          key: "treatment",
+          users: 20_000,
+          converters: n,
+          sumLogValue: n * logPrice,
+          sumLogValueSquared: n * logPrice ** 2,
+        },
+      ],
+    });
+
+    for (const v of result.variants) {
+      expect(v.sufficientData).toBe(false);
+      expect(v.mean).toBeNull();
+      expect(v.credibleInterval).toBeNull();
+      expect(v.probabilityBest).toBeNull();
+      expect(v.expectedLoss).toBeNull();
+    }
   });
 
   it("yields a null value factor when the log-value variance is not finite", () => {

@@ -520,29 +520,153 @@ export interface ExperimentSRMResult {
   message: string;
 }
 
+/** The metric the decision engine evaluates. Mirrors the
+ *  `ExperimentPrimaryMetric` Postgres enum. */
+export type ExperimentPrimaryMetric =
+  | "CONVERSION"
+  | "ARPU"
+  | "PROCEEDS_PER_USER";
+
+/**
+ * Why there is no shippable recommendation. Every clause of the stopping
+ * rule that failed is listed, ordered by evaluation, so `blockedBy[0]` is
+ * the primary reason and an operator asking "why is there no
+ * recommendation?" gets the answer from the payload rather than from
+ * reading the service.
+ *
+ *  - `SAMPLE_SIZE`  — an arm has not reached `sampleSize.required`, or the
+ *                     required size could not be estimated at all.
+ *  - `RUNTIME`      — fewer than the minimum number of whole weekly cycles
+ *                     have elapsed since the experiment started. NOT
+ *                     implied by the sample gate: a high-traffic app can
+ *                     clear any sample threshold inside one weekday.
+ *  - `EXPECTED_LOSS`— the leader's expected loss, as a fraction of the
+ *                     control's posterior mean, is still above the
+ *                     caution threshold.
+ *  - `NO_LEADER`    — fewer than two variants have enough data for the
+ *                     primary metric, so there is nothing to compare.
+ *  - `PROCEEDS_RATE_UNCONFIGURED`
+ *                   — the primary metric is PROCEEDS_PER_USER and at least
+ *                     one store contributing revenue has no configured
+ *                     commission rate, which makes the metric unknown for
+ *                     the WHOLE experiment (substituting gross revenue for
+ *                     the unpriced store would silently misreport it).
+ *
+ * The last three SUPPRESS rather than annotate — when any of them fires,
+ * `leadingVariantId` is withheld entirely:
+ *  - `SRM`               — sample ratio mismatch on the exposed-user split.
+ *  - `CROSSOVER`         — contamination above the named tolerance.
+ *  - `REFUND_GUARDRAIL`  — the leader's refund rate is materially worse
+ *                          than control's.
+ */
+export type ExperimentDecisionGate =
+  | "SAMPLE_SIZE"
+  | "RUNTIME"
+  | "EXPECTED_LOSS"
+  | "NO_LEADER"
+  | "PROCEEDS_RATE_UNCONFIGURED"
+  | "SRM"
+  | "CROSSOVER"
+  | "REFUND_GUARDRAIL";
+
 export interface ExperimentResultsVariant {
   variantId: string;
+
+  // ----- un-windowed exposure figures (SRM + back-compat) -----
   exposures: number;
+  /** Distinct exposed subscribers, un-windowed and not crossover-excluded.
+   *  This is the SRM denominator ONLY — never the metric denominator. */
   uniqueUsers: number;
   /** Precisely-attributed conversions (raw_revenue_events.experimentKey/
    *  variantId) — 0 for non-PAYWALL experiment types, which don't carry
    *  presentedContext. */
   attributedConversions: number;
+
+  // ----- windowed, crossover-excluded figures (the metric) -----
+  /** Exposed subscribers whose maturation window has fully elapsed and who
+   *  were never exposed to another variant of this experiment. This is the
+   *  denominator for every metric below. */
+  matureUsers: number;
+  /** Mature subscribers whose NET revenue over their own window is
+   *  strictly positive. A subscriber who purchased and was then fully
+   *  refunded is deliberately not a converter here — a semantic
+   *  correction relative to `attributedConversions`, not an accident. */
+  converters: number;
+  /** `converters / matureUsers`, or `null` when no mature users exist —
+   *  never 0, which would read as "nobody converted". */
+  conversionRate: number | null;
+  /** Mature-window gross revenue and refunds, in USD. */
+  revenueUsd: number;
+  refundsUsd: number;
+  /** `refundsUsd / revenueUsd`, or `null` when there is no revenue to take
+   *  a ratio of. The guardrail metric. */
+  refundRate: number | null;
+  /** Subscribers excluded from every windowed figure above because their
+   *  window has not elapsed yet. */
+  excludedImmature: number;
+  /** Subscribers excluded because they were exposed to more than one
+   *  variant of this experiment. */
+  excludedCrossover: number;
+
+  // ----- posterior (Bayesian, on the primary metric) -----
+  /** Posterior mean of the primary metric, or `null` when this variant
+   *  lacks the data to fit it. */
+  posteriorMean: number | null;
+  /** Equal-tailed credible interval bounds at the engine's named level. */
+  credibleIntervalLow: number | null;
+  credibleIntervalHigh: number | null;
+  /** Fraction of posterior draws in which this variant is best. */
+  probabilityBest: number | null;
+  /** Expected regret, in the metric's own units, of shipping this variant
+   *  when another is truly better. */
+  expectedLoss: number | null;
+  /** `false` when the posterior could not be fitted for this variant — the
+   *  four fields above are then all `null` rather than fabricated. */
+  sufficientData: boolean;
+}
+
+export interface ExperimentIntegrity {
+  /** Sample-ratio-mismatch check over the EXPOSED-user split
+   *  (`uniqueUsers`), never over the windowed denominator. `null` with
+   *  fewer than two variants. */
+  srm: ExperimentSRMResult | null;
+  /** Fraction of exposed subscribers seen under more than one variant, or
+   *  `null` when nobody was exposed. */
+  crossoverRate: number | null;
+}
+
+export interface ExperimentRecommendation {
+  /** The variant with the highest `probabilityBest`, or `null` when a
+   *  suppression gate fired (SRM / crossover / refund guardrail) or no
+   *  leader could be identified. Suppression WITHHOLDS the leader; it does
+   *  not annotate a recommendation that still renders. */
+  leadingVariantId: string | null;
+  /** True only when every clause of the stopping rule passed. */
+  shipRecommended: boolean;
+  /** Empty when nothing blocks. See `ExperimentDecisionGate`. */
+  blockedBy: ExperimentDecisionGate[];
 }
 
 export interface ExperimentResultsResponse {
   experimentId: string;
   status: DashboardExperimentStatus;
+  /** The metric the recommendation is made on. */
+  primaryMetric: ExperimentPrimaryMetric;
   /** Empty when ClickHouse is unconfigured or no exposures were
    *  recorded yet — never a zero-filled row per configured variant. */
   variants: ExperimentResultsVariant[];
+  /** Fixed-horizon frequentist cross-checks. Valid at the planned sample
+   *  size and only there — the recommendation is never made on these. */
   conversion: ExperimentConversionAnalysis | null;
   revenue: ExperimentRevenueAnalysis | null;
-  srm: ExperimentSRMResult | null;
+  integrity: ExperimentIntegrity;
   sampleSize: {
     required: number;
     reached: boolean;
   } | null;
+  /** Whole days since the experiment started, or `null` if it never did. */
+  runtimeDays: number | null;
+  recommendation: ExperimentRecommendation;
 }
 
 // =============================================================

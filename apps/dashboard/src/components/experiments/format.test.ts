@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { ExperimentResultsResponse } from "@rovenue/shared";
+import type {
+  ExperimentResultsResponse,
+  ExperimentResultsVariant,
+} from "@rovenue/shared";
 import {
   buildFunnelStages,
   hasLiveResultsData,
@@ -27,27 +30,61 @@ describe("isPaywallExperimentGroup", () => {
   });
 });
 
+/** Fills the fields `mapResultsVariants` / `buildFunnelStages` do not read,
+ *  so each test only states the counts it is actually about. */
+function variant(
+  partial: Pick<
+    ExperimentResultsVariant,
+    "variantId" | "exposures" | "uniqueUsers" | "attributedConversions"
+  >,
+): ExperimentResultsVariant {
+  return {
+    matureUsers: 0,
+    converters: 0,
+    conversionRate: null,
+    revenueUsd: 0,
+    refundsUsd: 0,
+    refundRate: null,
+    excludedImmature: 0,
+    excludedCrossover: 0,
+    posteriorMean: null,
+    credibleIntervalLow: null,
+    credibleIntervalHigh: null,
+    probabilityBest: null,
+    expectedLoss: null,
+    sufficientData: false,
+    ...partial,
+  };
+}
+
 function makeResults(
   variants: ExperimentResultsResponse["variants"],
 ): ExperimentResultsResponse {
   return {
     experimentId: "exp_1",
     status: "RUNNING",
+    primaryMetric: "CONVERSION",
     variants,
     conversion: null,
     revenue: null,
-    srm: null,
+    integrity: { srm: null, crossoverRate: null },
     sampleSize: null,
+    runtimeDays: null,
+    recommendation: {
+      leadingVariantId: null,
+      shipRecommended: false,
+      blockedBy: [],
+    },
   };
 }
 
 describe("mapResultsVariants", () => {
   it("maps exposures/uniqueUsers straight through and cycles colors by index", () => {
     const results = makeResults([
-      { variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 12 },
-      { variantId: "variant_a", exposures: 105, uniqueUsers: 95, attributedConversions: 20 },
-      { variantId: "variant_b", exposures: 98, uniqueUsers: 88, attributedConversions: 9 },
-      { variantId: "variant_c", exposures: 50, uniqueUsers: 40, attributedConversions: 3 },
+      variant({ variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 12 }),
+      variant({ variantId: "variant_a", exposures: 105, uniqueUsers: 95, attributedConversions: 20 }),
+      variant({ variantId: "variant_b", exposures: 98, uniqueUsers: 88, attributedConversions: 9 }),
+      variant({ variantId: "variant_c", exposures: 50, uniqueUsers: 40, attributedConversions: 3 }),
     ]);
 
     const rows = mapResultsVariants(results, true);
@@ -69,7 +106,7 @@ describe("mapResultsVariants", () => {
 
   it("nulls attributedConversions when the column isn't gated on — never a fabricated 0", () => {
     const results = makeResults([
-      { variantId: "control", exposures: 10, uniqueUsers: 9, attributedConversions: 0 },
+      variant({ variantId: "control", exposures: 10, uniqueUsers: 9, attributedConversions: 0 }),
     ]);
 
     const rows = mapResultsVariants(results, false);
@@ -100,7 +137,7 @@ describe("hasLiveResultsData", () => {
     expect(
       hasLiveResultsData(
         makeResults([
-          { variantId: "control", exposures: 1, uniqueUsers: 1, attributedConversions: 0 },
+          variant({ variantId: "control", exposures: 1, uniqueUsers: 1, attributedConversions: 0 }),
         ]),
       ),
     ).toBe(true);
@@ -111,7 +148,7 @@ describe("buildFunnelStages", () => {
   it("always includes exposures + uniqueUsers stages", () => {
     const rows = mapResultsVariants(
       makeResults([
-        { variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 10 },
+        variant({ variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 10 }),
       ]),
       false,
     );
@@ -126,7 +163,7 @@ describe("buildFunnelStages", () => {
   it("adds the attributed stage only when showAttributed is true", () => {
     const rows = mapResultsVariants(
       makeResults([
-        { variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 10 },
+        variant({ variantId: "control", exposures: 100, uniqueUsers: 90, attributedConversions: 10 }),
       ]),
       true,
     );

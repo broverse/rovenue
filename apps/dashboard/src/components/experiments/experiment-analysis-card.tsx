@@ -30,7 +30,7 @@ export function ExperimentAnalysisCard({ experiment, results }: Props) {
   // experiment type — unlike `attributedConversions` it isn't PAYWALL-
   // gated, so it's shown whenever the endpoint returns one.
   const conversion = results?.conversion ?? null;
-  const srm = results?.srm ?? null;
+  const srm = results?.integrity.srm ?? null;
   const sampleSize = results?.sampleSize ?? null;
 
   return (

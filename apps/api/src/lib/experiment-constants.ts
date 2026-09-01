@@ -41,6 +41,12 @@ export const MATURATION_WINDOW_DAYS = 7;
  *  regardless of sample size — guards against day-of-week and novelty. */
 export const MINIMUM_WEEKLY_CYCLES = 1;
 
+/** Days in a weekly cycle. Named so the runtime gate reads
+ *  `MINIMUM_WEEKLY_CYCLES * DAYS_PER_WEEK` rather than carrying a bare 7
+ *  that could be mistaken for `MATURATION_WINDOW_DAYS`, which happens to
+ *  share the value today but means something entirely different. */
+export const DAYS_PER_WEEK = 7;
+
 /** Fraction of subscribers assigned to more than one variant of the same
  *  experiment above which the recommendation is suppressed. */
 export const CROSSOVER_SUPPRESSION_RATE = 0.001;
