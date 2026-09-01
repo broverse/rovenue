@@ -5,10 +5,12 @@
 // single shared "target paywall": every variant's `value` must be
 // `{ paywallId, nodeId, props }` (packages/shared/src/experiments/types.ts
 // `elementVariantValueSchema`), every variant of one experiment must name
-// the SAME paywallId, `nodeId` must exist in that paywall's builder-config
-// tree, and every key in `props` must be in
-// `OVERRIDABLE_PROP_KEYS[node.type]`. Mirrors
-// dashboard-experiments-paywall-variants.integration.test.ts (real
+// the SAME paywallId, `nodeId` must exist in that paywall's PUBLISHED
+// builder-config tree (never the draft — production serves the published
+// snapshot, never `paywalls.builderConfig`; see
+// apps/api/src/services/experiment-create.ts `resolveTargetBuilderConfig`),
+// and every key in `props` must be in `OVERRIDABLE_PROP_KEYS[node.type]`.
+// Mirrors dashboard-experiments-paywall-variants.integration.test.ts (real
 // Postgres, real Better Auth session).
 // =============================================================
 
@@ -87,22 +89,94 @@ const BUILDER_CONFIG = {
   },
 };
 
-/** A paywall with a real builder-config tree — required for ELEMENT's
- *  nodeId/props checks to have something to validate against. */
+/** A DRAFT-only variant of BUILDER_CONFIG with an extra node ("t2") that
+ *  exists ONLY in the draft — never published. Used to prove save-time
+ *  validation is checked against the PUBLISHED tree, not the draft. */
+const BUILDER_CONFIG_WITH_DRAFT_ONLY_NODE = {
+  ...BUILDER_CONFIG,
+  root: {
+    ...BUILDER_CONFIG.root,
+    children: [...BUILDER_CONFIG.root.children, { type: "text" as const, id: "t2", key: "title_key" }],
+  },
+};
+
+/** A paywall with a PUBLISHED builder-config tree — required for
+ *  ELEMENT's nodeId/props checks to have something to validate against,
+ *  since save-time validation targets the published snapshot, never the
+ *  draft (see the file header comment). */
 async function seedPaywallWithBuilderConfig(projectId: string, offeringId: string, suffix = "") {
+  const db = getDb();
+  const paywall = await drizzle.paywallRepo.createPaywall(db, {
+    projectId,
+    identifier: `paywall_${RUN_ID}${suffix}`,
+    name: `Paywall ${suffix}`,
+    offeringId,
+    remoteConfig: { defaultLocale: "en", locales: { en: { title: "x" } } },
+    builderConfig: BUILDER_CONFIG,
+    configFormatVersion: 2,
+  });
+  const version = await drizzle.paywallVersionRepo.insert(db, {
+    paywallId: paywall.id,
+    versionNo: 1,
+    builderConfig: BUILDER_CONFIG,
+    remoteConfig: { defaultLocale: "en", locales: { en: { title: "x" } } },
+    offeringId,
+    configFormatVersion: 2,
+  });
+  await drizzle.paywallRepo.setPublishedVersion(db, projectId, paywall.id, version.id);
+  return { id: paywall.id };
+}
+
+/** A paywall with a builder-config DRAFT but no published version at
+ *  all — the FIX 2 scenario: a designer has authored a node in the
+ *  builder but never published, so it must be rejected at save time
+ *  rather than accepted and silently unable to ever apply in production. */
+async function seedPaywallWithDraftOnlyBuilderConfig(
+  projectId: string,
+  offeringId: string,
+  suffix = "",
+) {
   const db = getDb();
   const [row] = await db
     .insert(drizzle.schema.paywalls)
     .values({
       projectId,
-      identifier: `paywall_${RUN_ID}${suffix}`,
-      name: `Paywall ${suffix}`,
+      identifier: `paywall_draftonly_${RUN_ID}${suffix}`,
+      name: `Draft-only paywall ${suffix}`,
       offeringId,
       remoteConfig: { defaultLocale: "en", locales: { en: { title: "x" } } },
-      builderConfig: BUILDER_CONFIG,
+      builderConfig: BUILDER_CONFIG_WITH_DRAFT_ONLY_NODE,
     })
     .returning();
   return { id: row!.id };
+}
+
+/** A paywall published from BUILDER_CONFIG (no "t2"), then given a draft
+ *  edit that adds "t2" — "t2" exists only in the draft, never published. */
+async function seedPaywallWithDraftOnlyNode(projectId: string, offeringId: string, suffix = "") {
+  const db = getDb();
+  const paywall = await drizzle.paywallRepo.createPaywall(db, {
+    projectId,
+    identifier: `paywall_draftnode_${RUN_ID}${suffix}`,
+    name: `Draft-only node paywall ${suffix}`,
+    offeringId,
+    remoteConfig: { defaultLocale: "en", locales: { en: { title: "x" } } },
+    builderConfig: BUILDER_CONFIG,
+    configFormatVersion: 2,
+  });
+  const version = await drizzle.paywallVersionRepo.insert(db, {
+    paywallId: paywall.id,
+    versionNo: 1,
+    builderConfig: BUILDER_CONFIG,
+    remoteConfig: { defaultLocale: "en", locales: { en: { title: "x" } } },
+    offeringId,
+    configFormatVersion: 2,
+  });
+  await drizzle.paywallRepo.setPublishedVersion(db, projectId, paywall.id, version.id);
+  await drizzle.paywallRepo.updatePaywall(db, projectId, paywall.id, {
+    builderConfig: BUILDER_CONFIG_WITH_DRAFT_ONLY_NODE,
+  });
+  return { id: paywall.id };
 }
 
 async function seedAudience(projectId: string, suffix = "") {
@@ -313,6 +387,92 @@ describe("POST /experiments — ELEMENT variant enforcement", () => {
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/not overridable/);
     expect(body.error.message).toMatch(/axis/);
+  });
+
+  it("400s when the target paywall has never been published (FIX 2: validate against published, not draft)", async () => {
+    const { userId, cookie } = await createUserAndSession("create-unpublished");
+    const project = await seedProject("create-unpublished");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "create-unpublished");
+    const paywall = await seedPaywallWithDraftOnlyBuilderConfig(project.id, offering.id, "create-unpublished");
+    const audience = await seedAudience(project.id, "create-unpublished");
+
+    const app = buildApp();
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Element Experiment Unpublished Target",
+        type: "ELEMENT",
+        audienceId: audience.id,
+        variants: [
+          {
+            id: "control",
+            name: "Control",
+            value: { paywallId: paywall.id, nodeId: "t1", props: {} },
+            weight: 0.5,
+          },
+          {
+            id: "variant_a",
+            name: "Variant A",
+            value: { paywallId: paywall.id, nodeId: "t1", props: { color: { light: "#F00" } } },
+            weight: 0.5,
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/PUBLISHED/);
+    expect(body.error.message).toMatch(/no published version/);
+    expect(body.error.message).toMatch(/[Pp]ublish/);
+  });
+
+  it("400s when a variant's nodeId exists only in the draft, not the published version (FIX 2)", async () => {
+    const { userId, cookie } = await createUserAndSession("create-draft-node");
+    const project = await seedProject("create-draft-node");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "create-draft-node");
+    const paywall = await seedPaywallWithDraftOnlyNode(project.id, offering.id, "create-draft-node");
+    const audience = await seedAudience(project.id, "create-draft-node");
+
+    const app = buildApp();
+    // "t2" was added to the paywall's DRAFT builderConfig but never
+    // published — it must be rejected exactly like a wholly unknown
+    // nodeId, because production can never serve a node that only
+    // exists in the draft.
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Element Experiment Draft-Only Node",
+        type: "ELEMENT",
+        audienceId: audience.id,
+        variants: [
+          {
+            id: "control",
+            name: "Control",
+            value: { paywallId: paywall.id, nodeId: "t2", props: {} },
+            weight: 0.5,
+          },
+          {
+            id: "variant_a",
+            name: "Variant A",
+            value: { paywallId: paywall.id, nodeId: "t2", props: { color: { light: "#F00" } } },
+            weight: 0.5,
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/Unknown nodeId/);
+    expect(body.error.message).toMatch(/t2/);
+    expect(body.error.message).toMatch(/[Pp]ublish/);
   });
 });
 

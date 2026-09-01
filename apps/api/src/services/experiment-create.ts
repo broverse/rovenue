@@ -88,25 +88,40 @@ export async function assertPaywallVariantsValid(
 }
 
 /**
- * The tree an ELEMENT experiment's `nodeId` is validated against: the
- * paywall's current draft (`builderConfig`) when it has one — a designer
- * is typically wiring the experiment up against changes not yet published
- * — else its last published snapshot. Returns null when neither exists,
- * which the caller turns into a rejection (nothing to target).
+ * Why this validates against the PUBLISHED tree only.
+ *
+ * `resolveTargetBuilderConfig` used to prefer the paywall's DRAFT
+ * `builderConfig`, on the theory that a designer wires an ELEMENT
+ * experiment up against changes not yet published. But
+ * `hydratePaywall` (apps/api/src/lib/placement-resolution.ts) is explicit
+ * that production serves the PUBLISHED snapshot and NEVER
+ * `paywalls.builderConfig` — the draft is private to the builder. A node
+ * that exists only in the draft would pass this check and then can never
+ * apply in production: a successful save, a RUNNING experiment, and
+ * silence. The experiment isn't re-validated at publish time either, so
+ * validating against the draft accepts a configuration that cannot work.
+ * Validate against what actually ships.
+ *
+ * Returns a `reason` (never both a config and a reason) so the caller can
+ * give the operator an actionable rejection instead of a generic "no
+ * builder config" — tell them to publish, and why.
  */
+type TargetBuilderConfigResult =
+  | { config: BuilderConfig; reason?: undefined }
+  | { config?: undefined; reason: "NO_PUBLISHED_VERSION" | "PUBLISHED_VERSION_HAS_NO_BUILDER_CONFIG" };
+
 async function resolveTargetBuilderConfig(
   db: DbOrTx,
-  paywall: { builderConfig: unknown; publishedVersionId: string | null },
-): Promise<BuilderConfig | null> {
-  if (paywall.builderConfig !== null && typeof paywall.builderConfig === "object") {
-    return paywall.builderConfig as BuilderConfig;
+  paywall: { publishedVersionId: string | null },
+): Promise<TargetBuilderConfigResult> {
+  if (!paywall.publishedVersionId) {
+    return { reason: "NO_PUBLISHED_VERSION" };
   }
-  if (!paywall.publishedVersionId) return null;
   const version = await drizzle.paywallVersionRepo.findById(db, paywall.publishedVersionId);
   if (!version || version.builderConfig === null || typeof version.builderConfig !== "object") {
-    return null;
+    return { reason: "PUBLISHED_VERSION_HAS_NO_BUILDER_CONFIG" };
   }
-  return version.builderConfig as BuilderConfig;
+  return { config: version.builderConfig as BuilderConfig };
 }
 
 /**
@@ -116,7 +131,7 @@ async function resolveTargetBuilderConfig(
  * Every variant's `value` must be `{ paywallId, nodeId, props }`, every
  * variant of the SAME experiment must name the SAME `paywallId` (there is
  * exactly one target per experiment), `nodeId` must exist in that
- * paywall's builder-config tree, and every key in `props` must be in
+ * paywall's PUBLISHED builder-config tree, and every key in `props` must be in
  * `OVERRIDABLE_PROP_KEYS[node.type]` — the same allowlist all three
  * renderers already honour for the (unrelated, condition-evaluated)
  * `overrides` field, so an ELEMENT variant can never target a prop some
@@ -161,18 +176,23 @@ export async function assertElementVariantsValid(
     });
   }
 
-  const builderConfig = await resolveTargetBuilderConfig(db, paywall);
-  if (!builderConfig) {
+  const target = await resolveTargetBuilderConfig(db, paywall);
+  if (!target.config) {
+    const detail =
+      target.reason === "NO_PUBLISHED_VERSION"
+        ? `paywall ${paywallId} has no published version`
+        : `the published version of paywall ${paywallId} has no builder config`;
     throw new HTTPException(400, {
-      message: `Paywall ${paywallId} has no builder config for an ELEMENT experiment to target`,
+      message: `ELEMENT experiments target the PUBLISHED paywall, not the draft — ${detail}. Publish the paywall first, then create or edit the experiment.`,
     });
   }
+  const builderConfig = target.config;
 
   for (const value of parsed) {
     const node = findNode(builderConfig.root, value.nodeId);
     if (!node) {
       throw new HTTPException(400, {
-        message: `Unknown nodeId in ELEMENT experiment variant: ${value.nodeId}`,
+        message: `Unknown nodeId in ELEMENT experiment variant (checked against the PUBLISHED paywall, not the draft): ${value.nodeId}. If this node only exists in an unpublished draft, publish the paywall first.`,
       });
     }
     const allowed: readonly string[] = OVERRIDABLE_PROP_KEYS[node.type];
