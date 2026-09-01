@@ -38,9 +38,15 @@ import type { Db, Store } from "@rovenue/db";
 // =============================================================
 //
 // Values are the currently published headline rates, cited at the point
-// of use below. These are PRESETS the dashboard may offer to prefill a
-// custom rate field — they are never applied automatically, and a
-// project always needs an explicit configured row (see rule 3 above).
+// of use below. They are never applied automatically, and a project
+// always needs an explicit configured row (see rule 3 above).
+//
+// STATUS: nothing outside this module's own test reads these yet. There
+// is no commission-rate settings UI — a rate is configured only through
+// `PUT /dashboard/projects/:projectId/commission-rates/:store` — so these
+// are a sourced reference for whoever builds that screen, not a shipped
+// feature. Do not describe them as offered to users until a caller
+// exists (ROADMAP §5 tracks the UI).
 
 export const COMMISSION_RATE_PRESETS = {
   /**

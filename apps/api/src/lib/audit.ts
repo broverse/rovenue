@@ -79,6 +79,9 @@ export type AuditAction =
   | "subscriptions.exported"
   // --- metrics ---
   | "metrics.exported"
+  // --- store commission rates (proceeds) ---
+  | "commission_rate.updated"
+  | "commission_rate.deleted"
   // --- members ---
   | "member.invited"
   | "member.role_changed"
@@ -177,7 +180,9 @@ export type AuditResource =
   | "font_face"
   | "font_family"
   | "paywall_asset"
-  | "import_job";
+  | "import_job"
+  // Scoped by projectId; `resourceId` is the store the rate applies to.
+  | "commission_rate";
 
 export interface AuditEntry {
   projectId: string;

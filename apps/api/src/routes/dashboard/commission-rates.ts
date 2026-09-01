@@ -18,15 +18,26 @@
 // and apps/api/src/services/metrics/proceeds.ts) — this route only
 // stores what the customer enters. It never infers, defaults, or
 // snaps a value to one of the published presets.
+//
+// AUDIT: both writes go through the append-only chain. This is a config
+// UPSERT — a change overwrites the previous rate and no other table
+// remembers it — while every "estimated at X%" figure in the project is
+// derived from it. The chain entry is therefore the only thing that can
+// answer "who moved the rate, and from what to what" after every proceeds
+// number in the project shifts. The write and the audit share ONE
+// transaction (audit() accepts a caller tx for exactly this), so a
+// rollback cannot leave a chain entry claiming a change that did not
+// happen, nor a change with no entry.
 
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { validate } from "../../lib/validate";
-import { Store, drizzle } from "@rovenue/db";
+import { Store, drizzle, type Db } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
+import { audit, extractRequestContext, type AuditTx } from "../../lib/audit";
 
 // `Store` is the top-level string-literal map, and `z.nativeEnum` takes
 // exactly that — no tuple needed, so this does not have to reach for
@@ -42,6 +53,11 @@ import { ok } from "../../lib/response";
 const storeParamSchema = z.object({
   store: z.nativeEnum(Store),
 });
+
+// `project_store_commission_rates.rate` is numeric(5,4) — a rate is
+// stored to four decimal places (0.1500). Formatting to fewer would
+// silently round the customer's configured figure.
+const RATE_DECIMAL_PLACES = 4;
 
 const putBodySchema = z
   .object({
@@ -90,10 +106,41 @@ export const commissionRatesRoute = new Hono()
       const { store } = c.req.valid("param");
       const { rate } = c.req.valid("json");
 
-      const row = await drizzle.commissionRateRepo.upsertCommissionRate(
-        drizzle.db,
-        { projectId, store, rate: rate.toFixed(4) },
-      );
+      const row = await drizzle.db.transaction(async (tx) => {
+        const db = tx as unknown as Db;
+        // Read the previous rate INSIDE the tx so the "from" recorded in
+        // the chain is the value this write actually replaced, not one a
+        // concurrent PUT already overwrote.
+        const previous =
+          await drizzle.commissionRateRepo.getCommissionRate(
+            db,
+            projectId,
+            store,
+          );
+        const updated =
+          await drizzle.commissionRateRepo.upsertCommissionRate(db, {
+            projectId,
+            store,
+            rate: rate.toFixed(RATE_DECIMAL_PLACES),
+          });
+        await audit(
+          {
+            projectId,
+            userId: user.id,
+            action: "commission_rate.updated",
+            resource: "commission_rate",
+            resourceId: store,
+            // `null` for a first-time configuration — "there was no rate",
+            // which is the same distinction the rest of this feature
+            // preserves: never a stand-in 0%.
+            before: { store, rate: previous ? Number(previous.rate) : null },
+            after: { store, rate: Number(updated.rate) },
+            ...extractRequestContext(c),
+          },
+          tx as unknown as AuditTx,
+        );
+        return updated;
+      });
       return c.json(ok({ store: row.store, rate: Number(row.rate) }));
     },
   )
@@ -106,10 +153,36 @@ export const commissionRatesRoute = new Hono()
     await assertProjectCapability(projectId, user.id, "project:settings:write");
 
     const { store } = c.req.valid("param");
-    await drizzle.commissionRateRepo.deleteCommissionRate(
-      drizzle.db,
-      projectId,
-      store,
-    );
+    await drizzle.db.transaction(async (tx) => {
+      const db = tx as unknown as Db;
+      const previous = await drizzle.commissionRateRepo.getCommissionRate(
+        db,
+        projectId,
+        store,
+      );
+      // Nothing configured: the DELETE is a no-op, so there is no change
+      // to record. An audit row here would assert a state transition that
+      // never occurred.
+      if (!previous) return;
+
+      await drizzle.commissionRateRepo.deleteCommissionRate(
+        db,
+        projectId,
+        store,
+      );
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "commission_rate.deleted",
+          resource: "commission_rate",
+          resourceId: store,
+          before: { store, rate: Number(previous.rate) },
+          after: null,
+          ...extractRequestContext(c),
+        },
+        tx as unknown as AuditTx,
+      );
+    });
     return c.json(ok({ ok: true }));
   });

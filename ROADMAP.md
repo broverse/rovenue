@@ -102,7 +102,17 @@ nothing, but real net-new coverage on top of what was already there.
 - [x] Proceeds view (after store commission; Apple Small Business Program
       15% vs 30%) — shipped by this plan: per-project store commission
       rates, `ProceedsCard` + `readProceeds`/`GET /proceeds`, computed at
-      query time only — never written into `raw_revenue_events`
+      query time only — never written into `raw_revenue_events`. The rate
+      itself is **API-configured only** today (`PUT/DELETE
+      /dashboard/projects/:projectId/commission-rates/:store`, audited);
+      there is no settings UI, so a project without an API call sees "rate
+      not configured — proceeds unknown". `COMMISSION_RATE_PRESETS`
+      (Apple 15/30, Google 15) exists in `services/metrics/proceeds.ts`
+      with sourced citations but is read by nothing outside its own test —
+      it is NOT offered to anyone yet
+- [ ] Commission-rate settings UI — the presets above are not reachable
+      from the dashboard; configuring a rate currently requires an API
+      call
 - [x] Country revenue dimension — shipped by this plan, coverage is
       partial by store and by time: Apple full, Google full except
       voided-purchase refunds, Stripe only `charge.refunded` (most Stripe
