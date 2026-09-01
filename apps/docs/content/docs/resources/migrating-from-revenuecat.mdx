@@ -222,5 +222,10 @@ Specifically, the following are **not** carried over:
   own exported data model has nothing to import from.
 
 Uploaded export files are end-user PII and are deleted automatically after
-a retention window once a job finishes — plan your import and verification
-within that window; a job that can still resume is never swept.
+a retention window once a job finishes. A job still actively resumable
+(`VERIFICATION_INCOMPLETE` / `VERIFYING`) is never swept while it's in
+that state — the sweep would strand it incomplete forever. A `FAILED` or
+`CANCELLED` job, though also re-runnable from the mapping-editor step
+without re-uploading, IS swept on the same clock as a finished job once
+the window elapses; plan any mapping fix and retry within that window, or
+re-upload the same file as a new job afterward.

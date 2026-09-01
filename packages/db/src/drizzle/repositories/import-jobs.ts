@@ -372,6 +372,28 @@ export async function setImportJobDryRunSummary(
 // the identical reason — it is Phase B ACTIVELY running (or crashed
 // mid-run and awaiting a retry/`/resume`), never a terminal outcome. A
 // job sitting at `VERIFYING` still needs its source file to resume from.
+// Final-fix-wave minor fix (deliberate, not an oversight — recorded here
+// because the review that found this asked for an explicit decision):
+// FAILED and CANCELLED stay in this list, swept on the SAME 7-day clock
+// as a genuinely finished COMPLETED job, even though both are also
+// re-runnable from the mapping-editor step (`MAPPING_EDITABLE_STATUSES`
+// / `DRY_RUN_STARTABLE_STATUSES`, routes/dashboard/imports.ts) without
+// re-uploading — sounding, at a glance, like the same "still needs its
+// file" case VERIFICATION_INCOMPLETE/VERIFYING are excluded for above.
+// The difference: VERIFICATION_INCOMPLETE/VERIFYING hold data (a Google
+// purchase token from the source file) that exists NOWHERE else and an
+// automated resume needs on its own, unattended — sweeping the file
+// there strands the job incomplete forever with no operator action able
+// to fix it. A FAILED/CANCELLED job's "recovery" is a MANUAL operator
+// action (fix the mapping, click dry-run again) that they are free to
+// take at any point before the window elapses; past it, re-uploading the
+// same file as a new job is the same one click it always was. Given this
+// bucket holds end-user PII (an uploaded RevenueCat/Adapty export) with
+// no further code path reading it once terminal, keeping the 7-day
+// privacy deadline uniform for every terminal state — rather than
+// granting FAILED/CANCELLED an unbounded retention an abandoned job
+// would never reclaim — is the more defensible default. Migration guides
+// document this window explicitly for exactly this reason.
 const TERMINAL_IMPORT_JOB_STATUSES: readonly ImportJobStatus[] = [
   "COMPLETED",
   "FAILED",

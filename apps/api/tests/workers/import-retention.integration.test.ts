@@ -140,6 +140,13 @@ describe("runImportRetention", () => {
     deleteSpy.mockRestore();
   });
 
+  // Final-fix-wave minor fix: pinned as a DELIBERATE decision, not an
+  // oversight — both statuses are also re-runnable from the
+  // mapping-editor step without re-uploading, but that recovery is a
+  // manual operator action available any time before the window
+  // elapses, unlike VERIFICATION_INCOMPLETE/VERIFYING's unattended
+  // resume which genuinely cannot survive losing the file. See
+  // packages/db's `TERMINAL_IMPORT_JOB_STATUSES` for the full reasoning.
   it("deletes both FAILED and CANCELLED terminal jobs' files past the window", async () => {
     const oldFinishedAt = new Date(NOW.getTime() - RETENTION_MS - 24 * 60 * 60 * 1000);
     const failedJob = await seedJob({ status: "FAILED", finishedAt: oldFinishedAt });
