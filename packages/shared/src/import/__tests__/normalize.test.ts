@@ -281,6 +281,44 @@ describe("normalizeRow", () => {
     expect("error" in row).toBe(true);
   });
 
+  // ===========================================================
+  // Final-fix-wave FIX 8 — the accepted store values are undocumented
+  // nowhere near this normalizer's own behaviour
+  // ===========================================================
+
+  it("accepts a case-insensitive match (cheap, safe widening)", () => {
+    const row = normalizeRow({ ...rcRow, store: "APP_STORE" }, { now: NOW });
+    expect("error" in row).toBe(false);
+    if ("error" in row) throw new Error("unreachable");
+    expect(row.store).toBe("APP_STORE");
+
+    const mixedCase = normalizeRow({ ...rcRow, store: "Play_Store" }, { now: NOW });
+    expect("error" in mixedCase).toBe(false);
+  });
+
+  it("does NOT guess synonyms or normalise separators — only case", () => {
+    // "App Store" (a space, not an underscore) is a different string
+    // entirely, not a casing variant — deliberately still rejected, per
+    // STORE_VALUE_MAP's own comment on why this fix stops at case.
+    const spaced = normalizeRow({ ...rcRow, store: "App Store" }, { now: NOW });
+    expect("error" in spaced).toBe(true);
+
+    const synonym = normalizeRow({ ...rcRow, store: "ios" }, { now: NOW });
+    expect("error" in synonym).toBe(true);
+  });
+
+  it("names the offending value AND the accepted set in the error message", () => {
+    const row = normalizeRow({ ...rcRow, store: "ios" }, { now: NOW });
+    expect("error" in row).toBe(true);
+    if (!("error" in row)) throw new Error("unreachable");
+    expect(row.error.code).toBe("UNKNOWN_STORE_VALUE");
+    expect(row.error.message).toContain('"ios"');
+    expect(row.error.message).toContain("app_store");
+    expect(row.error.message).toContain("play_store");
+    expect(row.error.message).toContain("stripe");
+    expect(row.error.message).toContain("promotional");
+  });
+
   it("rejects a real (non-anchorless) row with no store transaction id", () => {
     const row = normalizeRow({ ...rcRow, storeTransactionId: undefined }, { now: NOW });
     expect("error" in row).toBe(true);

@@ -92,7 +92,7 @@ columns to the closest canonical field:
 | Canonical field | Typical Adapty column | Required |
 |---|---|---|
 | `subscriberExternalId` | your `customer_user_id` | yes |
-| `store` | store / platform column | yes |
+| `store` | store / platform column — accepted values only: `app_store`, `play_store`, `stripe`, `promotional` (case-insensitive; nothing else is guessed) | yes |
 | `productIdentifier` | product id / vendor product id | yes |
 | `purchaseDate` | purchase/transaction date | yes |
 | `storeTransactionId` | store transaction id (Apple original transaction id / Google purchase token / Stripe subscription id) | no, but strongly recommended |
@@ -109,6 +109,15 @@ column names and map from there. Only `subscriberExternalId`, `store`,
 `productIdentifier`, and `purchaseDate` are required; leave anything you
 can't map unmapped rather than guessing — an unmapped optional field is
 simply not imported, which is always safer than a wrong mapping.
+
+<Callout type="warn">
+The `store` column only recognizes exactly `app_store`, `play_store`,
+`stripe`, and `promotional` (case-insensitive, nothing else is guessed). A
+column that instead reads `ios`, `android`, or a platform name Adapty
+itself uses will fail **every row** in the file with an unrecognized-value
+error — recode the column to one of the four accepted values before
+importing.
+</Callout>
 
 <Callout type="warn">
 If your export doesn't have a usable value for `storeTransactionId` on a

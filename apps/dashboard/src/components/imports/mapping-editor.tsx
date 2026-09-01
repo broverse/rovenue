@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
-import { CANONICAL_FIELDS, validateMapping, type CanonicalField } from "@rovenue/shared";
+import {
+  CANONICAL_FIELDS,
+  STORE_VALUE_MAP,
+  validateMapping,
+  type CanonicalField,
+} from "@rovenue/shared";
 import { Input } from "../../ui/input";
 import { NativeSelect } from "../../ui/native-select";
 import { Button } from "../../ui/button";
@@ -52,6 +57,17 @@ interface MappingEditorProps {
   job: ImportJob;
   onSaved?: (job: ImportJob) => void;
 }
+
+/**
+ * Final-fix-wave FIX 8: the accepted `store` values were documented
+ * nowhere — a file whose store column reads `App Store`, `ios` or
+ * `google` fails EVERY row with `UNKNOWN_STORE_VALUE`
+ * (@rovenue/shared's `normalizeRow`), the most likely total-failure mode
+ * for the generic-mapper path. Derived from `STORE_VALUE_MAP` itself
+ * (never hand-duplicated) so this hint can't drift from what the
+ * normalizer actually accepts.
+ */
+const STORE_VALUE_HINT = `Accepted values: ${Object.keys(STORE_VALUE_MAP).join(", ")} (case-insensitive).`;
 
 function mappingToColumnByField(
   mapping: Record<string, CanonicalField>,
@@ -160,6 +176,14 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
                       <Chip tone="warning" className="ml-2">
                         Required
                       </Chip>
+                    )}
+                    {field.key === "store" && (
+                      <span
+                        className="mt-0.5 block text-[11.5px] text-rv-mute-500"
+                        data-testid="import-store-value-hint"
+                      >
+                        {STORE_VALUE_HINT}
+                      </span>
                     )}
                   </td>
                   <td className="px-3 py-2">

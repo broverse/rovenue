@@ -75,6 +75,19 @@ beforeEach(() => {
   );
 });
 
+describe("MappingEditor — accepted store values (final-fix-wave FIX 8)", () => {
+  it("shows the accepted store values next to the store field", () => {
+    wrap(<MappingEditor projectId={PROJECT_ID} job={makeJob({ mapping: {} })} />);
+
+    const hint = screen.getByTestId("import-store-value-hint");
+    expect(hint).toHaveTextContent("app_store");
+    expect(hint).toHaveTextContent("play_store");
+    expect(hint).toHaveTextContent("stripe");
+    expect(hint).toHaveTextContent("promotional");
+    expect(hint).toHaveTextContent(/case-insensitive/i);
+  });
+});
+
 describe("MappingEditor — required-field gate", () => {
   it("blocks the save action and names the missing required field when nothing is mapped", () => {
     wrap(<MappingEditor projectId={PROJECT_ID} job={makeJob({ mapping: {} })} />);

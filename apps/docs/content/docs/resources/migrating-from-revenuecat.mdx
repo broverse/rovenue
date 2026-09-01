@@ -129,6 +129,16 @@ the canonical fields yourself. `subscriberExternalId`, `store`,
 optional and simply isn't imported if left unmapped. Preset detection is
 anchor-gated — a file with no vendor-identifying column detects nothing,
 which is expected, not an error, and just means you map by hand.
+
+<Callout type="warn">
+The `store` column only recognizes exactly these values (matching is
+case-insensitive, but nothing else is guessed): `app_store`, `play_store`,
+`stripe`, `promotional`. A column that instead reads `App Store`, `ios`,
+`android`, or `google` will fail **every row** in the file with an
+unrecognized-value error — this is the single most common way a hand-mapped
+file fails completely. Recode the column (or transform it before export) to
+one of the four accepted values first.
+</Callout>
 </Step>
 <Step>
 ### Dry run

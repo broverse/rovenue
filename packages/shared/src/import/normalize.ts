@@ -22,13 +22,35 @@ export type StoreValue = "APP_STORE" | "PLAY_STORE" | "STRIPE" | "MANUAL";
 /** Source `store` column values this importer recognizes, mapped onto
  *  our `Store` enum (packages/db/src/drizzle/enums.ts). `promotional`
  *  maps to MANUAL because it has no real store transaction behind it —
- *  see the "anchorless rows" handling in normalizeRow below. */
+ *  see the "anchorless rows" handling in normalizeRow below.
+ *
+ *  Final-fix-wave FIX 8: these four values, and ONLY these four, are
+ *  documented as the accepted set in both migration guides
+ *  (migrating-from-revenuecat.mdx / migrating-from-adapty.mdx) and the
+ *  mapping UI next to the store field — a file whose store column reads
+ *  anything else (`App Store`, `ios`, `google`, …) fails EVERY row with
+ *  `UNKNOWN_STORE_VALUE`, the most likely total-failure mode for the
+ *  generic-mapper path. `resolveStoreValue` below widens matching to be
+ *  case-insensitive ONLY — a cheap, safe widening for a file whose
+ *  export happens to read `APP_STORE` or `App_Store`. It deliberately
+ *  does NOT try to guess synonyms (`ios` → `app_store`, `google` →
+ *  `play_store`, `App Store` with a space) — that would be fabricating a
+ *  mapping decision from a value this importer cannot actually verify,
+ *  the exact thing this project avoids; the documentation and the
+ *  `invalidRow` reason (see `normalizeRow` below) are what make an
+ *  unrecognised value diagnosable instead. */
 export const STORE_VALUE_MAP: Record<string, StoreValue> = {
   app_store: "APP_STORE",
   play_store: "PLAY_STORE",
   stripe: "STRIPE",
   promotional: "MANUAL",
 };
+
+/** Case-insensitive lookup over `STORE_VALUE_MAP` — see its own comment
+ *  for exactly how far "widened" goes (case only, no synonym guessing). */
+export function resolveStoreValue(sourceStore: string): StoreValue | undefined {
+  return STORE_VALUE_MAP[sourceStore.toLowerCase()];
+}
 
 // =============================================================
 // Status
@@ -347,12 +369,16 @@ export function normalizeRow(
   if (!sourceStore) {
     return missingFieldError("store");
   }
-  const store = STORE_VALUE_MAP[sourceStore];
+  const store = resolveStoreValue(sourceStore);
   if (!store) {
     return {
       error: {
         code: "UNKNOWN_STORE_VALUE",
-        message: `unrecognized store value "${sourceStore}"`,
+        // Final-fix-wave FIX 8: names the OFFENDING VALUE plus the exact
+        // accepted set — an operator staring at "every row is
+        // invalidRow" needs to see what their file actually said and
+        // what it needed to say, not just that something didn't match.
+        message: `unrecognized store value "${sourceStore}" — accepted values are: ${Object.keys(STORE_VALUE_MAP).join(", ")} (case-insensitive)`,
         field: "store",
       },
     };
