@@ -1606,12 +1606,17 @@ export interface ChartCountryCoverage {
 export interface ChartFilterOptionsResponse {
   windowDays: number;
   platform: ChartFilterOption[];
-  // `country` is currently always `[]` — `raw_revenue_events` carries no
-  // store-supplied country column yet. See
+  // Distinct store-supplied countries in the window, top values first.
+  // Backed by `raw_revenue_events.country` (migration 0023), sourced from
+  // the store's own per-transaction value — Apple's `storefront`,
+  // normalised to ISO 3166-1 alpha-2 — never the subscriber's last-known
+  // SDK-reported country, which is a different fact. See
   // docs/superpowers/specs/2026-09-01-analytics-integrity-and-proceeds-design.md
-  // §4.2: a follow-up task adds a per-transaction country sourced from the
-  // store (Apple's `storefront`/`storefrontId`, confirmed available), never
-  // the subscriber's last-known SDK-reported country.
+  // §4.2.
+  //
+  // Capped server-side (top 50 by count) because this feeds a dropdown.
+  // Never compute a coverage statistic from it — use `countryCoverage`,
+  // which is counted without a cap.
   country: ChartFilterOption[];
   /** Uncapped coverage counts for the same window — see `ChartCountryCoverage`. */
   countryCoverage: ChartCountryCoverage;
