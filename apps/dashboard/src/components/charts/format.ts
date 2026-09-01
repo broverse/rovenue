@@ -8,23 +8,6 @@ export const formatCurrencyCompact = (n: number): string => {
 
 export const formatCount = (n: number): string => n.toLocaleString();
 
-export const seededSeries = (
-  seed: number,
-  base: number,
-  growth: number,
-  jitter: number,
-  length = 12,
-): number[] => {
-  const out: number[] = [];
-  for (let i = 0; i < length; i++) {
-    const trend = base * Math.pow(1 + growth, i);
-    const wave = Math.sin((i + seed) / 1.6) * jitter;
-    const noise = ((Math.sin(seed * 9.31 + i * 1.7) + 1) / 2 - 0.5) * jitter;
-    out.push(Math.round(trend + wave + noise));
-  }
-  return out;
-};
-
 export const heatColor = (v: number): string => {
   const a = 0.05 + Math.min(1, Math.max(0, v)) * 0.85;
   return `oklch(0.65 0.16 240 / ${a})`;

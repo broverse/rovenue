@@ -9,7 +9,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 | 2 | Subscription state & entitlements | 85% | 95% |
 | 3 | Paywall builder & native rendering | 80% | 95% |
 | 4 | A/B testing & experiments | 75% | 90%+ |
-| 5 | Analytics (MRR / LTV / cohorts) | 70% | 95% |
+| 5 | Analytics (MRR / LTV / cohorts) | 90% | 95% |
 | 6 | Third-party integrations | 90% | 95% |
 | 7 | SDK platform coverage | 55% | 95% |
 | 8 | Self-hosting & data ownership | 95% | keep |
@@ -22,15 +22,20 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 
 1. Flutter SDK (§7)
 2. RevenueCat / Adapty migration guides + data import tool (§11)
-3. Analytics chart set (§5)
+3. Remaining analytics gaps: full country coverage, full chart-catalog
+   series coverage in the metrics export (§5 — most of the section is
+   already shipped, see below)
 4. Bayesian experiment engine (§4)
 5. Store-native full lifecycle passthrough (§6 — the last integrations gap;
    low priority, narrow scope)
 
 Integrations (§6) is effectively done as of Wave 2 (framework + webhook v2 +
-14 first-class providers across two waves, plus the vendor-agnostic CUSTOM_WEBHOOK escape hatch). Completing 1–2 should lift the
-overall picture toward ~88%; items 3–5 close the remaining analytics/
-experiments/integrations gaps on the way to 95%.
+14 first-class providers across two waves, plus the vendor-agnostic CUSTOM_WEBHOOK escape hatch). Analytics (§5) is likewise mostly done — cohort
+retention, churn/refund KPIs, predicted LTV, trial→paid, and the paywall
+funnel predate this plan; country revenue, estimated proceeds, and the
+metrics export are new but each has a documented partial-coverage edge.
+Completing 1–2 should lift the overall picture toward ~88%; items 3–5 close
+the remaining analytics/experiments/integrations gaps on the way to 95%.
 
 ---
 
@@ -70,16 +75,54 @@ experiments/integrations gaps on the way to 95%.
 - [ ] Experiment scheduling/sequencing per placement
 - [ ] Confidence intervals + minimum-sample warnings on the results page
 
-## 5. Analytics (70 → 95)
+## 5. Analytics (70 → 90) — mostly already shipped; this plan closed the gap
 
-- [ ] Cohort retention grid
-- [ ] Churn / refund rate charts
-- [ ] Trial → paid conversion funnel
-- [ ] Proceeds view (after store commission; Apple Small Business Program 15% vs 30%)
-- [ ] Predicted LTV
-- [ ] End-to-end paywall funnel in dashboard (paywall_view → purchase attribution already exists)
-- [ ] Country / currency-normalized revenue reports
-- [ ] Metrics export API for customer BI (ClickHouse-backed)
+This section previously presented the entire area as unstarted. That framing
+was stale: cohort retention, churn/refund KPIs, predicted LTV, trial→paid,
+and the paywall funnel were already live in the dashboard before the
+2026-09-01 analytics-integrity-and-proceeds plan
+(`.superpowers/sdd/2026-09-01-analytics-integrity-and-proceeds/`). That plan
+added the country revenue dimension, query-time estimated proceeds (after
+store commission), a ClickHouse-Postgres schema-contract test guarding every
+chart/metrics reader, and a metrics export API — none of it invented from
+nothing, but real net-new coverage on top of what was already there.
+
+- [x] Cohort retention grid — already shipped (`/cohorts` route,
+      `apps/dashboard/src/components/cohorts/retention-heatmap.tsx`)
+- [x] Churn / refund rate charts — already shipped (`RevenueKpisCard`
+      churnRate/refundRate/refunds tiles, backed by
+      `apps/api/src/services/metrics/summary.ts`)
+- [x] Trial → paid conversion funnel — already shipped (`FunnelCard`'s
+      `trial_to_paid` step plus `RevenueKpisCard`'s trialToPaid tile)
+- [x] Predicted LTV — already shipped (`PredictedLtvCard` +
+      `apps/api/src/services/metrics/ltv-extrapolation.ts` prediction service)
+- [x] End-to-end paywall funnel in dashboard (paywall_view → purchase
+      attribution already exists) — already shipped (`paywall_view_rate` /
+      `paywall_purchase` wired in `readChartSeries`)
+- [x] Proceeds view (after store commission; Apple Small Business Program
+      15% vs 30%) — shipped by this plan: per-project store commission
+      rates, `ProceedsCard` + `readProceeds`/`GET /proceeds`, computed at
+      query time only — never written into `raw_revenue_events`
+- [x] Country revenue dimension — shipped by this plan, coverage is
+      partial by store and by time: Apple full, Google full except
+      voided-purchase refunds, Stripe only `charge.refunded` (most Stripe
+      volume carries no country), and nothing before migration 0023. A row
+      without a store-supplied country is left without one, never
+      backfilled from a device attribute
+- [x] Metrics export API for customer BI (ClickHouse-backed) — shipped by
+      this plan: channels/proceeds/funnel/heatmap rows plus per-day series
+      for the chart-catalog ids that have a reader
+- [x] Schema-contract test guarding every chart/metrics ClickHouse query —
+      added by this plan (`schema-contract.integration.test.ts`); runs each
+      reader's real SQL against the live schema so a column rename/drop
+      fails CI instead of shipping a silently-broken chart
+- [ ] Full country coverage across all stores and all history (Stripe
+      country for non-`charge.refunded` events, backfill before migration
+      0023)
+- [ ] Full chart-catalog series coverage in the metrics export — only 2 of
+      17 catalog ids (`paywall_view_rate`, `paywall_purchase`) have a
+      `readChartSeries` reader wired; the rest return no rows, so the
+      export does not yet cover the catalog
 
 ## 6. Third-party integrations (75 → 90) — Wave 2 shipped, one gap left
 

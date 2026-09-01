@@ -37,7 +37,6 @@ vi.mock("../../../../components/charts", () => ({
   HourDayHeatmap: () => null,
   NewChartDialog: () => null,
   ProceedsCard: () => null,
-  SqlPreviewCard: () => null,
   MrrChartPanel: () => <div data-testid="mock-mrr-chart-panel" />,
   SeriesChartPanel: ({ chartId }: { chartId: string }) => (
     <div data-testid="mock-series-chart-panel">{chartId}</div>

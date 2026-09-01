@@ -16,7 +16,6 @@ import {
   NewChartDialog,
   ProceedsCard,
   SeriesChartPanel,
-  SqlPreviewCard,
   type ChartType,
   type RangeOption,
 } from "../../../../components/charts";
@@ -153,7 +152,7 @@ export function ChartsPage({ projectId }: { projectId: string }) {
         </div>
       </header>
 
-      <div className="grid items-start gap-4 grid-cols-1 max-[1100px]:grid-cols-1 max-[1480px]:grid-cols-[220px_minmax(0,1fr)] min-[1481px]:grid-cols-[240px_minmax(0,1fr)_320px]">
+      <div className="grid items-start gap-4 grid-cols-1 max-[1100px]:grid-cols-1 min-[1101px]:grid-cols-[220px_minmax(0,1fr)]">
         <ChartCatalog
           entries={entries}
           selectedId={selected?.id ?? ""}
@@ -213,10 +212,6 @@ export function ChartsPage({ projectId }: { projectId: string }) {
 
           <AnnotationsPanel projectId={projectId} />
         </main>
-
-        <aside className="sticky top-[76px] hidden max-h-[calc(100vh-96px)] flex-col gap-3 overflow-y-auto min-[1481px]:flex">
-          <SqlPreviewCard onOpenInQueries={openInQueries} />
-        </aside>
       </div>
 
       <NewChartDialog

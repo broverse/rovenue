@@ -374,7 +374,6 @@
     "overview": "Overview",
     "liveEvents": "Live events",
     "products": "Products",
-    "productGroups": "Product groups",
     "offerings": "Offerings",
     "access": "Access",
     "transactions": "Transactions",
@@ -3800,10 +3799,6 @@
       "errors": {
         "generic": "Could not create the chart. Please try again."
       }
-    },
-    "sql": {
-      "title": "SQL preview",
-      "openInQueries": "Open in Queries"
     }
   },
   "account": {

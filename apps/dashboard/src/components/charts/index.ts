@@ -14,30 +14,13 @@ export { NewAnnotationDialog } from "./new-annotation-dialog";
 export { NewChartDialog } from "./new-chart-dialog";
 export { ProceedsCard } from "./proceeds-card";
 export { SeriesChartPanel } from "./series-chart-panel";
-export { SqlPreviewCard } from "./sql-preview-card";
-export {
-  ANNOTATIONS,
-  CHART_MONTH_LABELS,
-  CHANNELS,
-  FUNNEL_STAGES,
-  HEATMAP_DAY_KEYS,
-  HEATMAP_MATRIX,
-  MRR_SERIES,
-  SQL_PREVIEW,
-} from "./mock-data";
 export {
   formatCount,
   formatCurrencyCompact,
   heatColor,
-  seededSeries,
 } from "./format";
 export type {
-  Annotation,
-  Channel,
   ChartCategory,
   ChartType,
-  FunnelStage,
-  MrrSeries,
   RangeOption,
-  SeriesPoint,
 } from "./types";

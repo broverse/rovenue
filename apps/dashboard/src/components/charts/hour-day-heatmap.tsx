@@ -2,11 +2,20 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useChartHeatmap } from "../../lib/hooks/useProjectCharts";
 import { heatColor } from "./format";
-import { HEATMAP_DAY_KEYS } from "./mock-data";
 
 const HOUR_TICKS = [0, 4, 8, 12, 16, 20] as const;
 const LEGEND_STOPS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
-const DAY_KEYS_MON_FIRST = HEATMAP_DAY_KEYS;
+// Grid convention: Mon=0..Sun=6 — matches the pivoted `matrix`/`counts`
+// rows below, not the wire's Sun=0..Sat=6.
+const DAY_KEYS_MON_FIRST = [
+  "charts.days.mon",
+  "charts.days.tue",
+  "charts.days.wed",
+  "charts.days.thu",
+  "charts.days.fri",
+  "charts.days.sat",
+  "charts.days.sun",
+] as const;
 const DEFAULT_WINDOW_DAYS = 28;
 
 // The API delivers cells keyed by `(dow, hour)` with Sunday=0..Saturday=6.
