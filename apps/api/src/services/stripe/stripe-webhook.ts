@@ -16,6 +16,7 @@ import { audit, type AuditTx } from "../../lib/audit";
 import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
 import { parsePresentedContextMetadata } from "../../lib/presented-context";
 import { convertToUsd } from "../fx";
+import { normalizeAlpha2Country } from "../country";
 import { completeFunnelPurchase } from "../funnel/complete-purchase";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
@@ -798,6 +799,9 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
   // event on a refunded subscription.
   if (!statusApplied) return;
 
+  // Same gap as applyInvoicePaid below: `Stripe.Subscription` carries no
+  // per-transaction country field either, so this $0 lifecycle marker
+  // also carries none.
   await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
     projectId: ctx.projectId,
     subscriberId: purchase.subscriberId,
@@ -868,6 +872,18 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     ? new Date(invoice.created * 1000)
     : new Date();
 
+  // VERIFIED GAP, not an oversight: `Stripe.Invoice` (the object this
+  // path already holds) carries no field documented as a per-transaction
+  // country. Its only country-shaped field, `customer_address`, is
+  // documented as equal to `customer.address` — the customer's ACCOUNT
+  // address, which the analytics-country plan explicitly forbids (not a
+  // fact about THIS transaction, and possibly captured at signup).
+  // `Charge.billing_details` — the field Stripe itself documents as
+  // "at the time of the transaction" (wired on the REFUND path below) —
+  // lives on the Charge, not the Invoice, and getting one here would
+  // need an extra Stripe API fetch this task does not introduce. So
+  // INITIAL/RENEWAL/TRIAL_CONVERSION revenue events from Stripe carry no
+  // store-supplied country; `country` is intentionally omitted.
   const revenueInput = {
     projectId: ctx.projectId,
     subscriberId: purchase.subscriberId,
@@ -1076,6 +1092,15 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     metadata: purchase.presentedContext
       ? { presentedContext: purchase.presentedContext }
       : undefined,
+    // The store's own per-transaction country: Stripe documents
+    // `billing_details` as "Billing information associated with the
+    // payment method AT THE TIME OF THE TRANSACTION"
+    // (https://docs.stripe.com/api/charges/object) — the one Stripe
+    // field whose own docs make it a per-transaction fact, unlike
+    // `Invoice.customer_address` (the customer's ACCOUNT address,
+    // never used here). Already house-format alpha-2;
+    // normalizeAlpha2Country only validates + fails closed.
+    country: normalizeAlpha2Country(charge.billing_details?.address?.country),
   });
 
   await maybeEmitRefundDetected(drizzle.db, {

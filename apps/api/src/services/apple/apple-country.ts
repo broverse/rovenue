@@ -6,8 +6,9 @@
 // 3166-1 ALPHA-3 code (e.g. "USA"). That is the ONLY alpha-3 country
 // surface in this codebase: `raw_exposures.country` is fed from
 // `apps/api/src/routes/v1/experiments.ts`'s `z.string().length(2)`,
-// which is ALPHA-2, and Google/Stripe (wired in a later task) both
-// natively supply alpha-2. Storing Apple's value raw would put two
+// which is ALPHA-2, and Google/Stripe (../country.ts's
+// `normalizeAlpha2Country`) both natively supply alpha-2. Storing
+// Apple's value raw would put two
 // formats of the same concept in the same analytics database —
 // `"USA"` on revenue vs. `"US"` on exposures — so any join or
 // comparison between the two silently splits one country into two
@@ -269,3 +270,18 @@ export function appleStorefrontToCountry(
   const alpha2 = ISO_3166_ALPHA3_TO_ALPHA2[storefront.trim().toUpperCase()];
   return alpha2 ?? null;
 }
+
+/**
+ * The set of house-format ISO 3166-1 alpha-2 codes — every VALUE in the
+ * alpha-3 -> alpha-2 table above, which is a complete ISO 3166-1 alpha-2
+ * enumeration in its own right (both forms are defined by the same
+ * standard entry for entry). Exported so `../country.ts`'s
+ * `normalizeAlpha2Country` — used to validate Google's and Stripe's
+ * already-alpha-2 store-supplied country fields — has exactly ONE
+ * source of truth for "is this a real ISO 3166-1 alpha-2 code" rather
+ * than a second, independently-maintained list that could drift from
+ * this one.
+ */
+export const ALPHA2_COUNTRY_CODES: ReadonlySet<string> = new Set(
+  Object.values(ISO_3166_ALPHA3_TO_ALPHA2),
+);

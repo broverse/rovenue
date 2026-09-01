@@ -25,6 +25,7 @@ import {
   type AppleNotificationVerifier,
 } from "./apple/apple-verify";
 import { appleStorefrontToCountry } from "./apple/apple-country";
+import { normalizeAlpha2Country } from "./country";
 import {
   APPLE_ENVIRONMENT,
   APPLE_OFFER_TYPE,
@@ -600,6 +601,11 @@ async function verifyGoogleSubscriptionReceipt(
         // dedup is enforced by the revenue_event_dedupe table).
         eventDate: new Date(),
         dedupeKey: `google:${orderId ?? args.receipt}:${revenueDedupeKind(type)}`,
+        // The store's own per-transaction billing country from the LIVE
+        // subscriptionsv2.get response — same field, same semantics as
+        // the RTDN webhook's country wiring above. Already house-format
+        // alpha-2; normalizeAlpha2Country only validates + fails closed.
+        country: normalizeAlpha2Country(subscription.regionCode),
       });
     }
   }
@@ -725,6 +731,11 @@ async function verifyGoogleProductReceipt(
         : undefined,
       eventDate: new Date(purchaseTimeMs),
       dedupeKey: `google:${productPurchase.orderId ?? args.receipt}:${revenueDedupeKind(type)}`,
+      // Same per-transaction billing country field as the subscription
+      // path, on the one-time ProductPurchase resource
+      // (`purchases.products.get` — regionCode is also documented by
+      // Google as "at the time the product was granted").
+      country: normalizeAlpha2Country(productPurchase.regionCode ?? undefined),
     });
   }
 

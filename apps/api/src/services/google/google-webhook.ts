@@ -10,6 +10,7 @@ import {
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { convertToUsd } from "../fx";
+import { normalizeAlpha2Country } from "../country";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
   GOOGLE_ACKNOWLEDGEMENT_STATE,
@@ -411,6 +412,11 @@ async function processSubscriptionNotification(
         store: Store.PLAY_STORE,
         eventDate,
         dedupeKey: `google:${orderId ?? ctx.notification.purchaseToken}:${revenueDedupeKind(revenueEventType)}`,
+        // The store's own per-transaction billing country from the LIVE
+        // subscriptionsv2.get response — Google's alpha-2 analog of
+        // Apple's storefront. Already house-format; normalizeAlpha2Country
+        // only validates + fails closed (see ../country.ts).
+        country: normalizeAlpha2Country(purchase.regionCode),
       });
 
       if (revenueEventType === RevenueEventType.REFUND) {
@@ -612,6 +618,13 @@ async function processVoidedPurchase(
           // A void is terminal/once-per-purchase; key on the token. A
           // REVOKE+VOID race is additionally prevented by the guard.apply gate.
           dedupeKey: `google:${args.purchaseToken}:refund`,
+          // VERIFIED GAP, not an oversight: `voidedPurchaseNotification`
+          // carries no regionCode, and unlike processSubscriptionNotification
+          // this path never re-fetches the live subscriptionsv2.get resource
+          // (it only ever reads the persisted `purchase` row, which has no
+          // country column). No fallback to a stale/borrowed value — a
+          // Google refund recorded via VOIDED_PURCHASE has no store-supplied
+          // country. `country` intentionally omitted here.
         });
         await maybeEmitRefundDetected(drizzle.db, {
           projectId: args.projectId,
