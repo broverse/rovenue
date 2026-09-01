@@ -69,11 +69,16 @@ Then add the `trialLabelKey` override field itself, following whatever the Bindi
 
 Follow the pattern Stripe already proves: include something credential-derived in the cache key, so a credential change moves the key and the old entries become unreachable and expire on their own.
 
-Requirements:
+**Where the credential actually lives** (verified 2026-09-01): not a separate table — `projects.appleCredentials` and `projects.googleCredentials` are encrypted JSONB columns, written by `writeProjectCredential` (`packages/db/src/drizzle/repositories/projects.ts:339-343`) and nulled by its sibling on disconnect.
 
-- The key component must change whenever the credential that produced the prices changes — a rotation, a corrected account, a disconnect. A stored `updatedAt` on the credential row, or a short hash of the credential's identifying fields, both satisfy this; the plan chooses and states why. **Do not put credential material in a Redis key** — a key is not a secret store, and keys are visible to anyone with Redis access.
-- A **disconnect** must not fall back to the last known key. If there is no credential, there is no cached price to serve.
-- `purgeResolvedPriceCache` stays. Keying makes staleness impossible; the purge remains the right tool for the mutations that already call it (a product's identifiers changing does not change the credential).
+**The key component is a short digest of the stored encrypted credential blob.** Requirements and the reasoning behind that choice:
+
+- It changes exactly when the credential changes, and never otherwise.
+- **`projects.updatedAt` was evaluated and rejected on two independent grounds.** First, it does not work: `writeProjectCredential` sets only the credential column and there is no `$onUpdate` anywhere in the schema, so `updatedAt` is not bumped by a credential write at all. Second, even if it were, it bumps on *any* project edit, so renaming a project would throw away every resolved price for no reason.
+- **No migration is needed.** The digest is derived from a column that already exists — which is also why this is the cheaper option.
+- **Do not put credential material in a Redis key.** A key is not a secret store and is visible to anyone with Redis access. A one-way digest of the *already-encrypted* blob is not material; say so in a comment so the next reader does not have to re-derive it.
+- A **disconnect** must not fall back to the last known key. The column is nulled, so there is no digest and therefore no cached price to serve — which is the correct outcome, not an edge case to handle.
+- `purgeResolvedPriceCache` stays. Keying makes credential staleness impossible; the purge remains the right tool for the mutations that already call it (a product's identifiers changing does not change the credential).
 
 ### 4.3 What we are explicitly not relying on
 
@@ -83,7 +88,7 @@ Adding a `purgeResolvedPriceCache` call to `credentials.ts` would fix today's bu
 
 ## 5. Data changes
 
-Possibly one additive column, if the chosen key component is not already available on the credential row. No paywall-model change, no ClickHouse change, no renderer change.
+**None.** The cache key's new component is derived from `projects.appleCredentials` / `projects.googleCredentials`, which already exist. No paywall-model change, no ClickHouse change, no renderer change.
 
 ## 6. Risks / decisions worth stating
 
@@ -91,6 +96,7 @@ Possibly one additive column, if the chosen key component is not already availab
 - **A changed cache key invalidates every entry for that project at once**, so the first request after a credential change pays a full resolve. That is correct: those prices were fetched with a credential that no longer applies.
 - **The tuple retyping touches a shared schema** consumed by three renderers and the builder. It is a type-level change with no runtime effect, but it must not alter the emitted JSON or the fixtures.
 - The recon for this spec deliberately did not verify the Stripe resolver's behaviour beyond reading its key construction; the plan should not extend scope there on the strength of this document alone.
+- Test surface for gap 2 already exists and should be extended rather than replaced: `apps/api/src/services/offering-price-resolver.test.ts`, `routes/dashboard/offerings.resolved.test.ts`, and `routes/dashboard/products.cache-purge.test.ts` — the last of which is the closest precedent for asserting cache behaviour from a route.
 
 ## 7. Acceptance criteria
 
