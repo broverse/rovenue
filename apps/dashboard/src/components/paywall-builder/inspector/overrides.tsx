@@ -37,6 +37,7 @@ const OVERRIDE_PROP_LABEL: Record<string, string> = {
   key: "Key",
   color: "Color",
   labelKey: "Label key",
+  trialLabelKey: "Trial-aware label",
   style: "Style",
   thickness: "Thickness",
   name: "Icon",
@@ -52,51 +53,26 @@ const OVERRIDE_PROP_LABEL: Record<string, string> = {
 };
 
 /**
- * Every `${node.type}.${propKey}` combination `OVERRIDABLE_PROP_KEYS` declares.
- * The schema's arrays are typed as plain `readonly string[]` (not literal
- * tuples), so nothing forces this union to stay in sync automatically — but
- * within THIS union, `OverridePropField`'s switch is exhaustive: dropping a
- * case for a combo listed here fails to compile via the `never` check below,
- * which is exactly the guard wave A's `default: return null` did not have.
+ * Every `${node.type}.${propKey}` combination `OVERRIDABLE_PROP_KEYS`
+ * declares — derived directly from the schema's own type rather than
+ * hand-restated here. Before this, the union below was a hand-written
+ * literal list with no compile-time link back to the schema: the schema's
+ * arrays were typed as plain `readonly string[]` (not literal tuples), so
+ * nothing forced the two to stay in sync, and `purchaseButton.trialLabelKey`
+ * fell out of the hand-written union silently.
+ *
+ * Now this union IS the schema (schema.ts's `OVERRIDABLE_PROP_KEYS` is typed
+ * with `as const satisfies Record<...>`, which keeps each array's literal
+ * string-tuple type instead of widening it to `readonly string[]`). That
+ * makes the `never` check below do double duty: it already proved the
+ * switch is exhaustive over this union; now that the union is defined as
+ * the schema, exhaustiveness over the union IS exhaustiveness over the
+ * schema — a prop added to `OVERRIDABLE_PROP_KEYS` without a matching case
+ * here fails to compile at that check, naming the missing combo.
  */
-type OverridablePropCombo =
-  | "stack.spacing"
-  | "stack.align"
-  | "stack.background"
-  | "stack.cornerRadius"
-  | "stack.border"
-  | "text.key"
-  | "text.color"
-  | "text.align"
-  | "text.background"
-  | "text.cornerRadius"
-  | "image.cornerRadius"
-  | "image.border"
-  | "button.labelKey"
-  | "button.style"
-  | "button.background"
-  | "button.labelColor"
-  | "button.border"
-  | "button.cornerRadius"
-  | "purchaseButton.labelKey"
-  | "purchaseButton.background"
-  | "purchaseButton.labelColor"
-  | "purchaseButton.border"
-  | "purchaseButton.cornerRadius"
-  | "divider.color"
-  | "divider.thickness"
-  | "icon.name"
-  | "icon.color"
-  | "featureList.iconColor"
-  | "timeline.connectorColor"
-  | "socialProof.rating"
-  | "socialProof.starColor"
-  | "stickyFooter.background"
-  | "countdown.color"
-  | "carousel.indicatorColor"
-  | "video.url"
-  | "video.posterUrl"
-  | "lottie.url";
+type OverridablePropCombo = {
+  [K in keyof typeof OVERRIDABLE_PROP_KEYS]: `${K}.${(typeof OVERRIDABLE_PROP_KEYS)[K][number]}`;
+}[keyof typeof OVERRIDABLE_PROP_KEYS];
 
 export function OverridesSection({ node }: { node: PaywallNode }) {
   const vm = useService(PaywallBuilderViewModel);
@@ -307,6 +283,24 @@ function OverridePropField({
             value={typeof value === "string" ? value : ""}
             onChange={(e) => onChange(e.currentTarget.value)}
             placeholder={label}
+            className={INPUT_CLASS}
+          />
+        </Field>
+      );
+    case "purchaseButton.trialLabelKey":
+      // Mirrors the Binding tab's base `trialLabelKey` field
+      // (`binding-tab.tsx`'s `PurchaseButtonBinding`) exactly: no
+      // placeholder (that field has none either — it's a key-editing
+      // field, not free text with an example), and an empty input
+      // writes `undefined`, never `""`, same as `set({ trialLabelKey:
+      // e.currentTarget.value || undefined })` there. A user overriding
+      // this prop should meet the same rules they already met on the
+      // base value.
+      return (
+        <Field label={label}>
+          <input
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => onChange(e.currentTarget.value || undefined)}
             className={INPUT_CLASS}
           />
         </Field>

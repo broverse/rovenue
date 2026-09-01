@@ -789,7 +789,14 @@ export function validateBuilderConfig(
   // time, so this is normally unreachable, but guards configs built/edited
   // outside the schema (e.g. programmatically) before they reach a renderer.
   for (const node of allNodes) {
-    const allowed = new Set(OVERRIDABLE_PROP_KEYS[node.type]);
+    // `OVERRIDABLE_PROP_KEYS[node.type]` is now a union of per-type literal
+    // tuples (schema.ts's `as const satisfies`, Task 1), not `readonly
+    // string[]` — indexing by the unnarrowed `node.type` yields a union of
+    // specific literal keys across every node type, not a general string
+    // array. `propKey` below is a plain `string` off `Object.keys`, so the
+    // Set's element type is widened back to `string` explicitly here — a
+    // type-only annotation, `allowed`'s actual members are unchanged.
+    const allowed = new Set<string>(OVERRIDABLE_PROP_KEYS[node.type]);
     for (const override of node.overrides ?? []) {
       for (const propKey of Object.keys(override.props)) {
         if (!allowed.has(propKey)) {

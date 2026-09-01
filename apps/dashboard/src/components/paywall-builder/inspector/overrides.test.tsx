@@ -178,6 +178,7 @@ function fakeConfig(): BuilderConfig {
           labelColor: { light: "#eeeeee" },
           border: { width: 2, color: { light: "#606060" } },
           cornerRadius: 8,
+          trialLabelKey: "cta.trial.intro",
         },
       },
     ],
@@ -699,5 +700,54 @@ describe("OverridesSection — purchaseButton background/labelColor/border/corne
     fireEvent.change(numberInputs[numberInputs.length - 1]!, { target: { value: "11" } });
     const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
     expect(node.overrides?.[0]?.props.cornerRadius).toBe(11);
+  });
+});
+
+// =============================================================
+// Task 1 — purchaseButton.trialLabelKey override field. Declared
+// overridable in the schema (`OVERRIDABLE_PROP_KEYS.purchaseButton`) and
+// honoured by all three renderers, but `OverridePropField`'s switch had no
+// case for it — a hand-written `OverridablePropCombo` union in this file
+// omitted the combo, and the schema's arrays weren't typed precisely enough
+// to catch the drift at compile time. Mirrors `binding-tab.test.tsx`'s
+// `PurchaseButtonBinding` coverage for the base `trialLabelKey` field: the
+// input has no placeholder, and clearing it writes `undefined`, never `""`.
+// =============================================================
+describe("OverridesSection — purchaseButton trialLabelKey override field", () => {
+  it("renders a real trialLabelKey input seeded with the override's value, not a silent no-op", async () => {
+    const { container } = await renderHarness("pb1");
+    const values = textInputsIn(container).map((el) => el.value);
+    expect(values).toContain("cta.trial.intro");
+  });
+
+  it("writes an edited trialLabelKey back onto the override's props and round-trips", async () => {
+    const { vm, container } = await renderHarness("pb1");
+    const input = textInputsIn(container).find((el) => el.value === "cta.trial.intro")!;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "cta.trial.updated" } });
+    });
+
+    const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
+    expect(node.overrides?.[0]?.props.trialLabelKey).toBe("cta.trial.updated");
+
+    // Round-trip: the field re-renders seeded with the newly-written value,
+    // not the stale one — same live-config-driven `Harness` every other
+    // suite in this file relies on.
+    const rewritten = textInputsIn(container).find((el) => el.value === "cta.trial.updated");
+    expect(rewritten).toBeDefined();
+  });
+
+  it("clearing the input writes trialLabelKey as undefined, never an empty string", async () => {
+    const { vm, container } = await renderHarness("pb1");
+    const input = textInputsIn(container).find((el) => el.value === "cta.trial.intro")!;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "" } });
+    });
+
+    const node = findNode(vm.config.root, "pb1") as PurchaseButtonNode;
+    expect(node.overrides?.[0]?.props.trialLabelKey).toBeUndefined();
+    expect(node.overrides?.[0]?.props.trialLabelKey === "").toBe(false);
   });
 });

@@ -445,8 +445,22 @@ export type PaywallNode =
  * OPTIONAL visual fields only. Used by both the strict authoring schema
  * (rejects any other key at parse time) and the validator's defensive
  * re-check (`OVERRIDE_BAD_PROP`) on already-parsed configs.
+ *
+ * `as const satisfies Record<...>` (not a `: Record<...>` annotation) is
+ * load-bearing: an annotation widens every array to `readonly string[]`,
+ * which is exactly what let the dashboard's override editor carry a
+ * hand-written prop union that silently drifted out of sync with this list
+ * (a prop declared here had no compile-time link forcing the editor to
+ * know about it). `satisfies` keeps each array's literal string tuple
+ * type while still checking the whole object against the Record shape
+ * (every `PaywallNode["type"]` present, no stray keys) — so
+ * `apps/dashboard`'s `OverridablePropCombo` can be derived directly off
+ * `typeof OVERRIDABLE_PROP_KEYS` and a prop added here without a matching
+ * editor case fails that derivation's build. This is type-level only:
+ * `Object.keys`/`Object.values`/JSON serialization of this object are
+ * unchanged by `as const satisfies`.
  */
-export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[]> = {
+export const OVERRIDABLE_PROP_KEYS = {
   stack: ["spacing", "align", "background", "cornerRadius", "border"],
   text: ["key", "color", "align", "background", "cornerRadius"],
   image: ["cornerRadius", "border"],
@@ -464,7 +478,7 @@ export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[
   carousel: ["indicatorColor"],
   video: ["url", "posterUrl"],
   lottie: ["url"],
-};
+} as const satisfies Record<PaywallNode["type"], readonly string[]>;
 
 export type BuilderConfig = {
   formatVersion: 2;
