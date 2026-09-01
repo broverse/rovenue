@@ -5,13 +5,32 @@ import {
 } from "simple-statistics";
 
 // =============================================================
-// Experiment statistics
+// Experiment statistics — fixed-horizon frequentist module
 // =============================================================
 //
 // All tests assume large-N designs (the typical mobile A/B case,
 // where cohorts sit in the thousands). For smaller N, p-values
 // from the Welch's t-test and SRM helpers are approximations —
 // see the notes on each function.
+//
+// FIXED-HORIZON, NOT A CONTINUOUS MONITOR: every p-value in this file is
+// valid at the sample size the experiment was planned for
+// (`estimateSampleSize`'s output) and only there. Calling
+// `analyzeConversion` / `analyzeRevenue` repeatedly as data accrues and
+// stopping the first time `isSignificant` flips true (peeking) inflates
+// the false-positive rate well past `alpha` — these functions do not
+// guard against that; the caller is responsible for waiting for the
+// planned horizon (and `MINIMUM_WEEKLY_CYCLES`) before treating a result
+// as final. `experiment-bayes.ts`'s posterior/expected-loss framing does
+// not have this failure mode, which is why the decision engine prefers it.
+//
+// >2 VARIANTS: `analyzeConversion` / `analyzeRevenue` are two-sample
+// tests. For an experiment with more than one non-control variant, the
+// decision engine calls them pairwise against control only — never
+// variant-vs-variant — and applies no multiplicity correction (no
+// Bonferroni/Holm adjustment to `alpha` across the pairwise tests). More
+// comparisons at the same nominal alpha raise the experiment-wise false-
+// positive rate above the per-test one.
 
 // =============================================================
 // Conversion — Z-test for two proportions
@@ -132,6 +151,28 @@ export function estimateSampleSize(
   power = 0.8,
   alpha = 0.05,
 ): number {
+  // Drizzle's numeric column mode returns `experiments.minimumDetectableEffect`
+  // (numeric(5,4)) as a STRING (e.g. "0.1000"). `1 + "0.1000"` is string
+  // concatenation ("10.1000"), not addition — an MDE of 10% would be
+  // silently read as 1010%, collapsing the required sample size to near
+  // nothing. The `<= 0` check below does not catch this: `"0.1000" <= 0`
+  // coerces the string back to a number for the comparison, so it passes.
+  // This is a guard, not a coercion — converting a numeric-mode string to
+  // a number belongs at the service boundary (see `resolveCommissionRate`,
+  // apps/api/src/services/metrics/proceeds.ts), not here.
+  if (typeof baselineRate !== "number" || !Number.isFinite(baselineRate)) {
+    throw new Error(
+      `estimateSampleSize: baselineRate must be a finite number, got ${typeof baselineRate}`,
+    );
+  }
+  if (
+    typeof minimumDetectableEffect !== "number" ||
+    !Number.isFinite(minimumDetectableEffect)
+  ) {
+    throw new Error(
+      `estimateSampleSize: minimumDetectableEffect must be a finite number, got ${typeof minimumDetectableEffect}`,
+    );
+  }
   if (baselineRate <= 0 || baselineRate >= 1) {
     throw new Error("estimateSampleSize: baselineRate must be in (0, 1)");
   }
