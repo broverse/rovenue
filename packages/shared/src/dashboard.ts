@@ -890,7 +890,12 @@ export interface ChartSeriesPoint {
 
 export interface ChartSeriesResponse {
   chartId: string;
-  unit: "count" | "percent";
+  /**
+   * `"money"` is USD — the pipeline normalises to `amountUsd`
+   * (summary.ts / proceeds.ts both rely on that), so there is no
+   * currency selector here or anywhere downstream of it.
+   */
+  unit: "count" | "percent" | "money";
   from: string;
   to: string;
   points: ChartSeriesPoint[];

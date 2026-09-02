@@ -217,6 +217,37 @@ describe("streamMetricsExportCsv", () => {
     expect(summary.rowCount).toBeGreaterThan(0);
   });
 
+  it("maps a series response's money unit to this export's own 'usd' vocabulary (task-2 revenue ids)", async () => {
+    resetMocksToEmpty();
+    readChartSeriesMock.mockImplementation(
+      async (_projectId: string, chartId: string) => {
+        if (chartId === "mrr") {
+          return {
+            chartId,
+            unit: "money",
+            from: "2026-07-01T00:00:00.000Z",
+            to: "2026-07-01T00:00:00.000Z",
+            points: [{ bucket: "2026-07-01T00:00:00.000Z", value: 500 }],
+            supported: true,
+          } satisfies ChartSeriesResponse;
+        }
+        return unsupportedSeries(chartId);
+      },
+    );
+
+    const { lines } = await drain(
+      streamMetricsExportCsv({ projectId: "proj_1", windowDays: 28 }),
+    );
+    const body = lines.slice(1).join("");
+
+    // "money" (ChartSeriesResponse's vocabulary) becomes "usd" (this
+    // export's vocabulary) — never passed through raw as "money".
+    expect(body).toContain(
+      "series,mrr,,2026-07-01T00:00:00.000Z,,,,value,500,usd\n",
+    );
+    expect(body).not.toContain(",money\n");
+  });
+
   it("appends an explicit truncation marker and stops early once the row cap is hit — a silently truncated export is a lying export", async () => {
     resetMocksToEmpty();
     // Force the cap well below the natural row count: one store with

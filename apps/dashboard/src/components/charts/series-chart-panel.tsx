@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useChartSeries } from "../../lib/hooks/useChartSeries";
-import { formatCount } from "./format";
+import { formatCount, formatCurrencyCompact } from "./format";
 import { RANGE_MONTHS } from "./mrr-chart-panel";
 import type { ChartType, RangeOption } from "./types";
 
@@ -158,8 +158,14 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
     PAD_L + (points.length <= 1 ? 0 : (i / (points.length - 1)) * INNER_W);
   const y = (v: number) => PAD_T + (1 - v / yMax) * INNER_H;
 
+  // Money is always USD — the API normalises every revenue figure to
+  // amountUsd, so there is no currency to select here.
   const formatValue = (v: number) =>
-    unit === "percent" ? `${v.toFixed(PERCENT_DECIMALS)}%` : formatCount(v);
+    unit === "percent"
+      ? `${v.toFixed(PERCENT_DECIMALS)}%`
+      : unit === "money"
+        ? formatCurrencyCompact(v)
+        : formatCount(v);
 
   // Axis labels: y is the same 5-fraction ticks as the gridlines,
   // formatted per-unit so a percent series never looks like a count

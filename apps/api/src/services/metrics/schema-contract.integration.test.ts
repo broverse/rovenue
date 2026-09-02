@@ -366,6 +366,8 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
       readChartSeries: "covered above, once per SYSTEM_CHART_IDS entry",
       buildRatePoints:
         "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment",
+      buildMrrSeriesPoints:
+        "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-2 revenue ids: mrr/arr/gross_vs_net/arpu)",
     },
     invokers: {
       readChannels: () => chartsModule.readChannels(PROJECT, WINDOW_DAYS),

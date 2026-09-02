@@ -252,6 +252,20 @@ function heatmapToRows(r: ChartHeatmapResponse): MetricsExportRow[] {
   );
 }
 
+// ChartSeriesResponse's money unit is spelled "usd" everywhere else in
+// this export (see the `unit: "usd"` rows above) — map rather than
+// assign directly so "count"/"percent" keep passing through unchanged
+// (identical to before the money unit existed) and "money" lands on
+// this file's own vocabulary instead of silently widening it.
+const SERIES_UNIT_TO_EXPORT_UNIT: Record<
+  ChartSeriesResponse["unit"],
+  MetricsExportUnit
+> = {
+  count: "count",
+  percent: "percent",
+  money: "usd",
+};
+
 function seriesToRows(r: ChartSeriesResponse): MetricsExportRow[] {
   if (!r.supported) return [];
   return r.points.map((p) =>
@@ -261,7 +275,7 @@ function seriesToRows(r: ChartSeriesResponse): MetricsExportRow[] {
       bucket: p.bucket,
       metric: "value",
       value: p.value === null ? "" : String(p.value),
-      unit: r.unit,
+      unit: SERIES_UNIT_TO_EXPORT_UNIT[r.unit],
     }),
   );
 }

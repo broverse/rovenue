@@ -144,6 +144,23 @@ describe("SeriesChartPanel", () => {
     expect(topLabel).toHaveTextContent(/^[\d,]+$/);
   });
 
+  it("formats a money unit's y-axis labels as compact USD, not a percent or plain count", async () => {
+    arrange(
+      response(
+        [
+          { bucket: "2026-01-01T00:00:00.000Z", value: 4_000, numerator: 4, denominator: 10 },
+          { bucket: "2026-01-02T00:00:00.000Z", value: 6_000, numerator: 6, denominator: 10 },
+        ],
+        { unit: "money" },
+      ),
+    );
+    const topLabel = await screen.findByTestId("series-chart-ylabel-0");
+    // Money renders as compact USD (formatCurrencyCompact) — distinct
+    // from both percent (no "%") and count (a leading "$").
+    expect(topLabel).not.toHaveTextContent(/%/);
+    expect(topLabel).toHaveTextContent(/^\$[\d.,]+[km]?$/i);
+  });
+
   it("renders x-axis date labels", async () => {
     arrange(
       response([

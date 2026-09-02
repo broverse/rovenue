@@ -19,6 +19,7 @@ import {
   isClickHouseConfigured,
   queryAnalytics,
 } from "../../lib/clickhouse";
+import { listDailyMrr, type MrrPoint } from "./mrr";
 import { computeNetRevenue, computeProceedsForProject } from "./proceeds";
 
 // =============================================================
@@ -38,6 +39,8 @@ import { computeNetRevenue, computeProceedsForProject } from "./proceeds";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WINDOW_MAX_DAYS = 365;
+/** ARR is a run-rate projection of the current month's net MRR. */
+const MONTHS_PER_YEAR = 12;
 
 interface Window {
   from: Date;
@@ -510,11 +513,56 @@ export function buildRatePoints(
   return points;
 }
 
+/**
+ * Align `listDailyMrr`'s sparse per-day rows (`v_mrr_daily` is a plain
+ * `GROUP BY day` — a day with zero revenue events simply has no row)
+ * onto every day in the window, then apply `extract` to each day's
+ * row (or `undefined` when the day is absent).
+ *
+ * A day absent from ClickHouse is a REAL, measured zero — "no revenue
+ * events happened" is not the same kind of gap as a ratio's zero
+ * denominator — so `extract` gets to decide per-metric what an absent
+ * day means (0 for an additive money total, `null` for a ratio like
+ * ARPU whose denominator is genuinely undefined that day).
+ *
+ * Extracted from the readers deliberately, same reasoning as
+ * `buildRatePoints`: this repo cannot run ClickHouse in tests, so
+ * keeping the arithmetic out of SQL is what makes it provable.
+ */
+export function buildMrrSeriesPoints(
+  rows: MrrPoint[],
+  from: Date,
+  to: Date,
+  extract: (row: MrrPoint | undefined) => number | null,
+): ChartSeriesPoint[] {
+  const byDay = new Map(rows.map((r) => [toDateOnly(r.bucket), r]));
+
+  const points: ChartSeriesPoint[] = [];
+  const cursor = new Date(from);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setUTCHours(0, 0, 0, 0);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const row = byDay.get(toDateOnly(cursor));
+    points.push({
+      bucket: new Date(cursor).toISOString(),
+      value: extract(row),
+    });
+    cursor.setTime(cursor.getTime() + DAY_MS);
+  }
+
+  return points;
+}
+
 // =============================================================
-// Generic chart series — paywall reach and conversion
+// Generic chart series — paywall reach/conversion and revenue
 // =============================================================
 //
-// Two of the sixteen catalog charts are wired. Every other id
+// Six of the sixteen catalog charts are wired (paywall_view_rate,
+// paywall_purchase, mrr, arr, gross_vs_net, arpu — the last four all
+// delegate to `listDailyMrr`, see buildMrrSeriesPoints below). Every
+// other id
 // answers `supported: false` so the dashboard renders an empty
 // state rather than another chart's data. `readChartSeries`'s
 // `switch` is the ONLY dispatch mechanism (no separate id allow-list)
@@ -723,6 +771,79 @@ export async function readChartSeries(
         ...base,
         unit: "percent",
         points: buildRatePoints(purchasers, viewers, w.from, w.to),
+        supported: true,
+      };
+    }
+
+    case "mrr": {
+      // Net MRR, per day — the same figure the bespoke MrrChartPanel
+      // rolls up to months; this generic panel plots it daily instead.
+      assertClickHouseReady();
+      const rows = await listDailyMrr({ projectId, from: w.from, to: w.to });
+      return {
+        ...base,
+        unit: "money",
+        points: buildMrrSeriesPoints(rows, w.from, w.to, (row) =>
+          row ? Number(row.netUsd) : 0,
+        ),
+        supported: true,
+      };
+    }
+
+    case "arr": {
+      // Run-rate projection: net MRR annualised. Derived, not a
+      // separately-tracked figure — see MONTHS_PER_YEAR.
+      assertClickHouseReady();
+      const rows = await listDailyMrr({ projectId, from: w.from, to: w.to });
+      return {
+        ...base,
+        unit: "money",
+        points: buildMrrSeriesPoints(rows, w.from, w.to, (row) =>
+          row ? Number(row.netUsd) * MONTHS_PER_YEAR : 0,
+        ),
+        supported: true,
+      };
+    }
+
+    case "gross_vs_net": {
+      // DECISION (task-2 controller notes): this id names two
+      // quantities but ChartSeriesPoint carries one. We plot the
+      // DIFFERENCE (gross − net), not the ratio — i.e. the dollars
+      // lost to refunds/chargebacks each day. That's what
+      // MrrChartPanel's own `refunds` bucket already computes for
+      // its breakdown (mrr-chart-panel.tsx's `rollupToMonths`), so a
+      // "gross vs net" money area chart reads as the same product
+      // concept. `refundsUsd` is a column `v_mrr_daily` already
+      // returns directly (grossUsd − netUsd, by construction — see
+      // migration 0012), so this needs no subtraction of two
+      // separately-summed monies.
+      assertClickHouseReady();
+      const rows = await listDailyMrr({ projectId, from: w.from, to: w.to });
+      return {
+        ...base,
+        unit: "money",
+        points: buildMrrSeriesPoints(rows, w.from, w.to, (row) =>
+          row ? Number(row.refundsUsd) : 0,
+        ),
+        supported: true,
+      };
+    }
+
+    case "arpu": {
+      // Net revenue ÷ active subscribers, per day. Both columns are
+      // already on MrrPoint; a day with zero active subscribers has
+      // an UNDEFINED average (not a $0 one), so it's null, mirroring
+      // buildRatePoints' zero-denominator handling.
+      assertClickHouseReady();
+      const rows = await listDailyMrr({ projectId, from: w.from, to: w.to });
+      return {
+        ...base,
+        unit: "money",
+        points: buildMrrSeriesPoints(rows, w.from, w.to, (row) =>
+          row && row.activeSubscribers > 0
+            ? Number(row.netUsd) / row.activeSubscribers
+            : null,
+        ),
         supported: true,
       };
     }
