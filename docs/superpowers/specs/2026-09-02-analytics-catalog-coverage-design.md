@@ -131,9 +131,13 @@ ruling and a physical impossibility as if they were backlog.
   spec's central constraint; see §4.1.
 - **No change to the chart catalog's ids, categories or ordering.** Nothing is added and
   nothing is removed — see §4.3.
-- **No new chart types and no change to the rendering layer.** Every wired id must fit a
-  chart type the dashboard already draws. If one does not, that is a finding to report, not
-  a licence to build a renderer.
+- **No new chart types.** Every wired id must fit a chart type the dashboard already draws.
+  If one does not, that is a finding to report, not a licence to build a renderer.
+  One bounded exception, found while writing the plan: `ChartSeriesResponse.unit` is today
+  `"count" | "percent"` and the panel formats accordingly
+  (`series-chart-panel.tsx:162`), so **money series have no unit to declare**. Widening that
+  union and teaching the panel to format money is required and in scope — it is formatting a
+  new unit, not building a renderer.
 
 ---
 
@@ -230,9 +234,11 @@ Two honesty requirements carried from the previous batch:
 - The preset citations exist in `proceeds.ts` and should be shown, not summarised. An
   operator choosing 15% vs 30% is making a claim about their App Store Small Business
   Program status.
-- **Match the role gate the existing endpoint already enforces.** The commission-rate routes
-  call `assertProjectAccess` with a role; the form must not become a wider door than the API
-  it writes through. Read the route and mirror it — do not invent a gate.
+- **Match the gate the existing endpoint already enforces.** Corrected while writing the
+  plan: the commission-rate routes do NOT use `assertProjectAccess`/`MemberRole` — they use
+  `assertProjectCapability(projectId, userId, "project:settings:write")` for the writes and
+  `"project:read"` for the read (`routes/dashboard/commission-rates.ts:79,104,152`). The
+  form must not become a wider door than the API it writes through.
 
 ### 4.5 Close §5's two unbuildable items in the roadmap
 
