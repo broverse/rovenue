@@ -101,7 +101,11 @@ deleted) that the four-gate stopping rule needed to exist at all.
       four-gate stopping rule (expected loss, sample size, whole weekly cycles, no
       integrity/guardrail firing); the pre-existing frequentist module now runs alongside it
       as an assumption-free cross-check, never the decision. `experiment-engine.ts`'s dead
-      `getExperimentResults` path is deleted — one results implementation, not two.
+      `getExperimentResults` path is deleted — one results implementation, not two. The
+      metric and the minimum detectable effect are chosen per experiment in the
+      new-experiment form (`primaryMetric` / `minimumDetectableEffect`, settable on create
+      and on a DRAFT patch), so ARPU and proceeds-per-user are reachable without touching
+      the database.
 - [x] Element-level (single-node) experiments — shipped: variants materialize server-side
       into per-variant paywall snapshots (`materializeElementVariants`); no renderer,
       `render-fixtures.json`, or emitted paywall JSON changed. Builder support (launch an

@@ -3012,7 +3012,9 @@
         "variantWeight": "Traffic weight",
         "variantValue": "Value (JSON)",
         "flagValue": "Variant value",
-        "offering": "Offering"
+        "offering": "Offering",
+        "primaryMetric": "Primary metric",
+        "mde": "Minimum detectable effect"
       },
       "descriptions": {
         "name": "Shown in the experiments list and reports. Keep it short.",
@@ -3023,7 +3025,9 @@
         "variantName": "Human label shown in dashboards.",
         "variantWeight": "Share of eligible users that get this arm. Moving one slider redistributes the rest so the total always stays at 100%.",
         "variantValue": "JSON value the SDK returns when this arm is picked. Use the wand to pretty-print.",
-        "offering": "Compare different paywall offerings"
+        "offering": "Compare different paywall offerings",
+        "primaryMetric": "What the decision engine ships on. Revenue metrics need store commission rates configured for proceeds.",
+        "mde": "The smallest RELATIVE change worth detecting — 0.1 means a 10% relative lift. Smaller values need a larger sample before a winner can be called."
       },
       "typeDescriptions": {
         "flag": "Return a typed flag value (boolean, string, number) — best for on/off and copy tests.",
@@ -3063,7 +3067,8 @@
         "offeringMissing": "Select an offering for this variant",
         "offeringDuplicate": "Each variant must use a different offering — two variants share one, so the test has nothing to compare.",
         "zeroWeight": "Variant \"{{id}}\" gets 0% traffic. Every variant must receive some traffic.",
-        "unknown": "Could not create experiment."
+        "unknown": "Could not create experiment.",
+        "mdeRange": "Enter a relative effect greater than 0 and at most 1."
       },
       "flag": {
         "subtypeLabel": "Flag value type",
@@ -3109,6 +3114,11 @@
         "valid": "valid JSON",
         "invalid": "invalid JSON",
         "format": "Format"
+      },
+      "primaryMetrics": {
+        "CONVERSION": "Conversion rate",
+        "ARPU": "Revenue per user (ARPU)",
+        "PROCEEDS_PER_USER": "Proceeds per user (after store commission)"
       }
     },
     "edit": {

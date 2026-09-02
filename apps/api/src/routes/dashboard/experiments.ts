@@ -10,6 +10,7 @@ import {
   type Experiment,
 } from "@rovenue/db";
 import {
+  EXPERIMENT_PRIMARY_METRICS,
   EXPERIMENT_TYPE,
   experimentObjectSchema,
   experimentSchema as sharedExperimentSchema,
@@ -32,6 +33,7 @@ import {
   createExperimentValidated,
   generateFreeExperimentKey,
 } from "../../services/experiment-create";
+import { MAXIMUM_DETECTABLE_EFFECT } from "../../lib/experiment-constants";
 import { invalidateExperimentCache } from "../../services/experiment-engine";
 import { computeExperimentResults } from "../../services/experiment-results";
 import { invalidateFlagCache } from "../../services/flag-engine";
@@ -82,6 +84,23 @@ function inferPromotedFlagType(
 // ids must be unique) when validating create/update payloads.
 const variantsAndTypeSchema = sharedExperimentSchema;
 
+/**
+ * The decision engine's two experiment-level inputs (spec §4.1). Derived
+ * from `EXPERIMENT_PRIMARY_METRICS` rather than re-listing the members, so
+ * a metric added to the shared list is settable here without a second
+ * edit.
+ *
+ * The MDE is a RELATIVE effect: 0.1 means "detect a 10% relative change".
+ * Bounded strictly above 0 (a zero MDE demands an infinite sample) and at
+ * `MAXIMUM_DETECTABLE_EFFECT`, which is also the widest value
+ * `numeric(5, 4)` can hold in this range.
+ */
+const primaryMetricSchema = z.enum(EXPERIMENT_PRIMARY_METRICS);
+const minimumDetectableEffectSchema = z
+  .number()
+  .gt(0)
+  .max(MAXIMUM_DETECTABLE_EFFECT);
+
 export const createExperimentBodySchema = z.object({
   projectId: z.string().min(1),
   name: z.string().min(1),
@@ -98,6 +117,12 @@ export const createExperimentBodySchema = z.object({
   variants: experimentObjectSchema.shape.variants,
   metrics: z.array(z.string()).optional(),
   mutualExclusionGroup: z.string().optional(),
+  // Decision-engine inputs. Both columns carry a DB default, so omitting
+  // them keeps the pre-existing behaviour (CONVERSION at the default MDE)
+  // — but without a write path the ARPU / PROCEEDS_PER_USER half of the
+  // engine was unreachable by any user of the product.
+  primaryMetric: primaryMetricSchema.optional(),
+  minimumDetectableEffect: minimumDetectableEffectSchema.optional(),
   // Task 9 scheduling — all optional; a DRAFT experiment with none of
   // these set behaves exactly as before (manual start/stop only).
   scheduledStartAt: z.string().datetime().nullable().optional(),
@@ -122,6 +147,11 @@ export const updateDraftExperimentBodySchema = z.object({
   variants: experimentObjectSchema.shape.variants.optional(),
   metrics: z.array(z.string()).nullable().optional(),
   mutualExclusionGroup: z.string().nullable().optional(),
+  // Decision-engine inputs — DRAFT-only, like the scheduling fields
+  // below: changing the metric or the MDE mid-flight would change what
+  // the stopping rule means halfway through the run.
+  primaryMetric: primaryMetricSchema.optional(),
+  minimumDetectableEffect: minimumDetectableEffectSchema.optional(),
   // Task 9 scheduling — DRAFT-only, like every other field here. Once
   // RUNNING, `updateRunningExperimentBodySchema` below narrows to
   // name/description/variant weights; there is deliberately no path to
@@ -344,6 +374,8 @@ export const experimentsRoute = new Hono()
       variants: body.variants,
       metrics: body.metrics,
       mutualExclusionGroup: body.mutualExclusionGroup,
+      primaryMetric: body.primaryMetric,
+      minimumDetectableEffect: body.minimumDetectableEffect,
       scheduledStartAt: toNullableDate(body.scheduledStartAt),
       scheduledEndAt: toNullableDate(body.scheduledEndAt),
       startAfterExperimentId: body.startAfterExperimentId,
@@ -530,6 +562,14 @@ export const experimentsRoute = new Hono()
         }),
         ...(body.mutualExclusionGroup !== undefined && {
           mutualExclusionGroup: body.mutualExclusionGroup,
+        }),
+        ...(body.primaryMetric !== undefined && {
+          primaryMetric: body.primaryMetric,
+        }),
+        ...(body.minimumDetectableEffect !== undefined && {
+          // `numeric` is string-mode in Drizzle — the house pattern is one
+          // explicit conversion at the boundary (see `resolveCommissionRate`).
+          minimumDetectableEffect: String(body.minimumDetectableEffect),
         }),
         ...(body.scheduledStartAt !== undefined && {
           scheduledStartAt: nextScheduledStartAt,

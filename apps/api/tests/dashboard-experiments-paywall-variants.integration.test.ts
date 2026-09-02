@@ -14,6 +14,10 @@ import { getDb, projects, drizzle } from "@rovenue/db";
 import { auth } from "../src/lib/auth";
 import { errorHandler } from "../src/middleware/error";
 import { experimentsRoute } from "../src/routes/dashboard/experiments";
+import {
+  DEFAULT_MINIMUM_DETECTABLE_EFFECT,
+  MAXIMUM_DETECTABLE_EFFECT,
+} from "../src/lib/experiment-constants";
 
 const RUN_ID = Date.now();
 
@@ -263,5 +267,191 @@ describe("PATCH /experiments/:id — DRAFT PAYWALL variant enforcement", () => {
       }),
     });
     expect(patchRes.status).toBe(400);
+  });
+});
+
+// =============================================================
+// Decision-engine inputs — primaryMetric + minimumDetectableEffect
+// =============================================================
+//
+// Both columns shipped with the decision engine but had no write path at
+// all: every experiment was permanently CONVERSION at the default MDE, so
+// the ARPU / PROCEEDS_PER_USER half of the engine was unreachable by any
+// user of the product. These assert the round trip, the DRAFT-only edit
+// and the bounds.
+
+async function readExperiment(
+  app: ReturnType<typeof buildApp>,
+  cookie: string,
+  id: string,
+): Promise<{ primaryMetric: string; minimumDetectableEffect: string }> {
+  const res = await app.request(`/experiments/${id}`, { headers: { cookie } });
+  expect(res.status).toBe(200);
+  const { data } = (await res.json()) as {
+    data: { experiment: { primaryMetric: string; minimumDetectableEffect: string } };
+  };
+  return data.experiment;
+}
+
+describe("POST/PATCH /experiments — decision-engine inputs", () => {
+  it("stores primaryMetric and minimumDetectableEffect from create", async () => {
+    const { userId, cookie } = await createUserAndSession("metric-create");
+    const project = await seedProject("metric-create");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const audience = await seedAudience(project.id, "metric-create");
+
+    const app = buildApp();
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "ARPU Experiment",
+        type: "FLAG",
+        audienceId: audience.id,
+        primaryMetric: "ARPU",
+        minimumDetectableEffect: 0.05,
+        variants: [
+          { id: "a", name: "A", value: true, weight: 0.5 },
+          { id: "b", name: "B", value: false, weight: 0.5 },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { experiment: { id: string } } };
+
+    const stored = await readExperiment(app, cookie, data.experiment.id);
+    expect(stored.primaryMetric).toBe("ARPU");
+    expect(Number(stored.minimumDetectableEffect)).toBeCloseTo(0.05, 10);
+  });
+
+  it("defaults to CONVERSION at the default MDE when neither is sent", async () => {
+    const { userId, cookie } = await createUserAndSession("metric-default");
+    const project = await seedProject("metric-default");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const audience = await seedAudience(project.id, "metric-default");
+
+    const app = buildApp();
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Default Metric Experiment",
+        type: "FLAG",
+        audienceId: audience.id,
+        variants: [
+          { id: "a", name: "A", value: true, weight: 0.5 },
+          { id: "b", name: "B", value: false, weight: 0.5 },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { experiment: { id: string } } };
+
+    const stored = await readExperiment(app, cookie, data.experiment.id);
+    expect(stored.primaryMetric).toBe("CONVERSION");
+    expect(Number(stored.minimumDetectableEffect)).toBeCloseTo(
+      DEFAULT_MINIMUM_DETECTABLE_EFFECT,
+      10,
+    );
+  });
+
+  it("edits both on a DRAFT experiment", async () => {
+    const { userId, cookie } = await createUserAndSession("metric-patch");
+    const project = await seedProject("metric-patch");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const audience = await seedAudience(project.id, "metric-patch");
+
+    const app = buildApp();
+    const createRes = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Patchable Metric Experiment",
+        type: "FLAG",
+        audienceId: audience.id,
+        variants: [
+          { id: "a", name: "A", value: true, weight: 0.5 },
+          { id: "b", name: "B", value: false, weight: 0.5 },
+        ],
+      }),
+    });
+    const { data } = (await createRes.json()) as { data: { experiment: { id: string } } };
+
+    const patchRes = await app.request(`/experiments/${data.experiment.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        primaryMetric: "PROCEEDS_PER_USER",
+        minimumDetectableEffect: 0.2,
+      }),
+    });
+    expect(patchRes.status).toBe(200);
+
+    const stored = await readExperiment(app, cookie, data.experiment.id);
+    expect(stored.primaryMetric).toBe("PROCEEDS_PER_USER");
+    expect(Number(stored.minimumDetectableEffect)).toBeCloseTo(0.2, 10);
+  });
+
+  it.each([
+    ["zero", 0],
+    ["negative", -0.1],
+    ["above the maximum", MAXIMUM_DETECTABLE_EFFECT + 0.5],
+  ])("400s on a %s minimumDetectableEffect", async (_label, mde) => {
+    const suffix = `metric-bad-${String(mde)}`;
+    const { userId, cookie } = await createUserAndSession(suffix);
+    const project = await seedProject(suffix);
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const audience = await seedAudience(project.id, suffix);
+
+    const app = buildApp();
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Bad MDE Experiment",
+        type: "FLAG",
+        audienceId: audience.id,
+        minimumDetectableEffect: mde,
+        variants: [
+          { id: "a", name: "A", value: true, weight: 0.5 },
+          { id: "b", name: "B", value: false, weight: 0.5 },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on a primaryMetric outside the enum", async () => {
+    const { userId, cookie } = await createUserAndSession("metric-unknown");
+    const project = await seedProject("metric-unknown");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const audience = await seedAudience(project.id, "metric-unknown");
+
+    const app = buildApp();
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Unknown Metric Experiment",
+        type: "FLAG",
+        audienceId: audience.id,
+        primaryMetric: "LTV",
+        variants: [
+          { id: "a", name: "A", value: true, weight: 0.5 },
+          { id: "b", name: "B", value: false, weight: 0.5 },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
   });
 });

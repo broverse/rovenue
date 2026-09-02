@@ -255,6 +255,8 @@ function fakeExperiment(overrides: Partial<ExperimentListItem> = {}): Experiment
     ],
     metrics: null,
     mutualExclusionGroup: null,
+    primaryMetric: "CONVERSION",
+    minimumDetectableEffect: "0.1000",
     startedAt: null,
     completedAt: null,
     winnerVariantId: null,

@@ -14,6 +14,12 @@
 // exactly one source of truth for the number; do not copy the value here.
 export { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "@rovenue/shared/experiments";
 
+/** Upper bound accepted for an experiment-level `minimumDetectableEffect`.
+ *  The MDE is a RELATIVE effect, so 1 means "a 100% relative change" — the
+ *  largest effect it is meaningful to power for, and also the widest value
+ *  `numeric(5, 4)` holds without rounding in this range. */
+export const MAXIMUM_DETECTABLE_EFFECT = 1;
+
 /** Uniform prior. Weak and conservative at the 1-5% conversion rates
  *  typical of mobile paywalls; stated explicitly so a future change is
  *  a decision rather than a discovery. */

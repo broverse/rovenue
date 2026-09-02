@@ -9,6 +9,7 @@ import {
 import {
   elementVariantValueSchema,
   experimentSchema as sharedExperimentSchema,
+  type ExperimentPrimaryMetric,
   type Variant as ExperimentVariant,
 } from "@rovenue/shared";
 import {
@@ -48,6 +49,10 @@ export interface CreateExperimentInput {
   variants: ExperimentVariant[];
   metrics?: string[];
   mutualExclusionGroup?: string;
+  /** Decision-engine inputs. Omitted leaves the column defaults
+   *  (CONVERSION, DEFAULT_MINIMUM_DETECTABLE_EFFECT). */
+  primaryMetric?: ExperimentPrimaryMetric;
+  minimumDetectableEffect?: number;
   scheduledStartAt?: Date | null;
   scheduledEndAt?: Date | null;
   startAfterExperimentId?: string | null;
@@ -513,6 +518,13 @@ export async function createExperimentValidated(
     variants: input.variants,
     metrics: input.metrics,
     mutualExclusionGroup: input.mutualExclusionGroup,
+    primaryMetric: input.primaryMetric,
+    // `numeric` is string-mode in Drizzle — one explicit conversion at the
+    // boundary, the same house pattern `resolveCommissionRate` follows.
+    minimumDetectableEffect:
+      input.minimumDetectableEffect === undefined
+        ? undefined
+        : String(input.minimumDetectableEffect),
     scheduledStartAt: input.scheduledStartAt,
     scheduledEndAt: input.scheduledEndAt,
     startAfterExperimentId: input.startAfterExperimentId,

@@ -443,6 +443,12 @@ export interface ExperimentListItem {
   variants: DashboardExperimentVariant[];
   metrics: string[] | null;
   mutualExclusionGroup: string | null;
+  /** The metric the decision engine's stopping rule is evaluated on. */
+  primaryMetric: ExperimentPrimaryMetric;
+  /** The smallest RELATIVE effect the experiment is powered to detect,
+   *  as a fraction (0.1 = 10%). `numeric(5,4)` in Postgres, so it arrives
+   *  over the wire as a STRING ("0.1000") — convert at the boundary. */
+  minimumDetectableEffect: string;
   startedAt: string | null;
   completedAt: string | null;
   winnerVariantId: string | null;
@@ -530,11 +536,16 @@ export interface ExperimentSRMResult {
 }
 
 /** The metric the decision engine evaluates. Mirrors the
- *  `ExperimentPrimaryMetric` Postgres enum. */
-export type ExperimentPrimaryMetric =
-  | "CONVERSION"
-  | "ARPU"
-  | "PROCEEDS_PER_USER";
+ *  `ExperimentPrimaryMetric` Postgres enum. The API's request schema and
+ *  the dashboard's picker both derive from this one list, so a metric
+ *  added to the enum cannot be settable in one place and not the other. */
+export const EXPERIMENT_PRIMARY_METRICS = [
+  "CONVERSION",
+  "ARPU",
+  "PROCEEDS_PER_USER",
+] as const;
+
+export type ExperimentPrimaryMetric = (typeof EXPERIMENT_PRIMARY_METRICS)[number];
 
 /**
  * Why there is no shippable recommendation. Every clause of the stopping

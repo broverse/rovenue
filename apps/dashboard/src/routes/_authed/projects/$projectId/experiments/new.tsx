@@ -30,7 +30,13 @@ import {
   Users,
   Wand2,
 } from "lucide-react";
-import type { DashboardExperimentType, ExperimentListItem } from "@rovenue/shared";
+import { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "@rovenue/shared/experiments";
+import {
+  EXPERIMENT_PRIMARY_METRICS,
+  type DashboardExperimentType,
+  type ExperimentListItem,
+  type ExperimentPrimaryMetric,
+} from "@rovenue/shared";
 import { Button } from "../../../../../ui/button";
 import { Input } from "../../../../../ui/input";
 import { NativeSelect } from "../../../../../ui/native-select";
@@ -51,6 +57,11 @@ import {
   useUpdateExperiment,
   type CreateExperimentVars,
 } from "../../../../../lib/hooks/useExperiments";
+
+/** The MDE is a RELATIVE effect, so 1 is a 100% relative change — the
+ *  largest the API accepts (`MAXIMUM_DETECTABLE_EFFECT`, mirrored here
+ *  so the field can reject before the round trip). */
+const MAXIMUM_DETECTABLE_EFFECT = 1;
 
 export const Route = createFileRoute(
   "/_authed/projects/$projectId/experiments/new",
@@ -328,6 +339,26 @@ export function NewExperimentPage({
     }
     return rebalanceEqually([makeVariant(0), makeVariant(1)]);
   });
+  // Decision-engine inputs (spec §4.1). DRAFT-only: changing the metric or
+  // the MDE mid-run changes what the stopping rule means halfway through.
+  const [primaryMetric, setPrimaryMetric] = useState<ExperimentPrimaryMetric>(
+    initialExperiment?.primaryMetric ?? "CONVERSION",
+  );
+  // Held as text so a half-typed value ("0.") does not snap. `numeric(5,4)`
+  // arrives as "0.1000"; trailing zeros are cosmetic, so trim them for the
+  // field rather than showing the storage form.
+  const [minimumDetectableEffect, setMinimumDetectableEffect] = useState(
+    initialExperiment
+      ? String(Number(initialExperiment.minimumDetectableEffect))
+      : String(DEFAULT_MINIMUM_DETECTABLE_EFFECT),
+  );
+  const parsedMde = Number(minimumDetectableEffect);
+  const mdeValid =
+    minimumDetectableEffect.trim().length > 0 &&
+    Number.isFinite(parsedMde) &&
+    parsedMde > 0 &&
+    parsedMde <= MAXIMUM_DETECTABLE_EFFECT;
+
   const [formError, setFormError] = useState<string | null>(null);
 
   const resolvedAudienceId = audienceId || audiences[0]?.id || "";
@@ -526,6 +557,14 @@ export function NewExperimentPage({
           type,
           audienceId: resolvedAudienceId,
           variants: parsedVariants,
+          // DRAFT-only on the server; sending them while RUNNING would be
+          // silently dropped, so don't pretend to send them.
+          ...(isRunning
+            ? {}
+            : {
+                primaryMetric,
+                minimumDetectableEffect: parsedMde,
+              }),
         });
         selectedKey = initialExperiment.key;
       } else {
@@ -536,6 +575,8 @@ export function NewExperimentPage({
           type,
           audienceId: resolvedAudienceId,
           variants: parsedVariants,
+          primaryMetric,
+          minimumDetectableEffect: parsedMde,
         });
         selectedKey = created.experiment.key;
       }
@@ -560,7 +601,8 @@ export function NewExperimentPage({
     update.isPending ||
     !weightOk ||
     hasZeroWeight ||
-    !elementValid;
+    !elementValid ||
+    (!isRunning && !mdeValid);
 
   return (
     <>
@@ -825,6 +867,53 @@ export function NewExperimentPage({
                 ))
               )}
             </NativeSelect>
+          </Field>
+
+          <Field
+            icon={<Scale size={11} />}
+            label={t("experiments.new.fields.primaryMetric", "Primary metric")}
+            description={t(
+              "experiments.new.descriptions.primaryMetric",
+              "What the decision engine ships on. Revenue metrics need store commission rates configured for proceeds.",
+            )}
+          >
+            <NativeSelect
+              value={primaryMetric}
+              disabled={isReadOnly}
+              onChange={(e) =>
+                setPrimaryMetric(e.target.value as ExperimentPrimaryMetric)
+              }
+            >
+              {EXPERIMENT_PRIMARY_METRICS.map((metric) => (
+                <option key={metric} value={metric}>
+                  {t(`experiments.new.primaryMetrics.${metric}`, metric)}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+
+          <Field
+            icon={<Target size={11} />}
+            label={t("experiments.new.fields.mde", "Minimum detectable effect")}
+            description={t(
+              "experiments.new.descriptions.mde",
+              "The smallest RELATIVE change worth detecting — 0.1 means a 10% relative lift. Smaller values need a larger sample before a winner can be called.",
+            )}
+          >
+            <Input
+              value={minimumDetectableEffect}
+              inputMode="decimal"
+              disabled={isReadOnly}
+              onChange={(e) => setMinimumDetectableEffect(e.target.value)}
+            />
+            {!mdeValid && (
+              <span role="status" className="text-[11px] text-rv-danger">
+                {t(
+                  "experiments.new.errors.mdeRange",
+                  "Enter a relative effect greater than 0 and at most 1.",
+                )}
+              </span>
+            )}
           </Field>
         </Section>
 

@@ -206,6 +206,8 @@ function makeListItem(overrides: Partial<ExperimentListItem> = {}): ExperimentLi
     ],
     metrics: ["conversion_rate"],
     mutualExclusionGroup: null,
+    primaryMetric: "CONVERSION",
+    minimumDetectableEffect: "0.1000",
     startedAt: "2026-08-01T00:00:00Z",
     completedAt: null,
     winnerVariantId: null,

@@ -5,7 +5,7 @@ import {
   experiments,
   type Experiment,
 } from "../schema";
-import { experimentStatus, experimentType } from "../enums";
+import { experimentPrimaryMetric, experimentStatus, experimentType } from "../enums";
 
 type DbOrTx = Db;
 
@@ -20,6 +20,7 @@ export function generateExperimentKey(): string {
 }
 type ExperimentStatus = (typeof experimentStatus.enumValues)[number];
 type ExperimentType = (typeof experimentType.enumValues)[number];
+type ExperimentPrimaryMetric = (typeof experimentPrimaryMetric.enumValues)[number];
 
 export async function countExperiments(
   db: Db,
@@ -159,6 +160,11 @@ export interface CreateExperimentInput {
   variants: unknown;
   metrics?: unknown;
   mutualExclusionGroup?: string | null;
+  /** Decision-engine inputs. Both columns carry a DB default, so
+   *  `undefined` means "leave the default" rather than "write NULL".
+   *  `minimumDetectableEffect` is `numeric(5,4)` — string-mode in Drizzle. */
+  primaryMetric?: ExperimentPrimaryMetric;
+  minimumDetectableEffect?: string;
   scheduledStartAt?: Date | null;
   scheduledEndAt?: Date | null;
   startAfterExperimentId?: string | null;
@@ -183,6 +189,12 @@ export async function createExperiment(
       metrics: (input.metrics ??
         null) as typeof experiments.$inferInsert.metrics,
       mutualExclusionGroup: input.mutualExclusionGroup ?? null,
+      ...(input.primaryMetric !== undefined && {
+        primaryMetric: input.primaryMetric,
+      }),
+      ...(input.minimumDetectableEffect !== undefined && {
+        minimumDetectableEffect: input.minimumDetectableEffect,
+      }),
       scheduledStartAt: input.scheduledStartAt ?? null,
       scheduledEndAt: input.scheduledEndAt ?? null,
       startAfterExperimentId: input.startAfterExperimentId ?? null,
@@ -207,6 +219,10 @@ export interface UpdateExperimentInput {
   variants?: unknown;
   metrics?: unknown;
   mutualExclusionGroup?: string | null;
+  /** DRAFT-only, like the scheduling fields — changing either mid-run
+   *  would change what the stopping rule means halfway through. */
+  primaryMetric?: ExperimentPrimaryMetric;
+  minimumDetectableEffect?: string;
   startedAt?: Date | null;
   completedAt?: Date | null;
   winnerVariantId?: string | null;
@@ -239,6 +255,12 @@ export async function updateExperiment(
   }
   if (patch.mutualExclusionGroup !== undefined) {
     data.mutualExclusionGroup = patch.mutualExclusionGroup;
+  }
+  if (patch.primaryMetric !== undefined) {
+    data.primaryMetric = patch.primaryMetric;
+  }
+  if (patch.minimumDetectableEffect !== undefined) {
+    data.minimumDetectableEffect = patch.minimumDetectableEffect;
   }
   if (patch.startedAt !== undefined) data.startedAt = patch.startedAt;
   if (patch.completedAt !== undefined) data.completedAt = patch.completedAt;

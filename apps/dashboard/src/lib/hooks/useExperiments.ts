@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   DashboardExperimentStatus,
   DashboardExperimentType,
+  ExperimentPrimaryMetric,
   DeleteExperimentResponse,
   DuplicateExperimentResponse,
   ExperimentDetailResponse,
@@ -27,6 +28,9 @@ export interface CreateExperimentVars {
   }>;
   metrics?: ReadonlyArray<string>;
   mutualExclusionGroup?: string;
+  /** Decision-engine inputs. Omitted keeps the server defaults. */
+  primaryMetric?: ExperimentPrimaryMetric;
+  minimumDetectableEffect?: number;
 }
 
 interface ListParams {
@@ -127,6 +131,9 @@ export interface UpdateDraftExperimentVars {
     value: unknown;
     weight: number;
   }>;
+  /** DRAFT-only on the server — see `updateDraftExperimentBodySchema`. */
+  primaryMetric?: ExperimentPrimaryMetric;
+  minimumDetectableEffect?: number;
 }
 
 export function useUpdateExperiment() {
@@ -140,6 +147,12 @@ export function useUpdateExperiment() {
       if (patch.audienceId !== undefined) body.audienceId = patch.audienceId;
       if (patch.variants !== undefined) {
         body.variants = patch.variants.map((v) => ({ ...v }));
+      }
+      if (patch.primaryMetric !== undefined) {
+        body.primaryMetric = patch.primaryMetric;
+      }
+      if (patch.minimumDetectableEffect !== undefined) {
+        body.minimumDetectableEffect = patch.minimumDetectableEffect;
       }
       // The backend PATCH handler parses the body itself (status-aware
       // schema discrimination) so there's no static `json` shape on
