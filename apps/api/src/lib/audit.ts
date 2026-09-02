@@ -62,6 +62,13 @@ export type AuditAction =
   | "duplicate"
   | "experiment.started"
   | "experiment.stopped"
+  // Written when a DRAFT experiment is deleted while another experiment's
+  // `startAfterExperimentId` points at it: the FK's ON DELETE SET NULL
+  // clears that column silently at the DB level, so this is the only
+  // durable record that the successor's dependency was severed by a
+  // deletion (vs. never having had one) — the read-time "blocked" check
+  // (experiment-create.ts `computeSchedulingBlocked`) keys off it.
+  | "experiment.predecessor_deleted"
   // --- feature flag ---
   | "toggle"
   // --- subscriber manual ops ---

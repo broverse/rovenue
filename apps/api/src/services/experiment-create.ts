@@ -12,7 +12,10 @@ import {
   type Variant as ExperimentVariant,
 } from "@rovenue/shared";
 import { OVERRIDABLE_PROP_KEYS, findNode, type BuilderConfig } from "@rovenue/shared/paywall";
-import { HOLDOUT_COHORT_ID } from "../lib/experiment-constants";
+import {
+  BLOCKED_SUCCESSOR_GRACE_MS,
+  HOLDOUT_COHORT_ID,
+} from "../lib/experiment-constants";
 
 // DB or Drizzle tx handle — every write here can run standalone or
 // inside a caller's transaction (Task 2 wraps both createExperimentValidated
@@ -40,6 +43,10 @@ export interface CreateExperimentInput {
   variants: ExperimentVariant[];
   metrics?: string[];
   mutualExclusionGroup?: string;
+  scheduledStartAt?: Date | null;
+  scheduledEndAt?: Date | null;
+  startAfterExperimentId?: string | null;
+  autoWinnerOnStop?: boolean;
 }
 
 /**
@@ -229,6 +236,137 @@ export function assertNoReservedVariantId(
 }
 
 /**
+ * Task 9 — `startAfterExperimentId` chains DRAFT experiments into a
+ * sequence the scheduler advances as each predecessor reaches COMPLETED.
+ * A cycle (A after B after A) would leave every member permanently DRAFT,
+ * each waiting on a predecessor that is itself waiting on it — and the
+ * spec requires this be rejected at WRITE time, not discovered at run
+ * time, where the scheduler's only options would be starting nothing or
+ * corrupting bookkeeping. Called from both create and the DRAFT-update
+ * path whenever `startAfterExperimentId` is being set to a non-null value.
+ *
+ * `experimentId` is `null` at create time (the row doesn't exist yet, so
+ * it cannot already be part of a cycle — nothing points at it) and the
+ * new experiment's own id thereafter.
+ */
+export async function assertNoScheduleCycle(
+  db: DbOrTx,
+  projectId: string,
+  experimentId: string | null,
+  startAfterExperimentId: string | null | undefined,
+): Promise<void> {
+  if (!startAfterExperimentId) return;
+
+  if (startAfterExperimentId === experimentId) {
+    throw new HTTPException(400, {
+      message: "startAfterExperimentId cannot reference the experiment itself",
+    });
+  }
+
+  const predecessor = await drizzle.experimentRepo.findByIdInProject(
+    db,
+    startAfterExperimentId,
+    projectId,
+  );
+  if (!predecessor) {
+    throw new HTTPException(400, {
+      message: `startAfterExperimentId ${startAfterExperimentId} does not belong to this project`,
+    });
+  }
+
+  const chain = await drizzle.experimentRepo.findScheduleChainByProject(
+    db,
+    projectId,
+  );
+  const nextOf = new Map(chain.map((e) => [e.id, e.startAfterExperimentId]));
+
+  let cursor: string | null = startAfterExperimentId;
+  const visited = new Set<string>();
+  while (cursor) {
+    if (experimentId !== null && cursor === experimentId) {
+      throw new HTTPException(400, {
+        message: "startAfterExperimentId would create a scheduling cycle",
+      });
+    }
+    // A cycle already present in unrelated existing data (which this
+    // function would itself have prevented, but data can predate it) —
+    // stop walking rather than loop forever; not this write's problem.
+    if (visited.has(cursor)) break;
+    visited.add(cursor);
+    cursor = nextOf.get(cursor) ?? null;
+  }
+}
+
+/**
+ * `scheduledEndAt`, when both scheduling bounds are set, must actually be
+ * after `scheduledStartAt` — otherwise the scheduler would see an
+ * experiment already past its end the moment it starts.
+ */
+export function assertValidScheduleWindow(
+  scheduledStartAt: Date | null | undefined,
+  scheduledEndAt: Date | null | undefined,
+): void {
+  if (!scheduledStartAt || !scheduledEndAt) return;
+  if (scheduledEndAt.getTime() <= scheduledStartAt.getTime()) {
+    throw new HTTPException(400, {
+      message: "scheduledEndAt must be after scheduledStartAt",
+    });
+  }
+}
+
+export type SchedulingBlockedReason = "PREDECESSOR_DELETED" | "OVERDUE";
+
+/**
+ * Read-time "blocked successor" surfacing (spec §4.5 / Task 9 step 5). Only
+ * DRAFT experiments can be blocked — once RUNNING there is nothing left to
+ * wait on. Two independent triggers:
+ *
+ *  - OVERDUE: still waiting more than `BLOCKED_SUCCESSOR_GRACE_MS` past its
+ *    own `scheduledStartAt` — typically because a predecessor it is
+ *    chained after has not reached COMPLETED (the scheduler's claim
+ *    requires that before it will start the row).
+ *  - PREDECESSOR_DELETED: `startAfterExperimentId` is null now, but a
+ *    durable `experiment.predecessor_deleted` audit marker says it became
+ *    null because the predecessor was deleted (see `findSuccessors` /
+ *    the DELETE route) rather than never having been set. This check is
+ *    read-time-computed rather than a stored flag because the FK's
+ *    `ON DELETE SET NULL` gives no other way to distinguish the two once
+ *    the delete has landed.
+ */
+export async function computeSchedulingBlocked(
+  db: DbOrTx,
+  experiment: Pick<
+    Experiment,
+    "id" | "status" | "scheduledStartAt" | "startAfterExperimentId"
+  >,
+  now: Date = new Date(),
+): Promise<{ blocked: boolean; reason: SchedulingBlockedReason | null }> {
+  if (experiment.status !== "DRAFT") {
+    return { blocked: false, reason: null };
+  }
+
+  if (
+    experiment.scheduledStartAt &&
+    now.getTime() - experiment.scheduledStartAt.getTime() > BLOCKED_SUCCESSOR_GRACE_MS
+  ) {
+    return { blocked: true, reason: "OVERDUE" };
+  }
+
+  if (experiment.startAfterExperimentId === null) {
+    const hadPredecessorDeleted = await drizzle.auditLogRepo.existsAuditEntry(db, {
+      resource: "experiment",
+      resourceId: experiment.id,
+      action: "experiment.predecessor_deleted",
+    });
+    if (hadPredecessorDeleted) {
+      return { blocked: true, reason: "PREDECESSOR_DELETED" };
+    }
+  }
+
+  return { blocked: false, reason: null };
+}
+
+/**
  * Generates a free experiment key for a project: generate → SELECT-precheck,
  * up to EXPERIMENT_KEY_MAX_ATTEMPTS. This works inside a caller's transaction
  * where an insert-then-catch-unique-violation retry loop cannot — a unique
@@ -291,6 +429,14 @@ export async function createExperimentValidated(
   await assertPaywallVariantsValid(db, input.projectId, input.type, input.variants);
   await assertElementVariantsValid(db, input.projectId, input.type, input.variants);
 
+  assertValidScheduleWindow(input.scheduledStartAt, input.scheduledEndAt);
+  await assertNoScheduleCycle(
+    db,
+    input.projectId,
+    null,
+    input.startAfterExperimentId,
+  );
+
   const key = await generateFreeExperimentKey(db, input.projectId);
 
   return drizzle.experimentRepo.createExperiment(db, {
@@ -304,6 +450,10 @@ export async function createExperimentValidated(
     variants: input.variants,
     metrics: input.metrics,
     mutualExclusionGroup: input.mutualExclusionGroup,
+    scheduledStartAt: input.scheduledStartAt,
+    scheduledEndAt: input.scheduledEndAt,
+    startAfterExperimentId: input.startAfterExperimentId,
+    autoWinnerOnStop: input.autoWinnerOnStop,
   });
 }
 

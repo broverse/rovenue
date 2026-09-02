@@ -129,6 +129,33 @@ export async function countAuditLogs(
 }
 
 /**
+ * Existence check with no `user` join — unlike `listAuditLogs`/
+ * `findAuditLogById`, this must also match rows written with a
+ * non-Better-Auth `userId` (e.g. `"system"`, the scheduler worker's
+ * attribution), which an INNER JOIN against `user` would silently
+ * exclude. Used by `computeSchedulingBlocked` (apps/api/src/services/
+ * experiment-create.ts) to check for a durable "predecessor deleted"
+ * marker without pulling the row itself.
+ */
+export async function existsAuditEntry(
+  db: Db,
+  filters: { resource: string; resourceId: string; action: string },
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: auditLogs.id })
+    .from(auditLogs)
+    .where(
+      and(
+        eq(auditLogs.resource, filters.resource),
+        eq(auditLogs.resourceId, filters.resourceId),
+        eq(auditLogs.action, filters.action),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
  * Full project chain ordered by (createdAt, id) ASC so the
  * verifyAuditChain walker reads rows in insertion order. Does
  * NOT join the user — the verifier only needs the hash columns

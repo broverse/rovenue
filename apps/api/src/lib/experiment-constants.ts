@@ -100,3 +100,20 @@ export const HOLDOUT_COHORT_ID = "__rovenue_holdout__";
  *  revenue comparison rests on. Never reuse an experiment key (or this
  *  seed) as the other's seed. */
 export const HOLDOUT_BUCKET_SEED = "__rovenue_holdout_seed__";
+
+/** How often the scheduler worker (`workers/experiment-scheduler.ts`) sweeps
+ *  for due starts/stops. Matches `expiry-checker.ts`'s cadence — five
+ *  minutes is tight enough that a scheduled transition fires close to its
+ *  wall-clock time, loose enough not to hammer Postgres with an idle-most-
+ *  of-the-time query on every replica. */
+export const EXPERIMENT_SCHEDULER_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+/** A DRAFT successor that has waited more than this past its own
+ *  `scheduledStartAt` — because its predecessor never reached COMPLETED, or
+ *  because the predecessor was deleted out from under it — is reported as
+ *  blocked rather than left to wait silently. Six sweep intervals
+ *  (`EXPERIMENT_SCHEDULER_SWEEP_INTERVAL_MS`) gives normal scheduling jitter
+ *  room before flagging: a queued experiment that waits silently forever is
+ *  indistinguishable from one that is working, and the point of this
+ *  constant is to make sure it never waits *silently*. */
+export const BLOCKED_SUCCESSOR_GRACE_MS = 6 * EXPERIMENT_SCHEDULER_SWEEP_INTERVAL_MS;

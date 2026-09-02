@@ -7,6 +7,7 @@ import {
   ExperimentType,
   FeatureFlagType,
   drizzle,
+  type Experiment,
 } from "@rovenue/db";
 import {
   EXPERIMENT_TYPE,
@@ -24,13 +25,39 @@ import { ok } from "../../lib/response";
 import {
   assertElementVariantsValid,
   assertNoReservedVariantId,
+  assertNoScheduleCycle,
   assertPaywallVariantsValid,
+  assertValidScheduleWindow,
+  computeSchedulingBlocked,
   createExperimentValidated,
   generateFreeExperimentKey,
 } from "../../services/experiment-create";
 import { invalidateExperimentCache } from "../../services/experiment-engine";
 import { computeExperimentResults } from "../../services/experiment-results";
 import { invalidateFlagCache } from "../../services/flag-engine";
+
+/** Parses an optional/nullable ISO-8601 body field into `Date | null |
+ *  undefined`, preserving all three states: absent (no change), `null`
+ *  (clear), and a value (set). Schemas validate the string shape with
+ *  `z.string().datetime()` before this ever runs. */
+function toNullableDate(value: string | null | undefined): Date | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return new Date(value);
+}
+
+/**
+ * Merges an experiment row with its Task 9 "blocked successor" signal for
+ * every response shape that exposes experiments to the dashboard —
+ * blocked-but-silent scheduling is exactly the failure mode this exists to
+ * prevent (spec §4.5).
+ */
+async function withSchedulingBlocked<T extends Experiment>(
+  experiment: T,
+): Promise<T & { schedulingBlocked: boolean; schedulingBlockedReason: string | null }> {
+  const { blocked, reason } = await computeSchedulingBlocked(drizzle.db, experiment);
+  return { ...experiment, schedulingBlocked: blocked, schedulingBlockedReason: reason };
+}
 
 function inferPromotedFlagType(
   experimentType: ExperimentType,
@@ -71,6 +98,12 @@ export const createExperimentBodySchema = z.object({
   variants: experimentObjectSchema.shape.variants,
   metrics: z.array(z.string()).optional(),
   mutualExclusionGroup: z.string().optional(),
+  // Task 9 scheduling — all optional; a DRAFT experiment with none of
+  // these set behaves exactly as before (manual start/stop only).
+  scheduledStartAt: z.string().datetime().nullable().optional(),
+  scheduledEndAt: z.string().datetime().nullable().optional(),
+  startAfterExperimentId: z.string().min(1).nullable().optional(),
+  autoWinnerOnStop: z.boolean().optional(),
 });
 
 export const updateDraftExperimentBodySchema = z.object({
@@ -89,6 +122,14 @@ export const updateDraftExperimentBodySchema = z.object({
   variants: experimentObjectSchema.shape.variants.optional(),
   metrics: z.array(z.string()).nullable().optional(),
   mutualExclusionGroup: z.string().nullable().optional(),
+  // Task 9 scheduling — DRAFT-only, like every other field here. Once
+  // RUNNING, `updateRunningExperimentBodySchema` below narrows to
+  // name/description/variant weights; there is deliberately no path to
+  // edit scheduling after start.
+  scheduledStartAt: z.string().datetime().nullable().optional(),
+  scheduledEndAt: z.string().datetime().nullable().optional(),
+  startAfterExperimentId: z.string().min(1).nullable().optional(),
+  autoWinnerOnStop: z.boolean().optional(),
 });
 
 export const updateRunningExperimentBodySchema = z.object({
@@ -110,6 +151,176 @@ export const stopExperimentBodySchema = z.object({
   winnerVariantId: z.string().optional(),
   promoteToFlag: z.boolean().optional(),
 });
+
+export interface StopExperimentWithWinnerOpts {
+  winnerVariantId?: string;
+  promoteToFlag?: boolean;
+  /** `"system"` for the scheduler (Task 9's `autoWinnerOnStop`); the
+   *  dashboard session's user id for the manual `/stop` route — so the
+   *  audit chain answers "who stopped this" truthfully either way. */
+  userId: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+export interface StopExperimentWithWinnerResult {
+  experiment: Experiment;
+  promotedFlag: { id: string; key: string } | null;
+  repointedCount: number;
+}
+
+/**
+ * The ONE stop-with-winner transition. Manual `/stop` and the scheduler's
+ * `autoWinnerOnStop` path both call this — a second implementation of the
+ * same transition (placement healing, promoteToFlag, the audit entry) is
+ * exactly the duplication Task 9 exists to avoid re-introducing. Extracted
+ * from the pre-Task-9 `/stop` handler with zero behaviour change on the
+ * manual path: same transaction shape, same repoint guard, same audit.
+ */
+export async function stopExperimentWithWinner(
+  existing: Experiment,
+  opts: StopExperimentWithWinnerOpts,
+): Promise<StopExperimentWithWinnerResult> {
+  const requestContext = { ipAddress: opts.ipAddress, userAgent: opts.userAgent };
+
+  // The status flip and the (optional) placement repoint must land
+  // atomically: a stopped experiment whose placements still target it
+  // would leave live traffic on a completed experiment forever. The
+  // repoint itself is a resolve-then-skip-silently guard — an unknown
+  // winner id or a winner with no paywallId (e.g. FLAG/OFFERING type)
+  // just means there's nothing to repoint, mirroring the promoteToFlag
+  // guard just below.
+  const { experiment, repointedCount } = await drizzle.db.transaction(
+    async (tx) => {
+      const updated = await drizzle.experimentRepo.updateExperiment(
+        tx,
+        existing.id,
+        {
+          status: ExperimentStatus.COMPLETED,
+          completedAt: new Date(),
+          winnerVariantId: opts.winnerVariantId,
+        },
+      );
+      if (!updated) {
+        throw new HTTPException(404, { message: "Experiment not found" });
+      }
+
+      let changedPlacements = 0;
+      if (existing.type === ExperimentType.PAYWALL && opts.winnerVariantId) {
+        const variants =
+          (existing.variants as unknown as Array<{
+            id: string;
+            value: unknown;
+          }>) ?? [];
+        const winner = variants.find((v) => v.id === opts.winnerVariantId);
+        const winnerPaywallId =
+          winner && typeof winner.value === "object" && winner.value !== null
+            ? (winner.value as { paywallId?: unknown }).paywallId
+            : undefined;
+
+        if (typeof winnerPaywallId === "string" && winnerPaywallId.length > 0) {
+          const allPlacements = await drizzle.placementRepo.listPlacements(
+            tx,
+            existing.projectId,
+          );
+          for (const placement of allPlacements) {
+            const rows = placementRowsSchema.parse(placement.rows);
+            let rowChanged = false;
+            const nextRows: PlacementRow[] = rows.map((row) => {
+              if (
+                row.target.type === "experiment" &&
+                row.target.experimentId === existing.id
+              ) {
+                rowChanged = true;
+                return {
+                  ...row,
+                  target: { type: "paywall" as const, paywallId: winnerPaywallId },
+                };
+              }
+              return row;
+            });
+            if (!rowChanged) continue;
+
+            await drizzle.placementRepo.updatePlacement(
+              tx,
+              existing.projectId,
+              placement.id,
+              { rows: nextRows },
+            );
+            await audit(
+              {
+                projectId: existing.projectId,
+                userId: opts.userId,
+                action: "update",
+                resource: "placement",
+                resourceId: placement.id,
+                before: { rows },
+                after: { rows: nextRows },
+                ...requestContext,
+              },
+              tx,
+            );
+            changedPlacements++;
+          }
+        }
+      }
+
+      return { experiment: updated, repointedCount: changedPlacements };
+    },
+  );
+
+  if (repointedCount > 0) {
+    purgeProjectCatalogCache(existing.projectId);
+  }
+
+  let promotedFlag: { id: string; key: string } | null = null;
+  if (opts.promoteToFlag && opts.winnerVariantId) {
+    const variants =
+      (existing.variants as unknown as Array<{
+        id: string;
+        value: unknown;
+      }>) ?? [];
+    const winner = variants.find((v) => v.id === opts.winnerVariantId);
+    if (winner) {
+      // Infer the flag type from the experiment type + winner value
+      // so SDK consumers calling `useFlag<boolean>` don't get a
+      // JSON-wrapped boolean back.
+      const flagType = inferPromotedFlagType(existing.type, winner.value);
+      const flag = await drizzle.dashboardFeatureFlagRepo.createFeatureFlag(
+        drizzle.db,
+        {
+          projectId: existing.projectId,
+          key: `${existing.key}_winner`,
+          type: flagType,
+          defaultValue: winner.value,
+          rules: [],
+          isEnabled: true,
+          description: `Promoted from experiment ${existing.key} (winner: ${winner.id})`,
+        },
+      );
+      promotedFlag = { id: flag.id, key: flag.key };
+      await invalidateFlagCache(existing.projectId);
+    }
+  }
+
+  await invalidateExperimentCache(existing.projectId);
+  await audit({
+    projectId: existing.projectId,
+    userId: opts.userId,
+    action: "experiment.stopped",
+    resource: "experiment",
+    resourceId: existing.id,
+    before: { status: existing.status },
+    after: {
+      status: "COMPLETED",
+      winnerVariantId: opts.winnerVariantId,
+      promotedFlagId: promotedFlag?.id,
+    },
+    ...requestContext,
+  });
+
+  return { experiment, promotedFlag, repointedCount };
+}
 
 export const experimentsRoute = new Hono()
   .use("*", requireDashboardAuth)
@@ -133,6 +344,10 @@ export const experimentsRoute = new Hono()
       variants: body.variants,
       metrics: body.metrics,
       mutualExclusionGroup: body.mutualExclusionGroup,
+      scheduledStartAt: toNullableDate(body.scheduledStartAt),
+      scheduledEndAt: toNullableDate(body.scheduledEndAt),
+      startAfterExperimentId: body.startAfterExperimentId,
+      autoWinnerOnStop: body.autoWinnerOnStop,
     });
 
     await invalidateExperimentCache(body.projectId);
@@ -169,7 +384,9 @@ export const experimentsRoute = new Hono()
       },
     );
 
-    return c.json(ok({ experiments }));
+    const withBlocked = await Promise.all(experiments.map(withSchedulingBlocked));
+
+    return c.json(ok({ experiments: withBlocked }));
   })
   // ----- GET /dashboard/experiments/:id -----
   .get("/:id", async (c) => {
@@ -196,7 +413,7 @@ export const experimentsRoute = new Hono()
 
     return c.json(
       ok({
-        experiment,
+        experiment: await withSchedulingBlocked(experiment),
         summary: {
           totalUsers: assignmentCount,
           conversions: conversionCount,
@@ -283,6 +500,24 @@ export const experimentsRoute = new Hono()
         );
       }
 
+      // Task 9 — scheduling fields. Self-contained: independent of the
+      // type/variants validation above, so it neither depends on nor
+      // reorders it.
+      const nextScheduledStartAt = toNullableDate(body.scheduledStartAt);
+      const nextScheduledEndAt = toNullableDate(body.scheduledEndAt);
+      assertValidScheduleWindow(
+        nextScheduledStartAt !== undefined ? nextScheduledStartAt : existing.scheduledStartAt,
+        nextScheduledEndAt !== undefined ? nextScheduledEndAt : existing.scheduledEndAt,
+      );
+      if (body.startAfterExperimentId !== undefined) {
+        await assertNoScheduleCycle(
+          drizzle.db,
+          existing.projectId,
+          existing.id,
+          body.startAfterExperimentId,
+        );
+      }
+
       updates = {
         ...(body.name !== undefined && { name: body.name }),
         ...(body.description !== undefined && { description: body.description }),
@@ -295,6 +530,18 @@ export const experimentsRoute = new Hono()
         }),
         ...(body.mutualExclusionGroup !== undefined && {
           mutualExclusionGroup: body.mutualExclusionGroup,
+        }),
+        ...(body.scheduledStartAt !== undefined && {
+          scheduledStartAt: nextScheduledStartAt,
+        }),
+        ...(body.scheduledEndAt !== undefined && {
+          scheduledEndAt: nextScheduledEndAt,
+        }),
+        ...(body.startAfterExperimentId !== undefined && {
+          startAfterExperimentId: body.startAfterExperimentId,
+        }),
+        ...(body.autoWinnerOnStop !== undefined && {
+          autoWinnerOnStop: body.autoWinnerOnStop,
         }),
       };
     } else {
@@ -543,140 +790,14 @@ export const experimentsRoute = new Hono()
     // than validate() so an empty body gracefully defaults to {}.
     const raw = await c.req.json().catch(() => ({}));
     const body = stopExperimentBodySchema.parse(raw);
-
     const requestContext = extractRequestContext(c);
 
-    // The status flip and the (optional) placement repoint must land
-    // atomically: a stopped experiment whose placements still target it
-    // would leave live traffic on a completed experiment forever. The
-    // repoint itself is a resolve-then-skip-silently guard — an unknown
-    // winner id or a winner with no paywallId (e.g. FLAG/OFFERING type)
-    // just means there's nothing to repoint, mirroring the promoteToFlag
-    // guard just below.
-    const { experiment, repointedCount } = await drizzle.db.transaction(
-      async (tx) => {
-        const updated = await drizzle.experimentRepo.updateExperiment(
-          tx,
-          id,
-          {
-            status: ExperimentStatus.COMPLETED,
-            completedAt: new Date(),
-            winnerVariantId: body.winnerVariantId,
-          },
-        );
-        if (!updated) {
-          throw new HTTPException(404, { message: "Experiment not found" });
-        }
-
-        let changedPlacements = 0;
-        if (existing.type === ExperimentType.PAYWALL && body.winnerVariantId) {
-          const variants =
-            (existing.variants as unknown as Array<{
-              id: string;
-              value: unknown;
-            }>) ?? [];
-          const winner = variants.find((v) => v.id === body.winnerVariantId);
-          const winnerPaywallId =
-            winner && typeof winner.value === "object" && winner.value !== null
-              ? (winner.value as { paywallId?: unknown }).paywallId
-              : undefined;
-
-          if (typeof winnerPaywallId === "string" && winnerPaywallId.length > 0) {
-            const allPlacements = await drizzle.placementRepo.listPlacements(
-              tx,
-              existing.projectId,
-            );
-            for (const placement of allPlacements) {
-              const rows = placementRowsSchema.parse(placement.rows);
-              let rowChanged = false;
-              const nextRows: PlacementRow[] = rows.map((row) => {
-                if (row.target.type === "experiment" && row.target.experimentId === id) {
-                  rowChanged = true;
-                  return {
-                    ...row,
-                    target: { type: "paywall" as const, paywallId: winnerPaywallId },
-                  };
-                }
-                return row;
-              });
-              if (!rowChanged) continue;
-
-              await drizzle.placementRepo.updatePlacement(
-                tx,
-                existing.projectId,
-                placement.id,
-                { rows: nextRows },
-              );
-              await audit(
-                {
-                  projectId: existing.projectId,
-                  userId: user.id,
-                  action: "update",
-                  resource: "placement",
-                  resourceId: placement.id,
-                  before: { rows },
-                  after: { rows: nextRows },
-                  ...requestContext,
-                },
-                tx,
-              );
-              changedPlacements++;
-            }
-          }
-        }
-
-        return { experiment: updated, repointedCount: changedPlacements };
-      },
-    );
-
-    if (repointedCount > 0) {
-      purgeProjectCatalogCache(existing.projectId);
-    }
-
-    let promotedFlag: { id: string; key: string } | null = null;
-    if (body.promoteToFlag && body.winnerVariantId) {
-      const variants =
-        (existing.variants as unknown as Array<{
-          id: string;
-          value: unknown;
-        }>) ?? [];
-      const winner = variants.find((v) => v.id === body.winnerVariantId);
-      if (winner) {
-        // Infer the flag type from the experiment type + winner value
-        // so SDK consumers calling `useFlag<boolean>` don't get a
-        // JSON-wrapped boolean back.
-        const flagType = inferPromotedFlagType(existing.type, winner.value);
-        const flag = await drizzle.dashboardFeatureFlagRepo.createFeatureFlag(
-          drizzle.db,
-          {
-            projectId: existing.projectId,
-            key: `${existing.key}_winner`,
-            type: flagType,
-            defaultValue: winner.value,
-            rules: [],
-            isEnabled: true,
-            description: `Promoted from experiment ${existing.key} (winner: ${winner.id})`,
-          },
-        );
-        promotedFlag = { id: flag.id, key: flag.key };
-        await invalidateFlagCache(existing.projectId);
-      }
-    }
-
-    await invalidateExperimentCache(existing.projectId);
-    await audit({
-      projectId: existing.projectId,
+    const { experiment, promotedFlag } = await stopExperimentWithWinner(existing, {
+      winnerVariantId: body.winnerVariantId,
+      promoteToFlag: body.promoteToFlag,
       userId: user.id,
-      action: "experiment.stopped",
-      resource: "experiment",
-      resourceId: id,
-      before: { status: existing.status },
-      after: {
-        status: "COMPLETED",
-        winnerVariantId: body.winnerVariantId,
-        promotedFlagId: promotedFlag?.id,
-      },
-      ...requestContext,
+      ipAddress: requestContext.ipAddress,
+      userAgent: requestContext.userAgent,
     });
 
     return c.json(ok({ experiment, promotedFlag }));
@@ -705,24 +826,56 @@ export const experimentsRoute = new Hono()
       });
     }
 
-    const deleted = await drizzle.experimentRepo.deleteExperiment(
-      drizzle.db,
-      id,
-    );
+    const requestContext = extractRequestContext(c);
+
+    // Successors must be looked up and audited BEFORE the delete lands in
+    // the same transaction: the FK's ON DELETE SET NULL clears their
+    // `startAfterExperimentId` at the DB level with no application hook,
+    // so this is the only chance to write a durable record of who used to
+    // depend on this experiment — `computeSchedulingBlocked` reads it back
+    // later to tell "predecessor deleted" apart from "never had one".
+    const deleted = await drizzle.db.transaction(async (tx) => {
+      const successors = await drizzle.experimentRepo.findSuccessors(tx, id);
+
+      const didDelete = await drizzle.experimentRepo.deleteExperiment(tx, id);
+      if (!didDelete) return false;
+
+      for (const successor of successors) {
+        await audit(
+          {
+            projectId: successor.projectId,
+            userId: user.id,
+            action: "experiment.predecessor_deleted",
+            resource: "experiment",
+            resourceId: successor.id,
+            before: { startAfterExperimentId: id },
+            after: { startAfterExperimentId: null },
+            ...requestContext,
+          },
+          tx,
+        );
+      }
+
+      await audit(
+        {
+          projectId: existing.projectId,
+          userId: user.id,
+          action: "delete",
+          resource: "experiment",
+          resourceId: id,
+          before: { status: existing.status, name: existing.name, key: existing.key },
+          ...requestContext,
+        },
+        tx,
+      );
+
+      return true;
+    });
     if (!deleted) {
       throw new HTTPException(404, { message: "Experiment not found" });
     }
 
     await invalidateExperimentCache(existing.projectId);
-    await audit({
-      projectId: existing.projectId,
-      userId: user.id,
-      action: "delete",
-      resource: "experiment",
-      resourceId: id,
-      before: { status: existing.status, name: existing.name, key: existing.key },
-      ...extractRequestContext(c),
-    });
 
     return c.json(ok({ id }));
   })

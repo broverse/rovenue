@@ -1,5 +1,5 @@
 import { init } from "@paralleldrive/cuid2";
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, isNotNull, lte, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   experiments,
@@ -159,6 +159,10 @@ export interface CreateExperimentInput {
   variants: unknown;
   metrics?: unknown;
   mutualExclusionGroup?: string | null;
+  scheduledStartAt?: Date | null;
+  scheduledEndAt?: Date | null;
+  startAfterExperimentId?: string | null;
+  autoWinnerOnStop?: boolean;
 }
 
 export async function createExperiment(
@@ -179,6 +183,12 @@ export async function createExperiment(
       metrics: (input.metrics ??
         null) as typeof experiments.$inferInsert.metrics,
       mutualExclusionGroup: input.mutualExclusionGroup ?? null,
+      scheduledStartAt: input.scheduledStartAt ?? null,
+      scheduledEndAt: input.scheduledEndAt ?? null,
+      startAfterExperimentId: input.startAfterExperimentId ?? null,
+      ...(input.autoWinnerOnStop !== undefined && {
+        autoWinnerOnStop: input.autoWinnerOnStop,
+      }),
     })
     .returning();
   const row = rows[0];
@@ -200,6 +210,10 @@ export interface UpdateExperimentInput {
   startedAt?: Date | null;
   completedAt?: Date | null;
   winnerVariantId?: string | null;
+  scheduledStartAt?: Date | null;
+  scheduledEndAt?: Date | null;
+  startAfterExperimentId?: string | null;
+  autoWinnerOnStop?: boolean;
 }
 
 /**
@@ -231,6 +245,18 @@ export async function updateExperiment(
   if (patch.winnerVariantId !== undefined) {
     data.winnerVariantId = patch.winnerVariantId;
   }
+  if (patch.scheduledStartAt !== undefined) {
+    data.scheduledStartAt = patch.scheduledStartAt;
+  }
+  if (patch.scheduledEndAt !== undefined) {
+    data.scheduledEndAt = patch.scheduledEndAt;
+  }
+  if (patch.startAfterExperimentId !== undefined) {
+    data.startAfterExperimentId = patch.startAfterExperimentId;
+  }
+  if (patch.autoWinnerOnStop !== undefined) {
+    data.autoWinnerOnStop = patch.autoWinnerOnStop;
+  }
   if (Object.keys(data).length === 0) return null;
   const rows = await db
     .update(experiments)
@@ -254,4 +280,175 @@ export async function deleteExperiment(
     .where(eq(experiments.id, id))
     .returning({ id: experiments.id });
   return rows.length > 0;
+}
+
+// =============================================================
+// Scheduling (Task 9) — chain lookups, candidates, per-row claims
+// =============================================================
+
+/**
+ * Experiments that name `predecessorId` as their `startAfterExperimentId`.
+ * Called BEFORE `deleteExperiment` (same transaction) so the caller can
+ * write a durable "predecessor deleted" audit marker for each dependent —
+ * once the delete lands, the FK's `ON DELETE SET NULL` clears the pointer
+ * and this list can never be reconstructed from the row state again.
+ */
+export async function findSuccessors(
+  db: DbOrTx,
+  predecessorId: string,
+): Promise<Array<Pick<Experiment, "id" | "projectId">>> {
+  return db
+    .select({ id: experiments.id, projectId: experiments.projectId })
+    .from(experiments)
+    .where(eq(experiments.startAfterExperimentId, predecessorId));
+}
+
+/**
+ * Every (id, startAfterExperimentId) pair in the project — the whole
+ * dependency graph, cheap enough to walk in memory. Used by
+ * `assertNoScheduleCycle` (experiment-create.ts) to reject a chain-forming
+ * write before it lands, rather than detecting the cycle at scheduler
+ * run time where the only options would be starting nothing or corrupting
+ * bookkeeping.
+ */
+export async function findScheduleChainByProject(
+  db: DbOrTx,
+  projectId: string,
+): Promise<Array<Pick<Experiment, "id" | "startAfterExperimentId">>> {
+  return db
+    .select({
+      id: experiments.id,
+      startAfterExperimentId: experiments.startAfterExperimentId,
+    })
+    .from(experiments)
+    .where(eq(experiments.projectId, projectId));
+}
+
+/**
+ * DRAFT experiments due to start: `scheduledStartAt` has arrived AND
+ * (no predecessor OR the predecessor has reached COMPLETED). This is a
+ * loose, non-authoritative read — the actual single-flight decision is
+ * `claimExperimentForScheduledStart`'s conditional UPDATE, which
+ * re-verifies both conditions atomically per row. A stale read here can
+ * only produce a wasted claim attempt, never a double-start.
+ */
+export async function findScheduledStartCandidates(
+  db: DbOrTx,
+  now: Date,
+): Promise<Array<Pick<Experiment, "id" | "projectId">>> {
+  const rows = await db.execute(sql`
+    SELECT "experiments"."id" AS "id", "experiments"."projectId" AS "projectId"
+    FROM "experiments"
+    LEFT JOIN "experiments" AS "predecessor"
+      ON "predecessor"."id" = "experiments"."startAfterExperimentId"
+    WHERE "experiments"."status" = 'DRAFT'
+      AND "experiments"."scheduledStartAt" IS NOT NULL
+      AND "experiments"."scheduledStartAt" <= ${now}
+      AND (
+        "experiments"."startAfterExperimentId" IS NULL
+        OR "predecessor"."status" = 'COMPLETED'
+      )
+  `);
+  const result = rows as unknown as { rows: Array<{ id: string; projectId: string }> };
+  return result.rows ?? [];
+}
+
+/**
+ * RUNNING experiments due to stop: `scheduledEndAt` has arrived. Same
+ * loose-read caveat as `findScheduledStartCandidates` — the authoritative
+ * check is `claimExperimentForScheduledStop`'s conditional UPDATE.
+ */
+export async function findScheduledStopCandidates(
+  db: DbOrTx,
+  now: Date,
+): Promise<Array<Pick<Experiment, "id" | "projectId" | "scheduledEndAt">>> {
+  return db
+    .select({
+      id: experiments.id,
+      projectId: experiments.projectId,
+      scheduledEndAt: experiments.scheduledEndAt,
+    })
+    .from(experiments)
+    .where(
+      and(
+        eq(experiments.status, "RUNNING"),
+        isNotNull(experiments.scheduledEndAt),
+        lte(experiments.scheduledEndAt, now),
+      ),
+    );
+}
+
+/**
+ * Atomic single-flight claim for a scheduled start. Flips DRAFT -> RUNNING
+ * in ONE statement, re-checking BOTH eligibility conditions (schedule due,
+ * predecessor completed) in the WHERE clause so the claim is authoritative
+ * on its own, not just a status guard. Two sweeps (same process or two
+ * replicas) racing on the same id: the first's UPDATE matches and commits;
+ * the second's WHERE re-evaluates against the now-RUNNING row and matches
+ * zero rows. This is the per-row claim pattern from the 2026-08-24
+ * stability batch (`claimDeliveryForSend`) — a conditional UPDATE ...
+ * RETURNING, never a SELECT followed by an UPDATE.
+ *
+ * The correlated subquery's columns are qualified with literal identifiers
+ * rather than interpolated Drizzle column references — `${experiments.col}`
+ * inside `sql` renders UNqualified, which would be ambiguous (or silently
+ * wrong) once the query joins `experiments` against itself as `predecessor`.
+ */
+export async function claimExperimentForScheduledStart(
+  db: DbOrTx,
+  id: string,
+  now: Date,
+): Promise<Experiment | null> {
+  const rows = await db
+    .update(experiments)
+    .set({ status: "RUNNING", startedAt: now })
+    .where(
+      and(
+        eq(experiments.id, id),
+        eq(experiments.status, "DRAFT"),
+        isNotNull(experiments.scheduledStartAt),
+        lte(experiments.scheduledStartAt, now),
+        sql`(
+          "experiments"."startAfterExperimentId" IS NULL
+          OR EXISTS (
+            SELECT 1 FROM "experiments" AS "predecessor"
+            WHERE "predecessor"."id" = "experiments"."startAfterExperimentId"
+              AND "predecessor"."status" = 'COMPLETED'
+          )
+        )`,
+      ),
+    )
+    .returning();
+  return rows[0] ?? null;
+}
+
+/**
+ * Atomic single-flight claim for a scheduled stop. Rather than flipping
+ * `status` directly (which the shared `stopExperimentWithWinner` transition
+ * — including its placement healing — must still perform, possibly after
+ * an async ClickHouse round-trip to decide `autoWinnerOnStop`'s winner),
+ * this claims by clearing `scheduledEndAt`: the WHERE requires it to still
+ * be non-null and due, so only one caller's UPDATE can win. The caller
+ * then proceeds to `stopExperimentWithWinner`; on failure it restores
+ * `scheduledEndAt` (via `updateExperiment`) so a later sweep can retry
+ * rather than leaving the row claimed-but-never-stopped forever.
+ */
+export async function claimExperimentForScheduledStop(
+  db: DbOrTx,
+  id: string,
+  now: Date,
+): Promise<Pick<Experiment, "id" | "projectId"> | null> {
+  const rows = await db
+    .update(experiments)
+    .set({ scheduledEndAt: null })
+    .where(
+      and(
+        eq(experiments.id, id),
+        eq(experiments.status, "RUNNING"),
+        isNotNull(experiments.scheduledEndAt),
+        lte(experiments.scheduledEndAt, now),
+      ),
+    )
+    .returning({ id: experiments.id, projectId: experiments.projectId });
+  return rows[0] ?? null;
 }

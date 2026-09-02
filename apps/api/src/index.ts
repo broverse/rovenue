@@ -83,6 +83,10 @@ import {
   createImportRetentionWorker,
   scheduleImportRetention,
 } from "./workers/import-retention";
+import {
+  createExperimentSchedulerWorker,
+  scheduleExperimentScheduler,
+} from "./workers/experiment-scheduler";
 import { bootIntegrations } from "./integrations-boot";
 import { checkConnectWebhookEvents } from "./services/stripe/connect-endpoint-check";
 import { applySharpHardening } from "./services/assets/sharp-hardening";
@@ -270,6 +274,20 @@ createImportRunnerWorker();
 createImportRetentionWorker();
 scheduleImportRetention().catch((err: unknown) => {
   logger.error("failed to schedule import file retention", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Experiment scheduler (Task 9) — 5-minute repeatable BullMQ job. Starts
+// DRAFT experiments whose scheduledStartAt is due (chaining successors on
+// startAfterExperimentId), stops RUNNING experiments past scheduledEndAt,
+// and — only when autoWinnerOnStop is set — ships a winner via the same
+// stop-with-winner transition the manual /stop route uses. Multiple API
+// replicas can run safely: every transition is claimed with a conditional
+// UPDATE ... RETURNING. See workers/experiment-scheduler.ts.
+createExperimentSchedulerWorker();
+scheduleExperimentScheduler().catch((err: unknown) => {
+  logger.error("failed to schedule experiment scheduler", {
     err: err instanceof Error ? err.message : String(err),
   });
 });
