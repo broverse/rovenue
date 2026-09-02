@@ -79,6 +79,10 @@ export function ExperimentAnalysisCard({ experiment, results }: Props) {
   // sample size — the recommendation below is never made on it.
   const conversion = results?.conversion ?? null;
   const srm = results?.integrity.srm ?? null;
+  // Contamination sits beside SRM deliberately: both answer "can this
+  // split be trusted at all?", and both SUPPRESS the leader when they
+  // fire. It was computed, shipped on the wire, and rendered nowhere.
+  const crossoverRate = results?.integrity.crossoverRate ?? null;
   const sampleSize = results?.sampleSize ?? null;
   const recommendation = results?.recommendation ?? null;
   const crossCheck = results?.crossCheck ?? null;
@@ -122,6 +126,31 @@ export function ExperimentAnalysisCard({ experiment, results }: Props) {
             </span>
           ) : (
             <Muted>{t("experiments.analysis.srmUnavailable")}</Muted>
+          )
+        }
+      />
+      <Kv
+        k={t("experiments.analysis.crossover", "Crossover")}
+        v={
+          crossoverRate === null ? (
+            <Muted>
+              {t(
+                "experiments.analysis.crossoverUnavailable",
+                "No exposures yet",
+              )}
+            </Muted>
+          ) : (
+            <span
+              className={
+                crossoverRate > 0 ? "text-rv-mute-500" : "text-rv-success"
+              }
+            >
+              {t("experiments.analysis.crossoverRate", {
+                rate: (crossoverRate * 100).toFixed(2),
+                defaultValue:
+                  "{{rate}}% of exposed subscribers saw more than one variant",
+              })}
+            </span>
           )
         }
       />

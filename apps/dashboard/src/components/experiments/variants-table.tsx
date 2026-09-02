@@ -22,12 +22,27 @@ type Props = {
 const POSTERIOR_COLUMN_COUNT = 4;
 
 /**
- * Live variant comparison table — exposures, exposed users, (when gated)
- * precisely-attributed conversions + the rate derived from them, and the
- * Bayesian posterior on the primary metric: mean, credible interval,
- * P(best), and expected loss. Every number here comes straight off
- * `ExperimentResultsResponse`; there's no per-variant ARPU/lift/CI beyond
- * what's rendered, so nothing here is fabricated.
+ * Live variant comparison table.
+ *
+ * THREE DENOMINATORS APPEAR HERE, and they are deliberately all visible:
+ *
+ *   Users     exposed subscribers, un-windowed. What SRM checks the split
+ *             of, and nothing else.
+ *   Mature    exposed subscribers whose maturation window has elapsed and
+ *             who saw only one variant. THE metric denominator — every
+ *             posterior column to its right was fitted on this number, and
+ *             "Conv. rate" is over it.
+ *   Excluded  the difference, split into the two reasons for it. Mature +
+ *             immature + crossover accounts for every exposed subscriber.
+ *
+ * Showing `Users 20 000` beside a posterior fitted on 6 000 mature
+ * subscribers, with no way to tell, was the seam this table used to hide.
+ * The attributed-conversion rate (PAYWALL only) is a fourth quantity —
+ * precisely-attributed purchases over exposed users — and is labelled as
+ * its own column rather than merged into the windowed rate.
+ *
+ * Every number comes straight off `ExperimentResultsResponse`; there's no
+ * per-variant ARPU/lift/CI beyond what's rendered, so nothing is fabricated.
  */
 export function VariantsTable({ variants, showAttributed }: Props) {
   const { t } = useTranslation();
@@ -45,6 +60,15 @@ export function VariantsTable({ variants, showAttributed }: Props) {
               <Th width="22%">{t("experiments.variants.cols.variant")}</Th>
               <Th align="right">{t("experiments.variants.cols.exposures")}</Th>
               <Th align="right">{t("experiments.variants.cols.users")}</Th>
+              <Th align="right">
+                {t("experiments.variants.cols.matureUsers", "Mature")}
+              </Th>
+              <Th align="right">
+                {t("experiments.variants.cols.excluded", "Excluded")}
+              </Th>
+              <Th align="right">
+                {t("experiments.variants.cols.conversionRate", "Conv. rate")}
+              </Th>
               {showAttributed && (
                 <Th align="right">
                   {t("experiments.variants.cols.attributed")}
@@ -98,6 +122,23 @@ export function VariantsTable({ variants, showAttributed }: Props) {
                   </td>
                   <NumCell>{v.exposures.toLocaleString()}</NumCell>
                   <NumCell>{v.uniqueUsers.toLocaleString()}</NumCell>
+                  <NumCell>{v.matureUsers.toLocaleString()}</NumCell>
+                  <NumCell>
+                    <span
+                      title={t(
+                        "experiments.variants.excludedTitle",
+                        "Immature (window not elapsed) / crossover (seen under more than one variant)",
+                      )}
+                    >
+                      {v.excludedImmature.toLocaleString()} /{" "}
+                      {v.excludedCrossover.toLocaleString()}
+                    </span>
+                  </NumCell>
+                  <NumCell>
+                    {v.conversionRate === null
+                      ? "—"
+                      : `${(v.conversionRate * 100).toFixed(2)}%`}
+                  </NumCell>
                   {showAttributed && (
                     <NumCell>
                       {(v.attributedConversions ?? 0).toLocaleString()}
@@ -132,6 +173,12 @@ export function VariantsTable({ variants, showAttributed }: Props) {
           </tbody>
         </table>
       </div>
+      <p className="m-0 border-t border-rv-divider px-5 py-2.5 text-[11px] leading-snug text-rv-mute-500">
+        {t(
+          "experiments.variants.denominatorNote",
+          "Users is the exposed count SRM checks. Mature is the windowed, crossover-free count every posterior and Conv. rate is computed over; Excluded shows the two reasons for the difference.",
+        )}
+      </p>
     </section>
   );
 }

@@ -85,8 +85,10 @@ why the results page shows both and flags it when they disagree in sign.
 
 ## The maturation window
 
-Every subscriber's revenue is counted starting from a fixed number of days
-after their **first exposure** to the experiment — the maturation window.
+Every subscriber's revenue is counted for a fixed number of days starting at
+their **first exposure** to the experiment — the maturation window. Revenue
+inside that window counts; revenue after it does not. It is a window, not a
+delay.
 Subscribers whose window has not yet fully elapsed are excluded from every
 revenue metric and from the conversion-rate denominator entirely; they are
 not counted as non-converters, because that would penalize a variant purely
@@ -95,15 +97,17 @@ for having gained traffic recently.
 <Callout type="info">
 This means **exposures from the last several days are not counted yet.**
 An experiment that looks flat because recent traffic hasn't matured is not
-necessarily flat — check the "excluded (immature)" figure alongside the
-conversion rate before concluding a variant has no effect.
+necessarily flat — check the **Excluded** column on the variants table
+(immature / crossover, beside the **Mature** count every posterior is fitted
+on) before concluding a variant has no effect.
 </Callout>
 
 A subscriber is also excluded — separately, into a "crossover" bucket —
 if they were exposed to more than one variant of the same experiment. A
 crossover rate above a small threshold suppresses the recommendation
 entirely (gate 4 above), because a contaminated split cannot honestly
-attribute an outcome to either arm.
+attribute an outcome to either arm. The rate is shown on the analysis card
+beside the SRM verdict.
 
 ## A fully refunded purchase is not a conversion
 
@@ -117,9 +121,13 @@ revenue-per-user figure on this page — a purchase-then-full-refund is
 economically a non-event, and is now reported as one.
 
 Partial refunds still count the subscriber as a converter, but reduce their
-contribution to net revenue accordingly — including going negative for a
-subscriber who was refunded more than they generated (e.g., a chargeback
-against an accumulated balance).
+contribution to net revenue accordingly.
+
+A subscriber whose net is *negative* — refunded more than they generated, e.g.
+a chargeback against an accumulated balance — is not a converter either, by the
+same `net > 0` rule. They still contribute their negative amount to the
+revenue-per-user cross-check, which is computed over all mature subscribers
+rather than over converters.
 
 ## Holdout groups
 

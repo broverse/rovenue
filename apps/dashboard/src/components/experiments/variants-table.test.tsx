@@ -10,6 +10,11 @@ function makeRow(overrides: Partial<ResultVariantRow> = {}): ResultVariantRow {
     exposures: 100,
     uniqueUsers: 90,
     attributedConversions: null,
+    matureUsers: 60,
+    converters: 6,
+    conversionRate: 0.1,
+    excludedImmature: 25,
+    excludedCrossover: 5,
     colorToken: "default",
     isControl: true,
     sufficientData: true,
@@ -89,5 +94,38 @@ describe("VariantsTable — posterior columns (Task 5, Step 2)", () => {
 
     expect(screen.getByText("0.1")).toBeInTheDocument();
     expect(screen.getByText("Not enough data yet")).toBeInTheDocument();
+  });
+});
+
+describe("VariantsTable — the windowed denominator is visible", () => {
+  async function settle() {
+    await screen.findByText("Variants");
+  }
+
+  it("shows mature users and both exclusion counts beside the exposed count", async () => {
+    // Un-windowed 90 exposed vs a posterior fitted on 60 mature
+    // subscribers: without the mature column and the two exclusion counts
+    // an operator has no way to tell which number the posterior used.
+    renderWithRouter(
+      <VariantsTable variants={[makeRow()]} showAttributed={false} />,
+    );
+    await settle();
+
+    expect(screen.getByText("90")).toBeInTheDocument();
+    expect(screen.getByText("60")).toBeInTheDocument();
+    expect(screen.getByText("25 / 5")).toBeInTheDocument();
+    expect(screen.getByText("10.00%")).toBeInTheDocument();
+  });
+
+  it("renders a dash, not 0%, when there are no mature users yet", async () => {
+    renderWithRouter(
+      <VariantsTable
+        variants={[makeRow({ matureUsers: 0, converters: 0, conversionRate: null })]}
+        showAttributed={false}
+      />,
+    );
+    await settle();
+
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 });

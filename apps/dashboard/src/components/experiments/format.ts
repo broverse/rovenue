@@ -238,6 +238,13 @@ export function mapResultsVariants(
     exposures: v.exposures,
     uniqueUsers: v.uniqueUsers,
     attributedConversions: showAttributed ? v.attributedConversions : null,
+    // The windowed figures ride alongside the un-windowed ones so the
+    // table can show the denominator the posterior was actually fitted on.
+    matureUsers: v.matureUsers,
+    converters: v.converters,
+    conversionRate: v.conversionRate,
+    excludedImmature: v.excludedImmature,
+    excludedCrossover: v.excludedCrossover,
     colorToken: colorForIndex(i),
     // Best-effort: the wire type carries no explicit "is control" flag,
     // but `control` is the conventional id (see new-experiment's

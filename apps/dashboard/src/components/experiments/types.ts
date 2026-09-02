@@ -78,6 +78,24 @@ export type ResultVariantRow = {
   exposures: number;
   uniqueUsers: number;
   attributedConversions: number | null;
+  /**
+   * The WINDOWED denominator — exposed subscribers whose maturation window
+   * has fully elapsed and who were never exposed to another variant. This
+   * is what every posterior on the row was fitted on, so it belongs beside
+   * them; `uniqueUsers` above is the un-windowed SRM denominator and is a
+   * different number.
+   */
+  matureUsers: number;
+  /** Mature subscribers with strictly positive net revenue in their own
+   *  window, and their rate over `matureUsers`. `null` rate when there are
+   *  no mature users — never 0, which would read as "nobody converted". */
+  converters: number;
+  conversionRate: number | null;
+  /** Why `matureUsers` is below `uniqueUsers`: window not yet elapsed, or
+   *  exposure to more than one variant. Together with `matureUsers` these
+   *  account for every exposed subscriber. */
+  excludedImmature: number;
+  excludedCrossover: number;
   colorToken: VariantColorToken;
   isControl: boolean;
   /**

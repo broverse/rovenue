@@ -3214,6 +3214,9 @@
         "variant": "Variant",
         "exposures": "Exposures",
         "users": "Users",
+        "matureUsers": "Mature",
+        "excluded": "Excluded",
+        "conversionRate": "Conv. rate",
         "attributed": "Attributed",
         "rate": "Rate",
         "posteriorMean": "Posterior mean",
@@ -3221,7 +3224,9 @@
         "probabilityBest": "P(best)",
         "expectedLoss": "Expected loss"
       },
-      "notEnoughData": "Not enough data yet"
+      "notEnoughData": "Not enough data yet",
+      "excludedTitle": "Immature (window not elapsed) / crossover (seen under more than one variant)",
+      "denominatorNote": "Users is the exposed count SRM checks. Mature is the windowed, crossover-free count every posterior and Conv. rate is computed over; Excluded shows the two reasons for the difference."
     },
     "funnel": {
       "title": "Conversion funnel",
@@ -3250,6 +3255,9 @@
       "srmPassed": "passed · p={{pValue}}",
       "srmMismatch": "mismatch · p={{pValue}}",
       "srmUnavailable": "Not enough data yet",
+      "crossover": "Crossover",
+      "crossoverRate": "{{rate}}% of exposed subscribers saw more than one variant",
+      "crossoverUnavailable": "No exposures yet",
       "sampleSize": "Sample size",
       "sampleSizeProgress": "{{required}} required · {{reached}}",
       "sampleSizeReached": "reached",
