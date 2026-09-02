@@ -161,7 +161,7 @@ because it was resolved and frozen before the experiment was created. The
 device only sees the element variant once it reaches the network again and
 re-resolves the placement live.
 
-## The offline fallback file serves control
+## The offline fallback file freezes the menu, not the decision
 
 The dashboard's bundled fallback-file export
 (`GET /dashboard/projects/:projectId/paywalls/fallback-export`) resolves
@@ -170,7 +170,7 @@ and is bundled into the app before it ships. Because it is generated before
 any subscriber exists to draw a variant for, what it captures for an
 experiment-targeted placement is the undrawn menu as of export time: the
 same shape a live anonymous request would return, with no variant singled
-out yet. In that sense the bundled file itself serves control — it freezes
+out yet. So the bundled file is an undrawn menu, not a decision — it freezes
 whatever the placement resolved to at export time, before any per-subscriber
 draw has happened.
 

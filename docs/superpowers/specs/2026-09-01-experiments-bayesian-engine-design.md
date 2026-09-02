@@ -318,8 +318,14 @@ Consequences to accept and document:
 
 - The envelope grows by roughly one snapshot per extra variant, for ELEMENT experiments
   only. State the size implication; two variants is the normal case.
-- The **offline fallback file serves the control**, since it is bundled before any draw.
-  This is correct and must be stated in the docs, not discovered.
+- The **offline fallback file freezes the undrawn menu**, not a decision. Corrected
+  2026-09-02 during implementation: an earlier draft of this spec said it "serves the
+  control", which is wrong. `GET /dashboard/projects/:projectId/paywalls/fallback-export`
+  calls the same `resolvePlacement` anonymously, so the bundled file carries the full
+  materialised variant list and the SDK draws from it with the same deterministic
+  bucketing it uses online. What is actually frozen is the export's freshness: a file
+  taken before an experiment started knows nothing about it until the device re-resolves
+  live. State that in the docs, not the original claim.
 - A patch naming a `nodeId` that no longer exists in the paywall must fail **at experiment
   save time**, not silently at resolve time.
 
