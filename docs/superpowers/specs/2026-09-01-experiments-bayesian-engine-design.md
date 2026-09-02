@@ -523,8 +523,8 @@ files — that harness exists precisely because reading was not enough.
     control is not shipped.
 13. An experiments docs page exists and states the decision rule, what expected loss does
     and does not guarantee, the log-normal revenue model, the maturation window, the
-    refunded-converter semantics, holdout semantics, and that the offline fallback serves
-    control.
+    refunded-converter semantics, holdout semantics, and that the offline fallback file
+    freezes the undrawn menu rather than serving control (see §4.3's correction).
 14. No statistical parameter appears as a literal at a call site: MDE, α, power, credible
     level, prior, expected-loss threshold, Monte Carlo draws, maturation window and minimum
     weekly cycles are each a named constant or an experiment field.

@@ -26,9 +26,16 @@ interface VersionRow {
 export interface PublishedPaywallConfig {
   /** The published tree, or null while loading / when nothing is published. */
   config: BuilderConfig | null;
-  /** False when the paywall has never been published at all. */
+  /** False when the paywall has never been published at all. Only meaningful
+   *  when `isError` is false — a failed lookup knows nothing either way. */
   hasPublishedVersion: boolean;
   isLoading: boolean;
+  /** True when the lookup itself failed. Distinct from
+   *  `hasPublishedVersion: false`: "we could not check" and "there is no
+   *  published version" are different claims, and telling an operator to
+   *  publish a paywall that is already published would be a confident lie
+   *  about the one thing this hook exists to establish. */
+  isError: boolean;
 }
 
 export function usePublishedPaywallConfig(
@@ -71,6 +78,7 @@ export function usePublishedPaywallConfig(
 
   return {
     config: configQuery.data?.version.builderConfig ?? null,
+    isError: versionsQuery.isError || configQuery.isError,
     // Only meaningful once the versions list has resolved; until then the
     // caller sees `isLoading` and must not conclude "never published".
     hasPublishedVersion: versionsQuery.isSuccess && liveVersionNo !== null,

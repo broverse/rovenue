@@ -1727,7 +1727,8 @@
           "variantB": "B (candidate)",
           "variantBLight": "B (candidate) — light",
           "variantBDark": "B (candidate) — dark (optional)",
-          "invalidValue": "That is not a valid value for “{{prop}}” on a {{type}} element."
+          "invalidValue": "That is not a valid value for “{{prop}}” on a {{type}} element.",
+          "lookupFailed": "Could not read the published version. Retry before starting an element test."
         }
       },
       "locales": {

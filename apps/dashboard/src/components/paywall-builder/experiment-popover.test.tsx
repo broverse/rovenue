@@ -314,7 +314,7 @@ beforeEach(() => {
   mockedUseCreateExperiment.mockReturnValue(createExperimentResult());
   mockedUsePublishedConfig.mockReturnValue({
     config: null,
-    hasPublishedVersion: false,
+    hasPublishedVersion: false, isError: false,
     isLoading: false,
   });
 });
@@ -663,11 +663,26 @@ async function renderInElementMode(
 describe("ExperimentPopover — element mode", () => {
   it("blocks and explains when the paywall has never been published", async () => {
     await renderInElementMode(
-      { config: null, hasPublishedVersion: false, isLoading: false },
+      { config: null, hasPublishedVersion: false, isError: false, isLoading: false },
       "n_div",
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(/never been published/i);
+    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
+  });
+
+  it("says the lookup FAILED rather than claiming the paywall is unpublished", async () => {
+    // "We could not check" and "there is no published version" are different
+    // claims. Reporting the first as the second would tell an operator to
+    // publish a paywall that may already be published.
+    await renderInElementMode(
+      { config: null, hasPublishedVersion: false, isError: true, isLoading: false },
+      "n_div",
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/could not read the published version/i);
+    expect(status).not.toHaveTextContent(/never been published/i);
     expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
   });
 
@@ -677,7 +692,7 @@ describe("ExperimentPopover — element mode", () => {
     await renderInElementMode(
       {
         config: publishedConfigWithDivider(),
-        hasPublishedVersion: true,
+        hasPublishedVersion: true, isError: false,
         isLoading: false,
       },
       "n_added_in_draft",
@@ -693,7 +708,7 @@ describe("ExperimentPopover — element mode", () => {
     await renderInElementMode(
       {
         config: publishedConfigWithDivider(),
-        hasPublishedVersion: true,
+        hasPublishedVersion: true, isError: false,
         isLoading: false,
       },
       "n_div",
@@ -754,7 +769,7 @@ describe("ExperimentPopover — element mode", () => {
     await renderInElementMode(
       {
         config: publishedConfigWithDivider(),
-        hasPublishedVersion: true,
+        hasPublishedVersion: true, isError: false,
         isLoading: false,
       },
       "n_div",
@@ -797,7 +812,7 @@ describe("ExperimentPopover — element mode", () => {
     await renderInElementMode(
       {
         config: publishedConfigWithDivider(),
-        hasPublishedVersion: true,
+        hasPublishedVersion: true, isError: false,
         isLoading: false,
       },
       "n_div",
@@ -833,7 +848,7 @@ describe("ExperimentPopover — element create state", () => {
     await renderInElementMode(
       {
         config: publishedConfigWithDivider(),
-        hasPublishedVersion: true,
+        hasPublishedVersion: true, isError: false,
         isLoading: false,
       },
       "n_div",
@@ -851,7 +866,7 @@ describe("ExperimentPopover — element create state", () => {
     await renderInElementMode(
       {
         config: publishedConfigWithDivider(),
-        hasPublishedVersion: true,
+        hasPublishedVersion: true, isError: false,
         isLoading: false,
       },
       "n_div",
@@ -871,7 +886,7 @@ describe("ExperimentPopover — element create state", () => {
     await renderInElementMode(
       {
         config: publishedConfigWithDivider(),
-        hasPublishedVersion: true,
+        hasPublishedVersion: true, isError: false,
         isLoading: false,
       },
       "n_div",

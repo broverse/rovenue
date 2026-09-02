@@ -378,6 +378,15 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
   /** Why the element form cannot be submitted yet, or null when it can. */
   const elementBlocker: string | null = (() => {
     if (published.isLoading) return null;
+    if (published.isError) {
+      // "We could not check" is not "there is nothing published". Telling an
+      // operator to publish a paywall that is already published would be a
+      // confident lie about the one fact this flow turns on.
+      return t(
+        "paywalls.builder.experiment.element.lookupFailed",
+        "Could not read the published version. Retry before starting an element test.",
+      );
+    }
     if (!published.hasPublishedVersion) {
       return t(
         "paywalls.builder.experiment.element.neverPublished",
