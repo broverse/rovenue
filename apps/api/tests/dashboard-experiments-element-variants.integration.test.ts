@@ -85,7 +85,13 @@ const BUILDER_CONFIG = {
     type: "stack" as const,
     id: "root",
     axis: "v" as const,
-    children: [{ type: "text" as const, id: "t1", key: "title_key" }],
+    children: [
+      { type: "text" as const, id: "t1", key: "title_key" },
+      // A divider gives the type checks below something with a NUMERIC
+      // prop (`thickness`) and an OBJECT-valued one (`color: ThemeColor`)
+      // — the two shapes a string-only client editor gets wrong.
+      { type: "divider" as const, id: "d1" },
+    ],
   },
 };
 
@@ -387,6 +393,137 @@ describe("POST /experiments — ELEMENT variant enforcement", () => {
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/not overridable/);
     expect(body.error.message).toMatch(/axis/);
+  });
+
+  it("400s when an allowlisted prop carries a wrong-typed VALUE", async () => {
+    // `thickness` IS in OVERRIDABLE_PROP_KEYS.divider, so the key
+    // allowlist passes it. `DividerNode.thickness` is `z.number()`; a
+    // string here would be spread onto the node by `applyTreeOp`'s
+    // `updateProps` and shipped verbatim to the web, SwiftUI and Android
+    // decoders. The re-parse of the PATCHED node is what catches it.
+    const { userId, cookie } = await createUserAndSession("create-bad-type");
+    const project = await seedProject("create-bad-type");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "create-bad-type");
+    const paywall = await seedPaywallWithBuilderConfig(project.id, offering.id, "create-bad-type");
+    const audience = await seedAudience(project.id, "create-bad-type");
+
+    const app = buildApp();
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Element Experiment Bad Type",
+        type: "ELEMENT",
+        audienceId: audience.id,
+        variants: [
+          {
+            id: "control",
+            name: "Control",
+            value: { paywallId: paywall.id, nodeId: "d1", props: { thickness: "1" } },
+            weight: 0.5,
+          },
+          {
+            id: "variant_a",
+            name: "Variant A",
+            value: { paywallId: paywall.id, nodeId: "d1", props: { thickness: "8" } },
+            weight: 0.5,
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/invalid value/);
+    expect(body.error.message).toMatch(/thickness/);
+  });
+
+  it("400s when an object-valued prop arrives stringified", async () => {
+    // `divider.color` is a `ThemeColor` ({light, dark?}). A client that
+    // coerces with `String(node.color)` produces "[object Object]".
+    const { userId, cookie } = await createUserAndSession("create-str-obj");
+    const project = await seedProject("create-str-obj");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "create-str-obj");
+    const paywall = await seedPaywallWithBuilderConfig(project.id, offering.id, "create-str-obj");
+    const audience = await seedAudience(project.id, "create-str-obj");
+
+    const app = buildApp();
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Element Experiment Stringified Colour",
+        type: "ELEMENT",
+        audienceId: audience.id,
+        variants: [
+          {
+            id: "control",
+            name: "Control",
+            value: { paywallId: paywall.id, nodeId: "d1", props: { color: "[object Object]" } },
+            weight: 0.5,
+          },
+          {
+            id: "variant_a",
+            name: "Variant A",
+            value: { paywallId: paywall.id, nodeId: "d1", props: { color: "#ff0000" } },
+            weight: 0.5,
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/color/);
+  });
+
+  it("accepts correctly-typed values for the same props", async () => {
+    const { userId, cookie } = await createUserAndSession("create-good-type");
+    const project = await seedProject("create-good-type");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "create-good-type");
+    const paywall = await seedPaywallWithBuilderConfig(project.id, offering.id, "create-good-type");
+    const audience = await seedAudience(project.id, "create-good-type");
+
+    const app = buildApp();
+    const res = await app.request("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        projectId: project.id,
+        name: "Element Experiment Good Type",
+        type: "ELEMENT",
+        audienceId: audience.id,
+        variants: [
+          {
+            id: "control",
+            name: "Control",
+            value: {
+              paywallId: paywall.id,
+              nodeId: "d1",
+              props: { thickness: 1, color: { light: "#000000" } },
+            },
+            weight: 0.5,
+          },
+          {
+            id: "variant_a",
+            name: "Variant A",
+            value: {
+              paywallId: paywall.id,
+              nodeId: "d1",
+              props: { thickness: 8, color: { light: "#FF0000", dark: "#FF6666" } },
+            },
+            weight: 0.5,
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
   });
 
   it("400s when the target paywall has never been published (FIX 2: validate against published, not draft)", async () => {

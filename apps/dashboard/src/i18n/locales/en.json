@@ -1724,7 +1724,10 @@
           "selected": "Testing {{type}} “{{id}}” from the published version.",
           "prop": "Property",
           "variantA": "A (published)",
-          "variantB": "B (candidate)"
+          "variantB": "B (candidate)",
+          "variantBLight": "B (candidate) — light",
+          "variantBDark": "B (candidate) — dark (optional)",
+          "invalidValue": "That is not a valid value for “{{prop}}” on a {{type}} element."
         }
       },
       "locales": {

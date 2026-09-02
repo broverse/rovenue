@@ -46,7 +46,14 @@ function extractPaywallNodeSchema(): z.ZodType<PaywallNode> {
   return arraySchema.element as z.ZodType<PaywallNode>;
 }
 
-const paywallNodeSchema: z.ZodType<PaywallNode> = extractPaywallNodeSchema();
+/**
+ * Exported so a server-side writer can re-validate a node it has PATCHED
+ * against the same strict union the builder config itself is parsed with.
+ * `updateProps` below is a bare spread — it cannot type-check the patch —
+ * so anything that accepts a caller-supplied patch (ELEMENT experiment
+ * variants) must re-parse the result rather than trust a key allowlist.
+ */
+export const paywallNodeSchema: z.ZodType<PaywallNode> = extractPaywallNodeSchema();
 
 export const paywallTreeOpSchema: z.ZodType<PaywallTreeOp> = z.discriminatedUnion("kind", [
   z.object({

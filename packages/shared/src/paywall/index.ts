@@ -6,5 +6,5 @@ export * from "./visibility";
 export * from "./icon-registry";
 export { diffBuilderConfigs } from "./diff";
 export type { BuilderConfigDiffEntry } from "./diff";
-export { applyTreeOp, findNode, paywallTreeOpSchema, TreeOpError } from "./tree-op";
+export { applyTreeOp, findNode, paywallNodeSchema, paywallTreeOpSchema, TreeOpError } from "./tree-op";
 export type { PaywallTreeOp } from "./tree-op";

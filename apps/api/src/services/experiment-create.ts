@@ -11,7 +11,12 @@ import {
   experimentSchema as sharedExperimentSchema,
   type Variant as ExperimentVariant,
 } from "@rovenue/shared";
-import { OVERRIDABLE_PROP_KEYS, findNode, type BuilderConfig } from "@rovenue/shared/paywall";
+import {
+  OVERRIDABLE_PROP_KEYS,
+  findNode,
+  paywallNodeSchema,
+  type BuilderConfig,
+} from "@rovenue/shared/paywall";
 import {
   BLOCKED_SUCCESSOR_GRACE_MS,
   HOLDOUT_COHORT_ID,
@@ -211,7 +216,65 @@ export async function assertElementVariantsValid(
         });
       }
     }
+    assertPatchedNodeParses(node, value.nodeId, value.props);
   }
+}
+
+/**
+ * The allowlist above says WHICH props may be overridden. It says nothing
+ * about what a valid VALUE for one is, and `applyTreeOp`'s `updateProps` is
+ * a bare `{ ...node, ...patch }` with no re-parse — so before this check a
+ * client could store `divider.thickness = "8"` (schema: `z.number()`) or
+ * `divider.color = "[object Object]"` (schema: `ThemeColor`), and the
+ * materialiser would ship that node verbatim into
+ * `variants[].paywall.builderConfig` and out to the web, SwiftUI and
+ * Android Views decoders. A key-only allowlist is a hand-maintained link
+ * between two lists; re-parsing the PATCHED node against the same strict
+ * union the builder config itself is built from is a structural guarantee
+ * that moves with the schema.
+ *
+ * Failures are attributed to the patch, not to the node: only issues whose
+ * path starts at a key this patch actually wrote are treated as this
+ * caller's fault. A published tree that predates a schema change is a
+ * separate problem and must not make an unrelated element experiment
+ * unsaveable.
+ */
+function assertPatchedNodeParses(
+  node: object,
+  nodeId: string,
+  props: Record<string, unknown>,
+): void {
+  if (paywallNodeSchema.safeParse({ ...node, ...props }).success) return;
+  // Attribution, not blanket rejection: if the node did not parse BEFORE
+  // the patch either, the published tree predates a schema change and this
+  // caller is not at fault.
+  if (!paywallNodeSchema.safeParse(node).success) return;
+
+  throw new HTTPException(400, {
+    message: `ELEMENT experiment variant sets an invalid value on node "${nodeId}" — ${describeInvalidProps(node, props)}`,
+  });
+}
+
+/**
+ * A per-prop diagnosis. `paywallNodeSchema` is a `z.union`, so a whole-node
+ * failure surfaces as one opaque `invalid_union` issue with no path — of no
+ * use to an operator. Re-parsing the node with ONE prop applied at a time
+ * isolates which prop is at fault, and the node's declared `type` names the
+ * expected shape.
+ */
+function describeInvalidProps(
+  node: object,
+  props: Record<string, unknown>,
+): string {
+  const nodeType = (node as { type?: unknown }).type;
+  const bad = Object.entries(props)
+    .filter(
+      ([key, value]) =>
+        !paywallNodeSchema.safeParse({ ...node, [key]: value }).success,
+    )
+    .map(([key, value]) => `${key} (got ${JSON.stringify(value) ?? typeof value})`);
+  const which = bad.length > 0 ? bad.join(", ") : Object.keys(props).join(", ");
+  return `${which} is not a valid value for node type "${String(nodeType)}"`;
 }
 
 /**

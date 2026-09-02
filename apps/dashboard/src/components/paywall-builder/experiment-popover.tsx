@@ -22,7 +22,12 @@ import { useProjectPlacements } from "../../lib/hooks/useProjectPlacements";
 import { useAudiences } from "../../lib/hooks/useProjectAdmin";
 import { useCreateExperiment } from "../../lib/hooks/useExperiments";
 import { usePublishedPaywallConfig } from "../../lib/hooks/usePublishedPaywallConfig";
-import { findNode, OVERRIDABLE_PROP_KEYS } from "@rovenue/shared/paywall";
+import {
+  findNode,
+  OVERRIDABLE_PROP_KEYS,
+  paywallNodeSchema,
+  type PaywallNode,
+} from "@rovenue/shared/paywall";
 
 type Props = { onClose: () => void };
 
@@ -33,6 +38,75 @@ const VARIANT_B_ID = "b";
 /** An element test is a straight 50/50 between the published value and the
  *  candidate — there is no third thing to weight. */
 const ELEMENT_VARIANT_WEIGHT = 0.5;
+
+// -------------------------------------------------------------
+// Typed element props
+// -------------------------------------------------------------
+//
+// `OVERRIDABLE_PROP_KEYS` is mostly NOT strings: `divider.thickness` and
+// `stack.spacing` are numbers, `*.background` / `text.color` are
+// `ThemeColor` ({light, dark?}), `*.border` is a `NodeBorder`. A free-text
+// editor that sends `String(value)` produces `thickness: "8"` and, for the
+// object-valued props, the literal `"[object Object]"` — values the three
+// renderers' decoders are not typed for.
+//
+// The editor shape is DERIVED from the schema by probing it, never from a
+// hand-written prop→type table: such a table is the hand-maintained link
+// this branch exists to remove, and it would drift the moment a prop's
+// type changed in `schema.ts`. `paywallNodeSchema` is the same strict union
+// the server re-validates the patched node against, so client and server
+// agree by construction.
+
+type ElementPropEditor = "text" | "number" | "color";
+
+const PROBE_NUMBER = 1;
+const PROBE_THEME_COLOR = { light: "#000000" } as const;
+
+/** Does the published node still parse with `prop` set to `value`? */
+function nodeAccepts(node: PaywallNode, prop: string, value: unknown): boolean {
+  return paywallNodeSchema.safeParse({ ...node, [prop]: value }).success;
+}
+
+/**
+ * Number and ThemeColor are recognised by probe. Everything else — plain
+ * strings AND enums like `align` / `style`, which no single probe value can
+ * stand in for — falls to `text`, where what the operator typed is checked
+ * against the schema before the form can be submitted. So an enum prop
+ * still works (type a valid member), and a prop no text can express
+ * (`border`) simply never validates and says so.
+ */
+function detectPropEditor(node: PaywallNode, prop: string): ElementPropEditor {
+  if (nodeAccepts(node, prop, PROBE_NUMBER)) return "number";
+  if (nodeAccepts(node, prop, PROBE_THEME_COLOR)) return "color";
+  return "text";
+}
+
+/** The candidate value, in the prop's own type, or `undefined` when the
+ *  inputs cannot yet form one. */
+function encodeElementValue(
+  editor: ElementPropEditor,
+  light: string,
+  dark: string,
+): unknown {
+  const value = light.trim();
+  if (value.length === 0) return undefined;
+  if (editor === "number") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  if (editor === "color") {
+    const darkValue = dark.trim();
+    return darkValue.length > 0 ? { light: value, dark: darkValue } : { light: value };
+  }
+  return value;
+}
+
+/** How a published value is shown in the read-only "A" field. */
+function displayElementValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
 
 /** `<select>` sentinel meaning "no match-all audience exists yet — one will be created". */
 const EVERYONE_WILL_BE_CREATED_VALUE = "";
@@ -170,6 +244,9 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
   // be sure they mean.
   const [elementProp, setElementProp] = useState<string | null>(null);
   const [elementVariantB, setElementVariantB] = useState("");
+  /** Only used by the `color` editor — the optional dark-mode member of
+   *  `ThemeColor`. Blank means "omit `dark`", which is a valid ThemeColor. */
+  const [elementVariantBDark, setElementVariantBDark] = useState("");
   const [name, setName] = useState<string | null>(null);
   const [variantBKind, setVariantBKind] = useState<VariantBKind>("duplicate");
   const [duplicateName, setDuplicateName] = useState<string | null>(null);
@@ -259,14 +336,36 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
     : [];
   const elementPropValue =
     elementProp ?? (overridableProps.length > 0 ? overridableProps[0]! : null);
-  const variantAValue =
+  // Variant A is the PUBLISHED value in its own type — read off the node,
+  // never stringified. When the prop is absent on the published node, A's
+  // patch is empty, which materialises to exactly the published node.
+  const variantAHasValue =
+    publishedNode !== null &&
+    elementPropValue !== null &&
+    (publishedNode as unknown as Record<string, unknown>)[elementPropValue] !==
+      undefined;
+  const variantARaw =
     publishedNode && elementPropValue
-      ? String(
-          (publishedNode as unknown as Record<string, unknown>)[
-            elementPropValue
-          ] ?? "",
-        )
-      : "";
+      ? (publishedNode as unknown as Record<string, unknown>)[elementPropValue]
+      : undefined;
+  const variantAValue = displayElementValue(variantARaw);
+  const elementEditor: ElementPropEditor =
+    publishedNode && elementPropValue
+      ? detectPropEditor(publishedNode, elementPropValue)
+      : "text";
+  const variantBRaw = encodeElementValue(
+    elementEditor,
+    elementVariantB,
+    elementVariantBDark,
+  );
+  /** The candidate must produce a node the schema still accepts — the same
+   *  check `assertPatchedNodeParses` makes server-side, so a rejected value
+   *  is caught here instead of arriving as a 400. */
+  const variantBValid =
+    publishedNode !== null &&
+    elementPropValue !== null &&
+    variantBRaw !== undefined &&
+    nodeAccepts(publishedNode, elementPropValue, variantBRaw);
   /** Why the element form cannot be submitted yet, or null when it can. */
   const elementBlocker: string | null = (() => {
     if (published.isLoading) return null;
@@ -308,8 +407,8 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
     elementBlocker === null &&
     !published.isLoading &&
     elementPropValue !== null &&
-    elementVariantB.trim().length > 0 &&
-    elementVariantB.trim() !== variantAValue;
+    variantBValid &&
+    JSON.stringify(variantBRaw ?? null) !== JSON.stringify(variantARaw ?? null);
 
   const canCreate =
     kind === "ELEMENT"
@@ -341,7 +440,9 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
               value: {
                 paywallId: paywall.id,
                 nodeId: selectedNodeId,
-                props: { [elementPropValue]: variantAValue },
+                props: variantAHasValue
+                ? { [elementPropValue]: variantARaw }
+                : {},
               },
               weight: ELEMENT_VARIANT_WEIGHT,
             },
@@ -351,7 +452,7 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
               value: {
                 paywallId: paywall.id,
                 nodeId: selectedNodeId,
-                props: { [elementPropValue]: elementVariantB.trim() },
+                props: { [elementPropValue]: variantBRaw },
               },
               weight: ELEMENT_VARIANT_WEIGHT,
             },
@@ -653,6 +754,7 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                           onChange={(e) => {
                             setElementProp(e.target.value);
                             setElementVariantB("");
+                            setElementVariantBDark("");
                           }}
                         >
                           {overridableProps.map((prop) => (
@@ -670,13 +772,45 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                       </label>
                       <label className="flex flex-col gap-1.5">
                         <span className="text-[11px] text-rv-mute-500">
-                          {t("paywalls.builder.experiment.element.variantB", "B (candidate)")}
+                          {elementEditor === "color"
+                            ? t(
+                                "paywalls.builder.experiment.element.variantBLight",
+                                "B (candidate) — light",
+                              )
+                            : t("paywalls.builder.experiment.element.variantB", "B (candidate)")}
                         </span>
                         <Input
                           value={elementVariantB}
+                          inputMode={elementEditor === "number" ? "decimal" : undefined}
                           onChange={(e) => setElementVariantB(e.target.value)}
                         />
                       </label>
+                      {elementEditor === "color" && (
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-[11px] text-rv-mute-500">
+                            {t(
+                              "paywalls.builder.experiment.element.variantBDark",
+                              "B (candidate) — dark (optional)",
+                            )}
+                          </span>
+                          <Input
+                            value={elementVariantBDark}
+                            onChange={(e) => setElementVariantBDark(e.target.value)}
+                          />
+                        </label>
+                      )}
+                      {elementVariantB.trim().length > 0 && !variantBValid && (
+                        <p
+                          role="status"
+                          className="m-0 rounded-md border border-rv-warning/40 bg-rv-warning/10 px-3 py-2 text-[12px] text-foreground"
+                        >
+                          {t(
+                            "paywalls.builder.experiment.element.invalidValue",
+                            "That is not a valid value for “{{prop}}” on a {{type}} element.",
+                            { prop: elementPropValue ?? "", type: publishedNode!.type },
+                          )}
+                        </p>
+                      )}
                     </>
                   )}
                 </div>

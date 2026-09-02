@@ -724,14 +724,93 @@ describe("ExperimentPopover — element mode", () => {
       variants: Array<{ id: string; value: unknown; weight: number }>;
     };
     expect(vars.type).toBe("ELEMENT");
+    // NUMBERS, not strings. `DividerNode.thickness` is `z.number()`, and
+    // `applyTreeOp`'s `updateProps` is a bare spread — a string here would
+    // be materialised into `variants[].paywall.builderConfig` and shipped
+    // to the web, SwiftUI and Android decoders as a type violation.
     expect(vars.variants.map((v) => v.value)).toEqual([
-      { paywallId: "pw_a", nodeId: "n_div", props: { thickness: "1" } },
-      { paywallId: "pw_a", nodeId: "n_div", props: { thickness: "8" } },
+      { paywallId: "pw_a", nodeId: "n_div", props: { thickness: 1 } },
+      { paywallId: "pw_a", nodeId: "n_div", props: { thickness: 8 } },
     ]);
+    for (const v of vars.variants) {
+      const props = (v.value as { props: Record<string, unknown> }).props;
+      expect(typeof props.thickness).toBe("number");
+    }
 
     // The builder autosaves, so a server-side write to the paywall body
     // would be clobbered by the next autosave. Launching an element test
     // must only CREATE AN EXPERIMENT that references the paywall.
     expect(launchPost).not.toHaveBeenCalled();
+  });
+
+  it("sends a ThemeColor object for an object-valued prop, never a stringified one", async () => {
+    // `divider.color` is the FIRST-listed overridable prop, so this is the
+    // default gesture. `String({light: "#fff"})` is "[object Object]".
+    await renderInElementMode(
+      {
+        config: publishedConfigWithDivider(),
+        hasPublishedVersion: true,
+        isLoading: false,
+      },
+      "n_div",
+    );
+
+    expect((screen.getByLabelText(/property/i) as HTMLSelectElement).value).toBe(
+      "color",
+    );
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/B \(candidate\) — light/i), {
+        target: { value: "#FF0000" },
+      });
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/B \(candidate\) — dark/i), {
+        target: { value: "#FF6666" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /create/i }));
+    });
+
+    const vars = createElementMutate.mock.calls[0]![0] as {
+      variants: Array<{ value: unknown }>;
+    };
+    // The published divider has no `color`, so A's patch is EMPTY — which
+    // materialises to exactly the published node, rather than to a
+    // fabricated `color: ""`.
+    expect(vars.variants.map((v) => v.value)).toEqual([
+      { paywallId: "pw_a", nodeId: "n_div", props: {} },
+      {
+        paywallId: "pw_a",
+        nodeId: "n_div",
+        props: { color: { light: "#FF0000", dark: "#FF6666" } },
+      },
+    ]);
+  });
+
+  it("blocks a candidate the node schema rejects, instead of posting it", async () => {
+    await renderInElementMode(
+      {
+        config: publishedConfigWithDivider(),
+        hasPublishedVersion: true,
+        isLoading: false,
+      },
+      "n_div",
+    );
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/property/i), {
+        target: { value: "thickness" },
+      });
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/B \(candidate\)/i), {
+        target: { value: "thick" },
+      });
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(/not a valid value/i);
+    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
+    expect(createElementMutate).not.toHaveBeenCalled();
   });
 });
