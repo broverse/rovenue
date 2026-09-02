@@ -1,21 +1,21 @@
 # Rovenue Roadmap
 
 Goal: close the gap with RevenueCat / Adapty in every area — target **95%** parity (or better) per area.
-Scores are a self-assessment of "% of a mature best-in-class solution" as of 2026-08-25.
+Scores are a self-assessment of "% of a mature best-in-class solution" as of 2026-09-02.
 
 | # | Area | Now | Target |
 |---|------|-----|--------|
 | 1 | Store integrations & receipt validation | 75% | 95% |
 | 2 | Subscription state & entitlements | 85% | 95% |
 | 3 | Paywall builder & native rendering | 85% | 95% |
-| 4 | A/B testing & experiments | 75% | 90%+ |
+| 4 | A/B testing & experiments | 88% | 90%+ |
 | 5 | Analytics (MRR / LTV / cohorts) | 90% | 95% |
 | 6 | Third-party integrations | 90% | 95% |
-| 7 | SDK platform coverage | 55% | 95% |
+| 7 | SDK platform coverage | 70% | 95% |
 | 8 | Self-hosting & data ownership | 95% | keep |
 | 9 | GDPR / KVKK tooling | 85% | 95% |
 | 10 | Production maturity & scale proof | 45% | 95% |
-| 11 | Docs & developer experience | 65% | 95% |
+| 11 | Docs & developer experience | 78% | 95% |
 | 12 | Feature breadth (flags, audiences, leaderboards, credits) | 85% | 95% |
 
 ## Priority order (impact / cost)
@@ -77,14 +77,50 @@ the remaining analytics/experiments/integrations gaps on the way to 95%.
 - [ ] Template gallery: 15–20 proven paywall templates (leverage App Store import)
 - [ ] Localization workflow: in-builder translation management + auto-translate (Rovi)
 
-## 4. A/B testing & experiments (75 → 90+)
+## 4. A/B testing & experiments (75 → 88) — decision engine shipped
 
-- [ ] Sequential/Bayesian statistics engine: revenue-based metrics (ARPU/proceeds) winner
-      selection + expected-loss display
-- [ ] Element-level (single-node) experiments
-- [ ] Holdout groups
-- [ ] Experiment scheduling/sequencing per placement
-- [ ] Confidence intervals + minimum-sample warnings on the results page
+This section previously read as five missing features. It was one missing
+decision rule plus four disconnected wires: the frequentist statistics
+module (`experiment-stats.ts`, Welch cross-check, SRM, sample-size
+estimation) already existed and was already tested; its richest consumer,
+`experiment-engine.getExperimentResults`, was unreachable dead code that the
+routes never called; `ELEMENT` was already a declared experiment type with a
+JSON editor in the builder and no consumer materializing it; and the
+dashboard results page hardcoded `confidence: 0` / `leadingVariant: null`, so
+the "ship the winner" banner had never once rendered. The
+2026-09-01 experiments-decision-engine plan
+(`.superpowers/sdd/2026-09-01-experiments-decision-engine/`) closed the
+actual gap: a Bayesian posterior module, a subscriber-level windowed
+ClickHouse reader, and the single results service (with the dead duplicate
+deleted) that the four-gate stopping rule needed to exist at all.
+
+- [x] Sequential/Bayesian statistics engine: revenue-based metrics (ARPU/proceeds) winner
+      selection + expected-loss display — shipped: `apps/api/src/lib/experiment-bayes.ts`
+      (seeded Monte Carlo posterior, log-normal per-subscriber value model) wired into the
+      single results service (`apps/api/src/services/experiment-results.ts`) behind a
+      four-gate stopping rule (expected loss, sample size, whole weekly cycles, no
+      integrity/guardrail firing); the pre-existing frequentist module now runs alongside it
+      as an assumption-free cross-check, never the decision. `experiment-engine.ts`'s dead
+      `getExperimentResults` path is deleted — one results implementation, not two.
+- [x] Element-level (single-node) experiments — shipped: variants materialize server-side
+      into per-variant paywall snapshots (`materializeElementVariants`); no renderer,
+      `render-fixtures.json`, or emitted paywall JSON changed. Builder support (launch an
+      ELEMENT experiment from the canvas) shipped alongside it.
+- [x] Holdout groups — shipped: project-level holdout percentage, decided server-side in
+      `resolvePlacement` (the variant draw is client-side, so holdout must be decided before
+      the client ever sees an experiment), exposure still recorded against a reserved
+      holdout cohort. Raising the percentage only adds members (safe); lowering removes
+      members whose exposures are already recorded and retroactively mixes cohorts (lossy) —
+      the dashboard warns only on lowering.
+- [x] Experiment scheduling/sequencing per placement — shipped: a scheduler worker with
+      per-row claims (no double-start/double-stop across workers), chaining (a stopped
+      experiment can auto-start the next one queued for its placement), and
+      `autoWinnerOnStop`.
+- [x] Confidence intervals + minimum-sample warnings on the results page — shipped: 95%
+      equal-tailed credible intervals per variant, plus the sample-size/runtime gates
+      surfaced as named blockers (`SAMPLE_SIZE`, `RUNTIME`, `SRM`, `CROSSOVER`,
+      `REFUND_GUARDRAIL`, `EXPECTED_LOSS`, `NO_LEADER`, `PROCEEDS_RATE_UNCONFIGURED`) rather
+      than a single opaque "not ready" state.
 
 ## 5. Analytics (70 → 90) — mostly already shipped; this plan closed the gap
 

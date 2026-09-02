@@ -1,0 +1,187 @@
+---
+title: Experiments
+description: How Rovenue decides an A/B test's winner — the stopping rule, its four gates, and what it does and does not guarantee.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Rovenue's experiments are Bayesian: every result is a posterior distribution
+over a metric (conversion rate, ARPU, or proceeds per user), not a p-value.
+A single decision-engine endpoint backs both the dashboard results page and
+the SDK-facing paywall resolution, so there is exactly one number for any
+given experiment at any given time — never a dashboard figure that disagrees
+with what the SDK actually served.
+
+This page documents the decision rule itself, the assumptions it depends on,
+and — as importantly — the places it is honest about what it cannot tell
+you.
+
+## The stopping rule
+
+A variant is only ever recommended for shipping when **all four** of the
+following hold. Any one of them failing withholds the recommendation
+entirely; the response tells you which gate is blocking (`SAMPLE_SIZE`,
+`RUNTIME`, `SRM`, `CROSSOVER`, `REFUND_GUARDRAIL`, `EXPECTED_LOSS`,
+`NO_LEADER`, `PROCEEDS_RATE_UNCONFIGURED`).
+
+1. **Expected loss** — the leader's expected loss, expressed as a fraction
+   of the control's posterior mean, is below a fixed relative threshold
+   (0.2%). Expressing it as a fraction rather than an absolute amount is
+   what lets the same threshold mean the same thing for a conversion rate
+   and for ARPU.
+2. **Sample size** — every arm has reached the sample size required to
+   detect the experiment's own configured minimum detectable effect.
+3. **Whole weekly cycles** — at least one full week has elapsed since the
+   experiment started, regardless of how quickly clause 2 was satisfied. A
+   high-traffic app can clear any sample threshold inside a single weekday,
+   and shipping on one weekday's user mix is the classic novelty /
+   day-of-week trap. This gate exists specifically to prevent that.
+4. **No integrity or guardrail failure** — none of three checks has fired:
+   a sample-ratio mismatch (the observed traffic split disagrees with the
+   declared weights), excessive crossover contamination (subscribers
+   exposed to more than one variant), or the refund guardrail (the leader's
+   refund rate is meaningfully worse than control's). Unlike the other
+   gates, these three **suppress** the leader outright rather than
+   annotating it — a recommendation rendered next to a warning is a
+   recommendation that gets shipped anyway, so `leadingVariantId` is
+   withheld entirely rather than shown alongside a caveat.
+
+<Callout type="warn">
+**What "expected loss" does and does not guarantee.** Expected loss bounds
+the *expected regret* of shipping the leader, computed under the posterior
+model's own prior. **It is not a Type-I error rate**, and clearing this gate
+is not the same claim as "p < 0.05." Rovenue also does not claim that
+continuously monitoring this number is "safe" in the frequentist sense —
+that guarantee belongs to a different statistical framework and this engine
+does not make it. The fixed-horizon Welch's-t cross-check the results page
+also shows is the closest thing to a frequentist read available here, and it
+is only valid at the experiment's originally planned sample size — never
+during continuous monitoring, and never as the decision itself.
+</Callout>
+
+## The value model, and what it assumes
+
+For revenue-based metrics (ARPU, proceeds per user), Rovenue fits a
+log-normal posterior to each variant's per-converter value: the conversion
+rate and the per-converter value are modeled and drawn independently, then
+multiplied per Monte Carlo draw — never by multiplying their posterior
+means, which is not the same thing for correlated quantities drawn from one
+experiment.
+
+The value factor is fitted **per subscriber**, not per order. A subscriber
+who purchases twice in one experiment contributes one net-revenue figure,
+not two independent data points — treating repeat purchases from the same
+person as independent observations overstates the sample and understates
+uncertainty.
+
+The log-normal assumption has a real, visible failure mode: if every mature
+converter in a variant paid the exact same price (a paywall selling one
+product at one price is the common case), the log-value variance is exactly
+zero. Rovenue treats that as information, not as missing data — the
+posterior mean is exact in that case, and the metric's remaining
+uncertainty lives entirely in the conversion rate, where it belongs. The
+Welch's-t cross-check makes no distributional assumption at all, which is
+why the results page shows both and flags it when they disagree in sign.
+
+## The maturation window
+
+Every subscriber's revenue is counted starting from a fixed number of days
+after their **first exposure** to the experiment — the maturation window.
+Subscribers whose window has not yet fully elapsed are excluded from every
+revenue metric and from the conversion-rate denominator entirely; they are
+not counted as non-converters, because that would penalize a variant purely
+for having gained traffic recently.
+
+<Callout type="info">
+This means **exposures from the last several days are not counted yet.**
+An experiment that looks flat because recent traffic hasn't matured is not
+necessarily flat — check the "excluded (immature)" figure alongside the
+conversion rate before concluding a variant has no effect.
+</Callout>
+
+A subscriber is also excluded — separately, into a "crossover" bucket —
+if they were exposed to more than one variant of the same experiment. A
+crossover rate above a small threshold suppresses the recommendation
+entirely (gate 4 above), because a contaminated split cannot honestly
+attribute an outcome to either arm.
+
+## A fully refunded purchase is not a conversion
+
+A subscriber whose gross revenue is fully offset by refunds within the
+maturation window is **not counted as a converter**. This is a deliberate
+semantic change from what an earlier, now-removed results path reported:
+that older code counted any purchase event as a conversion regardless of
+what happened to it afterward. Net revenue (gross minus refunds) is what
+drives every conversion count, every log-value aggregate, and every
+revenue-per-user figure on this page — a purchase-then-full-refund is
+economically a non-event, and is now reported as one.
+
+Partial refunds still count the subscriber as a converter, but reduce their
+contribution to net revenue accordingly — including going negative for a
+subscriber who was refunded more than they generated (e.g., a chargeback
+against an accumulated balance).
+
+## Holdout groups
+
+A project can reserve a percentage of subscribers as a permanent holdout:
+membership excludes a subscriber from every experiment on every placement,
+serving them the control/default treatment instead — with their exposure
+still recorded (an unmeasured holdout is just a smaller, wasted audience).
+Membership is decided **server-side**, before the client ever receives an
+experiment's variant menu — the variant draw itself is client-side and
+deterministic, so holdout has to be resolved earlier than that, not layered
+on top of it.
+
+<Callout type="warn">
+**Raising and lowering the holdout percentage are not symmetric.**
+Membership is "hash below a threshold," so **raising** the percentage only
+ever adds subscribers and leaves every existing member in place — the
+accumulated comparison stays valid. **Lowering** it removes members whose
+exposures are already recorded, retroactively mixing previously-held-out
+and now-treated data in the same cohort. Raising is safe to do at any time;
+lowering is lossy and should be treated as starting a new comparison, not
+adjusting an old one.
+</Callout>
+
+## Element-level experiments
+
+An experiment can target a single node inside a paywall (a button's label,
+a badge's visibility) rather than swapping the whole paywall. These variants
+are **materialized server-side** into complete per-variant paywall
+snapshots before they are ever sent anywhere — the renderer, the
+`render-fixtures.json` three-platform decoder contract, and the shape of an
+emitted paywall's JSON are all unchanged. From the client's perspective, an
+element experiment and a whole-paywall experiment look identical: a menu of
+full paywall variants to draw from.
+
+That server-side materialization is itself new. **An offline fallback file
+or a cached envelope generated before an element experiment existed on a
+placement predates it entirely** — it has no idea the experiment exists,
+because it was resolved and frozen before the experiment was created. The
+device only sees the element variant once it reaches the network again and
+re-resolves the placement live.
+
+## The offline fallback file serves control
+
+The dashboard's bundled fallback-file export
+(`GET /dashboard/projects/:projectId/paywalls/fallback-export`) resolves
+every active placement **anonymously** — no subscriber id, no attributes —
+and is bundled into the app before it ships. Because it is generated before
+any subscriber exists to draw a variant for, what it captures for an
+experiment-targeted placement is the undrawn menu as of export time: the
+same shape a live anonymous request would return, with no variant singled
+out yet. In that sense the bundled file itself serves control — it freezes
+whatever the placement resolved to at export time, before any per-subscriber
+draw has happened.
+
+The actual variant draw only happens on-device, deterministically, once a
+real subscriber id is available to hash against the experiment's key — the
+same mechanism whether the SDK is reading a live response, a cached one, or
+the bundled fallback. A stale export (taken before an experiment started,
+or before an audience rule changed) means an offline device keeps resolving
+whatever the placement pointed to when the file was generated until it can
+reach the network and re-resolve live — for an experiment-targeted
+placement, that is most often its pre-experiment or default path.
+
+Re-export the fallback file whenever you start, stop, or retarget an
+experiment on a placement you also ship offline coverage for.
