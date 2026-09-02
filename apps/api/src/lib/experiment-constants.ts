@@ -65,6 +65,27 @@ export const REFUND_GUARDRAIL_MARGIN = 0.25;
  *  the log-variance needs at least two. */
 export const MINIMUM_CONVERTERS_FOR_VALUE_MODEL = 2;
 
+/**
+ * Minimum OBSERVED users per variant before that variant gets a posterior
+ * at all.
+ *
+ * `Beta(1, 1)` is a perfectly valid uniform posterior with no data, so
+ * without this an arm with zero mature users comes back mean ≈ 0.5,
+ * `probabilityBest` ≈ 99% against a mature control at 1% — and is elected
+ * leader, rendered as "Confidence 99%", and offered to the manual
+ * Ship-winner button. That is reachable in ordinary operation: with a
+ * 7-day maturation window, any arm whose traffic all arrived in the last
+ * week has zero MATURE users while its sibling has thousands. A number
+ * computed from nothing must not be presented as a decision, so such an
+ * arm is reported `sufficientData: false` — the same treatment a variant
+ * with no fittable value factor already gets.
+ *
+ * One is the minimum that makes the posterior a statement about observed
+ * data rather than about the prior alone; the SAMPLE_SIZE gate is what
+ * decides when there is ENOUGH data to ship on.
+ */
+export const MINIMUM_USERS_FOR_POSTERIOR = 1;
+
 /** Relative tolerance separating a DEGENERATE log-value variance (every
  *  converter paid the same price, so the true variance is exactly zero and
  *  the value is known exactly) from a GENUINELY IMPOSSIBLE one (a negative

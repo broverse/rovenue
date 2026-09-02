@@ -6,6 +6,7 @@ import {
   CREDIBLE_LEVEL,
   DEGENERATE_VARIANCE_RELATIVE_TOLERANCE,
   MINIMUM_CONVERTERS_FOR_VALUE_MODEL,
+  MINIMUM_USERS_FOR_POSTERIOR,
   POSTERIOR_DRAWS,
 } from "./experiment-constants";
 
@@ -326,8 +327,16 @@ export function analyzeBayesian(input: AnalyzeBayesianInput): BayesianAnalysis {
           fitValueFactor(v.converters, v.sumLogValue ?? Number.NaN, v.sumLogValueSquared ?? Number.NaN),
         );
 
-  const included: boolean[] = variants.map((_v, idx) =>
-    metricType === "CONVERSION" ? true : valueFits[idx] !== null,
+  // An arm below MINIMUM_USERS_FOR_POSTERIOR has no posterior, whatever
+  // the metric: Beta(1,1) with no data is a valid UNIFORM posterior, so it
+  // would otherwise report a mean near 0.5 and win `probabilityBest`
+  // outright against a real arm converting at 1%.
+  const included: boolean[] = variants.map((v, idx) =>
+    v.users < MINIMUM_USERS_FOR_POSTERIOR
+      ? false
+      : metricType === "CONVERSION"
+        ? true
+        : valueFits[idx] !== null,
   );
   const includedIndices = included.reduce<number[]>((acc, isIncluded, idx) => {
     if (isIncluded) acc.push(idx);

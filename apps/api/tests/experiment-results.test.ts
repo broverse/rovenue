@@ -708,3 +708,44 @@ describe("computeExperimentResults — project holdout cohort", () => {
     );
   });
 });
+
+// -------------------------------------------------------------
+// An arm with no mature users is not a leader
+// -------------------------------------------------------------
+
+describe("computeExperimentResults — zero-mature-user arm", () => {
+  it("is neither the leader nor reported confident", async () => {
+    // Reachable in ordinary operation: with a maturation window, any arm
+    // whose traffic all arrived inside the window has zero MATURE users
+    // while its sibling has thousands. Before the guard this arm came back
+    // mean 0.4985 / probabilityBest 98.98% — "Confidence 99%" in the hero,
+    // with the manual Ship-winner button enabled.
+    respondWith([
+      variantRow({ variant_id: "control", converters: 2_000 }),
+      variantRow({
+        variant_id: "treatment",
+        unique_users: 20_000,
+        mature_users: 0,
+        converters: 0,
+        revenue_usd: 0,
+        refunds_usd: 0,
+        excluded_immature: 20_000,
+      }),
+    ]);
+
+    const res = await computeExperimentResults("exp_1", "proj_test");
+    const treatment = res.variants.find((v) => v.variantId === "treatment")!;
+
+    expect(treatment.matureUsers).toBe(0);
+    expect(treatment.sufficientData).toBe(false);
+    expect(treatment.posteriorMean).toBeNull();
+    expect(treatment.probabilityBest).toBeNull();
+
+    // `pickLeader` needs at least two arms with a fitted posterior, so
+    // with one excluded there is no leader to ship or to render a
+    // confidence for.
+    expect(res.recommendation.leadingVariantId).toBeNull();
+    expect(res.recommendation.shipRecommended).toBe(false);
+    expect(res.recommendation.blockedBy).toContain("NO_LEADER");
+  });
+});

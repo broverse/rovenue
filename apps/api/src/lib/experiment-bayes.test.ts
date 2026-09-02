@@ -5,6 +5,7 @@ import {
   CREDIBLE_LEVEL,
   DEGENERATE_VARIANCE_RELATIVE_TOLERANCE,
   MINIMUM_CONVERTERS_FOR_VALUE_MODEL,
+  MINIMUM_USERS_FOR_POSTERIOR,
 } from "./experiment-constants";
 
 // =============================================================
@@ -108,7 +109,15 @@ describe("analyzeBayesian — closed-form oracle", () => {
 });
 
 describe("analyzeBayesian — zero-user variant", () => {
-  it("does not produce NaN for a variant with zero users", () => {
+  it("gives a variant with no observed users NO posterior at all", () => {
+    // Beta(1,1) with no data is a perfectly valid UNIFORM posterior: mean
+    // ≈ 0.5, and against a control converting at 5% it wins
+    // `probabilityBest` outright. Reported as a number it becomes
+    // "Confidence 99%" in the hero and enables the manual Ship-winner
+    // button for an arm with zero observations. `null` is the honest
+    // answer.
+    expect(MINIMUM_USERS_FOR_POSTERIOR).toBeGreaterThan(0);
+
     const result = analyzeBayesian({
       experimentId: "exp_zero_users",
       metricType: "CONVERSION",
@@ -118,15 +127,21 @@ describe("analyzeBayesian — zero-user variant", () => {
       ],
     });
 
-    for (const variant of result.variants) {
-      expect(variant.mean).not.toBeNull();
-      expect(Number.isNaN(variant.mean!)).toBe(false);
-      expect(variant.credibleInterval).not.toBeNull();
-      expect(Number.isNaN(variant.credibleInterval![0])).toBe(false);
-      expect(Number.isNaN(variant.credibleInterval![1])).toBe(false);
-      expect(Number.isNaN(variant.probabilityBest!)).toBe(false);
-      expect(Number.isNaN(variant.expectedLoss!)).toBe(false);
-    }
+    const empty = result.variants.find((v) => v.key === "empty")!;
+    expect(empty.sufficientData).toBe(false);
+    expect(empty.mean).toBeNull();
+    expect(empty.credibleInterval).toBeNull();
+    expect(empty.probabilityBest).toBeNull();
+    expect(empty.expectedLoss).toBeNull();
+
+    // The arm that DOES have data is still fitted, and never NaN.
+    const control = result.variants.find((v) => v.key === "control")!;
+    expect(control.sufficientData).toBe(true);
+    expect(Number.isNaN(control.mean!)).toBe(false);
+    expect(Number.isNaN(control.credibleInterval![0])).toBe(false);
+    expect(Number.isNaN(control.credibleInterval![1])).toBe(false);
+    expect(Number.isNaN(control.probabilityBest!)).toBe(false);
+    expect(Number.isNaN(control.expectedLoss!)).toBe(false);
   });
 });
 
