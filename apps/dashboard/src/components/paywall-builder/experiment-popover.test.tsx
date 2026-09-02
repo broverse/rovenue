@@ -132,8 +132,11 @@ const mockedUseCreateExperiment = vi.mocked(useCreateExperiment);
 const mockedUsePublishedConfig = vi.mocked(usePublishedPaywallConfig);
 const createElementMutate = vi.fn();
 
-function createExperimentResult() {
-  return { mutate: createElementMutate, isPending: false, isError: false } as unknown as ReturnType<
+function createExperimentResult({
+  isPending = false,
+  isError = false,
+}: { isPending?: boolean; isError?: boolean } = {}) {
+  return { mutate: createElementMutate, isPending, isError } as unknown as ReturnType<
     typeof useCreateExperiment
   >;
 }
@@ -814,5 +817,113 @@ describe("ExperimentPopover — element mode", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/not a valid value/i);
     expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
     expect(createElementMutate).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------------
+// The create button reads the mutation the current kind uses
+// -------------------------------------------------------------
+
+describe("ExperimentPopover — element create state", () => {
+  it("renders the create error when the ELEMENT mutation rejects", async () => {
+    // `launchExperiment` (the PAYWALL flow) is untouched and reports no
+    // error — reading it here rendered nothing at all when an element
+    // create was rejected by `assertElementVariantsValid`.
+    mockedUseCreateExperiment.mockReturnValue(createExperimentResult({ isError: true }));
+    await renderInElementMode(
+      {
+        config: publishedConfigWithDivider(),
+        hasPublishedVersion: true,
+        isLoading: false,
+      },
+      "n_div",
+    );
+
+    expect(
+      screen.getByText(/Couldn't create the experiment/i),
+    ).toBeInTheDocument();
+  });
+
+  it("disables the create button while the ELEMENT mutation is in flight", async () => {
+    // Otherwise a slow-but-successful create stays clickable and a second
+    // click makes a duplicate DRAFT experiment.
+    mockedUseCreateExperiment.mockReturnValue(createExperimentResult({ isPending: true }));
+    await renderInElementMode(
+      {
+        config: publishedConfigWithDivider(),
+        hasPublishedVersion: true,
+        isLoading: false,
+      },
+      "n_div",
+    );
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/B \(candidate\) — light/i), {
+        target: { value: "#FF0000" },
+      });
+    });
+    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
+  });
+
+  it("does not show the PAYWALL flow's error while in element mode", async () => {
+    launchPost.mockRejectedValueOnce(new Error("nope"));
+    mockedUseCreateExperiment.mockReturnValue(createExperimentResult({ isError: false }));
+    await renderInElementMode(
+      {
+        config: publishedConfigWithDivider(),
+        hasPublishedVersion: true,
+        isLoading: false,
+      },
+      "n_div",
+    );
+
+    expect(
+      screen.queryByText(/Couldn't create the experiment/i),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// -------------------------------------------------------------
+// An existing ELEMENT experiment on this paywall is visible
+// -------------------------------------------------------------
+
+describe("ExperimentPopover — existing element experiment", () => {
+  it("queries every experiment type, not PAYWALL only", async () => {
+    await renderPopover();
+    expect(mockedUseExperiments).toHaveBeenCalledWith(
+      expect.not.objectContaining({ type: expect.anything() }),
+    );
+  });
+
+  it("shows the status panel for a RUNNING ELEMENT experiment on this paywall", async () => {
+    mockedUseExperiments.mockReturnValue(
+      experimentsResult([
+        fakeExperiment({
+          id: "exp_element",
+          type: "ELEMENT",
+          status: "RUNNING",
+          variants: [
+            {
+              id: "a",
+              name: "A",
+              value: { paywallId: "pw_a", nodeId: "n_div", props: {} },
+              weight: 0.5,
+            },
+            {
+              id: "b",
+              name: "B",
+              value: { paywallId: "pw_a", nodeId: "n_div", props: { thickness: 8 } },
+              weight: 0.5,
+            },
+          ],
+        }),
+      ]),
+    );
+
+    await renderPopover();
+
+    // The create form must NOT render: a second element experiment on the
+    // same node would be invisible dead config.
+    expect(screen.queryByRole("button", { name: /create/i })).toBeNull();
   });
 });

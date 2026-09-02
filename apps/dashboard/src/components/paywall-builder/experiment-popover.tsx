@@ -231,7 +231,14 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
   const paywall = vm.paywall;
   const paywallId = paywall?.id ?? "";
 
-  const experimentsQuery = useExperiments({ projectId, type: "PAYWALL" });
+  // Both types, deliberately: an ELEMENT experiment already running on this
+  // paywall is just as much a reason not to create a second one, and
+  // `matchesPaywall` below reads `value.paywallId`, which an ELEMENT
+  // variant value carries too. Filtering the query to PAYWALL made a live
+  // element test invisible here and let a user launch a duplicate on the
+  // same node — two RUNNING experiments patching one nodeId, with whichever
+  // placement row wins deciding and the other invisible dead config.
+  const experimentsQuery = useExperiments({ projectId });
   const paywallsQuery = useProjectPaywalls(projectId);
   const placementsQuery = useProjectPlacements(projectId);
   const audiencesQuery = useAudiences(projectId);
@@ -256,7 +263,9 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
   const [justCreated, setJustCreated] = useState<LaunchExperimentResult | null>(null);
   const [placementProvidedOnCreate, setPlacementProvidedOnCreate] = useState(false);
 
-  const experiments = experimentsQuery.data ?? [];
+  const experiments = (experimentsQuery.data ?? []).filter(
+    (e) => e.type === "PAYWALL" || e.type === "ELEMENT",
+  );
   const paywalls = paywallsQuery.data?.paywalls ?? [];
   const placements = placementsQuery.data?.placements ?? [];
   const audiences = audiencesQuery.data ?? [];
@@ -418,6 +427,16 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
         (variantBKind === "duplicate"
           ? duplicateNameValue.trim().length > 0
           : existingPaywallId.length > 0);
+
+  // ELEMENT submits through `createElementExperiment`, PAYWALL through
+  // `launchExperiment`. Reading the pending/error state off the wrong one
+  // meant an element launch rendered no error when the API rejected it and
+  // kept the button enabled while in flight — a second click creating a
+  // duplicate DRAFT experiment.
+  const activeCreatePending =
+    kind === "ELEMENT" ? createElementExperiment.isPending : launchExperiment.isPending;
+  const activeCreateFailed =
+    kind === "ELEMENT" ? createElementExperiment.isError : launchExperiment.isError;
 
   const handleCreate = () => {
     if (!paywall || !canCreate) return;
@@ -962,7 +981,7 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                 </p>
               </div>
 
-              {launchExperiment.isError && (
+              {activeCreateFailed && (
                 <p className="text-[12px] text-rv-danger">
                   {t("paywalls.builder.experiment.create.error", "Couldn't create the experiment. Try again.")}
                 </p>
@@ -982,11 +1001,11 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
             </button>
             <button
               type="button"
-              disabled={!canCreate || launchExperiment.isPending}
+              disabled={!canCreate || activeCreatePending}
               onClick={handleCreate}
               className={cn(
                 "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium transition",
-                canCreate && !launchExperiment.isPending
+                canCreate && !activeCreatePending
                   ? "cursor-pointer bg-rv-accent-500 text-white hover:bg-rv-accent-600"
                   : "cursor-not-allowed bg-rv-c2 text-rv-mute-600 opacity-60",
               )}
