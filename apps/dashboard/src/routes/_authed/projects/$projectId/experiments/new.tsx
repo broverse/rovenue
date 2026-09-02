@@ -30,7 +30,10 @@ import {
   Users,
   Wand2,
 } from "lucide-react";
-import { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "@rovenue/shared/experiments";
+// Subpath, NOT the `@rovenue/shared/experiments` barrel: that barrel
+// re-exports bucketing.ts, which imports `node:crypto` and breaks the
+// browser bundle. See the comment in that constants file.
+import { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "@rovenue/shared/experiments/constants";
 import {
   EXPERIMENT_PRIMARY_METRICS,
   type DashboardExperimentType,
