@@ -155,6 +155,60 @@ export interface ResolvedPlacementData {
   } | null;
 }
 
+interface MaterializedVariant {
+  variantId: string;
+  weight: number;
+  paywall: HydratedPaywall;
+}
+
+/**
+ * The outcome of materialising one experiment's variants. THREE cases, not
+ * two, and the difference between the last two is a monetisation hole.
+ *
+ * `complete`  every declared variant hydrated — run the experiment.
+ * `partial`   some hydrated, not all. The EXPERIMENT is unusable, but a
+ *             paywall is not: serve `fallback` as a plain paywall and do
+ *             not run the experiment (no variant menu, no exposure).
+ * `none`      nothing hydrated — there is no paywall to serve, so the
+ *             caller walks to the next placement row.
+ *
+ * Why `partial` may not simply become `none`: the caller's fall-through is
+ * `continue`, which walks to the NEXT placement row, and an experiment row
+ * is very often the LAST row (it is typically the all-users row, which
+ * `placementRowsSchema` requires to be last). So `continue` on a partially
+ * broken experiment exits the placement with NO PAYWALL AT ALL — the device
+ * shows nothing, the operator sees a RUNNING experiment, and nobody learns.
+ * This is the same argument the holdout path already accepts: a subscriber
+ * excluded from an experiment gets CONTROL, not nothing.
+ */
+type VariantMaterialisation =
+  | { kind: "complete"; variants: MaterializedVariant[] }
+  | { kind: "partial"; fallback: HydratedPaywall; hydratedCount: number }
+  | { kind: "none" };
+
+/**
+ * Classifies a per-variant hydration attempt. `hydrated` is index-aligned
+ * with the experiment's DECLARED variants, so `fallback` is the first
+ * declared variant that survived — control whenever control survived, and
+ * the best available paywall when it did not. Same first-declared
+ * convention `resolveControl` (services/experiment-results.ts) uses.
+ */
+function classifyMaterialisation(
+  hydrated: Array<MaterializedVariant | null>,
+  declaredCount: number,
+): VariantMaterialisation {
+  const survivors = hydrated.filter((v): v is MaterializedVariant => v !== null);
+  if (survivors.length === 0) return { kind: "none" };
+  if (survivors.length === declaredCount) {
+    return { kind: "complete", variants: survivors };
+  }
+  return {
+    kind: "partial",
+    fallback: survivors[0]!.paywall,
+    hydratedCount: survivors.length,
+  };
+}
+
 /**
  * ELEMENT experiments: every variant's `value` is
  * `{ paywallId, nodeId, props }` (packages/shared/src/experiments/types.ts
@@ -169,44 +223,41 @@ export interface ResolvedPlacementData {
  * mutating the shared hydrated snapshot) is load-bearing: a shared mutable
  * base would let variant B's patch stick to variant A's copy too.
  *
- * ALL-OR-NOTHING, not per-variant: if ANY variant fails to materialise
- * (bad shape, a disagreeing `paywallId`, or a `nodeId` that has since
- * vanished from the published paywall), the WHOLE result is `[]` and the
- * caller falls through to the next placement row — same contract as a
- * dangling paywall reference. Dropping only the bad variant and shipping
- * the rest would be worse than falling through: the placement variant
- * draw is CLIENT-SIDE (`selectVariant`,
- * packages/shared/src/experiments/bucketing.ts), and it falls through to
- * the LAST variant for any bucket past the cumulative weight total. Ship
- * variant A alone after dropping variant B (weight 0.5 each) and every
- * bucket — including B's 5000-9999 — lands on A: 100% of traffic sees A,
- * every exposure is logged as a normal split, and the experiment looks
- * like it's running instead of looking broken. SRM eventually catches
- * that, but only after the data is poisoned. A partial variant set must
- * never reach a client.
+ * ALL-OR-NOTHING, not per-variant: if ANY variant fails to materialise (a
+ * `nodeId` that has since vanished from the published paywall), the
+ * experiment does not run. Shipping the survivors as a variant menu would
+ * be worse than not running it: the placement variant draw is CLIENT-SIDE
+ * (`selectVariant`, packages/shared/src/experiments/bucketing.ts), and it
+ * falls through to the LAST variant for any bucket past the cumulative
+ * weight total. Ship variant A alone after dropping variant B (weight 0.5
+ * each) and every bucket — including B's 5000-9999 — lands on A: 100% of
+ * traffic sees A, every exposure is logged as a normal split, and the
+ * experiment looks like it's running instead of looking broken. SRM
+ * eventually catches that, but only after the data is poisoned. A partial
+ * variant set must never reach a client AS A VARIANT SET.
+ *
+ * It may still reach one as a PAYWALL — see `VariantMaterialisation`. The
+ * structural failures below (bad shape, a disagreeing `paywallId`, a
+ * dangling or unpublished target, no builder config to patch) return
+ * `none` rather than `partial`, because in every one of them there is no
+ * hydrated paywall to fall back to.
  */
 /**
  * PAYWALL experiment variants: each variant's `value` is `{ paywallId }`
- * and the paywall must be active with a published version.
- *
- * ALL-OR-NOTHING, for exactly the reason spelled out above
- * `materializeElementVariants`: the variant draw is client-side and
- * `selectVariant` falls through to the LAST variant for any bucket past
- * the cumulative weight total. Archive variant B of a 50/50 test and
- * shipping A alone sends 100% of traffic to A while every exposure is
- * logged as a normal split — the experiment looks like it is running, and
- * SRM only catches it after the data is poisoned. One rule, both
- * experiment types: if any variant cannot be hydrated, the caller falls
- * through to the next placement row.
+ * and the paywall must be active with a published version. Same
+ * all-or-nothing rule and same three-way outcome as
+ * `materializeElementVariants` above — one rule, both experiment types.
  *
  * A legacy inline-config experiment (no `paywallId` on any variant) yields
- * `[]` by the same route, since no ref survives the flatMap.
+ * `none`, since no ref survives the flatMap. A variant that carries no
+ * `paywallId` while its siblings do is itself a failed variant, so a mixed
+ * set is `partial`, not `complete`.
  */
 async function materializePaywallVariants(
   projectId: string,
   variants: Array<{ id: string; weight: number; value: unknown }>,
   requestedLocale: string | undefined,
-): Promise<Array<{ variantId: string; weight: number; paywall: HydratedPaywall }>> {
+): Promise<VariantMaterialisation> {
   // Batch the variant paywall lookups (SDK hot path — the per-variant
   // sequential fetches were an N+1 flagged in the whole-phase review),
   // then hydrate in parallel. Order follows the variants array.
@@ -214,8 +265,7 @@ async function materializePaywallVariants(
     const paywallId = (v.value as { paywallId?: string } | null)?.paywallId;
     return paywallId ? [{ variantId: v.id, weight: v.weight, paywallId }] : [];
   });
-  // A variant with no `paywallId` is itself a missing variant.
-  if (variantRefs.length === 0 || variantRefs.length !== variants.length) return [];
+  if (variantRefs.length === 0) return { kind: "none" };
 
   const variantPaywalls = await drizzle.paywallRepo.findPaywallsByIds(
     drizzle.db,
@@ -246,22 +296,23 @@ async function materializePaywallVariants(
       };
     }),
   );
-  if (hydrated.some((v) => v === null)) return [];
-  return hydrated as Array<{ variantId: string; weight: number; paywall: HydratedPaywall }>;
+  // Counted against the DECLARED variant count, not against `variantRefs`:
+  // a variant carrying no `paywallId` at all never became a ref, and is
+  // just as missing as one whose paywall was archived.
+  return classifyMaterialisation(hydrated, variants.length);
 }
 
 async function materializeElementVariants(
   projectId: string,
   variants: Array<{ id: string; weight: number; value: unknown }>,
   requestedLocale: string | undefined,
-): Promise<Array<{ variantId: string; weight: number; paywall: HydratedPaywall }>> {
-  if (variants.length === 0) return [];
+): Promise<VariantMaterialisation> {
+  if (variants.length === 0) return { kind: "none" };
 
   const parsedResults = variants.map((v) => elementVariantValueSchema.safeParse(v.value));
-  // Any one variant with a malformed value corrupts bucketing exactly like
-  // a vanished node would — drop the whole experiment, not just that
-  // variant.
-  if (parsedResults.some((r) => !r.success)) return [];
+  // A malformed value leaves no trustworthy target paywall to fall back
+  // to — we cannot even be sure which paywall the experiment meant.
+  if (parsedResults.some((r) => !r.success)) return { kind: "none" };
   const parsed = variants.map((v, i) => ({
     variantId: v.id,
     weight: v.weight,
@@ -274,42 +325,46 @@ async function materializeElementVariants(
   // disagrees means the data is inconsistent, which is drop-the-whole-
   // experiment territory just like everything else in this function.
   const paywallId = parsed[0]!.value.paywallId;
-  if (parsed.some((p) => p.value.paywallId !== paywallId)) return [];
+  // Inconsistent data: which of the disagreeing paywalls would "control"
+  // even be? Nothing to fall back to.
+  if (parsed.some((p) => p.value.paywallId !== paywallId)) return { kind: "none" };
 
   const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, paywallId);
-  if (!paywall || !paywall.isActive) return []; // dangling ref → next row
+  if (!paywall || !paywall.isActive) return { kind: "none" }; // dangling ref → next row
   // No published version → nothing to serve, same as the "paywall" target branch.
-  if (!paywall.publishedVersionId) return [];
+  if (!paywall.publishedVersionId) return { kind: "none" };
   const version = await drizzle.paywallVersionRepo.findById(
     drizzle.db,
     paywall.publishedVersionId,
   );
-  if (!version) return [];
+  if (!version) return { kind: "none" };
 
   const base = await hydratePaywall(projectId, paywall, version, requestedLocale);
   const baseConfig = (base as { builderConfig?: unknown }).builderConfig;
-  if (typeof baseConfig !== "object" || baseConfig === null) return []; // nothing to patch
-
-  const results: Array<{ variantId: string; weight: number; paywall: HydratedPaywall }> = [];
-  for (const { variantId, weight, value } of parsed) {
-    try {
-      const patchedConfig = applyTreeOp(baseConfig as BuilderConfig, {
-        kind: "updateProps",
-        nodeId: value.nodeId,
-        patch: value.props,
-      });
-      results.push({ variantId, weight, paywall: { ...base, builderConfig: patchedConfig } });
-    } catch (err) {
-      if (err instanceof TreeOpError && err.code === "TARGET_NOT_FOUND") {
-        // nodeId vanished since save-time validation — drop the WHOLE
-        // experiment (see the doc comment above for why a partial set is
-        // worse than none).
-        return [];
-      }
-      throw err;
-    }
+  if (typeof baseConfig !== "object" || baseConfig === null) {
+    return { kind: "none" }; // nothing to patch
   }
-  return results;
+
+  // Index-aligned with `parsed` (and so with the declared variants): a
+  // variant whose nodeId vanished since save-time validation becomes a
+  // `null` hole rather than an early return, so `classifyMaterialisation`
+  // can tell "some survived" from "none did".
+  const hydrated: Array<MaterializedVariant | null> = parsed.map(
+    ({ variantId, weight, value }) => {
+      try {
+        const patchedConfig = applyTreeOp(baseConfig as BuilderConfig, {
+          kind: "updateProps",
+          nodeId: value.nodeId,
+          patch: value.props,
+        });
+        return { variantId, weight, paywall: { ...base, builderConfig: patchedConfig } };
+      } catch (err) {
+        if (err instanceof TreeOpError && err.code === "TARGET_NOT_FOUND") return null;
+        throw err;
+      }
+    },
+  );
+  return classifyMaterialisation(hydrated, parsed.length);
 }
 
 /**
@@ -392,13 +447,40 @@ export async function resolvePlacement(
 
     const variants = (experiment.variants as Array<{ id: string; weight: number; value: unknown }>) ?? [];
 
-    const hydrated =
+    const materialised =
       experiment.type === "ELEMENT"
         ? await materializeElementVariants(projectId, variants, requestedLocale)
         : await materializePaywallVariants(projectId, variants, requestedLocale);
-    // Dangling target/nodeId, archived or unpublished variant paywall, or a
-    // legacy inline-config experiment → next row.
-    if (hydrated.length === 0) continue;
+
+    // Nothing hydrated — a legacy inline-config experiment, a dangling
+    // target, or an unpublished one. No paywall exists to serve, so the
+    // row genuinely has nothing to offer: walk on.
+    if (materialised.kind === "none") continue;
+
+    // Some hydrated, not all. The experiment cannot run (a partial variant
+    // set corrupts the client-side draw — see `materializeElementVariants`),
+    // but the surviving control paywall is perfectly serviceable. Falling
+    // through instead would usually mean serving NOTHING, because an
+    // experiment row is typically the last row in the placement. Serve
+    // control as a plain paywall, run no experiment, record no exposure —
+    // and say so in the log, since the operator's dashboard will still show
+    // a RUNNING experiment that is not actually running.
+    if (materialised.kind === "partial") {
+      log.warn("experiment variants partially unavailable; serving control", {
+        projectId,
+        experimentId: experiment.id,
+        placementId: placement.id,
+        declaredVariants: variants.length,
+        hydratedVariants: materialised.hydratedCount,
+      });
+      return {
+        placement: placementInfo,
+        paywall: materialised.fallback,
+        experiment: null,
+      };
+    }
+
+    const hydrated = materialised.variants;
 
     // Task 8 — project-level holdout. The variant draw is client-side
     // (selectVariant, packages/shared/src/experiments/bucketing.ts), so

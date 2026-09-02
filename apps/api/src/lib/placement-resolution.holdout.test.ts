@@ -290,7 +290,10 @@ describe("resolvePlacement — PAYWALL variant materialisation", () => {
     ]);
   });
 
-  it("drops the WHOLE experiment when one variant's paywall is archived", async () => {
+  it("drops the WHOLE experiment when one variant's paywall is archived, and serves control", async () => {
+    // The experiment is unusable; the surviving paywall is not. Falling
+    // through instead would usually mean serving NOTHING — the row below
+    // proves that case.
     findPaywallsByIds.mockResolvedValue([
       variantPaywallRows()[0]!,
       { ...variantPaywallRows()[1]!, isActive: false },
@@ -299,7 +302,23 @@ describe("resolvePlacement — PAYWALL variant materialisation", () => {
     const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
 
     expect(result.experiment).toBeNull();
-    expect(result.paywall).toBeNull();
+    expect(result.paywall?.id).toBe("pw_control");
+  });
+
+  it("serves control rather than an EMPTY envelope — the experiment row is the only row", async () => {
+    // `placementRow()` has exactly one all-users row, which is the normal
+    // configuration and the one `placementRowsSchema` forces to be last.
+    // `continue` here means falling out of the placement entirely: the
+    // device shows no paywall while the dashboard shows a RUNNING
+    // experiment, and nobody learns.
+    findPaywallsByIds.mockResolvedValue([
+      variantPaywallRows()[0]!,
+      { ...variantPaywallRows()[1]!, isActive: false },
+    ]);
+
+    const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
+
+    expect(result.paywall).not.toBeNull();
   });
 
   it("drops the WHOLE experiment when one variant has no published version", async () => {
@@ -312,9 +331,13 @@ describe("resolvePlacement — PAYWALL variant materialisation", () => {
     const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
 
     expect(result.experiment).toBeNull();
+    expect(result.paywall?.id).toBe("pw_control");
   });
 
   it("drops the WHOLE experiment when one variant carries no paywallId at all", async () => {
+    // A variant with no `paywallId` never becomes a ref, so the count is
+    // taken against the DECLARED variants — otherwise a one-ref set would
+    // look "complete" and ship as a 1-variant experiment.
     findByIdInProject.mockResolvedValue({
       ...runningPaywallExperiment(),
       variants: [
@@ -326,5 +349,52 @@ describe("resolvePlacement — PAYWALL variant materialisation", () => {
     const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
 
     expect(result.experiment).toBeNull();
+    expect(result.paywall?.id).toBe("pw_control");
+  });
+
+  it("serves the SURVIVING variant when control itself is the broken one", async () => {
+    // `fallback` is the first DECLARED variant that survived — control
+    // when control survived, and the best paywall available when it did
+    // not. Never nothing.
+    findPaywallsByIds.mockResolvedValue([
+      { ...variantPaywallRows()[0]!, isActive: false },
+      variantPaywallRows()[1]!,
+    ]);
+
+    const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
+
+    expect(result.experiment).toBeNull();
+    expect(result.paywall?.id).toBe("pw_treatment");
+  });
+
+  it("falls through to the next row only when NO variant hydrates", async () => {
+    findPaywallsByIds.mockResolvedValue([]);
+    findVersionsByIds.mockResolvedValue([]);
+
+    const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
+
+    expect(result.experiment).toBeNull();
+    expect(result.paywall).toBeNull();
+  });
+
+  it("does not record a holdout exposure for a partially-broken experiment", async () => {
+    // The experiment is not running for anyone, held out or not, so there
+    // is nothing to be withheld from and nothing to measure.
+    findProjectHoldoutPercentage.mockResolvedValue(100);
+    findPaywallsByIds.mockResolvedValue([
+      variantPaywallRows()[0]!,
+      { ...variantPaywallRows()[1]!, isActive: false },
+    ]);
+
+    const result = await resolvePlacement(
+      PROJECT_ID,
+      placementRow(),
+      {},
+      undefined,
+      "sub_holdout",
+    );
+
+    expect(result.paywall?.id).toBe("pw_control");
+    expect(publishHoldoutExposureMock).not.toHaveBeenCalled();
   });
 });

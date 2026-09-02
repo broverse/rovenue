@@ -190,7 +190,7 @@ describe("resolvePlacement — ELEMENT experiments", () => {
     expect(resolved.paywall!.id).toBe(fallbackPaywall.id);
   });
 
-  it("drops the WHOLE experiment — not just the affected variant — when only one variant's nodeId has vanished", async () => {
+  it("drops the WHOLE experiment — not just the affected variant — when only one variant's nodeId has vanished, and serves control", async () => {
     // A partial variant set is more dangerous than none. The placement
     // variant draw is CLIENT-SIDE (selectVariant,
     // packages/shared/src/experiments/bucketing.ts): it walks cumulative
@@ -201,8 +201,12 @@ describe("resolvePlacement — ELEMENT experiments", () => {
     // fall through to control too — 100% of traffic sees control, every
     // exposure is logged as a normal 50/50 split, and the experiment looks
     // like it's running instead of looking broken. So ANY variant failing
-    // to materialise must drop the WHOLE experiment, exactly like the
-    // all-vanished case above.
+    // to materialise must drop the WHOLE experiment.
+    //
+    // But the EXPERIMENT being unusable does not make the PAYWALL
+    // unusable: control's snapshot hydrated fine. It is served as a plain
+    // paywall on this row rather than walking on — see the next test for
+    // why walking on is a monetisation hole.
     const paywall = await createPublishedPaywall("partial-vanished");
     const experiment = await createRunningElementExperiment(
       `key-partial-vanished-${RUN_ID}`,
@@ -225,9 +229,47 @@ describe("resolvePlacement — ELEMENT experiments", () => {
 
     const resolved = await resolvePlacement(projectId, placement, {});
 
-    // Falls through to the next row — NOT a 1-variant experiment.
+    // NOT a 1-variant experiment, and NOT the next row either: this row
+    // resolves, to control's own patched snapshot.
     expect(resolved.experiment).toBeNull();
     expect(resolved.paywall).not.toBeNull();
-    expect(resolved.paywall!.id).toBe(fallbackPaywall.id);
+    expect(resolved.paywall!.id).toBe(paywall.id);
+    expect(resolved.paywall!.id).not.toBe(fallbackPaywall.id);
+
+    // It really is CONTROL's snapshot — control's patch is applied, so the
+    // subscriber sees the arm the experiment called control, not the bare
+    // published tree.
+    const root = (resolved.paywall!.builderConfig as unknown as BuilderConfig).root;
+    const node = root.children.find((n) => n.id === "t1") as { color?: unknown };
+    expect(node.color).toEqual({ light: "#111111" });
+  });
+
+  it("serves control rather than an EMPTY envelope when the broken experiment is the LAST row", async () => {
+    // The monetisation hole this rule exists to close. An experiment row
+    // is typically the all-users row, which placementRowsSchema requires
+    // to be LAST — so "fall through to the next row" means "fall out of
+    // the placement": the device shows nothing while the dashboard shows a
+    // RUNNING experiment.
+    const paywall = await createPublishedPaywall("partial-last-row");
+    const experiment = await createRunningElementExperiment(
+      `key-partial-last-${RUN_ID}`,
+      [
+        { id: "control", weight: 0.5, nodeId: "t1", props: { color: { light: "#222222" } } },
+        { id: "variant_a", weight: 0.5, nodeId: "gone", props: {} },
+      ],
+      paywall.id,
+    );
+    const placement = await drizzle.placementRepo.createPlacement(db, {
+      projectId,
+      identifier: `pl-elem-partial-last-${RUN_ID}`,
+      name: "Partially-vanished element placement, no next row",
+      rows: [{ audienceId: null, target: { type: "experiment", experimentId: experiment.id } }],
+    });
+
+    const resolved = await resolvePlacement(projectId, placement, {});
+
+    expect(resolved.experiment).toBeNull();
+    expect(resolved.paywall).not.toBeNull();
+    expect(resolved.paywall!.id).toBe(paywall.id);
   });
 });
