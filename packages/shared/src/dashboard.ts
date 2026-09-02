@@ -668,6 +668,36 @@ export interface ExperimentCrossCheck {
   signDisagreement: boolean;
 }
 
+/**
+ * The project-level holdout cohort's observed figures for ONE experiment.
+ *
+ * Held-out subscribers are still exposed — against the reserved holdout
+ * cohort id — because a holdout that is not measured is just a smaller
+ * audience. But the cohort is NOT an arm of the experiment: it was
+ * withheld from it. It therefore never enters SRM (whose expected split
+ * comes from the experiment's declared weights, which do not mention it),
+ * never gets a posterior, and never gates the sample size. It is reported
+ * here, beside `variants`, so a holdout-vs-treated comparison has the
+ * numbers without a synthetic third arm riding inside the variant list.
+ */
+export interface ExperimentHoldoutCohort {
+  /** The reserved synthetic variant id the exposures were written under. */
+  cohortId: string;
+  /** Un-windowed exposure figures, same meaning as on a variant. */
+  exposures: number;
+  uniqueUsers: number;
+  /** Windowed, crossover-excluded figures — same definitions as
+   *  `ExperimentResultsVariant`'s. */
+  matureUsers: number;
+  converters: number;
+  conversionRate: number | null;
+  revenueUsd: number;
+  refundsUsd: number;
+  refundRate: number | null;
+  excludedImmature: number;
+  excludedCrossover: number;
+}
+
 export interface ExperimentIntegrity {
   /** Sample-ratio-mismatch check over the EXPOSED-user split
    *  (`uniqueUsers`), never over the windowed denominator. `null` with
@@ -698,6 +728,10 @@ export interface ExperimentResultsResponse {
   /** Empty when ClickHouse is unconfigured or no exposures were
    *  recorded yet — never a zero-filled row per configured variant. */
   variants: ExperimentResultsVariant[];
+  /** The project holdout cohort's figures for this experiment, or `null`
+   *  when no holdout is configured (or nobody in it was exposed). Never an
+   *  entry in `variants` — it is not an arm of this experiment. */
+  holdout: ExperimentHoldoutCohort | null;
   /** Fixed-horizon frequentist cross-checks. Valid at the planned sample
    *  size and only there — the recommendation is never made on these. */
   conversion: ExperimentConversionAnalysis | null;

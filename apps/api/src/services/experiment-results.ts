@@ -3,6 +3,7 @@ import type { Store } from "@rovenue/db";
 import type {
   ExperimentCrossCheck,
   ExperimentDecisionGate,
+  ExperimentHoldoutCohort,
   ExperimentPrimaryMetric,
   ExperimentRecommendation,
   ExperimentResultsResponse,
@@ -18,6 +19,7 @@ import {
   CROSSOVER_SUPPRESSION_RATE,
   DAYS_PER_WEEK,
   EXPECTED_LOSS_THRESHOLD,
+  HOLDOUT_COHORT_ID,
   MINIMUM_WEEKLY_CYCLES,
   REFUND_GUARDRAIL_MARGIN,
 } from "../lib/experiment-constants";
@@ -160,12 +162,37 @@ export async function computeExperimentResults(
     throw new Error("experiment not found");
   }
 
-  const rows = await runAnalyticsQuery({
+  const allRows = await runAnalyticsQuery({
     kind: "experiment_results",
     experimentId,
     experimentKey: experiment.key,
     projectId,
   });
+
+  // -----------------------------------------------------------
+  // The holdout cohort is NOT a variant of this experiment
+  // -----------------------------------------------------------
+  //
+  // A held-out subscriber is still exposed, under the reserved
+  // HOLDOUT_COHORT_ID (`publishHoldoutExposure`), because a cohort that is
+  // never measured is just a smaller audience. But the reader groups
+  // `raw_exposures` by variantId, so that write comes back as an extra ROW
+  // of this experiment. Letting it through would be silently catastrophic:
+  // the experiment's declared weights never mention the cohort, so
+  // `expectedObservedSplit` finds weight 0, falls back to an EVEN split
+  // across N+1 rows and fires SRM permanently — suppressing the leader of
+  // every experiment in a project the moment a holdout is switched on,
+  // while blaming the randomiser. It would also drop both two-arm
+  // cross-checks (`aggregates.length !== 2`) and let `pickLeader` elect the
+  // cohort the experiment was withheld from.
+  //
+  // So it is partitioned out here, once, before anything reads the row
+  // set — SRM, the posteriors, the cross-checks and the sample gate all
+  // derive from `rows` — and reported separately as `holdout`.
+  const rows = allRows.filter((r) => r.variant_id !== HOLDOUT_COHORT_ID);
+  const holdout = buildHoldoutCohort(
+    allRows.find((r) => r.variant_id === HOLDOUT_COHORT_ID),
+  );
 
   const primaryMetric = experiment.primaryMetric as ExperimentPrimaryMetric;
   const declared = readDeclaredVariants(experiment.variants);
@@ -281,6 +308,7 @@ export async function computeExperimentResults(
     status: experiment.status as ExperimentStatus,
     primaryMetric,
     variants,
+    holdout,
     conversion,
     revenue,
     crossCheck,
@@ -317,6 +345,33 @@ function toAggregate(r: ExperimentVariantRow): VariantAgg {
     excludedCrossover: Number(r.excluded_crossover),
     netRevenueSum: Number(r.net_revenue_usd),
     netRevenueSumSq: Number(r.net_revenue_sq),
+  };
+}
+
+/**
+ * The holdout cohort's row, reshaped as its own figure. Deliberately
+ * carries no posterior and no `probabilityBest`: the cohort was withheld
+ * from this experiment, so "is it winning?" is not a question about it.
+ * What it IS good for is a holdout-vs-treated revenue comparison, which
+ * needs exactly the observed counts below.
+ */
+function buildHoldoutCohort(
+  row: ExperimentVariantRow | undefined,
+): ExperimentHoldoutCohort | null {
+  if (!row) return null;
+  const a = toAggregate(row);
+  return {
+    cohortId: a.variantId,
+    exposures: a.exposures,
+    uniqueUsers: a.uniqueUsers,
+    matureUsers: a.matureUsers,
+    converters: a.converters,
+    conversionRate: a.conversionRate,
+    revenueUsd: a.revenueUsd,
+    refundsUsd: a.refundsUsd,
+    refundRate: a.refundRate,
+    excludedImmature: a.excludedImmature,
+    excludedCrossover: a.excludedCrossover,
   };
 }
 
@@ -511,11 +566,16 @@ async function resolveProceedsFactors(
   experimentId: string,
   projectId: string,
 ): Promise<ProceedsScaling> {
-  const storeRows = await runAnalyticsQuery({
-    kind: "experiment_revenue_by_store",
-    experimentId,
-    projectId,
-  });
+  // Same partition as the main reader: the holdout cohort is not an arm,
+  // so its stores must not decide whether PROCEEDS_PER_USER is knowable
+  // for the experiment's actual variants.
+  const storeRows = (
+    await runAnalyticsQuery({
+      kind: "experiment_revenue_by_store",
+      experimentId,
+      projectId,
+    })
+  ).filter((r) => r.variant_id !== HOLDOUT_COHORT_ID);
 
   const stores = [...new Set(storeRows.map((r) => r.store))];
   const rateByStore = new Map<string, number | null>();

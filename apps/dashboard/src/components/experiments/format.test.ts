@@ -69,6 +69,7 @@ function makeResults(
     experimentId: "exp_1",
     status: "RUNNING",
     primaryMetric: "CONVERSION",
+    holdout: null,
     variants,
     conversion: null,
     revenue: null,

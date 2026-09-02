@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CROSSOVER_SUPPRESSION_RATE,
   EXPECTED_LOSS_THRESHOLD,
+  HOLDOUT_COHORT_ID,
   MINIMUM_WEEKLY_CYCLES,
   REFUND_GUARDRAIL_MARGIN,
 } from "../src/lib/experiment-constants";
@@ -596,5 +597,114 @@ describe("computeExperimentResults — Welch cross-check", () => {
     expect(res.crossCheck.welchRelativeLift).not.toBeNull();
     expect(res.crossCheck.posteriorRelativeLift).toBeNull();
     expect(res.crossCheck.signDisagreement).toBe(false);
+  });
+});
+
+// -------------------------------------------------------------
+// The holdout cohort is not an arm
+// -------------------------------------------------------------
+
+describe("computeExperimentResults — project holdout cohort", () => {
+  /** A 10% holdout beside two 20 000-user arms, exposed under the reserved
+   *  cohort id exactly as `publishHoldoutExposure` writes it. */
+  function holdoutRow(): Record<string, unknown> {
+    return variantRow({
+      variant_id: HOLDOUT_COHORT_ID,
+      exposures: 2_300,
+      unique_users: 2_200,
+      mature_users: 2_200,
+      converters: 180,
+      revenue_usd: 900,
+      refunds_usd: 9,
+    });
+  }
+
+  it("produces the identical verdict with a live holdout and with none", async () => {
+    respondWith(happyPathRows());
+    const withoutHoldout = await computeExperimentResults(
+      "exp_1",
+      "proj_test",
+    );
+
+    respondWith([...happyPathRows(), holdoutRow()]);
+    const withHoldout = await computeExperimentResults("exp_1", "proj_test");
+
+    expect(withHoldout.recommendation).toEqual(withoutHoldout.recommendation);
+    expect(withHoldout.integrity.srm).toEqual(withoutHoldout.integrity.srm);
+    expect(withHoldout.variants).toEqual(withoutHoldout.variants);
+    // The happy path must genuinely be a happy path, or this asserts
+    // nothing more than "both are equally broken".
+    expect(withHoldout.recommendation.shipRecommended).toBe(true);
+    expect(withHoldout.recommendation.blockedBy).toEqual([]);
+    expect(withHoldout.integrity.srm!.isMismatch).toBe(false);
+  });
+
+  it("keeps the cohort out of the variant list and the cross-checks", async () => {
+    respondWith([...happyPathRows(), holdoutRow()]);
+    const res = await computeExperimentResults("exp_1", "proj_test");
+
+    expect(res.variants.map((v) => v.variantId)).toEqual([
+      "control",
+      "treatment",
+    ]);
+    expect(res.recommendation.leadingVariantId).toBe("treatment");
+    // Two-arm cross-checks survive: a third row would have nulled both.
+    expect(res.conversion).not.toBeNull();
+    expect(res.revenue).not.toBeNull();
+  });
+
+  it("reports the cohort's own figures beside the variants", async () => {
+    respondWith([...happyPathRows(), holdoutRow()]);
+    const res = await computeExperimentResults("exp_1", "proj_test");
+
+    expect(res.holdout).not.toBeNull();
+    expect(res.holdout!.cohortId).toBe(HOLDOUT_COHORT_ID);
+    expect(res.holdout!.uniqueUsers).toBe(2_200);
+    expect(res.holdout!.matureUsers).toBe(2_200);
+    expect(res.holdout!.converters).toBe(180);
+    expect(res.holdout!.conversionRate).toBeCloseTo(180 / 2_200, 10);
+    expect(res.holdout!.revenueUsd).toBe(900);
+  });
+
+  it("reports holdout as null when no holdout row exists", async () => {
+    respondWith(happyPathRows());
+    const res = await computeExperimentResults("exp_1", "proj_test");
+    expect(res.holdout).toBeNull();
+  });
+
+  it("ignores the cohort's stores when resolving proceeds factors", async () => {
+    // The cohort bought through a store with no configured commission
+    // rate. That must not make PROCEEDS_PER_USER unknown for the arms.
+    setExperiment({ primaryMetric: "PROCEEDS_PER_USER" });
+    mockGetCommissionRate.mockImplementation(
+      async (_db: unknown, _projectId: string, store: string) =>
+        store === "APP_STORE" ? { rate: "0.3000" } : null,
+    );
+    respondWith(
+      [
+        variantRow({
+          variant_id: "control",
+          converters: 2_000,
+          sum_log_value: 2_000 * Math.log(10),
+          sum_log_value_sq: 2_000 * Math.log(10) ** 2 + 20,
+        }),
+        variantRow({
+          variant_id: "treatment",
+          converters: 2_600,
+          sum_log_value: 2_600 * Math.log(12),
+          sum_log_value_sq: 2_600 * Math.log(12) ** 2 + 26,
+        }),
+      ],
+      [
+        { variant_id: "control", store: "APP_STORE", revenue_usd: 10_000, refunds_usd: 100 },
+        { variant_id: "treatment", store: "APP_STORE", revenue_usd: 13_000, refunds_usd: 110 },
+        { variant_id: HOLDOUT_COHORT_ID, store: "STRIPE", revenue_usd: 900, refunds_usd: 9 },
+      ],
+    );
+
+    const res = await computeExperimentResults("exp_1", "proj_test");
+    expect(res.recommendation.blockedBy).not.toContain(
+      "PROCEEDS_RATE_UNCONFIGURED",
+    );
   });
 });
