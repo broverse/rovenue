@@ -143,6 +143,76 @@ describe("analyzeBayesian — zero-user variant", () => {
     expect(Number.isNaN(control.probabilityBest!)).toBe(false);
     expect(Number.isNaN(control.expectedLoss!)).toBe(false);
   });
+
+  /** One arm with `users` mature subscribers and no converters, against a
+   *  large control converting at 1%. */
+  function tinyArmAgainstMatureControl(users: number) {
+    return analyzeBayesian({
+      experimentId: "exp_tiny_arm",
+      metricType: "CONVERSION",
+      variants: [
+        { key: "control", users: 100_000, converters: 1_000 },
+        { key: "tiny", users, converters: 0 },
+      ],
+    }).variants.find((v) => v.key === "tiny")!;
+  }
+
+  /**
+   * Mature-user counts MEASURED to produce a leading posterior before the
+   * floor was raised, against a control converting at 1%:
+   *
+   *   users  mean    probabilityBest
+   *       1  0.3334  0.9791
+   *       5  0.1420  0.9384
+   *      29  0.0321  0.7379
+   *
+   * Pinned as data rather than re-derived, so this test fails if the floor
+   * is ever lowered back under any of them — a test written purely as
+   * `MINIMUM_USERS_FOR_POSTERIOR - 1` would follow the constant down and
+   * keep passing.
+   */
+  const USER_COUNTS_THAT_ONCE_LED = [1, 5, 29] as const;
+
+  it.each(USER_COUNTS_THAT_ONCE_LED)(
+    "excludes an arm of %i mature users, which used to lead on the prior alone",
+    (users) => {
+      // Beta(1,1)'s two pseudo-observations dominate at this scale, so the
+      // posterior is a statement about the prior, not about the data.
+      expect(users).toBeLessThan(MINIMUM_USERS_FOR_POSTERIOR);
+
+      const below = tinyArmAgainstMatureControl(users);
+      expect(below.sufficientData).toBe(false);
+      expect(below.mean).toBeNull();
+      expect(below.probabilityBest).toBeNull();
+      expect(below.expectedLoss).toBeNull();
+    },
+  );
+
+  it("excludes an arm one user BELOW the floor, wherever the floor sits", () => {
+    const below = tinyArmAgainstMatureControl(MINIMUM_USERS_FOR_POSTERIOR - 1);
+
+    expect(below.sufficientData).toBe(false);
+    expect(below.probabilityBest).toBeNull();
+  });
+
+  it("includes an arm exactly AT the floor", () => {
+    // The floor must be a boundary, not a blanket suppression — an arm
+    // that has reached it is reported, and the SAMPLE_SIZE gate (which
+    // demands far more) is what decides whether it can be shipped on.
+    const at = tinyArmAgainstMatureControl(MINIMUM_USERS_FOR_POSTERIOR);
+
+    expect(at.sufficientData).toBe(true);
+    expect(at.mean).not.toBeNull();
+    expect(Number.isFinite(at.mean!)).toBe(true);
+    expect(at.probabilityBest).not.toBeNull();
+  });
+
+  it("uses the large-sample floor experiment-stats.ts already commits to", () => {
+    // `welch()` documents its normal approximation as accurate for
+    // n >= 30 per group; the Bayesian module's normal-approximation
+    // neighbours sit in the same regime. One threshold, not two.
+    expect(MINIMUM_USERS_FOR_POSTERIOR).toBe(30);
+  });
 });
 
 describe("analyzeBayesian — insufficient converters for the value model", () => {

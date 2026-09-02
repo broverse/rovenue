@@ -4,6 +4,7 @@ import {
   CROSSOVER_SUPPRESSION_RATE,
   EXPECTED_LOSS_THRESHOLD,
   HOLDOUT_COHORT_ID,
+  MINIMUM_USERS_FOR_POSTERIOR,
   MINIMUM_WEEKLY_CYCLES,
   REFUND_GUARDRAIL_MARGIN,
 } from "../src/lib/experiment-constants";
@@ -747,5 +748,34 @@ describe("computeExperimentResults — zero-mature-user arm", () => {
     expect(res.recommendation.leadingVariantId).toBeNull();
     expect(res.recommendation.shipRecommended).toBe(false);
     expect(res.recommendation.blockedBy).toContain("NO_LEADER");
+  });
+
+  /** Measured to report probabilityBest 0.738 — i.e. to LEAD — against a
+   *  10%-converting control before the posterior floor was raised. Pinned
+   *  as a value, not derived from the constant, so lowering the floor back
+   *  under it fails this test instead of dragging it along. */
+  const MATURE_USERS_THAT_ONCE_LED = 29;
+
+  it("an arm just below the posterior floor cannot be the leader either", async () => {
+    expect(MATURE_USERS_THAT_ONCE_LED).toBeLessThan(MINIMUM_USERS_FOR_POSTERIOR);
+    respondWith([
+      variantRow({ variant_id: "control", converters: 2_000 }),
+      variantRow({
+        variant_id: "treatment",
+        unique_users: MATURE_USERS_THAT_ONCE_LED,
+        mature_users: MATURE_USERS_THAT_ONCE_LED,
+        converters: 0,
+        revenue_usd: 0,
+        refunds_usd: 0,
+      }),
+    ]);
+
+    const res = await computeExperimentResults("exp_1", "proj_test");
+    const treatment = res.variants.find((v) => v.variantId === "treatment")!;
+
+    expect(treatment.sufficientData).toBe(false);
+    expect(treatment.probabilityBest).toBeNull();
+    expect(res.recommendation.leadingVariantId).not.toBe("treatment");
+    expect(res.recommendation.leadingVariantId).toBeNull();
   });
 });

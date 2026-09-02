@@ -70,7 +70,7 @@ export const MINIMUM_CONVERTERS_FOR_VALUE_MODEL = 2;
  * at all.
  *
  * `Beta(1, 1)` is a perfectly valid uniform posterior with no data, so
- * without this an arm with zero mature users comes back mean ≈ 0.5,
+ * without a floor an arm with zero mature users comes back mean ≈ 0.5,
  * `probabilityBest` ≈ 99% against a mature control at 1% — and is elected
  * leader, rendered as "Confidence 99%", and offered to the manual
  * Ship-winner button. That is reachable in ordinary operation: with a
@@ -80,11 +80,27 @@ export const MINIMUM_CONVERTERS_FOR_VALUE_MODEL = 2;
  * arm is reported `sufficientData: false` — the same treatment a variant
  * with no fittable value factor already gets.
  *
- * One is the minimum that makes the posterior a statement about observed
- * data rather than about the prior alone; the SAMPLE_SIZE gate is what
- * decides when there is ENOUGH data to ship on.
+ * WHY 30 AND NOT 1. A floor of 1 does not fix this, it moves it: one
+ * mature user and zero converters gives `Beta(1, 2)`, which measures
+ * `probabilityBest` ≈ 0.98 and an expected loss around 1e-4 — BELOW
+ * `EXPECTED_LOSS_THRESHOLD` — so the arm is still elected leader on a
+ * single observation. Against a `Beta(1, 1)` prior, whose two
+ * pseudo-observations dominate at that scale, the posterior is a
+ * statement about the prior, not about the data.
+ *
+ * 30 is not a taste: it is the large-sample floor this repo already
+ * commits to for itself. `experiment-stats.ts`'s `welch()` documents its
+ * normal approximation as "accurate for Welch's with n >= 30 per group",
+ * and the Bayesian module's normal-approximation neighbours (the value
+ * model's log-normal fit, the credible interval's tails) sit in the same
+ * regime. Reusing that number keeps one large-sample threshold in the
+ * codebase rather than two that could drift.
+ *
+ * This is a FLOOR on being reported at all, not a sufficiency test: the
+ * SAMPLE_SIZE gate is what decides when there is enough data to ship on,
+ * and it demands far more than 30.
  */
-export const MINIMUM_USERS_FOR_POSTERIOR = 1;
+export const MINIMUM_USERS_FOR_POSTERIOR = 30;
 
 /** Relative tolerance separating a DEGENERATE log-value variance (every
  *  converter paid the same price, so the true variance is exactly zero and
