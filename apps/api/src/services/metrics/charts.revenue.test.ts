@@ -63,13 +63,23 @@ describe("readChartSeries — revenue ids", () => {
     expect(day?.value).toBe(1440);
   });
 
-  it("gross_vs_net: unit is money, value is refundsUsd (gross - net)", async () => {
+  it("gross_vs_net: unit is percent, value is net ÷ gross as a 0-100 number", async () => {
     queryAnalyticsMock.mockResolvedValueOnce([chRow()]);
     const res = await readChartSeries("proj_1", "gross_vs_net", 7);
     expect(res.supported).toBe(true);
-    expect(res.unit).toBe("money");
+    expect(res.unit).toBe("percent");
     const day = res.points.find((p) => p.bucket.startsWith("2026-07-02"));
-    expect(day?.value).toBe(30);
+    // net_usd 120 / gross_usd 150 = 80%.
+    expect(day?.value).toBe(80);
+  });
+
+  it("gross_vs_net: null, not zero, on a day with zero gross revenue", async () => {
+    queryAnalyticsMock.mockResolvedValueOnce([
+      chRow({ gross_usd: "0", refunds_usd: "0", net_usd: "0" }),
+    ]);
+    const res = await readChartSeries("proj_1", "gross_vs_net", 7);
+    const day = res.points.find((p) => p.bucket.startsWith("2026-07-02"));
+    expect(day?.value).toBeNull();
   });
 
   it("arpu: unit is money, value is netUsd / activeSubscribers", async () => {

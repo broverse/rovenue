@@ -58,7 +58,7 @@ describe("buildMrrSeriesPoints", () => {
     expect(points[1]?.value).toBe(1200);
   });
 
-  it("gross_vs_net: the difference is refundsUsd directly, no re-derivation", () => {
+  it("gross_vs_net: plots net ÷ gross as a 0-100 percentage", () => {
     const rows = [
       point({
         bucket: new Date("2026-07-02T00:00:00.000Z"),
@@ -67,10 +67,31 @@ describe("buildMrrSeriesPoints", () => {
         netUsd: "120",
       }),
     ];
-    const points = buildMrrSeriesPoints(rows, FROM, TO, (row) =>
-      row ? Number(row.refundsUsd) : 0,
-    );
-    expect(points[1]?.value).toBe(30);
+    const points = buildMrrSeriesPoints(rows, FROM, TO, (row) => {
+      if (!row) return null;
+      const gross = Number(row.grossUsd);
+      if (gross <= 0) return null;
+      return Math.round((Number(row.netUsd) / gross) * 100 * 10) / 10;
+    });
+    expect(points[1]?.value).toBe(80);
+  });
+
+  it("gross_vs_net: reports null — NOT zero — when gross is zero that day", () => {
+    const rows = [
+      point({
+        bucket: new Date("2026-07-02T00:00:00.000Z"),
+        grossUsd: "0",
+        refundsUsd: "0",
+        netUsd: "0",
+      }),
+    ];
+    const points = buildMrrSeriesPoints(rows, FROM, TO, (row) => {
+      if (!row) return null;
+      const gross = Number(row.grossUsd);
+      if (gross <= 0) return null;
+      return Math.round((Number(row.netUsd) / gross) * 100 * 10) / 10;
+    });
+    expect(points[1]?.value).toBeNull();
   });
 
   it("arpu: divides net revenue by active subscribers for a day with both", () => {

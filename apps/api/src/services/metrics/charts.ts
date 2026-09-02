@@ -806,25 +806,46 @@ export async function readChartSeries(
     }
 
     case "gross_vs_net": {
-      // DECISION (task-2 controller notes): this id names two
-      // quantities but ChartSeriesPoint carries one. We plot the
-      // DIFFERENCE (gross − net), not the ratio — i.e. the dollars
-      // lost to refunds/chargebacks each day. That's what
-      // MrrChartPanel's own `refunds` bucket already computes for
-      // its breakdown (mrr-chart-panel.tsx's `rollupToMonths`), so a
-      // "gross vs net" money area chart reads as the same product
-      // concept. `refundsUsd` is a column `v_mrr_daily` already
-      // returns directly (grossUsd − netUsd, by construction — see
-      // migration 0012), so this needs no subtraction of two
-      // separately-summed monies.
+      // DECISION (task-2 controller notes, REVISED in fix round 1):
+      // this id names two quantities but ChartSeriesPoint carries
+      // one. We plot the RATIO — net ÷ gross, the share of gross
+      // revenue that survives refunds/chargebacks — as a `percent`
+      // series, NOT the difference.
+      //
+      // A prior version of this reader plotted the DIFFERENCE
+      // (gross − net, i.e. refundsUsd) as a money series, reasoning
+      // that MrrChartPanel's own `refunds` bucket
+      // (mrr-chart-panel.tsx's `rollupToMonths`) already computes
+      // that figure. That precedent cuts the other way on closer
+      // reading: `rollupToMonths` rolls up all THREE of gross, net
+      // AND refunds as one breakdown, so shipping just the refunds
+      // slice alone under a label naming the other two ("Gross vs
+      // net revenue") is a mismatch, and it made this chart largely
+      // redundant with a panel that already draws that exact series.
+      // The ratio is the one number that actually expresses "gross
+      // vs net" as a comparison, and it doesn't duplicate anything
+      // MrrChartPanel already shows.
+      //
+      // A day with zero gross has an UNDEFINED ratio — null, not 0,
+      // per ChartSeriesPoint's documented convention (distinct from
+      // "measured, and it was zero"). Percentage scale/rounding
+      // matches buildRatePoints' convention (0-100, one decimal via
+      // PCT_ROUNDING_SCALE) — see series-chart-panel.tsx:162, which
+      // formats every `percent` series the same way.
       assertClickHouseReady();
       const rows = await listDailyMrr({ projectId, from: w.from, to: w.to });
       return {
         ...base,
-        unit: "money",
-        points: buildMrrSeriesPoints(rows, w.from, w.to, (row) =>
-          row ? Number(row.refundsUsd) : 0,
-        ),
+        unit: "percent",
+        points: buildMrrSeriesPoints(rows, w.from, w.to, (row) => {
+          if (!row) return null;
+          const gross = Number(row.grossUsd);
+          if (gross <= 0) return null;
+          return (
+            Math.round((Number(row.netUsd) / gross) * 100 * PCT_ROUNDING_SCALE) /
+            PCT_ROUNDING_SCALE
+          );
+        }),
         supported: true,
       };
     }
