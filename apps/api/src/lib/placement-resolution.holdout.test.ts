@@ -20,6 +20,7 @@ const findAudienceByIds = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
 const findProjectHoldoutPercentage = vi.hoisted(() => vi.fn(async () => 0));
 const findPaywallsByIds = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
 const findVersionsByIds = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
+const findOfferingById = vi.hoisted(() => vi.fn(async () => null));
 const transactionMock = vi.hoisted(() =>
   vi.fn(async (cb: (tx: unknown) => unknown) => cb({ __tx: true })),
 );
@@ -51,6 +52,10 @@ vi.mock("@rovenue/db", async (importOriginal) => {
       paywallVersionRepo: {
         ...actual.drizzle.paywallVersionRepo,
         findByIds: findVersionsByIds,
+      },
+      offeringRepo: {
+        ...actual.drizzle.offeringRepo,
+        findOfferingById,
       },
     },
   };
@@ -97,13 +102,55 @@ function runningPaywallExperiment() {
   };
 }
 
+/** Both variant paywalls, active and published — the ordinary case. */
+function variantPaywallRows() {
+  return [
+    {
+      id: "pw_control",
+      projectId: PROJECT_ID,
+      identifier: "pw-control",
+      name: "Control",
+      isActive: true,
+      publishedVersionId: "ver_control",
+    },
+    {
+      id: "pw_treatment",
+      projectId: PROJECT_ID,
+      identifier: "pw-treatment",
+      name: "Treatment",
+      isActive: true,
+      publishedVersionId: "ver_treatment",
+    },
+  ];
+}
+
+function variantVersionRows() {
+  return [
+    {
+      id: "ver_control",
+      offeringId: "off_1",
+      remoteConfig: { defaultLocale: "en", locales: { en: { title: "Control" } } },
+      builderConfig: null,
+      configFormatVersion: 2,
+    },
+    {
+      id: "ver_treatment",
+      offeringId: "off_1",
+      remoteConfig: { defaultLocale: "en", locales: { en: { title: "Treatment" } } },
+      builderConfig: null,
+      configFormatVersion: 2,
+    },
+  ];
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   findByIdInProject.mockResolvedValue(runningPaywallExperiment());
   findAudienceByIds.mockResolvedValue([]);
   findProjectHoldoutPercentage.mockResolvedValue(0);
-  findPaywallsByIds.mockResolvedValue([]);
-  findVersionsByIds.mockResolvedValue([]);
+  findPaywallsByIds.mockResolvedValue(variantPaywallRows());
+  findVersionsByIds.mockResolvedValue(variantVersionRows());
+  findOfferingById.mockResolvedValue(null);
   transactionMock.mockImplementation(async (cb: (tx: unknown) => unknown) => cb({ __tx: true }));
 });
 
@@ -121,7 +168,7 @@ describe("resolvePlacement — holdout", () => {
     expect(findPaywallsByIds).toHaveBeenCalled();
   });
 
-  it("a held-out subscriber (holdoutPercentage=100) gets no experiment in the envelope — falls through to the empty envelope shape", async () => {
+  it("a held-out subscriber (holdoutPercentage=100) is served the CONTROL paywall, with no experiment", async () => {
     findProjectHoldoutPercentage.mockResolvedValue(100);
 
     const result = await resolvePlacement(
@@ -132,12 +179,30 @@ describe("resolvePlacement — holdout", () => {
       "sub_holdout",
     );
 
-    // No new field: the ALREADY-SUPPORTED "no experiment" shape.
+    // Control is the FIRST DECLARED variant, the same convention the
+    // results service resolves control by.
+    expect(result.paywall?.id).toBe("pw_control");
+    // No `experiment`: the subscriber must not be drawn into an arm.
     expect(result.experiment).toBeNull();
-    expect(result.paywall).toBeNull();
-    // Never reached the type-specific variant menu — holdout omitted the
-    // row entirely rather than serving a partial/control-only menu.
-    expect(findPaywallsByIds).not.toHaveBeenCalled();
+  });
+
+  it("a held-out subscriber is NOT shown an empty envelope", async () => {
+    // `placementRowsSchema` allows at most one all-users row and requires
+    // it to be last, so falling through to "the next row" in the normal
+    // configuration means falling out of the placement entirely — 10% of
+    // users shown no paywall, and a baseline cohort measured on users who
+    // saw no offer.
+    findProjectHoldoutPercentage.mockResolvedValue(100);
+
+    const result = await resolvePlacement(
+      PROJECT_ID,
+      placementRow(),
+      {},
+      undefined,
+      "sub_holdout",
+    );
+
+    expect(result.paywall).not.toBeNull();
   });
 
   it("a held-out subscriber still gets an exposure recorded, against the real experimentId, with the placementId attached", async () => {
@@ -180,6 +245,86 @@ describe("resolvePlacement — holdout", () => {
     );
 
     expect(result.experiment).toBeNull();
+    expect(result.paywall?.id).toBe("pw_control");
+  });
+
+  it("falls through with no paywall when the control variant cannot be hydrated", async () => {
+    // Nothing to withhold them from: the experiment could not have run for
+    // anyone. Better an empty envelope than a control paywall conjured
+    // from an experiment that is itself broken.
+    findProjectHoldoutPercentage.mockResolvedValue(100);
+    findPaywallsByIds.mockResolvedValue([]);
+    findVersionsByIds.mockResolvedValue([]);
+
+    const result = await resolvePlacement(
+      PROJECT_ID,
+      placementRow(),
+      {},
+      undefined,
+      "sub_holdout",
+    );
+
     expect(result.paywall).toBeNull();
+    expect(result.experiment).toBeNull();
+    expect(publishHoldoutExposureMock).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// PAYWALL variants are all-or-nothing
+// =============================================================
+//
+// Identical rule to `materializeElementVariants`. The variant draw is
+// client-side and `selectVariant` falls through to the LAST variant for
+// any bucket past the cumulative weight total, so shipping A alone after
+// dropping B sends 100% of traffic to A while every exposure is logged as
+// a normal split.
+
+describe("resolvePlacement — PAYWALL variant materialisation", () => {
+  it("serves both variants when both hydrate", async () => {
+    const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
+
+    expect(result.experiment?.variants.map((v) => v.variantId)).toEqual([
+      "control",
+      "treatment",
+    ]);
+  });
+
+  it("drops the WHOLE experiment when one variant's paywall is archived", async () => {
+    findPaywallsByIds.mockResolvedValue([
+      variantPaywallRows()[0]!,
+      { ...variantPaywallRows()[1]!, isActive: false },
+    ]);
+
+    const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
+
+    expect(result.experiment).toBeNull();
+    expect(result.paywall).toBeNull();
+  });
+
+  it("drops the WHOLE experiment when one variant has no published version", async () => {
+    findPaywallsByIds.mockResolvedValue([
+      variantPaywallRows()[0]!,
+      { ...variantPaywallRows()[1]!, publishedVersionId: null },
+    ]);
+    findVersionsByIds.mockResolvedValue([variantVersionRows()[0]!]);
+
+    const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
+
+    expect(result.experiment).toBeNull();
+  });
+
+  it("drops the WHOLE experiment when one variant carries no paywallId at all", async () => {
+    findByIdInProject.mockResolvedValue({
+      ...runningPaywallExperiment(),
+      variants: [
+        { id: "control", weight: 0.5, value: { paywallId: "pw_control" } },
+        { id: "treatment", weight: 0.5, value: { inlineConfig: {} } },
+      ],
+    });
+
+    const result = await resolvePlacement(PROJECT_ID, placementRow(), {}, undefined, "sub_1");
+
+    expect(result.experiment).toBeNull();
   });
 });

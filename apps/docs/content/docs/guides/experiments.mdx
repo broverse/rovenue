@@ -125,8 +125,14 @@ against an accumulated balance).
 
 A project can reserve a percentage of subscribers as a permanent holdout:
 membership excludes a subscriber from every experiment on every placement,
-serving them the control/default treatment instead — with their exposure
-still recorded (an unmeasured holdout is just a smaller, wasted audience).
+serving them the control treatment instead — the experiment's **first
+declared variant**, the same arm the results page treats as control — with
+their exposure still recorded against a reserved holdout cohort id (an
+unmeasured holdout is just a smaller, wasted audience). A held-out
+subscriber is never shown an empty placement: they see a paywall, just
+never a treatment. Their exposures are reported separately from the
+experiment's arms, so switching a holdout on never changes an experiment's
+own split, SRM verdict or recommendation.
 Membership is decided **server-side**, before the client ever receives an
 experiment's variant menu — the variant draw itself is client-side and
 deterministic, so holdout has to be resolved earlier than that, not layered
