@@ -35,13 +35,27 @@ So the metrics export — which the previous plan shipped as "the catalog's data
 BI" — covers 2 of 16 series. It does not lie (`supported: false` is returned), but it is
 one eighth of what the catalog advertises.
 
-**The data mostly exists already.** `services/metrics/` holds `mrr.ts`,
-`mrr-decomposition.ts`, `ltv.ts`, `ltv-extrapolation.ts`, `ltv-prediction.ts`,
-`subscriptions.ts`, `summary.ts`, `credits.ts`, `engagement.ts` and `overview.ts`. Thirteen
-of the fourteen unwired ids name a concept one of those services already computes. This is
-a **wiring** job, not new analytics — the same shape as the §4 work that just landed.
+**Most of the data exists already, but not all of it, and the split was measured rather
+than assumed.** A grep of each id's concept across `services/metrics/` gives three groups:
 
-### 1.2 Item C's exception — `rev_per_install` has no backing data at all
+- **Clearly backed** — `mrr`, `arr` (`mrr.ts`), `ltv` (`ltv.ts` / `-extrapolation` /
+  `-prediction`), `churn` and `trial_to_paid` (`summary.ts`, `subscriptions.ts`),
+  `credit_burn` and `liability` (`credits.ts`), `gross_vs_net` and `reactivations` and
+  `trials_started` (`mrr-decomposition.ts`, `transactions.ts`, `overview.ts`).
+- **Backed elsewhere, not by a `services/metrics` sibling** — `retention_curve`. The
+  cohorts surface (`/cohorts`, `retention-heatmap.tsx`) has its own route; the delegation
+  target is that, not a metrics service.
+- **Thin or unclear** — `arpu` (only `summary.ts` mentions it) and `new_subs` (the catalog
+  is the ONLY file naming it). Both may still be derivable from an existing service under a
+  different name, but neither is confirmed.
+
+An earlier draft of this spec asserted "thirteen of the fourteen" from file names rather
+than behaviour. That is the exact failure this area keeps having, so the number is replaced
+by the grouping above and **§4.6 makes per-id verification an explicit first deliverable**
+rather than a spec claim. This is still a **wiring** job for most ids — the same shape as
+the §4 work that just landed — but the plan must confirm each backing before wiring it.
+
+### 1.2 Item C's one genuine exception — `rev_per_install` has no backing data at all
 
 `grep -rni install` across `services/metrics/` and the ClickHouse migrations returns exactly
 one hit that is not the word "fresh install" in a migration comment: **the catalog entry
@@ -49,7 +63,8 @@ itself**. There is no install event, no first-seen counter, and nothing in the S
 one.
 
 So one of the sixteen ids cannot be wired without first building install tracking, which is
-an SDK-and-pipeline project of its own.
+an SDK-and-pipeline project of its own. §4.3 explains why it nevertheless stays in the
+catalog.
 
 ### 1.3 Item B — "full country coverage" is not a gap, it is two closed questions
 
@@ -114,8 +129,11 @@ ruling and a physical impossibility as if they were backlog.
 - **No historical country backfill.** See §1.3.
 - **No new ClickHouse queries where a service already computes the concept.** This is the
   spec's central constraint; see §4.1.
-- **No change to the chart catalog's ids, categories or ordering**, beyond §4.3's single
-  removal.
+- **No change to the chart catalog's ids, categories or ordering.** Nothing is added and
+  nothing is removed — see §4.3.
+- **No new chart types and no change to the rendering layer.** Every wired id must fit a
+  chart type the dashboard already draws. If one does not, that is a finding to report, not
+  a licence to build a renderer.
 
 ---
 
@@ -151,18 +169,56 @@ The schema-contract harness (`schema-contract.integration.test.ts`) must cover e
 wired reader. That harness exists because §5 previously shipped a reader querying columns
 that never existed, green in CI because every test mocked the client.
 
-### 4.3 `rev_per_install` leaves the catalog
+### 4.3 `rev_per_install` STAYS in the catalog, documented
 
-A rail entry that renders and leads nowhere is worse than no entry — the previous §5 batch
-fixed exactly this defect for `estimated_proceeds`, which showed a raw i18n key and
-dead-ended. `rev_per_install` cannot be backed without install tracking, so it comes out of
-`SYSTEM_CATALOG`, with a comment saying what would have to exist first.
+An earlier draft removed it. Measurement reversed that, and the reasoning is worth keeping
+because it is a precedent that does **not** transfer:
 
-Removing it is not a loss of function: it has never returned a point.
+- The `estimated_proceeds` defect the previous §5 batch fixed was an entry with **no i18n
+  label**, which rendered as the literal string `charts.items.estimated_proceeds` and then
+  dead-ended. **All sixteen ids including `rev_per_install` have labels** — checked against
+  `en.json`. So it renders a proper name.
+- The dashboard already distinguishes `supported: false` from "supported but every day came
+  back null" (`series-chart-panel.tsx:149-150`) — a deliberate design, not an oversight. The
+  unsupported state is an honest "no reader for this yet", not a broken chart.
+- **`isSystemChartId` is what reserves the id.** System charts are read-only (`403`) and
+  undeletable (`charts.ts:277`, `:310`). Removing `rev_per_install` from `SYSTEM_CATALOG`
+  frees that name for a user-created custom chart, which is a namespace regression in
+  exchange for nothing.
+
+So it stays, with a comment at the entry naming what would have to exist first — an SDK-side
+install event and a pipeline to carry it — and it keeps returning `supported: false`. It is
+the one id §4.2's honest-default branch exists for.
+
+### 4.3b Units and currency are part of being correct, not decoration
+
+`ChartSeriesResponse` carries a `unit`, and the `default` branch hands back `"count"` for
+everything it does not know. A money series returned as a count renders as a bare number
+with no currency and is a display bug that looks like a data bug.
+
+Every wired id declares its real unit, and **money series are USD**, because the pipeline
+normalises to `amountUsd` — the same normalisation `summary.ts` and `proceeds.ts` already
+rely on. Say so at the reader so nobody later wires a local-currency figure into the same
+field. Rate-style ids (`churn`, `trial_to_paid`, `paywall_view_rate`) are fractions, not
+percentages, unless the existing card already shows percentages — match the card.
+
+### 4.3c The export gets roughly seven times the work per request
+
+`export.ts` iterates `SYSTEM_CHART_IDS` and today does real work for two of them. Wiring
+thirteen more multiplies the per-request cost on a **streaming** endpoint whose documented
+behaviour is to emit `# error: <message>` and close with HTTP 200 if a reader throws
+mid-stream.
+
+That is a real change in cost, not a rounding error. The plan must measure the export's
+wall-clock before and after on a project with data, and say the number. If it becomes
+unreasonable, the answer is to run the readers concurrently — the `paywall_view_rate` reader
+already sets that precedent with `Promise.all` — not to quietly drop ids from the export.
 
 ### 4.4 The commission-rate settings UI
 
-A small form on the project settings surface, one row per store, offering
+A small form on the project settings surface — `apps/dashboard/src/components/projects/SettingsForm.tsx`,
+which just gained `holdoutPercentage` and is the established home for per-project settings —
+one row per store, offering
 `COMMISSION_RATE_PRESETS` as choices with their sourced citations visible and a free entry
 for anything else. It writes through the existing audited endpoints; no new API.
 
@@ -174,6 +230,9 @@ Two honesty requirements carried from the previous batch:
 - The preset citations exist in `proceeds.ts` and should be shown, not summarised. An
   operator choosing 15% vs 30% is making a claim about their App Store Small Business
   Program status.
+- **Match the role gate the existing endpoint already enforces.** The commission-rate routes
+  call `assertProjectAccess` with a role; the form must not become a wider door than the API
+  it writes through. Read the route and mirror it — do not invent a gate.
 
 ### 4.5 Close §5's two unbuildable items in the roadmap
 
@@ -183,6 +242,19 @@ is **impossible from retained data** and would require a three-party re-verifica
 campaign. Whoever reads §5 next should not have to re-derive either.
 
 ---
+
+### 4.6 Per-id backing verification is the first deliverable, not a spec claim
+
+Before any reader is written, each unwired id gets a one-line answer to: *which existing
+function already computes this, and does its output match what the catalog entry promises?*
+The output is a table — id, backing function, unit, and whether the concept matches or only
+the name does.
+
+This exists because §1.1's grouping came from a grep, and a grep matches names, not
+behaviour. Two ids (`arpu`, `new_subs`) are already flagged as unconfirmed, and
+`retention_curve`'s backing turned out to live outside `services/metrics` entirely. **An id
+whose backing turns out not to exist is a finding to report, not a licence to write new
+SQL** — the whole point of §4.1 is that a second query set drifts from the first.
 
 ## 5. Data changes
 
@@ -208,15 +280,16 @@ is a different problem from an unwired reader.
 
 ## 7. Acceptance criteria
 
-1. Every catalog id except the one removed by §4.3 returns a real series with points over a
-   window containing data.
+1. Every catalog id whose backing §4.6 confirms returns a real series with points over a
+   window containing data. Any id §4.6 finds unbacked is reported with its reason and left
+   returning `supported: false` — an honest gap, not a fabricated series.
 2. No newly wired reader issues its own ClickHouse SQL for a concept an existing service
    already computes — demonstrated by the diff, which should add delegations and reshaping,
    not queries.
 3. Where a service was widened, its pre-existing caller returns identical numbers, proven by
    a test that existed before the change or was added to pin it.
-4. `rev_per_install` is gone from `SYSTEM_CATALOG`, with a comment naming what would have to
-   exist to bring it back.
+4. `rev_per_install` remains in `SYSTEM_CATALOG` with a comment naming what would have to
+   exist to back it, and still returns `supported: false`.
 5. `readChartSeries`'s `default` branch still returns `supported: false` with zero
    ClickHouse round-trips.
 6. Every newly wired reader is registered in the schema-contract harness and its tests
@@ -227,3 +300,8 @@ is a different problem from an unwired reader.
    no rate still reports proceeds as unknown rather than assuming a preset.
 9. ROADMAP §5's two unbuildable items are closed with their reasons — the Stripe billing-
    address ruling and the absence of any retained country or store payload to backfill from.
+10. Every wired series declares its real `unit`, money series are USD, and a test pins at
+    least one money id and one rate id against the card that already displays them.
+11. The export's wall-clock is measured before and after on a project with data, and the
+    number is reported.
+12. The commission-rate form enforces the same role gate as the endpoint it writes through.
