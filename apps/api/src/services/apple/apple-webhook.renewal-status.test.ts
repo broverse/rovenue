@@ -37,6 +37,15 @@ const { drizzleMock } = vi.hoisted(() => {
     },
     purchaseRepo: {
       updatePurchasesByOriginalTransaction: vi.fn(async () => undefined),
+      // REVOKE's chain write + access revocation; the renewal-status path
+      // never reaches these, the REVOKE path below does.
+      updateChainStatusGuarded: vi.fn(async () => ({
+        updatedIds: [PURCHASE_ID],
+        skippedTerminalIds: [],
+      })),
+    },
+    accessRepo: {
+      revokeAccessByOriginalTransaction: vi.fn(async () => undefined),
     },
     purchaseExtRepo: {
       findPurchaseByOriginalTransaction: vi.fn(),
@@ -110,6 +119,11 @@ function makeTransaction(): AppleJwsTransactionPayload {
     currency: "USD",
     price: 9_990_000,
   } as AppleJwsTransactionPayload;
+}
+
+function makeRevokeNotification(uuid: string): AppleResponseBodyV2DecodedPayload {
+  const base = makeRenewalStatusNotification(uuid);
+  return { ...base, notificationType: APPLE_NOTIFICATION_TYPE.REVOKE };
 }
 
 function makeRenewalStatusNotification(uuid: string): AppleResponseBodyV2DecodedPayload {
@@ -258,6 +272,62 @@ describe("handleAppleNotification — DID_CHANGE_RENEWAL_STATUS end-to-end", () 
     );
 
     const result = await dispatchRenewalStatusChange(1, "uuid-rs-orphan");
+
+    expect(result.status).toBe("processed");
+    expect(drizzleMock.outboxRepo.insert).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// REVOKE — the gap Task 1 found and Task 3 closed
+// =============================================================
+//
+// Before this, `applyRevoke` wrote the chain status and revoked access
+// while never setting `outcome.subscriberId` — and `postProcess` bails
+// without one. So an Apple REVOKE emitted NOTHING: no revenue event, no
+// lifecycle key, and a subscriber could lose access with zero signal to
+// any consumer.
+//
+// The mapping row alone would not have fixed that, which is exactly why
+// this asserts on the OUTBOX rather than on STORE_EVENT_TO_PUBLIC_KEY.
+
+describe("handleAppleNotification — REVOKE end-to-end", () => {
+  test("exactly one subscription.revoked lands in the outbox", async () => {
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier: makeStubVerifier(makeRevokeNotification("uuid-revoke"), 1),
+      postProcess: makePostProcess(),
+    });
+
+    expect(result.status).toBe("processed");
+
+    expect(drizzleMock.outboxRepo.insert).toHaveBeenCalledTimes(1);
+    expect(drizzleMock.outboxRepo.insert).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        aggregateType: "SUBSCRIPTION",
+        aggregateId: SUBSCRIBER_ID,
+        eventType: "subscription.revoked",
+        payload: expect.objectContaining({
+          projectId: PROJECT_ID,
+          purchaseId: PURCHASE_ID,
+        }),
+      }),
+    );
+  });
+
+  test("no matching purchase row: no key lands, and nothing throws", async () => {
+    drizzleMock.purchaseExtRepo.findPurchaseByOriginalTransaction.mockResolvedValueOnce(
+      null,
+    );
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier: makeStubVerifier(makeRevokeNotification("uuid-revoke-2"), 1),
+      postProcess: makePostProcess(),
+    });
 
     expect(result.status).toBe("processed");
     expect(drizzleMock.outboxRepo.insert).not.toHaveBeenCalled();
