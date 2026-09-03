@@ -6,6 +6,7 @@ import type {
   CountdownNode,
   DividerNode,
   FeatureListNode,
+  FooterLinksNode,
   IconNode,
   ImageNode,
   PaywallNode,
@@ -16,6 +17,7 @@ import type {
   TextNode,
   TimelineNode,
 } from "@rovenue/shared/paywall";
+import { FOOTER_LINKS_DEFAULT_ALIGN, FOOTER_LINKS_DEFAULT_SEPARATOR } from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { AlignField, BorderField, NumberField, ThemeColorField } from "./fields";
 import { Field, Section, Segmented } from "./primitives";
@@ -29,7 +31,8 @@ import { Field, Section, Segmented } from "./primitives";
 // style-only field (their one colour-ish knob, `posterUrl`, is content,
 // not appearance). Adding a Style tab without a case here would be the
 // wave-B defect in the other direction — an empty tab shipping instead of
-// no tab at all.
+// no tab at all. `packageList` and `spacer` are absent for the same
+// reason: neither has an appearance-only field of its own.
 // =============================================================
 
 export const StyleTab = component(({ node }: { node: PaywallNode }) => {
@@ -60,8 +63,23 @@ export const StyleTab = component(({ node }: { node: PaywallNode }) => {
       return <CountdownStyle node={node} />;
     case "carousel":
       return <CarouselStyle node={node} />;
-    default:
+    case "footerLinks":
+      return <FooterLinksStyle node={node} />;
+    // See the module doc comment above for why these four have no Style
+    // case: video/lottie have no style-only field; packageList/spacer have
+    // none either.
+    case "packageList":
+    case "spacer":
+    case "video":
+    case "lottie":
       return null;
+    default: {
+      // A new node type with no decision recorded above fails the build
+      // here instead of silently rendering an empty inspector.
+      const exhaustive: never = node;
+      void exhaustive;
+      return null;
+    }
   }
 });
 
@@ -363,6 +381,53 @@ function CarouselStyle({ node }: { node: CarouselNode }) {
         label={t("paywalls.builder.properties.carouselIndicatorColor", "Indicator color")}
         value={node.indicatorColor}
         onChange={(v) => set({ indicatorColor: v })}
+      />
+    </Section>
+  );
+}
+
+/**
+ * `separator`/`align` are rendered with their own `Field` + `Segmented`
+ * pair (rather than reusing `AlignField`) because their unset defaults are
+ * `FOOTER_LINKS_DEFAULT_SEPARATOR`/`FOOTER_LINKS_DEFAULT_ALIGN` — "center",
+ * not `AlignField`'s own hard-coded "start" default, and this field's label
+ * ("Alignment") is deliberately more specific than `AlignField`'s generic
+ * "Align" (this aligns the whole row, not text glyphs).
+ */
+function FooterLinksStyle({ node }: { node: FooterLinksNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const set = (patch: Partial<FooterLinksNode>) => vm.updateNode<FooterLinksNode>(node.id, patch);
+
+  return (
+    <Section title={t("paywalls.builder.properties.style", "Style")} defaultOpen>
+      <Field label={t("paywalls.builder.properties.footerLinksSeparator", "Separator")}>
+        <Segmented
+          value={node.separator ?? FOOTER_LINKS_DEFAULT_SEPARATOR}
+          onChange={(v) => set({ separator: v })}
+          options={[
+            { value: "dot", label: t("paywalls.builder.properties.footerLinksSeparatorDot", "Dot") },
+            { value: "pipe", label: t("paywalls.builder.properties.footerLinksSeparatorPipe", "Pipe") },
+            { value: "none", label: t("paywalls.builder.properties.footerLinksSeparatorNone", "None") },
+          ]}
+        />
+      </Field>
+      <Field className="mt-3" label={t("paywalls.builder.properties.footerLinksAlign", "Alignment")}>
+        <Segmented
+          value={node.align ?? FOOTER_LINKS_DEFAULT_ALIGN}
+          onChange={(v) => set({ align: v })}
+          options={[
+            { value: "start", label: t("paywalls.builder.properties.alignStart", "Start") },
+            { value: "center", label: t("paywalls.builder.properties.alignCenter", "Center") },
+            { value: "end", label: t("paywalls.builder.properties.alignEnd", "End") },
+          ]}
+        />
+      </Field>
+      <ThemeColorField
+        className="mt-3"
+        label={t("paywalls.builder.properties.footerLinksColor", "Link color")}
+        value={node.color}
+        onChange={(v) => set({ color: v })}
       />
     </Section>
   );

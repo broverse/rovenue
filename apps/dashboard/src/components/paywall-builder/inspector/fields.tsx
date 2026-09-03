@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderOpen, Languages } from "lucide-react";
 import type { AssetKind } from "@rovenue/shared";
-import type { NodeBorder, NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
+import type { ButtonNode, NodeBorder, NodeSize, StackNode, ThemeColor, ThemeUrl } from "@rovenue/shared/paywall";
 import { cn } from "../../../lib/cn";
 import { ColorSwatchInput } from "../../funnel-builder/color-swatch-input";
 import { AssetLibraryModal } from "../../assets/asset-library-modal";
@@ -685,5 +685,51 @@ export function NumberField({
     <Field label={label} className={className}>
       <NumberInput value={value} onChange={onChange} min={min} />
     </Field>
+  );
+}
+
+/**
+ * The three-way "on tap" action editor a `ButtonNode`'s `action` and a
+ * `FooterLink`'s `action` both need (`FooterLink["action"]` is literally
+ * `ButtonNode["action"]` — see schema.ts's doc comment on `FooterLink`) —
+ * close / open URL / restore, with the URL input shown only for "url".
+ * Extracted here so `ButtonBinding` (binding-tab.tsx) and
+ * `FooterLinksContent` (content-tab.tsx) share ONE editor instead of a
+ * second hand-maintained copy of it.
+ */
+export function ActionField({
+  value,
+  onChange,
+}: {
+  value: ButtonNode["action"];
+  onChange: (next: ButtonNode["action"]) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Field label={t("paywalls.builder.properties.actionKind", "On tap")}>
+        <Segmented
+          value={value.kind}
+          onChange={(kind) =>
+            onChange(kind === "url" ? { kind, url: value.kind === "url" ? value.url : "" } : { kind })
+          }
+          options={[
+            { value: "close", label: t("paywalls.builder.properties.actionClose", "Close") },
+            { value: "url", label: t("paywalls.builder.properties.actionUrl", "Open URL") },
+            { value: "restore", label: t("paywalls.builder.properties.actionRestore", "Restore") },
+          ]}
+        />
+      </Field>
+      {value.kind === "url" && (
+        <Field className="mt-3" label={t("paywalls.builder.properties.url", "URL")}>
+          <input
+            value={value.url}
+            onChange={(e) => onChange({ kind: "url", url: e.currentTarget.value })}
+            placeholder="https://example.com/terms"
+            className={INPUT_CLASS}
+          />
+        </Field>
+      )}
+    </>
   );
 }

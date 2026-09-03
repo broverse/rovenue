@@ -414,10 +414,10 @@ export function updateNode<T extends PaywallNode>(
 /**
  * Builds a new node of `type` with sensible defaults. `idGen` supplies
  * the id (callers pass e.g. `() => createId().slice(0, 8)`); text/
- * button/purchaseButton nodes derive a FRESH localization key from
- * that id (`text_<id>` / `button_<id>` / `purchaseButton_<id>`) so the
- * caller can immediately register an empty string for it in every
- * locale table.
+ * button/purchaseButton/footerLinks nodes derive a FRESH localization key
+ * from that id (`text_<id>` / `button_<id>` / `purchaseButton_<id>` /
+ * `footerLinks_<id>_1`) so the caller can immediately register an empty
+ * string for it in every locale table.
  */
 export function newNode(type: PaywallNode["type"], idGen: () => string): PaywallNode {
   const id = idGen();
@@ -462,6 +462,14 @@ export function newNode(type: PaywallNode["type"], idGen: () => string): Paywall
       return { type: "video", id, url: { light: "" } };
     case "lottie":
       return { type: "lottie", id, url: { light: "" } };
+    case "footerLinks":
+      // Restore is the only footer link every store requires and the only
+      // one that needs no URL from the author — see the module doc comment.
+      return {
+        type: "footerLinks",
+        id,
+        links: [{ labelKey: `footerLinks_${id}_1`, action: { kind: "restore" } }],
+      };
     default: {
       const exhaustive: never = type;
       throw new Error(`Unknown node type: ${String(exhaustive)}`);

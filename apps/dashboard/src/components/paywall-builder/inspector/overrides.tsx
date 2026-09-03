@@ -9,7 +9,13 @@ import type {
   ThemeColor,
   ThemeUrl,
 } from "@rovenue/shared/paywall";
-import { ICON_NAMES, OVERRIDABLE_PROP_KEYS, SOCIAL_PROOF_MAX_RATING } from "@rovenue/shared/paywall";
+import {
+  FOOTER_LINKS_DEFAULT_ALIGN,
+  FOOTER_LINKS_DEFAULT_SEPARATOR,
+  ICON_NAMES,
+  OVERRIDABLE_PROP_KEYS,
+  SOCIAL_PROOF_MAX_RATING,
+} from "@rovenue/shared/paywall";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { AlignField, BorderField, NumberField, SelectField, ThemeColorField, ThemeUrlField } from "./fields";
 import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
@@ -50,6 +56,7 @@ const OVERRIDE_PROP_LABEL: Record<string, string> = {
   posterUrl: "Poster URL",
   labelColor: "Label color",
   border: "Border",
+  separator: "Separator",
 };
 
 /**
@@ -239,6 +246,7 @@ function OverridePropField({
     case "stickyFooter.background":
     case "countdown.color":
     case "carousel.indicatorColor":
+    case "footerLinks.color":
       return (
         <ThemeColorField
           label={label}
@@ -314,6 +322,32 @@ function OverridePropField({
             { value: "primary", label: "Primary" },
             { value: "secondary", label: "Secondary" },
             { value: "plain", label: "Plain" },
+          ]}
+        />
+      );
+    case "footerLinks.separator":
+      return (
+        <Segmented
+          value={
+            value === "dot" || value === "pipe" || value === "none" ? value : FOOTER_LINKS_DEFAULT_SEPARATOR
+          }
+          onChange={(v) => onChange(v)}
+          options={[
+            { value: "dot", label: "Dot" },
+            { value: "pipe", label: "Pipe" },
+            { value: "none", label: "None" },
+          ]}
+        />
+      );
+    case "footerLinks.align":
+      return (
+        <Segmented
+          value={value === "start" || value === "center" || value === "end" ? value : FOOTER_LINKS_DEFAULT_ALIGN}
+          onChange={(v) => onChange(v)}
+          options={[
+            { value: "start", label: "Start" },
+            { value: "center", label: "Center" },
+            { value: "end", label: "End" },
           ]}
         />
       );

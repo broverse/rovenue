@@ -1444,7 +1444,8 @@
         "countdown": "Countdown",
         "carousel": "Carousel",
         "video": "Video",
-        "lottie": "Lottie"
+        "lottie": "Lottie",
+        "footerLinks": "Footer links"
       },
       "addNode": {
         "title": "Add node"
@@ -1640,7 +1641,15 @@
         "lottie": "Lottie",
         "lottieLoop": "Loop",
         "lottieAutoplay": "Autoplay",
-        "lottieSpeed": "Speed"
+        "lottieSpeed": "Speed",
+        "footerLinksAddLink": "Add link",
+        "footerLinksLabel": "Label",
+        "footerLinksSeparator": "Separator",
+        "footerLinksSeparatorDot": "Dot",
+        "footerLinksSeparatorPipe": "Pipe",
+        "footerLinksSeparatorNone": "None",
+        "footerLinksAlign": "Alignment",
+        "footerLinksColor": "Link color"
       },
       "topbar": {
         "close": "Close builder",

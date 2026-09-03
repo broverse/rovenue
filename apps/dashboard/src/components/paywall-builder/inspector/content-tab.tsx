@@ -5,6 +5,7 @@ import {
   CAROUSEL_DEFAULT_SHOWS_INDICATOR,
   COUNTDOWN_DEFAULT_ON_EXPIRY,
   FEATURE_ROW_DEFAULT_INCLUDED,
+  FOOTER_LINKS_MAX,
   ICON_NAMES,
   LOTTIE_DEFAULT_AUTOPLAY,
   LOTTIE_DEFAULT_LOOP,
@@ -19,6 +20,8 @@ import {
   type DividerNode,
   type FeatureListNode,
   type FeatureRow,
+  type FooterLink,
+  type FooterLinksNode,
   type IconNode,
   type ImageNode,
   type LottieNode,
@@ -33,6 +36,7 @@ import {
 import { COUNTDOWN_DEFAULT_DURATION_SECONDS } from "../tree-ops";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import {
+  ActionField,
   LocalizedTextField,
   NumberField,
   POSITIVE_NUMBER_FIELD_MIN,
@@ -82,8 +86,25 @@ export const ContentTab = component(({ node }: { node: PaywallNode }) => {
       return <VideoContent node={node} />;
     case "lottie":
       return <LottieContent node={node} />;
-    default:
+    case "footerLinks":
+      return <FooterLinksContent node={node} />;
+    // Node types with no Content tab by design: they carry no authorable
+    // content of their own. `stack` and `stickyFooter` hold children (their
+    // content lives in THEIR children's own Content tabs); `packageList`
+    // binds to the offering, which is Binding tab business, not Content;
+    // `spacer` has only a size, which is a Layout property.
+    case "stack":
+    case "stickyFooter":
+    case "packageList":
+    case "spacer":
       return null;
+    default: {
+      // A new node type with no decision recorded above fails the build
+      // here instead of silently rendering an empty inspector.
+      const exhaustive: never = node;
+      void exhaustive;
+      return null;
+    }
   }
 });
 
@@ -593,6 +614,50 @@ function LottieContent({ node }: { node: LottieNode }) {
         value={node.speed}
         onChange={(v) => set({ speed: v })}
         min={POSITIVE_NUMBER_FIELD_MIN}
+      />
+    </Section>
+  );
+}
+
+/**
+ * Each row's `labelKey` is edited through `LocalizedTextField` (the actual
+ * translated TEXT, not a typed-key reference) — unlike `FeatureListContent`/
+ * `TimelineContent`'s raw key input, because a footer link's key is always
+ * FRESH: `newNode`'s seed link gets `footerLinks_<id>_1`, and `newRow` below
+ * mints one in the same shape for every link added afterward
+ * (`footerLinks_<id>_<n>`), so there is never a bare key the author needs to
+ * type or look up by hand — only its translated copy.
+ *
+ * The action editor is `ActionField`, the exact widget `ButtonBinding`
+ * (binding-tab.tsx) uses for a button's `action` — `FooterLink["action"]`
+ * IS `ButtonNode["action"]` (see schema.ts), so this reuses it rather than
+ * writing a second copy.
+ */
+function FooterLinksContent({ node }: { node: FooterLinksNode }) {
+  const vm = useService(PaywallBuilderViewModel);
+  const { t } = useTranslation();
+  const setLinks = (links: FooterLink[]) => vm.updateNode<FooterLinksNode>(node.id, { links });
+
+  return (
+    <Section title={t("paywalls.builder.properties.content", "Content")} defaultOpen>
+      <RowListEditor<FooterLink>
+        rows={node.links}
+        onChange={setLinks}
+        maxRows={FOOTER_LINKS_MAX}
+        newRow={() => ({
+          labelKey: `footerLinks_${node.id}_${node.links.length + 1}`,
+          action: { kind: "close" },
+        })}
+        addLabel={t("paywalls.builder.properties.footerLinksAddLink", "Add link")}
+        renderRow={(link, _index, patch) => (
+          <div className="flex flex-col gap-2">
+            <LocalizedTextField
+              label={t("paywalls.builder.properties.footerLinksLabel", "Label")}
+              locKey={link.labelKey}
+            />
+            <ActionField value={link.action} onChange={(action) => patch({ action })} />
+          </div>
+        )}
       />
     </Section>
   );

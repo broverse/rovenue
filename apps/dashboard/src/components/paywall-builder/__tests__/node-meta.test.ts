@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PaywallNode } from "@rovenue/shared/paywall";
+import { OVERRIDABLE_PROP_KEYS, type PaywallNode } from "@rovenue/shared/paywall";
 import { NODE_ICON, NODE_TYPE_LABEL, NODE_TYPES, nodeLocKey } from "../node-meta";
 
 describe("nodeLocKey", () => {
@@ -43,7 +43,7 @@ describe("nodeLocKey", () => {
 });
 
 describe("NODE_TYPES", () => {
-  it("lists exactly the 17 node types the add-node popover offers", () => {
+  it("lists exactly the 18 node types the add-node popover offers", () => {
     expect(NODE_TYPES).toEqual([
       "stack",
       "text",
@@ -62,6 +62,7 @@ describe("NODE_TYPES", () => {
       "carousel",
       "video",
       "lottie",
+      "footerLinks",
     ]);
   });
 
@@ -92,6 +93,15 @@ describe("NODE_TYPES", () => {
     for (const t of NODE_TYPES) {
       expect(NODE_ICON[t], `no icon for ${t}`).toBeTruthy();
       expect(NODE_TYPE_LABEL[t], `no label for ${t}`).toBeTruthy();
+    }
+  });
+
+  it("carries metadata for every node type in the schema union", () => {
+    const schemaTypes = Object.keys(OVERRIDABLE_PROP_KEYS).sort();
+    expect([...NODE_TYPES].sort()).toEqual(schemaTypes);
+    for (const type of schemaTypes) {
+      expect(NODE_ICON[type as PaywallNode["type"]]).toBeDefined();
+      expect(NODE_TYPE_LABEL[type as PaywallNode["type"]]).toBeTruthy();
     }
   });
 });

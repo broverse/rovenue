@@ -4,6 +4,7 @@ import {
   DIVIDER_DEFAULT_THICKNESS,
   ICON_DEFAULT_SIZE,
   MAX_BUILDER_DEPTH,
+  paywallNodeSchema,
   type CarouselNode,
   type PackageListNode,
   type PaywallNode,
@@ -682,6 +683,21 @@ describe("newNode", () => {
   it("creates a lottie node with an empty light url", () => {
     const node = newNode("lottie", idGen);
     expect(node).toEqual({ type: "lottie", id: node.id, url: { light: "" } });
+  });
+});
+
+describe("newNode: footerLinks", () => {
+  it("seeds one restore link with a fresh localization key derived from the id", () => {
+    const node = newNode("footerLinks", () => "abc123");
+    expect(node).toEqual({
+      type: "footerLinks",
+      id: "abc123",
+      links: [{ labelKey: "footerLinks_abc123_1", action: { kind: "restore" } }],
+    });
+  });
+
+  it("produces a node the strict schema accepts", () => {
+    expect(paywallNodeSchema.safeParse(newNode("footerLinks", () => "abc123")).success).toBe(true);
   });
 });
 

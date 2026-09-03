@@ -99,6 +99,15 @@ describe("tabsForNode", () => {
       expect(tabsForNode(type).map((t) => t.id), `${type} tabs`).toEqual(["content", "visibility"]);
     }
   });
+
+  // Task 7 — footerLinks is the 18th node type. Same wave-B scar as
+  // carousel/video/lottie above: without a matching appliesTo entry in
+  // BOTH the style and content tabs, the author gets an inspector with no
+  // way to edit the links they just added.
+  it("gives footerLinks the style, content, and visibility tabs, and nothing else", () => {
+    expect(tabsForNode("footerLinks")).not.toHaveLength(0);
+    expect(tabsForNode("footerLinks").map((t) => t.id)).toEqual(["style", "content", "visibility"]);
+  });
 });
 
 describe("tabIssues", () => {

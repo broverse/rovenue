@@ -68,6 +68,7 @@ export const INSPECTOR_TABS = [
       "stickyFooter",
       "countdown",
       "carousel",
+      "footerLinks",
     ]),
     issueCodes: new Set<BuilderIssue["code"]>(),
   },
@@ -88,6 +89,7 @@ export const INSPECTOR_TABS = [
       "carousel",
       "video",
       "lottie",
+      "footerLinks",
     ]),
     // The three wave-D2 media codes are here because their offending field
     // really is on this tab: Autoplay/Muted, Poster URL and Speed are all
@@ -131,6 +133,7 @@ export const INSPECTOR_TABS = [
       "carousel",
       "video",
       "lottie",
+      "footerLinks",
     ]),
     issueCodes: new Set<BuilderIssue["code"]>(["VISIBILITY_NEVER_MATCHES", "VISIBILITY_BOUND_UNPARSEABLE"]),
   },

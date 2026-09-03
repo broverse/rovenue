@@ -30,10 +30,22 @@ type RowListEditorProps<T> = {
   newRow: () => T;
   addLabel: string;
   renderRow: (row: T, index: number, patch: (fields: Partial<T>) => void) => ReactNode;
+  /** Disables the add button once `rows.length` reaches this many — some row
+   *  lists are schema-capped (e.g. `FOOTER_LINKS_MAX`). Omitted for the
+   *  lists with no upper bound (featureList/timeline rows). */
+  maxRows?: number;
 };
 
-export function RowListEditor<T>({ rows, onChange, newRow, addLabel, renderRow }: RowListEditorProps<T>) {
+export function RowListEditor<T>({
+  rows,
+  onChange,
+  newRow,
+  addLabel,
+  renderRow,
+  maxRows,
+}: RowListEditorProps<T>) {
   const { t } = useTranslation();
+  const atMax = maxRows !== undefined && rows.length >= maxRows;
   const replace = (index: number, row: T) => onChange(rows.map((r, i) => (i === index ? row : r)));
 
   const move = (index: number, delta: number) => {
@@ -83,7 +95,8 @@ export function RowListEditor<T>({ rows, onChange, newRow, addLabel, renderRow }
       <button
         type="button"
         onClick={() => onChange([...rows, newRow()])}
-        className="inline-flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-2 text-[11px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
+        disabled={atMax}
+        className="inline-flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-2 text-[11px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rv-divider disabled:hover:text-rv-mute-600"
       >
         <Plus size={ROW_ICON_SIZE} />
         {addLabel}

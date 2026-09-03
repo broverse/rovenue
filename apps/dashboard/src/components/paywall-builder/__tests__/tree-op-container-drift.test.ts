@@ -39,6 +39,7 @@ const NODE_TYPE_WITNESS: Record<PaywallNode["type"], true> = {
   carousel: true,
   video: true,
   lottie: true,
+  footerLinks: true,
 };
 
 const ALL_NODE_TYPES = Object.keys(NODE_TYPE_WITNESS) as PaywallNode["type"][];

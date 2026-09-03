@@ -19,7 +19,8 @@ import {
   storeBadgeText,
   type PackagePriceRow,
 } from "./binding-prices";
-import { Field, INPUT_CLASS, Section, Segmented } from "./primitives";
+import { ActionField } from "./fields";
+import { Field, INPUT_CLASS, Section } from "./primitives";
 
 /**
  * apple > google > stripe: display order for per-store price badges and the
@@ -132,34 +133,7 @@ function ButtonBinding({ node }: { node: ButtonNode }) {
 
   return (
     <Section title={t("paywalls.builder.properties.action", "Action")} defaultOpen>
-      <Field label={t("paywalls.builder.properties.actionKind", "On tap")}>
-        <Segmented
-          value={node.action.kind}
-          onChange={(kind) =>
-            set({
-              action:
-                kind === "url"
-                  ? { kind, url: node.action.kind === "url" ? node.action.url : "" }
-                  : { kind },
-            })
-          }
-          options={[
-            { value: "close", label: t("paywalls.builder.properties.actionClose", "Close") },
-            { value: "url", label: t("paywalls.builder.properties.actionUrl", "Open URL") },
-            { value: "restore", label: t("paywalls.builder.properties.actionRestore", "Restore") },
-          ]}
-        />
-      </Field>
-      {node.action.kind === "url" && (
-        <Field className="mt-3" label={t("paywalls.builder.properties.url", "URL")}>
-          <input
-            value={node.action.url}
-            onChange={(e) => set({ action: { kind: "url", url: e.currentTarget.value } })}
-            placeholder="https://example.com/terms"
-            className={INPUT_CLASS}
-          />
-        </Field>
-      )}
+      <ActionField value={node.action} onChange={(action) => set({ action })} />
     </Section>
   );
 }

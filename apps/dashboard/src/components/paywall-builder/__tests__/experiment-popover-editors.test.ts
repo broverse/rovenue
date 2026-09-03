@@ -25,6 +25,7 @@ const SAMPLE_NODES: Record<PaywallNode["type"], PaywallNode> = {
   carousel: { type: "carousel", id: "n", children: [] },
   video: { type: "video", id: "n", url: { light: "" } },
   lottie: { type: "lottie", id: "n", url: { light: "" } },
+  footerLinks: { type: "footerLinks", id: "n", links: [{ labelKey: "k", action: { kind: "restore" } }] },
 };
 
 describe("element-experiment prop editors", () => {
