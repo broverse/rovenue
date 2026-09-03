@@ -278,6 +278,21 @@ public func applyOverrides(_ props: LottieProps, active: OverrideActiveCondition
     return result
 }
 
+public func applyOverrides(_ props: FooterLinksProps, active: OverrideActiveConditions) -> FooterLinksProps {
+    let patches = activePropPatches(props.overrides, active: active)
+    guard !patches.isEmpty else { return props }
+    var result = props
+    for patch in patches {
+        result = FooterLinksProps(
+            id: result.id, links: result.links,
+            separator: patch.separator ?? result.separator,
+            align: patch.align ?? result.align,
+            color: patch.color ?? result.color,
+            overrides: result.overrides, fallback: result.fallback)
+    }
+    return result
+}
+
 /// Dispatches to the node's own `applyOverrides` overload and re-wraps the
 /// result in the same `BuilderNode` case. `.unknown` nodes carry no
 /// overrides field at all and pass through unchanged.
@@ -300,6 +315,7 @@ public func applyOverrides(_ node: BuilderNode, active: OverrideActiveConditions
     case .carousel(let p): return .carousel(applyOverrides(p, active: active))
     case .video(let p): return .video(applyOverrides(p, active: active))
     case .lottie(let p): return .lottie(applyOverrides(p, active: active))
+    case .footerLinks(let p): return .footerLinks(applyOverrides(p, active: active))
     case .unknown: return node
     }
 }

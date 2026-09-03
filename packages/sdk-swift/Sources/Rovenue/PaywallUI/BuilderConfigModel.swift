@@ -262,6 +262,7 @@ enum OverridablePropKeys {
     /// `OVERRIDABLE_PROP_KEYS` says exactly this.
     static let video: Set<String> = ["url", "posterUrl"]
     static let lottie: Set<String> = ["url"]
+    static let footerLinks: Set<String> = ["color", "separator", "align"]
 }
 
 /// A `CodingKey` that accepts ANY string, used to enumerate every key
@@ -608,6 +609,30 @@ public struct LottieOverrideProps: Decodable, Equatable, Sendable {
         try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.lottie)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         url = try container.decodeIfPresent(ThemePair.self, forKey: .url)
+    }
+}
+
+/// `separator`/`align` stay `String?` here too (not an enum) — same reason
+/// as `FooterLinksProps`'s own fields: an override patch that supplies an
+/// unrecognized value falls to the view's lenient glyph/alignment lookup,
+/// never a decode failure.
+public struct FooterLinksOverrideProps: Decodable, Equatable, Sendable {
+    public let color: ThemePair?
+    public let separator: String?
+    public let align: String?
+
+    public init(color: ThemePair? = nil, separator: String? = nil, align: String? = nil) {
+        self.color = color; self.separator = separator; self.align = align
+    }
+
+    private enum CodingKeys: String, CodingKey { case color, separator, align }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.footerLinks)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+        separator = try container.decodeIfPresent(String.self, forKey: .separator)
+        align = try container.decodeIfPresent(String.self, forKey: .align)
     }
 }
 
@@ -1102,6 +1127,67 @@ public struct TimelineProps: Decodable {
     }
 }
 
+/// One tappable link in a `footerLinks` row. `action` is the SAME
+/// `ButtonAction` union a `button` node carries — a footer link and a
+/// button do the same three things (close/url/restore), and a second
+/// action union would be a second thing to keep in sync across three
+/// renderers. Mirrors schema.ts's `FooterLink`.
+public struct FooterLinkModel: Decodable, Equatable, Sendable {
+    public let labelKey: String
+    public let action: ButtonAction
+
+    public init(labelKey: String, action: ButtonAction) {
+        self.labelKey = labelKey; self.action = action
+    }
+}
+
+/// The row of small, low-emphasis legal/action links at the bottom of a
+/// paywall: Restore Purchases · Terms · Privacy. Mirrors schema.ts's
+/// `FooterLinksNode`.
+///
+/// `separator`/`align` are kept OPTIONAL here on purpose — this struct is
+/// the WIRE shape. The default (`footerLinksDefaultSeparator`/
+/// `footerLinksDefaultAlign` in RovenuePaywallView.swift) is applied by the
+/// VIEW, not fabricated here, mirroring nodes.tsx's `renderFooterLinks`
+/// (`node.separator ?? FOOTER_LINKS_DEFAULT_SEPARATOR`) — a renderer that
+/// forgets to apply the default is visible in a decode test instead of
+/// being masked by a fabricated decoder default.
+public struct FooterLinksProps: Decodable {
+    public let id: String
+    public let links: [FooterLinkModel]
+    public let separator: String?
+    public let align: String?
+    /// Applies to every link's label AND the separators. Absent = inherit
+    /// the ambient text colour (same contract as `IconProps.color`).
+    public let color: ThemePair?
+    public let overrides: [NodeOverride<FooterLinksOverrideProps>]?
+    public let visibility: Visibility?
+    public let fallback: BuilderNodeBox?
+
+    public init(id: String, links: [FooterLinkModel], separator: String? = nil, align: String? = nil,
+                color: ThemePair? = nil, overrides: [NodeOverride<FooterLinksOverrideProps>]? = nil,
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.links = links; self.separator = separator; self.align = align
+        self.color = color; self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, links, separator, align, color, overrides, visibility, fallback
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        links = try container.decode([FooterLinkModel].self, forKey: .links)
+        separator = try container.decodeIfPresent(String.self, forKey: .separator)
+        align = try container.decodeIfPresent(String.self, forKey: .align)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+        overrides = try container.decodeIfPresent([NodeOverride<FooterLinksOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
+    }
+}
+
 public struct SocialProofProps: Decodable {
     public let id: String
     /// 0…`SOCIAL_PROOF_MAX_RATING`. Absent renders no stars at all — not zero
@@ -1436,6 +1522,7 @@ public enum BuilderNode: Decodable {
     case carousel(CarouselProps)
     case video(VideoProps)
     case lottie(LottieProps)
+    case footerLinks(FooterLinksProps)
     case unknown(id: String, visibility: Visibility?, fallback: BuilderNodeBox?)
 
     private enum TypeKey: String, CodingKey { case type }
@@ -1462,6 +1549,7 @@ public enum BuilderNode: Decodable {
         case "carousel": self = .carousel(try CarouselProps(from: decoder))
         case "video": self = .video(try VideoProps(from: decoder))
         case "lottie": self = .lottie(try LottieProps(from: decoder))
+        case "footerLinks": self = .footerLinks(try FooterLinksProps(from: decoder))
         default:
             let container = try decoder.container(keyedBy: UnknownKeys.self)
             let id = try container.decode(String.self, forKey: .id)
@@ -1496,6 +1584,7 @@ public enum BuilderNode: Decodable {
         case .carousel(let p): return p.id
         case .video(let p): return p.id
         case .lottie(let p): return p.id
+        case .footerLinks(let p): return p.id
         case .unknown(let id, _, _): return id
         }
     }
@@ -1524,6 +1613,7 @@ public enum BuilderNode: Decodable {
         case .carousel(let p): return p.visibility
         case .video(let p): return p.visibility
         case .lottie(let p): return p.visibility
+        case .footerLinks(let p): return p.visibility
         case .unknown(_, let v, _): return v
         }
     }

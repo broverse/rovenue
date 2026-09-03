@@ -5,7 +5,13 @@
 //  harness (house rule: view bodies thin, logic in pure helpers).
 //
 
+import CoreGraphics
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Parsed sRGB components in 0...1. Alpha defaults to 1.
 public struct RGBAColor: Equatable, Sendable {
@@ -200,4 +206,179 @@ public func relevantPackageView(
           let pkg = offering?.packages.first(where: { $0.identifier == id })
     else { return nil }
     return packageView(from: pkg.product, displayName: pkg.product.displayName, offering: offering)
+}
+
+// =============================================================
+// footerLinks (spec §3 wave, 2026-09-04). Mirrors
+// packages/paywall-renderer/src/nodes.tsx's `renderFooterLinks` — the
+// normative sibling this ports byte-for-byte on the two rules below.
+// =============================================================
+
+/// One footer link that survived BOTH per-link drop rules, carrying its
+/// resolved label and its position in the AUTHORED `links` array
+/// (`originalIndex`) — not its position among survivors, which shifts
+/// between renders (a locale change alters which labels resolve, and
+/// `hasRestoreHandler` appearing/disappearing alters whether the restore
+/// link survives). Mirrors nodes.tsx's own `originalIndex`-keyed survivor
+/// list and its doc comment on why.
+public struct FooterLinkSurvivor: Equatable, Sendable {
+    public let originalIndex: Int
+    public let action: ButtonAction
+    public let label: String
+
+    public init(originalIndex: Int, action: ButtonAction, label: String) {
+        self.originalIndex = originalIndex
+        self.action = action
+        self.label = label
+    }
+}
+
+/// Applies `footerLinks`' two per-link drop rules, in `links` order:
+///
+///   1. a `restore` link with no restore handler is dropped — calls
+///      `actionButtonVisible` (the SAME rule `button` enforces) rather than
+///      re-deriving the restore check here.
+///   2. a link whose label doesn't resolve anywhere (`resolveLabel` returns
+///      `nil`) is dropped.
+///
+/// Pure and free-standing so the drop rules are testable without a SwiftUI
+/// hosting environment — `resolveLabel` is injected rather than reaching
+/// into `PaywallRenderContext` directly.
+public func footerLinksSurvivors(
+    _ links: [FooterLinkModel],
+    hasRestoreHandler: Bool,
+    resolveLabel: (String) -> String?
+) -> [FooterLinkSurvivor] {
+    var survivors: [FooterLinkSurvivor] = []
+    for (index, link) in links.enumerated() {
+        guard actionButtonVisible(link.action, hasRestoreHandler: hasRestoreHandler) else { continue }
+        guard let label = resolveLabel(link.labelKey) else { continue }
+        survivors.append(FooterLinkSurvivor(originalIndex: index, action: link.action, label: label))
+    }
+    return survivors
+}
+
+/// One entry in a rendered footer row: a survivor's own label, or a
+/// separator glyph strictly between two survivors.
+public enum FooterRowEntry: Equatable, Sendable {
+    case link(FooterLinkSurvivor)
+    case separator(String)
+
+    /// The text this entry draws — used for both rendering and (by the
+    /// flow layout) width measurement, so a separator's glyph is sized
+    /// exactly like any other row text.
+    public var text: String {
+        switch self {
+        case .link(let survivor): return survivor.label
+        case .separator(let glyph): return glyph
+        }
+    }
+}
+
+/// Interleaves `survivors` with `glyph`, computed over the SURVIVING links
+/// ONLY — never a leading or trailing separator, never two in a row. An
+/// empty `glyph` (the `none` separator) never inserts an entry at all.
+/// Mirrors nodes.tsx's `renderFooterLinks` loop (`position > 0 && separator
+/// !== "none"`).
+public func footerRowEntries(survivors: [FooterLinkSurvivor], glyph: String) -> [FooterRowEntry] {
+    guard !survivors.isEmpty else { return [] }
+    var entries: [FooterRowEntry] = []
+    for (position, survivor) in survivors.enumerated() {
+        if position > 0, !glyph.isEmpty {
+            entries.append(.separator(glyph))
+        }
+        entries.append(.link(survivor))
+    }
+    return entries
+}
+
+/// The glyph drawn between two surviving links, per `separator`. Same table
+/// on all three platforms — mirrors nodes.tsx's `FOOTER_SEPARATOR_GLYPH`
+/// (the normative sibling; see render-fixtures.json's `_comment`, which
+/// Task 6 wires this node's fixture entries against). An unrecognized or
+/// absent `separator` string falls through to
+/// `footerLinksDefaultSeparator`'s own glyph — native decoders/renderers
+/// are lenient by contract.
+public func footerLinkSeparatorGlyph(_ raw: String?) -> String {
+    switch raw ?? footerLinksDefaultSeparator {
+    case "dot": return "·"
+    case "pipe": return "|"
+    case "none": return ""
+    default: return footerLinkSeparatorGlyph(footerLinksDefaultSeparator)
+    }
+}
+
+/// Executes a `ButtonAction` against the host's render-context callbacks —
+/// the single dispatch point `ActionButtonView` (`button`) and
+/// `FooterLinksView` (`footerLinks`) both call, so close/url/restore never
+/// drift between the two node types that share this action union. The
+/// renderer never navigates itself; hosts decide (and should scheme-check
+/// before opening a URL). NOT `public`: `PaywallRenderContext` itself is
+/// module-internal (RovenuePaywallView.swift), so this can be no wider.
+func performButtonAction(_ action: ButtonAction, ctx: PaywallRenderContext) {
+    switch action {
+    case .close: ctx.onClose?()
+    case .restore: ctx.onRestore?()
+    case .url(let raw):
+        if let url = URL(string: raw) { ctx.onUrl?(url) }
+    }
+}
+
+/// The rendered width of `text` at the system font, `fontSize` points —
+/// used by `FlowRow` (RovenuePaywallView.swift) to decide `footerLinks`'
+/// wrap boundaries analytically, without a GeometryReader-per-child
+/// measurement pass: footer-link labels and separator glyphs are always
+/// short, plain strings, so sizing them with the system font metrics
+/// directly is exact.
+public func measuredTextWidth(_ text: String, fontSize: CGFloat) -> CGFloat {
+    guard !text.isEmpty else { return 0 }
+    #if canImport(UIKit)
+    let font = UIFont.systemFont(ofSize: fontSize)
+    #elseif canImport(AppKit)
+    let font = NSFont.systemFont(ofSize: fontSize)
+    #endif
+    #if canImport(UIKit) || canImport(AppKit)
+    let size = (text as NSString).size(withAttributes: [.font: font])
+    return ceil(size.width)
+    #else
+    // No text system available on this platform — a coarse per-character
+    // estimate keeps `computeFlowRows` from dividing by a hard zero rather
+    // than matching pixel-for-pixel (this branch never runs on iOS/macOS,
+    // the only platforms Package.swift declares).
+    return CGFloat(text.count) * fontSize
+    #endif
+}
+
+/// Which SURVIVING-item indices belong on each wrapped line, given each
+/// item's own measured width and the width available. Pure (no SwiftUI
+/// dependency) so the wrap boundary itself — not just survivor/glyph
+/// selection — is unit-testable: this is the function that decides whether
+/// three footer links overflow a 320pt device.
+///
+/// `spacing` is added BETWEEN items on the same row, never before the
+/// first item of a row. An item wider than `containerWidth` on its own
+/// still gets its own row rather than being dropped. `containerWidth <= 0`
+/// (not yet measured, e.g. the flow view's first SwiftUI render pass)
+/// degrades to a single row rather than one row per item, so nothing
+/// flashes into a collapsed column before the real width lands.
+public func computeFlowRows(itemWidths: [CGFloat], containerWidth: CGFloat, spacing: CGFloat) -> [[Int]] {
+    guard !itemWidths.isEmpty else { return [] }
+    guard containerWidth > 0 else { return [Array(itemWidths.indices)] }
+
+    var rows: [[Int]] = []
+    var currentRow: [Int] = []
+    var currentRowWidth: CGFloat = 0
+    for (index, width) in itemWidths.enumerated() {
+        let additional = currentRow.isEmpty ? width : width + spacing
+        if !currentRow.isEmpty, currentRowWidth + additional > containerWidth {
+            rows.append(currentRow)
+            currentRow = [index]
+            currentRowWidth = width
+        } else {
+            currentRow.append(index)
+            currentRowWidth += additional
+        }
+    }
+    rows.append(currentRow)
+    return rows
 }

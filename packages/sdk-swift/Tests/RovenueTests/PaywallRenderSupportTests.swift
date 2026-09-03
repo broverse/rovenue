@@ -144,6 +144,113 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertTrue(actionButtonVisible(.url("https://example.com"), hasRestoreHandler: false))
     }
 
+    // MARK: - footerLinks (spec §3 wave, 2026-09-04)
+
+    func test_footerLinksSurvivors_dropsHandlerlessRestoreAndUnresolvedLabels() {
+        let links = [
+            FooterLinkModel(labelKey: "restore", action: .restore),
+            FooterLinkModel(labelKey: "missing", action: .close),
+            FooterLinkModel(labelKey: "terms", action: .url("https://x.dev/terms")),
+        ]
+        let resolve: (String) -> String? = { key in
+            switch key {
+            case "missing": return nil
+            default: return key.uppercased()
+            }
+        }
+
+        // No restore handler: the restore link is dropped, "missing" never
+        // resolves, only "terms" survives.
+        let noHandler = footerLinksSurvivors(links, hasRestoreHandler: false, resolveLabel: resolve)
+        XCTAssertEqual(noHandler.map(\.originalIndex), [2])
+        XCTAssertEqual(noHandler[0].label, "TERMS")
+
+        // With a restore handler, "restore" survives too — original indices
+        // are preserved (not surviving-position indices).
+        let withHandler = footerLinksSurvivors(links, hasRestoreHandler: true, resolveLabel: resolve)
+        XCTAssertEqual(withHandler.map(\.originalIndex), [0, 2])
+    }
+
+    func test_footerLinksSurvivors_allDroppedReturnsEmpty() {
+        let links = [FooterLinkModel(labelKey: "restore", action: .restore)]
+        XCTAssertTrue(
+            footerLinksSurvivors(links, hasRestoreHandler: false, resolveLabel: { _ in "x" }).isEmpty)
+    }
+
+    func test_footerRowEntries_neverLeadingTrailingOrAdjacentSeparators() {
+        let survivors = (0..<3).map { FooterLinkSurvivor(originalIndex: $0, action: .close, label: "L\($0)") }
+
+        let withGlyph = footerRowEntries(survivors: survivors, glyph: "·")
+        // link, sep, link, sep, link — never a separator at position 0, never
+        // two adjacent, never trailing.
+        XCTAssertEqual(withGlyph.count, 5)
+        XCTAssertEqual(withGlyph[0], .link(survivors[0]))
+        XCTAssertEqual(withGlyph[1], .separator("·"))
+        XCTAssertEqual(withGlyph[2], .link(survivors[1]))
+        XCTAssertEqual(withGlyph[3], .separator("·"))
+        XCTAssertEqual(withGlyph[4], .link(survivors[2]))
+
+        // `none` (empty glyph) never inserts a separator entry at all.
+        XCTAssertEqual(footerRowEntries(survivors: survivors, glyph: "").count, 3)
+
+        XCTAssertTrue(footerRowEntries(survivors: [], glyph: "·").isEmpty)
+    }
+
+    /// The middle link of three dropped: exactly one separator remains, not
+    /// two and not zero — this is the case the brief calls out by name.
+    func test_footerRowEntries_middleLinkDropped_leavesExactlyOneSeparator() {
+        let survivors = [
+            FooterLinkSurvivor(originalIndex: 0, action: .close, label: "A"),
+            FooterLinkSurvivor(originalIndex: 2, action: .close, label: "C"),
+        ]
+        let entries = footerRowEntries(survivors: survivors, glyph: "|")
+        XCTAssertEqual(entries, [.link(survivors[0]), .separator("|"), .link(survivors[1])])
+    }
+
+    func test_footerLinkSeparatorGlyph_table() {
+        XCTAssertEqual(footerLinkSeparatorGlyph("dot"), "·")
+        XCTAssertEqual(footerLinkSeparatorGlyph("pipe"), "|")
+        XCTAssertEqual(footerLinkSeparatorGlyph("none"), "")
+        // Absent/unrecognized falls to the default's own glyph.
+        XCTAssertEqual(footerLinkSeparatorGlyph(nil), footerLinkSeparatorGlyph(footerLinksDefaultSeparator))
+        XCTAssertEqual(footerLinkSeparatorGlyph("bogus"), footerLinkSeparatorGlyph(footerLinksDefaultSeparator))
+    }
+
+    // MARK: computeFlowRows (the wrap boundary FlowRow renders against)
+
+    func test_computeFlowRows_fitsOnOneRowWhenNarrowEnough() {
+        XCTAssertEqual(
+            computeFlowRows(itemWidths: [50, 50, 50], containerWidth: 300, spacing: 8),
+            [[0, 1, 2]])
+    }
+
+    /// The brief's own example: three links plus separators overflow a
+    /// 320pt-wide device.
+    func test_computeFlowRows_wrapsWhenTheRowOverflowsA320ptDevice() {
+        let rows = computeFlowRows(itemWidths: [120, 10, 120, 10, 120], containerWidth: 320, spacing: 6)
+        XCTAssertGreaterThan(rows.count, 1, "5 entries totalling 380pt+spacing must wrap on a 320pt container")
+        XCTAssertEqual(rows.flatMap { $0 }, [0, 1, 2, 3, 4], "every index appears exactly once, in order")
+    }
+
+    func test_computeFlowRows_anItemWiderThanTheContainerStillGetsItsOwnRow() {
+        XCTAssertEqual(computeFlowRows(itemWidths: [500], containerWidth: 300, spacing: 8), [[0]])
+    }
+
+    func test_computeFlowRows_emptyInputIsEmptyOutput() {
+        XCTAssertEqual(computeFlowRows(itemWidths: [], containerWidth: 300, spacing: 8), [])
+    }
+
+    func test_computeFlowRows_unmeasuredContainerWidthDegradesToOneRow() {
+        // containerWidth <= 0 means "not yet measured" (FlowRow's first
+        // SwiftUI render pass) — must not collapse to one row per item.
+        XCTAssertEqual(computeFlowRows(itemWidths: [50, 50, 50], containerWidth: 0, spacing: 8), [[0, 1, 2]])
+    }
+
+    func test_measuredTextWidth_isMonotonicAndZeroForEmptyString() {
+        XCTAssertEqual(measuredTextWidth("", fontSize: 12), 0)
+        XCTAssertGreaterThan(measuredTextWidth("Restore Purchases", fontSize: 12), measuredTextWidth("Terms", fontSize: 12))
+    }
+
     // MARK: relevantPackageView
 
     func test_relevantPackageView_cell_wins_then_selected_then_nil() {

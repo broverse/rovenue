@@ -484,6 +484,15 @@ final class BuilderConfigModelTests: XCTestCase {
         return try XCTUnwrap(root.children.first, "fixture \"\(name)\" root has no children")
     }
 
+    /// A thin `JSONDecoder().decode(BuilderNode.self, ...)` of ONE node's
+    /// JSON literal — for shapes not yet in render-fixtures.json (Task 6
+    /// wires `footerLinks` into that shared contract file later). Never
+    /// touches `decodeNode(named:)` above, which the shared-fixture tests
+    /// depend on.
+    private func decodeNode(fromJSON json: String) throws -> BuilderNode {
+        try JSONDecoder().decode(BuilderNode.self, from: Data(json.utf8))
+    }
+
     func test_decodesFeatureListRows() throws {
         let config = try acceptEntry(named: "featureList: multi-row with a mix of included values")
         let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
@@ -1009,6 +1018,93 @@ final class BuilderConfigModelTests: XCTestCase {
         XCTAssertNil(
             decodeBuilderConfig(json),
             "`border` is not in OVERRIDABLE_PROP_KEYS.text, so the whole config must fail")
+    }
+
+    // MARK: - footerLinks
+
+    func testDecodesFooterLinksNode() throws {
+        let json = """
+        {"type":"footerLinks","id":"f","links":[
+          {"labelKey":"f_restore","action":{"kind":"restore"}},
+          {"labelKey":"f_terms","action":{"kind":"url","url":"https://x.dev/terms"}}
+        ],"separator":"pipe","align":"start"}
+        """
+        let node = try decodeNode(fromJSON: json)
+        guard case .footerLinks(let props) = node else {
+            return XCTFail("expected a footerLinks node, got \(node)")
+        }
+        XCTAssertEqual(props.id, "f")
+        XCTAssertEqual(props.links.count, 2)
+        XCTAssertEqual(props.links[0].labelKey, "f_restore")
+        XCTAssertEqual(props.links[0].action, .restore)
+        XCTAssertEqual(props.links[1].action, .url("https://x.dev/terms"))
+        XCTAssertEqual(props.separator, "pipe")
+        XCTAssertEqual(props.align, "start")
+    }
+
+    func testFooterLinksDefaultsAreAbsentNotFabricated() throws {
+        let json = """
+        {"type":"footerLinks","id":"f","links":[{"labelKey":"a","action":{"kind":"restore"}}]}
+        """
+        let node = try decodeNode(fromJSON: json)
+        guard case .footerLinks(let props) = node else {
+            return XCTFail("expected a footerLinks node, got \(node)")
+        }
+        // The DECODER keeps absence; the VIEW applies the default. Fabricating it
+        // here would hide a renderer that forgot to.
+        XCTAssertNil(props.separator)
+        XCTAssertNil(props.align)
+    }
+
+    /// The `action` field reuses `ButtonAction` (`kind: "close"`) — no second
+    /// action union exists for footer links.
+    func test_footerLinksCloseAction_decodesViaTheSharedButtonActionType() throws {
+        let json = """
+        {"type":"footerLinks","id":"f","links":[{"labelKey":"a","action":{"kind":"close"}}]}
+        """
+        let node = try decodeNode(fromJSON: json)
+        guard case .footerLinks(let props) = node else { return XCTFail("expected footerLinks") }
+        XCTAssertEqual(props.links[0].action, .close)
+    }
+
+    /// `overrides`/`fallback`/`color`/`visibility` round-trip like every other
+    /// node's payload — this pins the wiring into `NodeOverride`/
+    /// `BuilderNodeBox`/`ThemePair`/`Visibility`, not just the bespoke fields.
+    func test_footerLinksDecodesOverridesColorFallbackAndVisibility() throws {
+        let json = """
+        {"type":"footerLinks","id":"f","links":[{"labelKey":"a","action":{"kind":"close"}}],
+         "color":{"light":"#111111","dark":"#eeeeee"},
+         "overrides":[{"when":{"kind":"selected"},
+                       "props":{"separator":"none","align":"end","color":{"light":"#000000"}}}],
+         "fallback":{"type":"text","id":"fb","key":"k","role":"caption"},
+         "visibility":{"platform":["ios"]}}
+        """
+        let node = try decodeNode(fromJSON: json)
+        guard case .footerLinks(let props) = node else { return XCTFail("expected footerLinks") }
+        XCTAssertEqual(props.color?.light, "#111111")
+        XCTAssertEqual(props.overrides?.count, 1)
+        XCTAssertEqual(props.overrides?[0].when, .selected)
+        XCTAssertEqual(props.overrides?[0].props?.separator, "none")
+        XCTAssertEqual(props.overrides?[0].props?.align, "end")
+        guard case .text(let fallbackText) = props.fallback?.node else {
+            return XCTFail("expected a text fallback")
+        }
+        XCTAssertEqual(fallbackText.id, "fb")
+        XCTAssertEqual(props.visibility?.platform, ["ios"])
+        XCTAssertEqual(props.id, "f")
+    }
+
+    /// A key outside `OVERRIDABLE_PROP_KEYS.footerLinks` (e.g. `separatorXYZ`
+    /// or a structural key like `links`) fails the WHOLE config decode, same
+    /// whitelist enforcement every other overridable node type gets.
+    func test_footerLinksOverrideWithNonWhitelistedKeyFailsTheWholeConfig() {
+        let json = """
+        {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
+         "root":{"type":"stack","id":"root","axis":"v","children":[
+           {"type":"footerLinks","id":"f","links":[{"labelKey":"a","action":{"kind":"close"}}],
+            "overrides":[{"when":{"kind":"selected"},"props":{"links":[]}}]}]}}
+        """
+        XCTAssertNil(decodeBuilderConfig(json))
     }
 
     func test_countdownDeadline_parsesBothIsoSpellings() throws {

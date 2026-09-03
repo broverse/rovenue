@@ -401,6 +401,32 @@ let carouselMinAutoAdvanceSeconds = 2
 /// The index a looping carousel wraps back to, and the page it opens on.
 private let carouselFirstPageIndex = 0
 
+/// Defaults mirroring packages/shared/src/paywall/schema.ts's
+/// `FOOTER_LINKS_DEFAULT_SEPARATOR` / `FOOTER_LINKS_DEFAULT_ALIGN`. Applied
+/// by `FooterLinksView`, NOT `FooterLinksProps`'s decoder — see that
+/// struct's own doc comment for why absence must survive decode. Keep in
+/// sync with schema.ts by hand; there is no codegen step sharing these
+/// across platforms — NOT `private`, for the same reason as the divider
+/// defaults above: the shared-defaults fixture test compares each default
+/// against render-fixtures.json's `defaults` object BY VALUE, which it
+/// cannot do through `private` (Task 6 wires this node's fixture entries).
+let footerLinksDefaultSeparator = "dot"
+let footerLinksDefaultAlign = "center"
+
+/// Footer-link row constants — mirror the web renderer's own
+/// (packages/paywall-renderer/src/styles.ts) FOOTER_LINK_FONT_SIZE /
+/// FOOTER_LINK_GAP / FOOTER_LINK_MIN_TAP_HEIGHT verbatim (12 / 6 / 32),
+/// treating the web's px values as points here. `footerLinkFontSize`: one
+/// step below body text — the row must read as secondary fine print, not
+/// copy competing with the paywall's own text. `footerLinkGap`: the
+/// horizontal gap between a link and its separator, reused as the flow
+/// layout's row spacing so a wrapped second line reads the same as the
+/// first. `footerLinkMinTapHeight`: a WCAG-style minimum tap target, not a
+/// font-size-derived accident.
+private let footerLinkFontSize: CGFloat = 12
+private let footerLinkGap: CGFloat = 6
+private let footerLinkMinTapHeight: CGFloat = 32
+
 /// The ink a paywall element falls back to when it carries no colour of its
 /// own AND the platform gives it no usable inheritance — byte-identical to
 /// NodeViewFactory.kt's `TEXT_INK_DEFAULT_COLOR` and styles.ts's
@@ -737,6 +763,7 @@ struct BuilderNodeView: View {
         case .carousel(let p): CarouselView(props: p, ctx: ctx, cell: cell)
         case .video(let p): VideoNodeView(props: p, ctx: ctx, cell: cell)
         case .lottie(let p): LottieNodeView(props: p, ctx: ctx, cell: cell)
+        case .footerLinks(let p): FooterLinksView(props: p, ctx: ctx, cell: cell)
         case .unknown(_, _, let fallback):
             if let fallback {
                 BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
@@ -989,13 +1016,162 @@ struct ActionButtonView: View {
     }
 
     private func perform() {
-        switch props.action {
-        case .close: ctx.onClose?()
-        case .restore: ctx.onRestore?()
-        case .url(let raw):
-            // The renderer never navigates itself — hosts decide (and should
-            // scheme-check before opening).
-            if let url = URL(string: raw) { ctx.onUrl?(url) }
+        performButtonAction(props.action, ctx: ctx)
+    }
+}
+
+/// Renders `footerLinks`: a row of small legal/action links (Restore
+/// Purchases · Terms · Privacy). Mirrors nodes.tsx's `renderFooterLinks`
+/// (the normative sibling) exactly:
+///
+///   1. `footerLinksSurvivors` applies BOTH per-link drop rules (a
+///      handler-less restore, an unresolved label) — see that function's
+///      own doc in PaywallRenderSupport.swift.
+///   2. Zero survivors renders `fallback`, else nothing — never an empty
+///      row, never a bare separator.
+///   3. Separators are computed over the SURVIVORS only
+///      (`footerRowEntries`): never leading, never trailing, never two
+///      adjacent.
+///   4. Defaults are applied HERE, not in the decoder — absent `separator`
+///      → `footerLinksDefaultSeparator`, absent `align` →
+///      `footerLinksDefaultAlign` (see `FooterLinksProps`'s own doc for
+///      why).
+struct FooterLinksView: View {
+    let props: FooterLinksProps
+    let ctx: PaywallRenderContext
+    let cell: CellScope?
+
+    var body: some View {
+        let survivors = footerLinksSurvivors(
+            props.links, hasRestoreHandler: ctx.onRestore != nil, resolveLabel: resolveLabel)
+        if survivors.isEmpty {
+            if let fallback = props.fallback {
+                BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
+            }
+        } else {
+            let glyph = footerLinkSeparatorGlyph(props.separator)
+            let entries = footerRowEntries(survivors: survivors, glyph: glyph)
+            let resolvedColor = props.color.flatMap { parseHexColor(themeValue($0, dark: ctx.dark)) }.map(color)
+            FlowRow(
+                entries: entries, alignment: swiftUIAlignment(forFooterLinksAlign: props.align),
+                horizontalSpacing: footerLinkGap, verticalSpacing: footerLinkGap
+            ) { entry in
+                footerRowEntryView(entry, textColor: resolvedColor)
+            }
+        }
+    }
+
+    private func resolveLabel(_ key: String) -> String? {
+        footerLinkLabel(key, ctx: ctx, cell: cell)
+    }
+
+    @ViewBuilder
+    private func footerRowEntryView(_ entry: FooterRowEntry, textColor: Color?) -> some View {
+        switch entry {
+        case .link(let survivor):
+            Button(action: { performButtonAction(survivor.action, ctx: ctx) }) {
+                Text(survivor.label)
+                    .font(.system(size: footerLinkFontSize))
+                    .foregroundColor(textColor)
+                    .frame(minHeight: footerLinkMinTapHeight)
+            }
+            .buttonStyle(.plain)
+        case .separator(let glyph):
+            // Never announced by VoiceOver — the row must read as N links,
+            // not N links plus punctuation.
+            Text(glyph)
+                .font(.system(size: footerLinkFontSize))
+                .foregroundColor(textColor)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// A footer link's label: locale text -> {{variable}} substitution,
+/// exactly like `PaywallRenderContext.label`, EXCEPT a missing key resolves
+/// to `nil` here rather than `""` — `label` can't express "drop this
+/// node", which is exactly what an unresolved footer-link label must do
+/// (`footerLinksSurvivors`'s rule 2). `resolveText`/`resolveVariables` are
+/// the same pure helpers `label` itself calls. Shared by `FooterLinksView`
+/// and `nodeRendersContent`'s `.footerLinks` case so "does this link
+/// survive" never drifts between what's drawn and what's counted.
+private func footerLinkLabel(_ key: String, ctx: PaywallRenderContext, cell: CellScope?) -> String? {
+    guard let text = resolveText(ctx.config, locale: ctx.locale, key: key) else { return nil }
+    let pkg = relevantPackageView(cell: cell?.view, selectedPackageId: ctx.selectedPackageId, offering: ctx.offering)
+    return resolveVariables(text, pkg: pkg)
+}
+
+/// `align`'s three wire values -> SwiftUI's `HorizontalAlignment`. Absent or
+/// unrecognized falls through to `footerLinksDefaultAlign`'s own mapping —
+/// same leniency as `footerLinkSeparatorGlyph`.
+private func swiftUIAlignment(forFooterLinksAlign raw: String?) -> HorizontalAlignment {
+    switch raw ?? footerLinksDefaultAlign {
+    case "start": return .leading
+    case "end": return .trailing
+    case "center": return .center
+    default: return .center
+    }
+}
+
+/// Reports a wrapping row's own settled height back up to the
+/// `GeometryReader` sizing it in `FlowRow.body` — SwiftUI has no built-in
+/// "size to wrapped content" for a `GeometryReader`, which otherwise
+/// expands to fill whatever height its parent offers.
+private struct FlowRowHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// A minimal wrapping row: arranges `entries` left-to-right, wrapping to a
+/// new line whenever the next entry would overflow the available width —
+/// `footerLinks` is the one node in this file whose row can overflow a
+/// single line (three links plus separators already overflow a 320pt
+/// device). Kept specific to `FooterRowEntry` rather than generalized —
+/// it has exactly one caller.
+///
+/// Deliberately NOT SwiftUI's `Layout` protocol: `Layout` requires macOS 13,
+/// and this package's declared floor (Package.swift) is macOS 12 — the
+/// platform `swift test` actually builds and runs against, unlike the iOS
+/// 16 floor `Layout` itself would clear. Built on a `GeometryReader` for the
+/// available width and `computeFlowRows` (PaywallRenderSupport.swift, pure
+/// and unit-tested) for the wrap decision itself, fed by each entry's
+/// system-font width — footer-link text is always short, plain strings, so
+/// measuring it analytically (`(text as NSString).size(withAttributes:)`,
+/// `measuredTextWidth` below) is exact and avoids a GeometryReader-per-child
+/// measurement pass.
+private struct FlowRow<EntryContent: View>: View {
+    let entries: [FooterRowEntry]
+    let alignment: HorizontalAlignment
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+    @ViewBuilder let entryContent: (FooterRowEntry) -> EntryContent
+
+    @State private var height: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { proxy in
+            rows(containerWidth: proxy.size.width)
+                .background(
+                    GeometryReader { inner in
+                        Color.clear.preference(key: FlowRowHeightKey.self, value: inner.size.height)
+                    }
+                )
+        }
+        .frame(height: height)
+        .onPreferenceChange(FlowRowHeightKey.self) { height = $0 }
+    }
+
+    private func rows(containerWidth: CGFloat) -> some View {
+        let widths = entries.map { measuredTextWidth($0.text, fontSize: footerLinkFontSize) }
+        let grouped = computeFlowRows(itemWidths: widths, containerWidth: containerWidth, spacing: horizontalSpacing)
+        return VStack(alignment: alignment, spacing: verticalSpacing) {
+            ForEach(grouped.indices, id: \.self) { rowIndex in
+                HStack(spacing: horizontalSpacing) {
+                    ForEach(grouped[rowIndex], id: \.self) { entryIndex in
+                        entryContent(entries[entryIndex])
+                    }
+                }
+            }
         }
     }
 }
@@ -1549,6 +1725,11 @@ func nodeRendersContent(_ node: BuilderNode, ctx: PaywallRenderContext, cell: Ce
         // lottie costs no phantom dot.
         return lottieCanRender(p, dark: ctx.dark)
             || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
+    case .footerLinks(let p):
+        let survivors = footerLinksSurvivors(
+            p.links, hasRestoreHandler: ctx.onRestore != nil,
+            resolveLabel: { footerLinkLabel($0, ctx: ctx, cell: cell) })
+        return !survivors.isEmpty || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
     case .unknown(_, _, let fallback):
         return fallbackRendersContent(fallback, ctx: ctx, cell: cell)
     default:
