@@ -65,6 +65,17 @@ export interface GuardStatusWriteResult {
   purchaseId: string | null;
   from: PurchaseStatus | null;
   to: PurchaseStatus;
+  /**
+   * The row as it stood under the FOR UPDATE lock, or null when this is
+   * the first write for the transaction. Callers use it to detect a
+   * product change (plan change / cross-grade) and a genuine recovery
+   * (BILLING_ISSUE -> ACTIVE) without a second query.
+   */
+  previous: {
+    status: PurchaseStatus;
+    productId: string;
+    autoRenewStatus: boolean | null;
+  } | null;
 }
 
 /**
@@ -88,6 +99,14 @@ export async function guardStatusWrite(
       args.store,
       args.storeTransactionId,
     );
+
+  const previous = current
+    ? {
+        status: current.status,
+        productId: current.productId,
+        autoRenewStatus: current.autoRenewStatus,
+      }
+    : null;
 
   // Event-time ordering: a status write carried by an event OLDER than the
   // last applied one is stale regardless of state-machine legality (see
@@ -132,6 +151,7 @@ export async function guardStatusWrite(
       purchaseId: current.id,
       from: current.status,
       to: args.to,
+      previous,
     };
   }
 
@@ -153,6 +173,7 @@ export async function guardStatusWrite(
       purchaseId: current.id,
       from: decision.from,
       to: decision.to,
+      previous,
     };
   }
 
@@ -188,5 +209,6 @@ export async function guardStatusWrite(
     purchaseId: current?.id ?? null,
     from: decision.from,
     to: decision.to,
+    previous,
   };
 }

@@ -166,12 +166,19 @@ export async function lockPurchaseStatusByStoreTransaction(
   id: string;
   status: PurchaseStatus;
   lastStoreEventAt: Date | null;
+  // The before-image every ingestion path needs to tell a plan change
+  // from an ordinary renewal, and a recovery from an unrelated payment.
+  // Free here: the row is already being read FOR UPDATE.
+  productId: string;
+  autoRenewStatus: boolean | null;
 } | null> {
   const rows = await db
     .select({
       id: purchases.id,
       status: purchases.status,
       lastStoreEventAt: purchases.lastStoreEventAt,
+      productId: purchases.productId,
+      autoRenewStatus: purchases.autoRenewStatus,
     })
     .from(purchases)
     .where(
