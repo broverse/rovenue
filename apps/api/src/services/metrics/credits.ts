@@ -131,6 +131,34 @@ async function readVolume(
 }
 
 // =============================================================
+// Daily credit-burn series — charts.ts's `credit_burn` chart id
+// =============================================================
+//
+// No new SQL: `readVolume`'s CH query above already groups by day and
+// already carries `burned` (credits debited that day). This just
+// re-shapes that same query's output into charts.ts's plain
+// `{ day, n }` daily-count shape (see buildCountSeriesPoints) instead
+// of widening the query or duplicating it.
+//
+// SIGN CONVENTION: `burned` is already a positive magnitude here, not
+// a negative flow. `v_credit_consumption_daily` (0012/0015 migrations)
+// defines `debited_credits` as `sumIf(-amount, amount < 0)` — ledger
+// SPEND/EXPIRE rows store a negative `amount`, and negating a negative
+// sums to positive. `readKpis.burned28d` and `readTopBurners.burned`
+// use the identical convention (`-"amount"` under `amount < 0`) for
+// the same reason. `Math.abs` below is a defensive normalisation, not
+// a fix for an observed negative — it's there so a future change to
+// the view's sign can't silently ship a chart that dips below zero.
+export async function getCreditBurnDaily(
+  projectId: string,
+  window: RollupWindow,
+  currencyId?: string,
+): Promise<Array<{ day: string; n: number }>> {
+  const rows = await readVolume(projectId, window, currencyId);
+  return rows.map((r) => ({ day: r.day, n: Math.abs(r.burned) }));
+}
+
+// =============================================================
 // Currency filter helper
 // =============================================================
 //

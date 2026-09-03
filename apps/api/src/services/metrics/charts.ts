@@ -19,6 +19,7 @@ import {
   isClickHouseConfigured,
   queryAnalytics,
 } from "../../lib/clickhouse";
+import { getCreditBurnDaily } from "./credits";
 import { listDailyMrr, type MrrPoint } from "./mrr";
 import { computeNetRevenue, computeProceedsForProject } from "./proceeds";
 import { getMrrDecompositionDailyCounts } from "./mrr-decomposition";
@@ -601,14 +602,17 @@ export function buildCountSeriesPoints(
 // Generic chart series — paywall reach/conversion and revenue
 // =============================================================
 //
-// Eleven of the sixteen catalog charts are wired (paywall_view_rate,
+// Twelve of the sixteen catalog charts are wired (paywall_view_rate,
 // paywall_purchase, mrr, arr, gross_vs_net, arpu — the last four
 // delegate to `listDailyMrr`, see buildMrrSeriesPoints below — plus
 // new_subs, reactivations, trials_started, churn — task-3's
 // subscription-lifecycle group, all four daily COUNTS, see
 // buildCountSeriesPoints above — plus trial_to_paid, task-4, also a
 // daily COUNT, see getTrialConversionsDaily's doc comment in
-// summary.ts for why a rate isn't shipped). Every other id
+// summary.ts for why a rate isn't shipped — plus credit_burn, task-5,
+// also a daily COUNT, delegating to credits.ts's getCreditBurnDaily,
+// see the case below and getCreditBurnDaily's doc comment for the
+// `burned` sign convention). Every other id
 // answers `supported: false` so the dashboard renders an empty
 // state rather than another chart's data. `readChartSeries`'s
 // `switch` is the ONLY dispatch mechanism (no separate id allow-list)
@@ -643,6 +647,16 @@ export function buildCountSeriesPoints(
 //     per acquisition month, not one per calendar day) and otherwise
 //     return a single blended scalar — also not a daily series. No
 //     in-file widening produces a daily average LTV from any of them.
+//
+// A THIRD ID STAYS UNWIRED FOR A DIFFERENT REASON (task 5, controller
+// Ruling 3 — see task-5-report.md): `liability`. `readLiability`
+// (credits.ts) sums the LATEST per-subscriber balances from Postgres —
+// a snapshot, not a dated series — and no balance history exists
+// anywhere to reconstruct one from. A 12-month line would have to be
+// either today's figure repeated 365 times or a reconstruction the
+// credit ledger doesn't own; both are fabrications. See
+// chart-catalog.ts's comment at the `liability` entry for the full
+// reasoning; the id and its `chartType` are unchanged (Task 8's call).
 
 /**
  * Revenue event type counted in the `paywall_purchase` numerator.
@@ -1040,6 +1054,39 @@ export async function readChartSeries(
         from: w.from,
         to: w.to,
       });
+      return {
+        ...base,
+        unit: "count",
+        points: buildCountSeriesPoints(rows, w.from, w.to),
+        supported: true,
+      };
+    }
+
+    // =============================================================
+    // Credits group (task-5): credit_burn.
+    // =============================================================
+    //
+    // `liability` is deliberately NOT a case here — see this file's
+    // header comment ("A THIRD ID STAYS UNWIRED...") and the comment at
+    // chart-catalog.ts's `liability` entry for the full reasoning
+    // (controller Ruling 3: it's a Postgres balance snapshot, not a
+    // dated series, and fabricating history would be worse than an
+    // honest `supported: false`).
+
+    case "credit_burn": {
+      // Credits spent per day. No new SQL: credits.ts's `readVolume`
+      // already groups its CH query by day for the credits rollup's
+      // volume chart; `getCreditBurnDaily` just re-shapes that same
+      // query's `burned` column into this dispatcher's plain daily-
+      // count shape. See getCreditBurnDaily's doc comment (credits.ts)
+      // for the `burned` sign convention — it arrives as a positive
+      // magnitude already, normalised defensively either way.
+      //
+      // Unit is `count`, not `money`: credits are a unit of account,
+      // not USD (see credits.ts's readPackages comment on why revenue
+      // stays separate from credit volume).
+      assertClickHouseReady();
+      const rows = await getCreditBurnDaily(projectId, w);
       return {
         ...base,
         unit: "count",

@@ -487,7 +487,13 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
   {
     moduleName: "credits",
     module: creditsModule as unknown as Record<string, unknown>,
-    exempt: {},
+    exempt: {
+      // ClickHouse (readVolume's query, reshaped) — exercised, once,
+      // via SYSTEM_CHART_IDS's 'credit_burn' entry above, same pattern
+      // as mrr-decomposition's getMrrDecompositionDailyCounts (task-3).
+      getCreditBurnDaily:
+        "covered above, once per SYSTEM_CHART_IDS entry — dispatched via readChartSeries's 'credit_burn' case (task-5)",
+    },
     invokers: {
       getCreditsRollup: () =>
         creditsModule.getCreditsRollup({

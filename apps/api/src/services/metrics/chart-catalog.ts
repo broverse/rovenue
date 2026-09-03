@@ -80,6 +80,20 @@ const SYSTEM_CATALOG: ReadonlyArray<SystemChart> = [
   { id: "paywall_view_rate", category: "conversion", chartType: "line", range: "6M", config: {} },
   { id: "paywall_purchase", category: "conversion", chartType: "line", range: "6M", config: {} },
   { id: "credit_burn", category: "credits", chartType: "area", range: "6M", config: {} },
+  // NOT wired (task 5, controller Ruling 3 — see task-5-report.md).
+  // `readLiability` (services/metrics/credits.ts) sums the LATEST
+  // per-subscriber balances straight from Postgres — a present-day
+  // snapshot, not a dated event log — and no balance-history table
+  // exists anywhere to derive a trend from. A 12-month line here would
+  // have to be either today's single figure repeated across every
+  // bucket or a reconstruction from credit_ledger that no service
+  // owns; both are fabricated data, not a measured series. `/credits`
+  // already shows the real, current liability figure (and its
+  // paid/promo/transfer composition) via `getCreditsRollup` — that is
+  // this metric's honest surface. Left `chartType: "line"` and the id
+  // itself untouched: reconciling the catalog's declared shape with
+  // what the data model can actually support is Task 8's job, not
+  // this reader's.
   { id: "liability", category: "credits", chartType: "line", range: "12M", config: {} },
 ];
 
