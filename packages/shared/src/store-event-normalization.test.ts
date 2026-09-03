@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { isRovenueEventKey } from "./integrations";
-import { STORE_EVENT_TO_PUBLIC_KEY } from "./store-event-normalization";
+import {
+  resolveStorePublicKey,
+  STORE_EVENT_TO_PUBLIC_KEY,
+} from "./store-event-normalization";
 
 describe("STORE_EVENT_TO_PUBLIC_KEY", () => {
   it("maps every store-native event to a runtime-valid RovenueEventKey", () => {
@@ -33,5 +36,40 @@ describe("STORE_EVENT_TO_PUBLIC_KEY", () => {
       "subscription.cancel_requested",
     );
     expect(Object.values(STORE_EVENT_TO_PUBLIC_KEY)).not.toContain("subscription.expired");
+  });
+});
+
+// This is a table/unit-level check on the resolver's logic in isolation.
+// It is NOT the evidence that closes out the double-map risk — that risk
+// is about a real event physically reaching the outbox under the wrong
+// (or a second) key, which only an end-to-end drive through
+// webhook-processor.ts + apple-webhook.ts can demonstrate. See
+// apps/api's webhook-processor.apple-renewal-status.test.ts for that.
+describe("resolveStorePublicKey", () => {
+  it("behaves exactly like a STORE_EVENT_TO_PUBLIC_KEY lookup when no context is passed", () => {
+    for (const [storeEvent, publicKey] of Object.entries(STORE_EVENT_TO_PUBLIC_KEY)) {
+      expect(resolveStorePublicKey(storeEvent)).toBe(publicKey);
+    }
+    expect(resolveStorePublicKey("DID_CHANGE_RENEWAL_STATUS")).toBeUndefined();
+    expect(resolveStorePublicKey("some-unmapped-type")).toBeUndefined();
+  });
+
+  it("maps DID_CHANGE_RENEWAL_STATUS to subscription.uncancelled only when auto-renew turned back ON", () => {
+    expect(
+      resolveStorePublicKey("DID_CHANGE_RENEWAL_STATUS", { autoRenewEnabled: true }),
+    ).toBe("subscription.uncancelled");
+  });
+
+  it("maps DID_CHANGE_RENEWAL_STATUS to nothing when auto-renew turned OFF or direction is absent", () => {
+    expect(
+      resolveStorePublicKey("DID_CHANGE_RENEWAL_STATUS", { autoRenewEnabled: false }),
+    ).toBeUndefined();
+    expect(resolveStorePublicKey("DID_CHANGE_RENEWAL_STATUS", {})).toBeUndefined();
+  });
+
+  it("ignores context for every other event type (no accidental cross-wiring)", () => {
+    expect(
+      resolveStorePublicKey("DID_FAIL_TO_RENEW", { autoRenewEnabled: true }),
+    ).toBe("subscription.billing_issue");
   });
 });

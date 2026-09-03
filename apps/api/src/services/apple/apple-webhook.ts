@@ -40,6 +40,7 @@ import {
 } from "./apple-verify";
 import { guardStatusWrite } from "../subscription-transition-guard";
 import { audit } from "../../lib/audit";
+import type { StoreEventContext } from "@rovenue/shared";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -148,6 +149,14 @@ export type HandleAppleNotificationResult =
 interface DispatchOutcome {
   subscriberId?: string;
   purchaseId?: string;
+  /**
+   * Disambiguating fact for `postProcess`'s bridge to the outbox (see
+   * `WebhookPostProcess.eventContext`, webhook-processor.ts). Set only by
+   * `applyRenewalStatusChange` today — every other handler leaves this
+   * undefined and the bridge behaves exactly as before this field
+   * existed.
+   */
+  eventContext?: StoreEventContext;
 }
 
 interface DispatchContext {
@@ -236,6 +245,7 @@ export async function handleAppleNotification(
         eventType: notification.notificationType,
         subscriberId: outcome.subscriberId,
         purchaseId: outcome.purchaseId,
+        eventContext: outcome.eventContext,
       });
     }
 
@@ -461,6 +471,26 @@ async function applyRenewalStatusChange(ctx: DispatchContext): Promise<void> {
     ctx.transaction.originalTransactionId,
     { autoRenewStatus },
   );
+
+  // Thread the direction through to postProcess's bridge (see
+  // WebhookPostProcess.eventContext / resolveStorePublicKey in
+  // store-event-normalization.ts) instead of leaving it stranded on the
+  // autoRenewStatus column write above. This requires resolving the
+  // subscriber the chain-wide write above didn't need — the bridge can't
+  // run at all without one (postProcess bails when subscriberId is
+  // unset), so a chain with no matching purchase row simply produces no
+  // lifecycle key, same as before this change.
+  const purchase =
+    await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+      drizzle.db,
+      ctx.projectId,
+      ctx.transaction.originalTransactionId,
+    );
+  if (!purchase) return;
+
+  ctx.outcome.subscriberId = purchase.subscriberId;
+  ctx.outcome.purchaseId = purchase.id;
+  ctx.outcome.eventContext = { autoRenewEnabled: autoRenewStatus };
 }
 
 async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {

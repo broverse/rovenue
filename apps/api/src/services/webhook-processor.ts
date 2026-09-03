@@ -7,8 +7,9 @@ import {
 } from "@rovenue/db";
 import {
   isRovenueEventKey,
-  STORE_EVENT_TO_PUBLIC_KEY,
+  resolveStorePublicKey,
   toWebhookEventCategory,
+  type StoreEventContext,
 } from "@rovenue/shared";
 import { logger } from "../lib/logger";
 import { loadGoogleCredentials } from "../lib/project-credentials";
@@ -80,6 +81,15 @@ export type WebhookPostProcess = (ctx: {
   eventType: string;
   subscriberId?: string;
   purchaseId?: string;
+  /**
+   * Disambiguating fact a handler can thread alongside `eventType` for
+   * the store-native types `resolveStorePublicKey` (packages/shared)
+   * can't resolve on the bare type alone (currently: Apple
+   * `DID_CHANGE_RENEWAL_STATUS`'s auto-renew direction). Optional —
+   * every other caller keeps passing a bare `eventType` and behaves
+   * identically to before this field existed.
+   */
+  eventContext?: StoreEventContext;
 }) => Promise<void>;
 
 // =============================================================
@@ -163,6 +173,7 @@ export async function processWebhookEvent(
       purchaseId: ctx.purchaseId,
       eventType: ctx.eventType,
       webhookEventId: ctx.webhookEventId,
+      eventContext: ctx.eventContext,
     });
   };
 
@@ -227,6 +238,7 @@ interface PostProcessingArgs {
   purchaseId?: string;
   eventType: string;
   webhookEventId: string;
+  eventContext?: StoreEventContext;
 }
 
 /**
@@ -268,6 +280,7 @@ async function runPostProcessing(args: PostProcessingArgs): Promise<void> {
       purchaseId: args.purchaseId,
       eventType: args.eventType,
       webhookEventId: args.webhookEventId,
+      eventContext: args.eventContext,
     });
   } catch (err) {
     log.error("outgoing webhook enqueue failed; failing job for retry", {
@@ -307,6 +320,7 @@ interface EnqueueOutgoingWebhookArgs {
   eventType: string;
   /** Inbound webhook_events row id — the retry-safe dedup key. */
   webhookEventId: string;
+  eventContext?: StoreEventContext;
 }
 
 async function enqueueOutgoingWebhook(
@@ -344,15 +358,17 @@ async function enqueueOutgoingWebhook(
     // args.eventType is already a public key for the scheduled-actions /
     // expiry-checker producers (subscription.cancel_requested /
     // subscription.expired) — pass it through unchanged. Otherwise it's
-    // a store-native type; STORE_EVENT_TO_PUBLIC_KEY narrowly maps the
+    // a store-native type; resolveStorePublicKey narrowly maps the
     // handful of store signals that unambiguously mean a NEW public key
     // (billing_issue / grace_period / uncancelled / product_changed —
-    // see that file for the exact table and the ambiguous rows
-    // deliberately excluded from it). Everything else stays unmapped and
-    // is dropped here exactly as before this change.
+    // see store-event-normalization.ts for the exact table, the rows
+    // deliberately excluded from it, and the optional `eventContext` a
+    // handler can pass to resolve the ones that need more than the bare
+    // type). Everything else stays unmapped and is dropped here exactly
+    // as before this change.
     const publicKey = isRovenueEventKey(args.eventType)
       ? args.eventType
-      : STORE_EVENT_TO_PUBLIC_KEY[args.eventType];
+      : resolveStorePublicKey(args.eventType, args.eventContext);
     if (publicKey) {
       // DEDUPE KEY SELECTION — the inbound webhookEventId wins.
       //
