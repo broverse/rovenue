@@ -10,7 +10,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 | 3 | Paywall builder & native rendering | 85% | 95% |
 | 4 | A/B testing & experiments | 88% | 90%+ |
 | 5 | Analytics (MRR / LTV / cohorts) | 93% | 95% |
-| 6 | Third-party integrations | 90% | 95% |
+| 6 | Third-party integrations | 95% | 95% |
 | 7 | SDK platform coverage | 70% | 95% |
 | 8 | Self-hosting & data ownership | 95% | keep |
 | 9 | GDPR / KVKK tooling | 85% | 95% |
@@ -254,7 +254,7 @@ nothing, but real net-new coverage on top of what was already there.
   is a separate real-Postgres integration test. "Registered in the harness"
   does not mean "guarded" for those two.
 
-## 6. Third-party integrations (75 → 90) — Wave 2 shipped, one gap left
+## 6. Third-party integrations (75 → 95) — CLOSED 2026-09-03
 
 Framework + webhook v2 shipped 2026-08-24
 (`docs/superpowers/specs/2026-08-24-integrations-foundation-webhook-v2-design.md`).
@@ -326,10 +326,54 @@ else in the framework/provider-breadth dimension is done.
       (attribution), Discord (communication) — first-class providers, zero
       schema migrations, five new RC-compatible vendor-id attributes, Slack's
       message builder hoisted to a shared chat module reused by Discord
-- [ ] Full store-native lifecycle event normalization: raw Apple/Google/Stripe
-      event types → the public event-key catalog end to end (currently only
-      the 4 keys above are mapped; most raw event shapes still pass through
-      only partially normalized)
+- [x] Store-native lifecycle normalization — shipped 2026-09-03
+      (`.superpowers/sdd/2026-09-03-store-lifecycle-normalization/`).
+      **The item as written asked for the wrong thing, and this is the part
+      worth carrying forward: the unit is a distinct subscriber-facing
+      MEANING, not a raw store event type.** A key per raw type would give
+      consumers two events for one real-world fact — renewals, refunds and
+      revokes already reach them through `revenue.event.recorded` — and the
+      fan-out is at-least-once, so deduplicating them would become the
+      consumer's problem. Task 1's enumeration traced all 37 handled store
+      event types to confirm that before anything was added.
+      Delivered against that principle:
+      - **Two previously-excluded rows re-examined.** Apple
+        `DID_CHANGE_RENEWAL_STATUS` is now mapped, but only with the
+        direction threaded through to the bridge (`resolveStorePublicKey`
+        + `StoreEventContext`): ON → `subscription.uncancelled`, OFF stays
+        unmapped because a cancel is already carried by
+        `subscription.cancel_requested`. `STORE_EVENT_TO_PUBLIC_KEY` itself
+        stayed untouched, preserving its documented invariant that every
+        row in it is unconditionally true.
+      - **Stripe `customer.subscription.updated` deliberately still out.**
+        The prior `cancel_at_period_end` is unreachable without widening
+        `lockPurchaseStatusByStoreTransaction`'s SELECT, a helper shared by
+        Apple/Google/Stripe/refunds/supersede. A row that misclassifies half
+        its deliveries is worse than no row; the blocker is named in the
+        exclusion comment for whoever picks it up.
+      - **Three keys added** — `subscription.paused`, `.recovered`,
+        `.revoked` — mapped ONLY where a store sends a native signal.
+        Per-store coverage is documented in `outbound-webhooks.mdx`:
+        paused/recovered are Google-only, revoked is Apple + Google. Nothing
+        is inferred; a guessed recovery would stop a consumer's dunning
+        campaign for a subscriber who has not recovered.
+      - **`subscription.revoked` closed a real hole.** `applyRevoke` wrote
+        the chain status and revoked access while emitting NOTHING, and it
+        carried the same missing `outcome.subscriberId` found in
+        `applyRenewalStatusChange` — so a subscriber could lose access with
+        zero signal to any consumer, and a mapping row alone would never
+        have fired. Both were fixed and proven end-to-end against the outbox.
+      - **A catalog-coverage guard is the durable part.** Every provider
+        mapping table is `Partial<Record<RovenueEventKey, string>>`, so a
+        provider advertising a key with no name for it compiles, ships and
+        silently drops the event. The guard names the provider and key,
+        declares deliberate omissions with reasons, and fails when an
+        exemption goes stale.
+- [ ] Stripe one-time (non-subscription) purchases reach no integration
+      provider — funnel completion emits only `funnel.session.paid` on a
+      separate `FUNNEL` aggregate, never `revenue.event.recorded`. Found by
+      the 2026-09-03 enumeration; genuinely separate scope (the funnel/
+      revenue bridge, not store lifecycle normalization).
 - Architecture note (now implemented, not just planned): the outbox → Kafka
   fanout consumer + deliver worker is the "integration dispatcher"; each
   integration = registry entry (mapping + credential schema) + credential

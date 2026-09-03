@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ROVENUE_EVENT_KEYS } from "@rovenue/shared";
 import { http, HttpResponse } from "msw";
 import { useState } from "react";
 import { screen } from "@testing-library/react";
@@ -57,7 +58,7 @@ describe("StepEvents", () => {
     expect(lastState.enabledEvents).toContain("revenue.RENEWAL");
   });
 
-  it("offers all 17 ROVENUE_EVENT_KEYS for CUSTOM_WEBHOOK and hides Back", async () => {
+  it("offers every ROVENUE_EVENT_KEYS entry for CUSTOM_WEBHOOK and hides Back", async () => {
     renderWithRouter(
       <StepEvents
         state={BASE_STATE}
@@ -72,7 +73,12 @@ describe("StepEvents", () => {
 
     // A webhook-only event key (not in the ad-providers' 8-key catalog).
     expect(await screen.findByRole("checkbox", { name: "paywall.view" })).toBeTruthy();
-    expect(screen.getAllByRole("checkbox")).toHaveLength(17);
+    // Pinned to the constant, not a literal: this asserted 17 and had to be
+    // hand-edited every time a public event key was added, which is the
+    // same brittleness the provider tests carried.
+    expect(screen.getAllByRole("checkbox")).toHaveLength(
+      ROVENUE_EVENT_KEYS.length,
+    );
     expect(screen.queryByRole("button", { name: /^back$/i })).toBeNull();
   });
 
