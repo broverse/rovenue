@@ -347,7 +347,35 @@ The matrix modal gains what a translator actually needs:
   authorship field to it would push a dashboard concern into the SDK wire
   format and into `render-fixtures.json`.
 
-### 4.4 Known gap, deliberately not closed
+### 4.4 Region-aware locale matching
+
+`resolveText` matches the requested locale **exactly**, then falls straight to
+`defaultLocale` (`packages/shared/src/paywall/validate.ts:843`). A host app that
+passes the device locale `pt-BR` against a paywall whose table is keyed `pt`
+therefore shows English, silently — the renderer has no way to report a miss,
+it just returns the fallback string.
+
+Today this mostly works by accident: authors type one code and hosts happen to
+pass it back. A curated locale picker makes the mismatch systematic, because
+the store locale lists are full of region-tagged codes (`pt-BR`, `zh-Hans`,
+`en-GB`) while an author translating "Portuguese" may well key it `pt`. Adding
+translations without fixing the lookup would ship a feature that produces
+tables the SDK cannot always find.
+
+So `resolveText` gains one step: **requested → base language → defaultLocale**,
+using the same progressive-truncation rule `@rovenue/shared/i18n`'s `expand()`
+already implements for the funnel/remote-config side
+(`packages/shared/src/i18n/pick.ts:26`). Matching is case-insensitive on the
+locale key, since BCP-47 tags are, and the builder lowercases what an author
+types (`vm.addLocale`, `paywall-builder.vm.ts:651`) while a device reports
+`pt-BR`.
+
+The change is strictly widening — an exact match still wins, so no paywall
+that resolves correctly today resolves differently — and it must be ported to
+all three renderers with fixture cases, because `resolveText` is part of the
+decoder contract, not a web-only helper.
+
+### 4.5 Known gap, deliberately not closed
 
 `ImageNode.alt` is the one user-facing string that is a raw value rather than
 a key (`LOCALIZED_KEYS.image` returns `[]`). Localizing it means adding
@@ -365,6 +393,7 @@ than folded into this work.
 | Footer link group | shared schema + 3 renderers + fixtures | no | **yes, all three** |
 | Template gallery | dashboard only (`presets.ts` → catalogue + kit) | no | no |
 | Auto-translate | api route + service, dashboard modal, shared locale list | no | no |
+| Locale matching | shared `resolveText` + its 3 ports + fixtures | no | **yes, all three** |
 
 **No database migration anywhere in this plan.** Templates are code, locale
 choices already live inside `BuilderConfig`, and translation returns a patch
