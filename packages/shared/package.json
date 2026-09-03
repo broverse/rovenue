@@ -14,6 +14,10 @@
       "types": "./src/crypto.ts",
       "default": "./src/crypto.ts"
     },
+    "./subscription-status": {
+      "types": "./src/subscription-status.ts",
+      "default": "./src/subscription-status.ts"
+    },
     "./experiments": {
       "types": "./src/experiments/index.ts",
       "default": "./src/experiments/index.ts"

@@ -1,4 +1,5 @@
 import { pgEnum } from "drizzle-orm/pg-core";
+import { SUBSCRIPTION_STATUSES } from "@rovenue/shared/subscription-status";
 
 // =============================================================
 // Postgres enums
@@ -43,15 +44,10 @@ export const scheduledActionStatus = pgEnum("ScheduledActionStatus", [
   "FAILED",
 ]);
 
-export const purchaseStatus = pgEnum("PurchaseStatus", [
-  "TRIAL",
-  "ACTIVE",
-  "EXPIRED",
-  "REFUNDED",
-  "REVOKED",
-  "PAUSED",
-  "GRACE_PERIOD",
-]);
+// Derived from @rovenue/shared/subscription-status so the Postgres type
+// and the TypeScript union cannot drift. pgEnum wants a non-empty
+// tuple; the shared tuple is `as const` and non-empty by construction.
+export const purchaseStatus = pgEnum("PurchaseStatus", SUBSCRIPTION_STATUSES);
 
 export const creditLedgerType = pgEnum("CreditLedgerType", [
   "PURCHASE",

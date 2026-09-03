@@ -12,6 +12,10 @@
 //   3. Re-exports the encryption helpers.
 
 import * as drizzleNamespace from "./drizzle";
+import {
+  SUBSCRIPTION_STATUSES,
+  type SubscriptionStatus,
+} from "@rovenue/shared/subscription-status";
 
 // =============================================================
 // Enum value objects
@@ -53,16 +57,29 @@ export const Store = {
 } as const;
 export type Store = (typeof Store)[keyof typeof Store];
 
-export const PurchaseStatus = {
-  TRIAL: "TRIAL",
-  ACTIVE: "ACTIVE",
-  EXPIRED: "EXPIRED",
-  REFUNDED: "REFUNDED",
-  REVOKED: "REVOKED",
-  PAUSED: "PAUSED",
-  GRACE_PERIOD: "GRACE_PERIOD",
-} as const;
-export type PurchaseStatus = (typeof PurchaseStatus)[keyof typeof PurchaseStatus];
+/**
+ * Value-and-type pair kept for ergonomics (`PurchaseStatus.ACTIVE`).
+ * Built from the shared tuple rather than re-typed, so this object can
+ * never list a status the Postgres enum lacks or vice versa.
+ */
+export const PurchaseStatus = Object.fromEntries(
+  SUBSCRIPTION_STATUSES.map((s) => [s, s]),
+) as { [K in SubscriptionStatus]: K };
+export type PurchaseStatus = SubscriptionStatus;
+
+// Derived status sets (access-granting, live, sweepable, reconcilable,
+// terminal) plus the semantics table itself, re-exported here so api
+// consumers have one import (`@rovenue/db`) instead of reaching into
+// `@rovenue/shared/subscription-status` directly.
+export {
+  ACCESS_GRANTING_STATUSES,
+  EXPIRY_SWEEP_STATUSES,
+  LIVE_STATUSES,
+  RECONCILABLE_STATUSES,
+  SUBSCRIPTION_STATUS_SEMANTICS,
+  TERMINAL_STATUSES,
+  statusSqlList,
+} from "@rovenue/shared/subscription-status";
 
 export const CreditLedgerType = {
   PURCHASE: "PURCHASE",
