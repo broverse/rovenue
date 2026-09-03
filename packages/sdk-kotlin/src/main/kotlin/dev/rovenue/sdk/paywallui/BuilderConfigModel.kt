@@ -133,6 +133,7 @@ private object OverridablePropKeys {
     val carousel: Set<String> = setOf("indicatorColor")
     val video: Set<String> = setOf("url", "posterUrl")
     val lottie: Set<String> = setOf("url")
+    val footerLinks: Set<String> = setOf("color", "separator", "align")
 }
 
 /** A single conditional prop swap: `{ when: { kind }, props }`. [T] is the
@@ -211,6 +212,14 @@ data class VideoOverrideProps(val url: ThemePair? = null, val posterUrl: ThemePa
  *  [VideoOverrideProps]: the animation source, not `loop`/`autoplay`/`speed`. */
 data class LottieOverrideProps(val url: ThemePair? = null)
 
+/** `footerLinks`' three overridable props. Mirrors `OVERRIDABLE_PROP_KEYS.
+ *  footerLinks` in schema.ts / Swift's `FooterLinksOverrideProps`. */
+data class FooterLinksOverrideProps(
+    val color: ThemePair? = null,
+    val separator: String? = null,
+    val align: String? = null,
+)
+
 // =============================================================
 // Feature-list / timeline row shapes (Wave B) — Kotlin mirror of the shared
 // `FeatureRow`/`TimelineRow` types (packages/shared/src/paywall/schema.ts)
@@ -222,6 +231,13 @@ data class LottieOverrideProps(val url: ThemePair? = null)
 data class FeatureRow(val labelKey: String, val icon: String? = null, val included: Boolean? = null)
 
 data class TimelineRow(val labelKey: String, val captionKey: String? = null, val icon: String? = null)
+
+/** One tappable link in a `footerLinks` row. `action` is the SAME
+ *  `ButtonAction` union a `button` node carries — a footer link and a
+ *  button do the same three things (close/url/restore), and a second
+ *  action union would be a second thing to keep in sync across three
+ *  renderers. Mirrors schema.ts's `FooterLink` / Swift's `FooterLinkModel`. */
+data class FooterLink(val labelKey: String, val action: ButtonAction)
 
 sealed class BuilderNode {
     abstract val id: String
@@ -491,6 +507,31 @@ sealed class BuilderNode {
          *  handed to the host's player unchanged. */
         val speed: Double? = null,
         val overrides: List<NodeOverride<LottieOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
+        override val fallback: BuilderNode? = null,
+    ) : BuilderNode()
+
+    /**
+     * The row of small, low-emphasis legal/action links at the bottom of a
+     * paywall: Restore Purchases · Terms · Privacy. `separator`/`align` are
+     * kept OPTIONAL here on purpose — this is the WIRE shape, and the
+     * default ([dev.rovenue.sdk.paywallui] `FOOTER_LINKS_DEFAULT_SEPARATOR`/
+     * `FOOTER_LINKS_DEFAULT_ALIGN` in NodeViewFactory.kt) is applied by the
+     * VIEW, not fabricated here — mirrors nodes.tsx's `renderFooterLinks`
+     * (`node.separator ?? FOOTER_LINKS_DEFAULT_SEPARATOR`) and Swift's
+     * `FooterLinksProps`: a renderer that forgets to apply the default is
+     * visible in a decode test instead of being masked by a fabricated
+     * decoder default.
+     */
+    data class FooterLinks(
+        override val id: String,
+        val links: List<FooterLink>,
+        val separator: String? = null,
+        val align: String? = null,
+        /** Applies to every link's label AND the separators. Absent =
+         *  inherit the ambient text colour. */
+        val color: ThemePair? = null,
+        val overrides: List<NodeOverride<FooterLinksOverrideProps>>? = null,
         override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
@@ -796,6 +837,23 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             visibility = visibility,
             fallback = fallback,
         )
+        "footerLinks" -> BuilderNode.FooterLinks(
+            id = id,
+            links = (obj["links"] as? JsonArray
+                ?: throw BuilderDecodeException("footerLinks.links must be an array"))
+                .map { parseFooterLink(it as? JsonObject ?: throw BuilderDecodeException("footerLinks link must be an object")) },
+            // Kept as raw strings, not validated against the enum here —
+            // see [BuilderNode.FooterLinks]'s own doc: an unrecognized VALUE
+            // (not a structural type mismatch) is a render-time leniency
+            // concern (footerSeparatorGlyph/footerLinksGravity), same as
+            // Swift's FooterLinksProps.
+            separator = obj.optionalString("separator"),
+            align = obj.optionalString("align"),
+            color = obj["color"]?.letObject(::parseThemePair),
+            overrides = obj.parseOverrideList(::parseFooterLinksOverrideProps),
+            visibility = visibility,
+            fallback = fallback,
+        )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
         else -> BuilderNode.Unknown(id = id, visibility = visibility, fallback = fallback)
@@ -986,6 +1044,15 @@ private fun parseLottieOverrideProps(props: JsonObject): LottieOverrideProps {
     return LottieOverrideProps(url = props["url"]?.letObject(::parseThemePair))
 }
 
+private fun parseFooterLinksOverrideProps(props: JsonObject): FooterLinksOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.footerLinks)
+    return FooterLinksOverrideProps(
+        color = props["color"]?.letObject(::parseThemePair),
+        separator = props.optionalString("separator"),
+        align = props.optionalString("align"),
+    )
+}
+
 // ----- feature-list / timeline rows -----
 
 private fun parseFeatureRow(obj: JsonObject): FeatureRow = FeatureRow(
@@ -998,6 +1065,13 @@ private fun parseTimelineRow(obj: JsonObject): TimelineRow = TimelineRow(
     labelKey = obj.requireString("labelKey"),
     captionKey = obj.optionalString("captionKey"),
     icon = obj.optionalString("icon"),
+)
+
+private fun parseFooterLink(obj: JsonObject): FooterLink = FooterLink(
+    labelKey = obj.requireString("labelKey"),
+    action = parseAction(
+        obj["action"] as? JsonObject ?: throw BuilderDecodeException("footerLinks link.action required"),
+    ),
 )
 
 // ----- icon registry -----

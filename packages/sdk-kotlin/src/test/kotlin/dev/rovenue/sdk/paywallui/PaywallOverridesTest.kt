@@ -329,6 +329,32 @@ class PaywallOverridesTest {
         assertEquals(8.0, result.size)
     }
 
+    @Test
+    fun `footerLinks node merges color separator and align`() {
+        val overrides = listOf(
+            NodeOverride(
+                OverrideConditionKind.SELECTED,
+                FooterLinksOverrideProps(color = ThemePair("#222222", null), separator = "none", align = "end"),
+            ),
+        )
+        val node = BuilderNode.FooterLinks(
+            id = "f1",
+            links = listOf(FooterLink(labelKey = "a", action = ButtonAction.Close)),
+            separator = "dot",
+            align = "center",
+            color = ThemePair("#111111", null),
+            overrides = overrides,
+        )
+        val result = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = true))
+        assertEquals(ThemePair("#222222", null), result.color)
+        assertEquals("none", result.separator)
+        assertEquals("end", result.align)
+        // Untouched when inactive.
+        val inactive = applyOverrides(node, OverrideActiveConditions(introEligible = false, selected = false))
+        assertEquals("dot", inactive.separator)
+        assertEquals("center", inactive.align)
+    }
+
     // ---- activeOverrideConditions ------------------------------------------
 
     @Test

@@ -241,6 +241,20 @@ fun applyOverrides(node: BuilderNode.Lottie, active: OverrideActiveConditions): 
     return result
 }
 
+fun applyOverrides(node: BuilderNode.FooterLinks, active: OverrideActiveConditions): BuilderNode.FooterLinks {
+    val patches = activePropPatches(node.overrides, active)
+    if (patches.isEmpty()) return node
+    var result = node
+    for (patch in patches) {
+        result = result.copy(
+            color = patch.color ?: result.color,
+            separator = patch.separator ?: result.separator,
+            align = patch.align ?: result.align,
+        )
+    }
+    return result
+}
+
 /** Dispatches to the node's own `applyOverrides` overload. `.Unknown` nodes
  *  carry no overrides field at all and pass through unchanged. */
 fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): BuilderNode = when (node) {
@@ -261,6 +275,7 @@ fun applyOverrides(node: BuilderNode, active: OverrideActiveConditions): Builder
     is BuilderNode.Carousel -> applyOverrides(node, active)
     is BuilderNode.Video -> applyOverrides(node, active)
     is BuilderNode.Lottie -> applyOverrides(node, active)
+    is BuilderNode.FooterLinks -> applyOverrides(node, active)
     is BuilderNode.Unknown -> node
 }
 

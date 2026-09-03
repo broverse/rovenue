@@ -2,6 +2,7 @@ package dev.rovenue.sdk.paywallui
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -1724,6 +1725,198 @@ class NodeViewFactoryTest {
         NodeViewFactory.build(mockContext(), iconNode(), renderContext(), cell = null)
         verify(atLeast = 1) { anyConstructed<ImageView>().setImageTintList(any<ColorStateList>()) }
     }
+
+    // ---- footerLinks (spec §3 wave, 2026-09-04) ----------------------------
+    // Mirrors PaywallRenderSupport.swift's own test coverage for
+    // footerLinksSurvivors/footerRowEntries/footerLinkSeparatorGlyph and
+    // nodes.tsx's renderFooterLinks contract: two per-link drop rules,
+    // separator interleaving over SURVIVORS only, and the wrap arithmetic
+    // that decides whether footer links overflow a 320dp screen.
+
+    @Test
+    fun `separator glyphs match the shared table`() {
+        assertEquals("·", footerSeparatorGlyph("dot"))
+        assertEquals("|", footerSeparatorGlyph("pipe"))
+        assertEquals("", footerSeparatorGlyph("none"))
+        // Absent separator falls to the documented default, not to empty.
+        assertEquals("·", footerSeparatorGlyph(null))
+        // An unknown value fails open to the default rather than crashing --
+        // the decoders are lenient by contract.
+        assertEquals("·", footerSeparatorGlyph("slash"))
+    }
+
+    @Test
+    fun `footerLinksGravity falls open to the default for absent or unknown align`() {
+        assertEquals(Gravity.START, footerLinksGravity("start"))
+        assertEquals(Gravity.END, footerLinksGravity("end"))
+        assertEquals(Gravity.CENTER_HORIZONTAL, footerLinksGravity("center"))
+        assertEquals(Gravity.CENTER_HORIZONTAL, footerLinksGravity(null))
+        assertEquals(Gravity.CENTER_HORIZONTAL, footerLinksGravity("diagonal"))
+    }
+
+    @Test
+    fun `footerLinksSurvivors drops a restore link with no restore handler`() {
+        val links = listOf(
+            FooterLink(labelKey = "restore", action = ButtonAction.Restore),
+            FooterLink(labelKey = "terms", action = ButtonAction.Url("https://x.dev/terms")),
+        )
+        val survivors = footerLinksSurvivors(links, hasRestoreHandler = false) { it }
+        assertEquals(1, survivors.size)
+        assertEquals("terms", survivors[0].label)
+        // originalIndex is the AUTHORED position, not the survivor position.
+        assertEquals(1, survivors[0].originalIndex)
+    }
+
+    @Test
+    fun `footerLinksSurvivors keeps a restore link when a restore handler exists`() {
+        val links = listOf(FooterLink(labelKey = "restore", action = ButtonAction.Restore))
+        val survivors = footerLinksSurvivors(links, hasRestoreHandler = true) { it }
+        assertEquals(1, survivors.size)
+        assertEquals(0, survivors[0].originalIndex)
+    }
+
+    @Test
+    fun `footerLinksSurvivors drops a link whose label does not resolve`() {
+        val links = listOf(
+            FooterLink(labelKey = "missing", action = ButtonAction.Close),
+            FooterLink(labelKey = "present", action = ButtonAction.Close),
+        )
+        val survivors = footerLinksSurvivors(links, hasRestoreHandler = true) { key ->
+            if (key == "present") "Present" else null
+        }
+        assertEquals(1, survivors.size)
+        assertEquals(1, survivors[0].originalIndex)
+        assertEquals("Present", survivors[0].label)
+    }
+
+    @Test
+    fun `footerRowEntries interleaves a separator only between surviving links`() {
+        // The middle of three original links is imagined dropped upstream --
+        // footerRowEntries only ever sees survivors, so exactly one
+        // separator remains, never leading or trailing.
+        val survivors = listOf(
+            FooterLinkSurvivor(0, ButtonAction.Close, "A"),
+            FooterLinkSurvivor(2, ButtonAction.Close, "B"),
+        )
+        val entries = footerRowEntries(survivors, glyph = "·")
+        assertEquals(3, entries.size)
+        assertTrue(entries[0] is FooterRowEntry.Link)
+        assertTrue(entries[1] is FooterRowEntry.Separator)
+        assertTrue(entries[2] is FooterRowEntry.Link)
+        assertEquals("·", (entries[1] as FooterRowEntry.Separator).glyph)
+    }
+
+    @Test
+    fun `footerRowEntries never inserts an entry for the none separator`() {
+        val survivors = listOf(
+            FooterLinkSurvivor(0, ButtonAction.Close, "A"),
+            FooterLinkSurvivor(1, ButtonAction.Close, "B"),
+        )
+        val entries = footerRowEntries(survivors, glyph = "")
+        assertEquals(2, entries.size)
+        assertTrue(entries.all { it is FooterRowEntry.Link })
+    }
+
+    @Test
+    fun `footerRowEntries returns empty for zero survivors`() {
+        assertTrue(footerRowEntries(emptyList(), glyph = "·").isEmpty())
+    }
+
+    @Test
+    fun `computeFlowRows packs items onto one row when they fit`() {
+        val rows = computeFlowRows(itemWidthsPx = listOf(40, 40, 40), containerWidthPx = 200, spacingPx = 8)
+        assertEquals(listOf(listOf(0, 1, 2)), rows)
+    }
+
+    @Test
+    fun `computeFlowRows wraps to a new line -- three footer links overflow a 320dp screen`() {
+        val rows = computeFlowRows(itemWidthsPx = listOf(120, 120, 120), containerWidthPx = 320, spacingPx = 8)
+        assertEquals(listOf(listOf(0, 1), listOf(2)), rows)
+    }
+
+    @Test
+    fun `computeFlowRows gives an over-wide single item its own row rather than dropping it`() {
+        val rows = computeFlowRows(itemWidthsPx = listOf(400), containerWidthPx = 320, spacingPx = 8)
+        assertEquals(listOf(listOf(0)), rows)
+    }
+
+    @Test
+    fun `computeFlowRows degrades to a single row when the container isn't measured yet`() {
+        val rows = computeFlowRows(itemWidthsPx = listOf(40, 40, 40), containerWidthPx = 0, spacingPx = 8)
+        assertEquals(listOf(listOf(0, 1, 2)), rows)
+    }
+
+    @Test
+    fun `computeFlowRows returns empty for zero items`() {
+        assertTrue(computeFlowRows(itemWidthsPx = emptyList(), containerWidthPx = 320, spacingPx = 8).isEmpty())
+    }
+
+    @Test
+    fun `build drops a footerLinks link whose label does not resolve, even a non-restore action`() {
+        val node = BuilderNode.FooterLinks(
+            id = "f",
+            links = listOf(FooterLink(labelKey = "unresolvable", action = ButtonAction.Close)),
+        )
+        // Default renderContext() has empty localizations, so no label
+        // resolves -- zero survivors, no fallback -> null.
+        assertNull(NodeViewFactory.build(mockContext(), node, renderContext(), cell = null))
+    }
+
+    @Test
+    fun `build renders the footerLinks fallback when every link is dropped`() {
+        val node = BuilderNode.FooterLinks(
+            id = "f",
+            links = listOf(FooterLink(labelKey = "restore", action = ButtonAction.Restore)),
+            fallback = textNode(),
+        )
+        assertTrue(NodeViewFactory.build(mockContext(), node, renderContext(), cell = null) != null)
+    }
+
+    @Test
+    fun `build renders footerLinks with resolvable survivors`() {
+        val node = BuilderNode.FooterLinks(
+            id = "f",
+            links = listOf(
+                FooterLink(labelKey = "restore", action = ButtonAction.Restore),
+                FooterLink(labelKey = "terms", action = ButtonAction.Url("https://x.dev/terms")),
+            ),
+        )
+        val ctx = footerLinksRenderContext(
+            localizations = mapOf("restore" to "Restore", "terms" to "Terms"),
+            onRestore = {},
+        )
+        assertTrue(NodeViewFactory.build(mockContext(), node, ctx, cell = null) != null)
+    }
+
+    /** A [renderContext] variant with real `en` localizations and an
+     *  optional restore handler -- the default [renderContext] has neither,
+     *  which is exactly what the "everything gets dropped" tests above rely
+     *  on, but the "renders with survivors" test needs labels that actually
+     *  resolve. */
+    private fun footerLinksRenderContext(
+        localizations: Map<String, String>,
+        onRestore: (() -> Unit)? = null,
+    ) = PaywallRenderContext(
+        config = BuilderConfigModel(
+            formatVersion = 2,
+            defaultLocale = "en",
+            localizations = mapOf("en" to localizations),
+            background = null,
+            root = BuilderNode.Stack(id = "root", axis = Axis.V, children = emptyList()),
+        ),
+        locale = null,
+        dark = false,
+        offering = null,
+        selectedPackageId = null,
+        isPurchasing = false,
+        select = {},
+        purchase = {},
+        onClose = null,
+        onRestore = onRestore,
+        onUrl = null,
+        loadImage = { _, _ -> },
+        appVersion = "2.0.0",
+    )
 
     private companion object {
         /** `ViewGroup.LayoutParams.MATCH_PARENT`, spelled out as the literal

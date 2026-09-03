@@ -1031,4 +1031,88 @@ class BuilderConfigModelTest {
             "`border` is not in OVERRIDABLE_PROP_KEYS.text, so the whole config must fail",
         )
     }
+
+    // ---- footerLinks node (spec §3 wave, 2026-09-04) -----------------------
+
+    /** Decodes a single bare node JSON object by wrapping it as the sole
+     *  child of a minimal stack root. Thin alias over [firstChild]/
+     *  [rootWith] so this section reads like its siblings' `decodeFixtureNode`
+     *  helper. */
+    private fun decodeNode(nodeJson: String): BuilderNode = firstChild(rootWith(nodeJson))
+
+    @Test
+    fun `decodes a footerLinks node`() {
+        val json = """
+            {"type":"footerLinks","id":"f","links":[
+              {"labelKey":"f_restore","action":{"kind":"restore"}},
+              {"labelKey":"f_terms","action":{"kind":"url","url":"https://x.dev/terms"}}
+            ],"separator":"pipe","align":"start"}
+        """.trimIndent()
+        val node = decodeNode(json)
+        assertTrue(node is BuilderNode.FooterLinks)
+        node as BuilderNode.FooterLinks
+        assertEquals("f", node.id)
+        assertEquals(2, node.links.size)
+        assertEquals("f_restore", node.links[0].labelKey)
+        assertEquals(ButtonAction.Restore, node.links[0].action)
+        assertEquals("f_terms", node.links[1].labelKey)
+        assertEquals(ButtonAction.Url("https://x.dev/terms"), node.links[1].action)
+        assertEquals("pipe", node.separator)
+        assertEquals("start", node.align)
+    }
+
+    /** `separator`/`align` decode as whatever the wire says (leniently, no
+     *  enum validation) -- an unrecognized value is a render-time leniency
+     *  concern ([footerSeparatorGlyph]/`footerLinksGravity` in
+     *  NodeViewFactory.kt), not a decode failure. Mirrors Swift's
+     *  `FooterLinksProps`. */
+    @Test
+    fun `keeps an unrecognized footerLinks separator instead of failing the decode`() {
+        val node = decodeNode(
+            """{"type":"footerLinks","id":"f","links":[{"labelKey":"a","action":{"kind":"restore"}}],
+               "separator":"slash"}""",
+        ) as BuilderNode.FooterLinks
+        assertEquals("slash", node.separator)
+    }
+
+    @Test
+    fun `keeps footerLinks defaults absent in the decoder`() {
+        val json = """{"type":"footerLinks","id":"f","links":[{"labelKey":"a","action":{"kind":"restore"}}]}"""
+        val node = decodeNode(json) as BuilderNode.FooterLinks
+        assertNull(node.separator)
+        assertNull(node.align)
+        assertNull(node.color)
+    }
+
+    @Test
+    fun `decodes a footerLinks node's color and overrides`() {
+        val node = decodeNode(
+            """{"type":"footerLinks","id":"f","links":[{"labelKey":"a","action":{"kind":"close"}}],
+               "color":{"light":"#111111","dark":"#EEEEEE"},
+               "overrides":[{"when":{"kind":"selected"},
+                             "props":{"color":{"light":"#222222"},"separator":"none","align":"end"}}]}""",
+        ) as BuilderNode.FooterLinks
+        assertEquals(ThemePair("#111111", "#EEEEEE"), node.color)
+        val patch = node.overrides!!.first().props!!
+        assertEquals(ThemePair("#222222", null), patch.color)
+        assertEquals("none", patch.separator)
+        assertEquals("end", patch.align)
+    }
+
+    /** The whitelist side of parity, same shape as the `text`/`border` case
+     *  above: a key NOT in `OVERRIDABLE_PROP_KEYS.footerLinks` fails the
+     *  whole config. */
+    @Test
+    fun `a non-whitelisted footerLinks override prop fails the whole config`() {
+        val json = """
+            {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
+             "root":{"type":"stack","id":"root","axis":"v","children":[
+               {"type":"footerLinks","id":"f","links":[{"labelKey":"a","action":{"kind":"close"}}],
+                "overrides":[{"when":{"kind":"selected"},"props":{"labelKey":"nope"}}]}]}}
+        """
+        assertNull(
+            decodeBuilderConfig(json),
+            "`labelKey` is not in OVERRIDABLE_PROP_KEYS.footerLinks, so the whole config must fail",
+        )
+    }
 }

@@ -272,6 +272,179 @@ fun relevantPackageView(cell: PackageView?, selectedPackageId: String?, offering
 }
 
 // ---------------------------------------------------------------
+// Pure: footerLinks (spec §3 wave, 2026-09-04). Mirrors
+// packages/paywall-renderer/src/nodes.tsx's `renderFooterLinks` and
+// packages/sdk-swift .../PaywallUI/PaywallRenderSupport.swift's
+// `footerLinksSurvivors`/`footerRowEntries`/`footerLinkSeparatorGlyph` —
+// the normative siblings this ports byte-for-byte, including their helper
+// names, so all three renderers name the same contract the same way.
+// ---------------------------------------------------------------
+
+/** Absent `separator` renders this on every platform. Mirrors schema.ts's
+ *  `FOOTER_LINKS_DEFAULT_SEPARATOR` / Swift's `footerLinksDefaultSeparator`.
+ *  Applied HERE (the view), never in the decoder — see
+ *  `BuilderNode.FooterLinks`'s own doc for why. */
+internal const val FOOTER_LINKS_DEFAULT_SEPARATOR = "dot"
+
+/** Absent `align` renders this on every platform. Mirrors schema.ts's
+ *  `FOOTER_LINKS_DEFAULT_ALIGN` / Swift's `footerLinksDefaultAlign`. */
+internal const val FOOTER_LINKS_DEFAULT_ALIGN = "center"
+
+/** 12sp — mirrors the web renderer's `FOOTER_LINK_FONT_SIZE` (px) and
+ *  SwiftUI's `footerLinkFontSize` (pt); treating the web's px value as sp
+ *  here, same convention [textStyleFor] already uses for every other node's
+ *  text size. */
+internal const val FOOTER_LINK_FONT_SIZE_SP = 12f
+
+/** 6dp gap between footer-row entries, both axes (a wrapped second row gaps
+ *  the same as the first) — mirrors `FOOTER_LINK_GAP` on web and SwiftUI's
+ *  `footerLinkGap`. */
+internal const val FOOTER_LINK_GAP_DP = 6.0
+
+/** 32dp minimum tappable height — a WCAG-style minimum tap target, not a
+ *  font-size-derived accident. Mirrors `FOOTER_LINK_MIN_TAP_HEIGHT` on web
+ *  and SwiftUI's `footerLinkMinTapHeight`. */
+internal const val FOOTER_LINK_MIN_TAP_HEIGHT_DP = 32.0
+
+/** `separator` glyph table — identical on all three platforms (web's
+ *  `FOOTER_SEPARATOR_GLYPH`, SwiftUI's `footerLinkSeparatorGlyph`). Named
+ *  so a mis-copied glyph is visible in review rather than buried inside a
+ *  `when` branch. */
+private const val FOOTER_SEPARATOR_GLYPH_DOT = "·" // middle dot "·"
+private const val FOOTER_SEPARATOR_GLYPH_PIPE = "|"
+private const val FOOTER_SEPARATOR_GLYPH_NONE = ""
+
+/** One footer link that survived BOTH per-link drop rules, carrying its
+ *  resolved label and its position in the AUTHORED `links` array
+ *  (`originalIndex`) — not its position among survivors, which shifts
+ *  between renders (a locale change alters which labels resolve, and
+ *  `hasRestoreHandler` appearing/disappearing alters whether the restore
+ *  link survives). Mirrors Swift's `FooterLinkSurvivor` / nodes.tsx's own
+ *  `originalIndex`-keyed survivor list. */
+internal data class FooterLinkSurvivor(val originalIndex: Int, val action: ButtonAction, val label: String)
+
+/**
+ * Applies `footerLinks`' two per-link drop rules, in `links` order:
+ *
+ *   1. a `restore` link with no restore handler is dropped — calls
+ *      [actionButtonVisible] (the SAME rule `button` enforces) rather than
+ *      re-deriving the restore check here.
+ *   2. a link whose label doesn't resolve anywhere ([resolveLabel] returns
+ *      `null`) is dropped.
+ *
+ * Pure and free-standing so the drop rules are testable without an Android
+ * context — [resolveLabel] is injected rather than reaching into
+ * [PaywallRenderContext] directly. Mirrors Swift's `footerLinksSurvivors`.
+ */
+internal fun footerLinksSurvivors(
+    links: List<FooterLink>,
+    hasRestoreHandler: Boolean,
+    resolveLabel: (String) -> String?,
+): List<FooterLinkSurvivor> {
+    val survivors = mutableListOf<FooterLinkSurvivor>()
+    links.forEachIndexed { index, link ->
+        if (!actionButtonVisible(link.action, hasRestoreHandler)) return@forEachIndexed
+        val label = resolveLabel(link.labelKey) ?: return@forEachIndexed
+        survivors.add(FooterLinkSurvivor(originalIndex = index, action = link.action, label = label))
+    }
+    return survivors
+}
+
+/** One entry in a rendered footer row: a survivor's own label, or a
+ *  separator glyph strictly between two survivors. Mirrors Swift's
+ *  `FooterRowEntry`. */
+internal sealed class FooterRowEntry {
+    data class Link(val survivor: FooterLinkSurvivor) : FooterRowEntry()
+    data class Separator(val glyph: String) : FooterRowEntry()
+
+    /** The text this entry draws — used for both rendering and (by the
+     *  flow layout) width measurement. */
+    val text: String
+        get() = when (this) {
+            is Link -> survivor.label
+            is Separator -> glyph
+        }
+}
+
+/**
+ * Interleaves [survivors] with [glyph], computed over the SURVIVING links
+ * ONLY — never a leading or trailing separator, never two in a row. An
+ * empty [glyph] (the `none` separator) never inserts an entry at all.
+ * Mirrors nodes.tsx's `renderFooterLinks` loop (`position > 0 && separator
+ * !== "none"`) and Swift's `footerRowEntries`.
+ */
+internal fun footerRowEntries(survivors: List<FooterLinkSurvivor>, glyph: String): List<FooterRowEntry> {
+    if (survivors.isEmpty()) return emptyList()
+    val entries = mutableListOf<FooterRowEntry>()
+    survivors.forEachIndexed { position, survivor ->
+        if (position > 0 && glyph.isNotEmpty()) entries.add(FooterRowEntry.Separator(glyph))
+        entries.add(FooterRowEntry.Link(survivor))
+    }
+    return entries
+}
+
+/** Separator glyph per `separator`, shared verbatim with the web and
+ *  SwiftUI renderers (see render-fixtures.json). Absent or unknown falls
+ *  through to [FOOTER_LINKS_DEFAULT_SEPARATOR]'s own glyph — native
+ *  decoders/renderers are lenient by contract. Mirrors nodes.tsx's
+ *  `FOOTER_SEPARATOR_GLYPH` table and Swift's `footerLinkSeparatorGlyph`. */
+internal fun footerSeparatorGlyph(separator: String?): String = when (separator ?: FOOTER_LINKS_DEFAULT_SEPARATOR) {
+    "dot" -> FOOTER_SEPARATOR_GLYPH_DOT
+    "pipe" -> FOOTER_SEPARATOR_GLYPH_PIPE
+    "none" -> FOOTER_SEPARATOR_GLYPH_NONE
+    else -> footerSeparatorGlyph(FOOTER_LINKS_DEFAULT_SEPARATOR)
+}
+
+/** `align`'s three wire values -> the flow row's own horizontal Gravity.
+ *  Absent or unrecognized falls through to [FOOTER_LINKS_DEFAULT_ALIGN]'s
+ *  own mapping — same leniency as [footerSeparatorGlyph]. Mirrors Swift's
+ *  `swiftUIAlignment(forFooterLinksAlign:)`. */
+internal fun footerLinksGravity(align: String?): Int = when (align ?: FOOTER_LINKS_DEFAULT_ALIGN) {
+    "start" -> Gravity.START
+    "end" -> Gravity.END
+    "center" -> Gravity.CENTER_HORIZONTAL
+    else -> footerLinksGravity(FOOTER_LINKS_DEFAULT_ALIGN)
+}
+
+/**
+ * Which SURVIVING-item indices belong on each wrapped line, given each
+ * item's own measured width (px) and the width available (px). Pure (no
+ * Android View dependency) so the wrap boundary — not just survivor/glyph
+ * selection — is unit-testable: the Android View system has no flow
+ * container, and this is the function that decides whether three footer
+ * links overflow a 320dp screen. Mirrors SwiftUI's `computeFlowRows`
+ * exactly (same edge cases, same reasoning).
+ *
+ * [spacingPx] is added BETWEEN items on the same row, never before the
+ * first item of a row. An item wider than [containerWidthPx] on its own
+ * still gets its own row rather than being dropped. `containerWidthPx <=
+ * 0` (not yet measured, e.g. the flow view's first measure pass) degrades
+ * to a single row rather than one row per item, so nothing flashes into a
+ * collapsed column before the real width lands.
+ */
+internal fun computeFlowRows(itemWidthsPx: List<Int>, containerWidthPx: Int, spacingPx: Int): List<List<Int>> {
+    if (itemWidthsPx.isEmpty()) return emptyList()
+    if (containerWidthPx <= 0) return listOf(itemWidthsPx.indices.toList())
+
+    val rows = mutableListOf<MutableList<Int>>()
+    var currentRow = mutableListOf<Int>()
+    var currentRowWidth = 0
+    itemWidthsPx.forEachIndexed { index, width ->
+        val additional = if (currentRow.isEmpty()) width else width + spacingPx
+        if (currentRow.isNotEmpty() && currentRowWidth + additional > containerWidthPx) {
+            rows.add(currentRow)
+            currentRow = mutableListOf(index)
+            currentRowWidth = width
+        } else {
+            currentRow.add(index)
+            currentRowWidth += additional
+        }
+    }
+    rows.add(currentRow)
+    return rows
+}
+
+// ---------------------------------------------------------------
 // Pure: text style scale
 // ---------------------------------------------------------------
 
@@ -1310,6 +1483,7 @@ internal object NodeViewFactory {
             is BuilderNode.Carousel -> buildCarousel(context, resolved, ctx, cell)
             is BuilderNode.Video -> buildVideo(context, resolved, ctx, cell)
             is BuilderNode.Lottie -> buildLottie(context, resolved, ctx, cell)
+            is BuilderNode.FooterLinks -> buildFooterLinks(context, resolved, ctx, cell)
             is BuilderNode.Unknown -> resolved.fallback?.let { build(context, it, ctx, cell) }
         }
     }
@@ -2088,6 +2262,170 @@ internal object NodeViewFactory {
         val initialContent = lottieViewOrNull(context, initialRequest)
             ?: return node.fallback?.let { build(context, it, ctx, cell) }
         return LottieNodeView(context, node, ctx.dark, initialContent)
+    }
+
+    /**
+     * Renders `footerLinks`. Mirrors nodes.tsx's `renderFooterLinks` (the
+     * normative sibling) exactly:
+     *
+     *   1. [footerLinksSurvivors] applies BOTH per-link drop rules (a
+     *      handler-less restore, an unresolved label).
+     *   2. Zero survivors renders `fallback`, else nothing — never an empty
+     *      row, never a bare separator.
+     *   3. Separators are computed over the SURVIVORS only
+     *      ([footerRowEntries]): never leading, never trailing, never two
+     *      adjacent.
+     *   4. Defaults are applied HERE, not in the decoder — absent
+     *      `separator` -> [FOOTER_LINKS_DEFAULT_SEPARATOR], absent `align`
+     *      -> [FOOTER_LINKS_DEFAULT_ALIGN].
+     *
+     * The row itself is a [FooterLinksFlowLayout] — the Android View system
+     * has no flow container, and three footer links plus separators already
+     * overflow a 320dp screen.
+     */
+    private fun buildFooterLinks(
+        context: Context,
+        node: BuilderNode.FooterLinks,
+        ctx: PaywallRenderContext,
+        cell: CellScope?,
+    ): View? {
+        val survivors = footerLinksSurvivors(
+            node.links,
+            hasRestoreHandler = ctx.onRestore != null,
+            resolveLabel = { key -> footerLinkLabel(key, ctx, cell) },
+        )
+        if (survivors.isEmpty()) return node.fallback?.let { build(context, it, ctx, cell) }
+
+        val glyph = footerSeparatorGlyph(node.separator)
+        val entries = footerRowEntries(survivors, glyph)
+        val colorInt = node.color?.let { pair -> parseHexColor(themeValue(pair, ctx.dark))?.toColorInt() }
+        val rowGravity = footerLinksGravity(node.align)
+        val gapPx = dp(context, FOOTER_LINK_GAP_DP)
+        val minTapHeightPx = dp(context, FOOTER_LINK_MIN_TAP_HEIGHT_DP)
+
+        return FooterLinksFlowLayout(
+            context, horizontalSpacingPx = gapPx, verticalSpacingPx = gapPx, rowGravity = rowGravity,
+        ).apply {
+            entries.forEach { entry ->
+                addView(
+                    TextView(context).apply {
+                        text = entry.text
+                        textSize = FOOTER_LINK_FONT_SIZE_SP
+                        colorInt?.let { setTextColor(it) }
+                        when (entry) {
+                            is FooterRowEntry.Link -> {
+                                isClickable = true
+                                isFocusable = true
+                                minHeight = minTapHeightPx
+                                this.gravity = Gravity.CENTER_VERTICAL
+                                setPadding(gapPx, 0, gapPx, 0)
+                                setOnClickListener {
+                                    routeButtonAction(
+                                        entry.survivor.action,
+                                        onClose = ctx.onClose, onRestore = ctx.onRestore, onUrl = ctx.onUrl,
+                                    )
+                                }
+                            }
+                            is FooterRowEntry.Separator -> {
+                                // Never announced by TalkBack -- the row must
+                                // read as N links, not N links plus
+                                // punctuation. Mirrors web's aria-hidden and
+                                // SwiftUI's accessibilityHidden.
+                                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                            }
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A footer link's label: locale text -> `{{variable}}` substitution, EXCEPT
+ * a missing key resolves to `null` here rather than `""` — [resolveText]
+ * itself expresses that already, but [PaywallRenderContext.label] (used by
+ * every other node) papers over it with an empty string; `footerLinks`
+ * needs the "drop this node" signal that only a `null` can carry (rule 2 of
+ * [footerLinksSurvivors]). Mirrors Swift's `footerLinkLabel`.
+ */
+private fun footerLinkLabel(key: String, ctx: PaywallRenderContext, cell: CellScope?): String? {
+    val text = resolveText(ctx.config, ctx.locale, key) ?: return null
+    val pkg = relevantPackageView(cell?.view, ctx.selectedPackageId, ctx.offering)
+    return resolveVariables(text, pkg)
+}
+
+/**
+ * A minimal wrapping row `ViewGroup` for `footerLinks`: lays out its
+ * children (one per [FooterRowEntry] — a link label or a separator glyph)
+ * left-to-right, wrapping to a new line whenever the next child would
+ * overflow the available width. `footerLinks` is the one node whose row
+ * can overflow a single line (three links plus separators already overflow
+ * a 320dp device) — the Android View system has no built-in flow
+ * container, so this is a small, purpose-built one.
+ *
+ * The wrap DECISION itself is [computeFlowRows] (pure, unit-tested without
+ * an Android runtime); this class is kept thin — it only measures each
+ * child at its natural (unconstrained) width, feeds those widths to
+ * [computeFlowRows], and positions children accordingly. Mirrors SwiftUI's
+ * `FlowRow` (RovenuePaywallView.swift), built the same way for the same
+ * reason: `Layout`/flexbox has no Android/pre-iOS16 equivalent here.
+ *
+ * Always claims the FULL width it is offered (rather than shrinking to its
+ * content, ordinary `WRAP_CONTENT` semantics) so `align` has a container to
+ * align itself within — mirrors the web renderer's full-width flex row
+ * (`footerRowStyle`) and SwiftUI's `GeometryReader`-driven `FlowRow`, both
+ * of which do the same.
+ */
+private class FooterLinksFlowLayout(
+    context: Context,
+    private val horizontalSpacingPx: Int,
+    private val verticalSpacingPx: Int,
+    private val rowGravity: Int,
+) : ViewGroup(context) {
+    private var rows: List<List<Int>> = emptyList()
+
+    override fun generateDefaultLayoutParams(): LayoutParams =
+        LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val availableWidth = MeasureSpec.getSize(widthMeasureSpec)
+        val childWidthSpec = MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST)
+        val childHeightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
+        val widths = (0 until childCount).map { index ->
+            val child = getChildAt(index)
+            child.measure(childWidthSpec, childHeightSpec)
+            child.measuredWidth
+        }
+        rows = computeFlowRows(widths, availableWidth, horizontalSpacingPx)
+
+        var totalHeight = 0
+        rows.forEachIndexed { rowIndex, row ->
+            totalHeight += row.maxOf { getChildAt(it).measuredHeight }
+            if (rowIndex < rows.size - 1) totalHeight += verticalSpacingPx
+        }
+        setMeasuredDimension(availableWidth, totalHeight)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val availableWidth = r - l
+        var y = 0
+        rows.forEach { row ->
+            val rowWidth = row.sumOf { getChildAt(it).measuredWidth } + horizontalSpacingPx * (row.size - 1)
+            var x = when (rowGravity) {
+                Gravity.CENTER_HORIZONTAL -> (availableWidth - rowWidth) / 2
+                Gravity.END -> availableWidth - rowWidth
+                else -> 0
+            }
+            val rowHeight = row.maxOf { getChildAt(it).measuredHeight }
+            row.forEach { index ->
+                val child = getChildAt(index)
+                val childTop = y + (rowHeight - child.measuredHeight) / 2
+                child.layout(x, childTop, x + child.measuredWidth, childTop + child.measuredHeight)
+                x += child.measuredWidth + horizontalSpacingPx
+            }
+            y += rowHeight + verticalSpacingPx
+        }
     }
 }
 
