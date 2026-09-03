@@ -5,7 +5,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 
 | # | Area | Now | Target |
 |---|------|-----|--------|
-| 1 | Store integrations & receipt validation | 75% | 95% |
+| 1 | Store integrations & receipt validation | 85% | 95% |
 | 2 | Subscription state & entitlements | 85% | 95% |
 | 3 | Paywall builder & native rendering | 85% | 95% |
 | 4 | A/B testing & experiments | 88% | 90%+ |
@@ -39,14 +39,79 @@ the remaining analytics/experiments/integrations gaps on the way to 95%.
 
 ---
 
-## 1. Store integrations & receipt validation (75 → 95)
+## 1. Store integrations & receipt validation (85 → 95)
 
-- [ ] Amazon Appstore support: RVS receipt validation + new store enum in `store_event_id` dedup
-- [ ] Paddle integration (web/desktop alternative to Stripe: webhooks + checkout)
-- [ ] Roku Pay (low priority, needed for full parity)
-- [ ] Stripe dunning / billing-portal flows fully covered (card renewal, involuntary churn recovery)
-- [ ] Apple StoreKit External Purchase / EU DMA scenarios (alternative payment links) in the event model
-- [ ] Google reconciliation job (open item from the 2026-08-23 store-billing correctness batch)
+Three of this section's six items shipped 2026-09-03
+(`.superpowers/sdd/2026-09-03-store-integrations-completeness/`), each
+differently from how the item was originally phrased — see below. Amazon
+Appstore, Paddle and Roku Pay (whole new store/processor integrations, not
+gaps in existing ones) remain untouched, which is why the score moves to 85
+rather than closing the section.
+
+- [x] Stripe dunning / billing-portal flows fully covered (card renewal,
+      involuntary churn recovery) — shipped as an SDK-facing
+      `POST /v1/billing-portal` session endpoint (Stripe customer resolved
+      server-side from the authenticated subscriber only, never from the
+      request body; return URL allow-listed against the project's
+      **verified** `custom_domains` rows, reusing that admin-verified record
+      rather than inventing a second, unverified one; seven security tests),
+      plus handling `invoice.payment_action_required` — it surfaces the
+      existing `subscription.billing_issue` key, but a new `storeEventType`
+      field on the outbox payload distinguishes "tap to approve" from "your
+      card was declined" in storage, since a consumer cannot write either
+      email from an undifferentiated event. Alongside this, closed a fail-open:
+      `mapStripeSubscriptionStatus`'s `default` branch used to silently
+      return `ACTIVE` — full entitlement — for any Stripe status it didn't
+      recognise. **This was a future hazard closed early, not an outage that
+      happened**: Stripe's SDK (15.12.0) documents exactly eight subscription
+      statuses and the mapper named all eight, so the `default` branch was
+      unreachable for any status Stripe currently sends. It would have fired
+      for the first time, silently, during a routine SDK version bump that
+      introduced a ninth status. The mapper now returns `null` on an
+      unrecognised value — callers leave the stored status alone rather than
+      promoting *or* revoking on a status they don't understand — and logs
+      the unrecognised value. Not built: `customer.subscription.trial_will_end`
+      was dropped in the plan audit as scope creep — a voluntary-conversion
+      nudge, not involuntary churn, and this item is about the latter. Also
+      still open, unrelated to this batch: `customer.subscription.updated`
+      remains unmapped to a lifecycle key (see §6) and Stripe one-time
+      (non-subscription) purchases still reach no integration provider (also
+      §6) — both intentionally left there rather than duplicated here.
+- [x] Apple StoreKit External Purchase / EU DMA scenarios (alternative
+      payment links) in the event model — **the boundary matters more than
+      the feature here.** Apple's `EXTERNAL_PURCHASE_TOKEN` notification
+      payload is `{ externalPurchaseId, tokenCreationDate, appAppleId }` and
+      Apple documents `data` / `summary` / `externalPurchaseToken` as
+      mutually exclusive on the decoded payload — so this notification never
+      carries a transaction and never carries a subscriber-resolvable
+      identifier. **It says a purchase happened in your app, not whose.**
+      Recorded accordingly as a project-level fact in its own table
+      (`apple_external_purchases`, keyed by project + `externalPurchaseId`,
+      migration adds no `DROP`) — no subscriber is inferred, no revenue row
+      is written, and no integration event is emitted, because all three
+      would be fabrications the outbox has no subscriber to key on. **Do not
+      read this as end-to-end external-purchase support**: the External
+      Purchase Server API, token reporting deadlines and commission
+      accounting are not implemented, and the handling above was verified
+      against the documented payload shape only — this repo has no
+      external-purchase entitlement to test against live Apple traffic.
+- [x] Google reconciliation job (open item from the 2026-08-23 store-billing
+      correctness batch) — a scheduled sweep (`rovenue-google-reconciliation`
+      queue) that re-verifies Play Store purchases the RTDN pipeline may have
+      missed: an `ACTIVE` purchase past its `expiresDate`, or any purchase not
+      re-checked within 24h, capped at 200 candidates/run, claimed with
+      `FOR UPDATE OF p SKIP LOCKED` so concurrent sweeps can't double-transition
+      one row. **First-run decision: an explicit backfill mode, not a low
+      cap.** A cap alone would still eventually flood every configured
+      integration with one event per historical drift, just spread over
+      several days, with no way to tell "genuinely new drift" from "backlog
+      predating this feature" — and reporting a months-old lapse as live news
+      would trigger win-back campaigns for subscribers who left long ago.
+      Backfill mode (`{ backfill: true }`, run once by an operator after
+      deploy) still corrects the row, syncs entitlements and writes the audit
+      trail — it only withholds the externally-visible outbox event. The
+      scheduled job itself always runs live (`backfill: false`) once the
+      one-time drain is done.
 
 ## 2. Subscription state & entitlements (85 → 95)
 
@@ -422,6 +487,13 @@ else in the framework/provider-breadth dimension is done.
 - [ ] 3–5 pilot apps in production; millions of live events as reference
 - [ ] All CI green and required (including pre-existing red tests); testcontainers
       suite running in CI
+- [ ] `pnpm db:migrate`'s fresh-vs-upgrade detection misfired on a healthy
+      dev database (114 migrations, 291 tables applied) with "fresh install
+      detected," found 2026-09-03 while working §1's items and reproduced
+      with that batch's schema changes stashed, so it predates this plan.
+      Worked around by resetting the dev Postgres volume (dev only,
+      user-authorised); the detection heuristic itself needs investigation
+      before it fires against a database that isn't disposable.
 
 ## 11. Docs & developer experience (65 → 95)
 
