@@ -51,6 +51,12 @@ const SOCIAL_PROOF_MIN_RATING = 0;
 /** The row-icon picker's "let the renderer pick" option — an empty selection,
  *  never a real registry name, so it can't collide with `ICON_NAMES`. */
 const ROW_ICON_AUTO_VALUE = "";
+/** `schema.ts`'s `footerLinksNodeSchema` declares `links: z.array(...).min(1)`
+ *  — unlike featureList/timeline rows, an empty footer link list is not a
+ *  valid config. Named here (rather than a bare `1` at the call site) so a
+ *  future change to that `.min(...)` has one obvious place in the builder
+ *  to update alongside it. */
+const FOOTER_LINKS_MIN_LINKS = 1;
 
 // =============================================================
 // Content — what the node actually shows. Localized strings live
@@ -644,6 +650,7 @@ function FooterLinksContent({ node }: { node: FooterLinksNode }) {
         rows={node.links}
         onChange={setLinks}
         maxRows={FOOTER_LINKS_MAX}
+        minRows={FOOTER_LINKS_MIN_LINKS}
         newRow={() => ({
           labelKey: `footerLinks_${node.id}_${node.links.length + 1}`,
           action: { kind: "close" },

@@ -13,7 +13,7 @@ import { RowListEditor } from "./row-list-editor";
 
 type Row = { labelKey: string };
 
-function harness(initial: Row[]) {
+function harness(initial: Row[], extra?: { maxRows?: number; minRows?: number }) {
   const onChange = vi.fn();
   render(
     <RowListEditor<Row>
@@ -21,6 +21,8 @@ function harness(initial: Row[]) {
       onChange={onChange}
       newRow={() => ({ labelKey: "" })}
       addLabel="Add row"
+      maxRows={extra?.maxRows}
+      minRows={extra?.minRows}
       renderRow={(row, i, patch) => (
         <input
           aria-label={`label-${i}`}
@@ -57,5 +59,37 @@ describe("RowListEditor", () => {
     const onChange = harness([{ labelKey: "a" }, { labelKey: "b" }]);
     fireEvent.change(screen.getByLabelText("label-1"), { target: { value: "bb" } });
     expect(onChange).toHaveBeenCalledWith([{ labelKey: "a" }, { labelKey: "bb" }]);
+  });
+});
+
+// =============================================================
+// minRows — the symmetric floor to maxRows. footerLinks' schema requires
+// `links.min(1)`, so its RowListEditor must refuse to go below one row;
+// featureList/timeline have no such floor and must be unaffected.
+// =============================================================
+
+describe("RowListEditor — minRows", () => {
+  it("disables remove once rows.length is down to minRows", () => {
+    const onChange = harness([{ labelKey: "a" }], { minRows: 1 });
+    const removeButton = screen.getByRole("button", { name: /remove/i });
+    expect(removeButton).toBeDisabled();
+    fireEvent.click(removeButton);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("still allows removal above minRows", () => {
+    const onChange = harness([{ labelKey: "a" }, { labelKey: "b" }], { minRows: 1 });
+    const removeButtons = screen.getAllByRole("button", { name: /remove/i });
+    expect(removeButtons[0]).not.toBeDisabled();
+    fireEvent.click(removeButtons[0]!);
+    expect(onChange).toHaveBeenCalledWith([{ labelKey: "b" }]);
+  });
+
+  it("with no minRows, still allows removing down to zero (featureList/timeline behaviour unchanged)", () => {
+    const onChange = harness([{ labelKey: "a" }]);
+    const removeButton = screen.getByRole("button", { name: /remove/i });
+    expect(removeButton).not.toBeDisabled();
+    fireEvent.click(removeButton);
+    expect(onChange).toHaveBeenCalledWith([]);
   });
 });

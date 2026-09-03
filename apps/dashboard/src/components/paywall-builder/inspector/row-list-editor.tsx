@@ -19,7 +19,7 @@ const ICON_BUTTON_CLASS =
   "flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30";
 
 const REMOVE_BUTTON_CLASS =
-  "flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-danger/15 hover:text-rv-danger";
+  "flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-danger/15 hover:text-rv-danger disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-rv-mute-500";
 
 const ROW_ICON_SIZE = 11;
 
@@ -34,6 +34,14 @@ type RowListEditorProps<T> = {
    *  lists are schema-capped (e.g. `FOOTER_LINKS_MAX`). Omitted for the
    *  lists with no upper bound (featureList/timeline rows). */
   maxRows?: number;
+  /** Disables every remove button once `rows.length` is down to this many —
+   *  the symmetric floor to `maxRows`. Some row lists are schema-floored
+   *  (e.g. footerLinks' `links: z.array(...).min(1)`); featureList/timeline
+   *  rows have no `.min(...)` in the schema, so an empty list is legitimate
+   *  for them and this stays omitted there. Deliberately optional with no
+   *  default floor — hard-coding one here would forbid what the schema
+   *  allows for those callers. */
+  minRows?: number;
 };
 
 export function RowListEditor<T>({
@@ -43,9 +51,11 @@ export function RowListEditor<T>({
   addLabel,
   renderRow,
   maxRows,
+  minRows,
 }: RowListEditorProps<T>) {
   const { t } = useTranslation();
   const atMax = maxRows !== undefined && rows.length >= maxRows;
+  const atMin = minRows !== undefined && rows.length <= minRows;
   const replace = (index: number, row: T) => onChange(rows.map((r, i) => (i === index ? row : r)));
 
   const move = (index: number, delta: number) => {
@@ -84,6 +94,7 @@ export function RowListEditor<T>({
             <button
               type="button"
               title={t("paywalls.builder.rowList.remove", "Remove row {{index}}", { index: index + 1 })}
+              disabled={atMin}
               onClick={() => remove(index)}
               className={REMOVE_BUTTON_CLASS}
             >
