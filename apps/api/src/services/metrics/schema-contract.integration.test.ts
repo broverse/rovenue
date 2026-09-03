@@ -369,9 +369,7 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
       buildMrrSeriesPoints:
         "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-2 revenue ids: mrr/arr/gross_vs_net/arpu)",
       buildCountSeriesPoints:
-        "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-3 lifecycle ids: new_subs/reactivations/trials_started)",
-      buildChurnRatePoints:
-        "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-3 lifecycle id: churn)",
+        "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-3 lifecycle ids: new_subs/reactivations/trials_started/churn — churn switched from a rate to a count in fix round 1, see task-3-fixes.md)",
     },
     invokers: {
       readChannels: () => chartsModule.readChannels(PROJECT, WINDOW_DAYS),

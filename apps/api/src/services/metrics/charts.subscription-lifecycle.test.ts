@@ -50,10 +50,7 @@ describe("readChartSeries — subscription-lifecycle ids", () => {
       reactivations: [],
     });
     getTrialStartsDailyMock.mockReset().mockResolvedValue([]);
-    getChurnDailyMock.mockReset().mockResolvedValue({
-      activeSubscriberBase: 0,
-      churnedByDay: [],
-    });
+    getChurnDailyMock.mockReset().mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -104,36 +101,28 @@ describe("readChartSeries — subscription-lifecycle ids", () => {
     expect(res.points.at(-1)?.value).toBe(0);
   });
 
-  it("churn: unit is percent, no ClickHouse required, holds the active base constant across days", async () => {
+  // FIX (task-3 round 1): churn used to be `unit: "percent"`, dividing
+  // each day's churn count by a CONSTANT (the project's present-day
+  // active-subscriber snapshot) applied to every day in the window —
+  // caught in review as a rate label on what was actually a daily count
+  // rescaled by an unrelated, undated denominator. Now a plain count,
+  // same shape as new_subs/reactivations/trials_started. See
+  // summary.ts's getChurnDaily doc comment for the corrected reasoning
+  // and what a real per-day rate would need.
+
+  it("churn: unit is count, no ClickHouse required, values come from getChurnDaily", async () => {
     isClickHouseConfiguredMock.mockReturnValue(false);
-    getChurnDailyMock.mockResolvedValueOnce({
-      activeSubscriberBase: 2,
-      churnedByDay: [{ day: "2026-07-02", n: 1 }],
-    });
+    getChurnDailyMock.mockResolvedValueOnce([{ day: "2026-07-02", n: 4 }]);
     const res = await readChartSeries("proj_1", "churn", 1);
-    expect(res.unit).toBe("percent");
+    expect(res.unit).toBe("count");
     expect(res.supported).toBe(true);
-    // 1 churned ÷ (2 active + 1 churned) = 33.3%
-    expect(res.points.at(-1)?.value).toBe(33.3);
-    expect(res.points.at(-1)?.numerator).toBe(1);
-    expect(res.points.at(-1)?.denominator).toBe(3);
+    expect(res.points.at(-1)?.value).toBe(4);
   });
 
-  it("churn: zero churn and zero active base is an undefined rate (null), not 0%", async () => {
-    getChurnDailyMock.mockResolvedValueOnce({
-      activeSubscriberBase: 0,
-      churnedByDay: [],
-    });
-    const res = await readChartSeries("proj_1", "churn", 1);
-    expect(res.points.at(-1)?.value).toBeNull();
-  });
-
-  it("churn: zero churn but a non-zero active base is a measured 0%, not null", async () => {
-    getChurnDailyMock.mockResolvedValueOnce({
-      activeSubscriberBase: 5,
-      churnedByDay: [],
-    });
+  it("churn: a day absent from getChurnDaily's rows is a real, measured zero", async () => {
+    getChurnDailyMock.mockResolvedValueOnce([]);
     const res = await readChartSeries("proj_1", "churn", 1);
     expect(res.points.at(-1)?.value).toBe(0);
+    expect(res.points.at(-1)?.value).not.toBeNull();
   });
 });

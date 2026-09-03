@@ -593,50 +593,6 @@ export function buildCountSeriesPoints(
   return points;
 }
 
-/**
- * `churn`'s daily grain: that day's churn count ÷ (that day's churn
- * count + the project's CURRENT active-subscriber count). The
- * denominator is `getRevenueSummary`'s own `activeSubscriberBase` —
- * already a live snapshot with no date bound at all (see summary.ts) —
- * so every day in the window is measured against the SAME active count;
- * only the numerator moves. That's the faithful daily reading of the
- * tile's own formula, not an approximation of it: a genuinely
- * per-day-historical active count isn't something the data model keeps
- * (same gap `liability` hits — see chart-catalog audit).
- *
- * Delegates to `buildRatePoints` for the percent arithmetic/rounding
- * convention instead of re-deriving it — but `buildRatePoints` treats a
- * day ABSENT from a series as a zero for that series, which is right
- * for the numerator (no churn that day) and wrong for the denominator
- * (it must still be `activeSubscriberBase`, not zero). So both series
- * are densified to name every day in the window before delegating.
- */
-export function buildChurnRatePoints(
-  churnedByDay: ReadonlyArray<{ day: string; n: number }>,
-  activeSubscriberBase: number,
-  from: Date,
-  to: Date,
-): ChartSeriesPoint[] {
-  const churned = new Map(churnedByDay.map((r) => [r.day, r.n]));
-  const numerator: DailyCountRow[] = [];
-  const denominator: DailyCountRow[] = [];
-
-  const cursor = new Date(from);
-  cursor.setUTCHours(0, 0, 0, 0);
-  const end = new Date(to);
-  end.setUTCHours(0, 0, 0, 0);
-
-  while (cursor.getTime() <= end.getTime()) {
-    const key = toDateOnly(cursor);
-    const n = churned.get(key) ?? 0;
-    numerator.push({ day: key, n: String(n) });
-    denominator.push({ day: key, n: String(activeSubscriberBase + n) });
-    cursor.setTime(cursor.getTime() + DAY_MS);
-  }
-
-  return buildRatePoints(numerator, denominator, from, to);
-}
-
 // =============================================================
 // Generic chart series — paywall reach/conversion and revenue
 // =============================================================
@@ -645,8 +601,8 @@ export function buildChurnRatePoints(
 // paywall_purchase, mrr, arr, gross_vs_net, arpu — the last four
 // delegate to `listDailyMrr`, see buildMrrSeriesPoints below — plus
 // new_subs, reactivations, trials_started, churn — task-3's
-// subscription-lifecycle group, see buildCountSeriesPoints /
-// buildChurnRatePoints above). Every other id
+// subscription-lifecycle group, all four daily COUNTS, see
+// buildCountSeriesPoints above). Every other id
 // answers `supported: false` so the dashboard renders an empty
 // state rather than another chart's data. `readChartSeries`'s
 // `switch` is the ONLY dispatch mechanism (no separate id allow-list)
@@ -1013,20 +969,27 @@ export async function readChartSeries(
     }
 
     case "churn": {
-      const { activeSubscriberBase, churnedByDay } = await getChurnDaily({
+      // FIX (task-3 round 1): this used to be a `percent` series dividing
+      // each day's churn count by a CONSTANT — the project's present-day
+      // active-subscriber snapshot, `getRevenueSummary`'s
+      // `activeSubscriberBase` — applied to every day in the window. That
+      // reads as a rate but isn't one for any day except roughly the
+      // last: a point for 12 March was March's churn count over TODAY's
+      // active base. Fixed to a daily COUNT (distinct subscribers who
+      // churned that day) — see getChurnDaily's doc comment in
+      // summary.ts for what a real per-day rate would need instead. The
+      // window RATE `RevenueKpisCard` shows is untouched by this fix;
+      // its denominator (a live snapshot) is valid for a single window,
+      // just not for 180 daily points.
+      const churnedByDay = await getChurnDaily({
         projectId,
         from: w.from,
         to: w.to,
       });
       return {
         ...base,
-        unit: "percent",
-        points: buildChurnRatePoints(
-          churnedByDay,
-          activeSubscriberBase,
-          w.from,
-          w.to,
-        ),
+        unit: "count",
+        points: buildCountSeriesPoints(churnedByDay, w.from, w.to),
         supported: true,
       };
     }

@@ -372,13 +372,12 @@ describe("widen: daily-grain readers reconcile to the pinned window totals", () 
     expect(rows.reduce((a, r) => a + r.n, 0)).toBe(2); // matches s.trialStarts above
   });
 
-  it("getChurnDaily's active base matches the pinned activeSubscriberBase, and its daily churn sums to churnedInWindow", async () => {
-    const { activeSubscriberBase, churnedByDay } = await getChurnDaily({
+  it("getChurnDaily's daily churn counts sum to the pinned churnedInWindow (fix round 1: count, not a rate divided by a constant snapshot)", async () => {
+    const churnedByDay = await getChurnDaily({
       projectId: PROJECT,
       from: FROM,
       to: TO,
     });
-    expect(activeSubscriberBase).toBe(2); // matches s.activeSubscriberBase above
     const byDay = Object.fromEntries(churnedByDay.map((r) => [r.day, r.n]));
     expect(byDay).toEqual({ "2026-06-01": 1, "2026-06-02": 1 }); // sub_d, sub_f
     expect(churnedByDay.reduce((a, r) => a + r.n, 0)).toBe(2); // matches s.churnedInWindow above
@@ -425,10 +424,10 @@ describe("readChartSeries — subscription-lifecycle ids, real ClickHouse + real
     expect(res.points.map((p) => p.value)).toEqual([1, 1, 0]);
   });
 
-  it("churn: percent, active base held constant, matches RevenueKpisCard's fraction-times-100 convention", async () => {
+  it("churn: daily counts (fix round 1 — was a percent divided by a constant snapshot; see task-3-fixes.md), a real zero on the day with no churn", async () => {
     const res = await readChartSeries(PROJECT, "churn", 3);
-    expect(res.unit).toBe("percent");
-    // day1: 1 churned / (2 active + 1) = 33.3%; day2: same; day3: 0 / 2 = 0%
-    expect(res.points.map((p) => p.value)).toEqual([33.3, 33.3, 0]);
+    expect(res.unit).toBe("count");
+    // day1: sub_d churned; day2: sub_f churned; day3: nobody
+    expect(res.points.map((p) => p.value)).toEqual([1, 1, 0]);
   });
 });

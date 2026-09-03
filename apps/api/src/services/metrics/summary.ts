@@ -251,72 +251,62 @@ export async function getTrialStartsDaily(
   return rows.map((r) => ({ day: r.day, n: Number(r.n) }));
 }
 
-export interface ChurnDaily {
-  /**
-   * Live snapshot — exactly `activeSubscriberBase` above, NOT bounded by
-   * `from`/`to` (see that field's query: no date filter at all). The
-   * window-level `churnRate` above divides by this same unbounded
-   * snapshot, so the daily series holds it constant across every day
-   * too and only moves the numerator; see charts.ts's `churn` case for
-   * why that's the faithful reading of the tile's own definition rather
-   * than a shortcut.
-   */
-  activeSubscriberBase: number;
-  /** Daily grain of `churnedInWindow` above — same status set
-   *  (`EXPIRED`/`REFUNDED`/`REVOKED`), same
-   *  cancellationDate-else-expiresDate bucketing. */
-  churnedByDay: DailyLifecycleCount[];
-}
-
 /**
- * Daily grain backing the chart-catalog `churn` id. Matches
- * `RevenueKpisCard`'s "Churn rate" tile (revenue-kpis-card.tsx renders
- * `data.churnRate` via `fmtPct`, i.e. a 0-1 fraction multiplied by 100
- * for display) — this is the same fraction-shaped quantity, just
- * bucketed by day; charts.ts's `percent` unit convention (0-100, see
- * `buildRatePoints`) applies the ×100 at the series layer instead.
+ * Daily grain backing the chart-catalog `churn` id — as a COUNT, not a
+ * rate.
+ *
+ * FIX (task-3 round 1): the window-level `churnRate` above divides
+ * `churnedInWindow` by `activeSubscriberBase`, a live snapshot with no
+ * date bound at all — a reasonable denominator for a SINGLE window
+ * figure (that's what `RevenueKpisCard`'s tile is), but wrong to stretch
+ * across a daily series: a point for 12 March would read as March's
+ * churn count over TODAY's active base, not a churn rate for that day.
+ * That shipped once in this file (constant-denominator `percent` daily
+ * series) and was caught in review — see task-3-fixes.md. So this
+ * function returns only the numerator, day-grouped, and the reader
+ * reports `unit: "count"`; the window RATE stays exactly where its
+ * denominator is valid — `RevenueKpisCard` — untouched by this file.
+ *
+ * A genuine per-day churn RATE is derivable, just heavier than this
+ * task's scope: it needs a per-day active base, i.e. for each day D,
+ * `count(DISTINCT subscriberId) WHERE purchaseDate <= D AND
+ * (expiresDate IS NULL OR expiresDate > D)` — active-as-of-that-day,
+ * not active-today. That's a per-day point-in-time query (one per
+ * bucket, or a running-total reconstruction), not a single GROUP BY,
+ * which is why it isn't done here.
  */
 export async function getChurnDaily(
   input: GetSummaryDailyInput,
-): Promise<ChurnDaily> {
+): Promise<DailyLifecycleCount[]> {
   const p = drizzle.schema.purchases;
-  const [activeRow, churnedRows] = await Promise.all([
-    drizzle.db
-      .select({ c: countDistinct(p.subscriberId) })
-      .from(p)
-      .where(and(eq(p.projectId, input.projectId), eq(p.status, "ACTIVE"))),
-    drizzle.db
-      .select({
-        day: sql<string>`to_char(date_trunc('day', COALESCE(${p.cancellationDate}, ${p.expiresDate})), 'YYYY-MM-DD')`,
-        n: countDistinct(p.subscriberId),
-      })
-      .from(p)
-      .where(
-        and(
-          eq(p.projectId, input.projectId),
-          inArray(p.status, ["EXPIRED", "REFUNDED", "REVOKED"]),
-          or(
-            and(
-              isNotNull(p.cancellationDate),
-              gte(p.cancellationDate, input.from),
-              lte(p.cancellationDate, input.to),
-            ),
-            and(
-              isNull(p.cancellationDate),
-              isNotNull(p.expiresDate),
-              gte(p.expiresDate, input.from),
-              lte(p.expiresDate, input.to),
-            ),
+  const rows = await drizzle.db
+    .select({
+      day: sql<string>`to_char(date_trunc('day', COALESCE(${p.cancellationDate}, ${p.expiresDate})), 'YYYY-MM-DD')`,
+      n: countDistinct(p.subscriberId),
+    })
+    .from(p)
+    .where(
+      and(
+        eq(p.projectId, input.projectId),
+        inArray(p.status, ["EXPIRED", "REFUNDED", "REVOKED"]),
+        or(
+          and(
+            isNotNull(p.cancellationDate),
+            gte(p.cancellationDate, input.from),
+            lte(p.cancellationDate, input.to),
+          ),
+          and(
+            isNull(p.cancellationDate),
+            isNotNull(p.expiresDate),
+            gte(p.expiresDate, input.from),
+            lte(p.expiresDate, input.to),
           ),
         ),
-      )
-      .groupBy(
-        sql`date_trunc('day', COALESCE(${p.cancellationDate}, ${p.expiresDate}))`,
       ),
-  ]);
+    )
+    .groupBy(
+      sql`date_trunc('day', COALESCE(${p.cancellationDate}, ${p.expiresDate}))`,
+    );
 
-  return {
-    activeSubscriberBase: Number(activeRow[0]?.c ?? 0),
-    churnedByDay: churnedRows.map((r) => ({ day: r.day, n: Number(r.n) })),
-  };
+  return rows.map((r) => ({ day: r.day, n: Number(r.n) }));
 }
