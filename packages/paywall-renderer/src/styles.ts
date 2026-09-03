@@ -192,6 +192,34 @@ export const Z_OVERLAY_CHILD_STYLE: CSSProperties = {
 };
 
 // =============================================================
+// footerLinks (spec §3 wave, 2026-09-04). A row of small legal/action links
+// (Restore Purchases · Terms · Privacy) — see `nodes.tsx`'s `renderFooterLinks`
+// for the per-link drop/separator logic; this file only owns static style.
+// =============================================================
+
+/** Fine print, one step below `caption` (12px) — the row must read as
+ *  secondary, not as body text competing with the paywall's own copy. */
+export const FOOTER_LINK_FONT_SIZE = 12;
+/** Horizontal gap between a link and its separator, and between wrapped
+ *  rows (columnGap/rowGap share this value). */
+export const FOOTER_LINK_GAP = 6;
+/** Minimum tappable height, so fine-print-sized text is still a real hit
+ *  target (WCAG-style minimum, not a font-size-derived accident). */
+export const FOOTER_LINK_MIN_TAP_HEIGHT = 32;
+
+/** Container style for the footer row: wraps, aligns per `align`, and gaps
+ *  both axes uniformly with `FOOTER_LINK_GAP` so a wrapped second row reads
+ *  the same as the first. */
+export const footerRowStyle = (align: "start" | "center" | "end"): CSSProperties => ({
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: align === "start" ? "flex-start" : align === "end" ? "flex-end" : "center",
+  columnGap: FOOTER_LINK_GAP,
+  rowGap: FOOTER_LINK_GAP,
+});
+
+// =============================================================
 // Video (spec §6, wave D2). The renderer draws a plain `<video>` element and
 // drives it via the element itself (`play()`/`pause()`) — see `Video` in
 // nodes.tsx — this file only owns the element's static style.

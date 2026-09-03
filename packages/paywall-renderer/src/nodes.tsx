@@ -21,6 +21,8 @@ import {
   FEATURE_ROW_DEFAULT_ICON,
   FEATURE_ROW_DEFAULT_INCLUDED,
   FEATURE_ROW_EXCLUDED_ICON,
+  FOOTER_LINKS_DEFAULT_ALIGN,
+  FOOTER_LINKS_DEFAULT_SEPARATOR,
   LOTTIE_DEFAULT_AUTOPLAY,
   LOTTIE_DEFAULT_LOOP,
   LOTTIE_DEFAULT_SPEED,
@@ -39,6 +41,8 @@ import {
   type CountdownNode,
   type DividerNode,
   type FeatureListNode,
+  type FooterLink,
+  type FooterLinksNode,
   type IconNode,
   type ImageNode,
   type LottieNode,
@@ -63,6 +67,10 @@ import {
   CAROUSEL_TRACK_SCROLL_SNAP_TYPE,
   carouselDotStyle,
   borderStyle,
+  footerRowStyle,
+  FOOTER_LINK_FONT_SIZE,
+  FOOTER_LINK_GAP,
+  FOOTER_LINK_MIN_TAP_HEIGHT,
   NODE_BUTTON_DEFAULT_CORNER_RADIUS_PX,
   PURCHASE_BUTTON_DEFAULT_CORNER_RADIUS_PX,
   resolveButtonVisualStyle,
@@ -335,6 +343,95 @@ function renderButton(node: ButtonNode, ctx: RenderCtx): ReactElement | null {
     >
       {label}
     </button>
+  );
+}
+
+/** The glyph drawn between two surviving links, per `separator`. Same table
+ *  on all three platforms — see render-fixtures.json (Task 6 wires this
+ *  node's fixture entries; this table is the contract they must agree
+ *  with). `none` is never actually looked up (zero separators are rendered
+ *  for it) but is listed for exhaustiveness. */
+const FOOTER_SEPARATOR_GLYPH: Record<FooterLinksNode["separator"] & string, string> = {
+  dot: "·",
+  pipe: "|",
+  none: "",
+};
+
+/**
+ * A row of small legal/action links (Restore Purchases · Terms · Privacy).
+ * Each link is rendered as a real `<button>` reusing `renderButton`'s own
+ * action-dispatch idiom (close/url/restore), so the two contracts a bare
+ * `button` node enforces apply PER LINK here too:
+ *
+ *   1. a `restore` link with no `ctx.onRestore` is dropped — an inert but
+ *      visible restore affordance would be actively misleading.
+ *   2. a link whose label doesn't resolve anywhere is dropped.
+ *
+ * Separators are computed over the SURVIVING links only, after both rules
+ * are applied — never a leading or trailing one, never two in a row. Zero
+ * survivors renders the node's `fallback` (or nothing), never an empty row:
+ * this is why the node exists instead of a hand-built stack of buttons.
+ */
+function renderFooterLinks(node: FooterLinksNode, ctx: RenderCtx): ReactElement | null {
+  const survivors: { link: FooterLink; label: string }[] = [];
+  for (const link of node.links) {
+    if (link.action.kind === "restore" && !ctx.onRestore) continue;
+    const label = resolveLabel(ctx, link.labelKey);
+    if (label === null) continue;
+    survivors.push({ link, label });
+  }
+  if (survivors.length === 0) return renderFallbackOrNull(node, ctx);
+
+  const separator = node.separator ?? FOOTER_LINKS_DEFAULT_SEPARATOR;
+  const align = node.align ?? FOOTER_LINKS_DEFAULT_ALIGN;
+  const color = resolveTextColor(node.color, ctx.colorScheme);
+  const glyph = FOOTER_SEPARATOR_GLYPH[separator];
+
+  const handleClick = (action: ButtonNode["action"]) => () => {
+    if (action.kind === "close") ctx.onClose?.();
+    if (action.kind === "url") ctx.onUrl?.(action.url);
+    if (action.kind === "restore") ctx.onRestore?.();
+  };
+
+  const children: ReactElement[] = [];
+  survivors.forEach(({ link, label }, index) => {
+    if (index > 0 && separator !== "none") {
+      children.push(
+        <span
+          key={`sep-${index}`}
+          data-rv-footer-separator=""
+          aria-hidden="true"
+          style={{ color, fontSize: `${FOOTER_LINK_FONT_SIZE}px` }}
+        >
+          {glyph}
+        </span>,
+      );
+    }
+    children.push(
+      <button
+        key={`link-${index}`}
+        type="button"
+        data-rov-node={`${node.id}-${index}`}
+        onClick={handleClick(link.action)}
+        style={{
+          cursor: "pointer",
+          background: "transparent",
+          border: "none",
+          padding: `0 ${FOOTER_LINK_GAP}px`,
+          minHeight: `${FOOTER_LINK_MIN_TAP_HEIGHT}px`,
+          fontSize: `${FOOTER_LINK_FONT_SIZE}px`,
+          color,
+        }}
+      >
+        {label}
+      </button>,
+    );
+  });
+
+  return (
+    <div data-rov-node={node.id} style={footerRowStyle(align)}>
+      {children}
+    </div>
   );
 }
 
@@ -1407,6 +1504,8 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         return renderSocialProof(resolved, ctx);
       case "stickyFooter":
         return renderStickyFooter(resolved, ctx);
+      case "footerLinks":
+        return renderFooterLinks(resolved, ctx);
       // Every stateful node type answers "do I draw anything?" HERE, before
       // its component exists, so that a null answer becomes `renderNode`
       // returning null — the one signal a parent carousel reads to decide a

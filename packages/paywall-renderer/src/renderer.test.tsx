@@ -504,6 +504,276 @@ describe("PaywallRenderer", () => {
     });
   });
 
+  describe("footerLinks node", () => {
+    // Three links: restore, and two plain urls — the same trio the brief's
+    // motivating example (Restore Purchases · Terms · Privacy) describes.
+    function footerConfig(
+      footer: Partial<Omit<Extract<PaywallNode, { type: "footerLinks" }>, "type" | "id">> & {
+        links: Extract<PaywallNode, { type: "footerLinks" }>["links"];
+      },
+      localizationOverrides?: Record<string, Record<string, string>>,
+    ): BuilderConfig {
+      return baseConfig({
+        localizations: localizationOverrides ?? {
+          en: { f_restore: "Restore Purchases", f_terms: "Terms", f_privacy: "Privacy" },
+        },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [{ type: "footerLinks", id: "f", ...footer }],
+        },
+      });
+    }
+
+    const threeLinks: Extract<PaywallNode, { type: "footerLinks" }>["links"] = [
+      { labelKey: "f_restore", action: { kind: "restore" } },
+      { labelKey: "f_terms", action: { kind: "url", url: "https://x.dev/terms" } },
+      { labelKey: "f_privacy", action: { kind: "url", url: "https://x.dev/privacy" } },
+    ];
+
+    it("renders one tappable button per link, with the resolved label", () => {
+      const { getByRole } = render(
+        <PaywallRenderer
+          config={footerConfig({ links: threeLinks })}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      expect(getByRole("button", { name: "Restore Purchases" })).toBeInTheDocument();
+      expect(getByRole("button", { name: "Terms" })).toBeInTheDocument();
+      expect(getByRole("button", { name: "Privacy" })).toBeInTheDocument();
+    });
+
+    it("renders one fewer separator than surviving links, and none for separator: none", () => {
+      const { container, unmount } = render(
+        <PaywallRenderer
+          config={footerConfig({ links: threeLinks })}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      expect(container.querySelectorAll("[data-rv-footer-separator]")).toHaveLength(2);
+      unmount();
+
+      const bare = render(
+        <PaywallRenderer
+          config={footerConfig({ links: threeLinks, separator: "none" })}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      expect(bare.container.querySelectorAll("[data-rv-footer-separator]")).toHaveLength(0);
+    });
+
+    it("marks separators aria-hidden so the row reads as N links, not N links and N-1 glyphs", () => {
+      const { container, getAllByRole } = render(
+        <PaywallRenderer
+          config={footerConfig({ links: threeLinks })}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      expect(getAllByRole("button")).toHaveLength(3);
+      for (const sep of container.querySelectorAll("[data-rv-footer-separator]")) {
+        expect(sep.getAttribute("aria-hidden")).toBe("true");
+      }
+    });
+
+    it("fires the same action callbacks a button node fires", () => {
+      const onRestore = vi.fn();
+      const onUrl = vi.fn();
+      const { getByRole } = render(
+        <PaywallRenderer
+          config={footerConfig({ links: threeLinks })}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={onRestore}
+          onUrl={onUrl}
+        />,
+      );
+      fireEvent.click(getByRole("button", { name: "Restore Purchases" }));
+      expect(onRestore).toHaveBeenCalledTimes(1);
+      fireEvent.click(getByRole("button", { name: "Terms" }));
+      expect(onUrl).toHaveBeenCalledWith("https://x.dev/terms");
+    });
+
+    it("falls back to the default locale for a link with no translation in the active locale", () => {
+      const { getByRole } = render(
+        <PaywallRenderer
+          config={footerConfig(
+            { links: threeLinks },
+            {
+              en: { f_restore: "Restore Purchases", f_terms: "Terms", f_privacy: "Privacy" },
+              pt: { f_terms: "Termos" },
+            },
+          )}
+          offering={offering}
+          colorScheme="light"
+          locale="pt"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      // "Termos" comes from pt directly; "Restore Purchases" falls back to
+      // the default locale (en) because pt has no f_restore entry.
+      expect(getByRole("button", { name: "Termos" })).toBeInTheDocument();
+      expect(getByRole("button", { name: "Restore Purchases" })).toBeInTheDocument();
+    });
+
+    it("drops a restore link when onRestore is absent, same as a bare button node", () => {
+      const { queryByRole, getByRole, container } = render(
+        <PaywallRenderer
+          config={footerConfig({ links: threeLinks })}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          // no onRestore
+        />,
+      );
+      expect(queryByRole("button", { name: "Restore Purchases" })).toBeNull();
+      expect(getByRole("button", { name: "Terms" })).toBeInTheDocument();
+      expect(getByRole("button", { name: "Privacy" })).toBeInTheDocument();
+      // Two survivors -> exactly one separator, not two.
+      expect(container.querySelectorAll("[data-rv-footer-separator]")).toHaveLength(1);
+    });
+
+    it("drops a link whose label does not resolve anywhere, and recomputes the separator count", () => {
+      const { queryByRole, getByRole, container } = render(
+        <PaywallRenderer
+          config={footerConfig(
+            { links: threeLinks },
+            // f_terms is missing from every locale, including the default.
+            { en: { f_restore: "Restore Purchases", f_privacy: "Privacy" } },
+          )}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      expect(queryByRole("button", { name: "Terms" })).toBeNull();
+      expect(getByRole("button", { name: "Restore Purchases" })).toBeInTheDocument();
+      expect(getByRole("button", { name: "Privacy" })).toBeInTheDocument();
+      expect(container.querySelectorAll("[data-rv-footer-separator]")).toHaveLength(1);
+    });
+
+    it("drops exactly the middle link and still renders N-1 separators for the two survivors, never a leading or trailing one", () => {
+      const { getByRole, queryByRole, container } = render(
+        <PaywallRenderer
+          config={footerConfig(
+            { links: threeLinks },
+            // f_terms (the middle link) has no translation anywhere.
+            { en: { f_restore: "Restore Purchases", f_privacy: "Privacy" } },
+          )}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      expect(queryByRole("button", { name: "Terms" })).toBeNull();
+      const survivors = [
+        getByRole("button", { name: "Restore Purchases" }),
+        getByRole("button", { name: "Privacy" }),
+      ];
+      expect(survivors).toHaveLength(2);
+      const separators = container.querySelectorAll("[data-rv-footer-separator]");
+      expect(separators).toHaveLength(1);
+      // The lone separator sits strictly between the two survivors: neither
+      // leading nor trailing.
+      const row = container.querySelector('[data-rov-node="f"]') as HTMLElement;
+      const rowChildren = Array.from(row.children);
+      expect(rowChildren[0]).not.toBe(separators[0]);
+      expect(rowChildren[rowChildren.length - 1]).not.toBe(separators[0]);
+    });
+
+    it("renders the node's fallback, not an empty row, when zero links survive", () => {
+      const onlyRestore: Extract<PaywallNode, { type: "footerLinks" }>["links"] = [
+        { labelKey: "f_restore", action: { kind: "restore" } },
+      ];
+      const { container, queryByRole } = render(
+        <PaywallRenderer
+          config={footerConfig({
+            links: onlyRestore,
+            fallback: { type: "text", id: "fallback-text", key: "f_fallback", role: "caption" },
+          }, { en: { f_fallback: "No links available" } })}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          // no onRestore -> the one link is dropped -> zero survivors
+        />,
+      );
+      expect(queryByRole("button")).toBeNull();
+      expect(container.querySelector('[data-rov-node="f"]')).toBeNull();
+      expect(container.querySelector('[data-rov-node="fallback-text"]')).not.toBeNull();
+    });
+
+    it("renders nothing when zero links survive and there is no fallback", () => {
+      const onlyRestore: Extract<PaywallNode, { type: "footerLinks" }>["links"] = [
+        { labelKey: "f_restore", action: { kind: "restore" } },
+      ];
+      const { container, queryByRole } = render(
+        <PaywallRenderer
+          config={footerConfig({ links: onlyRestore })}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      expect(queryByRole("button")).toBeNull();
+      expect(container.querySelector('[data-rov-node="f"]')).toBeNull();
+    });
+
+    it("respects node-level overrides on color/separator/align like every other node", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={footerConfig({
+            links: threeLinks,
+            separator: "dot",
+            overrides: [{ when: { kind: "introEligible" }, props: { separator: "pipe" } }],
+          })}
+          offering={offering}
+          priceView={priceView}
+          // No packageList in this config -> initial selection falls back to
+          // the offering's first package ("monthly").
+          eligibility={{ monthly: true }}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      const separators = container.querySelectorAll("[data-rv-footer-separator]");
+      expect(separators).toHaveLength(2);
+      for (const sep of separators) {
+        expect(sep.textContent).toBe("|");
+      }
+    });
+
+    it("respects node-level visibility like every other node", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={footerConfig({ links: threeLinks, visibility: { platform: ["ios"] } })}
+          offering={offering}
+          colorScheme="light"
+          platform="web"
+          onPurchase={noop}
+          onRestore={noop}
+        />,
+      );
+      expect(container.querySelector('[data-rov-node="f"]')).toBeNull();
+    });
+  });
+
   describe("variable resolution", () => {
     it("swaps purchaseButton variable text when selection changes, without touching other cells", () => {
       const { container, getByText } = render(
