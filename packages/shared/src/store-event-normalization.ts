@@ -96,8 +96,45 @@ export const STORE_EVENT_TO_PUBLIC_KEY: Record<string, RovenueEventKey> = {
   SUBSCRIPTION_PRICE_CHANGE_CONFIRMED: "subscription.product_changed",
   SUBSCRIPTION_DEFERRED: "subscription.product_changed",
 
+  // Google — paused / recovered / revoked (2026-09-03).
+  //
+  // `SUBSCRIPTION_RECOVERED` already produces a REACTIVATION revenue event
+  // (google-mappers.ts), so this key is a SECOND signal for the same
+  // delivery. It earns that because REACTIVATION is produced by BOTH
+  // `SUBSCRIPTION_RECOVERED` (a billing failure resolved) and
+  // `SUBSCRIPTION_RESTARTED` (a user re-subscribing after cancelling), and
+  // a consumer seeing REACTIVATION cannot tell them apart — yet they need
+  // opposite follow-ups: one stops a dunning campaign, the other stops a
+  // win-back campaign. The revenue event says money moved; this says which
+  // state transition produced it.
+  SUBSCRIPTION_PAUSED: "subscription.paused",
+  SUBSCRIPTION_RECOVERED: "subscription.recovered",
+  SUBSCRIPTION_REVOKED: "subscription.revoked",
+
+  // Apple — REVOKE (2026-09-03). Until now `applyRevoke` wrote the chain
+  // status and revoked access while emitting NOTHING: no revenue event and
+  // no lifecycle key, so an Apple subscriber could lose access with zero
+  // signal to any consumer. Google's SUBSCRIPTION_REVOKED never had that
+  // gap (it classifies to a REFUND revenue event), which is why both stores
+  // map here: one meaning, one key, rather than a key whose mechanism
+  // differs per store.
+  //
+  // NOT mapped to `subscription.expired`: that is an end-of-term expiry,
+  // and a revoke is an involuntary immediate termination. NOT given a
+  // fabricated REFUND revenue event either — a family-sharing removal
+  // involves no money, and inventing an amount would corrupt every
+  // downstream aggregate.
+  REVOKE: "subscription.revoked",
+
   // Stripe (event.type)
   "invoice.payment_failed": "subscription.billing_issue",
+
+  // Stripe gets no `paused` row and no `recovered` row: its paused status
+  // arrives on `customer.subscription.updated`, whose delta never reaches
+  // this bridge (see the deferral above), and it sends no recovery signal
+  // at all. Inferring one from an `invoice.paid` following a
+  // `payment_failed` would fire on unrelated renewals and stop a
+  // consumer's dunning campaign for a subscriber who has not recovered.
 };
 
 // =============================================================

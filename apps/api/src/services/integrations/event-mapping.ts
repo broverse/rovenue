@@ -47,6 +47,9 @@ const ANALYTICS_DEFAULT_EVENT_NAMES: Partial<Record<RovenueEventKey, string>> = 
   "subscription.grace_period": "grace_period",
   "subscription.uncancelled": "uncancelled",
   "subscription.product_changed": "product_changed",
+  "subscription.paused": "paused",
+  "subscription.recovered": "recovered",
+  "subscription.revoked": "revoked",
 };
 
 // ---------------------------------------------------------------------------
@@ -213,6 +216,9 @@ const SINGULAR_LIFECYCLE_EVENT_NAMES: Readonly<
   "subscription.grace_period": "rovenue_grace_period",
   "subscription.uncancelled": "rovenue_uncancelled",
   "subscription.product_changed": "rovenue_product_changed",
+  "subscription.paused": "rovenue_paused",
+  "subscription.recovered": "rovenue_recovered",
+  "subscription.revoked": "rovenue_revoked",
 };
 
 export const DEFAULT_EVENT_MAPPING: Readonly<
@@ -259,6 +265,9 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "subscription.grace_period": "af_grace_period",
     "subscription.uncancelled": "af_uncancel",
     "subscription.product_changed": "af_product_change",
+    "subscription.paused": "af_paused",
+    "subscription.recovered": "af_recovered",
+    "subscription.revoked": "af_revoked",
   },
   // DELIBERATELY EMPTY — see providers/adjust.ts's "Default event mapping"
   // header comment for the full PRE-FLIGHT RULING rationale: Adjust event tokens

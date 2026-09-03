@@ -55,7 +55,8 @@ function deriveEventKey(
 // tokens are opaque, account-specific ids minted per-event in the Adjust
 // dashboard (e.g. "f0ob4r") — there is no vendor-wide vocabulary to default
 // to, unlike Amplitude/Mixpanel/AppsFlyer's own free-form or `af_`-prefixed
-// event names. `eventCatalog` still lists the 13 revenue+subscription keys
+// event names. `eventCatalog` still lists the full STANDARD_PROVIDER_EVENT_KEYS
+// revenue+subscription set
 // (it drives the drawer's mapping-step rows, letting a user configure a
 // token per key); a key with no configured token falls through
 // `applyEventMapping` to `{ kind: "skip", reason: "no_mapping" }` exactly

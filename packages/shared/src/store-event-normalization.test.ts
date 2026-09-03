@@ -21,6 +21,10 @@ describe("STORE_EVENT_TO_PUBLIC_KEY", () => {
       SUBSCRIPTION_IN_GRACE_PERIOD: "subscription.grace_period",
       SUBSCRIPTION_RESTARTED: "subscription.uncancelled",
       SUBSCRIPTION_PRICE_CHANGE_CONFIRMED: "subscription.product_changed",
+      SUBSCRIPTION_PAUSED: "subscription.paused",
+      SUBSCRIPTION_RECOVERED: "subscription.recovered",
+      SUBSCRIPTION_REVOKED: "subscription.revoked",
+      REVOKE: "subscription.revoked",
       SUBSCRIPTION_DEFERRED: "subscription.product_changed",
       "invoice.payment_failed": "subscription.billing_issue",
     });

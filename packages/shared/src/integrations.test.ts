@@ -7,7 +7,7 @@ import {
 } from "./integrations";
 
 describe("RovenueEventKey", () => {
-  it("includes all 17 canonical keys (v2, Wave-1 store-lifecycle normalization)", () => {
+  it("includes all 20 canonical keys (v2, Wave-1 + 2026-09-03 paused/recovered/revoked)", () => {
     expect(ROVENUE_EVENT_KEYS).toEqual([
       "revenue.INITIAL",
       "revenue.TRIAL_CONVERSION",
@@ -23,6 +23,9 @@ describe("RovenueEventKey", () => {
       "subscription.grace_period",
       "subscription.uncancelled",
       "subscription.product_changed",
+      "subscription.paused",
+      "subscription.recovered",
+      "subscription.revoked",
       "paywall.view",
       "paywall.close",
       "credit.ledger.appended",

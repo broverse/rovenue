@@ -34,6 +34,11 @@ export type RovenueEventType =
   | "subscription.grace_period"
   | "subscription.uncancelled"
   | "subscription.product_changed"
+  // 2026-09-03 — see ROVENUE_EVENT_KEYS; the bridge below checks the
+  // spellings agree across the two hand-maintained unions.
+  | "subscription.paused"
+  | "subscription.recovered"
+  | "subscription.revoked"
   | "paywall_view"
   | "paywall_close"
   | "credit.ledger.appended";

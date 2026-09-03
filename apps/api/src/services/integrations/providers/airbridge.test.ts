@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { STANDARD_PROVIDER_EVENT_KEYS } from "@rovenue/shared";
 import { MockAgent, setGlobalDispatcher } from "undici";
 import { createUndiciHttpClient } from "../http-client";
 import { airbridgeProvider, deriveAirbridgeEventUUID } from "./airbridge";
@@ -585,8 +586,8 @@ describe("airbridgeProvider static config", () => {
     expect(airbridgeProvider.retryPolicy).toBeUndefined();
   });
 
-  it("eventCatalog is the 13-key STANDARD_PROVIDER_EVENT_KEYS set", () => {
-    expect(airbridgeProvider.eventCatalog).toHaveLength(13);
+  it("eventCatalog IS STANDARD_PROVIDER_EVENT_KEYS (length pinned to the constant, not a literal)", () => {
+    expect(airbridgeProvider.eventCatalog).toHaveLength(STANDARD_PROVIDER_EVENT_KEYS.length);
     expect(airbridgeProvider.eventCatalog).toContain("revenue.REFUND");
     expect(airbridgeProvider.eventCatalog).toContain("subscription.trial.started");
   });

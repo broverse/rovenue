@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { STANDARD_PROVIDER_EVENT_KEYS } from "@rovenue/shared";
 import { MockAgent, setGlobalDispatcher } from "undici";
 import { createUndiciHttpClient } from "../http-client";
 import { firebaseGa4Provider } from "./firebase-ga4";
@@ -13,21 +14,10 @@ import type { RovenueEventKey } from "@rovenue/shared";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const ALL_EVENTS: RovenueEventKey[] = [
-  "revenue.INITIAL",
-  "revenue.TRIAL_CONVERSION",
-  "revenue.RENEWAL",
-  "revenue.CREDIT_PURCHASE",
-  "revenue.REFUND",
-  "revenue.CANCELLATION",
-  "subscription.trial.started",
-  "subscription.cancel_requested",
-  "subscription.expired",
-  "subscription.billing_issue",
-  "subscription.grace_period",
-  "subscription.uncancelled",
-  "subscription.product_changed",
-];
+// Derived, not hand-copied: this list was a verbatim duplicate of
+// STANDARD_PROVIDER_EVENT_KEYS, so every new public event key silently
+// made the assertion below wrong until someone edited it here too.
+const ALL_EVENTS: RovenueEventKey[] = [...STANDARD_PROVIDER_EVENT_KEYS];
 
 function makeEnvelope(
   overrides: Partial<RovenueEventEnvelope> = {},
@@ -90,7 +80,7 @@ describe("firebaseGa4Provider.defaultEventMapping", () => {
     }
   });
 
-  it("has exactly the 13-key Wave-1 catalog", () => {
+  it("has exactly the STANDARD_PROVIDER_EVENT_KEYS catalog", () => {
     expect(Object.keys(firebaseGa4Provider.defaultEventMapping).sort()).toEqual(
       [...ALL_EVENTS].sort(),
     );

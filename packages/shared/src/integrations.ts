@@ -17,6 +17,13 @@ export const ROVENUE_EVENT_KEYS = [
   "subscription.grace_period",
   "subscription.uncancelled",
   "subscription.product_changed",
+  // 2026-09-03: three meanings the catalog lacked. `paused` and `revoked`
+  // are store-native on Google (and `revoked` on Apple too); `recovered`
+  // is Google-only — see store-event-normalization.ts for why neither
+  // Apple nor Stripe gets an inferred one.
+  "subscription.paused",
+  "subscription.recovered",
+  "subscription.revoked",
   "paywall.view",
   "paywall.close",
   "credit.ledger.appended",
@@ -71,6 +78,9 @@ export const SUBSCRIPTION_BRIDGE_EVENT_KEYS = [
   "subscription.grace_period",
   "subscription.uncancelled",
   "subscription.product_changed",
+  "subscription.paused",
+  "subscription.recovered",
+  "subscription.revoked",
 ] as const satisfies readonly RovenueEventKey[];
 
 /** The one lifecycle key that does NOT come from the SUBSCRIPTION bridge —

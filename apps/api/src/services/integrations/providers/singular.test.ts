@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { STANDARD_PROVIDER_EVENT_KEYS } from "@rovenue/shared";
 import { MockAgent, setGlobalDispatcher } from "undici";
 import { createUndiciHttpClient } from "../http-client";
 import { singularProvider } from "./singular";
@@ -744,8 +745,8 @@ describe("singularProvider static config", () => {
     expect(singularProvider.retryPolicy).toBeUndefined();
   });
 
-  it("eventCatalog is the 13-key STANDARD_PROVIDER_EVENT_KEYS set", () => {
-    expect(singularProvider.eventCatalog).toHaveLength(13);
+  it("eventCatalog IS STANDARD_PROVIDER_EVENT_KEYS (length pinned to the constant, not a literal)", () => {
+    expect(singularProvider.eventCatalog).toHaveLength(STANDARD_PROVIDER_EVENT_KEYS.length);
     expect(singularProvider.eventCatalog).toContain("revenue.REFUND");
     expect(singularProvider.eventCatalog).toContain("subscription.trial.started");
   });

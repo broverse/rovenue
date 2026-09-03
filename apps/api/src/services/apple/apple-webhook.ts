@@ -622,6 +622,25 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
 async function applyRevoke(ctx: DispatchContext): Promise<void> {
   await guardedChainStatusWrite(ctx, { status: PurchaseStatus.REVOKED });
   await revokeAccessForTransaction(ctx);
+
+  // Same latent gap Task 2 found in applyRenewalStatusChange: the two
+  // writes above are chain-wide and never needed a subscriber, so
+  // `outcome.subscriberId` stayed unset — and postProcess bails without
+  // one. A REVOKE therefore emitted NOTHING at all: no revenue event, no
+  // lifecycle key. Resolving the subscriber here is what lets the
+  // `REVOKE -> subscription.revoked` row in STORE_EVENT_TO_PUBLIC_KEY
+  // actually fire. A chain with no matching purchase row still produces
+  // no key, exactly as before.
+  const purchase =
+    await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+      drizzle.db,
+      ctx.projectId,
+      ctx.transaction.originalTransactionId,
+    );
+  if (!purchase) return;
+
+  ctx.outcome.subscriberId = purchase.subscriberId;
+  ctx.outcome.purchaseId = purchase.id;
 }
 
 // REFUND_DECLINED: Apple rejected the customer's refund request.
