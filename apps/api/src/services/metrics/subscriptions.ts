@@ -1,6 +1,9 @@
 import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle, type PurchaseStatus } from "@rovenue/db";
-import { LIVE_STATUSES as SHARED_LIVE_STATUSES } from "@rovenue/shared/subscription-status";
+import {
+  LIVE_STATUSES as SHARED_LIVE_STATUSES,
+  SUBSCRIPTION_STATUS_SEMANTICS,
+} from "@rovenue/shared/subscription-status";
 import type {
   BillingIssueRow,
   BillingIssuesResponse,
@@ -73,6 +76,20 @@ const CHURNED_STATUSES: ReadonlyArray<"EXPIRED" | "REFUNDED" | "REVOKED"> = [
   "REFUNDED",
   "REVOKED",
 ];
+
+/**
+ * "At risk" = live, but either failing payment (involuntary — e.g. a
+ * billing-retry grace period) or not currently granting access (e.g. a
+ * voluntary pause). Derived from the shared semantics table rather than
+ * listed by name so a future status matching this rule (e.g. a live,
+ * involuntary, non-granting BILLING_ISSUE) joins the dashboard's at-risk
+ * count automatically instead of being silently left out.
+ */
+const AT_RISK_STATUSES: ReadonlyArray<PurchaseStatus> =
+  SHARED_LIVE_STATUSES.filter((status) => {
+    const semantics = SUBSCRIPTION_STATUS_SEMANTICS[status];
+    return semantics.involuntary || !semantics.grantsAccess;
+  });
 
 function mapStatus(row: {
   status: string;
@@ -182,7 +199,7 @@ function scopeWhere(scope: SubscriptionScopeName, now: Date) {
     case "trial":
       return eq(p.status, "TRIAL");
     case "grace":
-      return inArray(p.status, ["GRACE_PERIOD", "PAUSED"]);
+      return inArray(p.status, [...AT_RISK_STATUSES]);
     case "canceling":
       return and(eq(p.status, "ACTIVE"), eq(p.autoRenewStatus, false));
     case "churned":
@@ -873,4 +890,5 @@ export const __subscriptionsConstants = {
   CALENDAR_PAST_DEFAULT_DAYS,
   CALENDAR_FUTURE_DEFAULT_DAYS,
   CALENDAR_MAX_DAYS,
+  AT_RISK_STATUSES,
 };
