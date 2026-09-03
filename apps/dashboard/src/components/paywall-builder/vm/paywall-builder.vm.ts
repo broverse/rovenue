@@ -32,7 +32,7 @@ import {
 } from "../../../lib/services/paywall-builder-api";
 import { ApiError } from "../../../lib/api";
 import * as treeOps from "../tree-ops";
-import { PRESETS, type PresetId } from "../presets";
+import { TEMPLATES, type TemplateId } from "../templates";
 import { resolveActiveTab, type InspectorTabId } from "../inspector/tabs";
 import type { CanvasDevice, ColorScheme } from "../types";
 import {
@@ -122,7 +122,7 @@ export class PaywallBuilderViewModel {
 
   /** Drops any pending AI-revert snapshot. Called at the top of every
    *  hand-drawn tree mutation (`addNode`/`removeNode`/`moveNode`/
-   *  `updateNode`), `applyPreset`, and every locale-op method
+   *  `updateNode`), `applyTemplate`, and every locale-op method
    *  (`setLocaleText`/`addLocale`/`removeLocale`/`setDefaultLocale`) —
    *  anything routed through `applyExternalTreeOp`/`applyExternalConfig`
    *  must NOT call this, or it would erase the very snapshot it just set. */
@@ -603,7 +603,7 @@ export class PaywallBuilderViewModel {
    * these keys carry a meaningful starter value — `resolveText` already
    * falls back to the default locale for any locale missing the key, so
    * leaving other locales unset is intentional (surfaces as an existing,
-   * warning-only LOCALE_KEY_GAP, same as the hero/comparison presets).
+   * warning-only LOCALE_KEY_GAP, same as the template catalogue).
    */
   private registerLocKeysWithDefaults(entries: Record<string, string>) {
     const defaultTable = { ...(this.config.localizations[this.config.defaultLocale] ?? {}) };
@@ -685,12 +685,12 @@ export class PaywallBuilderViewModel {
     this.defaultLocale = code;
   }
 
-  // ----- Presets -----
-  applyPreset(id: PresetId) {
-    const preset = PRESETS.find((p) => p.id === id);
-    if (!preset) return;
+  // ----- Templates -----
+  applyTemplate(id: TemplateId) {
+    const template = TEMPLATES.find((t) => t.id === id);
+    if (!template) return;
     this.clearAiSnapshotOnManualEdit();
-    const config = preset.build(this.defaultLocale || "en");
+    const config = template.build(this.defaultLocale || "en");
     this.config = config;
     this.locales = Object.keys(config.localizations);
     this.defaultLocale = config.defaultLocale;
@@ -702,7 +702,7 @@ export class PaywallBuilderViewModel {
   /**
    * Re-derives `locales`/`defaultLocale`/`editLocale` from the CURRENT
    * `config.localizations` — the same derivation `syncFromDetail`/
-   * `applyPreset` use. Must run after any wholesale replacement of
+   * `applyTemplate` use. Must run after any wholesale replacement of
    * `config` (`applyExternalConfig`, `applyExternalTreeOp` — a
    * `setLocalizations` op can introduce a brand-new locale table —, and
    * `revertAiChange`), or these three fields keep describing whichever
@@ -745,7 +745,7 @@ export class PaywallBuilderViewModel {
 
   /**
    * Wholesale-replaces `config` (an App Store import or one-shot AI
-   * generation result) — same shape as `applyPreset` below, including the
+   * generation result) — same shape as `applyTemplate` below, including the
    * locale reset, so an imported/generated tree with a different locale
    * set than the current draft doesn't leave `locales`/`defaultLocale`
    * pointing at tables that no longer exist.

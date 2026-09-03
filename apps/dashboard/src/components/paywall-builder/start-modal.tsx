@@ -7,7 +7,7 @@ import { cn } from "../../lib/cn";
 import { ApiError, rpc, unwrap } from "../../lib/api";
 import { RoviMissingConfig } from "../rovi/rovi-missing-config";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
-import { PRESETS, type PresetId } from "./presets";
+import { TEMPLATES, type TemplateId } from "./templates";
 import { previewBlocks, type PreviewBlock } from "./start-model";
 
 type Props = { onClose: () => void };
@@ -86,7 +86,7 @@ function Silhouette({ blocks }: { blocks: PreviewBlock[] }) {
 export const StartModal = component(({ onClose }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
-  const [confirmingId, setConfirmingId] = useState<PresetId | null>(null);
+  const [confirmingId, setConfirmingId] = useState<TemplateId | null>(null);
   const [tab, setTab] = useState<StartTab>("presets");
 
   // Shared apply-with-confirm for the two config-producing tabs: same
@@ -119,15 +119,15 @@ export const StartModal = component(({ onClose }: Props) => {
   // do it once per locale rather than on every re-render.
   const silhouettes = useMemo(() => {
     const locale = vm.defaultLocale || "en";
-    return new Map(PRESETS.map((p) => [p.id, previewBlocks(p.build(locale))] as const));
+    return new Map(TEMPLATES.map((t) => [t.id, previewBlocks(t.build(locale))] as const));
   }, [vm.defaultLocale]);
 
-  const choose = (id: PresetId) => {
+  const choose = (id: TemplateId) => {
     if (!treeIsEmpty && confirmingId !== id) {
       setConfirmingId(id);
       return;
     }
-    vm.applyPreset(id);
+    vm.applyTemplate(id);
     onClose();
   };
 
@@ -420,7 +420,7 @@ export const StartModal = component(({ onClose }: Props) => {
         {tab === "presets" && (
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
           <div className="grid grid-cols-3 gap-4">
-            {PRESETS.map((preset) => {
+            {TEMPLATES.map((preset) => {
               const confirming = confirmingId === preset.id;
               return (
                 <button

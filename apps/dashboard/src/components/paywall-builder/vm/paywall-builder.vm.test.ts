@@ -183,38 +183,45 @@ describe("PaywallBuilderViewModel", () => {
 
   // ----- Presets -----
   // Task 8b: the hero preset's own `hero_image` ships with `url: { light: "" }`
-  // on purpose — an author applies the preset and picks real art next. That
+  // on purpose — an author applies the template and picks real art next. That
   // used to read as zero issues, which was the bug Task 8b closes: nothing
-  // caught a blank hero image before publish. Now EMPTY_MEDIA_URL flags it —
-  // publish-blocking, and ONLY that, so the preset still applies cleanly and
-  // stays editable (see the save-tier assertion below).
-  it("applyPreset('hero') raises EMPTY_MEDIA_URL for the placeholder hero image, and nothing else", async () => {
+  // caught a blank hero image before publish. Now EMPTY_MEDIA_URL flags it,
+  // and EMPTY_ACTION_URL flags the footer's Terms/Privacy links, which a
+  // template cannot fill in either. Both are publish-tier, so the template
+  // still applies cleanly and stays editable.
+  it("applyTemplate('hero') raises the placeholder codes and ONLY those", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail({ offeringPackageIds: [] }));
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
     await vm.load(() => {});
 
-    vm.applyPreset("hero");
-    expect(vm.errorIssues).toEqual([
-      expect.objectContaining({ code: "EMPTY_MEDIA_URL", nodeId: "hero_image" }),
-    ]);
+    vm.applyTemplate("hero");
+    // The blank hero image, plus the footer's Terms/Privacy links, which no
+    // template can fill in on a project's behalf. Both publish-tier: the
+    // template still applies cleanly and stays editable.
+    expect(new Set(vm.errorIssues.map((i) => i.code))).toEqual(
+      new Set(["EMPTY_MEDIA_URL", "EMPTY_ACTION_URL"]),
+    );
+    expect(vm.errorIssues).toContainEqual(
+      expect.objectContaining({ code: "EMPTY_MEDIA_URL", nodeId: "hero_img_image" }),
+    );
   });
 
-  it("applyPreset('comparison') produces a config with zero blocking validation issues", async () => {
+  it("applyTemplate('comparison') raises only its footer's EMPTY_ACTION_URL — it carries no media", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail({ offeringPackageIds: [] }));
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
     await vm.load(() => {});
 
-    vm.applyPreset("comparison");
-    expect(vm.errorIssues).toEqual([]);
+    vm.applyTemplate("comparison");
+    expect(new Set(vm.errorIssues.map((i) => i.code))).toEqual(new Set(["EMPTY_ACTION_URL"]));
   });
 
-  it("applyPreset marks the VM dirty and clears selection", async () => {
+  it("applyTemplate marks the VM dirty and clears selection", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail());
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
     await vm.load(() => {});
     vm.selectNode("t1");
 
-    vm.applyPreset("hero");
+    vm.applyTemplate("hero");
     expect(vm.isDirty).toBe(true);
     expect(vm.selectedNodeId).toBeNull();
   });
@@ -1356,7 +1363,7 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
     expect(vm.configBeforeAiApply).toBeNull();
   });
 
-  it("applyExternalConfig wholesale-assigns config, snapshots the previous one, and resets locale state (applyPreset semantics)", async () => {
+  it("applyExternalConfig wholesale-assigns config, snapshots the previous one, and resets locale state (applyTemplate semantics)", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail());
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
     await vm.load(() => {});
@@ -1544,7 +1551,7 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
     expect(vm.configBeforeAiApply).toBeNull();
   });
 
-  it("applyPreset also clears a pending AI snapshot", async () => {
+  it("applyTemplate also clears a pending AI snapshot", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail());
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
     await vm.load(() => {});
@@ -1556,7 +1563,7 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
     });
     expect(vm.configBeforeAiApply).not.toBeNull();
 
-    vm.applyPreset("hero");
+    vm.applyTemplate("hero");
 
     expect(vm.configBeforeAiApply).toBeNull();
   });
