@@ -51,7 +51,7 @@ these two rows can be reinstated with real evidence backing them."* **This spec 
 task.** The exclusions were never a coverage failure — they were accuracy over coverage, and
 the fix is named in the code.
 
-### 1.3 Two meanings the catalog genuinely lacks
+### 1.3 Two meanings the catalog genuinely lacks — with asymmetric store coverage
 
 `ROVENUE_EVENT_KEYS` has twelve entries. Checked against what the subscription state machine
 and the stores actually express, two meanings have no key at all:
@@ -64,6 +64,25 @@ and the stores actually express, two meanings have no key at all:
   then silence, so a dunning or win-back campaign has no signal to stop on. This is the more
   valuable of the two: an integration that can start a recovery flow but never learns it
   succeeded will keep chasing a subscriber who already paid.
+
+**Neither key can fire for every store, and the spec must say so rather than imply parity.**
+Checked against the handlers:
+
+| key | Apple | Google | Stripe |
+|---|---|---|---|
+| `subscription.paused` | **no such notification** — Apple has no pause concept | `SUBSCRIPTION_PAUSED` | a `paused` status exists (`stripe-types.ts:99`) |
+| `subscription.recovered` | **no native signal** | `SUBSCRIPTION_RECOVERED` | **no native signal** |
+
+For Apple and Stripe, "recovered" could only be *inferred* — a `DID_RENEW` following a grace
+period, an `invoice.paid` following a `payment_failed`. **Do not infer it.** This codebase
+has refused exactly this shape of inference before: country comes from the store and never
+from a device attribute, and currency is never fabricated. An inferred recovery that fires
+on an unrelated renewal is worse than no event, because a consumer would stop a dunning
+campaign on it.
+
+So both keys ship with **documented partial coverage**, the same way §5's country dimension
+did. A consumer must be able to learn from the docs that recovery signals arrive for Google
+subscribers only.
 
 ### 1.4 The shape
 
@@ -112,6 +131,14 @@ holds:
 Then `STORE_EVENT_TO_PUBLIC_KEY` gains the two rows, resolved by that evidence rather than
 by the event type alone.
 
+**Neither reinstated row may double-map.** The excluded comment names this risk directly:
+turning auto-renew OFF is already carried by `subscription.cancel_requested`, so mapping
+`DID_CHANGE_RENEWAL_STATUS` in that direction would deliver one real-world event under two
+public keys. The same question has to be asked of the Stripe row against
+`cancel_requested` and `product_changed`. Prove the absence of a double-map with a test that
+drives a real cancel and asserts exactly one lifecycle key is emitted — not by reading the
+mapping table.
+
 **Do not reinstate a row without its evidence.** The excluded comment's judgment — accuracy
 over coverage — is the standard this work has to meet, not an obstacle to route around. If
 the Stripe delta turns out not to be reachable at the handler, report that and leave the row
@@ -125,12 +152,35 @@ out; a row that misclassifies half its deliveries is worse than no row.
 - `RovenueEventType` in `services/integrations/types.ts` — the file carries a compile-time
   bridge between the two hand-maintained unions precisely so a spelling drift fails the
   build. Use it rather than working around it;
-- every provider's mapping table in `event-mapping.ts`. There are fourteen providers and
-  each names events in its own vocabulary; a key with no mapping is a key that silently
-  never reaches that provider.
+- the mapping tables in `event-mapping.ts`. **Corrected during the audit:** this is not
+  fourteen hand-edited tables. There is one shared `ANALYTICS_DEFAULT_EVENT_NAMES` (`:36`)
+  and one per-provider override map (`:219`), plus two derived tables — and every one of
+  them is typed `Partial<Record<RovenueEventKey, string>>`.
+
+  **That `Partial` is the risk, and it is worse than the count I first wrote.** A missing key
+  is not a type error; it silently produces no event for that provider. So the guard cannot
+  be "remember to add rows" — it must be a test that fails when a provider's catalog claims
+  a key it has no name for. See §6.
 
 **The event-key catalog is public API for `CUSTOM_WEBHOOK` consumers.** Adding a key is
 additive and safe; renaming or repurposing one is not, and nothing here does either.
+
+### 4.2b The two surfaces a new public key also has to reach
+
+Adding a key to `ROVENUE_EVENT_KEYS` is not the end of it. Two consumer-facing surfaces read
+that catalog and were missing from this spec's first draft:
+
+- **The integration drawer's event picker** (`apps/dashboard/src/components/apps/
+  integration-drawer/step-events.tsx`) imports `ROVENUE_EVENT_KEYS` directly, so new keys
+  appear in the picker automatically — but they need **i18n labels**. `en.json` has no
+  missing-key handler, so an absent label renders as the raw key path, a defect this repo
+  has shipped before.
+- **The provider docs.** Every provider page carries a per-key mapping table
+  (`apps/docs/content/docs/integrations/adjust.mdx:52`, `amplitude.mdx:50`, and the rest).
+  The event catalog is public API for `CUSTOM_WEBHOOK` consumers, so a key that exists in
+  code and not in the docs is an undocumented API addition. The per-store coverage table
+  from §1.3 belongs here too — this is where a consumer would look to learn that recovery
+  fires for Google only.
 
 ### 4.3 Enumerate what remains unmapped, and prove it is already covered
 
@@ -184,8 +234,9 @@ The outbox, the fan-out topics and the delivery worker are unchanged. No migrati
 3. `subscription.paused` and `subscription.recovered` exist in `ROVENUE_EVENT_KEYS`,
    `SUBSCRIPTION_BRIDGE_EVENT_KEYS` and `RovenueEventType`, and the compile-time bridge
    between the two unions still passes.
-4. All fourteen providers map both new keys, guarded by a test that fails when a provider
-   table is missing a key rather than by review.
+4. A test fails when a provider whose `eventCatalog` claims a key has no name for it in its
+   mapping table. The tables are `Partial`, so a missing key is not a type error — it
+   silently produces no event, and only a test can catch that.
 5. Google `SUBSCRIPTION_PAUSED` and `SUBSCRIPTION_RECOVERED` produce the new keys end to
    end, asserted through the bridge rather than at the mapping table alone.
 6. The enumeration from §4.3 exists in the report: every handled store event type, and the
@@ -194,3 +245,12 @@ The outbox, the fan-out topics and the delivery worker are unchanged. No migrati
    repurposed.
 8. ROADMAP §6 states the key-per-meaning principle and records what was reinstated, what was
    added, and what the enumeration found.
+9. Both new keys have i18n labels in the integration drawer's picker, verified by grepping
+   the finished component against `en.json` rather than by eye.
+10. Every provider doc page that lists the event catalog gains the two keys, and states the
+    per-store coverage — recovery for Google only — so a consumer can learn the limit from
+    the docs rather than from silence.
+11. Reinstating either excluded row emits exactly ONE lifecycle key for a real cancel,
+    proven by a test rather than by reading the mapping table.
+12. Neither `subscription.recovered` nor `subscription.paused` is ever inferred for a store
+    that has no native signal for it.
