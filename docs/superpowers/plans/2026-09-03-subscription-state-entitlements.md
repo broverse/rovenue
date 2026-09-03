@@ -530,18 +530,35 @@ import { LIVE_STATUSES as SHARED_LIVE_STATUSES } from "@rovenue/shared/subscript
 const LIVE_STATUSES: ReadonlyArray<PurchaseStatus> = SHARED_LIVE_STATUSES;
 ```
 
-At line 189, replace `inArray(p.status, ["GRACE_PERIOD", "PAUSED"])` with a derived expression:
+At line 189, replace `inArray(p.status, ["GRACE_PERIOD", "PAUSED"])` with a derived expression.
+
+**Corrected 2026-09-04.** An earlier draft of this step derived the set as
+`LIVE_STATUSES minus ACCESS_GRANTING_STATUSES`. That is wrong: GRACE_PERIOD *grants*
+access, so it is subtracted out and the set collapses to `["PAUSED"]`, silently dropping
+grace-period subscribers from the dashboard's at-risk count. The rule that actually
+reproduces the literal is "live, but either failing payment or not currently granting
+access":
 
 ```ts
-// "At risk" = live but not currently granting access.
-const AT_RISK_STATUSES = SHARED_LIVE_STATUSES.filter(
-  (s) => !ACCESS_GRANTING_STATUSES.includes(s),
-);
+import { SUBSCRIPTION_STATUS_SEMANTICS } from "@rovenue/shared/subscription-status";
+
+/**
+ * "At risk" = a live subscription that is either failing payment or not
+ * currently granting access. GRACE_PERIOD qualifies on the first count,
+ * PAUSED on the second; TRIAL and ACTIVE on neither. Derived rather than
+ * listed so a new status matching the rule — BILLING_ISSUE, added in
+ * Task 3 — joins the set automatically, which is what this view wants.
+ */
+const AT_RISK_STATUSES = SHARED_LIVE_STATUSES.filter((s) => {
+  const semantics = SUBSCRIPTION_STATUS_SEMANTICS[s];
+  return semantics.involuntary || !semantics.grantsAccess;
+});
 // ...
       return inArray(p.status, [...AT_RISK_STATUSES]);
 ```
 
-Add `ACCESS_GRANTING_STATUSES` to the same import.
+Pin it with a test asserting `[...AT_RISK_STATUSES].sort()` equals
+`["GRACE_PERIOD", "PAUSED"]` today — that assertion is what catches a wrong derivation.
 
 - [ ] **Step 6: Rewire the state machine's STATUS mirror**
 
