@@ -81,6 +81,7 @@ import { createClient } from "@clickhouse/client";
 import { Kafka } from "kafkajs";
 import { __resetClickHouseForTests } from "../../lib/clickhouse";
 import { env } from "../../lib/env";
+import * as installsModule from "./installs";
 import { SYSTEM_CHART_IDS } from "./chart-catalog";
 import * as analyticsRouterModule from "../analytics-router";
 import * as chartsModule from "./charts";
@@ -370,6 +371,8 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
         "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-2 revenue ids: mrr/arr/gross_vs_net/arpu)",
       buildCountSeriesPoints:
         "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-3 lifecycle ids: new_subs/reactivations/trials_started/churn — churn switched from a rate to a count in fix round 1, see task-3-fixes.md)",
+      buildPerInstallPoints:
+        "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (rev_per_install: net revenue over installs)",
     },
     invokers: {
       readChannels: () => chartsModule.readChannels(PROJECT, WINDOW_DAYS),
@@ -493,6 +496,8 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
       // as mrr-decomposition's getMrrDecompositionDailyCounts (task-3).
       getCreditBurnDaily:
         "covered above, once per SYSTEM_CHART_IDS entry — dispatched via readChartSeries's 'credit_burn' case (task-5)",
+      getCreditLiabilityDaily:
+        "Postgres-only (credit_ledger balances + deltas) — issues no ClickHouse query at all; guarded by credits.liability-daily.integration.test.ts against a real ledger",
     },
     invokers: {
       getCreditsRollup: () =>
@@ -501,6 +506,20 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
           windowDays: WINDOW_DAYS,
         }),
     },
+  },
+  {
+    // Postgres-only, and registered anyway. The module list is this
+    // harness's one hand-kept edge (see the comment above REGISTRY): a
+    // new services/metrics module that is NOT listed is silently
+    // uncovered. Listing it with an exemption records that the absence
+    // of ClickHouse here is a decision, not an oversight.
+    moduleName: "installs",
+    module: installsModule as unknown as Record<string, unknown>,
+    exempt: {
+      getInstallsDaily:
+        "Postgres-only (subscribers.sdkInstalledAt) — ClickHouse cannot answer it at all, since raw_revenue_events only ever sees a subscriber who transacted; guarded by installs.integration.test.ts",
+    },
+    invokers: {},
   },
   {
     moduleName: "transactions",

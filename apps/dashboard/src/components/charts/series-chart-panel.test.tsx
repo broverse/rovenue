@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ChartSeriesPoint, ChartSeriesResponse } from "@rovenue/shared";
+import type {
+  ChartSeriesDateResponse,
+  ChartSeriesPeriodGranularity,
+  ChartSeriesPeriodPoint,
+  ChartSeriesPoint,
+  ChartSeriesResponse,
+} from "@rovenue/shared";
 // initialise i18n so useTranslation() returns real strings in jsdom
 import "../../i18n/config";
 import type { RangeOption } from "./types";
@@ -17,16 +23,34 @@ function wrap(ui: React.ReactNode) {
 
 function response(
   points: ChartSeriesPoint[],
-  overrides: Partial<ChartSeriesResponse> = {},
+  overrides: Partial<ChartSeriesDateResponse> = {},
 ): ChartSeriesResponse {
   return {
     chartId: "churn",
+    axis: "date",
     unit: "percent",
     from: "2026-01-01T00:00:00.000Z",
     to: "2026-01-03T00:00:00.000Z",
     points,
     supported: true,
     ...overrides,
+  };
+}
+
+/** A cohort-period response: no dates anywhere, by design. */
+function periodResponse(
+  points: ChartSeriesPeriodPoint[],
+  granularity: ChartSeriesPeriodGranularity = "week",
+): ChartSeriesResponse {
+  return {
+    chartId: "retention_curve",
+    axis: "period",
+    periodGranularity: granularity,
+    unit: "percent",
+    from: "2026-01-01T00:00:00.000Z",
+    to: "2026-06-30T00:00:00.000Z",
+    points,
+    supported: true,
   };
 }
 
@@ -169,6 +193,38 @@ describe("SeriesChartPanel", () => {
       ]),
     );
     expect(await screen.findByTestId("series-chart-xlabel-0")).toBeInTheDocument();
+  });
+
+  // ===========================================================
+  // Cohort-period axis (retention_curve / ltv)
+  // ===========================================================
+  it("labels a period-axis series by period, not by date", async () => {
+    arrange(
+      periodResponse([
+        { period: 0, value: 100, numerator: 200, denominator: 200 },
+        { period: 1, value: 41, numerator: 82, denominator: 200 },
+      ]),
+    );
+    const first = await screen.findByTestId("series-chart-xlabel-0");
+    expect(first).toHaveTextContent("W0");
+    const second = await screen.findByTestId("series-chart-xlabel-1");
+    expect(second).toHaveTextContent("W1");
+  });
+
+  it("uses the declared granularity for the period prefix", async () => {
+    arrange(
+      periodResponse([{ period: 2, value: 10 }], "month"),
+    );
+    expect(await screen.findByTestId("series-chart-xlabel-0")).toHaveTextContent(
+      "M2",
+    );
+  });
+
+  it("suppresses the served-days note on a period axis", async () => {
+    // "showing N days" is a statement about calendar days; a 12-period
+    // cohort curve is not a truncated window.
+    arrange(periodResponse([{ period: 0, value: 100 }]), {}, "All");
+    expect(screen.queryByTestId("series-chart-window-note")).toBeNull();
   });
 
   // ===========================================================

@@ -11,6 +11,7 @@ vi.mock("../../lib/clickhouse", () => ({
 }));
 
 import { readChartSeries } from "./charts";
+import { asDateSeries } from "./series-test-helpers";
 
 // readChartSeries builds its window off the real clock (buildWindow ->
 // `new Date()`), but the fixture rows below are pinned to 2026-07-02.
@@ -35,7 +36,7 @@ describe("readChartSeries", () => {
     // `rev_per_install` stays unsupported per spec §4.3 (no install event
     // exists anywhere in the product) — unlike `churn`, which task-3 wired,
     // this id has no reader to eventually land here.
-    const res = await readChartSeries("proj_1", "rev_per_install", 7);
+    const res = asDateSeries(await readChartSeries("proj_1", "rev_per_install", 7));
     expect(res.supported).toBe(false);
     expect(res.points).toEqual([]);
     expect(res.chartId).toBe("rev_per_install");
@@ -45,14 +46,14 @@ describe("readChartSeries", () => {
   });
 
   it("retention_curve stays unsupported (task-4 controller Ruling 4: its x-axis is periods-since-cohort-start, not a calendar date — /cohorts is its surface, not this dispatcher)", async () => {
-    const res = await readChartSeries("proj_1", "retention_curve", 7);
+    const res = asDateSeries(await readChartSeries("proj_1", "retention_curve", 7));
     expect(res.supported).toBe(false);
     expect(res.points).toEqual([]);
     expect(queryAnalyticsMock).not.toHaveBeenCalled();
   });
 
   it("ltv stays unsupported (task-4: no owning service has a day column to widen by — see charts.ts's dispatcher-header comment)", async () => {
-    const res = await readChartSeries("proj_1", "ltv", 7);
+    const res = asDateSeries(await readChartSeries("proj_1", "ltv", 7));
     expect(res.supported).toBe(false);
     expect(res.points).toEqual([]);
     expect(queryAnalyticsMock).not.toHaveBeenCalled();
@@ -63,7 +64,7 @@ describe("readChartSeries", () => {
       .mockResolvedValueOnce([{ day: "2026-07-02", n: "30" }]) // viewers
       .mockResolvedValueOnce([{ day: "2026-07-02", n: "120" }]); // actives
 
-    const res = await readChartSeries("proj_1", "paywall_view_rate", 7);
+    const res = asDateSeries(await readChartSeries("proj_1", "paywall_view_rate", 7));
 
     expect(res.supported).toBe(true);
     expect(res.unit).toBe("percent");
@@ -89,7 +90,7 @@ describe("readChartSeries", () => {
       .mockResolvedValueOnce([{ day: "2026-07-02", n: "6" }]) // purchasers
       .mockResolvedValueOnce([{ day: "2026-07-02", n: "30" }]); // viewers
 
-    const res = await readChartSeries("proj_1", "paywall_purchase", 7);
+    const res = asDateSeries(await readChartSeries("proj_1", "paywall_purchase", 7));
 
     expect(res.supported).toBe(true);
     const day = res.points.find((p) => p.bucket.startsWith("2026-07-02"));

@@ -10,13 +10,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // pinned in routes/dashboard/credits.integration.test.ts, never with a
 // mock.
 //
-// `liability` has no case in the dispatcher (controller Ruling 3) so it
-// is not exercised here — see charts.ts's header comment and
-// chart-catalog.ts's comment at the `liability` entry.
+// `liability` is dispatched here too, from the same service. Its own
+// SQL is proven against a real ledger in
+// credits.liability-daily.integration.test.ts; what this file pins is
+// that the dispatcher serves it, as a Postgres fact, with no ClickHouse
+// requirement.
 
 const getCreditBurnDailyMock = vi.fn();
+const getCreditLiabilityDailyMock = vi.fn();
 vi.mock("./credits", () => ({
   getCreditBurnDaily: (...args: unknown[]) => getCreditBurnDailyMock(...args),
+  getCreditLiabilityDaily: (...args: unknown[]) =>
+    getCreditLiabilityDailyMock(...args),
 }));
 
 const isClickHouseConfiguredMock = vi.fn();
@@ -37,6 +42,7 @@ describe("readChartSeries — credits group (credit_burn)", () => {
     vi.setSystemTime(FROZEN_NOW);
     isClickHouseConfiguredMock.mockReset().mockReturnValue(true);
     getCreditBurnDailyMock.mockReset().mockResolvedValue([]);
+    getCreditLiabilityDailyMock.mockReset().mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -69,6 +75,52 @@ describe("readChartSeries — credits group (credit_burn)", () => {
     await readChartSeries("proj_1", "credit_burn", 3);
     expect(getCreditBurnDailyMock).toHaveBeenCalledTimes(1);
     const [projectId, window] = getCreditBurnDailyMock.mock.calls[0] as [
+      string,
+      { from: Date; to: Date; days: number },
+    ];
+    expect(projectId).toBe("proj_1");
+    expect(window.days).toBe(3);
+  });
+});
+
+describe("readChartSeries — liability", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_NOW);
+    isClickHouseConfiguredMock.mockReset().mockReturnValue(true);
+    getCreditLiabilityDailyMock.mockReset().mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("serves the ledger's daily outstanding balance as a count", async () => {
+    getCreditLiabilityDailyMock.mockResolvedValueOnce([
+      { day: "2026-07-02", n: 95 },
+    ]);
+    const res = await readChartSeries("proj_1", "liability", 1);
+    expect(res.supported).toBe(true);
+    // Credits are a unit of account, not USD — same ruling as
+    // credit_burn above.
+    expect(res.unit).toBe("count");
+    expect(res.points.at(-1)?.value).toBe(95);
+  });
+
+  it("issues no ClickHouse query — the ledger is Postgres", async () => {
+    isClickHouseConfiguredMock.mockReturnValue(false);
+    getCreditLiabilityDailyMock.mockResolvedValueOnce([
+      { day: "2026-07-02", n: 7 },
+    ]);
+    const res = await readChartSeries("proj_1", "liability", 1);
+    expect(res.supported).toBe(true);
+    expect(res.points.at(-1)?.value).toBe(7);
+  });
+
+  it("passes the dispatcher's window through to getCreditLiabilityDaily", async () => {
+    await readChartSeries("proj_1", "liability", 3);
+    expect(getCreditLiabilityDailyMock).toHaveBeenCalledTimes(1);
+    const [projectId, window] = getCreditLiabilityDailyMock.mock.calls[0] as [
       string,
       { from: Date; to: Date; days: number },
     ];

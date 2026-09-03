@@ -1,4 +1,8 @@
 import { useMemo } from "react";
+import type {
+  ChartSeriesPeriodGranularity,
+  ChartSeriesPoint,
+} from "@rovenue/shared";
 import { useTranslation } from "react-i18next";
 import { useChartSeries } from "../../lib/hooks/useChartSeries";
 import { formatCount, formatCurrencyCompact } from "./format";
@@ -86,6 +90,23 @@ function formatDayLabel(iso: string): string {
     day: "numeric",
     timeZone: "UTC",
   });
+}
+
+const PERIOD_LABEL_PREFIX: Record<ChartSeriesPeriodGranularity, string> = {
+  day: "D",
+  week: "W",
+  month: "M",
+};
+
+/** Label a cohort-period point, e.g. "W3" — periods SINCE COHORT START,
+ *  never a date. `retention_curve` and `ltv` are lines over periods, and
+ *  rendering their index as a calendar date is exactly the fabrication
+ *  `ChartSeriesAxis` exists to prevent. */
+function formatPeriodLabel(
+  period: number,
+  granularity: ChartSeriesPeriodGranularity,
+): string {
+  return `${PERIOD_LABEL_PREFIX[granularity]}${period}`;
 }
 
 /** Pick up to `tickCount` evenly-spaced indices into a 0..count-1
@@ -184,7 +205,17 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
     [points.length],
   );
 
-  const windowTruncated = isRangeWindowTruncated(range);
+  // One label per x tick, from whichever axis the response declares.
+  const xLabelAt = (i: number): string =>
+    data?.axis === "period"
+      ? formatPeriodLabel(data.points[i]!.period, data.periodGranularity)
+      : formatDayLabel((points[i] as ChartSeriesPoint).bucket);
+
+  // The "showing N days" note is about CALENDAR days, so it means
+  // nothing on a period axis — a cohort curve is not a truncated
+  // window, it is 12 periods by design.
+  const windowTruncated =
+    data?.axis !== "period" && isRangeWindowTruncated(range);
   // Read the served span off the RESPONSE, not off `range`. The client's
   // own cap and the server's `windowQuerySchema.max()` are two constants
   // either side of a service boundary; recomputing the number here would
@@ -291,7 +322,7 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
             textAnchor="middle"
             fontFamily="var(--font-rv-mono)"
           >
-            {formatDayLabel(points[i]!.bucket)}
+            {xLabelAt(i)}
           </text>
         ))}
 

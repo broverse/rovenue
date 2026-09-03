@@ -888,7 +888,41 @@ export interface ChartSeriesPoint {
   denominator?: number;
 }
 
-export interface ChartSeriesResponse {
+/**
+ * What a series' x-axis MEANS.
+ *
+ * `"date"` — one point per calendar day; `bucket` is an ISO
+ * start-of-day. Every daily metric.
+ *
+ * `"period"` — one point per period SINCE COHORT START; `period` is a
+ * 0-based index and there is no date involved at all. Cohort-shaped
+ * metrics (`retention_curve`, `ltv`) are lines, but not lines over
+ * dates: until this discriminator existed they could only have been
+ * served by inventing calendar dates for periods-since-join, which is
+ * why they shipped `supported: false` instead.
+ *
+ * Required, never optional-with-a-default: a period-shaped reader that
+ * forgot to declare itself would claim to be dated and be plotted as
+ * dates — the exact bug this field exists to prevent.
+ */
+export type ChartSeriesAxis = "date" | "period";
+
+export type ChartSeriesPeriodGranularity = "day" | "week" | "month";
+
+export interface ChartSeriesPeriodPoint {
+  /** 0-based periods since cohort start. Not a date. */
+  period: number;
+  /**
+   * null when the metric is undefined for that period — e.g. an empty
+   * cohort, whose retention is undefined rather than 0%.
+   */
+  value: number | null;
+  /** Ratio inputs, exposed so a reader can show "82 of 200". */
+  numerator?: number;
+  denominator?: number;
+}
+
+interface ChartSeriesBase {
   chartId: string;
   /**
    * `"money"` is USD — the pipeline normalises to `amountUsd`
@@ -898,10 +932,25 @@ export interface ChartSeriesResponse {
   unit: "count" | "percent" | "money";
   from: string;
   to: string;
-  points: ChartSeriesPoint[];
-  /** false when this catalog id has no reader wired yet. */
+  /** false when this chart id has no reader — an unknown or custom id. */
   supported: boolean;
 }
+
+export interface ChartSeriesDateResponse extends ChartSeriesBase {
+  axis: "date";
+  points: ChartSeriesPoint[];
+}
+
+export interface ChartSeriesPeriodResponse extends ChartSeriesBase {
+  axis: "period";
+  /** Whether a period is a day, a week, or a month. */
+  periodGranularity: ChartSeriesPeriodGranularity;
+  points: ChartSeriesPeriodPoint[];
+}
+
+export type ChartSeriesResponse =
+  | ChartSeriesDateResponse
+  | ChartSeriesPeriodResponse;
 
 // =============================================================
 // Revenue summary — window KPIs (analytics surfacing Phase 1)

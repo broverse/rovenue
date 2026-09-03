@@ -284,7 +284,186 @@ export async function computeRetention(
   return { size, granularity, periods, points };
 }
 
+// =============================================================
+// The /charts catalog's fixed cohort
+// =============================================================
+//
+// `retention_curve` and `ltv` are catalog charts, not cohort-builder
+// queries: they arrive with a window and nothing else. Both use the
+// SAME cohort — everyone whose first revenue event falls inside the
+// selected window — so the two panels can be read side by side, and so
+// neither invents a question the user did not ask. Arbitrary rules
+// stay on /cohorts, which is what the rule builder is for.
+//
+// Granularity follows the window rather than being fixed, because 12
+// DAILY periods out of a 12-month window would describe the first
+// fortnight of a year and call it a retention curve.
+const DAY_GRAIN_MAX_DAYS = 62;
+const WEEK_GRAIN_MAX_DAYS = 186;
+const CATALOG_COHORT_PERIODS = 12;
+
+export function catalogCohortShape(windowDays: number): {
+  granularity: "day" | "week" | "month";
+  periods: number;
+} {
+  const granularity =
+    windowDays <= DAY_GRAIN_MAX_DAYS
+      ? "day"
+      : windowDays <= WEEK_GRAIN_MAX_DAYS
+        ? "week"
+        : "month";
+  return { granularity, periods: CATALOG_COHORT_PERIODS };
+}
+
+/**
+ * ClickHouse's own DateTime64 literal format. `Date.toISOString()`'s
+ * `T` separator and trailing `Z` are not it, and a parameter CH cannot
+ * parse fails the whole query rather than the one filter.
+ */
+function toChDateTime(d: Date): string {
+  return d.toISOString().replace("T", " ").replace("Z", "");
+}
+
+export function catalogCohortRule(from: Date, to: Date): CohortRule {
+  return {
+    match: "all",
+    filters: [
+      { field: "firstSeenAfter", op: "gte", value: toChDateTime(from) },
+      { field: "firstSeenBefore", op: "lte", value: toChDateTime(to) },
+    ],
+  };
+}
+
+// =============================================================
+// Cohort LTV curve
+// =============================================================
+
+export interface CohortLtvCurve {
+  /** Cohort size — the denominator every point divides by. */
+  size: number;
+  points: Array<{ period: number; cumulativeNetUsd: number }>;
+}
+
+/**
+ * The cohort's CUMULATIVE net revenue at each period since join — the
+ * standard LTV curve, and the honest shape for the catalog's `ltv` id
+ * (whose own label has always read "LTV by cohort").
+ *
+ * `v_revenue_lifetime_subscriber` cannot answer this and never could:
+ * it groups by (projectId, subscriberId) with no day dimension at all,
+ * so it is a lifetime-to-date snapshot with no "when". This reads
+ * `raw_revenue_events` directly, exactly as `computeRetention` above
+ * does, and buckets by `dateDiff` from each member's join bucket.
+ *
+ * Net = purchases minus refunds/chargebacks, the same sign convention
+ * as `mv_mrr_daily` (migration 0006). `FINAL` retained for the same
+ * at-least-once-outbox reason as every other raw_revenue_events reader.
+ *
+ * The running total is accumulated in TypeScript rather than as a SQL
+ * window function, following buildRatePoints' rule in charts.ts: this
+ * repo cannot run ClickHouse in unit tests, so arithmetic that lives
+ * outside SQL is arithmetic that can be proven.
+ */
+export async function computeCohortLtvCurve(
+  input: ComputeRetentionInput,
+): Promise<CohortLtvCurve> {
+  if (!isClickHouseConfigured()) {
+    throw new ClickHouseUnavailableError();
+  }
+  const periods = Math.min(Math.max(input.periods, 1), MAX_PERIODS);
+  const compiled = compileRule(input.rule);
+
+  const members = await queryAnalytics<ChCohortMember>(
+    input.projectId,
+    `
+      WITH matches AS (
+        SELECT subscriberId, min(eventDate) AS joined_at
+        FROM rovenue.raw_revenue_events FINAL
+        WHERE projectId = {projectId:String}
+          AND (${compiled.whereSql})
+        GROUP BY subscriberId
+      )
+      SELECT subscriberId,
+             formatDateTime(joined_at, '%Y-%m-%dT%H:%i:%S.%fZ') AS joined_at
+      FROM matches
+    `,
+    compiled.params,
+  );
+
+  const size = members.length;
+  if (size === 0) {
+    return {
+      size: 0,
+      points: Array.from({ length: periods }, (_, i) => ({
+        period: i,
+        cumulativeNetUsd: 0,
+      })),
+    };
+  }
+
+  const memberIds = members.map((m) => m.subscriberId);
+  const bucketFn =
+    input.granularity === "month"
+      ? "toStartOfMonth"
+      : input.granularity === "week"
+        ? "toMonday"
+        : "toStartOfDay";
+  const intervalFn =
+    input.granularity === "month"
+      ? "dateDiff('month'"
+      : input.granularity === "week"
+        ? "dateDiff('week'"
+        : "dateDiff('day'";
+
+  const rows = await queryAnalytics<{ period: string; net_usd: string }>(
+    input.projectId,
+    `
+      WITH members AS (
+        SELECT subscriberId,
+               ${bucketFn}(min(eventDate)) AS join_bucket
+        FROM rovenue.raw_revenue_events FINAL
+        WHERE projectId = {projectId:String}
+          AND subscriberId IN ({memberIds:Array(String)})
+          AND (${compiled.whereSql})
+        GROUP BY subscriberId
+      )
+      SELECT
+        toString(${intervalFn}, m.join_bucket, ${bucketFn}(e.eventDate))) AS period,
+        toString(
+          sumIf(e.amountUsd, e.type NOT IN ('REFUND','CHARGEBACK'))
+          - sumIf(e.amountUsd, e.type IN ('REFUND','CHARGEBACK'))
+        ) AS net_usd
+      FROM rovenue.raw_revenue_events AS e FINAL
+      JOIN members AS m ON e.subscriberId = m.subscriberId
+      WHERE e.projectId = {projectId:String}
+        AND ${bucketFn}(e.eventDate) >= m.join_bucket
+        AND ${intervalFn}, m.join_bucket, ${bucketFn}(e.eventDate)) < {periods:UInt32}
+      GROUP BY period
+      ORDER BY toInt32(period) ASC
+    `,
+    {
+      ...compiled.params,
+      memberIds,
+      periods,
+    },
+  );
+
+  const byPeriod = new Map(rows.map((r) => [Number(r.period), Number(r.net_usd)]));
+
+  const points: CohortLtvCurve["points"] = [];
+  let cumulative = 0;
+  for (let p = 0; p < periods; p++) {
+    cumulative += byPeriod.get(p) ?? 0;
+    points.push({ period: p, cumulativeNetUsd: cumulative });
+  }
+
+  return { size, points };
+}
+
 export const __cohortsConstants = {
   MAX_PERIODS,
   DAY_MS,
+  DAY_GRAIN_MAX_DAYS,
+  WEEK_GRAIN_MAX_DAYS,
+  CATALOG_COHORT_PERIODS,
 };

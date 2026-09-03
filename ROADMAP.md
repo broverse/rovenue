@@ -9,7 +9,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 | 2 | Subscription state & entitlements | 85% | 95% |
 | 3 | Paywall builder & native rendering | 85% | 95% |
 | 4 | A/B testing & experiments | 88% | 90%+ |
-| 5 | Analytics (MRR / LTV / cohorts) | 93% | 95% |
+| 5 | Analytics (MRR / LTV / cohorts) | 95% | 95% ✅ |
 | 6 | Third-party integrations | 95% | 95% |
 | 7 | SDK platform coverage | 70% | 95% |
 | 8 | Self-hosting & data ownership | 95% | keep |
@@ -30,7 +30,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
    low priority, narrow scope)
 
 Integrations (§6) is effectively done as of Wave 2 (framework + webhook v2 +
-14 first-class providers across two waves, plus the vendor-agnostic CUSTOM_WEBHOOK escape hatch). Analytics (§5) is likewise mostly done — cohort
+14 first-class providers across two waves, plus the vendor-agnostic CUSTOM_WEBHOOK escape hatch). Analytics (§5) is CLOSED as of 2026-09-04 (all 16 catalog charts served) — cohort
 retention, churn/refund KPIs, predicted LTV, trial→paid, and the paywall
 funnel predate this plan; country revenue, estimated proceeds, and the
 metrics export are new but each has a documented partial-coverage edge.
@@ -191,7 +191,7 @@ deleted) that the four-gate stopping rule needed to exist at all.
       `REFUND_GUARDRAIL`, `EXPECTED_LOSS`, `NO_LEADER`, `PROCEEDS_RATE_UNCONFIGURED`) rather
       than a single opaque "not ready" state.
 
-## 5. Analytics (70 → 93) — catalog coverage closed 2026-09-03
+## 5. Analytics (70 → 95) — CLOSED 2026-09-04
 
 This section previously presented the entire area as unstarted. That framing
 was stale: cohort retention, churn/refund KPIs, predicted LTV, trial→paid,
@@ -276,8 +276,9 @@ nothing, but real net-new coverage on top of what was already there.
       dimension**, never merged into the store-supplied `country` column.
 - [x] Chart-catalog series coverage — shipped 2026-09-03
       (`.superpowers/sdd/2026-09-02-analytics-catalog-coverage/`). **12 of
-      16** catalog ids now return a real series and the export streams all
-      of them; it was 2 of 16. Every reader **delegates to the service that
+      16** catalog ids returned a real series and the export streamed all
+      of them; it was 2 of 16. The remaining four closed 2026-09-04 (next
+      item), taking it to 16 of 16. Every reader **delegates to the service that
       already owns the concept** and `charts.ts` contains no SQL of its
       own — a second query set drifts from the first, which is why the
       export was built to issue none. Where a daily grain did not exist it
@@ -287,37 +288,70 @@ nothing, but real net-new coverage on top of what was already there.
       out with `Promise.allSettled`, so **one failing reader emits its own
       `# error:` marker and every other series still streams** rather than
       truncating the file.
-- [ ] The four catalog ids that stay `supported: false` — each for a
-      different reason, and they should not be treated as one backlog item:
-      - **`rev_per_install`** — no install event exists anywhere in the
-        product. Needs SDK-side work first. It stays IN the catalog: all 16
-        ids have i18n labels, the dashboard already distinguishes
-        `supported: false` from "supported but no data", and
-        `isSystemChartId` is what reserves the id against a user-created
-        chart.
-      - **`liability`** — `readLiability` sums the *latest* per-subscriber
-        balances from Postgres. No balance history is retained anywhere, so
-        a 12-month line would be today's figure repeated or a
-        reconstruction no service owns. **The catalog advertises a time
-        series the data model does not keep.** `/credits` shows the real
-        current figure.
-      - **`retention_curve`** and **`ltv`** — these two share a root cause.
-        `ChartSeriesPoint.bucket` is a calendar date, but both metrics are
-        inherently **cohort-shaped**: `computeRetention` yields a cohort
-        matrix (rendered correctly by `/cohorts`), and
-        `v_revenue_lifetime_subscriber` groups by `projectId, subscriberId`
-        with **no day dimension at all** — `ltv`'s own label is "LTV by
-        cohort". Forcing either onto a date axis would ship a fabricated
-        series. **This is a catalog modelling gap, not a wiring gap**: the
-        catalog declares `chartType: "line"` for two metrics that are not
-        lines over dates. Whoever picks this up should start from that, not
-        from "wire two more readers".
-- Note on the schema-contract harness: `trials_started` and `churn` are
+- [x] The four catalog ids that stayed `supported: false` — **closed
+      2026-09-04** (`docs/superpowers/specs/2026-09-04-analytics-catalog-last-four-design.md`).
+      All **16 of 16** ids now return a measured series, and
+      `charts.catalog-coverage.test.ts` fails by name if a seventeenth is
+      ever added without a reader. They were not one item, and each of
+      the three earlier rulings turned out to be a different kind of
+      claim:
+      - **`rev_per_install`** — the ruling was "no install event exists
+        anywhere in the product; needs SDK-side work first". No SDK work
+        was needed, on any of the five platforms. `resolveOrCreateSubscriber`
+        is reachable ONLY from the SDK's public-key `/v1` surface, so
+        creating a subscriber there *is* an install — the product had
+        been recording it all along, in the `platform` attribute that
+        path writes on create and the importer is forbidden to touch
+        (`services/import/write.ts` rule 6). It is now a dedicated
+        `subscribers.sdkInstalledAt` column (migration 0116, backfilled
+        from that attribute) rather than a query over `attributes`,
+        because GDPR erasure clears attributes and an aggregate install
+        count must not shrink when a person is erased. The metric is
+        same-day net revenue ÷ same-day installs, with both inputs
+        exposed; `services/metrics/installs.ts` is the one definition of
+        an install in the codebase. Rows anonymized before the migration
+        stay NULL — not recoverable, not guessed.
+      - **`liability`** — the ruling was "no balance history is retained
+        anywhere, so a 12-month line would be today's figure repeated or
+        a reconstruction no service owns". `credit_ledger` retained it
+        the whole time: append-only, every row carrying the signed delta
+        *and* the balance after it. `getCreditLiabilityDaily` anchors on
+        today's authoritative outstanding total and walks it BACKWARDS
+        through the window's deltas — so the last point equals the
+        `/credits` gauge by construction, and the query reads no row
+        outside the window (a forward sum would silently lose its
+        opening balance the day an old monthly partition is detached).
+        Credits, not USD: the paid-reserve figure needs a window-derived
+        average credit price and has no historical meaning.
+      - **`retention_curve`** and **`ltv`** — this ruling was **right**,
+        and it named its own fix: a catalog modelling gap, not a wiring
+        gap. Both are lines over *periods since cohort start*, and
+        `ChartSeriesResponse` could only describe lines over calendar
+        dates. The contract now carries a required `axis` discriminator
+        (`"date" | "period"`) — required, not optional-with-a-default, so
+        the compiler walked every existing reader instead of letting a
+        period-shaped one ship claiming to be dated. Both ids serve
+        `axis: "period"` over the same fixed cohort (everyone whose first
+        revenue event falls in the window), so the two panels describe
+        one population; `ltv` is cumulative net revenue per cohort
+        member, from `computeCohortLtvCurve`, because
+        `v_revenue_lifetime_subscriber` has no day dimension to widen by
+        at all. `/cohorts` keeps the arbitrary-rule heatmap. The
+        catalog's long-standing `chartType: "line"` finally describes
+        both, and neither id nor type had to change.
+      The metrics export gained a `period` column for the two
+      period-axis ids — the long/tidy row format existing precisely so a
+      section with an unrelated grain gets its own column instead of
+      being bent into one that means something else.
+- Note on the schema-contract harness: `trials_started`, `churn`,
+  `liability` and the install half of `rev_per_install` are
   **Postgres-backed** and issue zero ClickHouse queries, so
   `schema-contract.integration.test.ts` cannot guard them — a `purchases`
-  column rename would break them with the harness still green. Their guard
-  is a separate real-Postgres integration test. "Registered in the harness"
-  does not mean "guarded" for those two.
+  or `subscribers` column rename would break them with the harness still
+  green. Each has a separate real-Postgres integration test instead
+  (`installs.integration.test.ts`,
+  `credits.liability-daily.integration.test.ts`). "Registered in the
+  harness" does not mean "guarded" for those four.
 
 ## 6. Third-party integrations (75 → 95) — CLOSED 2026-09-03
 

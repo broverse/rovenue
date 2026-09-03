@@ -54,6 +54,12 @@ const COLUMNS = [
   "chart_id",
   "store",
   "bucket",
+  // Cohort-shaped series (retention_curve, ltv) have no calendar date
+  // at all — they carry a 0-based period since cohort start instead.
+  // The long/tidy row format exists precisely so a section with an
+  // unrelated grain gets its own column rather than being bent into
+  // one that means something else.
+  "period",
   "dow",
   "hour",
   "step",
@@ -79,6 +85,8 @@ export interface MetricsExportRow {
   chartId: string | null;
   store: string | null;
   bucket: string | null;
+  /** Set only for a period-axis series row; `bucket` is null there. */
+  period: number | null;
   dow: number | null;
   hour: number | null;
   step: string | null;
@@ -112,7 +120,10 @@ export interface MetricsExportSummary {
 function baseRow(
   fields: Pick<MetricsExportRow, "kind" | "metric" | "value" | "unit"> &
     Partial<
-      Pick<MetricsExportRow, "chartId" | "store" | "bucket" | "dow" | "hour" | "step">
+      Pick<
+        MetricsExportRow,
+        "chartId" | "store" | "bucket" | "period" | "dow" | "hour" | "step"
+      >
     >,
 ): MetricsExportRow {
   return {
@@ -120,6 +131,7 @@ function baseRow(
     chartId: fields.chartId ?? null,
     store: fields.store ?? null,
     bucket: fields.bucket ?? null,
+    period: fields.period ?? null,
     dow: fields.dow ?? null,
     hour: fields.hour ?? null,
     step: fields.step ?? null,
@@ -276,6 +288,22 @@ const SERIES_UNIT_TO_EXPORT_UNIT: Record<
 
 function seriesToRows(r: ChartSeriesResponse): MetricsExportRow[] {
   if (!r.supported) return [];
+  // A period-axis series fills `period` and leaves `bucket` empty: it
+  // has no calendar date, and writing the period index into a column
+  // documented as a date is the fabrication ChartSeriesAxis exists to
+  // prevent.
+  if (r.axis === "period") {
+    return r.points.map((p) =>
+      baseRow({
+        kind: "series",
+        chartId: r.chartId,
+        period: p.period,
+        metric: "value",
+        value: p.value === null ? "" : String(p.value),
+        unit: SERIES_UNIT_TO_EXPORT_UNIT[r.unit],
+      }),
+    );
+  }
   return r.points.map((p) =>
     baseRow({
       kind: "series",
@@ -298,6 +326,7 @@ export function formatMetricsExportRow(r: MetricsExportRow): string {
     r.chartId ?? "",
     r.store ?? "",
     r.bucket ?? "",
+    numOrBlank(r.period),
     numOrBlank(r.dow),
     numOrBlank(r.hour),
     r.step ?? "",

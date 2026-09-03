@@ -19,7 +19,14 @@ import {
   isClickHouseConfigured,
   queryAnalytics,
 } from "../../lib/clickhouse";
-import { getCreditBurnDaily } from "./credits";
+import {
+  catalogCohortRule,
+  catalogCohortShape,
+  computeCohortLtvCurve,
+  computeRetention,
+} from "../cohorts";
+import { getCreditBurnDaily, getCreditLiabilityDaily } from "./credits";
+import { getInstallsDaily } from "./installs";
 import { listDailyMrr, type MrrPoint } from "./mrr";
 import { computeNetRevenue, computeProceedsForProject } from "./proceeds";
 import { getMrrDecompositionDailyCounts } from "./mrr-decomposition";
@@ -598,65 +605,98 @@ export function buildCountSeriesPoints(
   return points;
 }
 
+/**
+ * One point per day of net revenue ÷ installs — the `rev_per_install`
+ * arithmetic, kept here beside `buildRatePoints` for the same reason:
+ * this repo cannot run ClickHouse in tests, so arithmetic that lives in
+ * TypeScript is arithmetic that can be proven.
+ *
+ * Zero installs is an UNDEFINED average, not a $0 one, so the day is
+ * `null` — matching `arpu` and `buildRatePoints`. Zero revenue on a day
+ * that HAD installs is a measured 0. Both inputs are reported so the
+ * panel can show "$120 ÷ 4 installs".
+ */
+export function buildPerInstallPoints(
+  mrrRows: MrrPoint[],
+  installRows: ReadonlyArray<{ day: string; n: number }>,
+  from: Date,
+  to: Date,
+): ChartSeriesPoint[] {
+  const netByDay = new Map(
+    mrrRows.map((r) => [toDateOnly(r.bucket), Number(r.netUsd)]),
+  );
+  const installsByDay = new Map(installRows.map((r) => [r.day, r.n]));
+
+  const points: ChartSeriesPoint[] = [];
+  const cursor = new Date(from);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setUTCHours(0, 0, 0, 0);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const key = toDateOnly(cursor);
+    const net = netByDay.get(key) ?? 0;
+    const installs = installsByDay.get(key) ?? 0;
+    points.push({
+      bucket: new Date(cursor).toISOString(),
+      value: installs > 0 ? net / installs : null,
+      numerator: net,
+      denominator: installs,
+    });
+    cursor.setTime(cursor.getTime() + DAY_MS);
+  }
+
+  return points;
+}
+
 // =============================================================
 // Generic chart series — paywall reach/conversion and revenue
 // =============================================================
 //
-// Twelve of the sixteen catalog charts are wired (paywall_view_rate,
-// paywall_purchase, mrr, arr, gross_vs_net, arpu — the last four
-// delegate to `listDailyMrr`, see buildMrrSeriesPoints below — plus
-// new_subs, reactivations, trials_started, churn — task-3's
-// subscription-lifecycle group, all four daily COUNTS, see
-// buildCountSeriesPoints above — plus trial_to_paid, task-4, also a
-// daily COUNT, see getTrialConversionsDaily's doc comment in
-// summary.ts for why a rate isn't shipped — plus credit_burn, task-5,
-// also a daily COUNT, delegating to credits.ts's getCreditBurnDaily,
-// see the case below and getCreditBurnDaily's doc comment for the
-// `burned` sign convention). Every other id
-// answers `supported: false` so the dashboard renders an empty
-// state rather than another chart's data. `readChartSeries`'s
-// `switch` is the ONLY dispatch mechanism (no separate id allow-list)
-// so a chart id can never be "in the supported set" yet fall through
-// to another chart's reader — the two can't disagree if there's only
-// one of them. Its `default` case must return with ZERO ClickHouse
-// queries issued, `paywall_purchase`'s data leaking out under
-// `churn`'s name (or any other id's) is exactly the bug this
-// dispatch exists to prevent.
+// ALL SIXTEEN catalog ids have a reader (2026-09-04;
+// charts.catalog-coverage.test.ts fails by name if a seventeenth ever
+// ships without one). `readChartSeries`'s `switch` is the ONLY dispatch
+// mechanism — no separate id allow-list — so an id can never be "in the
+// supported set" yet fall through to another chart's reader; the two
+// cannot disagree if there is only one of them. The `default` case must
+// return with ZERO ClickHouse queries issued: `paywall_purchase`'s data
+// leaking out under `churn`'s name is exactly the bug this dispatch
+// exists to prevent. It still answers `supported: false`, for an id the
+// dispatcher does not know — a custom chart, or a typo.
 //
-// TWO IDS DELIBERATELY STAY UNWIRED (task 4, controller ruling — see
-// task-4-report.md for the full reasoning):
+// Every case delegates to the service that OWNS the concept; this file
+// contains no SQL of its own beyond the four bespoke panel readers
+// above. Where a daily grain did not exist it was added inside the
+// owning service, never here.
 //
-//   - `retention_curve`: `computeRetention` (`services/cohorts.ts`)
-//     produces a cohort × PERIOD-SINCE-JOIN matrix, not a per-CALENDAR-
-//     DAY series. `ChartSeriesPoint.bucket` is documented as a calendar
-//     date; forcing periods-since-cohort-start onto it would fabricate
-//     dates that don't mean what the field says they mean. `/cohorts`
-//     already renders the real matrix as a heatmap — that is this
-//     metric's surface, not this dispatcher. The catalog's declared
-//     `chartType: "line"` for this id does not describe the data (see
-//     chart-catalog.ts's comment at the entry); that mismatch is
-//     recorded for product to resolve, not silently "fixed" here.
-//   - `ltv`: every owning service was checked for a day column.
-//     `getLtvDistribution` (ltv.ts) and `getRevenueSummary.avgLtvUsd`
-//     both read `v_revenue_lifetime_subscriber`, a view with no
-//     `eventDate`/day column at all (`GROUP BY projectId, subscriberId`
-//     — see its migration, 0013/0014) — a lifetime-to-date snapshot per
-//     subscriber, not a dated event log, so there is no "day" to widen
-//     by. `getLtvPrediction`/`computeLtvPrediction` (ltv-prediction.ts /
-//     ltv-extrapolation.ts) are cohort-MONTH based (sparse, one point
-//     per acquisition month, not one per calendar day) and otherwise
-//     return a single blended scalar — also not a daily series. No
-//     in-file widening produces a daily average LTV from any of them.
+// THE FOUR THAT TOOK LONGEST, and what changed to make each possible —
+// each had been ruled unbuildable, and each ruling was about a
+// different thing:
 //
-// A THIRD ID STAYS UNWIRED FOR A DIFFERENT REASON (task 5, controller
-// Ruling 3 — see task-5-report.md): `liability`. `readLiability`
-// (credits.ts) sums the LATEST per-subscriber balances from Postgres —
-// a snapshot, not a dated series — and no balance history exists
-// anywhere to reconstruct one from. A 12-month line would have to be
-// either today's figure repeated 365 times or a reconstruction the
-// credit ledger doesn't own; both are fabrications. See
-// chart-catalog.ts's comment at the `liability` entry for the full
-// reasoning; the id and its `chartType` are unchanged (Task 8's call).
+//   - `rev_per_install` (2026-09-04): ruled "no install event exists
+//     anywhere in the product; needs SDK-side work first". No SDK work
+//     was needed. `resolveOrCreateSubscriber` is reachable only from the
+//     SDK's public-key /v1 surface, so creating a subscriber there IS an
+//     install; it now stamps `subscribers.sdkInstalledAt`, and the
+//     column was backfilled from the `platform` attribute the same path
+//     had always written. See services/metrics/installs.ts, which is the
+//     one definition of an install in the codebase.
+//   - `liability` (2026-09-04): ruled "no balance history is retained
+//     anywhere, so a line would be fabricated". `credit_ledger` retains
+//     it — append-only, with both the signed delta and the balance after
+//     it on every row. `getCreditLiabilityDaily` walks today's
+//     authoritative outstanding figure backwards through the window's
+//     deltas, so the last point equals the /credits gauge by
+//     construction. Postgres only: this case issues no CH query.
+//   - `retention_curve` and `ltv` (2026-09-04): ruled cohort-shaped, and
+//     that ruling was RIGHT — both are lines over periods since cohort
+//     start, not over calendar dates, and forcing them onto
+//     `ChartSeriesPoint.bucket` would have fabricated dates. What was
+//     missing was a way for a response to SAY so. `ChartSeriesAxis`
+//     (@rovenue/shared) now does; both ids serve `axis: "period"`, and
+//     the catalog's long-standing `chartType: "line"` finally describes
+//     them. `/cohorts` keeps the arbitrary-rule heatmap — this is the
+//     catalog's fixed-cohort view of the same data.
 
 /**
  * Revenue event type counted in the `paywall_purchase` numerator.
@@ -819,6 +859,11 @@ export async function readChartSeries(
     chartId,
     from: w.from.toISOString(),
     to: w.to.toISOString(),
+    // Every daily reader inherits this; the two cohort readers below
+    // override it with `axis: "period"`. See ChartSeriesAxis in
+    // @rovenue/shared for why the field is required rather than
+    // defaulted.
+    axis: "date" as const,
   };
 
   switch (chartId) {
@@ -954,6 +999,31 @@ export async function readChartSeries(
       };
     }
 
+    case "rev_per_install": {
+      // Net revenue ÷ installs, per day. The numerator is the same
+      // `listDailyMrr` column `arpu` and `gross_vs_net` already read —
+      // no second revenue query — and the denominator is installs.ts,
+      // the only definition of an install in the codebase.
+      //
+      // SAME-DAY over SAME-DAY, deliberately: this is a daily
+      // efficiency ratio, not lifetime revenue attributed to an install
+      // cohort. The cohort-attributed question is exactly what the
+      // `ltv` curve answers (see the cohort group below), so the two are
+      // complements and neither reader has to invent an attribution
+      // model. Both inputs ride along as numerator/denominator.
+      assertClickHouseReady();
+      const [mrrRows, installRows] = await Promise.all([
+        listDailyMrr({ projectId, from: w.from, to: w.to }),
+        getInstallsDaily({ projectId, from: w.from, to: w.to }),
+      ]);
+      return {
+        ...base,
+        unit: "money",
+        points: buildPerInstallPoints(mrrRows, installRows, w.from, w.to),
+        supported: true,
+      };
+    }
+
     // =============================================================
     // Subscription-lifecycle group (task-3): new_subs, reactivations,
     // trials_started, churn.
@@ -1063,15 +1133,8 @@ export async function readChartSeries(
     }
 
     // =============================================================
-    // Credits group (task-5): credit_burn.
+    // Credits group: credit_burn (CH) and liability (PG).
     // =============================================================
-    //
-    // `liability` is deliberately NOT a case here — see this file's
-    // header comment ("A THIRD ID STAYS UNWIRED...") and the comment at
-    // chart-catalog.ts's `liability` entry for the full reasoning
-    // (controller Ruling 3: it's a Postgres balance snapshot, not a
-    // dated series, and fabricating history would be worse than an
-    // honest `supported: false`).
 
     case "credit_burn": {
       // Credits spent per day. No new SQL: credits.ts's `readVolume`
@@ -1095,10 +1158,106 @@ export async function readChartSeries(
       };
     }
 
+    // =============================================================
+    // Cohort group: retention_curve and ltv.
+    // =============================================================
+    //
+    // The only two ids on a PERIOD axis. They are lines — the catalog
+    // has always said so — but lines over periods since cohort start,
+    // not over calendar dates, which is why they could not be served
+    // until `ChartSeriesAxis` existed to say which. Both use the same
+    // fixed cohort (see catalogCohortRule in services/cohorts.ts), so
+    // the two panels describe the same population.
+
+    case "retention_curve": {
+      assertClickHouseReady();
+      const shape = catalogCohortShape(w.days);
+      const r = await computeRetention({
+        projectId,
+        rule: catalogCohortRule(w.from, w.to),
+        granularity: shape.granularity,
+        periods: shape.periods,
+      });
+      return {
+        ...base,
+        axis: "period",
+        periodGranularity: shape.granularity,
+        unit: "percent",
+        // An empty cohort has an UNDEFINED retention, not a 0% one —
+        // the same distinction buildRatePoints draws for a zero
+        // denominator.
+        points: r.points.map((p) => ({
+          period: p.period,
+          value: r.size > 0 ? p.pct : null,
+          numerator: p.active,
+          denominator: r.size,
+        })),
+        supported: true,
+      };
+    }
+
+    case "ltv": {
+      // Cumulative net revenue per cohort MEMBER at each period — the
+      // standard LTV curve. `v_revenue_lifetime_subscriber` (the view
+      // behind `getLtvDistribution` and `avgLtvUsd`) cannot produce
+      // this: it has no day dimension at all. See computeCohortLtvCurve.
+      assertClickHouseReady();
+      const shape = catalogCohortShape(w.days);
+      const curve = await computeCohortLtvCurve({
+        projectId,
+        rule: catalogCohortRule(w.from, w.to),
+        granularity: shape.granularity,
+        periods: shape.periods,
+      });
+      return {
+        ...base,
+        axis: "period",
+        periodGranularity: shape.granularity,
+        unit: "money",
+        points: curve.points.map((p) => ({
+          period: p.period,
+          value: curve.size > 0 ? p.cumulativeNetUsd / curve.size : null,
+          numerator: p.cumulativeNetUsd,
+          denominator: curve.size,
+        })),
+        supported: true,
+      };
+    }
+
+    case "liability": {
+      // Outstanding credit balance per day, from credits.ts — the
+      // service that owns the gauge this line has to end on.
+      //
+      // NO assertClickHouseReady() here, deliberately: the ledger is
+      // Postgres and a blank ClickHouse must not blank this chart. Same
+      // position as `trials_started` and `churn`.
+      //
+      // Unit is `count`, not `money`: credits are a unit of account
+      // (the same ruling `credit_burn` carries above). The rollup's
+      // USD reserve figure is not reconstructible historically — see
+      // getCreditLiabilityDaily's doc comment.
+      const rows = await getCreditLiabilityDaily(projectId, {
+        from: w.from,
+        to: w.to,
+        days: w.days,
+      });
+      return {
+        ...base,
+        unit: "count",
+        points: buildCountSeriesPoints(rows, w.from, w.to),
+        supported: true,
+      };
+    }
+
     default:
-      // Not an error: most of the catalog simply has no reader yet.
-      // No `assertClickHouseReady()` and no query above this line —
-      // an unsupported id must cost zero ClickHouse round-trips.
+      // Not an error, and no longer the catalog's normal state: every
+      // SYSTEM id has a reader (chart-catalog.test.ts asserts it). This
+      // is the answer for an id the dispatcher does not know — a custom
+      // chart, or a typo.
+      //
+      // No `assertClickHouseReady()` and no query above this line — an
+      // unsupported id must cost zero ClickHouse round-trips, or one
+      // chart's data leaks out under another's name.
       return { ...base, unit: "count", points: [], supported: false };
   }
 }

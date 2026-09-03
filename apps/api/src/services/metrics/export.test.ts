@@ -63,6 +63,7 @@ const EMPTY_HEATMAP: ChartHeatmapResponse = { windowDays: 28, cells: [] };
 function unsupportedSeries(chartId: string): ChartSeriesResponse {
   return {
     chartId,
+    axis: "date",
     unit: "count",
     from: "2026-07-01T00:00:00.000Z",
     to: "2026-07-28T00:00:00.000Z",
@@ -158,6 +159,7 @@ describe("streamMetricsExportCsv", () => {
         if (chartId === "paywall_view_rate") {
           return {
             chartId,
+            axis: "date",
             unit: "percent",
             from: "2026-07-01T00:00:00.000Z",
             to: "2026-07-02T00:00:00.000Z",
@@ -181,35 +183,35 @@ describe("streamMetricsExportCsv", () => {
     );
 
     expect(lines[0]).toBe(
-      "kind,chart_id,store,bucket,dow,hour,step,metric,value,unit\n",
+      "kind,chart_id,store,bucket,period,dow,hour,step,metric,value,unit\n",
     );
     const body = lines.slice(1).join("");
 
     // channels: gross_usd, pct, event_count
-    expect(body).toContain("channels,,APP_STORE,,,,,gross_usd,100.0000,usd\n");
-    expect(body).toContain("channels,,APP_STORE,,,,,pct,100,percent\n");
-    expect(body).toContain("channels,,APP_STORE,,,,,event_count,3,count\n");
+    expect(body).toContain("channels,,APP_STORE,,,,,,gross_usd,100.0000,usd\n");
+    expect(body).toContain("channels,,APP_STORE,,,,,,pct,100,percent\n");
+    expect(body).toContain("channels,,APP_STORE,,,,,,event_count,3,count\n");
 
     // proceeds: configured-rate store carries a real rate/proceeds
-    expect(body).toContain("proceeds,,APP_STORE,,,,,rate,0.15,ratio\n");
+    expect(body).toContain("proceeds,,APP_STORE,,,,,,rate,0.15,ratio\n");
     expect(body).toContain(
-      "proceeds,,APP_STORE,,,,,proceeds_usd,85.0000,usd\n",
+      "proceeds,,APP_STORE,,,,,,proceeds_usd,85.0000,usd\n",
     );
     // unconfigured-rate store: BOTH rate and proceeds_usd blank, never a
     // silent 0% (mirrors readProceeds's own null-together contract)
-    expect(body).toContain("proceeds,,PLAY_STORE,,,,,rate,,ratio\n");
-    expect(body).toContain("proceeds,,PLAY_STORE,,,,,proceeds_usd,,usd\n");
+    expect(body).toContain("proceeds,,PLAY_STORE,,,,,,rate,,ratio\n");
+    expect(body).toContain("proceeds,,PLAY_STORE,,,,,,proceeds_usd,,usd\n");
 
     // funnel
-    expect(body).toContain("funnel,,,,,,purchase,count,10,count\n");
-    expect(body).toContain("funnel,,,,,,purchase,pct,100,percent\n");
+    expect(body).toContain("funnel,,,,,,,purchase,count,10,count\n");
+    expect(body).toContain("funnel,,,,,,,purchase,pct,100,percent\n");
 
     // heatmap
-    expect(body).toContain("heatmap,,,,1,9,,count,4,count\n");
+    expect(body).toContain("heatmap,,,,,1,9,,count,4,count\n");
 
     // series: only the supported chart id produces rows
     expect(body).toContain(
-      "series,paywall_view_rate,,2026-07-01T00:00:00.000Z,,,,value,42,percent\n",
+      "series,paywall_view_rate,,2026-07-01T00:00:00.000Z,,,,,value,42,percent\n",
     );
     const unsupportedIds = [...SYSTEM_CHART_IDS].filter(
       (id) => id !== "paywall_view_rate",
@@ -222,6 +224,42 @@ describe("streamMetricsExportCsv", () => {
     expect(summary.rowCount).toBeGreaterThan(0);
   });
 
+  it("emits a period, and no bucket, for a cohort-axis series", async () => {
+    // retention_curve/ltv have no calendar date at all. The row must
+    // carry the period index in its own column and leave `bucket`
+    // blank — writing a period into a date column is the exact
+    // fabrication ChartSeriesAxis exists to prevent.
+    resetMocksToEmpty();
+    readChartSeriesMock.mockImplementation(
+      async (_projectId: string, chartId: string) => {
+        if (chartId === "retention_curve") {
+          return {
+            chartId,
+            axis: "period",
+            periodGranularity: "week",
+            unit: "percent",
+            from: "2026-07-01T00:00:00.000Z",
+            to: "2026-07-28T00:00:00.000Z",
+            points: [
+              { period: 0, value: 100, numerator: 200, denominator: 200 },
+              { period: 1, value: 41, numerator: 82, denominator: 200 },
+            ],
+            supported: true,
+          } satisfies ChartSeriesResponse;
+        }
+        return unsupportedSeries(chartId);
+      },
+    );
+
+    const { lines } = await drain(
+      streamMetricsExportCsv({ projectId: "proj_1", windowDays: 28 }),
+    );
+    const body = lines.slice(1).join("");
+
+    expect(body).toContain("series,retention_curve,,,0,,,,value,100,percent\n");
+    expect(body).toContain("series,retention_curve,,,1,,,,value,41,percent\n");
+  });
+
   it("maps a series response's money unit to this export's own 'usd' vocabulary (task-2 revenue ids)", async () => {
     resetMocksToEmpty();
     readChartSeriesMock.mockImplementation(
@@ -229,6 +267,7 @@ describe("streamMetricsExportCsv", () => {
         if (chartId === "mrr") {
           return {
             chartId,
+            axis: "date",
             unit: "money",
             from: "2026-07-01T00:00:00.000Z",
             to: "2026-07-01T00:00:00.000Z",
@@ -248,7 +287,7 @@ describe("streamMetricsExportCsv", () => {
     // "money" (ChartSeriesResponse's vocabulary) becomes "usd" (this
     // export's vocabulary) — never passed through raw as "money".
     expect(body).toContain(
-      "series,mrr,,2026-07-01T00:00:00.000Z,,,,value,500,usd\n",
+      "series,mrr,,2026-07-01T00:00:00.000Z,,,,,value,500,usd\n",
     );
     expect(body).not.toContain(",money\n");
   });
@@ -338,6 +377,7 @@ describe("streamMetricsExportCsv", () => {
         if (chartId === SURVIVING_ID) {
           return {
             chartId,
+            axis: "date",
             unit: "count",
             from: "2026-07-01T00:00:00.000Z",
             to: "2026-07-02T00:00:00.000Z",
@@ -368,7 +408,7 @@ describe("streamMetricsExportCsv", () => {
     // order still streamed its real data. This is the crux of the
     // proof: the failure did not truncate the rest of the export.
     expect(body).toContain(
-      `series,${SURVIVING_ID},,2026-07-01T00:00:00.000Z,,,,value,7,count\n`,
+      `series,${SURVIVING_ID},,2026-07-01T00:00:00.000Z,,,,,value,7,count\n`,
     );
 
     // The export completes normally (not truncated) and names the

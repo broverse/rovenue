@@ -20,11 +20,12 @@ import type {
 // renders as the raw key in the rail, so a new entry here is not
 // finished until en.json has its label.
 //
-// Selecting an entry renders the `/series/:chartId` panel. Most ids
-// here have no `readChartSeries` reader YET and show "not wired to a
-// data source" until one lands (ROADMAP §5 tracks that) — that is a
-// pending state, not a wrong one, because every id in this list is a
-// daily series the dispatcher will eventually serve.
+// Selecting an entry renders the `/series/:chartId` panel, and every id
+// here has a `readChartSeries` reader — charts.catalog-coverage.test.ts
+// fails by name if one is added without. Fourteen are daily series; two
+// (`retention_curve`, `ltv`) are cohort-period curves and say so via the
+// response's `axis`. "Not wired to a data source" is now reachable only
+// for an id the dispatcher does not know.
 //
 // `estimated_proceeds` is deliberately NOT in this list, because it is
 // not that: it is a per-store breakdown whose whole point is showing a
@@ -49,51 +50,41 @@ const SYSTEM_CATALOG: ReadonlyArray<SystemChart> = [
   { id: "mrr", category: "revenue", chartType: "area", range: "12M", config: {} },
   { id: "arr", category: "revenue", chartType: "line", range: "12M", config: {} },
   { id: "arpu", category: "revenue", chartType: "line", range: "12M", config: {} },
+  // Net revenue ÷ installs. "Install" means one thing only, defined in
+  // services/metrics/installs.ts: a subscriber row created by the SDK's
+  // public-key /v1 surface (`subscribers.sdkInstalledAt`). Importer- and
+  // webhook-created rows are not installs and are not counted.
   { id: "rev_per_install", category: "revenue", chartType: "line", range: "12M", config: {} },
   { id: "gross_vs_net", category: "revenue", chartType: "area", range: "12M", config: {} },
   { id: "new_subs", category: "growth", chartType: "bar", range: "6M", config: {} },
   { id: "trials_started", category: "growth", chartType: "bar", range: "6M", config: {} },
   { id: "reactivations", category: "growth", chartType: "line", range: "6M", config: {} },
   { id: "churn", category: "retention", chartType: "line", range: "12M", config: {} },
-  // NOT wired (task 4, controller Ruling 4 — do not wire, do not change
-  // this id or its chartType, that's Task 8's job). `computeRetention`
-  // (services/cohorts.ts) produces a cohort × period-since-join matrix;
-  // its x-axis is periods since cohort start (0, 7, 30…), not a
-  // calendar date. `ChartSeriesPoint.bucket` is documented as an ISO
-  // calendar date (dashboard.ts:877-879), so this declared
-  // `chartType: "line"` does not describe this metric — forcing the
-  // matrix into a daily-bucket line would fabricate dates. `/cohorts`
-  // already renders the real matrix correctly as a heatmap; that is
-  // this metric's surface, not `/series/:chartId`.
+  // PERIOD axis, not a date one: `computeRetention` (services/cohorts.ts)
+  // yields points indexed by periods since cohort start. `chartType:
+  // "line"` is accurate — it is a line, over periods — and the response
+  // says which via `ChartSeriesAxis` (@rovenue/shared). It was
+  // unsupported until 2026-09-04 only because that discriminator did not
+  // exist; the catalog id and its declared type never changed.
   { id: "retention_curve", category: "retention", chartType: "line", range: "12M", config: {} },
-  // NOT wired (task 4): every owning service was checked for a day
-  // column and none has one. `getLtvDistribution` (ltv.ts) and
-  // `getRevenueSummary.avgLtvUsd` both read
-  // `v_revenue_lifetime_subscriber`, a lifetime-to-date snapshot per
-  // subscriber with no `eventDate` — there is no day to widen by.
-  // `getLtvPrediction` (ltv-prediction.ts/ltv-extrapolation.ts) is
-  // cohort-MONTH based and otherwise returns one blended scalar,
-  // neither of which is a daily series either. See charts.ts's
-  // dispatcher-header comment for the full reasoning.
+  // PERIOD axis too, and the same fixed cohort as `retention_curve` so
+  // the two panels describe one population. Cumulative net revenue per
+  // cohort member at each period — `computeCohortLtvCurve`, not
+  // `v_revenue_lifetime_subscriber`, which groups by (projectId,
+  // subscriberId) and has no day dimension to widen by at all.
   { id: "ltv", category: "retention", chartType: "line", range: "12M", config: {} },
   { id: "trial_to_paid", category: "conversion", chartType: "line", range: "6M", config: {} },
   { id: "paywall_view_rate", category: "conversion", chartType: "line", range: "6M", config: {} },
   { id: "paywall_purchase", category: "conversion", chartType: "line", range: "6M", config: {} },
   { id: "credit_burn", category: "credits", chartType: "area", range: "6M", config: {} },
-  // NOT wired (task 5, controller Ruling 3 — see task-5-report.md).
-  // `readLiability` (services/metrics/credits.ts) sums the LATEST
-  // per-subscriber balances straight from Postgres — a present-day
-  // snapshot, not a dated event log — and no balance-history table
-  // exists anywhere to derive a trend from. A 12-month line here would
-  // have to be either today's single figure repeated across every
-  // bucket or a reconstruction from credit_ledger that no service
-  // owns; both are fabricated data, not a measured series. `/credits`
-  // already shows the real, current liability figure (and its
-  // paid/promo/transfer composition) via `getCreditsRollup` — that is
-  // this metric's honest surface. Left `chartType: "line"` and the id
-  // itself untouched: reconciling the catalog's declared shape with
-  // what the data model can actually support is Task 8's job, not
-  // this reader's.
+  // Daily outstanding credit balance, from `getCreditLiabilityDaily`
+  // (services/metrics/credits.ts). Ruled unbuildable on 2026-09-03 for
+  // want of balance history; `credit_ledger` had it all along —
+  // append-only, every row carrying the signed delta AND the balance
+  // after it. The series is anchored on today's authoritative figure and
+  // walked backwards, so its last point IS the number /credits shows.
+  // Credits, not USD: the rollup's paid-reserve figure needs a
+  // window-derived average credit price and has no historical meaning.
   { id: "liability", category: "credits", chartType: "line", range: "12M", config: {} },
 ];
 
