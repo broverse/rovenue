@@ -578,6 +578,19 @@
       "confirm": "Delete project"
     }
   },
+  "commissionRates": {
+    "header": "Store commission rates",
+    "description": "Rovenue never assumes a commission rate. Configure one per store to turn on proceeds estimates — a store with no rate keeps reporting \"not configured\" everywhere in the dashboard.",
+    "loading": "Loading…",
+    "rateLabel": "Commission rate",
+    "percentPlaceholder": "e.g. 15",
+    "configuredAt": "{{rate}}% configured",
+    "save": "Save rate",
+    "clear": "Clear",
+    "usePreset": "Use this preset",
+    "fetchedOn": "Sourced {{date}}",
+    "invalidPercent": "Enter a percentage between 0 and 100."
+  },
   "settings": {
     "tabs": {
       "aria": "Settings sections",

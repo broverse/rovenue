@@ -1,5 +1,11 @@
 import { drizzle } from "@rovenue/db";
 import type { Db, Store } from "@rovenue/db";
+import {
+  COMMISSION_RATE_PRESETS,
+  type CommissionRatePreset,
+} from "@rovenue/shared";
+
+export { COMMISSION_RATE_PRESETS, type CommissionRatePreset };
 
 // =============================================================
 // Proceeds after store commission — query-time only
@@ -37,61 +43,14 @@ import type { Db, Store } from "@rovenue/db";
 // Commission rate presets
 // =============================================================
 //
-// Values are the currently published headline rates, cited at the point
-// of use below. They are never applied automatically, and a project
-// always needs an explicit configured row (see rule 3 above).
-//
-// STATUS: nothing outside this module's own test reads these yet. There
-// is no commission-rate settings UI — a rate is configured only through
-// `PUT /dashboard/projects/:projectId/commission-rates/:store` — so these
-// are a sourced reference for whoever builds that screen, not a shipped
-// feature. Do not describe them as offered to users until a caller
-// exists (ROADMAP §5 tracks the UI).
-
-export const COMMISSION_RATE_PRESETS = {
-  /**
-   * App Store Small Business Program: 15% commission (85% net revenue)
-   * for developers who earned ≤$1M USD in proceeds account-wide in the
-   * prior calendar year (re-qualifies annually).
-   * Source: https://developer.apple.com/app-store/small-business-program/
-   * ("a reduced commission rate of 15% on paid apps and In-App
-   * Purchases") and https://developer.apple.com/app-store/subscriptions/
-   * ("If you're currently enrolled in the App Store Small Business
-   * Program, you receive 85% of the subscription price at each billing
-   * cycle... regardless of whether or not the subscription has
-   * accumulated one year of paid service."). Fetched 2026-09-01.
-   */
-  APPLE_SMALL_BUSINESS: 0.15,
-  /**
-   * App Store standard commission: 30% (70% net revenue) during a
-   * subscriber's first year of paid service (and the default rate for
-   * one-time IAP/paid apps outside the Small Business Program).
-   * Source: https://developer.apple.com/app-store/subscriptions/
-   * ("During a subscriber's first year of service, you receive 70% of
-   * the subscription price at each billing cycle, minus applicable
-   * taxes."). Fetched 2026-09-01. (Apple also drops subscriptions to a
-   * 15% rate after a full year of paid service — a THIRD tier this
-   * module deliberately does not add a dedicated preset for, matching
-   * the brief's "two Apple tiers"; a project in that state uses a
-   * CUSTOM rate.)
-   */
-  APPLE_STANDARD: 0.3,
-  /**
-   * Google Play service fee for auto-renewing subscriptions: a flat 15%
-   * regardless of the developer's annual revenue (unlike Google's
-   * non-subscription tiers, which step from 15% to 30% at the $1M/year
-   * mark). Chosen as "the Google equivalent" preset because Rovenue is a
-   * subscription/credit-management product — this is the rate that
-   * applies to the transactions this project actually tracks.
-   * Source: https://support.google.com/googleplay/android-developer/answer/112622
-   * ("Subscriptions: 15% for automatically renewing subscription
-   * products purchased by subscribers, regardless of revenue earned by
-   * the developer each year."). Fetched 2026-09-01.
-   */
-  GOOGLE_STANDARD: 0.15,
-} as const;
-
-export type CommissionRatePreset = keyof typeof COMMISSION_RATE_PRESETS;
+// Values, citations, and the `CommissionRatePresetOption[]` shown to
+// operators all live in `@rovenue/shared`'s `commission-rates.ts` — the
+// single source both this module and the dashboard's commission-rate
+// settings form (`apps/dashboard/src/components/projects/SettingsForm.tsx`)
+// read from. `COMMISSION_RATE_PRESETS`/`CommissionRatePreset` above are
+// re-exported from there so existing callers of this module are
+// unaffected. They are never applied automatically — a project always
+// needs an explicit configured row (see rule 3 above).
 
 // =============================================================
 // Pure arithmetic

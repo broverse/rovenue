@@ -197,6 +197,14 @@ export * from "./dashboard";
 export * from "./billing";
 
 // =============================================================
+// Store commission-rate presets (single source of truth — see
+// commission-rates.ts's header). apps/api's proceeds.ts re-exports
+// these rather than declaring its own copy.
+// =============================================================
+
+export * from "./commission-rates";
+
+// =============================================================
 // Onboarding funnel — page/branching/settings Zod schemas
 // =============================================================
 
