@@ -57,6 +57,9 @@ Revenue keys ride Iterable's `commerce/trackPurchase` endpoint, which has no ven
 | `subscription.grace_period` | `events/track` | `rovenue_subscription_grace_period` |
 | `subscription.uncancelled` | `events/track` | `rovenue_subscription_uncancelled` |
 | `subscription.product_changed` | `events/track` | `rovenue_subscription_product_changed` |
+| `subscription.paused` | `paused` |
+| `subscription.recovered` | `recovered` |
+| `subscription.revoked` | `revoked` |
 
 Every `trackPurchase` and `events/track` request carries `id` set to Rovenue's own outbox event id, which Iterable uses as its own idempotency key for that record — re-delivering the same event updates the existing Iterable record instead of duplicating it. Every `events/track` request also carries `dataFields.rovenue_event` (the original Rovenue event key) and `dataFields.product_id` when known, so you can trace an Iterable custom event back to its Rovenue source.
 

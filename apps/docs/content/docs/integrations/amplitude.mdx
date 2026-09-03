@@ -51,6 +51,9 @@ Amplitude has no built-in "purchase" event — Rovenue's public event keys are f
 | `subscription.grace_period` | `grace_period` |
 | `subscription.uncancelled` | `uncancelled` |
 | `subscription.product_changed` | `product_changed` |
+| `subscription.paused` | `paused` |
+| `subscription.recovered` | `recovered` |
+| `subscription.revoked` | `revoked` |
 
 Every forwarded event carries `event_properties.rovenue_event` set to the original Rovenue event key (e.g. `revenue.RENEWAL`), so you can always trace an Amplitude event back to its Rovenue source regardless of how the vendor event name has been overridden, plus `event_properties.product_id`.
 

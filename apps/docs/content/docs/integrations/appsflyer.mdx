@@ -66,6 +66,9 @@ AppsFlyer's `af_`-prefixed vocabulary is its own documented in-app-event set. Ro
 | `subscription.grace_period` | `af_grace_period` |
 | `subscription.uncancelled` | `af_uncancel` |
 | `subscription.product_changed` | `af_product_change` |
+| `subscription.paused` | `af_paused` |
+| `subscription.recovered` | `af_recovered` |
+| `subscription.revoked` | `af_revoked` |
 
 Every forwarded event's `eventValue` JSON always carries `af_order_id` (Rovenue's internal `outboxEventId`, for dedup — see below) and `product_id` when known. For the six `revenue.*` keys only, it also carries `af_revenue` (the event's amount) and `af_currency`; the top-level `eventCurrency` field is set the same way. Subscription-lifecycle events never carry revenue fields — they represent no money movement.
 

@@ -62,6 +62,9 @@ Every forwarded key becomes a OneSignal custom event, named per the mapping tabl
 | `subscription.grace_period` | `grace_period` |
 | `subscription.uncancelled` | `uncancelled` |
 | `subscription.product_changed` | `product_changed` |
+| `subscription.paused` | `paused` |
+| `subscription.recovered` | `recovered` |
+| `subscription.revoked` | `revoked` |
 
 Every forwarded event carries a `payload` with `rovenue_event` (the original Rovenue event key) and `outbox_event_id`, so you can always trace a OneSignal custom event back to its Rovenue source. `revenue.*` events also carry `product_id` when known.
 

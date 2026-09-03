@@ -73,6 +73,9 @@ Every forwarded key becomes an Airbridge event category, named per the mapping t
 | `subscription.grace_period` | `rovenue_subscription_grace_period` |
 | `subscription.uncancelled` | `rovenue_subscription_uncancelled` |
 | `subscription.product_changed` | `rovenue_subscription_product_changed` |
+| `subscription.paused` | `paused` |
+| `subscription.recovered` | `recovered` |
+| `subscription.revoked` | `revoked` |
 
 **On `revenue.REFUND`:** Airbridge documents a dedicated "Order Cancel" (`airbridge.ecommerce.order.canceled`) standard event. Its own guide frames the example around cancelling an order before fulfillment rather than a post-purchase refund specifically, so this is not a perfect semantic match — but it's Airbridge's own, only standard event for reversing a completed order's revenue, and mapping it (rather than dropping `revenue.REFUND`, as some other Rovenue integrations do when their vendor has no reversal convention at all) avoids leaving a refunded purchase permanently double-counted in Airbridge's own revenue/LTV rollups.
 
