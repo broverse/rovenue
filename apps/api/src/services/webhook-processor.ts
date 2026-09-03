@@ -415,6 +415,16 @@ async function enqueueOutgoingWebhook(
             subscriberId: args.subscriberId,
             purchaseId: args.purchaseId ?? null,
             webhookEventId: args.webhookEventId,
+            // The store's own event type that produced this key. Several
+            // store events legitimately share one public key — Stripe's
+            // `invoice.payment_failed` and `invoice.payment_action_required`
+            // both mean `subscription.billing_issue`, because the subscriber
+            // must act either way. But "your card was declined" and "tap to
+            // approve in your banking app" are different emails, and without
+            // this field a consumer receiving the key cannot write either
+            // one. Additive and always present; consumers that ignore it are
+            // unaffected.
+            storeEventType: args.eventType,
             timestamp: new Date().toISOString(),
           },
         });

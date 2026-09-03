@@ -210,6 +210,12 @@ const DOMAIN_SYNC: Readonly<
   [STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_DELETED]: applySubscriptionDeleted,
   [STRIPE_EVENT_TYPE.INVOICE_PAID]: applyInvoicePaid,
   [STRIPE_EVENT_TYPE.INVOICE_PAYMENT_FAILED]: applyInvoicePaymentFailed,
+  // Same destination state and the same public key — the subscriber does
+  // have to act either way. What differs is the `source` each writes, which
+  // is what lets a consumer tell "tap to approve in your banking app" from
+  // "your card was declined". Those are different emails and neither can be
+  // written from an undifferentiated billing-issue event.
+  [STRIPE_EVENT_TYPE.INVOICE_PAYMENT_ACTION_REQUIRED]: applyInvoicePaymentFailed,
   [STRIPE_EVENT_TYPE.CHARGE_REFUNDED]: applyChargeRefunded,
   [STRIPE_EVENT_TYPE.SETUP_INTENT_SUCCEEDED]: persistFunnelPaymentMethod,
 };
@@ -678,6 +684,13 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
     return;
   }
   const status = mapStripeSubscriptionStatus(subscription.status);
+  if (status === null) {
+    // Unrecognised Stripe status (already logged by the mapper). We do not
+    // know what this event means, so we apply NONE of it rather than
+    // writing a status we guessed at — a half-applied sync is harder to
+    // reason about later than one that was skipped and logged.
+    return;
+  }
 
   // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
   // is held across the write (mechanism (a)); upsertPurchase also
@@ -1128,7 +1141,7 @@ const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> =
 // path already uses — a second copy is how the two paths drift apart.
 export function mapStripeSubscriptionStatus(
   status: Stripe.Subscription.Status,
-): PurchaseStatus {
+): PurchaseStatus | null {
   switch (status) {
     case STRIPE_SUBSCRIPTION_STATUS.ACTIVE:
       return PurchaseStatus.ACTIVE;
@@ -1144,7 +1157,27 @@ export function mapStripeSubscriptionStatus(
     case STRIPE_SUBSCRIPTION_STATUS.PAUSED:
       return PurchaseStatus.PAUSED;
     default:
-      return PurchaseStatus.ACTIVE;
+      // An unrecognised status returns null — "we do not know what this
+      // means" — and the caller leaves the stored status alone.
+      //
+      // This used to `return PurchaseStatus.ACTIVE`, which silently GRANTED
+      // full entitlement to a state we do not understand, with no log. It
+      // is unreachable today (Stripe documents exactly the eight statuses
+      // handled above, and the SDK's own union pins them), so it would have
+      // fired for the first time during a routine dependency bump long
+      // after anyone remembered it existed.
+      //
+      // Mapping it to a concrete status instead would just pick a different
+      // way to be wrong: ACTIVE, TRIAL and GRACE_PERIOD all grant access
+      // (access-engine.ts:8), so "fail into GRACE_PERIOD" is a shorter
+      // fail-open; EXPIRED fails closed and revokes a paying customer over
+      // a status we merely failed to recognise. Preserving what is already
+      // stored does neither — an unknown status cannot promote anyone, and
+      // cannot cut anyone off.
+      log.error("unrecognised Stripe subscription status — leaving the stored status unchanged", {
+        status,
+      });
+      return null;
   }
 }
 

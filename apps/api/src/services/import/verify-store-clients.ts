@@ -284,9 +284,18 @@ async function verifyStripeAnchor(
     const subscription = await stripeCircuit.exec(() =>
       connected.account.subscriptions.retrieve(input.subscriptionId),
     );
+    const mapped = mapStripeSubscriptionStatus(subscription.status);
+    if (mapped === null) {
+      // Unrecognised Stripe status: we cannot claim "verified" for a state
+      // we do not understand, and guessing one would write it onto an
+      // imported purchase. `notFound` is the honest neighbour here — Phase B
+      // leaves the row's existing status alone, same as an anchor Stripe
+      // does not know about.
+      return { kind: "notFound" };
+    }
     return {
       kind: "verified",
-      status: mapStripeSubscriptionStatus(subscription.status),
+      status: mapped,
       expiresDate: subscription.current_period_end
         ? new Date(subscription.current_period_end * 1000)
         : null,

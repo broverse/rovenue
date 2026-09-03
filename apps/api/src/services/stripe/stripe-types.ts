@@ -10,6 +10,11 @@ export const STRIPE_EVENT_TYPE = {
   CUSTOMER_SUBSCRIPTION_DELETED: "customer.subscription.deleted",
   INVOICE_PAID: "invoice.paid",
   INVOICE_PAYMENT_FAILED: "invoice.payment_failed",
+  // SCA/3DS: the renewal did not fail, it is waiting on the cardholder to
+  // authenticate. Unhandled, a European renewal that needs one tap looks
+  // exactly like a hard decline — which is why this is dunning and not a
+  // nice-to-have.
+  INVOICE_PAYMENT_ACTION_REQUIRED: "invoice.payment_action_required",
   CHARGE_REFUNDED: "charge.refunded",
   /**
    * Carries no subscription and no invoice, so it drives no purchase
