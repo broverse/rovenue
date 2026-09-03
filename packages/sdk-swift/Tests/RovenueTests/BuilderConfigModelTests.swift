@@ -1056,6 +1056,45 @@ final class BuilderConfigModelTests: XCTestCase {
         XCTAssertNil(props.align)
     }
 
+    // MARK: - footerLinks (render-fixtures.json, Task 6 — the shared
+    // contract entries, decoded through `decodeNode(named:)`, never by
+    // index; the inline JSON tests above pin the same fields against a
+    // hand-written literal, these pin them against the cross-platform file
+    // Kotlin's `BuilderConfigModelTest` also decodes.)
+
+    func test_decodesFooterLinksFullFromSharedFixture() throws {
+        let node = try decodeNode(named: "footer-links-full")   // select by NAME, never by index
+        guard case .footerLinks(let props) = node else {
+            return XCTFail("expected a footerLinks node, got \(node)")
+        }
+        XCTAssertEqual(props.id, "fl_full")
+        XCTAssertEqual(props.links.count, 3)
+        XCTAssertEqual(props.links[0].labelKey, "fl_restore")
+        XCTAssertEqual(props.links[0].action, .restore)
+        XCTAssertEqual(props.links[1].action, .url("https://example.com/terms"))
+        XCTAssertEqual(props.links[2].action, .url("https://example.com/privacy"))
+        XCTAssertEqual(props.separator, "pipe")
+        XCTAssertEqual(props.align, "start")
+        XCTAssertEqual(props.color?.light, "#666666")
+        XCTAssertEqual(props.color?.dark, "#999999")
+    }
+
+    func test_decodesFooterLinksBareFromSharedFixture() throws {
+        let node = try decodeNode(named: "footer-links-bare")   // select by NAME, never by index
+        guard case .footerLinks(let props) = node else {
+            return XCTFail("expected a footerLinks node, got \(node)")
+        }
+        XCTAssertEqual(props.id, "fl_bare")
+        XCTAssertEqual(props.links.count, 1)
+        XCTAssertEqual(props.links[0].labelKey, "fl_restore")
+        XCTAssertEqual(props.links[0].action, .restore)
+        // Absent in the fixture -> absent from the decoder; the VIEW applies
+        // FOOTER_LINKS_DEFAULT_SEPARATOR/_ALIGN, never the decoder.
+        XCTAssertNil(props.separator)
+        XCTAssertNil(props.align)
+        XCTAssertNil(props.color)
+    }
+
     /// The `action` field reuses `ButtonAction` (`kind: "close"`) — no second
     /// action union exists for footer links.
     func test_footerLinksCloseAction_decodesViaTheSharedButtonActionType() throws {

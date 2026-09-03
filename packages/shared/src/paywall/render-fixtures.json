@@ -1460,6 +1460,194 @@
           ]
         }
       }
+    },
+    {
+      "name": "footer-links-bare",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "fl_restore": "Restore Purchases"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "footerLinks",
+              "id": "fl_bare",
+              "links": [
+                {
+                  "labelKey": "fl_restore",
+                  "action": {
+                    "kind": "restore"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "footer-links-full",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "fl_restore": "Restore Purchases",
+            "fl_terms": "Terms",
+            "fl_privacy": "Privacy"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "footerLinks",
+              "id": "fl_full",
+              "links": [
+                {
+                  "labelKey": "fl_restore",
+                  "action": {
+                    "kind": "restore"
+                  }
+                },
+                {
+                  "labelKey": "fl_terms",
+                  "action": {
+                    "kind": "url",
+                    "url": "https://example.com/terms"
+                  }
+                },
+                {
+                  "labelKey": "fl_privacy",
+                  "action": {
+                    "kind": "url",
+                    "url": "https://example.com/privacy"
+                  }
+                }
+              ],
+              "separator": "pipe",
+              "align": "start",
+              "color": {
+                "light": "#666666",
+                "dark": "#999999"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "footer-links-separator-none",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "fl_terms": "Terms",
+            "fl_privacy": "Privacy"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "footerLinks",
+              "id": "fl_sep_none",
+              "links": [
+                {
+                  "labelKey": "fl_terms",
+                  "action": {
+                    "kind": "url",
+                    "url": "https://example.com/terms"
+                  }
+                },
+                {
+                  "labelKey": "fl_privacy",
+                  "action": {
+                    "kind": "url",
+                    "url": "https://example.com/privacy"
+                  }
+                }
+              ],
+              "separator": "none"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "footer-links-max",
+      "_note": "Exactly FOOTER_LINKS_MAX (5) links -- the wrap case a footer row must survive on a 320pt device.",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "fl_1": "Restore",
+            "fl_2": "Terms",
+            "fl_3": "Privacy",
+            "fl_4": "Support",
+            "fl_5": "About"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "footerLinks",
+              "id": "fl_max",
+              "links": [
+                {
+                  "labelKey": "fl_1",
+                  "action": {
+                    "kind": "restore"
+                  }
+                },
+                {
+                  "labelKey": "fl_2",
+                  "action": {
+                    "kind": "url",
+                    "url": "https://example.com/terms"
+                  }
+                },
+                {
+                  "labelKey": "fl_3",
+                  "action": {
+                    "kind": "url",
+                    "url": "https://example.com/privacy"
+                  }
+                },
+                {
+                  "labelKey": "fl_4",
+                  "action": {
+                    "kind": "url",
+                    "url": "https://example.com/support"
+                  }
+                },
+                {
+                  "labelKey": "fl_5",
+                  "action": {
+                    "kind": "close"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [
@@ -1615,6 +1803,136 @@
                 "key": "t",
                 "role": "body"
               }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "footer-links-empty",
+      "_note": "The strict TS authoring schema rejects an empty links array (min 1). The native decoders do NOT enforce a count bound on `links` -- Kotlin's `parseFooterLink` mapping and Swift's `[FooterLinkModel].self` decode both succeed trivially on an empty array, same leniency-by-design as the rest of this node's optional fields -- so this is acceptLenient (schema rejects, platforms decode fine), not reject. It was drafted as a `reject` entry; moved here because `reject` requires failing EVERYWHERE per this file's own _comment, and the native decoders do not fail on it (verified against BuilderConfigModel.kt/.swift, which neither of them bound-check `links.count`).",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "footerLinks",
+              "id": "fl_empty",
+              "links": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "footer-links-over-max",
+      "_note": "The strict TS authoring schema rejects more than FOOTER_LINKS_MAX (5) links -- this config has six. Same reasoning as footer-links-empty: the native decoders don't bound-check `links.count` either, so six links decode successfully on Swift/Kotlin -- acceptLenient (schema rejects, platforms decode fine), not reject. Also moved out of `reject` for that reason.",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "fl_1": "1",
+            "fl_2": "2",
+            "fl_3": "3",
+            "fl_4": "4",
+            "fl_5": "5",
+            "fl_6": "6"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "footerLinks",
+              "id": "fl_over_max",
+              "links": [
+                {
+                  "labelKey": "fl_1",
+                  "action": {
+                    "kind": "restore"
+                  }
+                },
+                {
+                  "labelKey": "fl_2",
+                  "action": {
+                    "kind": "close"
+                  }
+                },
+                {
+                  "labelKey": "fl_3",
+                  "action": {
+                    "kind": "close"
+                  }
+                },
+                {
+                  "labelKey": "fl_4",
+                  "action": {
+                    "kind": "close"
+                  }
+                },
+                {
+                  "labelKey": "fl_5",
+                  "action": {
+                    "kind": "close"
+                  }
+                },
+                {
+                  "labelKey": "fl_6",
+                  "action": {
+                    "kind": "close"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "footer-links-unknown-separator",
+      "_note": "The strict TS authoring schema rejects `separator: \"slash\"` (must be dot|pipe|none). The native decoders keep `separator` as a raw, unvalidated string BY DESIGN -- see BuilderConfigModel.kt's comment on the footerLinks branch ('Kept as raw strings, not validated against the enum here... a render-time leniency concern') and the equivalent Swift FooterLinksProps doc -- so they decode this fixture successfully with separator == \"slash\" and fall back to the default glyph only later, at render time (footerSeparatorGlyph / the SwiftUI view), never at decode time. That is acceptLenient's exact contract (schema rejects, platforms decode fine), not reject's (fail everywhere). The brief drafted this as a `reject` entry; moved here to match the file's own bucket rule and the decoders' actual behaviour.",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "fl_a": "A",
+            "fl_b": "B"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "footerLinks",
+              "id": "fl_unknown_sep",
+              "links": [
+                {
+                  "labelKey": "fl_a",
+                  "action": {
+                    "kind": "restore"
+                  }
+                },
+                {
+                  "labelKey": "fl_b",
+                  "action": {
+                    "kind": "close"
+                  }
+                }
+              ],
+              "separator": "slash"
             }
           ]
         }

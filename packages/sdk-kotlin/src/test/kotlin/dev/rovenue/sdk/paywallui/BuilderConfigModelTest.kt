@@ -1084,6 +1084,41 @@ class BuilderConfigModelTest {
         assertNull(node.color)
     }
 
+    // ---- footerLinks node, shared render-fixtures.json entries (Task 6) ---
+    // Selected BY NAME through `decodeFixtureNode`, mirroring the same two
+    // fixtures Swift's BuilderConfigModelTests decode ("footer-links-full",
+    // "footer-links-bare") -- these pin the same fields against the
+    // cross-platform contract file, not just the hand-written JSON literals
+    // above.
+
+    @Test
+    fun `decodes footer-links-full from the shared fixture`() {
+        val node = decodeFixtureNode("footer-links-full") as BuilderNode.FooterLinks
+        assertEquals("fl_full", node.id)
+        assertEquals(3, node.links.size)
+        assertEquals("fl_restore", node.links[0].labelKey)
+        assertEquals(ButtonAction.Restore, node.links[0].action)
+        assertEquals(ButtonAction.Url("https://example.com/terms"), node.links[1].action)
+        assertEquals(ButtonAction.Url("https://example.com/privacy"), node.links[2].action)
+        assertEquals("pipe", node.separator)
+        assertEquals("start", node.align)
+        assertEquals(ThemePair("#666666", "#999999"), node.color)
+    }
+
+    @Test
+    fun `decodes footer-links-bare from the shared fixture`() {
+        val node = decodeFixtureNode("footer-links-bare") as BuilderNode.FooterLinks
+        assertEquals("fl_bare", node.id)
+        assertEquals(1, node.links.size)
+        assertEquals("fl_restore", node.links[0].labelKey)
+        assertEquals(ButtonAction.Restore, node.links[0].action)
+        // Absent in the fixture -> absent from the decoder; the VIEW applies
+        // FOOTER_LINKS_DEFAULT_SEPARATOR/_ALIGN, never the decoder.
+        assertNull(node.separator)
+        assertNull(node.align)
+        assertNull(node.color)
+    }
+
     @Test
     fun `decodes a footerLinks node's color and overrides`() {
         val node = decodeNode(
