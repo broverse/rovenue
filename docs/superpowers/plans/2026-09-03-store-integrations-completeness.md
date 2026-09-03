@@ -52,7 +52,13 @@
 - [ ] **Step 1: `mapStripeStatus`'s `default` stops returning `ACTIVE`.** An unrecognised status must not grant entitlement. Map it to the most conservative state that does not, and **log the unrecognised value** — the current failure is silent, and a status Stripe adds next year should announce itself.
 - [ ] **Step 2: Do not touch the existing mappings.** `past_due`/`unpaid`/`incomplete` → `GRACE_PERIOD` is correct and load-bearing.
 - [ ] **Step 3: Handle `invoice.payment_action_required`.** It surfaces the existing `subscription.billing_issue` key — the subscriber does need to act — but what is stored must distinguish it from a hard decline. "Tap to approve" and "your card was declined" are different emails, and a consumer cannot write either one from an undifferentiated billing-issue event.
-- [ ] **Step 4: Handle `customer.subscription.trial_will_end`** as a new public key `subscription.trial.will_end`, following the §6 rule: a key per distinct meaning. Take it through **every** surface the §6 work established — both unions, the provider tables, and the coverage guard must pass. Apple and Google send no equivalent, so document the Stripe-only coverage in `outbound-webhooks.mdx`'s per-store table.
+- [ ] **Step 4: `customer.subscription.trial_will_end` is OUT of scope — do not add it.**
+      Removed during the plan audit. The roadmap item is *"Stripe dunning / billing-portal
+      flows fully covered (card renewal, involuntary churn recovery)"*. A trial-ending
+      reminder is neither: it is a **voluntary**-conversion nudge, and bundling it here was
+      scope creep wearing coverage's clothes. `invoice.payment_action_required` stays because
+      an unhandled SCA-required renewal IS involuntary churn. If a trial-ending event is
+      wanted, it deserves its own item rather than riding this one.
 - [ ] **Step 5: Test the default branch directly** with a status string Stripe does not currently send, asserting no entitlement is granted and the value is logged.
 - [ ] **Step 6: Commit** `fix(stripe): an unknown subscription status no longer grants entitlement`.
 
@@ -75,12 +81,37 @@
 
 **Files:** `apps/api/src/services/apple/`, `packages/shared/src/`, a migration, tests alongside.
 
-- [ ] **Step 1: Handle `EXTERNAL_PURCHASE_TOKEN`** as a first-class notification type: record that an external purchase occurred and attach it to the subscriber.
-- [ ] **Step 2: Persist it in its own table, not `purchases`.** An external purchase has no store transaction, so it cannot share that table's store-transaction unique index. Key the row by token with the subscriber and the notification's own identifiers.
-- [ ] **Step 3: Emit a public event key for it**, through every surface §6 established. **No revenue event and no amount** — Apple did not process the purchase and we have no price. A guessed amount corrupts every downstream aggregate.
-- [ ] **Step 4: Check the `outcome.subscriberId` trap.** Two Apple handlers (`applyRenewalStatusChange`, `applyRevoke`) shipped without setting it, and `postProcess` bails without one, so a mapping row alone never fires. Prove your key reaches the **outbox**, not just the mapping table.
+**Premise correction from the plan audit — read this before Step 1.** The vendored Apple
+library gives the real shape, and it is narrower than this task assumed:
+`ExternalPurchaseToken { externalPurchaseId?, tokenCreationDate?, appAppleId? }`
+(`@apple/app-store-server-library/dist/models/ExternalPurchaseToken.d.ts`), and
+`ResponseBodyV2DecodedPayload` documents that **`data`, `summary` and
+`externalPurchaseToken` are mutually exclusive — the payload contains only one.**
+
+So an `EXTERNAL_PURCHASE_TOKEN` notification carries **no `data`**, therefore no
+`signedTransactionInfo`, therefore **no transaction and no subscriber-resolvable
+identifier at all**. `appAppleId` is the app; `externalPurchaseId` is Apple's opaque id for
+the purchase. The notification says *an* external purchase happened in your app — **not
+whose.**
+
+That kills "attach it to the subscriber" and any subscriber-scoped event, because the
+outbox's `aggregateId` IS the subscriber id. Design accordingly:
+
+- [ ] **Step 1: Handle `EXTERNAL_PURCHASE_TOKEN`** and record the token as a **project-level**
+      fact. Do not invent a subscriber for it, and do not guess one from timing.
+- [ ] **Step 2: Persist it in its own table, not `purchases`.** It has no store transaction,
+      so it cannot share that table's unique index. Key the row by `externalPurchaseId` with
+      the project, `tokenCreationDate` and the raw token.
+- [ ] **Step 3: Emit NO subscriber-scoped event and NO revenue event.** There is no
+      subscriber to attribute one to and no price to record. Both would be fabrications, and
+      a guessed amount corrupts every downstream aggregate. If a later task adds an explicit
+      developer-reported API that supplies the subscriber and the money, the event belongs
+      there — say so at the table.
+- [ ] **Step 4: Because no key is emitted, the `outcome.subscriberId` trap does not apply
+      here** — but say in your report that you checked, since it has bitten twice in Apple
+      handlers already and the next person will wonder.
 - [ ] **Step 5: Document what is NOT implemented** — the External Purchase Server API, token reporting deadlines, commission accounting — and state that handling was verified against the documented payload shape, **not against Apple**, because this repo has no external-purchase entitlement. Shipping untestable integration code while implying it was exercised is how the `revenuecat_google_token` preset became detectable-but-never-importable.
-- [ ] **Step 6: Commit** `feat(apple): model external-purchase notifications without fabricating revenue`.
+- [ ] **Step 6: Commit** `feat(apple): record external-purchase tokens without inventing a subscriber`.
 
 ---
 
@@ -114,6 +145,10 @@
 
 ## Self-review notes (for executors)
 
+- **Two of this plan's key additions were removed by the audit**, so no new public event key
+  ships here at all: `subscription.trial.will_end` was scope creep, and the external-purchase
+  notification has no subscriber to attribute an event to. That makes §6's key-surface
+  checklist inapplicable — do not go looking for it.
 - **Task 1 gates Task 2.** If subscribers exist in an unmapped status, revoking their entitlement is a production incident, not a fix. Report before changing.
 - **The `outcome.subscriberId` trap has now bitten twice** in Apple handlers. Task 4 must assume it applies until proven otherwise — a mapping row is not a delivery guarantee.
 - **Task 5's outbox emission is the difference between a fix and a divergence.** Correcting the database silently is worse than not correcting it, because the integrations then disagree with the source of truth and nothing says so.
