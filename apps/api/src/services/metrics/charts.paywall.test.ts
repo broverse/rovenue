@@ -32,10 +32,13 @@ describe("readChartSeries", () => {
   });
 
   it("reports supported:false and no points for an id with no reader", async () => {
-    const res = await readChartSeries("proj_1", "churn", 7);
+    // `rev_per_install` stays unsupported per spec §4.3 (no install event
+    // exists anywhere in the product) — unlike `churn`, which task-3 wired,
+    // this id has no reader to eventually land here.
+    const res = await readChartSeries("proj_1", "rev_per_install", 7);
     expect(res.supported).toBe(false);
     expect(res.points).toEqual([]);
-    expect(res.chartId).toBe("churn");
+    expect(res.chartId).toBe("rev_per_install");
     // An unwired chart must never trigger a query — that is how the
     // old page ended up showing MRR data under another chart's name.
     expect(queryAnalyticsMock).not.toHaveBeenCalled();

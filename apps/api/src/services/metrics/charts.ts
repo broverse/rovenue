@@ -21,6 +21,8 @@ import {
 } from "../../lib/clickhouse";
 import { listDailyMrr, type MrrPoint } from "./mrr";
 import { computeNetRevenue, computeProceedsForProject } from "./proceeds";
+import { getMrrDecompositionDailyCounts } from "./mrr-decomposition";
+import { getChurnDaily, getTrialStartsDaily } from "./summary";
 
 // =============================================================
 // Charts service (Phase 3.5)
@@ -555,14 +557,96 @@ export function buildMrrSeriesPoints(
   return points;
 }
 
+/**
+ * One point per day from a plain daily COUNT series — `new_subs`,
+ * `reactivations`, `trials_started`. There is no zero-denominator case
+ * here (it isn't a ratio), so an absent day is a real, measured zero
+ * ("nothing happened"), not an undefined value — unlike
+ * `buildRatePoints`'s `null`.
+ *
+ * Extracted from the readers for the same reason as `buildRatePoints` /
+ * `buildMrrSeriesPoints`: this repo cannot run ClickHouse in tests, so
+ * keeping the arithmetic out of SQL is what makes it provable.
+ */
+export function buildCountSeriesPoints(
+  rows: ReadonlyArray<{ day: string; n: number }>,
+  from: Date,
+  to: Date,
+): ChartSeriesPoint[] {
+  const byDay = new Map(rows.map((r) => [r.day, r.n]));
+
+  const points: ChartSeriesPoint[] = [];
+  const cursor = new Date(from);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setUTCHours(0, 0, 0, 0);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const key = toDateOnly(cursor);
+    points.push({
+      bucket: new Date(cursor).toISOString(),
+      value: byDay.get(key) ?? 0,
+    });
+    cursor.setTime(cursor.getTime() + DAY_MS);
+  }
+
+  return points;
+}
+
+/**
+ * `churn`'s daily grain: that day's churn count ÷ (that day's churn
+ * count + the project's CURRENT active-subscriber count). The
+ * denominator is `getRevenueSummary`'s own `activeSubscriberBase` —
+ * already a live snapshot with no date bound at all (see summary.ts) —
+ * so every day in the window is measured against the SAME active count;
+ * only the numerator moves. That's the faithful daily reading of the
+ * tile's own formula, not an approximation of it: a genuinely
+ * per-day-historical active count isn't something the data model keeps
+ * (same gap `liability` hits — see chart-catalog audit).
+ *
+ * Delegates to `buildRatePoints` for the percent arithmetic/rounding
+ * convention instead of re-deriving it — but `buildRatePoints` treats a
+ * day ABSENT from a series as a zero for that series, which is right
+ * for the numerator (no churn that day) and wrong for the denominator
+ * (it must still be `activeSubscriberBase`, not zero). So both series
+ * are densified to name every day in the window before delegating.
+ */
+export function buildChurnRatePoints(
+  churnedByDay: ReadonlyArray<{ day: string; n: number }>,
+  activeSubscriberBase: number,
+  from: Date,
+  to: Date,
+): ChartSeriesPoint[] {
+  const churned = new Map(churnedByDay.map((r) => [r.day, r.n]));
+  const numerator: DailyCountRow[] = [];
+  const denominator: DailyCountRow[] = [];
+
+  const cursor = new Date(from);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setUTCHours(0, 0, 0, 0);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const key = toDateOnly(cursor);
+    const n = churned.get(key) ?? 0;
+    numerator.push({ day: key, n: String(n) });
+    denominator.push({ day: key, n: String(activeSubscriberBase + n) });
+    cursor.setTime(cursor.getTime() + DAY_MS);
+  }
+
+  return buildRatePoints(numerator, denominator, from, to);
+}
+
 // =============================================================
 // Generic chart series — paywall reach/conversion and revenue
 // =============================================================
 //
-// Six of the sixteen catalog charts are wired (paywall_view_rate,
-// paywall_purchase, mrr, arr, gross_vs_net, arpu — the last four all
-// delegate to `listDailyMrr`, see buildMrrSeriesPoints below). Every
-// other id
+// Ten of the sixteen catalog charts are wired (paywall_view_rate,
+// paywall_purchase, mrr, arr, gross_vs_net, arpu — the last four
+// delegate to `listDailyMrr`, see buildMrrSeriesPoints below — plus
+// new_subs, reactivations, trials_started, churn — task-3's
+// subscription-lifecycle group, see buildCountSeriesPoints /
+// buildChurnRatePoints above). Every other id
 // answers `supported: false` so the dashboard renders an empty
 // state rather than another chart's data. `readChartSeries`'s
 // `switch` is the ONLY dispatch mechanism (no separate id allow-list)
@@ -864,6 +948,84 @@ export async function readChartSeries(
           row && row.activeSubscribers > 0
             ? Number(row.netUsd) / row.activeSubscribers
             : null,
+        ),
+        supported: true,
+      };
+    }
+
+    // =============================================================
+    // Subscription-lifecycle group (task-3): new_subs, reactivations,
+    // trials_started, churn.
+    // =============================================================
+    //
+    // new_subs/reactivations are `countIf` siblings of
+    // mrr-decomposition's existing `sumIf` buckets, at a daily grain —
+    // ClickHouse, FINAL retained (see mrr-decomposition.ts). churn and
+    // trials_started name the same quantities as `getRevenueSummary`'s
+    // `churnRate`/`trialStarts` (churn also renders on
+    // `RevenueKpisCard` as "Churn rate") — both are Postgres facts
+    // (subscription status/trial flag live on `purchases`, not on
+    // `raw_revenue_events`), so those two readers issue no ClickHouse
+    // query at all; see summary.ts for the daily widening.
+
+    case "new_subs": {
+      assertClickHouseReady();
+      const { newSubs } = await getMrrDecompositionDailyCounts({
+        projectId,
+        from: w.from,
+        to: w.to,
+      });
+      return {
+        ...base,
+        unit: "count",
+        points: buildCountSeriesPoints(newSubs, w.from, w.to),
+        supported: true,
+      };
+    }
+
+    case "reactivations": {
+      assertClickHouseReady();
+      const { reactivations } = await getMrrDecompositionDailyCounts({
+        projectId,
+        from: w.from,
+        to: w.to,
+      });
+      return {
+        ...base,
+        unit: "count",
+        points: buildCountSeriesPoints(reactivations, w.from, w.to),
+        supported: true,
+      };
+    }
+
+    case "trials_started": {
+      const rows = await getTrialStartsDaily({
+        projectId,
+        from: w.from,
+        to: w.to,
+      });
+      return {
+        ...base,
+        unit: "count",
+        points: buildCountSeriesPoints(rows, w.from, w.to),
+        supported: true,
+      };
+    }
+
+    case "churn": {
+      const { activeSubscriberBase, churnedByDay } = await getChurnDaily({
+        projectId,
+        from: w.from,
+        to: w.to,
+      });
+      return {
+        ...base,
+        unit: "percent",
+        points: buildChurnRatePoints(
+          churnedByDay,
+          activeSubscriberBase,
+          w.from,
+          w.to,
         ),
         supported: true,
       };

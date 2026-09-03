@@ -1,0 +1,139 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Dispatch tests for the four subscription-lifecycle chart-series ids
+// (new_subs, reactivations, trials_started, churn) — task 3.
+//
+// new_subs/reactivations delegate to mrr-decomposition.ts's
+// getMrrDecompositionDailyCounts (ClickHouse); mocking that function
+// directly (rather than queryAnalytics underneath it) keeps this file
+// focused on charts.ts's own dispatch/reshaping logic, which is what it
+// owns — the SQL itself is schema-validated for real in
+// schema-contract.integration.test.ts and pinned/widened in
+// subscription-lifecycle-daily.integration.test.ts, never with a mock.
+//
+// trials_started/churn delegate to summary.ts's getTrialStartsDaily /
+// getChurnDaily, which are Postgres (drizzle), not ClickHouse — mocked
+// the same way for the same reason.
+
+const getMrrDecompositionDailyCountsMock = vi.fn();
+vi.mock("./mrr-decomposition", () => ({
+  getMrrDecompositionDailyCounts: (...args: unknown[]) =>
+    getMrrDecompositionDailyCountsMock(...args),
+}));
+
+const getTrialStartsDailyMock = vi.fn();
+const getChurnDailyMock = vi.fn();
+vi.mock("./summary", () => ({
+  getTrialStartsDaily: (...args: unknown[]) => getTrialStartsDailyMock(...args),
+  getChurnDaily: (...args: unknown[]) => getChurnDailyMock(...args),
+}));
+
+const isClickHouseConfiguredMock = vi.fn();
+vi.mock("../../lib/clickhouse", () => ({
+  isClickHouseConfigured: (...args: unknown[]) =>
+    isClickHouseConfiguredMock(...args),
+  queryAnalytics: vi.fn(),
+  ClickHouseUnavailableError: class ClickHouseUnavailableError extends Error {},
+}));
+
+import { readChartSeries } from "./charts";
+
+const FROZEN_NOW = new Date("2026-07-02T12:00:00.000Z");
+
+describe("readChartSeries — subscription-lifecycle ids", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_NOW);
+    isClickHouseConfiguredMock.mockReset().mockReturnValue(true);
+    getMrrDecompositionDailyCountsMock.mockReset().mockResolvedValue({
+      newSubs: [],
+      reactivations: [],
+    });
+    getTrialStartsDailyMock.mockReset().mockResolvedValue([]);
+    getChurnDailyMock.mockReset().mockResolvedValue({
+      activeSubscriberBase: 0,
+      churnedByDay: [],
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("new_subs: unit is count, values come from the newSubs daily counts", async () => {
+    getMrrDecompositionDailyCountsMock.mockResolvedValueOnce({
+      newSubs: [{ day: "2026-07-02", n: 3 }],
+      reactivations: [],
+    });
+    const res = await readChartSeries("proj_1", "new_subs", 1);
+    expect(res.unit).toBe("count");
+    expect(res.supported).toBe(true);
+    expect(res.points.at(-1)?.value).toBe(3);
+  });
+
+  it("new_subs: requires ClickHouse configured", async () => {
+    isClickHouseConfiguredMock.mockReturnValue(false);
+    await expect(readChartSeries("proj_1", "new_subs", 1)).rejects.toThrow();
+  });
+
+  it("reactivations: unit is count, values come from the reactivations daily counts", async () => {
+    getMrrDecompositionDailyCountsMock.mockResolvedValueOnce({
+      newSubs: [],
+      reactivations: [{ day: "2026-07-02", n: 5 }],
+    });
+    const res = await readChartSeries("proj_1", "reactivations", 1);
+    expect(res.unit).toBe("count");
+    expect(res.points.at(-1)?.value).toBe(5);
+  });
+
+  it("trials_started: unit is count, values come from getTrialStartsDaily, no ClickHouse required", async () => {
+    getTrialStartsDailyMock.mockResolvedValueOnce([{ day: "2026-07-02", n: 2 }]);
+    isClickHouseConfiguredMock.mockReturnValue(false);
+    const res = await readChartSeries("proj_1", "trials_started", 1);
+    expect(res.unit).toBe("count");
+    expect(res.supported).toBe(true);
+    expect(res.points.at(-1)?.value).toBe(2);
+  });
+
+  it("a day absent from the daily counts is a real zero, not null", async () => {
+    getMrrDecompositionDailyCountsMock.mockResolvedValueOnce({
+      newSubs: [],
+      reactivations: [],
+    });
+    const res = await readChartSeries("proj_1", "new_subs", 1);
+    expect(res.points.at(-1)?.value).toBe(0);
+  });
+
+  it("churn: unit is percent, no ClickHouse required, holds the active base constant across days", async () => {
+    isClickHouseConfiguredMock.mockReturnValue(false);
+    getChurnDailyMock.mockResolvedValueOnce({
+      activeSubscriberBase: 2,
+      churnedByDay: [{ day: "2026-07-02", n: 1 }],
+    });
+    const res = await readChartSeries("proj_1", "churn", 1);
+    expect(res.unit).toBe("percent");
+    expect(res.supported).toBe(true);
+    // 1 churned ÷ (2 active + 1 churned) = 33.3%
+    expect(res.points.at(-1)?.value).toBe(33.3);
+    expect(res.points.at(-1)?.numerator).toBe(1);
+    expect(res.points.at(-1)?.denominator).toBe(3);
+  });
+
+  it("churn: zero churn and zero active base is an undefined rate (null), not 0%", async () => {
+    getChurnDailyMock.mockResolvedValueOnce({
+      activeSubscriberBase: 0,
+      churnedByDay: [],
+    });
+    const res = await readChartSeries("proj_1", "churn", 1);
+    expect(res.points.at(-1)?.value).toBeNull();
+  });
+
+  it("churn: zero churn but a non-zero active base is a measured 0%, not null", async () => {
+    getChurnDailyMock.mockResolvedValueOnce({
+      activeSubscriberBase: 5,
+      churnedByDay: [],
+    });
+    const res = await readChartSeries("proj_1", "churn", 1);
+    expect(res.points.at(-1)?.value).toBe(0);
+  });
+});

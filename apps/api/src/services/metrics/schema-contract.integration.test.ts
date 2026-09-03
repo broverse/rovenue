@@ -368,6 +368,10 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
         "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment",
       buildMrrSeriesPoints:
         "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-2 revenue ids: mrr/arr/gross_vs_net/arpu)",
+      buildCountSeriesPoints:
+        "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-3 lifecycle ids: new_subs/reactivations/trials_started)",
+      buildChurnRatePoints:
+        "pure arithmetic extracted specifically so it needs no ClickHouse — see its doc comment (task-3 lifecycle id: churn)",
     },
     invokers: {
       readChannels: () => chartsModule.readChannels(PROJECT, WINDOW_DAYS),
@@ -417,7 +421,10 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
   {
     moduleName: "mrr-decomposition",
     module: mrrDecompositionModule as unknown as Record<string, unknown>,
-    exempt: {},
+    exempt: {
+      getMrrDecompositionDailyCounts:
+        "covered above, once per SYSTEM_CHART_IDS entry — dispatched via readChartSeries's 'new_subs' and 'reactivations' cases (task-3)",
+    },
     invokers: {
       getMrrDecomposition: () =>
         mrrDecompositionModule.getMrrDecomposition({
@@ -443,7 +450,14 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
   {
     moduleName: "summary",
     module: summaryModule as unknown as Record<string, unknown>,
-    exempt: {},
+    exempt: {
+      // Postgres-only (see summary.ts's daily-grain header comment) — no
+      // ClickHouse schema to validate — but still exercised, once per
+      // SYSTEM_CHART_IDS entry, via readChartSeries's 'trials_started'
+      // and 'churn' cases (task-3).
+      getTrialStartsDaily: "Postgres-only; covered above via 'trials_started'",
+      getChurnDaily: "Postgres-only; covered above via 'churn'",
+    },
     invokers: {
       getRevenueSummary: () =>
         summaryModule.getRevenueSummary({

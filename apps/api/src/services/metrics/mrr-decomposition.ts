@@ -80,3 +80,70 @@ export async function getMrrDecomposition(
     churnedUsd: moneyStr(r.churned_usd),
   };
 }
+
+// =============================================================
+// Daily grain — chart-catalog `new_subs` / `reactivations`
+// =============================================================
+
+/** One day's event count. `n` counts ROWS (events), matching the grain
+ *  `sumIf` above counts in — not distinct subscribers — so a day's count
+ *  and that day's dollar bucket always agree on which rows they cover. */
+export interface DailyLifecycleCount {
+  /** YYYY-MM-DD, UTC. */
+  day: string;
+  n: number;
+}
+
+export interface MrrDecompositionDailyCounts {
+  /** `countIf` sibling of `newUsd` — INITIAL + TRIAL_CONVERSION, per day. */
+  newSubs: DailyLifecycleCount[];
+  /** `countIf` sibling of `reactivationUsd` — REACTIVATION, per day. */
+  reactivations: DailyLifecycleCount[];
+}
+
+interface ChDailyCountRow {
+  day: string;
+  new_subs: string;
+  reactivations: string;
+}
+
+/**
+ * Daily grain of two of the four decomposition buckets above, as EVENT
+ * COUNTS rather than dollar sums — backs the chart-catalog ids
+ * `new_subs` and `reactivations` (charts.ts's `readChartSeries`). Each
+ * `countIf` here uses the exact same predicate as the matching `sumIf`
+ * in `getMrrDecomposition`, so the two never disagree about which rows
+ * they're counting.
+ *
+ * Same table, same `FINAL` as the window aggregate above — the outbox is
+ * at-least-once and this is a ReplacingMergeTree, so dropping `FINAL`
+ * would double-count a replayed event (see migration 0012). Only the
+ * grain (per-day vs. one total) and the aggregate (`countIf` vs.
+ * `sumIf`) differ from `getMrrDecomposition`; that function is untouched
+ * by this addition.
+ */
+export async function getMrrDecompositionDailyCounts(
+  input: GetMrrDecompositionInput,
+): Promise<MrrDecompositionDailyCounts> {
+  const rows = await queryAnalytics<ChDailyCountRow>(
+    input.projectId,
+    `
+      SELECT
+        toString(toDate(eventDate))                                AS day,
+        toString(countIf(type IN ('INITIAL','TRIAL_CONVERSION')))  AS new_subs,
+        toString(countIf(type = 'REACTIVATION'))                   AS reactivations
+      FROM rovenue.raw_revenue_events FINAL
+      WHERE projectId = {projectId:String}
+        AND toDate(eventDate) >= {from:Date}
+        AND toDate(eventDate) <= {to:Date}
+      GROUP BY day
+      ORDER BY day
+    `,
+    { from: toDateOnly(input.from), to: toDateOnly(input.to) },
+  );
+
+  return {
+    newSubs: rows.map((r) => ({ day: r.day, n: Number(r.new_subs) })),
+    reactivations: rows.map((r) => ({ day: r.day, n: Number(r.reactivations) })),
+  };
+}

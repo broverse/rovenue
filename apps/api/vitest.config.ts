@@ -29,6 +29,7 @@ const CONTAINER_SUITES = [
   "tests/mrr-clickhouse-only.integration.test.ts",
   "tests/analytics-clickhouse.integration.test.ts",
   "tests/revenue-aggregates-idempotency.integration.test.ts",
+  "tests/subscription-lifecycle-daily.integration.test.ts",
   "tests/notifier.integration.test.ts",
   "tests/notifier-entry.integration.test.ts",
   "tests/outbox-dispatcher.integration.test.ts",
