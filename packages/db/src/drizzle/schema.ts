@@ -1,5 +1,10 @@
 import { createId } from "@paralleldrive/cuid2";
 import { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "@rovenue/shared/experiments";
+import {
+  EXPIRY_SWEEP_STATUSES,
+  RECONCILABLE_STATUSES,
+  statusSqlList,
+} from "@rovenue/shared/subscription-status";
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
@@ -954,6 +959,12 @@ export const purchases = pgTable(
     // covered it, has no evidence its state is correct. Only Google-store
     // rows are ever stamped; Apple/Stripe purchases keep it NULL forever.
     lastReconciledAt: timestamp("lastReconciledAt", { withTimezone: true }),
+    // Set the first time a purchase enters BILLING_ISSUE (not refreshed
+    // by a repeated signal, so dunning campaigns can age off the real
+    // start), cleared on any exit to an access-granting status.
+    billingIssueDetectedAt: timestamp("billingIssueDetectedAt", {
+      withTimezone: true,
+    }),
     // Opaque paywall-attribution snapshot the SDK/webhook supplied at
     // purchase time: { placementId, paywallId, variantId?, experimentKey? }.
     // Never validated against live placement/paywall/experiment rows —
@@ -979,23 +990,27 @@ export const purchases = pgTable(
     ),
     expiresDateIdx: index("purchases_expiresDate_idx").on(t.expiresDate),
     // Expiry sweeper scan (`findOverduePurchases`): status-bounded, so
-    // partial on the sweepable (non-terminal) statuses — rows leave the
-    // index the moment the sweeper moves them to EXPIRED. Keep the
-    // status list in sync with EXPIRY_SWEEP_STATUSES in the api
-    // expiry-checker worker. Migration 0102.
+    // partial on the sweepable statuses — rows leave the index the
+    // moment the sweeper moves them to EXPIRED. The list is DERIVED from
+    // the shared semantics table (`sweepable`) rather than written out,
+    // so a new status joins or stays out of the predicate by declaring
+    // its meaning once. Migrations 0102, 0115.
     statusExpiresDateIdx: index("purchases_status_expiresDate_idx")
       .on(t.status, t.expiresDate)
       .where(
-        sql`${t.status} IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')`,
+        sql`${t.status} IN (${sql.raw(statusSqlList(EXPIRY_SWEEP_STATUSES))})`,
       ),
     // Google reconciliation sweep candidate scan (workers/google-reconciliation.ts):
-    // partial on PLAY_STORE + the same sweepable statuses as above, ordered
-    // by "checked longest ago" (NULL — never checked — first). Rows leave
-    // this index once the sweep moves them to a terminal status.
+    // partial on PLAY_STORE + the RECONCILABLE statuses, ordered by
+    // "checked longest ago" (NULL — never checked — first). This list is
+    // deliberately WIDER than the sweep list above: it also carries
+    // BILLING_ISSUE, because a held Play subscription can still recover
+    // and the sweep must keep re-polling it. Rows leave this index once
+    // the sweep moves them to a terminal status.
     googleReconciliationIdx: index("purchases_google_reconciliation_idx")
       .on(t.store, t.lastReconciledAt, t.expiresDate)
       .where(
-        sql`${t.store} = 'PLAY_STORE' AND ${t.status} IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')`,
+        sql`${t.store} = 'PLAY_STORE' AND ${t.status} IN (${sql.raw(statusSqlList(RECONCILABLE_STATUSES))})`,
       ),
   }),
 );

@@ -1,4 +1,5 @@
 import { and, desc, asc, eq } from "drizzle-orm";
+import type { SubscriptionStatus } from "@rovenue/shared/subscription-status";
 import type { Db } from "../client";
 import {
   experimentAssignments,
@@ -35,14 +36,10 @@ export interface SubscriberDetailPurchase {
   productId: string;
   productIdentifier: string;
   store: "APP_STORE" | "PLAY_STORE" | "STRIPE" | "MANUAL";
-  status:
-    | "TRIAL"
-    | "ACTIVE"
-    | "EXPIRED"
-    | "REFUNDED"
-    | "REVOKED"
-    | "PAUSED"
-    | "GRACE_PERIOD";
+  /** Derived, never listed by name — a new status must not need an edit
+   *  here to be selectable (tsc caught this union hand-written when
+   *  BILLING_ISSUE was added). */
+  status: SubscriptionStatus;
   priceAmount: string | null;
   priceCurrency: string | null;
   purchaseDate: Date;

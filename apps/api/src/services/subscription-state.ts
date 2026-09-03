@@ -153,6 +153,7 @@ const TRANSITIONS: Readonly<Record<PurchaseStatus, ReadonlySet<PurchaseStatus>>>
       STATUS.EXPIRED,
       STATUS.REVOKED,
       STATUS.REFUNDED,
+      STATUS.BILLING_ISSUE,
     ]),
     [STATUS.ACTIVE]: new Set<PurchaseStatus>([
       STATUS.ACTIVE,
@@ -162,9 +163,26 @@ const TRANSITIONS: Readonly<Record<PurchaseStatus, ReadonlySet<PurchaseStatus>>>
       STATUS.REFUNDED,
       STATUS.REVOKED,
       STATUS.PAUSED,
+      STATUS.BILLING_ISSUE,
     ]),
     [STATUS.GRACE_PERIOD]: new Set<PurchaseStatus>([
       STATUS.GRACE_PERIOD,
+      STATUS.ACTIVE,
+      STATUS.EXPIRED,
+      STATUS.REFUNDED,
+      STATUS.REVOKED,
+      // The retry window closed without a successful charge and the
+      // store dropped access: grace (retry WITH access) hands off to
+      // the involuntary suspension.
+      STATUS.BILLING_ISSUE,
+    ]),
+    // Involuntary suspension. Recovers to ACTIVE when the store finally
+    // collects, lapses to EXPIRED when the hold runs out, and can be cut
+    // short by either terminal status. Deliberately NO edge to PAUSED:
+    // PAUSED is the user's own choice, and letting a dunning row slide
+    // into it would relabel involuntary churn as voluntary.
+    [STATUS.BILLING_ISSUE]: new Set<PurchaseStatus>([
+      STATUS.BILLING_ISSUE,
       STATUS.ACTIVE,
       STATUS.EXPIRED,
       STATUS.REFUNDED,

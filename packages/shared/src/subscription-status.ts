@@ -28,6 +28,9 @@ export const SUBSCRIPTION_STATUSES = [
   "REVOKED",
   "PAUSED",
   "GRACE_PERIOD",
+  // Appended last, and every future status must be too: this tuple is
+  // the Postgres enum's label order, and the enum is append-only.
+  "BILLING_ISSUE",
 ] as const;
 
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
@@ -92,6 +95,24 @@ export const SUBSCRIPTION_STATUS_SEMANTICS: Record<
     sweepable: true,
     reconcilable: true,
     involuntary: false,
+  },
+  // Involuntary suspension for a payment failure the store has stopped
+  // covering: Google account hold, Apple billing retry with no grace
+  // period configured, Stripe `unpaid`/`incomplete`. Distinct from
+  // GRACE_PERIOD (retry WITH access) and from PAUSED (the user's own
+  // choice). Not sweepable — an account-hold row's expiresDate is
+  // ALREADY past when the hold arrives, so the expiry sweeper would move
+  // it straight to EXPIRED and erase the dunning signal the moment it
+  // appeared. Retiring a stale hold is therefore a separate ageing pass
+  // in expiry-checker.ts, landing with the store routing that first
+  // writes this status; until then nothing produces a BILLING_ISSUE row.
+  BILLING_ISSUE: {
+    grantsAccess: false,
+    isLive: true,
+    isTerminal: false,
+    sweepable: false,
+    reconcilable: true,
+    involuntary: true,
   },
   EXPIRED: {
     grantsAccess: false,

@@ -62,7 +62,7 @@ const RENEWING_WINDOW_DAYS = 7;
 //   TRIAL                                      → trial
 //   ACTIVE  + autoRenewStatus !== false        → active
 //   ACTIVE  + autoRenewStatus === false        → canceling
-//   GRACE_PERIOD | PAUSED                      → grace
+//   GRACE_PERIOD | PAUSED | BILLING_ISSUE      → grace
 //   EXPIRED | REFUNDED | REVOKED               → churned
 //
 // `mapStatus` returns the UI key per row; the SQL helpers below
@@ -100,15 +100,22 @@ function mapStatus(row: {
       return "trial";
     case "ACTIVE":
       return row.autoRenewStatus === false ? "canceling" : "active";
-    case "GRACE_PERIOD":
-    case "PAUSED":
-      return "grace";
     case "EXPIRED":
     case "REFUNDED":
     case "REVOKED":
       return "churned";
     default:
-      return "active";
+      // The at-risk statuses collapse to the "grace" tab. Derived from
+      // AT_RISK_STATUSES rather than listed here, because the `case
+      // "grace"` SQL filter below is built from that same array: a
+      // by-name list here would let a status be FILTERED INTO the grace
+      // tab while being LABELLED something else (which is exactly what
+      // BILLING_ISSUE would have done). Behaviour for the pre-existing
+      // statuses is unchanged — AT_RISK_STATUSES is GRACE_PERIOD,
+      // PAUSED and BILLING_ISSUE.
+      return (AT_RISK_STATUSES as readonly string[]).includes(row.status)
+        ? "grace"
+        : "active";
   }
 }
 
@@ -891,4 +898,5 @@ export const __subscriptionsConstants = {
   CALENDAR_FUTURE_DEFAULT_DAYS,
   CALENDAR_MAX_DAYS,
   AT_RISK_STATUSES,
+  mapStatus,
 };
