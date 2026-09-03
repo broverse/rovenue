@@ -697,41 +697,87 @@ describe("PaywallRenderer", () => {
       expect(rowChildren[rowChildren.length - 1]).not.toBe(separators[0]);
     });
 
-    it("renders the node's fallback, not an empty row, when zero links survive", () => {
+    it("renders the node's fallback, not an empty row, when zero links survive — paired with the positive control that it renders real links when they don't", () => {
       const onlyRestore: Extract<PaywallNode, { type: "footerLinks" }>["links"] = [
         { labelKey: "f_restore", action: { kind: "restore" } },
       ];
+      const config = footerConfig(
+        {
+          links: onlyRestore,
+          fallback: { type: "text", id: "fallback-text", key: "f_fallback", role: "caption" },
+        },
+        { en: { f_restore: "Restore Purchases", f_fallback: "No links available" } },
+      );
+
+      // Positive control FIRST: with onRestore present, the link survives —
+      // this is what proves the assertions below are actually exercising
+      // renderFooterLinks and not merely the generic unknown-node/default
+      // fallback path, which would produce the same "fallback renders"
+      // outcome whether or not footerLinks is implemented at all.
+      const withRestore = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} onRestore={noop} />,
+      );
+      expect(withRestore.getByRole("button", { name: "Restore Purchases" })).toBeInTheDocument();
+      expect(withRestore.container.querySelector('[data-rov-node="fallback-text"]')).toBeNull();
+      withRestore.unmount();
+
+      // Now the one link is dropped (no onRestore) -> zero survivors -> fallback.
       const { container, queryByRole } = render(
-        <PaywallRenderer
-          config={footerConfig({
-            links: onlyRestore,
-            fallback: { type: "text", id: "fallback-text", key: "f_fallback", role: "caption" },
-          }, { en: { f_fallback: "No links available" } })}
-          offering={offering}
-          colorScheme="light"
-          onPurchase={noop}
-          // no onRestore -> the one link is dropped -> zero survivors
-        />,
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} />,
       );
       expect(queryByRole("button")).toBeNull();
       expect(container.querySelector('[data-rov-node="f"]')).toBeNull();
       expect(container.querySelector('[data-rov-node="fallback-text"]')).not.toBeNull();
     });
 
-    it("renders nothing when zero links survive and there is no fallback", () => {
+    it("renders nothing when zero links survive and there is no fallback — paired with the positive control that it renders a real link when it survives", () => {
       const onlyRestore: Extract<PaywallNode, { type: "footerLinks" }>["links"] = [
         { labelKey: "f_restore", action: { kind: "restore" } },
       ];
+      const config = footerConfig(
+        { links: onlyRestore },
+        { en: { f_restore: "Restore Purchases" } },
+      );
+
+      // Positive control: with onRestore present, footerLinks actually
+      // renders a button under the node's own id.
+      const withRestore = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} onRestore={noop} />,
+      );
+      expect(withRestore.getByRole("button", { name: "Restore Purchases" })).toBeInTheDocument();
+      expect(withRestore.container.querySelector('[data-rov-node="f"]')).not.toBeNull();
+      withRestore.unmount();
+
       const { container, queryByRole } = render(
-        <PaywallRenderer
-          config={footerConfig({ links: onlyRestore })}
-          offering={offering}
-          colorScheme="light"
-          onPurchase={noop}
-        />,
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} />,
       );
       expect(queryByRole("button")).toBeNull();
       expect(container.querySelector('[data-rov-node="f"]')).toBeNull();
+    });
+
+    it("keeps a surviving link's own DOM identity across a re-render that changes which links survive", () => {
+      // Regression pin for keying/data-rov-node on the link's ORIGINAL
+      // index rather than its post-filter position among survivors. If
+      // keys were derived from position-among-survivors, removing the
+      // restore link (originally index 0) would shift "Terms" from
+      // survivor-position 1 to survivor-position 0 on the next render,
+      // React would reuse the DOM node that used to be "Restore Purchases"
+      // for "Terms", and any node-level state a browser tracks (focus, here)
+      // would be lost even though "Terms" itself never stopped surviving.
+      const config = footerConfig({ links: threeLinks });
+      const { getByRole, rerender } = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} onRestore={noop} />,
+      );
+      const termsBefore = getByRole("button", { name: "Terms" });
+      termsBefore.focus();
+      expect(document.activeElement).toBe(termsBefore);
+
+      rerender(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      const termsAfter = getByRole("button", { name: "Terms" });
+      expect(termsAfter).toBe(termsBefore);
+      expect(document.activeElement).toBe(termsBefore);
     });
 
     it("respects node-level overrides on color/separator/align like every other node", () => {
@@ -759,16 +805,24 @@ describe("PaywallRenderer", () => {
       }
     });
 
-    it("respects node-level visibility like every other node", () => {
+    it("respects node-level visibility like every other node — paired with the positive control that a matching platform renders the real links", () => {
+      const config = footerConfig({ links: threeLinks, visibility: { platform: ["ios"] } });
+
+      // Positive control FIRST: on a matching platform, the node reaches
+      // renderFooterLinks and draws real link buttons — this is what proves
+      // the negative assertion below is discriminating the footerLinks
+      // switch case, and not the `isNodeVisible` gate that runs before the
+      // switch for every node type (which alone would produce the same
+      // "hidden on mismatch" result for an unimplemented node).
+      const matching = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" platform="ios" onPurchase={noop} onRestore={noop} />,
+      );
+      expect(matching.getByRole("button", { name: "Restore Purchases" })).toBeInTheDocument();
+      expect(matching.container.querySelector('[data-rov-node="f"]')).not.toBeNull();
+      matching.unmount();
+
       const { container } = render(
-        <PaywallRenderer
-          config={footerConfig({ links: threeLinks, visibility: { platform: ["ios"] } })}
-          offering={offering}
-          colorScheme="light"
-          platform="web"
-          onPurchase={noop}
-          onRestore={noop}
-        />,
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" platform="web" onPurchase={noop} onRestore={noop} />,
       );
       expect(container.querySelector('[data-rov-node="f"]')).toBeNull();
     });

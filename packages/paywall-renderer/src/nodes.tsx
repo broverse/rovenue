@@ -373,13 +373,23 @@ const FOOTER_SEPARATOR_GLYPH: Record<FooterLinksNode["separator"] & string, stri
  * this is why the node exists instead of a hand-built stack of buttons.
  */
 function renderFooterLinks(node: FooterLinksNode, ctx: RenderCtx): ReactElement | null {
-  const survivors: { link: FooterLink; label: string }[] = [];
-  for (const link of node.links) {
-    if (link.action.kind === "restore" && !ctx.onRestore) continue;
+  // `originalIndex` (the link's position in the AUTHORED `node.links`, not
+  // its position among survivors) is what keys/identifies the rendered
+  // button below. `survivors` is a DERIVED list whose membership shifts
+  // between renders — a locale change alters which labels resolve, and
+  // `onRestore` appearing/disappearing alters whether the restore link
+  // survives — unlike `renderStack`'s fixed, unfiltered children (see its
+  // own comment on positional keys). Keying on post-filter position would
+  // let React reuse one link's DOM node for a different logical link
+  // across renders (a focused "Terms" button silently becoming "Privacy"),
+  // losing focus and any other node identity a browser tracks.
+  const survivors: { link: FooterLink; label: string; originalIndex: number }[] = [];
+  node.links.forEach((link, originalIndex) => {
+    if (link.action.kind === "restore" && !ctx.onRestore) return;
     const label = resolveLabel(ctx, link.labelKey);
-    if (label === null) continue;
-    survivors.push({ link, label });
-  }
+    if (label === null) return;
+    survivors.push({ link, label, originalIndex });
+  });
   if (survivors.length === 0) return renderFallbackOrNull(node, ctx);
 
   const separator = node.separator ?? FOOTER_LINKS_DEFAULT_SEPARATOR;
@@ -394,11 +404,13 @@ function renderFooterLinks(node: FooterLinksNode, ctx: RenderCtx): ReactElement 
   };
 
   const children: ReactElement[] = [];
-  survivors.forEach(({ link, label }, index) => {
-    if (index > 0 && separator !== "none") {
+  survivors.forEach(({ link, label, originalIndex }, position) => {
+    if (position > 0 && separator !== "none") {
+      // Keyed on the FOLLOWING link's originalIndex — the separator that
+      // precedes a given link is as stable as that link's own identity.
       children.push(
         <span
-          key={`sep-${index}`}
+          key={`sep-${originalIndex}`}
           data-rv-footer-separator=""
           aria-hidden="true"
           style={{ color, fontSize: `${FOOTER_LINK_FONT_SIZE}px` }}
@@ -409,9 +421,9 @@ function renderFooterLinks(node: FooterLinksNode, ctx: RenderCtx): ReactElement 
     }
     children.push(
       <button
-        key={`link-${index}`}
+        key={`link-${originalIndex}`}
         type="button"
-        data-rov-node={`${node.id}-${index}`}
+        data-rov-node={`${node.id}-${originalIndex}`}
         onClick={handleClick(link.action)}
         style={{
           cursor: "pointer",
