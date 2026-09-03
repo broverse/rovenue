@@ -251,6 +251,72 @@ export async function getTrialStartsDaily(
   return rows.map((r) => ({ day: r.day, n: Number(r.n) }));
 }
 
+interface ChDailyConversionRow {
+  day: string;
+  n: string;
+}
+
+/**
+ * Daily grain backing the chart-catalog `trial_to_paid` id — as a
+ * COUNT, not a rate. ClickHouse (task 4), unlike `getTrialStartsDaily`/
+ * `getChurnDaily` above.
+ *
+ * `trialConversions` in `getRevenueSummary` above (line ~76) is
+ * `uniqExactIf(subscriberId, type = 'TRIAL_CONVERSION')` on
+ * `raw_revenue_events` — this is that same predicate, day-grouped by
+ * `eventDate`, `FINAL` retained for the same at-least-once-outbox
+ * reason as every other `raw_revenue_events` reader in this file.
+ *
+ * WHY THIS IS A COUNT, NOT A RATE (read before "fixing" it to divide by
+ * `getTrialStartsDaily`): a trial that STARTS on day D typically
+ * CONVERTS on a LATER day, after the trial length elapses — so day D's
+ * conversions are overwhelmingly drawn from trials that started on
+ * EARLIER days, not from day D's starters. Dividing day D's conversions
+ * by day D's trial STARTS would compare two disjoint, time-offset
+ * cohorts and report the result as a same-day rate. This repo already
+ * identified this exact failure mode for this exact event type: see
+ * `charts.ts`'s `PURCHASE_NUMERATOR_EVENT_TYPE` comment, which excludes
+ * TRIAL_CONVERSION from `paywall_purchase`'s same-day numerator for
+ * precisely this lag reason ("a trial started from a paywall view on
+ * day 1 converts on day 8, landing in day 8's numerator against day
+ * 8's viewers"). It is the identical mismatch here, just with
+ * `trialStarts` standing in for `viewers`.
+ *
+ * A sound per-day trial-to-paid RATE is derivable in principle — bucket
+ * by TRIAL-START day (not conversion day), numerator = how many of that
+ * day's starters (matched by subscriberId, not by day) EVER convert —
+ * but that is a subscriber-level cross-store join (Postgres start-day
+ * cohort ⋈ ClickHouse ever-converted set) with right-censoring for
+ * cohorts too recent to have finished converting (same shape of
+ * limitation as a retention curve's incomplete tail). That is real work
+ * deserving its own review, not an in-file widening, so it is not built
+ * here. Per the task-4 controller notes' own binding rule ("if you can
+ * only get a daily numerator, ship the count and say so"), this ships
+ * as `unit: "count"` in `charts.ts`'s `trial_to_paid` case — same
+ * pattern as `getChurnDaily` just above.
+ */
+export async function getTrialConversionsDaily(
+  input: GetSummaryDailyInput,
+): Promise<DailyLifecycleCount[]> {
+  const rows = await queryAnalytics<ChDailyConversionRow>(
+    input.projectId,
+    `
+      SELECT
+        toString(toDate(eventDate))                                     AS day,
+        toString(uniqExactIf(subscriberId, type = 'TRIAL_CONVERSION'))   AS n
+      FROM rovenue.raw_revenue_events FINAL
+      WHERE projectId = {projectId:String}
+        AND toDate(eventDate) >= {from:Date}
+        AND toDate(eventDate) <= {to:Date}
+      GROUP BY day
+      ORDER BY day
+    `,
+    { from: toDateOnly(input.from), to: toDateOnly(input.to) },
+  );
+
+  return rows.map((r) => ({ day: r.day, n: Number(r.n) }));
+}
+
 /**
  * Daily grain backing the chart-catalog `churn` id — as a COUNT, not a
  * rate.

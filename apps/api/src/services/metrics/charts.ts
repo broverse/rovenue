@@ -22,7 +22,11 @@ import {
 import { listDailyMrr, type MrrPoint } from "./mrr";
 import { computeNetRevenue, computeProceedsForProject } from "./proceeds";
 import { getMrrDecompositionDailyCounts } from "./mrr-decomposition";
-import { getChurnDaily, getTrialStartsDaily } from "./summary";
+import {
+  getChurnDaily,
+  getTrialConversionsDaily,
+  getTrialStartsDaily,
+} from "./summary";
 
 // =============================================================
 // Charts service (Phase 3.5)
@@ -597,12 +601,14 @@ export function buildCountSeriesPoints(
 // Generic chart series — paywall reach/conversion and revenue
 // =============================================================
 //
-// Ten of the sixteen catalog charts are wired (paywall_view_rate,
+// Eleven of the sixteen catalog charts are wired (paywall_view_rate,
 // paywall_purchase, mrr, arr, gross_vs_net, arpu — the last four
 // delegate to `listDailyMrr`, see buildMrrSeriesPoints below — plus
 // new_subs, reactivations, trials_started, churn — task-3's
 // subscription-lifecycle group, all four daily COUNTS, see
-// buildCountSeriesPoints above). Every other id
+// buildCountSeriesPoints above — plus trial_to_paid, task-4, also a
+// daily COUNT, see getTrialConversionsDaily's doc comment in
+// summary.ts for why a rate isn't shipped). Every other id
 // answers `supported: false` so the dashboard renders an empty
 // state rather than another chart's data. `readChartSeries`'s
 // `switch` is the ONLY dispatch mechanism (no separate id allow-list)
@@ -612,6 +618,31 @@ export function buildCountSeriesPoints(
 // queries issued, `paywall_purchase`'s data leaking out under
 // `churn`'s name (or any other id's) is exactly the bug this
 // dispatch exists to prevent.
+//
+// TWO IDS DELIBERATELY STAY UNWIRED (task 4, controller ruling — see
+// task-4-report.md for the full reasoning):
+//
+//   - `retention_curve`: `computeRetention` (`services/cohorts.ts`)
+//     produces a cohort × PERIOD-SINCE-JOIN matrix, not a per-CALENDAR-
+//     DAY series. `ChartSeriesPoint.bucket` is documented as a calendar
+//     date; forcing periods-since-cohort-start onto it would fabricate
+//     dates that don't mean what the field says they mean. `/cohorts`
+//     already renders the real matrix as a heatmap — that is this
+//     metric's surface, not this dispatcher. The catalog's declared
+//     `chartType: "line"` for this id does not describe the data (see
+//     chart-catalog.ts's comment at the entry); that mismatch is
+//     recorded for product to resolve, not silently "fixed" here.
+//   - `ltv`: every owning service was checked for a day column.
+//     `getLtvDistribution` (ltv.ts) and `getRevenueSummary.avgLtvUsd`
+//     both read `v_revenue_lifetime_subscriber`, a view with no
+//     `eventDate`/day column at all (`GROUP BY projectId, subscriberId`
+//     — see its migration, 0013/0014) — a lifetime-to-date snapshot per
+//     subscriber, not a dated event log, so there is no "day" to widen
+//     by. `getLtvPrediction`/`computeLtvPrediction` (ltv-prediction.ts /
+//     ltv-extrapolation.ts) are cohort-MONTH based (sparse, one point
+//     per acquisition month, not one per calendar day) and otherwise
+//     return a single blended scalar — also not a daily series. No
+//     in-file widening produces a daily average LTV from any of them.
 
 /**
  * Revenue event type counted in the `paywall_purchase` numerator.
@@ -990,6 +1021,29 @@ export async function readChartSeries(
         ...base,
         unit: "count",
         points: buildCountSeriesPoints(churnedByDay, w.from, w.to),
+        supported: true,
+      };
+    }
+
+    case "trial_to_paid": {
+      // Task 4. See getTrialConversionsDaily's doc comment in
+      // summary.ts: this is a daily COUNT of TRIAL_CONVERSION events,
+      // not a rate. The obvious-looking alternative — divide by
+      // getTrialStartsDaily for the same day — would divide by the
+      // WRONG day's denominator (trials converting today mostly
+      // started on an earlier day), the identical lag mismatch this
+      // file's own PURCHASE_NUMERATOR_EVENT_TYPE comment already rules
+      // out for TRIAL_CONVERSION. ClickHouse, FINAL retained.
+      assertClickHouseReady();
+      const rows = await getTrialConversionsDaily({
+        projectId,
+        from: w.from,
+        to: w.to,
+      });
+      return {
+        ...base,
+        unit: "count",
+        points: buildCountSeriesPoints(rows, w.from, w.to),
         supported: true,
       };
     }

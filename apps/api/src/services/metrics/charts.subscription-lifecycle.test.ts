@@ -14,6 +14,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // trials_started/churn delegate to summary.ts's getTrialStartsDaily /
 // getChurnDaily, which are Postgres (drizzle), not ClickHouse — mocked
 // the same way for the same reason.
+//
+// trial_to_paid (task 4) delegates to summary.ts's
+// getTrialConversionsDaily, which IS ClickHouse (unlike its two
+// siblings above) — see its doc comment in summary.ts for why it ships
+// as a count, not a rate.
 
 const getMrrDecompositionDailyCountsMock = vi.fn();
 vi.mock("./mrr-decomposition", () => ({
@@ -23,9 +28,12 @@ vi.mock("./mrr-decomposition", () => ({
 
 const getTrialStartsDailyMock = vi.fn();
 const getChurnDailyMock = vi.fn();
+const getTrialConversionsDailyMock = vi.fn();
 vi.mock("./summary", () => ({
   getTrialStartsDaily: (...args: unknown[]) => getTrialStartsDailyMock(...args),
   getChurnDaily: (...args: unknown[]) => getChurnDailyMock(...args),
+  getTrialConversionsDaily: (...args: unknown[]) =>
+    getTrialConversionsDailyMock(...args),
 }));
 
 const isClickHouseConfiguredMock = vi.fn();
@@ -51,6 +59,7 @@ describe("readChartSeries — subscription-lifecycle ids", () => {
     });
     getTrialStartsDailyMock.mockReset().mockResolvedValue([]);
     getChurnDailyMock.mockReset().mockResolvedValue([]);
+    getTrialConversionsDailyMock.mockReset().mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -124,5 +133,32 @@ describe("readChartSeries — subscription-lifecycle ids", () => {
     const res = await readChartSeries("proj_1", "churn", 1);
     expect(res.points.at(-1)?.value).toBe(0);
     expect(res.points.at(-1)?.value).not.toBeNull();
+  });
+
+  // task 4: trial_to_paid — a daily COUNT of TRIAL_CONVERSION events,
+  // ClickHouse (unlike trials_started/churn just above). See
+  // getTrialConversionsDaily's doc comment in summary.ts for why this
+  // isn't a rate divided by getTrialStartsDaily.
+
+  it("trial_to_paid: unit is count, values come from getTrialConversionsDaily, requires ClickHouse", async () => {
+    getTrialConversionsDailyMock.mockResolvedValueOnce([
+      { day: "2026-07-02", n: 6 },
+    ]);
+    const res = await readChartSeries("proj_1", "trial_to_paid", 1);
+    expect(res.unit).toBe("count");
+    expect(res.supported).toBe(true);
+    expect(res.points.at(-1)?.value).toBe(6);
+  });
+
+  it("trial_to_paid: a day absent from getTrialConversionsDaily's rows is a real, measured zero", async () => {
+    getTrialConversionsDailyMock.mockResolvedValueOnce([]);
+    const res = await readChartSeries("proj_1", "trial_to_paid", 1);
+    expect(res.points.at(-1)?.value).toBe(0);
+    expect(res.points.at(-1)?.value).not.toBeNull();
+  });
+
+  it("trial_to_paid: requires ClickHouse configured", async () => {
+    isClickHouseConfiguredMock.mockReturnValue(false);
+    await expect(readChartSeries("proj_1", "trial_to_paid", 1)).rejects.toThrow();
   });
 });

@@ -55,7 +55,26 @@ const SYSTEM_CATALOG: ReadonlyArray<SystemChart> = [
   { id: "trials_started", category: "growth", chartType: "bar", range: "6M", config: {} },
   { id: "reactivations", category: "growth", chartType: "line", range: "6M", config: {} },
   { id: "churn", category: "retention", chartType: "line", range: "12M", config: {} },
+  // NOT wired (task 4, controller Ruling 4 — do not wire, do not change
+  // this id or its chartType, that's Task 8's job). `computeRetention`
+  // (services/cohorts.ts) produces a cohort × period-since-join matrix;
+  // its x-axis is periods since cohort start (0, 7, 30…), not a
+  // calendar date. `ChartSeriesPoint.bucket` is documented as an ISO
+  // calendar date (dashboard.ts:877-879), so this declared
+  // `chartType: "line"` does not describe this metric — forcing the
+  // matrix into a daily-bucket line would fabricate dates. `/cohorts`
+  // already renders the real matrix correctly as a heatmap; that is
+  // this metric's surface, not `/series/:chartId`.
   { id: "retention_curve", category: "retention", chartType: "line", range: "12M", config: {} },
+  // NOT wired (task 4): every owning service was checked for a day
+  // column and none has one. `getLtvDistribution` (ltv.ts) and
+  // `getRevenueSummary.avgLtvUsd` both read
+  // `v_revenue_lifetime_subscriber`, a lifetime-to-date snapshot per
+  // subscriber with no `eventDate` — there is no day to widen by.
+  // `getLtvPrediction` (ltv-prediction.ts/ltv-extrapolation.ts) is
+  // cohort-MONTH based and otherwise returns one blended scalar,
+  // neither of which is a daily series either. See charts.ts's
+  // dispatcher-header comment for the full reasoning.
   { id: "ltv", category: "retention", chartType: "line", range: "12M", config: {} },
   { id: "trial_to_paid", category: "conversion", chartType: "line", range: "6M", config: {} },
   { id: "paywall_view_rate", category: "conversion", chartType: "line", range: "6M", config: {} },

@@ -35,6 +35,7 @@ import {
 import {
   getRevenueSummary,
   getChurnDaily,
+  getTrialConversionsDaily,
   getTrialStartsDaily,
 } from "../src/services/metrics/summary";
 import { readChartSeries } from "../src/services/metrics/charts";
@@ -382,6 +383,20 @@ describe("widen: daily-grain readers reconcile to the pinned window totals", () 
     expect(byDay).toEqual({ "2026-06-01": 1, "2026-06-02": 1 }); // sub_d, sub_f
     expect(churnedByDay.reduce((a, r) => a + r.n, 0)).toBe(2); // matches s.churnedInWindow above
   });
+
+  it("getTrialConversionsDaily (task 4, ClickHouse) reconciles to the pinned trialConversions window total", async () => {
+    const rows = await getTrialConversionsDaily({ projectId: PROJECT, from: FROM, to: TO });
+    const byDay = Object.fromEntries(rows.map((r) => [r.day, r.n]));
+    // ClickHouse's GROUP BY day emits a row for every day that has ANY
+    // event, not just days with a TRIAL_CONVERSION — 2026-06-02 has
+    // sub_e/sub_f events (INITIAL/REACTIVATION) so it's a real row with
+    // uniqExactIf(...) = 0, distinct from 2026-06-03 (zero events at
+    // all that day), which has no row. Both read as 0 once
+    // buildCountSeriesPoints fills the window, so this doesn't change
+    // the dispatcher's output — see the Part 3 test below.
+    expect(byDay).toEqual({ "2026-06-01": 1, "2026-06-02": 0 }); // sub_b, TRIAL_CONVERSION
+    expect(rows.reduce((a, r) => a + r.n, 0)).toBe(1); // matches s.trialConversions above
+  });
 });
 
 // =============================================================
@@ -429,5 +444,13 @@ describe("readChartSeries — subscription-lifecycle ids, real ClickHouse + real
     expect(res.unit).toBe("count");
     // day1: sub_d churned; day2: sub_f churned; day3: nobody
     expect(res.points.map((p) => p.value)).toEqual([1, 1, 0]);
+  });
+
+  it("trial_to_paid (task 4): daily TRIAL_CONVERSION counts, real zeros on days with no conversion", async () => {
+    const res = await readChartSeries(PROJECT, "trial_to_paid", 3);
+    expect(res.unit).toBe("count");
+    expect(res.supported).toBe(true);
+    // day1: sub_b converts; day2/day3: nobody
+    expect(res.points.map((p) => p.value)).toEqual([1, 0, 0]);
   });
 });

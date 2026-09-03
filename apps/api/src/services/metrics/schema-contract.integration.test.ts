@@ -455,6 +455,13 @@ const REGISTRY: ReadonlyArray<ModuleCoverage> = [
       // and 'churn' cases (task-3).
       getTrialStartsDaily: "Postgres-only; covered above via 'trials_started'",
       getChurnDaily: "Postgres-only; covered above via 'churn'",
+      // Unlike its two siblings above, this one IS ClickHouse (task 4:
+      // see its doc comment) — still exempted here for the same reason
+      // as getMrrDecompositionDailyCounts: it's exercised, once, via
+      // SYSTEM_CHART_IDS's 'trial_to_paid' entry above, which schema-
+      // validates the real SQL against the real container.
+      getTrialConversionsDaily:
+        "ClickHouse; covered above, once per SYSTEM_CHART_IDS entry — dispatched via readChartSeries's 'trial_to_paid' case (task-4)",
     },
     invokers: {
       getRevenueSummary: () =>

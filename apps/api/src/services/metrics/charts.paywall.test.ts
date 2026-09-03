@@ -44,6 +44,20 @@ describe("readChartSeries", () => {
     expect(queryAnalyticsMock).not.toHaveBeenCalled();
   });
 
+  it("retention_curve stays unsupported (task-4 controller Ruling 4: its x-axis is periods-since-cohort-start, not a calendar date — /cohorts is its surface, not this dispatcher)", async () => {
+    const res = await readChartSeries("proj_1", "retention_curve", 7);
+    expect(res.supported).toBe(false);
+    expect(res.points).toEqual([]);
+    expect(queryAnalyticsMock).not.toHaveBeenCalled();
+  });
+
+  it("ltv stays unsupported (task-4: no owning service has a day column to widen by — see charts.ts's dispatcher-header comment)", async () => {
+    const res = await readChartSeries("proj_1", "ltv", 7);
+    expect(res.supported).toBe(false);
+    expect(res.points).toEqual([]);
+    expect(queryAnalyticsMock).not.toHaveBeenCalled();
+  });
+
   it("paywall_view_rate divides unique viewers by daily active subscribers", async () => {
     queryAnalyticsMock
       .mockResolvedValueOnce([{ day: "2026-07-02", n: "30" }]) // viewers
