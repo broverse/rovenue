@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { funnelPurchases, type FunnelPurchase, type NewFunnelPurchase } from "../schema";
 
@@ -164,4 +164,46 @@ export async function upsertPending(
     })
     .returning();
   return saved ?? null;
+}
+
+// A rows-billed status: the only two statuses a row reaches after Stripe
+// has actually charged the customer. Named so the intent at the call site
+// below reads as "ever billed", not as an arbitrary status list.
+const BILLED_STATUSES = ["paid", "refunded"] as const;
+
+/**
+ * The most recent Stripe customer id billed for this subscriber, or null.
+ *
+ * Subscribers carry no `stripeCustomerId` of their own — a funnel-payment
+ * customer is created against a `funnel_purchases` row, and that row's
+ * `subscriber_id` is populated once the paid session resolves to an
+ * installed subscriber (see `setSubscriber` above). This is therefore the
+ * ONLY place a subscriber's Stripe customer can be read back from, and it
+ * is what the billing-portal endpoint resolves the customer from
+ * server-side — never from anything a client sends.
+ *
+ * Restricted to {@link BILLED_STATUSES}: a `pending` row already has a
+ * live Stripe customer (funnel-payment.ts creates it before payment is
+ * confirmed), but handing out a portal for an attempt that never actually
+ * billed is not what this endpoint is for, and a stale abandoned attempt
+ * must not shadow a later, genuinely paid one — hence `ORDER BY paidAt
+ * DESC`, newest bill first.
+ */
+export async function findLatestStripeCustomerIdForSubscriber(
+  db: Db,
+  subscriberId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ stripeCustomerId: funnelPurchases.stripeCustomerId })
+    .from(funnelPurchases)
+    .where(
+      and(
+        eq(funnelPurchases.subscriberId, subscriberId),
+        inArray(funnelPurchases.status, BILLED_STATUSES),
+        isNotNull(funnelPurchases.stripeCustomerId),
+      ),
+    )
+    .orderBy(desc(funnelPurchases.paidAt))
+    .limit(1);
+  return rows[0]?.stripeCustomerId ?? null;
 }

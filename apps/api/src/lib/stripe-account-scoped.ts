@@ -146,6 +146,21 @@ export interface AccountScopedStripe {
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.ApiList<Stripe.PaymentMethodDomain>>>;
   };
+  readonly billingPortal: {
+    sessions: {
+      /**
+       * The billing-portal session endpoint (v1/billing-portal) creates
+       * this against the subscriber's Stripe customer on the CONNECTED
+       * account. Unscoped, it would open a portal onto Rovenue's own
+       * Stripe account instead — the exact failure this facade exists to
+       * make unreachable.
+       */
+      create(
+        params: Stripe.BillingPortal.SessionCreateParams,
+        options?: ScopedRequestOptions,
+      ): Promise<Stripe.Response<Stripe.BillingPortal.Session>>;
+    };
+  };
 }
 
 /**
@@ -217,6 +232,12 @@ export function withAccount(
         stripe.paymentMethodDomains.create(params, { ...options, ...bound }),
       list: (params, options) =>
         stripe.paymentMethodDomains.list(params, { ...options, ...bound }),
+    },
+    billingPortal: {
+      sessions: {
+        create: (params, options) =>
+          stripe.billingPortal.sessions.create(params, { ...options, ...bound }),
+      },
     },
   };
 }

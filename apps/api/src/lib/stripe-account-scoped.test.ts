@@ -107,6 +107,7 @@ function stubClientWide() {
     subscriptionsCancel: vi.fn(async () => ({ id: "sub_1", status: "canceled" })),
     domainsCreate: vi.fn(async () => ({ id: "pmd_1" })),
     domainsList: vi.fn(async () => ({ data: [] })),
+    billingPortalSessionsCreate: vi.fn(async () => ({ id: "bps_1", url: "https://billing.stripe.com/session/bps_1" })),
   };
   const stripe = {
     prices: { retrieve: fns.pricesRetrieve },
@@ -122,6 +123,7 @@ function stubClientWide() {
       cancel: fns.subscriptionsCancel,
     },
     paymentMethodDomains: { create: fns.domainsCreate, list: fns.domainsList },
+    billingPortal: { sessions: { create: fns.billingPortalSessionsCreate } },
   } as unknown as Stripe;
   return { stripe, ...fns };
 }
@@ -243,6 +245,22 @@ describe("withAccount — payment resources", () => {
     );
     expect(domainsList).toHaveBeenCalledWith(
       { domain_name: "app.rovenue.io" },
+      { stripeAccount: "acct_x" },
+    );
+  });
+
+  // The billing-portal endpoint (v1/billing-portal) is a fresh auth
+  // surface: a session created against the wrong account would hand a
+  // subscriber a URL onto Rovenue's platform Stripe account instead of
+  // the connected one — this is the assertion that makes that impossible.
+  it("binds stripeAccount to billingPortal.sessions.create", async () => {
+    const { stripe, billingPortalSessionsCreate } = stubClientWide();
+    await withAccount(stripe, "acct_x").billingPortal.sessions.create({
+      customer: "cus_1",
+      return_url: "https://app.example.com/return",
+    });
+    expect(billingPortalSessionsCreate).toHaveBeenCalledWith(
+      { customer: "cus_1", return_url: "https://app.example.com/return" },
       { stripeAccount: "acct_x" },
     );
   });

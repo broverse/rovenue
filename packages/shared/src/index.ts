@@ -82,6 +82,19 @@ export const ERROR_CODE = {
   // hono's `bodyLimit` throws an HTTPException carrying its text in a
   // `res` the error handler replaces rather than in `.message`.
   PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
+  // SDK-facing billing-portal session endpoint (store-integrations
+  // completeness, Task 3). This is an auth surface — the URL it returns
+  // grants access to payment data — so its failure modes are distinct
+  // machine-readable codes rather than a generic 400/404.
+  // STRIPE_NOT_CONNECTED: the project has no active Stripe Connect
+  // account to open a portal session on. STRIPE_CUSTOMER_NOT_FOUND: the
+  // authenticated subscriber has no Stripe customer on record — the
+  // normal case for an Apple/Google-only subscriber, not an error state.
+  // RETURN_URL_NOT_ALLOWED: `returnUrl` is not one of the project's
+  // verified domains; the request's URL is never echoed back unchecked.
+  STRIPE_NOT_CONNECTED: "STRIPE_NOT_CONNECTED",
+  STRIPE_CUSTOMER_NOT_FOUND: "STRIPE_CUSTOMER_NOT_FOUND",
+  RETURN_URL_NOT_ALLOWED: "RETURN_URL_NOT_ALLOWED",
 } as const;
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];
 

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { apiKeyAuth } from "../../middleware/api-key-auth";
 import { apiKeyRateLimit } from "../../middleware/rate-limit";
+import { billingPortalRoute } from "./billing-portal";
 import { configRoute } from "./config";
 import { eventsRoute } from "./events";
 import { experimentsRoute } from "./experiments";
@@ -41,6 +42,7 @@ export const v1Route = new Hono()
   // Sits after apiKeyAuth so the bucket key is the apiKeyId, not
   // the IP.
   .use("*", apiKeyRateLimit())
+  .route("/billing-portal", billingPortalRoute)
   .route("/config", configRoute)
   .route("/identify", identifyRoute)
   .route("/events", eventsRoute)
