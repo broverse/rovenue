@@ -3660,7 +3660,7 @@
       "new_subs": "New subscribers",
       "trials_started": "Trials started",
       "reactivations": "Reactivations",
-      "churn": "Churn rate",
+      "churn": "Churned subscribers",
       "retention_curve": "Retention curve",
       "ltv": "LTV by cohort",
       "trial_to_paid": "Trial conversions",
