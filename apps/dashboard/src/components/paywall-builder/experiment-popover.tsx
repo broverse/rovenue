@@ -26,8 +26,10 @@ import {
   findNode,
   OVERRIDABLE_PROP_KEYS,
   paywallNodeSchema,
+  type NodeBorder,
   type PaywallNode,
 } from "@rovenue/shared/paywall";
+import { BorderField } from "./inspector/fields";
 
 type Props = { onClose: () => void };
 
@@ -57,10 +59,22 @@ const ELEMENT_VARIANT_WEIGHT = 0.5;
 // the server re-validates the patched node against, so client and server
 // agree by construction.
 
-type ElementPropEditor = "text" | "number" | "color";
+export type ElementPropEditor = "text" | "number" | "color" | "border";
 
+/** Stand-in value for probing a numeric prop — any finite number would do. */
 const PROBE_NUMBER = 1;
+/** Stand-in value for probing a `ThemeColor` prop — a bare light color with
+ *  no `dark`, the minimal valid shape. */
 const PROBE_THEME_COLOR = { light: "#000000" } as const;
+/**
+ * Stand-in value for probing a `NodeBorder` prop. `NodeBorder` requires BOTH
+ * `width` and `color` (schema.ts's `nodeBorderSchema`), so this probe can
+ * never validate against a `ThemeColor` prop (it carries an extra `width`
+ * field ThemeColor's strict shape rejects) and `PROBE_THEME_COLOR` can never
+ * validate against a `border` prop (it is missing the required `width`) —
+ * the two probes are shapes zod tells apart, not values that could tie.
+ */
+const PROBE_BORDER = { width: 1, color: { light: "#000000" } } as const;
 
 /** Does the published node still parse with `prop` set to `value`? */
 function nodeAccepts(node: PaywallNode, prop: string, value: unknown): boolean {
@@ -68,16 +82,17 @@ function nodeAccepts(node: PaywallNode, prop: string, value: unknown): boolean {
 }
 
 /**
- * Number and ThemeColor are recognised by probe. Everything else — plain
- * strings AND enums like `align` / `style`, which no single probe value can
- * stand in for — falls to `text`, where what the operator typed is checked
- * against the schema before the form can be submitted. So an enum prop
- * still works (type a valid member), and a prop no text can express
- * (`border`) simply never validates and says so.
+ * Number, ThemeColor and NodeBorder are recognised by probe. Everything
+ * else — plain strings AND enums like `align` / `style`, which no single
+ * probe value can stand in for — falls to `text`, where what the operator
+ * typed is checked against the schema before the form can be submitted. So
+ * an enum prop still works (type a valid member), and a prop no text can
+ * express is caught by an earlier, more specific probe instead.
  */
-function detectPropEditor(node: PaywallNode, prop: string): ElementPropEditor {
+export function detectPropEditor(node: PaywallNode, prop: string): ElementPropEditor {
   if (nodeAccepts(node, prop, PROBE_NUMBER)) return "number";
   if (nodeAccepts(node, prop, PROBE_THEME_COLOR)) return "color";
+  if (nodeAccepts(node, prop, PROBE_BORDER)) return "border";
   return "text";
 }
 
@@ -87,7 +102,9 @@ function encodeElementValue(
   editor: ElementPropEditor,
   light: string,
   dark: string,
+  border: NodeBorder | undefined,
 ): unknown {
+  if (editor === "border") return border;
   const value = light.trim();
   if (value.length === 0) return undefined;
   if (editor === "number") {
@@ -254,6 +271,10 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
   /** Only used by the `color` editor — the optional dark-mode member of
    *  `ThemeColor`. Blank means "omit `dark`", which is a valid ThemeColor. */
   const [elementVariantBDark, setElementVariantBDark] = useState("");
+  /** Only used by the `border` editor. A `NodeBorder` is an object, not a
+   *  string, so it cannot share the `light`/`dark` text state the other
+   *  editors use — it gets its own slot, reset alongside them. */
+  const [variantBorder, setVariantBorder] = useState<NodeBorder | undefined>(undefined);
   const [name, setName] = useState<string | null>(null);
   const [variantBKind, setVariantBKind] = useState<VariantBKind>("duplicate");
   const [duplicateName, setDuplicateName] = useState<string | null>(null);
@@ -366,6 +387,7 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
     elementEditor,
     elementVariantB,
     elementVariantBDark,
+    variantBorder,
   );
   /** The candidate must produce a node the schema still accepts — the same
    *  check `assertPatchedNodeParses` makes server-side, so a rejected value
@@ -783,6 +805,7 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                             setElementProp(e.target.value);
                             setElementVariantB("");
                             setElementVariantBDark("");
+                            setVariantBorder(undefined);
                           }}
                         >
                           {overridableProps.map((prop) => (
@@ -798,36 +821,57 @@ export const ExperimentPopover = component(({ onClose }: Props) => {
                         </span>
                         <Input value={variantAValue} readOnly disabled />
                       </label>
-                      <label className="flex flex-col gap-1.5">
-                        <span className="text-[11px] text-rv-mute-500">
-                          {elementEditor === "color"
-                            ? t(
-                                "paywalls.builder.experiment.element.variantBLight",
-                                "B (candidate) — light",
-                              )
-                            : t("paywalls.builder.experiment.element.variantB", "B (candidate)")}
-                        </span>
-                        <Input
-                          value={elementVariantB}
-                          inputMode={elementEditor === "number" ? "decimal" : undefined}
-                          onChange={(e) => setElementVariantB(e.target.value)}
+                      {elementEditor === "border" ? (
+                        <BorderField
+                          label={t(
+                            "paywalls.builder.experiment.element.variantB",
+                            "B (candidate)",
+                          )}
+                          value={variantBorder}
+                          onChange={setVariantBorder}
                         />
-                      </label>
-                      {elementEditor === "color" && (
-                        <label className="flex flex-col gap-1.5">
-                          <span className="text-[11px] text-rv-mute-500">
-                            {t(
-                              "paywalls.builder.experiment.element.variantBDark",
-                              "B (candidate) — dark (optional)",
-                            )}
-                          </span>
-                          <Input
-                            value={elementVariantBDark}
-                            onChange={(e) => setElementVariantBDark(e.target.value)}
-                          />
-                        </label>
+                      ) : (
+                        <>
+                          <label className="flex flex-col gap-1.5">
+                            <span className="text-[11px] text-rv-mute-500">
+                              {elementEditor === "color"
+                                ? t(
+                                    "paywalls.builder.experiment.element.variantBLight",
+                                    "B (candidate) — light",
+                                  )
+                                : t(
+                                    "paywalls.builder.experiment.element.variantB",
+                                    "B (candidate)",
+                                  )}
+                            </span>
+                            <Input
+                              value={elementVariantB}
+                              inputMode={elementEditor === "number" ? "decimal" : undefined}
+                              onChange={(e) => setElementVariantB(e.target.value)}
+                            />
+                          </label>
+                          {elementEditor === "color" && (
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-[11px] text-rv-mute-500">
+                                {t(
+                                  "paywalls.builder.experiment.element.variantBDark",
+                                  "B (candidate) — dark (optional)",
+                                )}
+                              </span>
+                              <Input
+                                value={elementVariantBDark}
+                                onChange={(e) => setElementVariantBDark(e.target.value)}
+                              />
+                            </label>
+                          )}
+                        </>
                       )}
-                      {elementVariantB.trim().length > 0 && !variantBValid && (
+                      {/* `border`'s "did they type something yet" check reads
+                          `variantBorder` instead of the shared text state —
+                          the field never touches `elementVariantB`. */}
+                      {(elementEditor === "border"
+                        ? variantBorder !== undefined
+                        : elementVariantB.trim().length > 0) && !variantBValid && (
                         <p
                           role="status"
                           className="m-0 rounded-md border border-rv-warning/40 bg-rv-warning/10 px-3 py-2 text-[12px] text-foreground"
