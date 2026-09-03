@@ -95,6 +95,14 @@ export type MetricsExportParams = {
 export interface MetricsExportSummary {
   rowCount: number;
   truncated: boolean;
+  /**
+   * Chart ids whose reader threw mid-stream (Task 6 — the catalog grew
+   * from 2 wired readers to a dozen, so a single bad reader is no
+   * longer a rare event). Each failing id gets its own `# error:` line
+   * in the body and is skipped; every OTHER id still streams normally.
+   * Empty in the common case.
+   */
+  erroredChartIds: string[];
 }
 
 // =============================================================
@@ -304,6 +312,58 @@ function formatTruncationMarker(cap: number): string {
   return `# truncated at ${cap} rows\n`;
 }
 
+function formatSeriesErrorMarker(chartId: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  // Same "#"-prefixed comment convention as the truncation marker —
+  // every CSV reader we care about ignores a "#" line, and a consumer
+  // that cares can grep for it. Scoped to the one chart id that failed
+  // (`chart_id=<id>`) rather than the single unqualified `# error:`
+  // line the route's catch-all uses for a section-wide failure, so a
+  // customer can tell "arr failed" from "the whole export failed".
+  return `# error: chart_id=${chartId}: ${message}\n`;
+}
+
+// =============================================================
+// Per-chart-id series fan-out
+// =============================================================
+//
+// SYSTEM_CHART_IDS has grown from 2 wired readers to a dozen (Tasks
+// 2-5). Fetching them one at a time, awaiting each before starting the
+// next, turns this loop into a dozen sequential ClickHouse/Postgres
+// round trips per export request — a real increase in per-request
+// work regardless of whether it was timed. `readChartSeries`'s own
+// `paywall_view_rate` case already sets the precedent for running
+// independent reads concurrently (`Promise.all` there); this does the
+// same across the whole catalog.
+//
+// `Promise.allSettled`, not `Promise.all`: with a dozen real readers a
+// single one throwing is no longer rare, and a `Promise.all` rejection
+// would still take the whole batch down together — exactly the
+// mid-stream "one bad reader kills the export" failure mode this task
+// exists to close. Settling each one individually means a failing
+// reader's rejection never reaches the caller as a thrown error; it is
+// captured, reported as its own marker line, and every other id's
+// result streams normally.
+type SeriesFanOutResult =
+  | { chartId: string; ok: true; series: ChartSeriesResponse }
+  | { chartId: string; ok: false; error: unknown };
+
+async function readAllChartSeries(
+  projectId: string,
+  windowDays: number,
+): Promise<SeriesFanOutResult[]> {
+  const ids = [...SYSTEM_CHART_IDS];
+  const settled = await Promise.allSettled(
+    ids.map((chartId) => readChartSeries(projectId, chartId, windowDays)),
+  );
+  return settled.map((result, i) => {
+    const chartId = ids[i]!;
+    return result.status === "fulfilled"
+      ? { chartId, ok: true, series: result.value }
+      : { chartId, ok: false, error: result.reason };
+  });
+}
+
 // =============================================================
 // Streaming generator
 // =============================================================
@@ -316,6 +376,7 @@ export async function* streamMetricsExportCsv(
   yield formatMetricsExportHeader();
 
   let rowCount = 0;
+  const erroredChartIds: string[] = [];
 
   // Yields each row's CSV line and, once `cap` is reached, the
   // truncation marker; returns whether the cap was hit so the caller
@@ -337,30 +398,38 @@ export async function* streamMetricsExportCsv(
 
   const channels = await readChannels(projectId, windowDays);
   if (yield* emit(channelsToRows(channels))) {
-    return { rowCount, truncated: true };
+    return { rowCount, truncated: true, erroredChartIds };
   }
 
   const proceeds = await readProceeds(projectId, windowDays);
   if (yield* emit(proceedsToRows(proceeds))) {
-    return { rowCount, truncated: true };
+    return { rowCount, truncated: true, erroredChartIds };
   }
 
   const funnel = await readFunnel(projectId, windowDays);
   if (yield* emit(funnelToRows(funnel))) {
-    return { rowCount, truncated: true };
+    return { rowCount, truncated: true, erroredChartIds };
   }
 
   const heatmap = await readHeatmap(projectId, windowDays);
   if (yield* emit(heatmapToRows(heatmap))) {
-    return { rowCount, truncated: true };
+    return { rowCount, truncated: true, erroredChartIds };
   }
 
-  for (const chartId of SYSTEM_CHART_IDS) {
-    const series = await readChartSeries(projectId, chartId, windowDays);
-    if (yield* emit(seriesToRows(series))) {
-      return { rowCount, truncated: true };
+  // Fired concurrently (see readAllChartSeries above) — a failing id
+  // is settled, not thrown, so it cannot unwind this generator and
+  // cannot stop any other id's rows from streaming.
+  const seriesResults = await readAllChartSeries(projectId, windowDays);
+  for (const result of seriesResults) {
+    if (!result.ok) {
+      erroredChartIds.push(result.chartId);
+      yield formatSeriesErrorMarker(result.chartId, result.error);
+      continue;
+    }
+    if (yield* emit(seriesToRows(result.series))) {
+      return { rowCount, truncated: true, erroredChartIds };
     }
   }
 
-  return { rowCount, truncated: false };
+  return { rowCount, truncated: false, erroredChartIds };
 }

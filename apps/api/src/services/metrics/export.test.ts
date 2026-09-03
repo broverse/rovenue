@@ -44,6 +44,7 @@ vi.mock("./charts", () => ({
 import {
   METRICS_EXPORT_ROW_CAP,
   streamMetricsExportCsv,
+  type MetricsExportSummary,
 } from "./export";
 import { SYSTEM_CHART_IDS } from "./chart-catalog";
 
@@ -71,8 +72,8 @@ function unsupportedSeries(chartId: string): ChartSeriesResponse {
 }
 
 async function drain(
-  gen: AsyncGenerator<string, { rowCount: number; truncated: boolean }, void>,
-): Promise<{ lines: string[]; summary: { rowCount: number; truncated: boolean } }> {
+  gen: AsyncGenerator<string, MetricsExportSummary, void>,
+): Promise<{ lines: string[]; summary: MetricsExportSummary }> {
   const lines: string[] = [];
   let next = await gen.next();
   while (!next.done) {
@@ -107,7 +108,11 @@ describe("streamMetricsExportCsv", () => {
     expect(readFunnelMock).toHaveBeenCalledWith("proj_1", 28);
     expect(readHeatmapMock).toHaveBeenCalledWith("proj_1", 28);
     expect(readChartSeriesMock).toHaveBeenCalledTimes(SYSTEM_CHART_IDS.size);
-    expect(summary).toEqual({ rowCount: 0, truncated: false });
+    expect(summary).toEqual({
+      rowCount: 0,
+      truncated: false,
+      erroredChartIds: [],
+    });
   });
 
   it("emits a header and one row per (store, metric) pair for channels/proceeds, per step for funnel, per cell for heatmap, per point for a supported series", async () => {
@@ -285,5 +290,94 @@ describe("streamMetricsExportCsv", () => {
 
   it("has a sane default cap, exported as a named constant (no magic values)", () => {
     expect(METRICS_EXPORT_ROW_CAP).toBeGreaterThan(1000);
+  });
+
+  it("fires every chart-id reader concurrently, not one after another (Task 6, Step 4)", async () => {
+    resetMocksToEmpty();
+    const ids = [...SYSTEM_CHART_IDS];
+    let callsSoFarAtFirstResume = -1;
+    readChartSeriesMock.mockImplementation(
+      async (_projectId: string, chartId: string) => {
+        // Yield to the microtask queue without a real timer, THEN read
+        // how many calls have been made in total. If the export awaited
+        // each reader in turn, only the ONE call that's currently
+        // executing would exist by the time its own continuation
+        // resumes. If it fans every id out synchronously first (via
+        // `.map` + Promise.allSettled, as it now does), every other
+        // mock invocation has already been registered before this
+        // (the first-scheduled) continuation gets to run.
+        await Promise.resolve();
+        if (callsSoFarAtFirstResume === -1) {
+          callsSoFarAtFirstResume = readChartSeriesMock.mock.calls.length;
+        }
+        return unsupportedSeries(chartId);
+      },
+    );
+
+    await drain(streamMetricsExportCsv({ projectId: "proj_1", windowDays: 28 }));
+
+    expect(callsSoFarAtFirstResume).toBe(ids.length);
+  });
+
+  it("does not abort the export when a single chart-id reader throws mid-stream (Task 6, Step 5)", async () => {
+    resetMocksToEmpty();
+    const ids = [...SYSTEM_CHART_IDS];
+    const failingIndex = Math.floor(ids.length / 2);
+    const FAILING_ID = ids[failingIndex]!;
+    // Deliberately AFTER the failing id in iteration order — proves the
+    // failure didn't stop the fan-out from reaching ids later in the
+    // catalog, not just ones already resolved before it.
+    const SURVIVING_ID = ids[failingIndex + 1]!;
+    const FAILURE_MESSAGE = "ClickHouse connection reset";
+
+    readChartSeriesMock.mockImplementation(
+      async (_projectId: string, chartId: string) => {
+        if (chartId === FAILING_ID) {
+          throw new Error(FAILURE_MESSAGE);
+        }
+        if (chartId === SURVIVING_ID) {
+          return {
+            chartId,
+            unit: "count",
+            from: "2026-07-01T00:00:00.000Z",
+            to: "2026-07-02T00:00:00.000Z",
+            points: [{ bucket: "2026-07-01T00:00:00.000Z", value: 7 }],
+            supported: true,
+          } satisfies ChartSeriesResponse;
+        }
+        return unsupportedSeries(chartId);
+      },
+    );
+
+    const { lines, summary } = await drain(
+      streamMetricsExportCsv({ projectId: "proj_1", windowDays: 28 }),
+    );
+    const body = lines.join("");
+
+    // Every id was still attempted — the failure of one did not stop
+    // the fan-out from reaching the rest.
+    expect(readChartSeriesMock).toHaveBeenCalledTimes(ids.length);
+
+    // The failing id's own error is named on a marker line...
+    const errorLine = lines.find(
+      (l) => l.startsWith("#") && l.includes(FAILING_ID),
+    );
+    expect(errorLine).toBe(`# error: chart_id=${FAILING_ID}: ${FAILURE_MESSAGE}\n`);
+
+    // ...but a chart id that comes AFTER the failing one in iteration
+    // order still streamed its real data. This is the crux of the
+    // proof: the failure did not truncate the rest of the export.
+    expect(body).toContain(
+      `series,${SURVIVING_ID},,2026-07-01T00:00:00.000Z,,,,value,7,count\n`,
+    );
+
+    // The export completes normally (not truncated) and names the
+    // failing id for the caller/audit log, rather than silently
+    // swallowing which chart went missing.
+    expect(summary.truncated).toBe(false);
+    expect(summary.erroredChartIds).toEqual([FAILING_ID]);
+
+    // The generator itself never threw — drain() would have rejected
+    // if it had.
   });
 });
