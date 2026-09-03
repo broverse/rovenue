@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
-import { drizzle } from "@rovenue/db";
+import { drizzle, type PurchaseStatus } from "@rovenue/db";
+import { LIVE_STATUSES as SHARED_LIVE_STATUSES } from "@rovenue/shared/subscription-status";
 import type {
   BillingIssueRow,
   BillingIssuesResponse,
@@ -65,12 +66,7 @@ const RENEWING_WINDOW_DAYS = 7;
 // use the equivalent CASE expression so filters stay aligned
 // between server and client.
 
-const LIVE_STATUSES: ReadonlyArray<"TRIAL" | "ACTIVE" | "GRACE_PERIOD" | "PAUSED"> = [
-  "TRIAL",
-  "ACTIVE",
-  "GRACE_PERIOD",
-  "PAUSED",
-];
+const LIVE_STATUSES: ReadonlyArray<PurchaseStatus> = SHARED_LIVE_STATUSES;
 
 const CHURNED_STATUSES: ReadonlyArray<"EXPIRED" | "REFUNDED" | "REVOKED"> = [
   "EXPIRED",

@@ -1,6 +1,10 @@
 import type { PurchaseStatus } from "@rovenue/db";
 import type Stripe from "stripe";
 import {
+  SUBSCRIPTION_STATUSES,
+  type SubscriptionStatus,
+} from "@rovenue/shared/subscription-status";
+import {
   APPLE_NOTIFICATION_SUBTYPE,
   APPLE_NOTIFICATION_TYPE,
   type AppleNotificationSubtype,
@@ -14,18 +18,12 @@ import {
 } from "./google/google-types";
 import { STRIPE_SUBSCRIPTION_STATUS } from "./stripe/stripe-types";
 
-// Type-safe mirror of the PurchaseStatus enum. `import type` keeps
-// the DB package out of this module's runtime graph so tests and
-// tooling can load the state machine without DB initialization.
-const STATUS = {
-  TRIAL: "TRIAL",
-  ACTIVE: "ACTIVE",
-  EXPIRED: "EXPIRED",
-  REFUNDED: "REFUNDED",
-  REVOKED: "REVOKED",
-  PAUSED: "PAUSED",
-  GRACE_PERIOD: "GRACE_PERIOD",
-} as const satisfies Record<string, PurchaseStatus>;
+// Type-safe mirror of the PurchaseStatus enum, built from the shared
+// tuple. `import type` still keeps the DB package out of this module's
+// runtime graph.
+const STATUS = Object.fromEntries(
+  SUBSCRIPTION_STATUSES.map((s) => [s, s]),
+) as { [K in SubscriptionStatus]: K };
 
 // =============================================================
 // Per-store normalizers

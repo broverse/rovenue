@@ -23,6 +23,16 @@ type PurchaseStatus = (typeof purchaseStatus.enumValues)[number];
  */
 const TERMINAL_STATUSES: PurchaseStatus[] = ["REFUNDED", "REVOKED"];
 
+/**
+ * Read-only accessor for the data-layer terminal guard. Exists so a test
+ * can assert this deliberate duplicate still agrees with the shared
+ * semantics table WITHOUT this module importing it — the duplication is
+ * the point (defence in depth if the application layer is wrong).
+ */
+export function purchaseRepoTerminalStatuses(): readonly PurchaseStatus[] {
+  return TERMINAL_STATUSES;
+}
+
 // =============================================================
 // Purchase reads
 // =============================================================

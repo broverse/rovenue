@@ -1,11 +1,15 @@
 import { PurchaseStatus, drizzle, type Store } from "@rovenue/db";
+import { ACCESS_GRANTING_STATUSES } from "@rovenue/shared/subscription-status";
 import { logger } from "../lib/logger";
 
 const log = logger.child("access-engine");
 
-const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> = new Set<
-  PurchaseStatus
->([PurchaseStatus.ACTIVE, PurchaseStatus.TRIAL, PurchaseStatus.GRACE_PERIOD]);
+// Derived from the shared status-semantics table — see
+// packages/shared/src/subscription-status.ts. A new status that grants
+// access is picked up here automatically.
+const ACCESS_GRANTING: ReadonlySet<PurchaseStatus> = new Set<PurchaseStatus>(
+  ACCESS_GRANTING_STATUSES,
+);
 
 export interface ActiveAccessEntry {
   isActive: boolean;
@@ -40,7 +44,7 @@ export async function syncAccess(subscriberId: string): Promise<void> {
     const desired = new Map<string, Target>();
 
     for (const purchase of purchases) {
-      if (!ACCESS_GRANTING_STATUSES.has(purchase.status as PurchaseStatus)) continue;
+      if (!ACCESS_GRANTING.has(purchase.status as PurchaseStatus)) continue;
       if (purchase.expiresDate && purchase.expiresDate < now) continue;
 
       for (const accessId of purchase.accessIds) {

@@ -81,6 +81,12 @@ export {
   statusSqlList,
 } from "@rovenue/shared/subscription-status";
 
+// Data-layer terminal-status guard accessor (packages/db/.../purchases.ts)
+// — a deliberate duplicate of TERMINAL_STATUSES above, re-exported so a
+// test can pin the two together without this module importing the
+// shared list. See purchaseRepoTerminalStatuses' doc comment.
+export { purchaseRepoTerminalStatuses } from "./drizzle/repositories/purchases";
+
 export const CreditLedgerType = {
   PURCHASE: "PURCHASE",
   SPEND: "SPEND",

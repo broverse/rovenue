@@ -6,6 +6,7 @@ import {
   drizzle,
   type Store,
 } from "@rovenue/db";
+import { EXPIRY_SWEEP_STATUSES as SWEEPABLE } from "@rovenue/shared/subscription-status";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { syncAccess } from "../services/access-engine";
@@ -38,18 +39,11 @@ const REPEAT_EVERY_MS = 5 * 60 * 1000;
 // backlog. Processed rows leave the sweepable statuses, so successive
 // runs naturally drain whatever remains, oldest expiries first.
 const MAX_CANDIDATES_PER_RUN = 500;
-// Every non-terminal status that can lapse. Keep in sync with the
-// partial index purchases_status_expiresDate_idx (migration 0102).
-const EXPIRY_SWEEP_STATUSES: PurchaseStatus[] = [
-  PurchaseStatus.ACTIVE,
-  PurchaseStatus.GRACE_PERIOD,
-  PurchaseStatus.TRIAL,
-  // PAUSED is included so a paused subscription whose period lapses
-  // reaches the terminal EXPIRED state (and emits a cancellation
-  // event) instead of lingering as PAUSED forever. The state machine
-  // allows PAUSED → EXPIRED.
-  PurchaseStatus.PAUSED,
-];
+// Every non-terminal status that can lapse, derived from the shared
+// semantics table. Kept in sync with the partial index
+// purchases_status_expiresDate_idx by the pg_indexes contract test in
+// packages/db (see Task 5).
+const EXPIRY_SWEEP_STATUSES: PurchaseStatus[] = [...SWEEPABLE];
 const REPEATABLE_JOB_NAME = "expiry:check";
 const REPEATABLE_JOB_ID = "expiry-checker-repeatable";
 
