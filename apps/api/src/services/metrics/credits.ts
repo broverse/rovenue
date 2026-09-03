@@ -159,6 +159,103 @@ export async function getCreditBurnDaily(
 }
 
 // =============================================================
+// PG: outstanding liability, per day
+// =============================================================
+
+/**
+ * Daily grain behind the chart-catalog `liability` id: the outstanding
+ * credit balance at the end of each day in the window.
+ *
+ * Anchored on TODAY's authoritative figure and walked BACKWARDS through
+ * the window's signed deltas:
+ *
+ *     liability(D) = outstanding_now − Σ { amount : createdAt > end of D }
+ *
+ * Three reasons for that direction, none of them stylistic:
+ *
+ *  1. The last point equals `getCreditsRollup`'s gauge BY CONSTRUCTION
+ *     — same query, so the chart and the card cannot drift apart.
+ *  2. It reads no row outside the window. `credit_ledger` is monthly
+ *     range-partitioned; a forward sum from zero would silently lose its
+ *     opening balance the day an old partition is detached, and report
+ *     the shortfall as a real decline.
+ *  3. It sums `amount` (the signed delta) while the anchor reads
+ *     `balance` (the running total the schema stores per row). Those two
+ *     agreeing IS the ledger's append-only invariant; asserting the
+ *     final point against the gauge on real Postgres
+ *     (credits.liability-daily.integration.test.ts) is what turns that
+ *     invariant from an assumption into a test.
+ *
+ * Credits, not USD: the rollup's `paidReserveUsd` needs an average
+ * credit price derived from a window's revenue, which has no meaning
+ * "as of last March". Every currency is summed, matching the gauge's
+ * own default (`readOutstandingBalance` with no currency filter).
+ *
+ * This was `supported: false` until 2026-09-04 on the grounds that "no
+ * balance history is retained anywhere". The ledger retains it: it is
+ * append-only and every row carries both the delta and the balance
+ * after it.
+ */
+export async function getCreditLiabilityDaily(
+  projectId: string,
+  window: RollupWindow,
+  currencyId?: string,
+): Promise<Array<{ day: string; n: number }>> {
+  const [{ outstanding }, deltaRows] = await Promise.all([
+    readOutstandingBalance(projectId, currencyId),
+    readDailyDeltas(projectId, window, currencyId),
+  ]);
+
+  const deltaByDay = new Map(deltaRows.map((r) => [r.day, r.delta]));
+
+  const days: string[] = [];
+  const cursor = new Date(window.from);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const end = new Date(window.to);
+  end.setUTCHours(0, 0, 0, 0);
+  while (cursor.getTime() <= end.getTime()) {
+    days.push(cursor.toISOString().slice(0, 10));
+    cursor.setTime(cursor.getTime() + DAY_MS);
+  }
+
+  // Right to left: the last day carries today's authoritative figure,
+  // and each earlier day undoes the deltas booked after it.
+  const out: Array<{ day: string; n: number }> = new Array(days.length);
+  let running = outstanding;
+  for (let i = days.length - 1; i >= 0; i--) {
+    const day = days[i]!;
+    out[i] = { day, n: running };
+    running -= deltaByDay.get(day) ?? 0;
+  }
+  return out;
+}
+
+async function readDailyDeltas(
+  projectId: string,
+  window: RollupWindow,
+  currencyId?: string,
+): Promise<Array<{ day: string; delta: number }>> {
+  const cl = drizzle.schema.creditLedger;
+  const rows = await drizzle.db
+    .select({
+      day: sql<string>`to_char(date_trunc('day', ${cl.createdAt}), 'YYYY-MM-DD')`,
+      delta: sql<string>`COALESCE(SUM("amount"), 0)::text`,
+    })
+    .from(cl)
+    .where(
+      and(
+        eq(cl.projectId, projectId),
+        gte(cl.createdAt, window.from),
+        lte(cl.createdAt, window.to),
+        ...(currencyId ? [eq(cl.currencyId, currencyId)] : []),
+      ),
+    )
+    .groupBy(sql`date_trunc('day', ${cl.createdAt})`);
+
+  return rows.map((r) => ({ day: r.day, delta: Number(r.delta) }));
+}
+
+// =============================================================
 // Currency filter helper
 // =============================================================
 //
