@@ -1,0 +1,2 @@
+ALTER TABLE "purchases" ADD COLUMN "lastReconciledAt" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "purchases_google_reconciliation_idx" ON "purchases" USING btree ("store","lastReconciledAt","expiresDate") WHERE "purchases"."store" = 'PLAY_STORE' AND "purchases"."status" IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED');

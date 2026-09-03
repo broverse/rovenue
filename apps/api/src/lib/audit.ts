@@ -83,6 +83,13 @@ export type AuditAction =
   | "subscription.cancel_executed"
   | "subscription.cancel_failed"
   | "subscription.transition_rejected"
+  // Written by the Google reconciliation sweep (Task 5, §6) when a live
+  // Play Developer API check finds the purchase's real state has drifted
+  // from ours — the RTDN that should have reported it was lost. Distinct
+  // from `subscription.transition_rejected`: that one records a write the
+  // state machine refused; this one records a write the sweep DID apply,
+  // attributed to "system" rather than a user.
+  | "subscription.reconciled"
   | "subscriptions.exported"
   // --- metrics ---
   | "metrics.exported"

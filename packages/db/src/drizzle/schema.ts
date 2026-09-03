@@ -946,6 +946,14 @@ export const purchases = pgTable(
     // itself is state-machine-legal. NULL on legacy rows = no ordering
     // information, guard behaves as before.
     lastStoreEventAt: timestamp("lastStoreEventAt", { withTimezone: true }),
+    // Last time the Google reconciliation sweep (workers/google-reconciliation.ts)
+    // called the Play Developer API to confirm this purchase's live state,
+    // independent of whether that check found drift. NULL means "never
+    // checked" and must sort FIRST in the sweep's candidate query — a
+    // purchase created before this column existed, or before RTDN first
+    // covered it, has no evidence its state is correct. Only Google-store
+    // rows are ever stamped; Apple/Stripe purchases keep it NULL forever.
+    lastReconciledAt: timestamp("lastReconciledAt", { withTimezone: true }),
     // Opaque paywall-attribution snapshot the SDK/webhook supplied at
     // purchase time: { placementId, paywallId, variantId?, experimentKey? }.
     // Never validated against live placement/paywall/experiment rows —
@@ -979,6 +987,15 @@ export const purchases = pgTable(
       .on(t.status, t.expiresDate)
       .where(
         sql`${t.status} IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')`,
+      ),
+    // Google reconciliation sweep candidate scan (workers/google-reconciliation.ts):
+    // partial on PLAY_STORE + the same sweepable statuses as above, ordered
+    // by "checked longest ago" (NULL — never checked — first). Rows leave
+    // this index once the sweep moves them to a terminal status.
+    googleReconciliationIdx: index("purchases_google_reconciliation_idx")
+      .on(t.store, t.lastReconciledAt, t.expiresDate)
+      .where(
+        sql`${t.store} = 'PLAY_STORE' AND ${t.status} IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')`,
       ),
   }),
 );

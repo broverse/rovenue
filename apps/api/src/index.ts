@@ -9,6 +9,10 @@ import {
   scheduleExpiryCheck,
 } from "./workers/expiry-checker";
 import {
+  createGoogleReconciliationWorker,
+  scheduleGoogleReconciliation,
+} from "./workers/google-reconciliation";
+import {
   createFxWorker,
   scheduleFxFetch,
 } from "./services/fx";
@@ -104,6 +108,17 @@ createWebhookWorker();
 createExpiryWorker();
 scheduleExpiryCheck().catch((err: unknown) => {
   logger.error("failed to schedule expiry checker", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Google reconciliation sweep — 15-minute repeatable BullMQ job that
+// re-verifies drifted Google purchases against the Play Developer API
+// (see workers/google-reconciliation.ts for the first-run backfill
+// decision). Always schedules with the default `backfill: false`.
+createGoogleReconciliationWorker();
+scheduleGoogleReconciliation().catch((err: unknown) => {
+  logger.error("failed to schedule google reconciliation sweep", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

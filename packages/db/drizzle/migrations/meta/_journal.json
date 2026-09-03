@@ -799,6 +799,13 @@
       "when": 1788453316044,
       "tag": "0113_wide_smiling_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1788454388561,
+      "tag": "0114_burly_pyro",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,12 @@ import { products, purchases, subscribers, type Purchase } from "../schema";
 // Separated from repositories/purchases.ts (dashboard fan-out)
 // so each module stays focused on one caller type.
 
+// Accepts both the top-level db and a Drizzle tx handle, like
+// repositories/purchases.ts's own alias — the claim functions below
+// must be callable with a tx so their `FOR UPDATE` lock is held
+// across the caller's live Google API call.
+type DbOrTx = Db;
+
 /**
  * Lookup a purchase by its store-side transaction id, scoped to the
  * project. The (store, storeTransactionId) pair is unique globally, not
@@ -270,6 +276,139 @@ export async function findPurchasesByIdsBatch(
 ): Promise<Purchase[]> {
   if (ids.length === 0) return [];
   return db.select().from(purchases).where(inArray(purchases.id, ids));
+}
+
+// =============================================================
+// Google reconciliation sweep (workers/google-reconciliation.ts)
+// =============================================================
+//
+// Two-step claim, mirroring the expiry sweeper (a plain, non-locking
+// scan builds this run's worklist) plus the refund-shield-responder
+// per-row `FOR UPDATE SKIP LOCKED` claim (each id is locked, verified
+// against Google, and corrected inside ONE short transaction). The
+// two-step split matters: locking the whole worklist up front would
+// hold N row locks across N sequential Google HTTP calls; claiming
+// one id at a time means a slow or failing candidate blocks nothing
+// else in the batch, and a second concurrent sweep instance simply
+// SKIPs a row the first is already holding.
+//
+// The WHERE clause is identical between the two queries (see
+// `googleReconciliationIdx`, migration 0114) so a row the worklist
+// selected can still fail to claim if a concurrent sweep already
+// corrected it (lastReconciledAt now fresh) or a live webhook moved
+// it out of the sweepable statuses in between — both cases correctly
+// resolve to "nothing to do here" rather than a lost update.
+
+export interface GoogleReconciliationCandidate {
+  id: string;
+  projectId: string;
+  subscriberId: string;
+  productId: string;
+  productIdentifier: string;
+  status: Purchase["status"];
+  expiresDate: Date | null;
+  storeTransactionId: string;
+  originalTransactionId: string;
+  priceAmount: string | null;
+  priceCurrency: string | null;
+  lastReconciledAt: Date | null;
+}
+
+function toDateOrNull(value: unknown): Date | null {
+  if (value === null || value === undefined) return null;
+  return value instanceof Date ? value : new Date(value as string);
+}
+
+function rowToCandidate(
+  row: Record<string, unknown>,
+): GoogleReconciliationCandidate {
+  return {
+    id: row.id as string,
+    projectId: row.projectId as string,
+    subscriberId: row.subscriberId as string,
+    productId: row.productId as string,
+    productIdentifier: row.productIdentifier as string,
+    status: row.status as Purchase["status"],
+    expiresDate: toDateOrNull(row.expiresDate),
+    storeTransactionId: row.storeTransactionId as string,
+    originalTransactionId: row.originalTransactionId as string,
+    priceAmount: (row.priceAmount as string | null) ?? null,
+    priceCurrency: (row.priceCurrency as string | null) ?? null,
+    lastReconciledAt: toDateOrNull(row.lastReconciledAt),
+  };
+}
+
+/**
+ * Non-locking scan: every PLAY_STORE purchase either (a) past its
+ * expiry while still ACTIVE — RTDN's EXPIRED notification never
+ * arrived — or (b) not reconciled within `staleBefore`. NULL
+ * `lastReconciledAt` ("never checked") sorts first via `NULLS FIRST`.
+ * Capped at `limit` — the caller's named per-sweep constant.
+ */
+export async function selectGoogleReconciliationCandidateIds(
+  db: Db,
+  args: { now: Date; staleBefore: Date; limit: number },
+): Promise<string[]> {
+  const result = await db.execute(sql`
+    SELECT p.id
+    FROM ${purchases} p
+    WHERE p.store = 'PLAY_STORE'
+      AND p.status IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')
+      AND (
+        (p.status = 'ACTIVE' AND p."expiresDate" < ${args.now})
+        OR p."lastReconciledAt" IS NULL
+        OR p."lastReconciledAt" < ${args.staleBefore}
+      )
+    ORDER BY p."lastReconciledAt" ASC NULLS FIRST, p."expiresDate" ASC NULLS LAST
+    LIMIT ${args.limit}
+  `);
+  const rows =
+    (result as unknown as { rows: Array<{ id: string }> }).rows ?? [];
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Locks exactly one row (by primary key) with the same eligibility
+ * predicate `selectGoogleReconciliationCandidateIds` used, via
+ * `FOR UPDATE OF p SKIP LOCKED`. Returns null when another sweep
+ * instance already holds the row, or the row is no longer eligible
+ * (already reconciled, or moved out of a sweepable status by a
+ * concurrent webhook) — both are "nothing to do", not an error.
+ */
+export async function claimGoogleReconciliationCandidateById(
+  db: DbOrTx,
+  args: { id: string; now: Date; staleBefore: Date },
+): Promise<GoogleReconciliationCandidate | null> {
+  const result = await db.execute(sql`
+    SELECT p.id,
+           p."projectId"              AS "projectId",
+           p."subscriberId"           AS "subscriberId",
+           p."productId"              AS "productId",
+           pr.identifier               AS "productIdentifier",
+           p.status,
+           p."expiresDate"            AS "expiresDate",
+           p."storeTransactionId"     AS "storeTransactionId",
+           p."originalTransactionId"  AS "originalTransactionId",
+           p."priceAmount"            AS "priceAmount",
+           p."priceCurrency"          AS "priceCurrency",
+           p."lastReconciledAt"       AS "lastReconciledAt"
+    FROM ${purchases} p
+    JOIN ${products} pr ON pr.id = p."productId"
+    WHERE p.id = ${args.id}
+      AND p.store = 'PLAY_STORE'
+      AND p.status IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')
+      AND (
+        (p.status = 'ACTIVE' AND p."expiresDate" < ${args.now})
+        OR p."lastReconciledAt" IS NULL
+        OR p."lastReconciledAt" < ${args.staleBefore}
+      )
+    FOR UPDATE OF p SKIP LOCKED
+  `);
+  const rows =
+    (result as unknown as { rows: Array<Record<string, unknown>> }).rows ??
+    [];
+  const row = rows[0];
+  return row ? rowToCandidate(row) : null;
 }
 
 // Export sql for callers that need to compose additional
