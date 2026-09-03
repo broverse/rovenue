@@ -47,6 +47,19 @@ const EXPIRY_SWEEP_STATUSES: PurchaseStatus[] = [...SWEEPABLE];
 const REPEATABLE_JOB_NAME = "expiry:check";
 const REPEATABLE_JOB_ID = "expiry-checker-repeatable";
 
+// BILLING_ISSUE is deliberately `sweepable: false` (see the module doc
+// above) so the sweep loop this file otherwise runs never touches it —
+// a held row's expiresDate is already in the past, and sweeping it the
+// instant it appeared would erase the dunning signal. This constant
+// bounds a SEPARATE ageing pass (`runBillingIssueAgeing`) that retires
+// a held row only once no store could plausibly still be retrying it.
+//
+// Apple retries a failed renewal for up to 60 days; Google's account
+// hold is 30; Stripe's dunning is configurable and shorter — 60 is the
+// widest real window, so a row still in BILLING_ISSUE past it is not
+// "being retried" any more by any of the three stores.
+export const BILLING_ISSUE_MAX_AGE_DAYS = 60;
+
 // =============================================================
 // Query + processing
 // =============================================================
@@ -259,6 +272,77 @@ async function recordCancellationRevenue(
 }
 
 // =============================================================
+// BILLING_ISSUE ageing pass
+// =============================================================
+//
+// Separate from runExpiryCheck above: BILLING_ISSUE is not in
+// EXPIRY_SWEEP_STATUSES, so the ordinary sweep never sees these rows.
+// This pass has its own bounded window (BILLING_ISSUE_MAX_AGE_DAYS)
+// instead of the sweep's status-only bound, because a held row's
+// expiresDate is already in the past the moment it's stamped — bounding
+// by status alone would retire it immediately and erase the dunning
+// signal (whether the churn was involuntary). Reuses the same
+// candidate-processing helpers as the sweep (safeSyncAccess,
+// enqueueExpirationWebhook, recordCancellationRevenue) so a
+// BILLING_ISSUE → EXPIRED transition produces the same access sync,
+// webhook, and revenue bookkeeping as any other expiry.
+//
+// updatePurchaseStatusIf only writes `status`, so billingIssueDetectedAt
+// is left untouched on this transition — it must survive the lapse as
+// the record that the churn was involuntary (see
+// services/subscription-state.ts's billingIssueStamp, which likewise
+// returns {} for a BILLING_ISSUE → EXPIRED transition).
+
+export interface BillingIssueAgeingResult {
+  checked: number;
+  expired: number;
+}
+
+export async function runBillingIssueAgeing(
+  now: Date = new Date(),
+): Promise<BillingIssueAgeingResult> {
+  const cutoff = new Date(
+    now.getTime() - BILLING_ISSUE_MAX_AGE_DAYS * 24 * 60 * 60 * 1000,
+  );
+  const candidates = (await drizzle.purchaseExtRepo.findAgedBillingIssuePurchases(
+    drizzle.db,
+    { cutoff, limit: MAX_CANDIDATES_PER_RUN },
+  )) as unknown as Candidate[];
+
+  let expired = 0;
+
+  for (const candidate of candidates) {
+    try {
+      const updated = await drizzle.purchaseRepo.updatePurchaseStatusIf(
+        drizzle.db,
+        candidate.id,
+        PurchaseStatus.BILLING_ISSUE,
+        PurchaseStatus.EXPIRED,
+      );
+      if (updated === 0) continue;
+
+      expired += 1;
+      await safeSyncAccess(candidate.subscriberId);
+      await enqueueExpirationWebhook(candidate);
+      await recordCancellationRevenue(candidate, now);
+    } catch (err) {
+      log.error("billing-issue ageing processing failed", {
+        purchaseId: candidate.id,
+        subscriberId: candidate.subscriberId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  log.info("billing-issue ageing complete", {
+    checked: candidates.length,
+    expired,
+  });
+
+  return { checked: candidates.length, expired };
+}
+
+// =============================================================
 // BullMQ queue + worker + scheduling
 // =============================================================
 
@@ -301,7 +385,9 @@ export function createExpiryWorker(): Worker {
   cachedWorker = new Worker(
     EXPIRY_QUEUE_NAME,
     async (_job: Job) => {
-      return runExpiryCheck();
+      const expiry = await runExpiryCheck();
+      const ageing = await runBillingIssueAgeing();
+      return { ...expiry, billingIssueExpired: ageing.expired };
     },
     {
       connection: createBullConnection("expiry-checker"),

@@ -270,6 +270,62 @@ export async function findOverduePurchases(
   return rows as ExpiryCandidate[];
 }
 
+function rowToExpiryCandidate(row: Record<string, unknown>): ExpiryCandidate {
+  return {
+    id: row.id as string,
+    projectId: row.projectId as string,
+    subscriberId: row.subscriberId as string,
+    productId: row.productId as string,
+    status: row.status as Purchase["status"],
+    store: row.store as Purchase["store"],
+    expiresDate: toDateOrNull(row.expiresDate),
+    gracePeriodExpires: toDateOrNull(row.gracePeriodExpires),
+    priceAmount: (row.priceAmount as string | null) ?? null,
+    priceCurrency: (row.priceCurrency as string | null) ?? null,
+  };
+}
+
+/**
+ * BILLING_ISSUE rows whose dunning window has fully elapsed: no store
+ * (Apple, Google, or Stripe) could still be retrying the payment past
+ * `args.cutoff`, so the hold is retired. Columns match `ExpiryCandidate`
+ * / `findOverduePurchases` so the expiry worker's ageing pass can feed
+ * both result sets to the same processing helpers without a second
+ * mapper.
+ *
+ * `billingIssueDetectedAt IS NOT NULL` is a hard requirement, not an
+ * optimization: a NULL stamp means we do not know when the hold began,
+ * and ageing a row out on an unknown clock risks expiring a subscription
+ * that is still genuinely being retried by its store.
+ */
+export async function findAgedBillingIssuePurchases(
+  db: Db,
+  args: { cutoff: Date; limit: number },
+): Promise<ExpiryCandidate[]> {
+  const result = await db.execute(sql`
+    SELECT p.id,
+           p."projectId"           AS "projectId",
+           p."subscriberId"        AS "subscriberId",
+           p."productId"           AS "productId",
+           p.status,
+           p.store,
+           p."expiresDate"         AS "expiresDate",
+           p."gracePeriodExpires"  AS "gracePeriodExpires",
+           p."priceAmount"         AS "priceAmount",
+           p."priceCurrency"       AS "priceCurrency"
+    FROM ${purchases} p
+    WHERE p.status = 'BILLING_ISSUE'
+      AND p."billingIssueDetectedAt" IS NOT NULL
+      AND p."billingIssueDetectedAt" < ${args.cutoff}
+    ORDER BY p."billingIssueDetectedAt" ASC
+    LIMIT ${args.limit}
+  `);
+  const rows =
+    (result as unknown as { rows: Array<Record<string, unknown>> }).rows ??
+    [];
+  return rows.map(rowToExpiryCandidate);
+}
+
 /**
  * Batch lookup by ids — used by the webhook processor after it
  * claims a batch from the queue and needs the full row.
