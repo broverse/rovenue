@@ -2344,6 +2344,16 @@ Create `apps/api/src/workers/access-reconciliation.integration.test.ts`:
 ```ts
 // Drift is injected with direct SQL — never by calling the code under
 // test — so a passing run means the reconciler found real corruption.
+//
+// Each case must start from a clean subscriber set: the sweep selects
+// candidates GLOBALLY (drift is not project-scoped), so subscribers left
+// behind by an earlier case join later batches and move the circuit
+// breaker's ratio. Truncate subscribers/purchases/subscriber_access in a
+// beforeEach rather than relying on distinct project ids.
+//
+// The breaker only applies at or above MIN_BATCH_FOR_CIRCUIT_BREAKER
+// candidates, which is why the single-subscriber cases below can assert
+// a heal at all.
 it("classifies and heals a missing grant", async () => {
   const { subscriberId, accessId } = await seedActiveSubscriberWithAccess();
   await rawSql`DELETE FROM subscriber_access WHERE "subscriberId" = ${subscriberId}`;
@@ -2400,7 +2410,9 @@ it("dryRun reports drift and writes nothing", async () => {
 // from faithfully revoking everyone's entitlements.
 it("refuses to heal when drift exceeds MAX_DRIFT_HEAL_RATIO", async () => {
   const seeded = await Promise.all(
-    Array.from({ length: 20 }, () => seedActiveSubscriberWithAccess()),
+    Array.from({ length: MIN_BATCH_FOR_CIRCUIT_BREAKER }, () =>
+      seedActiveSubscriberWithAccess(),
+    ),
   );
   await rawSql`DELETE FROM subscriber_access`;
 
@@ -2508,6 +2520,14 @@ export const ACCESS_RECONCILE_STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 // silently rewrite.
 export const MAX_DRIFT_HEAL_RATIO = 0.05;
 
+// The ratio above is only meaningful once a batch is big enough for a
+// ratio to mean anything: one drifted subscriber in a batch of one is
+// 100% drift and would trip the breaker every time, so small sweeps
+// could never heal at all. Below this many candidates the breaker does
+// not apply — mass corruption, the thing it exists to catch, cannot
+// hide in a batch this small, and every heal still writes an audit row.
+export const MIN_BATCH_FOR_CIRCUIT_BREAKER = 20;
+
 const REPEAT_EVERY_MS = 30 * 60 * 1000;
 const REPEATABLE_JOB_NAME = "access-reconciliation:sweep";
 const REPEATABLE_JOB_ID = "access-reconciliation-repeatable";
@@ -2580,7 +2600,9 @@ export async function runAccessReconciliationSweep(
 
   const ratio =
     candidates.length === 0 ? 0 : drifted.length / candidates.length;
-  const circuitBroken = ratio > MAX_DRIFT_HEAL_RATIO;
+  const circuitBroken =
+    candidates.length >= MIN_BATCH_FOR_CIRCUIT_BREAKER &&
+    ratio > MAX_DRIFT_HEAL_RATIO;
 
   if (circuitBroken) {
     log.error("drift ratio above threshold — refusing to heal", {
