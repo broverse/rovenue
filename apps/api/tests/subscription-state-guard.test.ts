@@ -10,10 +10,14 @@ import {
 } from "../src/services/apple/apple-types";
 
 describe("normalizeAppleStatus DID_FAIL_TO_RENEW (OD-1)", () => {
-  it("maps a non-grace failed renewal to GRACE_PERIOD, not ACTIVE", () => {
+  // Task 4 (2026-09-04): without the GRACE_PERIOD subtype, Apple has
+  // already withdrawn access on its side — reporting GRACE_PERIOD here
+  // (the prior expectation) granted entitlement Apple itself had revoked.
+  // It now maps to BILLING_ISSUE.
+  it("maps a non-grace failed renewal to BILLING_ISSUE, not ACTIVE or GRACE_PERIOD", () => {
     expect(
       normalizeAppleStatus(APPLE_NOTIFICATION_TYPE.DID_FAIL_TO_RENEW, undefined),
-    ).toBe("GRACE_PERIOD");
+    ).toBe("BILLING_ISSUE");
   });
   it("still maps the grace subtype to GRACE_PERIOD", () => {
     expect(

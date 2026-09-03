@@ -61,9 +61,19 @@ function mapAppleSubscriptionStatus(status: number): PurchaseStatus {
   switch (status) {
     case APPLE_SUBSCRIPTION_STATUS.ACTIVE:
       return PurchaseStatus.ACTIVE;
-    case APPLE_SUBSCRIPTION_STATUS.BILLING_RETRY:
     case APPLE_SUBSCRIPTION_STATUS.BILLING_GRACE_PERIOD:
+      // In the billing retry period AND an app-configured grace period —
+      // access is retained. (Task 4, 2026-09-04.)
       return PurchaseStatus.GRACE_PERIOD;
+    case APPLE_SUBSCRIPTION_STATUS.BILLING_RETRY:
+      // In the billing retry period WITHOUT a grace period — Apple's own
+      // status codes already distinguish this from BILLING_GRACE_PERIOD
+      // exactly on access-retained vs not; collapsing both into
+      // GRACE_PERIOD (the pre-2026-09-04 behaviour) granted entitlement
+      // Apple itself had withdrawn. Mirrors the live webhook's
+      // DID_FAIL_TO_RENEW-without-GRACE_PERIOD-subtype mapping in
+      // apple-webhook.ts.
+      return PurchaseStatus.BILLING_ISSUE;
     case APPLE_SUBSCRIPTION_STATUS.EXPIRED:
       return PurchaseStatus.EXPIRED;
     case APPLE_SUBSCRIPTION_STATUS.REVOKED:

@@ -293,7 +293,12 @@ describe("verifyReceipt — Google subscription paid-state gate", () => {
     expect(drizzleMock.purchaseRepo.upsertPurchase).not.toHaveBeenCalled();
   });
 
-  it("writes the mapper's status for ON_HOLD (PAUSED), not hardcoded ACTIVE", async () => {
+  // Task 4 (2026-09-04): ON_HOLD used to collapse into PAUSED alongside a
+  // voluntary pause. It now maps to BILLING_ISSUE — an account hold is
+  // Google having stopped covering a failed payment, not the user's own
+  // choice — via the same shared `mapSubscriptionStateToStatus` this test
+  // already exercises, so the mapper's real output changed under it.
+  it("writes the mapper's status for ON_HOLD (BILLING_ISSUE), not hardcoded ACTIVE", async () => {
     googleMocks.verifyGoogleSubscription.mockResolvedValue(
       googleSubscriptionFixture("SUBSCRIPTION_STATE_ON_HOLD"),
     );
@@ -304,8 +309,8 @@ describe("verifyReceipt — Google subscription paid-state gate", () => {
     expect(call).toBeDefined();
     const create = call?.[1]?.create as Record<string, unknown>;
     const update = call?.[1]?.update as Record<string, unknown>;
-    expect(create).toHaveProperty("status", "PAUSED");
-    expect(update).toHaveProperty("status", "PAUSED");
+    expect(create).toHaveProperty("status", "BILLING_ISSUE");
+    expect(update).toHaveProperty("status", "BILLING_ISSUE");
   });
 
   it("still activates a paid ACTIVE subscription", async () => {

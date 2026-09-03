@@ -17,6 +17,7 @@ import {
   type GoogleVerifyConfig,
 } from "../services/google/google-verify";
 import { mapSubscriptionStateToStatus } from "../services/google/google-mappers";
+import { billingIssueStamp } from "../services/subscription-state";
 import type {
   GoogleServiceAccountCredentials,
   GoogleSubscriptionPurchaseV2,
@@ -52,7 +53,9 @@ interface GoogleReconciliationCandidate {
 // project's endpoint can be down when it fires, our own worker can
 // crash mid-claim. When that happens, a purchase silently drifts:
 // Rovenue keeps serving an ACTIVE (or GRACE_PERIOD, or PAUSED)
-// entitlement for a subscription Google itself has already moved on.
+// entitlement for a subscription Google itself has already moved on —
+// or keeps a row OUT of BILLING_ISSUE (Task 4, 2026-09-04) that Google
+// already placed on account hold.
 // This sweep is the backstop — it asks Google directly, for the
 // purchases most likely to have drifted, and corrects the row the
 // same way a live webhook would: guarded status write, entitlement
@@ -335,6 +338,11 @@ async function processCandidate(args: {
       autoRenewStatus,
       lastStoreEventAt: now,
       lastReconciledAt: now,
+      // Task 4 (2026-09-04): mapSubscriptionStateToStatus can now resolve
+      // an ON_HOLD state to BILLING_ISSUE, so this sweep is itself an
+      // ingestion path for that status same as the live RTDN — stamp/clear
+      // billingIssueDetectedAt exactly as google-webhook.ts does.
+      ...billingIssueStamp(candidate.status, newStatus, now),
     });
 
     await audit(
@@ -415,8 +423,9 @@ async function processCandidate(args: {
 /**
  * Maps a reconciled status onto an EXISTING public event key — this
  * sweep mints NO new key. `mapSubscriptionStateToStatus` only ever
- * returns ACTIVE / GRACE_PERIOD / PAUSED / EXPIRED, so those are the
- * only cases handled; the others are unreachable defense-in-depth.
+ * returns ACTIVE / GRACE_PERIOD / BILLING_ISSUE / PAUSED / EXPIRED (Task
+ * 4, 2026-09-04, added BILLING_ISSUE for a Google account hold), so those
+ * are the only cases handled; the others are unreachable defense-in-depth.
  */
 function reconciliationOutboxEventType(
   status: PurchaseStatus,
@@ -426,11 +435,19 @@ function reconciliationOutboxEventType(
       return "subscription.expired";
     case PurchaseStatus.GRACE_PERIOD:
       return "subscription.grace_period";
+    case PurchaseStatus.BILLING_ISSUE:
+      // An account hold discovered here means we never saw its ON_HOLD
+      // RTDN either — reuse the same public key the live webhook path
+      // emits for DID_FAIL_TO_RENEW/SUBSCRIPTION_ON_HOLD (see
+      // packages/shared/src/store-event-normalization.ts) so every
+      // configured integration sees one consistent event regardless of
+      // which path caught it.
+      return "subscription.billing_issue";
     case PurchaseStatus.PAUSED:
       return "subscription.paused";
     case PurchaseStatus.ACTIVE:
-      // A prior GRACE_PERIOD/PAUSED row Google now reports ACTIVE again
-      // recovered without us ever seeing the RTDN for it.
+      // A prior GRACE_PERIOD/BILLING_ISSUE/PAUSED row Google now reports
+      // ACTIVE again recovered without us ever seeing the RTDN for it.
       return "subscription.recovered";
     default:
       return null;

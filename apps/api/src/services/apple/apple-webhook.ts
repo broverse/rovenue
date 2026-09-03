@@ -39,6 +39,7 @@ import {
   type AppleNotificationVerifier,
 } from "./apple-verify";
 import { guardStatusWrite } from "../subscription-transition-guard";
+import { billingIssueStamp } from "../subscription-state";
 import { audit } from "../../lib/audit";
 import type { StoreEventContext } from "@rovenue/shared";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
@@ -514,19 +515,40 @@ async function applyRenewalStatusChange(ctx: DispatchContext): Promise<void> {
 }
 
 async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
-  // OD-1: a failed renewal is billing-retry limbo, not active revenue —
-  // keep access during Apple's retry window. This holds whether or not
-  // the GRACE_PERIOD subtype is present: the non-grace variant is the
-  // same retry limbo, so it must NOT map to ACTIVE (which would treat a
-  // non-renewing subscription as a healthy paid one). Mirrors
-  // normalizeAppleStatus(DID_FAIL_TO_RENEW) -> GRACE_PERIOD.
+  // OD-1 revisited (Task 4, 2026-09-04): Apple sends subtype GRACE_PERIOD
+  // only when the app has a billing grace period configured — that is the
+  // ONLY case where the subscriber keeps access during the retry. Without
+  // it, Apple has already withdrawn access on its side, so reporting
+  // GRACE_PERIOD here (the pre-2026-09-04 choice, which mapped every
+  // DID_FAIL_TO_RENEW to GRACE_PERIOD regardless of subtype) granted
+  // entitlement Apple itself had withdrawn. Mirrors
+  // normalizeAppleStatus(DID_FAIL_TO_RENEW).
+  const status =
+    ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD
+      ? PurchaseStatus.GRACE_PERIOD
+      : PurchaseStatus.BILLING_ISSUE;
+
   const gracePeriodExpires = ctx.renewalInfo?.gracePeriodExpiresDate
     ? new Date(ctx.renewalInfo.gracePeriodExpiresDate)
     : null;
 
+  const eventTime = appleNotificationEventTime(ctx);
+  // billingIssueStamp needs the row's status BEFORE this write, but this
+  // write is chain-wide (guardedChainStatusWrite has no single `from` —
+  // see its docstring), so read the chain's current row directly. Same
+  // lookup applyRevoke/applyRenewalStatusChange already use for their own
+  // post-write subscriber resolution.
+  const current =
+    await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+      drizzle.db,
+      ctx.projectId,
+      ctx.transaction.originalTransactionId,
+    );
+
   await guardedChainStatusWrite(ctx, {
-    status: PurchaseStatus.GRACE_PERIOD,
+    status,
     gracePeriodExpires,
+    ...billingIssueStamp(current?.status ?? null, status, eventTime),
   });
 }
 
@@ -1067,7 +1089,13 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           lastStoreEventAt: eventTime,
         },
         update: {
-          ...(guard.apply ? { status, lastStoreEventAt: eventTime } : {}),
+          ...(guard.apply
+            ? {
+                status,
+                lastStoreEventAt: eventTime,
+                ...billingIssueStamp(guard.from, status, eventTime),
+              }
+            : {}),
           autoRenewStatus,
           expiresDate: tx.expiresDate ? new Date(tx.expiresDate) : null,
           verifiedAt: new Date(),

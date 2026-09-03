@@ -1,6 +1,7 @@
 import type { PurchaseStatus } from "@rovenue/db";
 import type Stripe from "stripe";
 import {
+  SUBSCRIPTION_STATUS_SEMANTICS,
   SUBSCRIPTION_STATUSES,
   type SubscriptionStatus,
 } from "@rovenue/shared/subscription-status";
@@ -41,9 +42,16 @@ export function normalizeAppleStatus(
     case APPLE_NOTIFICATION_TYPE.DID_RENEW:
       return STATUS.ACTIVE;
     case APPLE_NOTIFICATION_TYPE.DID_FAIL_TO_RENEW:
-      // No grace subtype still means billing-retry limbo, not active
-      // revenue. Keep access during Apple's retry window (OD-1).
-      return STATUS.GRACE_PERIOD;
+      // Apple sends subtype GRACE_PERIOD only when the app has a billing
+      // grace period configured — that is the case where the subscriber
+      // keeps access during the retry. Without it the subscription has
+      // already lapsed on Apple's side and the user has NO access, so
+      // reporting GRACE_PERIOD here (the pre-2026-09-03 "OD-1" choice)
+      // granted entitlement Apple itself had withdrawn. (Task 4,
+      // 2026-09-04.)
+      return subtype === APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD
+        ? STATUS.GRACE_PERIOD
+        : STATUS.BILLING_ISSUE;
     case APPLE_NOTIFICATION_TYPE.GRACE_PERIOD_EXPIRED:
     case APPLE_NOTIFICATION_TYPE.EXPIRED:
       return STATUS.EXPIRED;
@@ -70,6 +78,10 @@ export function normalizeGoogleStatus(
     case GOOGLE_SUBSCRIPTION_STATE.IN_GRACE_PERIOD:
       return STATUS.GRACE_PERIOD;
     case GOOGLE_SUBSCRIPTION_STATE.ON_HOLD:
+      // Account hold: Google suspended the subscription after the grace
+      // window closed. Access is gone, and — unlike PAUSED — the user
+      // did not choose this, so dunning applies. (Task 4, 2026-09-04.)
+      return STATUS.BILLING_ISSUE;
     case GOOGLE_SUBSCRIPTION_STATE.PAUSED:
       return STATUS.PAUSED;
     case GOOGLE_SUBSCRIPTION_STATE.EXPIRED:
@@ -97,9 +109,12 @@ export function normalizeStripeStatus(
     case STRIPE_SUBSCRIPTION_STATUS.TRIALING:
       return STATUS.TRIAL;
     case STRIPE_SUBSCRIPTION_STATUS.PAST_DUE:
+      // Smart retries are running and Stripe keeps the subscription
+      // usable — access is retained. (Task 4, 2026-09-04.)
+      return STATUS.GRACE_PERIOD;
     case STRIPE_SUBSCRIPTION_STATUS.UNPAID:
     case STRIPE_SUBSCRIPTION_STATUS.INCOMPLETE:
-      return STATUS.GRACE_PERIOD;
+      return STATUS.BILLING_ISSUE;
     case STRIPE_SUBSCRIPTION_STATUS.INCOMPLETE_EXPIRED:
     case STRIPE_SUBSCRIPTION_STATUS.CANCELED:
       return STATUS.EXPIRED;
@@ -237,4 +252,33 @@ export function decideTransition(
 ): TransitionDecision {
   if (from === null) return { apply: true, from, to };
   return { apply: validateTransition(from, to), from, to };
+}
+
+// =============================================================
+// Billing-issue stamp — column patch for every ingestion path
+// =============================================================
+
+/**
+ * Column patch for `purchases.billingIssueDetectedAt`, spread into the
+ * guarded update by every ingestion path (Apple, Google, Stripe). Stamped
+ * on ENTRY only (so a repeated ON_HOLD/BILLING_RETRY/unpaid signal doesn't
+ * reset a dunning campaign's clock) and cleared only when the subscription
+ * recovers into a status that grants access again. A lapse to EXPIRED
+ * keeps the stamp — that is the evidence the churn was involuntary.
+ */
+export function billingIssueStamp(
+  from: PurchaseStatus | null,
+  to: PurchaseStatus,
+  now: Date,
+): { billingIssueDetectedAt?: Date | null } {
+  if (to === STATUS.BILLING_ISSUE) {
+    return from === STATUS.BILLING_ISSUE ? {} : { billingIssueDetectedAt: now };
+  }
+  if (
+    from === STATUS.BILLING_ISSUE &&
+    SUBSCRIPTION_STATUS_SEMANTICS[to].grantsAccess
+  ) {
+    return { billingIssueDetectedAt: null };
+  }
+  return {};
 }

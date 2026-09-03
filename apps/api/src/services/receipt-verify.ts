@@ -57,6 +57,7 @@ import {
 } from "./google/google-pricing";
 import { expireSupersededGooglePurchase } from "./google/google-supersede";
 import { guardStatusWrite } from "./subscription-transition-guard";
+import { billingIssueStamp } from "./subscription-state";
 import { convertToUsd } from "./fx";
 import { reassignAllAssets, safeSyncAccessAfterMerge } from "./subscriber-transfer";
 import type { PresentedContext } from "../lib/presented-context";
@@ -275,7 +276,16 @@ async function verifyAppleReceipt(
       },
       update: {
         ...(guard.apply
-          ? { status, lastStoreEventAt: appleEventTime }
+          ? {
+              status,
+              lastStoreEventAt: appleEventTime,
+              // Task 4 (2026-09-04): this path only ever writes
+              // ACTIVE/TRIAL, so the only thing billingIssueStamp can do
+              // here is clear a stale stamp on recovery from BILLING_ISSUE
+              // — a receipt re-verify catching a payment fix the webhook
+              // hasn't delivered yet.
+              ...billingIssueStamp(guard.from, status, appleEventTime),
+            }
           : {}),
         expiresDate: transaction.expiresDate
           ? new Date(transaction.expiresDate)
@@ -531,7 +541,15 @@ async function verifyGoogleSubscriptionReceipt(
       },
       update: {
         ...(guard.apply
-          ? { status, lastStoreEventAt: googleEventTime }
+          ? {
+              status,
+              lastStoreEventAt: googleEventTime,
+              // Task 4 (2026-09-04): status here comes from the same
+              // mapSubscriptionStateToStatus the RTDN webhook uses, so a
+              // receipt re-verify can be this row's first sighting of
+              // BILLING_ISSUE (or its recovery) just as much as a webhook.
+              ...billingIssueStamp(guard.from, status, googleEventTime),
+            }
           : {}),
         expiresDate,
         autoRenewStatus:

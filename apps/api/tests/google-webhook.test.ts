@@ -161,13 +161,20 @@ describe("mapStatus", () => {
     ).toBe("EXPIRED");
   });
 
-  it("maps ON_HOLD / PAUSED to PAUSED", () => {
+  // Task 4 (2026-09-04): ON_HOLD used to collapse into PAUSED alongside a
+  // voluntary pause. It now maps to BILLING_ISSUE — an account hold is
+  // Google having stopped covering a failed payment, not the user's own
+  // choice — so this splits into two separate expectations.
+  it("maps ON_HOLD to BILLING_ISSUE, not PAUSED", () => {
     expect(
       mapStatus(
         GOOGLE_SUBSCRIPTION_STATE.ON_HOLD,
         GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_ON_HOLD,
       ),
-    ).toBe("PAUSED");
+    ).toBe("BILLING_ISSUE");
+  });
+
+  it("maps PAUSED to PAUSED", () => {
     expect(
       mapStatus(
         GOOGLE_SUBSCRIPTION_STATE.PAUSED,

@@ -5,18 +5,23 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // =============================================================
 //
 // In-process unit harness (mocks the whole `drizzle` namespace, no
-// Postgres). Two things are asserted:
+// Postgres). Asserted:
 //
-//   GAP 2 (OD-1): a DID_FAIL_TO_RENEW WITHOUT the grace-period
-//   subtype must still map to GRACE_PERIOD (billing-retry limbo, not
-//   ACTIVE). The live path computes status inline in
-//   `applyFailedRenewal`, so we assert the status arg handed to the
-//   chain updater.
+//   GAP 2 (OD-1), revised by Task 4 (2026-09-04): a DID_FAIL_TO_RENEW
+//   WITHOUT the grace-period subtype now maps to BILLING_ISSUE, not
+//   GRACE_PERIOD — Apple only keeps access DURING the retry when an
+//   app-configured grace period is present (the GRACE_PERIOD subtype);
+//   without it Apple has already withdrawn access on its side. The live
+//   path computes status inline in `applyFailedRenewal`, so we assert the
+//   status arg handed to the chain updater.
 //
 //   GAP 1: applyFailedRenewal routes through the guarded chain
 //   updater `updateChainStatusGuarded` (which carries the
 //   "never resurrect a terminal row" predicate), NOT the unguarded
 //   `updatePurchasesByOriginalTransaction`.
+//
+//   Task 4: `billingIssueDetectedAt` is stamped on entry into
+//   BILLING_ISSUE and left alone on a repeated signal.
 // =============================================================
 
 const { drizzleMock } = vi.hoisted(() => {
@@ -32,6 +37,15 @@ const { drizzleMock } = vi.hoisted(() => {
         updatedIds: [] as string[],
         skippedTerminalIds: [] as string[],
       })),
+    },
+    purchaseExtRepo: {
+      // applyFailedRenewal reads the chain's current row to compute
+      // billingIssueStamp's `from` (the chain-wide write has no single
+      // `from` of its own — see guardedChainStatusWrite's docstring).
+      // Default: no prior row, i.e. first sighting of this chain.
+      findPurchaseByOriginalTransaction: vi.fn(
+        async (): Promise<{ status: string } | null> => null,
+      ),
     },
   };
   return { drizzleMock };
@@ -114,13 +128,16 @@ function makeStubVerifier(
   };
 }
 
-function lastGuardedChainPatch(): { status: string } {
+function lastGuardedChainPatch(): {
+  status: string;
+  billingIssueDetectedAt?: Date | null;
+} {
   const calls = drizzleMock.purchaseRepo.updateChainStatusGuarded.mock
     .calls as unknown as Array<unknown[]>;
   const last = calls[calls.length - 1];
   if (!last) throw new Error("updateChainStatusGuarded was never called");
   // (db, projectId, originalTransactionId, patch) — index 3 is patch.
-  return last[3] as { status: string };
+  return last[3] as { status: string; billingIssueDetectedAt?: Date | null };
 }
 
 beforeEach(() => {
@@ -132,7 +149,12 @@ beforeEach(() => {
 });
 
 describe("applyFailedRenewal — status mapping + terminal guard", () => {
-  test("non-grace DID_FAIL_TO_RENEW maps to GRACE_PERIOD (OD-1)", async () => {
+  // Task 4 (2026-09-04): a non-grace DID_FAIL_TO_RENEW used to map to
+  // GRACE_PERIOD (the OD-1 choice) — that granted entitlement Apple itself
+  // had already withdrawn (Apple only keeps access DURING the retry when
+  // an app-configured grace period is present; that is exactly the GRACE_PERIOD
+  // subtype). It now routes to BILLING_ISSUE instead.
+  test("non-grace DID_FAIL_TO_RENEW maps to BILLING_ISSUE", async () => {
     const result = await handleAppleNotification({
       projectId: PROJECT_ID,
       signedPayload: "signed-envelope-stub",
@@ -149,8 +171,8 @@ describe("applyFailedRenewal — status mapping + terminal guard", () => {
     expect(
       drizzleMock.purchaseRepo.updatePurchasesByOriginalTransaction,
     ).not.toHaveBeenCalled();
-    // ... with GRACE_PERIOD even though the grace subtype is absent.
-    expect(lastGuardedChainPatch().status).toBe("GRACE_PERIOD");
+    // ... with BILLING_ISSUE since the grace subtype is absent.
+    expect(lastGuardedChainPatch().status).toBe("BILLING_ISSUE");
   });
 
   test("grace-subtype DID_FAIL_TO_RENEW also maps to GRACE_PERIOD", async () => {
@@ -163,5 +185,43 @@ describe("applyFailedRenewal — status mapping + terminal guard", () => {
     });
 
     expect(lastGuardedChainPatch().status).toBe("GRACE_PERIOD");
+  });
+
+  // billingIssueStamp: entry vs. repeat, using the chain's current row
+  // (purchaseExtRepo.findPurchaseByOriginalTransaction) as `from`.
+  test("stamps billingIssueDetectedAt on entry into BILLING_ISSUE", async () => {
+    drizzleMock.purchaseExtRepo.findPurchaseByOriginalTransaction.mockResolvedValueOnce(
+      { status: "ACTIVE" },
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier: makeStubVerifier(
+        makeFailedRenewalNotification({ grace: false }),
+      ),
+    });
+
+    const patch = lastGuardedChainPatch();
+    expect(patch.status).toBe("BILLING_ISSUE");
+    expect(patch.billingIssueDetectedAt).toEqual(new Date(1_700_000_000_000));
+  });
+
+  test("does not reset billingIssueDetectedAt on a repeated BILLING_ISSUE signal", async () => {
+    drizzleMock.purchaseExtRepo.findPurchaseByOriginalTransaction.mockResolvedValueOnce(
+      { status: "BILLING_ISSUE" },
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier: makeStubVerifier(
+        makeFailedRenewalNotification({ grace: false }),
+      ),
+    });
+
+    const patch = lastGuardedChainPatch();
+    expect(patch.status).toBe("BILLING_ISSUE");
+    expect(patch.billingIssueDetectedAt).toBeUndefined();
   });
 });

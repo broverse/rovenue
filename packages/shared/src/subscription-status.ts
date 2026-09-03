@@ -164,6 +164,17 @@ export const RECONCILABLE_STATUSES = statusesWhere((s) => s.reconcilable);
 export const TERMINAL_STATUSES = statusesWhere((s) => s.isTerminal);
 
 /**
+ * Statuses signaling involuntary churn (a payment failure), never the
+ * user's own choice. Today exactly {GRACE_PERIOD, BILLING_ISSUE} — derived
+ * rather than hand-listed so a metrics query built on "involuntary payment
+ * trouble" (Task 4, apps/api/src/services/metrics/subscriptions.ts) picks
+ * up a future involuntary status automatically instead of silently
+ * excluding it, the same hazard `Record` (not `Partial<Record>`) guards
+ * against above.
+ */
+export const INVOLUNTARY_STATUSES = statusesWhere((s) => s.involuntary);
+
+/**
  * A single-quoted, comma-separated list for embedding in a raw SQL
  * `IN (...)`. Status names are compile-time constants from this module —
  * never user input — so interpolation is safe here and nowhere else.

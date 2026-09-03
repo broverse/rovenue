@@ -30,6 +30,7 @@ const PURCHASE_STATUS = {
   REVOKED: "REVOKED",
   PAUSED: "PAUSED",
   GRACE_PERIOD: "GRACE_PERIOD",
+  BILLING_ISSUE: "BILLING_ISSUE",
 } as const satisfies Record<string, PurchaseStatus>;
 
 const REVENUE_EVENT_TYPE = {
@@ -124,6 +125,10 @@ export function mapSubscriptionStateToStatus(
     case GOOGLE_SUBSCRIPTION_STATE.IN_GRACE_PERIOD:
       return PURCHASE_STATUS.GRACE_PERIOD;
     case GOOGLE_SUBSCRIPTION_STATE.ON_HOLD:
+      // Account hold: Google suspended the subscription after the grace
+      // window closed. Access is gone, and — unlike PAUSED — the user
+      // did not choose this, so dunning applies. (Task 4, 2026-09-04.)
+      return PURCHASE_STATUS.BILLING_ISSUE;
     case GOOGLE_SUBSCRIPTION_STATE.PAUSED:
       return PURCHASE_STATUS.PAUSED;
     case GOOGLE_SUBSCRIPTION_STATE.EXPIRED:

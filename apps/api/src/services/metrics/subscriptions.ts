@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle, type PurchaseStatus } from "@rovenue/db";
 import {
+  INVOLUNTARY_STATUSES,
   LIVE_STATUSES as SHARED_LIVE_STATUSES,
   SUBSCRIPTION_STATUS_SEMANTICS,
 } from "@rovenue/shared/subscription-status";
@@ -212,12 +213,18 @@ function scopeWhere(scope: SubscriptionScopeName, now: Date) {
     case "churned":
       return inArray(p.status, ["EXPIRED", "REFUNDED", "REVOKED"]);
     case "issues":
-      return and(
-        eq(p.status, "GRACE_PERIOD"),
-        or(
-          isNull(p.gracePeriodExpires),
-          gte(p.gracePeriodExpires, now),
+      // "Involuntary payment trouble" (Task 4, 2026-09-04): GRACE_PERIOD
+      // rows only count while their store-reported grace window is still
+      // valid (a stale gracePeriodExpires means the sweeper just hasn't
+      // caught up yet); BILLING_ISSUE rows have no gracePeriodExpires at
+      // all — they ARE the store having stopped covering the failure — so
+      // that guard doesn't apply to them.
+      return or(
+        and(
+          eq(p.status, "GRACE_PERIOD"),
+          or(isNull(p.gracePeriodExpires), gte(p.gracePeriodExpires, now)),
         ),
+        eq(p.status, "BILLING_ISSUE"),
       );
     default:
       return undefined;
@@ -265,7 +272,10 @@ function buildListFilters(input: ListSubscriptionsInput) {
   if (input.hasIssue) {
     filters.push(
       and(
-        eq(p.status, "GRACE_PERIOD"),
+        // Involuntary payment trouble (Task 4, 2026-09-04): GRACE_PERIOD
+        // and BILLING_ISSUE, derived from the shared semantics table
+        // rather than hand-listed a second time here.
+        inArray(p.status, [...INVOLUNTARY_STATUSES]),
         or(isNull(p.autoRenewStatus), eq(p.autoRenewStatus, true)),
       )!,
     );
@@ -570,7 +580,14 @@ export async function readSubscriptionsKpis(
       .where(
         and(
           eq(p.projectId, projectId),
-          eq(p.status, "GRACE_PERIOD"),
+          // Labelled "GRACE / BILLING RETRY" on the dashboard (Task 4,
+          // 2026-09-04) — that already covers BILLING_ISSUE (Apple's
+          // billing retry with no grace period, Google's account hold,
+          // Stripe unpaid/incomplete) as much as GRACE_PERIOD; without
+          // this, a row would silently drop out of this KPI the moment
+          // it tipped from GRACE_PERIOD into BILLING_ISSUE while staying
+          // in the "issues" scope and billing-issues list below.
+          inArray(p.status, [...INVOLUNTARY_STATUSES]),
         ),
       ),
     drizzle.db
@@ -776,6 +793,11 @@ export async function readRenewalCalendar(
     );
 
   // Grace bucket — grace_period subs whose grace expiry falls in window.
+  // Deliberately GRACE_PERIOD only (Task 4, 2026-09-04): this buckets on
+  // gracePeriodExpires, and a BILLING_ISSUE row never has one (see
+  // SUBSCRIPTION_STATUS_SEMANTICS — it isn't sweepable for the same
+  // reason). Adding it to the status filter would only add rows the
+  // `isNotNull(p.gracePeriodExpires)` guard below immediately drops.
   const graceRows = await drizzle.db
     .select({
       day: sql<string>`to_char(date_trunc('day', ${p.gracePeriodExpires}), 'YYYY-MM-DD')`,
@@ -858,7 +880,13 @@ export async function readBillingIssues(
     .where(
       and(
         eq(p.projectId, projectId),
-        eq(p.status, "GRACE_PERIOD"),
+        // The billing-issues list itself (Task 4, 2026-09-04): involuntary
+        // payment trouble is GRACE_PERIOD and BILLING_ISSUE alike, derived
+        // from the shared semantics table rather than hand-listed a second
+        // time here. Same auto-renew guard as `hasIssue` above — a
+        // subscriber who turned auto-renew off is naturally expiring, not
+        // failing a payment.
+        inArray(p.status, [...INVOLUNTARY_STATUSES]),
         or(isNull(p.autoRenewStatus), eq(p.autoRenewStatus, true)),
       ),
     )
@@ -883,7 +911,14 @@ export async function readBillingIssues(
       priceCurrency: row.priceCurrency ?? null,
       store: row.store,
       signalAt: signal.toISOString(),
-      issue: "Renewal pending in grace period",
+      // BILLING_ISSUE rows are the more severe case (Task 4, 2026-09-04):
+      // the store has already stopped covering the failure — there is no
+      // gracePeriodExpires, so the row is no longer "in grace period" at
+      // all, and the old unconditional label was actively wrong for it.
+      issue:
+        row.status === "BILLING_ISSUE"
+          ? "Payment failed — access suspended"
+          : "Renewal pending in grace period",
       severity: "high",
     };
   });

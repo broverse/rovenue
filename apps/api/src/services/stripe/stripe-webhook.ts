@@ -27,6 +27,7 @@ import {
 } from "./stripe-types";
 import { hasPaidOrAttachedACard } from "./payment-settled";
 import { guardStatusWrite } from "../subscription-transition-guard";
+import { billingIssueStamp } from "../subscription-state";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -715,6 +716,7 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
         status,
         guard.apply,
         stripeEventTime(ctx),
+        guard.from,
       );
       return { ...result, statusApplied: guard.apply };
     },
@@ -1148,9 +1150,16 @@ export function mapStripeSubscriptionStatus(
     case STRIPE_SUBSCRIPTION_STATUS.TRIALING:
       return PurchaseStatus.TRIAL;
     case STRIPE_SUBSCRIPTION_STATUS.PAST_DUE:
+      // Smart retries are running and Stripe keeps the subscription
+      // usable — access is retained. (Task 4, 2026-09-04.)
+      return PurchaseStatus.GRACE_PERIOD;
     case STRIPE_SUBSCRIPTION_STATUS.UNPAID:
     case STRIPE_SUBSCRIPTION_STATUS.INCOMPLETE:
-      return PurchaseStatus.GRACE_PERIOD;
+      // Stripe has stopped covering this: `unpaid` means retries are
+      // exhausted with no default action taken, and `incomplete` means the
+      // very first invoice never got paid — neither keeps access. (Task 4,
+      // 2026-09-04.)
+      return PurchaseStatus.BILLING_ISSUE;
     case STRIPE_SUBSCRIPTION_STATUS.INCOMPLETE_EXPIRED:
     case STRIPE_SUBSCRIPTION_STATUS.CANCELED:
       return PurchaseStatus.EXPIRED;
@@ -1257,6 +1266,12 @@ async function upsertPurchaseFromSubscription(
   status: PurchaseStatus,
   applyStatus: boolean,
   eventTime?: Date,
+  /**
+   * The row's status BEFORE this write (`guard.from` from the caller's
+   * `guardStatusWrite`), so `billingIssueStamp` below can tell entry from
+   * a repeated signal, and recovery from a plain lapse.
+   */
+  guardFrom?: PurchaseStatus | null,
 ) {
   const item = subscription.items.data[0];
   if (!item) {
@@ -1322,7 +1337,12 @@ async function upsertPurchaseFromSubscription(
     },
     update: {
       ...(applyStatus && eventTime ? { lastStoreEventAt: eventTime } : {}),
-      ...(applyStatus ? { status } : {}),
+      ...(applyStatus
+        ? {
+            status,
+            ...billingIssueStamp(guardFrom ?? null, status, eventTime ?? new Date()),
+          }
+        : {}),
       isTrial,
       expiresDate,
       ...(priceAmount != null && { priceAmount: priceAmount.toString() }),

@@ -17,7 +17,14 @@
 //   - no edge INTO it from a terminal status, which stays absorbing.
 
 import { describe, expect, it } from "vitest";
-import { validateTransition } from "./subscription-state";
+import { GOOGLE_SUBSCRIPTION_STATE } from "./google/google-types";
+import {
+  billingIssueStamp,
+  normalizeAppleStatus,
+  normalizeGoogleStatus,
+  normalizeStripeStatus,
+  validateTransition,
+} from "./subscription-state";
 
 describe("BILLING_ISSUE transitions", () => {
   it("allows entry into BILLING_ISSUE from every granting status", () => {
@@ -44,5 +51,63 @@ describe("BILLING_ISSUE transitions", () => {
   // an idempotent replay of the notification that created the row.
   it("permits an idempotent BILLING_ISSUE re-write", () => {
     expect(validateTransition("BILLING_ISSUE", "BILLING_ISSUE")).toBe(true);
+  });
+});
+
+describe("billing issue mapping", () => {
+  it("keeps Apple's configured grace period access-granting", () => {
+    expect(normalizeAppleStatus("DID_FAIL_TO_RENEW", "GRACE_PERIOD")).toBe(
+      "GRACE_PERIOD",
+    );
+  });
+
+  it("routes Apple billing retry without grace to BILLING_ISSUE", () => {
+    expect(normalizeAppleStatus("DID_FAIL_TO_RENEW", "BILLING_RETRY")).toBe(
+      "BILLING_ISSUE",
+    );
+    expect(normalizeAppleStatus("DID_FAIL_TO_RENEW", undefined)).toBe(
+      "BILLING_ISSUE",
+    );
+  });
+
+  it("separates Google account hold from a voluntary pause", () => {
+    expect(normalizeGoogleStatus(GOOGLE_SUBSCRIPTION_STATE.ON_HOLD)).toBe(
+      "BILLING_ISSUE",
+    );
+    expect(normalizeGoogleStatus(GOOGLE_SUBSCRIPTION_STATE.PAUSED)).toBe(
+      "PAUSED",
+    );
+  });
+
+  it("separates Stripe's retrying and non-paying statuses", () => {
+    expect(normalizeStripeStatus("past_due")).toBe("GRACE_PERIOD");
+    expect(normalizeStripeStatus("unpaid")).toBe("BILLING_ISSUE");
+    expect(normalizeStripeStatus("incomplete")).toBe("BILLING_ISSUE");
+  });
+});
+
+describe("billingIssueStamp", () => {
+  const now = new Date("2026-09-03T00:00:00Z");
+
+  it("stamps on entry", () => {
+    expect(billingIssueStamp("ACTIVE", "BILLING_ISSUE", now)).toEqual({
+      billingIssueDetectedAt: now,
+    });
+  });
+
+  it("does not reset the clock on a repeated signal", () => {
+    expect(billingIssueStamp("BILLING_ISSUE", "BILLING_ISSUE", now)).toEqual(
+      {},
+    );
+  });
+
+  it("clears on recovery to a granting status", () => {
+    expect(billingIssueStamp("BILLING_ISSUE", "ACTIVE", now)).toEqual({
+      billingIssueDetectedAt: null,
+    });
+  });
+
+  it("leaves the stamp alone on a lapse to EXPIRED", () => {
+    expect(billingIssueStamp("BILLING_ISSUE", "EXPIRED", now)).toEqual({});
   });
 });

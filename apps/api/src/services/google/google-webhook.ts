@@ -35,6 +35,7 @@ import {
 } from "./google-verify";
 import { resolveSubscriptionPricing } from "./google-pricing";
 import { guardStatusWrite } from "../subscription-transition-guard";
+import { billingIssueStamp } from "../subscription-state";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -325,7 +326,13 @@ async function processSubscriptionNotification(
         lastStoreEventAt: eventTime,
       },
       update: {
-        ...(decided.apply ? { status, lastStoreEventAt: eventTime } : {}),
+        ...(decided.apply
+          ? {
+              status,
+              lastStoreEventAt: eventTime,
+              ...billingIssueStamp(decided.from, status, eventTime),
+            }
+          : {}),
         expiresDate,
         autoRenewStatus,
         cancellationDate,
