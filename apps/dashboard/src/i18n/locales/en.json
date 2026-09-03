@@ -3650,7 +3650,7 @@
       "churn": "Churn rate",
       "retention_curve": "Retention curve",
       "ltv": "LTV by cohort",
-      "trial_to_paid": "Trial → paid",
+      "trial_to_paid": "Trial conversions",
       "paywall_view_rate": "Paywall view rate",
       "paywall_purchase": "Paywall → purchase",
       "credit_burn": "Credit burn",
