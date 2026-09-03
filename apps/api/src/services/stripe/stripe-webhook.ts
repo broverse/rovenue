@@ -730,18 +730,29 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
   //
   // A funnel subscription is created speculatively at package selection —
   // `default_incomplete`, before any card — so `customer.subscription.created`
-  // fires while it sits at `incomplete` (→ GRACE_PERIOD) or `trialing`
-  // (→ TRIAL). Granting then would put entitlement on the pre-payment
-  // (synthetic) subscriber before a single cent or card exists, inflating
-  // trial/grace counts on every abandoned click and — if `cancelSuperseded`
-  // later fails on a package switch — risking the abandoned package's access
-  // being merged onto the buyer at claim time. For those two initial states
-  // require the same proof of payment `/confirm` and the backstop require
-  // (`hasPaidOrAttachedACard`): the grant then lands on the
-  // `customer.subscription.updated` that `setup_intent.succeeded` triggers
-  // once the card is attached. `past_due`/`unpaid` are NOT gated — they only
-  // occur after a subscription was active, so their GRACE_PERIOD access is a
-  // real lapse to keep, not a speculative grant to withhold.
+  // fires while it sits at `incomplete` or `trialing` (→ TRIAL). Granting
+  // then would put entitlement on the pre-payment (synthetic) subscriber
+  // before a single cent or card exists, inflating trial counts on every
+  // abandoned click and — if `cancelSuperseded` later fails on a package
+  // switch — risking the abandoned package's access being merged onto the
+  // buyer at claim time. TRIALING requires the same proof of payment
+  // `/confirm` and the backstop require (`hasPaidOrAttachedACard`): the
+  // grant then lands on the `customer.subscription.updated` that
+  // `setup_intent.succeeded` triggers once the card is attached.
+  //
+  // Corrected 2026-09-04 (review rider, Task 4): `incomplete` now maps to
+  // BILLING_ISSUE, not GRACE_PERIOD (see `mapStripeSubscriptionStatus`),
+  // and BILLING_ISSUE is never in `ACCESS_GRANTING_STATUSES` — so
+  // `grantsAccess` below is already `false` for it via that check alone,
+  // regardless of `hasPaidOrAttachedACard`. The INCOMPLETE arm of
+  // `isSpeculativeInitialState` is therefore dead: nothing currently reads
+  // its value for that case. Left in rather than removed here — a
+  // behaviour-neutral cleanup is a separate decision from a comment fix.
+  // `past_due` still maps to GRACE_PERIOD and is still NOT gated — real
+  // access retained during Stripe's smart retries, same as before.
+  // `unpaid` now maps to BILLING_ISSUE too, same as `incomplete`: no
+  // access, unconditionally, via `ACCESS_GRANTING_STATUSES` — it is no
+  // longer "a real lapse to keep".
   const isSpeculativeInitialState =
     subscription.status === STRIPE_SUBSCRIPTION_STATUS.INCOMPLETE ||
     subscription.status === STRIPE_SUBSCRIPTION_STATUS.TRIALING;
@@ -1334,6 +1345,12 @@ async function upsertPurchaseFromSubscription(
       verifiedAt: new Date(),
       ...(eventTime && { lastStoreEventAt: eventTime }),
       presentedContext,
+      // Creation IS entry (review finding 1, 2026-09-04): `customer.
+      // subscription.created` can fire with `status` already BILLING_ISSUE
+      // (a funnel subscription created at `incomplete`, no gate before this
+      // write) — `from` is null (no prior row), so this only ever stamps or
+      // is a no-op, never clears.
+      ...billingIssueStamp(null, status, eventTime ?? new Date()),
     },
     update: {
       ...(applyStatus && eventTime ? { lastStoreEventAt: eventTime } : {}),

@@ -324,6 +324,12 @@ async function processSubscriptionNotification(
         priceCurrency: pricing?.currency ?? null,
         verifiedAt: new Date(),
         lastStoreEventAt: eventTime,
+        // Creation IS entry (review finding 1, 2026-09-04): the first RTDN
+        // this project ever processes for a token can already be ON_HOLD
+        // (a lost message before it), so `status` can be BILLING_ISSUE on
+        // the very first insert. `from` is null (no prior row), so this
+        // only ever stamps or is a no-op, never clears.
+        ...billingIssueStamp(null, status, eventTime),
       },
       update: {
         ...(decided.apply

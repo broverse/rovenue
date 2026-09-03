@@ -1,4 +1,8 @@
 import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import {
+  RECONCILABLE_STATUSES,
+  statusSqlList,
+} from "@rovenue/shared/subscription-status";
 import type { Db } from "../client";
 import { products, purchases, subscribers, type Purchase } from "../schema";
 
@@ -344,6 +348,15 @@ function rowToCandidate(
  * arrived — or (b) not reconciled within `staleBefore`. NULL
  * `lastReconciledAt` ("never checked") sorts first via `NULLS FIRST`.
  * Capped at `limit` — the caller's named per-sweep constant.
+ *
+ * The status predicate is `RECONCILABLE_STATUSES`, derived from the shared
+ * semantics table (review finding 2, 2026-09-04) — it includes
+ * BILLING_ISSUE (declared `reconcilable: true`, `sweepable: false`): a
+ * held row is invisible to the expiry sweeper by design, so THIS sweep is
+ * its only automated path back to ACTIVE (or forward to EXPIRED) when the
+ * recovery/hold-exhausted RTDN was itself lost. Must match
+ * `purchases_google_reconciliation_idx` in schema.ts, built from the same
+ * derived list, or this scan stops using that partial index.
  */
 export async function selectGoogleReconciliationCandidateIds(
   db: Db,
@@ -353,7 +366,7 @@ export async function selectGoogleReconciliationCandidateIds(
     SELECT p.id
     FROM ${purchases} p
     WHERE p.store = 'PLAY_STORE'
-      AND p.status IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')
+      AND p.status IN (${sql.raw(statusSqlList(RECONCILABLE_STATUSES))})
       AND (
         (p.status = 'ACTIVE' AND p."expiresDate" < ${args.now})
         OR p."lastReconciledAt" IS NULL
@@ -369,10 +382,11 @@ export async function selectGoogleReconciliationCandidateIds(
 
 /**
  * Locks exactly one row (by primary key) with the same eligibility
- * predicate `selectGoogleReconciliationCandidateIds` used, via
+ * predicate `selectGoogleReconciliationCandidateIds` used (see that
+ * function's doc for the RECONCILABLE_STATUSES / BILLING_ISSUE note), via
  * `FOR UPDATE OF p SKIP LOCKED`. Returns null when another sweep
  * instance already holds the row, or the row is no longer eligible
- * (already reconciled, or moved out of a sweepable status by a
+ * (already reconciled, or moved out of a reconcilable status by a
  * concurrent webhook) — both are "nothing to do", not an error.
  */
 export async function claimGoogleReconciliationCandidateById(
@@ -396,7 +410,7 @@ export async function claimGoogleReconciliationCandidateById(
     JOIN ${products} pr ON pr.id = p."productId"
     WHERE p.id = ${args.id}
       AND p.store = 'PLAY_STORE'
-      AND p.status IN ('TRIAL', 'ACTIVE', 'GRACE_PERIOD', 'PAUSED')
+      AND p.status IN (${sql.raw(statusSqlList(RECONCILABLE_STATUSES))})
       AND (
         (p.status = 'ACTIVE' AND p."expiresDate" < ${args.now})
         OR p."lastReconciledAt" IS NULL

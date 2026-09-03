@@ -105,6 +105,7 @@ import {
 import * as importStore from "../../lib/import-store";
 import { logger } from "../../lib/logger";
 import { syncAccess } from "../access-engine";
+import { billingIssueStamp } from "../subscription-state";
 import { buildCanonicalRow } from "./plan";
 import { resolveStoreTransactionId } from "./write";
 
@@ -694,14 +695,23 @@ async function applyVerifiedResult(
   group: AnchorGroup,
   result: Extract<StoreAnchorVerificationResult, { kind: "verified" }>,
 ): Promise<string[]> {
+  const verifiedAt = new Date();
   const patch = {
     status: result.status,
-    verifiedAt: new Date(),
+    verifiedAt,
     expiresDate: result.expiresDate,
     autoRenewStatus: result.autoRenewStatus,
   };
 
   if (group.store === "APP_STORE") {
+    // No billingIssueStamp here (review finding 4, 2026-09-04): this write
+    // is chain-wide via `updateChainStatusGuarded`, which — like
+    // `apple-webhook.ts`'s `guardedChainStatusWrite` it mirrors — has no
+    // single per-row `from` to hand the stamp (a chain can hold more than
+    // one purchase row, each possibly at a different prior status). Fixing
+    // that needs the same extra per-row read `applyFailedRenewal` added in
+    // apple-webhook.ts, which is a real behavioural change to this shared
+    // import path, not a safe follow-along here.
     await drizzle.purchaseRepo.updateChainStatusGuarded(
       db,
       projectId,
@@ -729,7 +739,14 @@ async function applyVerifiedResult(
         storeTransactionId,
       );
     if (!purchase) continue;
-    const updated = await drizzle.purchaseRepo.updatePurchase(db, purchase.id, patch);
+    // Unlike APP_STORE above, `purchase.status` (this row's status BEFORE
+    // this write) is right here — so, unlike the chain-wide branch, this
+    // path CAN and does stamp/clear `billingIssueDetectedAt` (review
+    // finding 4, 2026-09-04).
+    const updated = await drizzle.purchaseRepo.updatePurchase(db, purchase.id, {
+      ...patch,
+      ...billingIssueStamp(purchase.status, result.status, verifiedAt),
+    });
     if (updated) subscriberIds.add(updated.subscriberId);
   }
   return [...subscriberIds];

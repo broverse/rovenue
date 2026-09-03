@@ -538,6 +538,12 @@ async function verifyGoogleSubscriptionReceipt(
         verifiedAt: new Date(),
         lastStoreEventAt: googleEventTime,
         presentedContext: args.presentedContext ?? null,
+        // Creation IS entry (review finding 1, 2026-09-04): a receipt
+        // verify can be the very first row for a subscription that is
+        // already ON_HOLD (e.g. the client only calls verify long after
+        // purchase). `from` is null (no prior row), so this only ever
+        // stamps or is a no-op, never clears.
+        ...billingIssueStamp(null, status, googleEventTime),
       },
       update: {
         ...(guard.apply

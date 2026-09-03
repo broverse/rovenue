@@ -383,13 +383,26 @@ export async function updatePurchaseStatusIf(
 }
 
 /**
- * The Stripe subscription ids a subscriber still has live access through.
- * Used by GDPR erasure to cancel a forgotten customer's funnel
+ * The Stripe subscription ids a subscriber's erasure must cancel: any
+ * status meaning the subscription still exists — and is still billable —
+ * on Stripe. Used by GDPR erasure to cancel a forgotten customer's funnel
  * subscriptions so they are not billed further. Only recurring
  * subscriptions (`sub_…`) are returned — a one-time purchase's
  * storeTransactionId is a PaymentIntent, already captured and nothing to
- * cancel. Status is restricted to the access-granting set so an already
- * -ended subscription is not re-touched.
+ * cancel.
+ *
+ * Status list (review finding 3, 2026-09-04): hand-listed, not derived —
+ * no shared list matches "still live on Stripe and must be cancelled"
+ * exactly. `ACCESS_GRANTING_STATUSES` fits ACTIVE/TRIAL/GRACE_PERIOD but
+ * wrongly excludes BILLING_ISSUE (unpaid/incomplete — the subscription is
+ * unquestionably still live and billable on Stripe, it just isn't
+ * granting access right now). `LIVE_STATUSES`/`RECONCILABLE_STATUSES`
+ * would fit BILLING_ISSUE but wrongly ADD PAUSED, which this list has
+ * never included — changing that is a separate decision this fix does
+ * not make. BILLING_ISSUE is added explicitly alongside the pre-existing
+ * three so an unpaid/incomplete Stripe subscription is cancelled on
+ * erasure exactly like it was before this status split (it used to be
+ * GRACE_PERIOD and was already cancelled here).
  */
 export async function findActiveStripeSubscriptionIds(
   db: Db,
@@ -402,7 +415,12 @@ export async function findActiveStripeSubscriptionIds(
       and(
         eq(purchases.subscriberId, subscriberId),
         eq(purchases.store, "STRIPE"),
-        inArray(purchases.status, ["ACTIVE", "TRIAL", "GRACE_PERIOD"]),
+        inArray(purchases.status, [
+          "ACTIVE",
+          "TRIAL",
+          "GRACE_PERIOD",
+          "BILLING_ISSUE",
+        ]),
         sql`${purchases.storeTransactionId} LIKE 'sub_%'`,
       ),
     );
