@@ -1,7 +1,7 @@
 # Rovenue Roadmap
 
 Goal: close the gap with RevenueCat / Adapty in every area — target **95%** parity (or better) per area.
-Scores are a self-assessment of "% of a mature best-in-class solution" as of 2026-09-02.
+Scores are a self-assessment of "% of a mature best-in-class solution" as of 2026-09-03.
 
 | # | Area | Now | Target |
 |---|------|-----|--------|
@@ -9,7 +9,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 | 2 | Subscription state & entitlements | 85% | 95% |
 | 3 | Paywall builder & native rendering | 85% | 95% |
 | 4 | A/B testing & experiments | 88% | 90%+ |
-| 5 | Analytics (MRR / LTV / cohorts) | 90% | 95% |
+| 5 | Analytics (MRR / LTV / cohorts) | 93% | 95% |
 | 6 | Third-party integrations | 90% | 95% |
 | 7 | SDK platform coverage | 70% | 95% |
 | 8 | Self-hosting & data ownership | 95% | keep |
@@ -126,7 +126,7 @@ deleted) that the four-gate stopping rule needed to exist at all.
       `REFUND_GUARDRAIL`, `EXPECTED_LOSS`, `NO_LEADER`, `PROCEEDS_RATE_UNCONFIGURED`) rather
       than a single opaque "not ready" state.
 
-## 5. Analytics (70 → 90) — mostly already shipped; this plan closed the gap
+## 5. Analytics (70 → 93) — catalog coverage closed 2026-09-03
 
 This section previously presented the entire area as unstarted. That framing
 was stale: cohort retention, churn/refund KPIs, predicted LTV, trial→paid,
@@ -161,9 +161,18 @@ nothing, but real net-new coverage on top of what was already there.
       (Apple 15/30, Google 15) exists in `services/metrics/proceeds.ts`
       with sourced citations but is read by nothing outside its own test —
       it is NOT offered to anyone yet
-- [ ] Commission-rate settings UI — the presets above are not reachable
-      from the dashboard; configuring a rate currently requires an API
-      call
+- [x] Commission-rate settings UI — shipped 2026-09-03. One row per store
+      in `SettingsForm.tsx`, writing through the existing audited
+      `PUT/DELETE /dashboard/projects/:projectId/commission-rates/:store`
+      and gated on the same `assertProjectCapability` the endpoints use
+      (`project:settings:write`). `COMMISSION_RATE_PRESETS` moved to
+      `packages/shared/src/commission-rates.ts` so the dashboard and the
+      API read ONE copy of the rates and their citations — the citations
+      are shown, not summarised, because choosing 15% vs 30% is a claim
+      about Small Business Program status. **Offering a preset is not
+      configuring one**: a store with no rate still reports "not
+      configured — proceeds unknown", and rendering the form issues no
+      write (asserted by test).
 - [x] Country revenue dimension — shipped by this plan, coverage is
       partial by store and by time: Apple full, Google full except
       voided-purchase refunds, Stripe only `charge.refunded` (most Stripe
@@ -177,13 +186,73 @@ nothing, but real net-new coverage on top of what was already there.
       added by this plan (`schema-contract.integration.test.ts`); runs each
       reader's real SQL against the live schema so a column rename/drop
       fails CI instead of shipping a silently-broken chart
-- [ ] Full country coverage across all stores and all history (Stripe
-      country for non-`charge.refunded` events, backfill before migration
-      0023)
-- [ ] Full chart-catalog series coverage in the metrics export — only 2 of
-      17 catalog ids (`paywall_view_rate`, `paywall_purchase`) have a
-      `readChartSeries` reader wired; the rest return no rows, so the
-      export does not yet cover the catalog
+- [~] Full country coverage — **CLOSED 2026-09-03: neither done nor open.**
+      Both halves were investigated and both resolve as won't-do, for
+      different reasons:
+      - **Stripe half — a deliberate ruling, not an oversight.**
+        `invoice.paid` carries no per-transaction country, and its only
+        country-shaped field, `customer_address`, is a **billing address**,
+        which the analytics-country design forbids as not store-supplied.
+        The reasoning sits at the call site
+        (`services/stripe/stripe-webhook.ts:877-886`). `charge.refunded` is
+        wired precisely because it *does* carry a real one. Mixing a
+        self-declared billing address into the same column as Apple's
+        `storefront` and Google's `regionCode` would silently change what
+        the column means.
+      - **Backfill half — impossible from retained data.** The only
+        `country` column in the entire Postgres schema is on
+        `projectStripeConnections` (the connected account's own country).
+        `revenue_events` and `purchases` have none, and no table retains a
+        raw store payload to re-derive one from. A backfill would mean
+        re-verifying every historical transaction against three
+        rate-limited third-party APIs — a re-verification campaign, not a
+        data migration.
+      If country-by-billing is ever wanted, it must be a **separately named
+      dimension**, never merged into the store-supplied `country` column.
+- [x] Chart-catalog series coverage — shipped 2026-09-03
+      (`.superpowers/sdd/2026-09-02-analytics-catalog-coverage/`). **12 of
+      16** catalog ids now return a real series and the export streams all
+      of them; it was 2 of 16. Every reader **delegates to the service that
+      already owns the concept** and `charts.ts` contains no SQL of its
+      own — a second query set drifts from the first, which is why the
+      export was built to issue none. Where a daily grain did not exist it
+      was added *inside the owning service* (`mrr-decomposition.ts`,
+      `summary.ts`, `credits.ts`), with the existing caller's numbers
+      pinned by test first. No migration was needed. The export now fans
+      out with `Promise.allSettled`, so **one failing reader emits its own
+      `# error:` marker and every other series still streams** rather than
+      truncating the file.
+- [ ] The four catalog ids that stay `supported: false` — each for a
+      different reason, and they should not be treated as one backlog item:
+      - **`rev_per_install`** — no install event exists anywhere in the
+        product. Needs SDK-side work first. It stays IN the catalog: all 16
+        ids have i18n labels, the dashboard already distinguishes
+        `supported: false` from "supported but no data", and
+        `isSystemChartId` is what reserves the id against a user-created
+        chart.
+      - **`liability`** — `readLiability` sums the *latest* per-subscriber
+        balances from Postgres. No balance history is retained anywhere, so
+        a 12-month line would be today's figure repeated or a
+        reconstruction no service owns. **The catalog advertises a time
+        series the data model does not keep.** `/credits` shows the real
+        current figure.
+      - **`retention_curve`** and **`ltv`** — these two share a root cause.
+        `ChartSeriesPoint.bucket` is a calendar date, but both metrics are
+        inherently **cohort-shaped**: `computeRetention` yields a cohort
+        matrix (rendered correctly by `/cohorts`), and
+        `v_revenue_lifetime_subscriber` groups by `projectId, subscriberId`
+        with **no day dimension at all** — `ltv`'s own label is "LTV by
+        cohort". Forcing either onto a date axis would ship a fabricated
+        series. **This is a catalog modelling gap, not a wiring gap**: the
+        catalog declares `chartType: "line"` for two metrics that are not
+        lines over dates. Whoever picks this up should start from that, not
+        from "wire two more readers".
+- Note on the schema-contract harness: `trials_started` and `churn` are
+  **Postgres-backed** and issue zero ClickHouse queries, so
+  `schema-contract.integration.test.ts` cannot guard them — a `purchases`
+  column rename would break them with the harness still green. Their guard
+  is a separate real-Postgres integration test. "Registered in the harness"
+  does not mean "guarded" for those two.
 
 ## 6. Third-party integrations (75 → 90) — Wave 2 shipped, one gap left
 
