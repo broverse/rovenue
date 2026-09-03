@@ -428,6 +428,14 @@ export interface UpsertSubscriberInput {
    * to look up the owning subscriber from CONSUMPTION_REQUEST.
    */
   appleAppAccountToken?: string | null;
+  /**
+   * Applied ONLY on insert, like `createAttributes` — the conflict path
+   * never touches it, so SDK first-install truth is immutable. Only the
+   * SDK's public-key create path (`resolveOrCreateSubscriber`) passes a
+   * value; every other caller leaves it NULL. See the column comment in
+   * schema.ts.
+   */
+  sdkInstalledAt?: Date | null;
 }
 
 /**
@@ -463,6 +471,7 @@ export async function upsertSubscriber(
       attributes: (input.createAttributes ??
         {}) as typeof subscribers.$inferInsert.attributes,
       appleAppAccountToken: input.appleAppAccountToken ?? null,
+      sdkInstalledAt: input.sdkInstalledAt ?? null,
     })
     .onConflictDoUpdate({
       target: [subscribers.projectId, subscribers.rovenueId],

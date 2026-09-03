@@ -418,6 +418,17 @@ export const subscribers = pgTable(
     deletedAt: timestamp("deletedAt", { withTimezone: true }),
     mergedInto: text("mergedInto"),
     identifiedAt: timestamp("identifiedAt", { withTimezone: true }),
+    // Set ONCE, by the SDK's public-key /v1 create path only
+    // (`resolveOrCreateSubscriber`) — never by the CSV importer, a store
+    // webhook, or any S2S route. NULL therefore means "this row was not
+    // created by an SDK client", and non-NULL is an install.
+    //
+    // It duplicates `firstSeenAt`'s value at create time on purpose: it
+    // is the only install signal that survives GDPR erasure, which
+    // clears `attributes` (and with it the `platform` marker this
+    // generalises). An install count is an aggregate, not personal
+    // data; erasing a person must not retroactively shrink it.
+    sdkInstalledAt: timestamp("sdkInstalledAt", { withTimezone: true }),
     // Apple StoreKit `appAccountToken` (UUID v4) — opaque per-user
     // identifier sent with the purchase and echoed in every
     // ASSN v2 notification for that transaction. Persisted so the
@@ -442,6 +453,12 @@ export const subscribers = pgTable(
     appleTokenIdx: uniqueIndex("idx_subscribers_apple_app_account_token")
       .on(t.projectId, t.appleAppAccountToken)
       .where(sql`${t.appleAppAccountToken} IS NOT NULL`),
+    // Sole access path for the `rev_per_install` install denominator
+    // (apps/api/src/services/metrics/installs.ts). Partial, so an
+    // importer-heavy project contributes no index entries at all.
+    sdkInstalledAtIdx: index("subscribers_projectId_sdkInstalledAt_idx")
+      .on(t.projectId, t.sdkInstalledAt)
+      .where(sql`${t.sdkInstalledAt} IS NOT NULL`),
   }),
 );
 

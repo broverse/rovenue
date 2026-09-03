@@ -813,6 +813,13 @@
       "when": 1788469902466,
       "tag": "0115_billing_issue_status",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1788471031535,
+      "tag": "0116_subscriber_sdk_installed_at",
+      "breakpoints": true
     }
   ]
 }

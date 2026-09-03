@@ -36,6 +36,7 @@ export async function resolveSubscriberForWrite(
   projectId: string,
   rovenueId: string,
   createAttributes: unknown = {},
+  markSdkInstall = false,
 ): Promise<ResolvedSubscriberForWrite> {
   const resolved = await drizzle.subscriberRepo.resolveSubscriberByRovenueId(
     drizzle.db,
@@ -55,6 +56,7 @@ export async function resolveSubscriberForWrite(
     projectId,
     rovenueId,
     createAttributes,
+    sdkInstalledAt: markSdkInstall ? new Date() : null,
   });
   return { subscriber, deadEnded: false };
 }
@@ -71,6 +73,14 @@ export async function resolveSubscriberForWrite(
  * the `platform` attribute ONLY on create (createAttributes); the conflict
  * path never touches attributes, so it stays immutable as a first-install
  * signal even though the SDK sends it on every call.
+ *
+ * Because this wrapper is reachable ONLY from the SDK's public-key /v1
+ * surface, creating here IS an install: it stamps `sdkInstalledAt`
+ * (insert-only — see the column comment in schema.ts), independently of
+ * whether the façade sent a platform header. `resolveSubscriberForWrite`
+ * itself does not stamp it: the CSV importer calls that one directly, and
+ * services/import/write.ts's rule 6 ("NEVER set `subscribers.platform`. It
+ * is SDK first-install truth") governs this column for the same reason.
  */
 export async function resolveOrCreateSubscriber(
   projectId: string,
@@ -84,6 +94,7 @@ export async function resolveOrCreateSubscriber(
     projectId,
     key,
     createAttributes,
+    true,
   );
   return subscriber;
 }
