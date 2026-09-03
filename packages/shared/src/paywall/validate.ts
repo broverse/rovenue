@@ -81,6 +81,7 @@ export const LOCALIZED_KEYS: LocalizedKeyFns = {
   // Wave D2 — video/lottie carry no localized text of their own.
   video: () => [],
   lottie: () => [],
+  footerLinks: (n) => n.links.map((l) => l.labelKey),
 };
 
 /**

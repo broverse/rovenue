@@ -35,7 +35,7 @@ export type NodeBorder = { width: number; color: ThemeColor };
 // the node's own OPTIONAL VISUAL fields are overridable (see
 // `OVERRIDABLE_PROP_KEYS` below) — structural fields (type, id,
 // children, axis, packageIds, defaultSelected, cellLayout, action,
-// url, size, padding, cellTemplate) are never overridable.
+// url, size, padding, cellTemplate, links) are never overridable.
 // -------------------------------------------------------------
 
 export type OverrideCondition = { kind: "introEligible" } | { kind: "selected" };
@@ -317,6 +317,47 @@ export type TimelineNode = {
   visibility?: NodeVisibility;
 };
 
+/** Upper bound on links in one footer row. Four already wraps on a 320pt
+ *  device; beyond that the row stops reading as fine print. */
+export const FOOTER_LINKS_MAX = 5;
+/** Absent `separator` renders FOOTER_LINKS_DEFAULT_SEPARATOR on every platform. */
+export const FOOTER_LINKS_DEFAULT_SEPARATOR = "dot" as const;
+/** Absent `align` renders FOOTER_LINKS_DEFAULT_ALIGN on every platform. */
+export const FOOTER_LINKS_DEFAULT_ALIGN = "center" as const;
+
+/**
+ * One tappable link in a footer row. `action` is the SAME union a button
+ * carries — a footer link and a button do the same three things, and a
+ * second action union would be a second thing to keep in sync across three
+ * renderers.
+ */
+export type FooterLink = {
+  labelKey: string;
+  action: ButtonNode["action"];
+};
+
+/**
+ * The row of small, low-emphasis legal/action links at the bottom of a
+ * paywall: Restore Purchases · Terms · Privacy. A first-class node rather
+ * than a horizontal stack of plain buttons because the separators, the wrap
+ * behaviour and the shared type treatment are properties of the ROW, and a
+ * stack can express none of the three.
+ */
+export type FooterLinksNode = {
+  type: "footerLinks";
+  id: string;
+  links: FooterLink[];
+  /** Absent = FOOTER_LINKS_DEFAULT_SEPARATOR. */
+  separator?: "dot" | "pipe" | "none";
+  /** Absent = FOOTER_LINKS_DEFAULT_ALIGN. */
+  align?: "start" | "center" | "end";
+  /** Applies to every link's label AND the separators. Absent = inherit. */
+  color?: ThemeColor;
+  overrides?: NodeOverride[];
+  fallback?: PaywallNode;
+  visibility?: NodeVisibility;
+};
+
 export type SocialProofNode = {
   type: "socialProof";
   id: string;
@@ -438,7 +479,8 @@ export type PaywallNode =
   | CountdownNode
   | CarouselNode
   | VideoNode
-  | LottieNode;
+  | LottieNode
+  | FooterLinksNode;
 
 /**
  * Per node-type whitelist of override-able prop keys — the node's own
@@ -478,6 +520,12 @@ export const OVERRIDABLE_PROP_KEYS = {
   carousel: ["indicatorColor"],
   video: ["url", "posterUrl"],
   lottie: ["url"],
+  // `links` is deliberately absent here, for the same reason `children`,
+  // `packageIds` and `action` are absent from their own rows: it is
+  // structural (see the comment at the top of this section), not an
+  // optional visual field — an override can recolor the row or change how
+  // its links are arranged, but it cannot swap which links exist.
+  footerLinks: ["color", "separator", "align"],
 } as const satisfies Record<PaywallNode["type"], readonly string[]>;
 
 export type BuilderConfig = {
@@ -729,6 +777,23 @@ const timelineNodeSchema: z.ZodType<TimelineNode> = z.object({
   visibility: nodeVisibilitySchema.optional(),
 });
 
+const footerLinkSchema: z.ZodType<FooterLink> = z.object({
+  labelKey: z.string().min(1),
+  action: buttonActionSchema,
+});
+
+const footerLinksNodeSchema: z.ZodType<FooterLinksNode> = z.object({
+  type: z.literal("footerLinks"),
+  id: z.string().min(1),
+  links: z.array(footerLinkSchema).min(1).max(FOOTER_LINKS_MAX),
+  separator: z.enum(["dot", "pipe", "none"]).optional(),
+  align: z.enum(["start", "center", "end"]).optional(),
+  color: themeColorSchema.optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.footerLinks).optional(),
+  fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
+});
+
 const socialProofNodeSchema: z.ZodType<SocialProofNode> = z.object({
   type: z.literal("socialProof"),
   id: z.string().min(1),
@@ -830,6 +895,7 @@ const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([
   carouselNodeSchema,
   videoNodeSchema,
   lottieNodeSchema,
+  footerLinksNodeSchema,
 ]);
 paywallNodeSchemaRef = paywallNodeSchema;
 

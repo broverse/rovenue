@@ -91,6 +91,11 @@ function walk(node: PaywallNode, urls: Set<string>): void {
     case "timeline":
     case "socialProof":
     case "countdown":
+    // A footer link's `{ kind: "url" }` action is an external destination
+    // the host opens, NOT a media asset — `collectMediaUrls` exists to
+    // track CDN assets for the publish-time asset-usage index, and a link
+    // to an external terms/privacy page is never one of those.
+    case "footerLinks":
       break;
     default: {
       // Exhaustiveness guard: a new PaywallNode variant that isn't wired

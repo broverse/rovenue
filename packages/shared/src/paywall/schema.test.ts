@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  FOOTER_LINKS_MAX,
   MAX_BUILDER_DEPTH,
   OVERRIDABLE_PROP_KEYS,
   builderConfigSchema,
@@ -7,6 +8,7 @@ import {
   measureNodeTree,
   type BuilderConfig,
 } from "./schema";
+import { paywallNodeSchema } from "./tree-op";
 
 describe("builderConfigSchema", () => {
   it("round-trips a two-level tree exercising every node type", () => {
@@ -992,5 +994,53 @@ describe("node style pass: border / background / labelColor", () => {
       ],
     });
     expect(builderConfigSchema.safeParse(config).success).toBe(true);
+  });
+});
+
+describe("footerLinks node", () => {
+  const link = { labelKey: "f_terms", action: { kind: "url" as const, url: "https://x.dev/terms" } };
+
+  it("accepts a minimal footerLinks node", () => {
+    const node = { type: "footerLinks", id: "f", links: [link] };
+    expect(paywallNodeSchema.safeParse(node).success).toBe(true);
+  });
+
+  it("accepts every separator and align member", () => {
+    for (const separator of ["dot", "pipe", "none"]) {
+      for (const align of ["start", "center", "end"]) {
+        const node = { type: "footerLinks", id: "f", links: [link], separator, align };
+        expect(paywallNodeSchema.safeParse(node).success).toBe(true);
+      }
+    }
+  });
+
+  it("accepts all three action kinds, reusing the button action union", () => {
+    const links = [
+      { labelKey: "a", action: { kind: "restore" } },
+      { labelKey: "b", action: { kind: "url", url: "https://x.dev/privacy" } },
+      { labelKey: "c", action: { kind: "close" } },
+    ];
+    expect(paywallNodeSchema.safeParse({ type: "footerLinks", id: "f", links }).success).toBe(true);
+  });
+
+  it("rejects an empty links array", () => {
+    expect(paywallNodeSchema.safeParse({ type: "footerLinks", id: "f", links: [] }).success).toBe(false);
+  });
+
+  it("rejects more than FOOTER_LINKS_MAX links", () => {
+    const links = Array.from({ length: FOOTER_LINKS_MAX + 1 }, (_, i) => ({
+      labelKey: `f_${i}`,
+      action: { kind: "restore" as const },
+    }));
+    expect(paywallNodeSchema.safeParse({ type: "footerLinks", id: "f", links }).success).toBe(false);
+  });
+
+  it("rejects an unknown separator", () => {
+    const node = { type: "footerLinks", id: "f", links: [link], separator: "slash" };
+    expect(paywallNodeSchema.safeParse(node).success).toBe(false);
+  });
+
+  it("gives footerLinks an OVERRIDABLE_PROP_KEYS row", () => {
+    expect(OVERRIDABLE_PROP_KEYS.footerLinks).toEqual(["color", "separator", "align"]);
   });
 });

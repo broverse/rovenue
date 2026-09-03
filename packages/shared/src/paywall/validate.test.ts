@@ -7,6 +7,7 @@ import {
   isMissingLocaleValue,
   isPublishBlockingIssue,
   issueSeverity,
+  localizedKeysOf,
   resolveText,
   validateBuilderConfig,
   type BuilderIssue,
@@ -1900,5 +1901,19 @@ describe("LOCALIZED_KEYS for video and lottie", () => {
     });
     const usages = collectLocalizationUsages(config.root);
     expect(usages.some((u) => u.nodeId === "v1" || u.nodeId === "l1")).toBe(false);
+  });
+});
+
+describe("footerLinks localization keys", () => {
+  it("contributes every link's labelKey, in link order", () => {
+    const node = {
+      type: "footerLinks" as const,
+      id: "f",
+      links: [
+        { labelKey: "f_restore", action: { kind: "restore" as const } },
+        { labelKey: "f_terms", action: { kind: "url" as const, url: "https://x.dev/t" } },
+      ],
+    };
+    expect(localizedKeysOf(node)).toEqual(["f_restore", "f_terms"]);
   });
 });
