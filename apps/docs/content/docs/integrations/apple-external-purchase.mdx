@@ -1,0 +1,60 @@
+---
+title: Apple external purchases
+description: What Rovenue records for EU DMA / US link-entitlement purchases, and what it deliberately does not.
+---
+
+Apple sends an `EXTERNAL_PURCHASE_TOKEN` notification when a purchase happens
+through an external purchase link — the EU DMA and US link-entitlement flows.
+Rovenue records it, and this page is explicit about how little that means.
+
+## What the notification actually contains
+
+```
+externalPurchaseToken: {
+  externalPurchaseId?: string
+  tokenCreationDate?: number
+  appAppleId?: number
+}
+```
+
+Apple documents `data`, `summary` and `externalPurchaseToken` as **mutually
+exclusive** — a payload carries exactly one. So an `EXTERNAL_PURCHASE_TOKEN`
+notification has **no transaction, no product, no price, and nothing that
+identifies one of your users**. `appAppleId` is your app; `externalPurchaseId`
+is Apple's opaque id for the purchase.
+
+It tells you *a* purchase happened in your app. It does not tell you whose.
+
+## What Rovenue does
+
+Records the token against the project, keyed by `externalPurchaseId` so a
+redelivery is idempotent.
+
+## What Rovenue deliberately does not do
+
+- **No subscriber is attached.** There is nothing in the payload to attach it
+  to, and inferring one from timing or from the most recent active user would
+  produce attribution that looks authoritative and is a guess.
+- **No revenue is recorded.** Apple did not process this purchase and does not
+  send its amount. A placeholder figure would flow into MRR, LTV and proceeds
+  and corrupt all three.
+- **No integration event is emitted.** Rovenue's subscription event stream is
+  keyed by subscriber, and there is no subscriber here.
+
+If you want an external purchase to affect a user's entitlements or your
+revenue reporting, report it yourself: your own checkout knows which user
+bought and what they paid, and that is the only place both facts exist.
+
+## Not implemented
+
+- The **External Purchase Server API** — Rovenue does not report tokens back
+  to Apple on your behalf, and does not track Apple's reporting deadlines.
+- **Per-region commission accounting** for external purchases.
+
+## How this was verified
+
+Against Apple's documented payload shape and the decoder in
+`@apple/app-store-server-library`, **not against Apple**. Rovenue's development
+environment has no external-purchase entitlement, so this path has not been
+exercised end to end with a live notification. Treat it accordingly, and tell
+us what you see if you have the entitlement and can.

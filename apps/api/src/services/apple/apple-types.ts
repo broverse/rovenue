@@ -20,6 +20,9 @@ export const APPLE_NOTIFICATION_TYPE = {
   RENEWAL_EXTENDED: "RENEWAL_EXTENDED",
   RENEWAL_EXTENSION: "RENEWAL_EXTENSION",
   REVOKE: "REVOKE",
+  // EU DMA / US link entitlement. Carries NO `data` — see
+  // AppleExternalPurchaseToken below.
+  EXTERNAL_PURCHASE_TOKEN: "EXTERNAL_PURCHASE_TOKEN",
   TEST: "TEST",
 } as const;
 export type AppleNotificationType =
@@ -142,11 +145,29 @@ export interface AppleResponseBodyV2Data {
   status?: number;
 }
 
+/**
+ * Apple sends this INSTEAD of `data` for EXTERNAL_PURCHASE_TOKEN —
+ * `ResponseBodyV2DecodedPayload` documents `data`, `summary` and
+ * `externalPurchaseToken` as mutually exclusive, and the payload carries
+ * exactly one of them.
+ *
+ * Note what is NOT here: no transaction, no product, no price, and no
+ * identifier that resolves to one of our subscribers. `appAppleId` is the
+ * app; `externalPurchaseId` is Apple's opaque id for the purchase. The
+ * notification says AN external purchase happened in your app — not whose.
+ */
+export interface AppleExternalPurchaseToken {
+  externalPurchaseId?: string;
+  tokenCreationDate?: number;
+  appAppleId?: number;
+}
+
 export interface AppleResponseBodyV2DecodedPayload {
   notificationType: AppleNotificationType;
   subtype?: AppleNotificationSubtype;
   notificationUUID: string;
   data?: AppleResponseBodyV2Data;
+  externalPurchaseToken?: AppleExternalPurchaseToken;
   version: string;
   signedDate: number;
 }

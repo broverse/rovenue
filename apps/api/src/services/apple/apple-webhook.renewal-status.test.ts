@@ -47,6 +47,9 @@ const { drizzleMock } = vi.hoisted(() => {
     accessRepo: {
       revokeAccessByOriginalTransaction: vi.fn(async () => undefined),
     },
+    appleExternalPurchaseRepo: {
+      recordExternalPurchase: vi.fn(async () => undefined),
+    },
     purchaseExtRepo: {
       findPurchaseByOriginalTransaction: vi.fn(),
       findPurchaseWithCreditInfo: vi.fn(async () => null),
@@ -331,5 +334,90 @@ describe("handleAppleNotification — REVOKE end-to-end", () => {
 
     expect(result.status).toBe("processed");
     expect(drizzleMock.outboxRepo.insert).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// EXTERNAL_PURCHASE_TOKEN — EU DMA / US link entitlement
+// =============================================================
+//
+// Apple sends `externalPurchaseToken` INSTEAD of `data` (the payload
+// documents them as mutually exclusive), so this notification reaches the
+// pipeline with NO transaction — `dispatch()` is never called for it. It
+// is the only notification handled on that branch.
+//
+// The payload identifies the app (`appAppleId`) and the purchase
+// (`externalPurchaseId`). It identifies no subscriber, so these tests pin
+// the two things a future change would be tempted to invent.
+
+function makeExternalPurchaseNotification(
+  uuid: string,
+  token: Record<string, unknown> | undefined,
+): AppleResponseBodyV2DecodedPayload {
+  return {
+    notificationType: APPLE_NOTIFICATION_TYPE.EXTERNAL_PURCHASE_TOKEN,
+    notificationUUID: uuid,
+    version: "2.0",
+    signedDate: Date.now(),
+    ...(token ? { externalPurchaseToken: token } : {}),
+  } as AppleResponseBodyV2DecodedPayload;
+}
+
+async function dispatchExternalPurchase(
+  uuid: string,
+  token: Record<string, unknown> | undefined,
+) {
+  return handleAppleNotification({
+    projectId: PROJECT_ID,
+    signedPayload: "signed-envelope-stub",
+    // No `data`, so the stub verifier is never asked for a transaction.
+    verifier: makeStubVerifier(makeExternalPurchaseNotification(uuid, token), 1),
+    postProcess: makePostProcess(),
+  });
+}
+
+describe("handleAppleNotification — EXTERNAL_PURCHASE_TOKEN", () => {
+  test("records the token as a project-level fact with Apple's own values", async () => {
+    const created = 1_725_000_000_000;
+    const result = await dispatchExternalPurchase("uuid-ext-1", {
+      externalPurchaseId: "ext_abc123",
+      tokenCreationDate: created,
+      appAppleId: 987654321,
+    });
+
+    expect(result.status).toBe("processed");
+    expect(
+      drizzleMock.appleExternalPurchaseRepo.recordExternalPurchase,
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: PROJECT_ID,
+        externalPurchaseId: "ext_abc123",
+        tokenCreationDate: new Date(created),
+        appAppleId: 987654321,
+      }),
+    );
+  });
+
+  test("emits NO outbox event and touches no purchase — there is no subscriber to attribute one to", async () => {
+    await dispatchExternalPurchase("uuid-ext-2", {
+      externalPurchaseId: "ext_abc456",
+      appAppleId: 987654321,
+    });
+
+    // The outbox keys on subscriberId. Emitting here would require
+    // inventing one, which is the inference this codebase refuses.
+    expect(drizzleMock.outboxRepo.insert).not.toHaveBeenCalled();
+    expect(
+      drizzleMock.purchaseRepo.updatePurchasesByOriginalTransaction,
+    ).not.toHaveBeenCalled();
+  });
+
+  test("without Apple's externalPurchaseId it records nothing rather than a row nobody can reconcile", async () => {
+    await dispatchExternalPurchase("uuid-ext-3", { appAppleId: 987654321 });
+
+    expect(
+      drizzleMock.appleExternalPurchaseRepo.recordExternalPurchase,
+    ).not.toHaveBeenCalled();
   });
 });

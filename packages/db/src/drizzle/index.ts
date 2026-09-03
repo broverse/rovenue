@@ -79,6 +79,7 @@ export * as funnelTemplateRepo from "./repositories/funnel-templates";
 export * as funnelSessionRepo from "./repositories/funnel-sessions";
 export * as funnelAnswerRepo from "./repositories/funnel-answers";
 export * as funnelPurchaseRepo from "./repositories/funnel-purchases";
+export * as appleExternalPurchaseRepo from "./repositories/apple-external-purchases";
 export * as funnelClaimTokenRepo from "./repositories/funnel-claim-tokens";
 export * as funnelDeferredClaimRepo from "./repositories/funnel-deferred-claims";
 export * as customDomainRepo from "./repositories/custom-domains";

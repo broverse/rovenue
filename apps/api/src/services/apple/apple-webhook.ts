@@ -231,6 +231,26 @@ export async function handleAppleNotification(
         renewalInfo,
         outcome,
       });
+    } else if (
+      notification.notificationType ===
+      APPLE_NOTIFICATION_TYPE.EXTERNAL_PURCHASE_TOKEN
+    ) {
+      // EU DMA / US link entitlement. This is the ONLY notification we act
+      // on without a transaction, and it is handled here rather than in
+      // `dispatch()` because dispatch requires one — Apple sends
+      // `externalPurchaseToken` INSTEAD of `data`, never alongside it.
+      //
+      // Recorded as a PROJECT-level fact. No subscriber is resolved,
+      // because the payload contains nothing that identifies one:
+      // `appAppleId` is the app and `externalPurchaseId` is Apple's opaque
+      // id for the purchase. No revenue event either — Apple did not
+      // process this purchase and we have no amount for it. Inferring
+      // either from timing or recency is the shape this codebase refuses.
+      await recordExternalPurchaseToken(
+        opts.projectId,
+        notification,
+        webhookEvent.id,
+      );
     } else {
       log.info("notification without transaction info, acknowledging", {
         uuid: notification.notificationUUID,
@@ -1196,5 +1216,46 @@ async function emitCancellationEvent(ctx: DispatchContext): Promise<void> {
     purchaseId: purchase.id,
     productId: purchase.productId,
     type: RevenueEventType.CANCELLATION,
+  });
+}
+
+/**
+ * Persist an EXTERNAL_PURCHASE_TOKEN notification.
+ *
+ * Deliberately emits nothing: no outbox event (the outbox keys on
+ * subscriberId and there is none), no revenue row (no amount), and no
+ * entitlement change (we do not know who bought). A developer who knows
+ * which of their users made the purchase reports it through their own
+ * flow; that is where money and attribution belong.
+ */
+async function recordExternalPurchaseToken(
+  projectId: string,
+  notification: AppleResponseBodyV2DecodedPayload,
+  webhookEventId: string,
+): Promise<void> {
+  const token = notification.externalPurchaseToken;
+  if (!token?.externalPurchaseId) {
+    // Without Apple's own id there is no dedup key and nothing to
+    // reconcile against later, so recording it would create a row nobody
+    // can act on.
+    log.warn("EXTERNAL_PURCHASE_TOKEN without an externalPurchaseId", {
+      uuid: notification.notificationUUID,
+    });
+    return;
+  }
+
+  await drizzle.appleExternalPurchaseRepo.recordExternalPurchase(drizzle.db, {
+    projectId,
+    externalPurchaseId: token.externalPurchaseId,
+    tokenCreationDate: token.tokenCreationDate
+      ? new Date(token.tokenCreationDate)
+      : null,
+    appAppleId: token.appAppleId ?? null,
+    webhookEventId,
+  });
+
+  log.info("recorded an external purchase token", {
+    projectId,
+    externalPurchaseId: token.externalPurchaseId,
   });
 }

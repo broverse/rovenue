@@ -2738,6 +2738,50 @@ export const customDomains = pgTable(
 // Rows are soft-deleted (`disconnected_at`) rather than removed so the
 // connect/disconnect history stays auditable.
 
+// =============================================================
+// apple_external_purchases
+// =============================================================
+//
+// Apple's EXTERNAL_PURCHASE_TOKEN notification (EU DMA / US link
+// entitlement) records that AN external purchase happened in the app —
+// not whose. Its payload is `{ externalPurchaseId, tokenCreationDate,
+// appAppleId }` and, per Apple, `data`/`summary`/`externalPurchaseToken`
+// are mutually exclusive: there is no transaction, no product, no price
+// and no subscriber-resolvable identifier.
+//
+// So this is a PROJECT-level fact and deliberately NOT a row in
+// `purchases`: it has no store transaction and cannot share that table's
+// store-transaction unique index. No subscriber is inferred, no revenue
+// event is written, and no integration event is emitted — the outbox
+// keys on subscriberId, and there is none.
+export const appleExternalPurchases = pgTable(
+  "apple_external_purchases",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Apple's opaque id for the external purchase. The dedup key. */
+    externalPurchaseId: text("external_purchase_id").notNull(),
+    /** Apple's own creation timestamp for the token, when supplied. */
+    tokenCreationDate: timestamp("token_creation_date", { withTimezone: true }),
+    /** The App Store app id the purchase belongs to. Not a subscriber. */
+    appAppleId: bigint("app_apple_id", { mode: "number" }),
+    /** The inbound webhook_events row this arrived on. */
+    webhookEventId: text("webhook_event_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectExternalIdKey: uniqueIndex(
+      "apple_external_purchases_project_external_id_key",
+    ).on(t.projectId, t.externalPurchaseId),
+  }),
+);
+
 export const projectStripeConnections = pgTable(
   "project_stripe_connections",
   {
