@@ -98,19 +98,49 @@ export const INSPECTOR_TABS = [
     // VIDEO_IN_CAROUSEL_NO_FALLBACK is deliberately absent, in the
     // CELL_TEMPLATE_BAD_NODE family: its remedy is a `fallback` subtree,
     // which no tab in this strip edits.
+    //
+    // EMPTY_MEDIA_URL is here for the same reason as the wave-D2 codes:
+    // image/video/lottie `url` and video's `posterUrl` are all
+    // ThemeUrlFields inside ImageContent/VideoContent/LottieContent, on
+    // this tab, for every node type that can raise it.
+    //
+    // EMPTY_ACTION_URL is deliberately NOT here, even though the same code
+    // is also raised for footerLinks links whose action IS edited on this
+    // tab (FooterLinksContent's ActionField). `tabIssues` below matches a
+    // code to a tab by nodeId + code membership only — it does not know
+    // the node's TYPE — so a code mapped to two tabs lights up BOTH of
+    // them for any node reachable from both, whether or not that node
+    // actually renders the offending field there. A button's Content tab
+    // (ButtonContent) renders only its label, not the ActionField — that
+    // lives on Binding (see below) — so mapping EMPTY_ACTION_URL here too
+    // would put a dot on a button's Content tab pointing at nothing to
+    // fix. See Binding's issueCodes comment for the resulting trade-off.
     issueCodes: new Set<BuilderIssue["code"]>([
       "UNKNOWN_LOC_KEY",
       "EMPTY_LOC_VALUE",
       "VIDEO_AUTOPLAY_UNMUTED",
       "VIDEO_NO_POSTER",
       "LOTTIE_SPEED_OUT_OF_RANGE",
+      "EMPTY_MEDIA_URL",
     ]),
   },
   {
     id: "binding",
     fallbackLabel: "Binding",
     appliesTo: new Set<PaywallNode["type"]>(["button", "packageList", "purchaseButton"]),
-    issueCodes: new Set<BuilderIssue["code"]>(["FOREIGN_PACKAGE_ID"]),
+    // EMPTY_ACTION_URL is mapped ONLY here, not also to Content, even
+    // though a footerLinks link's action is edited on Content
+    // (FooterLinksContent's ActionField) and footerLinks — the template
+    // footer factory's Terms/Privacy links are this code's primary
+    // motivating case — has no Binding tab at all (see appliesTo above),
+    // so a footerLinks node carrying this issue gets no per-tab dot here.
+    // That is a deliberate, CELL_TEMPLATE_BAD_NODE-style trade: `tabIssues`
+    // has no node-type awareness, so mapping to both tabs would light up a
+    // BUTTON's Content tab too — a dot pointing at a tab (ButtonContent)
+    // that renders no action field at all, which is worse than a missing
+    // dot. The validation drawer remains the complete, node-scoped list
+    // either way.
+    issueCodes: new Set<BuilderIssue["code"]>(["FOREIGN_PACKAGE_ID", "EMPTY_ACTION_URL"]),
   },
   {
     id: "visibility",

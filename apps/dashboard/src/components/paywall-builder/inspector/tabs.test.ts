@@ -187,6 +187,26 @@ describe("tabIssues", () => {
       expect(map.get("content"), code).toEqual({ severity: "warning", count: 1 });
     }
   });
+
+  // Task 8b.
+  it("gives EMPTY_MEDIA_URL a Content dot", () => {
+    // image/video/lottie url and video's posterUrl are all ThemeUrlFields
+    // on the Content tab.
+    const map = tabIssues([{ code: "EMPTY_MEDIA_URL", nodeId: "n1", message: "" }], "n1");
+    expect(map.get("content")).toEqual({ severity: "error", count: 1 });
+  });
+
+  it("gives EMPTY_ACTION_URL a Binding dot, and NOT a Content dot", () => {
+    // The offending field for a BUTTON (this code's other emitter besides
+    // footerLinks) is edited on Binding, not Content — ButtonContent
+    // renders only the label. Mapping to Content too would put a dot on a
+    // button's Content tab pointing at nothing to fix, so it is mapped to
+    // Binding only; see tabs.ts's issueCodes comment for the trade-off
+    // this leaves for footerLinks (which has no Binding tab at all).
+    const map = tabIssues([{ code: "EMPTY_ACTION_URL", nodeId: "n1", message: "" }], "n1");
+    expect(map.get("binding")).toEqual({ severity: "error", count: 1 });
+    expect(map.has("content")).toBe(false);
+  });
 });
 
 describe("resolveActiveTab", () => {

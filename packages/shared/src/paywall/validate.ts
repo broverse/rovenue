@@ -8,8 +8,10 @@ import {
   VIDEO_DEFAULT_AUTOPLAY,
   VIDEO_DEFAULT_MUTED,
   type BuilderConfig,
+  type ButtonNode,
   type PaywallNode,
   type StackNode,
+  type ThemeUrl,
 } from "./schema";
 import { compareVersions } from "./visibility";
 
@@ -33,6 +35,55 @@ import { compareVersions } from "./visibility";
  */
 function hasOwnKey(table: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(table, key);
+}
+
+/**
+ * A URL string is empty when it's absent or blank after trimming — the same
+ * rule `isMissingLocaleValue` applies to localization text, restated here
+ * for URLs so the two domains don't have to share one name for two
+ * different things. Whitespace reads as filled to a naive `!== ""` check
+ * but is exactly as unusable as `""`.
+ */
+function isEmptyUrlValue(url: string | undefined): boolean {
+  return typeof url !== "string" || url.trim() === "";
+}
+
+/**
+ * Pushes EMPTY_MEDIA_URL for every empty variant of one ThemeUrl-typed
+ * field on one node: `light` unconditionally — it's the url every renderer
+ * falls back to — and `dark` only when the field is PRESENT. An ABSENT dark
+ * variant just means "use light on both themes," a complete config, not a
+ * hole; a PRESENT-but-blank one resolves to nothing on that theme, which is
+ * exactly the hole light's check exists to catch. `fieldLabel` names the
+ * field in the message ("url" or "posterUrl") so the author knows which
+ * control on the Content tab to open.
+ */
+function pushEmptyMediaUrlIssues(
+  issues: BuilderIssue[],
+  node: PaywallNode,
+  fieldLabel: string,
+  url: ThemeUrl,
+): void {
+  if (isEmptyUrlValue(url.light)) {
+    issues.push({
+      code: "EMPTY_MEDIA_URL",
+      nodeId: node.id,
+      message: `${node.type} "${node.id}" has an empty ${fieldLabel}.light — replace the placeholder before publishing.`,
+    });
+  }
+  if (url.dark !== undefined && isEmptyUrlValue(url.dark)) {
+    issues.push({
+      code: "EMPTY_MEDIA_URL",
+      nodeId: node.id,
+      message: `${node.type} "${node.id}" has an empty ${fieldLabel}.dark — replace the placeholder before publishing, or remove the dark override.`,
+    });
+  }
+}
+
+/** True for a `{kind: "url", url: ""}` (or whitespace) action. `close` and
+ *  `restore` carry no url to be empty, so they never match. */
+function isEmptyUrlAction(action: ButtonNode["action"]): boolean {
+  return action.kind === "url" && isEmptyUrlValue(action.url);
 }
 
 /**
@@ -169,7 +220,20 @@ export type BuilderIssue = {
     // assessed on all three paging primitives and rejected as
     // disproportionate; a `fallback` makes the blank page impossible in
     // practice, so the author is told to carry one.
-    | "VIDEO_IN_CAROUSEL_NO_FALLBACK";
+    | "VIDEO_IN_CAROUSEL_NO_FALLBACK"
+    // Task 8b — an image/video/lottie node whose `url.light` is blank, or
+    // whose PRESENT `url.dark`/`video.posterUrl.dark` is blank. Every
+    // gallery template's placeholder media (and the long-standing `hero`
+    // preset) ships this way on purpose, so it must save freely — but it
+    // must not reach a device with nothing to draw.
+    | "EMPTY_MEDIA_URL"
+    // Task 8b — a button, or a footerLinks link, whose action is
+    // `{kind:"url", url:""}`. A template's footer factory emits Terms/
+    // Privacy links exactly this way because it cannot know a project's
+    // real legal URLs — a normal, save-able mid-authoring state, but a
+    // link that goes nowhere is an App Store review risk on top of being
+    // cosmetic, so it must not ship.
+    | "EMPTY_ACTION_URL";
   nodeId?: string;
   locale?: string;
   key?: string;
@@ -263,6 +327,20 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   // yet is a normal edit state (the author adds pages next), so it must
   // still save.
   CAROUSEL_EMPTY: "publish",
+  // Task 8b — every gallery template's placeholder media (and the
+  // long-standing `hero` preset) ships with `url: { light: "" }` on
+  // purpose, precisely so a template can be applied and its copy edited
+  // before the author has picked real art. That is ordinary work in
+  // progress and MUST still persist; only shipping it to a device — where
+  // it draws nothing — is the problem.
+  EMPTY_MEDIA_URL: "publish",
+  // Task 8b — a template's footer factory emits Terms/Privacy links as
+  // `{kind:"url", url:""}` because it cannot know a project's real legal
+  // URLs; that placeholder is the same kind of normal in-progress state as
+  // EMPTY_MEDIA_URL and must still save. It blocks publish rather than
+  // warning because a link that goes nowhere is not merely cosmetic — a
+  // non-functional Terms/Privacy link is an App Store review risk.
+  EMPTY_ACTION_URL: "publish",
 
   // Anything unlisted stays "save" — see issueSeverity. Only DUPLICATE_NODE_ID
   // relies on that today: tree-ops addresses nodes by id, so a duplicate makes
@@ -681,6 +759,42 @@ export function validateBuilderConfig(
         nodeId: node.id,
         message: `lottie "${node.id}" has speed ${node.speed}, outside ${LOTTIE_MIN_SPEED}–${LOTTIE_MAX_SPEED} — playback will read as broken rather than stylised.`,
       });
+    }
+  }
+
+  // EMPTY_MEDIA_URL — Task 8b. image/video/lottie `url`, plus `video.posterUrl`
+  // when it's present (an ABSENT posterUrl is VIDEO_NO_POSTER's territory
+  // above, unchanged — a node that never carried a poster is a different
+  // thing from one whose poster resolves to nothing).
+  for (const node of allNodes) {
+    if (node.type === "image" || node.type === "video" || node.type === "lottie") {
+      pushEmptyMediaUrlIssues(issues, node, "url", node.url);
+    }
+    if (node.type === "video" && node.posterUrl !== undefined) {
+      pushEmptyMediaUrlIssues(issues, node, "posterUrl", node.posterUrl);
+    }
+  }
+
+  // EMPTY_ACTION_URL — Task 8b. A button's own action, or any footerLinks
+  // link's action, that is `{kind:"url", url:""}`.
+  for (const node of allNodes) {
+    if (node.type === "button" && isEmptyUrlAction(node.action)) {
+      issues.push({
+        code: "EMPTY_ACTION_URL",
+        nodeId: node.id,
+        message: `button "${node.id}" has an empty url action — replace the placeholder before publishing.`,
+      });
+    }
+    if (node.type === "footerLinks") {
+      for (const link of node.links) {
+        if (isEmptyUrlAction(link.action)) {
+          issues.push({
+            code: "EMPTY_ACTION_URL",
+            nodeId: node.id,
+            message: `footerLinks "${node.id}" has a link with an empty url action — replace the placeholder before publishing.`,
+          });
+        }
+      }
     }
   }
 

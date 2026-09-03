@@ -1777,6 +1777,8 @@
         "codeCellTemplateBadNode": "Unsupported node in cell template",
         "codeOverrideBadProp": "Non-overridable prop",
         "codeOverrideSelectedOutsideCell": "Override never matches",
+        "codeEmptyMediaUrl": "Missing media URL",
+        "codeEmptyActionUrl": "Missing link URL",
         "locale": "Locale"
       },
       "diff": {

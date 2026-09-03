@@ -1917,3 +1917,181 @@ describe("footerLinks localization keys", () => {
     expect(localizedKeysOf(node)).toEqual(["f_restore", "f_terms"]);
   });
 });
+
+// Task 8b — EMPTY_MEDIA_URL / EMPTY_ACTION_URL. Both are publish-tier: a
+// half-filled template's placeholder media/links must still SAVE, but must
+// not reach a device.
+describe("Task 8b: EMPTY_MEDIA_URL", () => {
+  function configWith(node: PaywallNode): BuilderConfig {
+    return baseConfig({
+      root: { type: "stack", id: "root", axis: "v", children: [node] },
+    });
+  }
+
+  it("raises EMPTY_MEDIA_URL for an image with a blank url.light", () => {
+    const node: PaywallNode = { type: "image", id: "hero_image", url: { light: "" } };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(codesOf(issues)).toContain("EMPTY_MEDIA_URL");
+  });
+
+  it("raises nothing for an image with a real url.light", () => {
+    const node: PaywallNode = { type: "image", id: "hero_image", url: { light: "https://x/hero.png" } };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(codesOf(issues)).not.toContain("EMPTY_MEDIA_URL");
+  });
+
+  it("treats a whitespace-only url.light as empty", () => {
+    const node: PaywallNode = { type: "image", id: "hero_image", url: { light: "   " } };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(codesOf(issues)).toContain("EMPTY_MEDIA_URL");
+  });
+
+  it("raises it for a present-but-blank dark variant, and not for an absent one", () => {
+    const withBlankDark: PaywallNode = {
+      type: "image",
+      id: "hero_image",
+      url: { light: "https://x/hero.png", dark: "" },
+    };
+    expect(
+      codesOf(validateBuilderConfig(configWith(withBlankDark), { offeringPackageIds })),
+    ).toContain("EMPTY_MEDIA_URL");
+
+    const withoutDark: PaywallNode = {
+      type: "image",
+      id: "hero_image",
+      url: { light: "https://x/hero.png" },
+    };
+    expect(
+      codesOf(validateBuilderConfig(configWith(withoutDark), { offeringPackageIds })),
+    ).not.toContain("EMPTY_MEDIA_URL");
+  });
+
+  it("covers video.url and lottie.url, not only image", () => {
+    for (const node of [
+      { type: "video", id: "v1", url: { light: "" } },
+      { type: "lottie", id: "l1", url: { light: "" } },
+    ] as const) {
+      const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+      expect(codesOf(issues), node.type).toContain("EMPTY_MEDIA_URL");
+    }
+  });
+
+  it("raises it for a present video.posterUrl.light that is blank", () => {
+    const node: PaywallNode = {
+      type: "video",
+      id: "v1",
+      url: { light: "https://x/hero.mp4" },
+      autoplay: true,
+      muted: true,
+      posterUrl: { light: "" },
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(codesOf(issues)).toContain("EMPTY_MEDIA_URL");
+  });
+
+  it("raises only VIDEO_NO_POSTER, unchanged, when posterUrl is absent entirely", () => {
+    const node: PaywallNode = {
+      type: "video",
+      id: "v1",
+      url: { light: "https://x/hero.mp4" },
+      autoplay: false,
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(codesOf(issues)).toContain("VIDEO_NO_POSTER");
+    expect(codesOf(issues)).not.toContain("EMPTY_MEDIA_URL");
+  });
+
+  it("is publish-tier: blocks publish but not the save", () => {
+    const node: PaywallNode = { type: "image", id: "hero_image", url: { light: "" } };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "EMPTY_MEDIA_URL");
+    expect(issue).toBeDefined();
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(true);
+  });
+});
+
+describe("Task 8b: EMPTY_ACTION_URL", () => {
+  function configWith(node: PaywallNode): BuilderConfig {
+    return baseConfig({
+      root: { type: "stack", id: "root", axis: "v", children: [node] },
+    });
+  }
+
+  it("raises it for a button with {kind:'url', url:''}", () => {
+    const node: PaywallNode = {
+      type: "button",
+      id: "terms_btn",
+      labelKey: "cta_key",
+      style: "plain",
+      action: { kind: "url", url: "" },
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(codesOf(issues)).toContain("EMPTY_ACTION_URL");
+  });
+
+  it("treats a whitespace-only action url as empty", () => {
+    const node: PaywallNode = {
+      type: "button",
+      id: "terms_btn",
+      labelKey: "cta_key",
+      style: "plain",
+      action: { kind: "url", url: "   " },
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(codesOf(issues)).toContain("EMPTY_ACTION_URL");
+  });
+
+  it("raises nothing for a button with a real action url", () => {
+    const node: PaywallNode = {
+      type: "button",
+      id: "terms_btn",
+      labelKey: "cta_key",
+      style: "plain",
+      action: { kind: "url", url: "https://x.dev/terms" },
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    expect(codesOf(issues)).not.toContain("EMPTY_ACTION_URL");
+  });
+
+  it("raises nothing for {kind:'restore'} or {kind:'close'}", () => {
+    for (const action of [{ kind: "restore" }, { kind: "close" }] as const) {
+      const node: PaywallNode = {
+        type: "button",
+        id: "b1",
+        labelKey: "cta_key",
+        style: "plain",
+        action,
+      };
+      const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+      expect(codesOf(issues), JSON.stringify(action)).not.toContain("EMPTY_ACTION_URL");
+    }
+  });
+
+  it("raises it for a footerLinks link with an empty url action, naming the footer node", () => {
+    const node: PaywallNode = {
+      type: "footerLinks",
+      id: "footer",
+      links: [
+        { labelKey: "f_restore", action: { kind: "restore" } },
+        { labelKey: "f_terms", action: { kind: "url", url: "" } },
+      ],
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "EMPTY_ACTION_URL");
+    expect(issue?.nodeId).toBe("footer");
+  });
+
+  it("is publish-tier: blocks publish but not the save", () => {
+    const node: PaywallNode = {
+      type: "footerLinks",
+      id: "footer",
+      links: [{ labelKey: "f_terms", action: { kind: "url", url: "" } }],
+    };
+    const issues = validateBuilderConfig(configWith(node), { offeringPackageIds });
+    const issue = issues.find((i) => i.code === "EMPTY_ACTION_URL");
+    expect(issue).toBeDefined();
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(true);
+  });
+});

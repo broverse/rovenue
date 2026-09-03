@@ -101,6 +101,10 @@ function issueTitle(issue: BuilderIssue, t: (key: string, fallback: string) => s
       return t("paywalls.builder.validation.codeOverrideBadProp", "Non-overridable prop");
     case "OVERRIDE_SELECTED_OUTSIDE_CELL":
       return t("paywalls.builder.validation.codeOverrideSelectedOutsideCell", "Override never matches");
+    case "EMPTY_MEDIA_URL":
+      return t("paywalls.builder.validation.codeEmptyMediaUrl", "Missing media URL");
+    case "EMPTY_ACTION_URL":
+      return t("paywalls.builder.validation.codeEmptyActionUrl", "Missing link URL");
     default:
       return issue.code;
   }

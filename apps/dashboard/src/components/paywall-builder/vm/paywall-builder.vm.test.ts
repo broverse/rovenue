@@ -182,13 +182,21 @@ describe("PaywallBuilderViewModel", () => {
   });
 
   // ----- Presets -----
-  it("applyPreset('hero') produces a config with zero blocking validation issues", async () => {
+  // Task 8b: the hero preset's own `hero_image` ships with `url: { light: "" }`
+  // on purpose — an author applies the preset and picks real art next. That
+  // used to read as zero issues, which was the bug Task 8b closes: nothing
+  // caught a blank hero image before publish. Now EMPTY_MEDIA_URL flags it —
+  // publish-blocking, and ONLY that, so the preset still applies cleanly and
+  // stays editable (see the save-tier assertion below).
+  it("applyPreset('hero') raises EMPTY_MEDIA_URL for the placeholder hero image, and nothing else", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail({ offeringPackageIds: [] }));
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
     await vm.load(() => {});
 
     vm.applyPreset("hero");
-    expect(vm.errorIssues).toEqual([]);
+    expect(vm.errorIssues).toEqual([
+      expect.objectContaining({ code: "EMPTY_MEDIA_URL", nodeId: "hero_image" }),
+    ]);
   });
 
   it("applyPreset('comparison') produces a config with zero blocking validation issues", async () => {
