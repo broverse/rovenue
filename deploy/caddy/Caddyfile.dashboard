@@ -1,22 +1,54 @@
-# Static file server for the built dashboard SPA. Baked into the
-# dashboard image and run on :80 inside the docker network; the edge
-# Caddy (deploy/caddy/Caddyfile) reverse-proxies app.rovenue.io here.
+# Static file server for the built dashboard SPA. Baked into the dashboard
+# image and run on :80 inside the docker network; the edge Caddy
+# (deploy/caddy/Caddyfile) reverse-proxies app.rovenue.io here.
+#
+# Everything is routed through explicit `handle` blocks so that /config.js
+# resolves here and never reaches file_server — the static build also
+# contains a config.js (the dev placeholder from apps/dashboard/public/),
+# and leaving both reachable would make which one wins depend on Caddy's
+# directive ordering. The wrong answer serves an empty config to every
+# browser.
 :80 {
-	root * /srv
 	encode zstd gzip
-	# SPA fallback: serve index.html for any path that is not a real
-	# file, so TanStack Router client routes resolve on hard refresh.
-	try_files {path} /index.html
-	file_server
-	# Long-cache fingerprinted assets; never cache index.html.
-	@assets path /assets/*
-	header @assets Cache-Control "public, max-age=31536000, immutable"
-	header /index.html Cache-Control "no-cache"
+
+	# Runtime deployment config, read by lib/runtime-config.ts before the
+	# bundle loads. Vite inlines VITE_* at BUILD time, so this is the only
+	# way one published image can serve any operator's origin.
+	#
+	# Substitution is textual — deploy/dashboard/entrypoint.sh validates
+	# every value and refuses to start the container on anything that could
+	# break out of these string literals.
+	#
+	# no-cache is load-bearing: a cached config.js survives a redeploy that
+	# changed the API origin, and the failure is a dashboard silently
+	# talking to the wrong host.
+	handle /config.js {
+		header Content-Type "application/javascript; charset=utf-8"
+		header Cache-Control "no-cache"
+		respond `window.__ROVENUE_CONFIG__={"apiUrl":"{$ROVENUE_API_URL:}","hostMode":"{$ROVENUE_HOST_MODE:}","allowRegistration":"{$ROVENUE_ALLOW_REGISTRATION:}","dashboardHost":"{$ROVENUE_DASHBOARD_HOST:}"};` 200
+	}
+
 	# Stripe's Apple Pay domain association file (shipped in the Vite
-	# public/ dir). This origin serves the funnel paywall at /f/<slug>,
-	# and Stripe will not mark Apple Pay active on a payment method
-	# domain that does not serve this file. The file is extensionless, so
-	# without this header Caddy sends no Content-Type at all; Stripe's own
-	# payment hosts serve it as application/octet-stream.
-	header /.well-known/apple-developer-merchantid-domain-association Content-Type "application/octet-stream"
+	# public/ dir). This origin serves the funnel paywall at /f/<slug>, and
+	# Stripe will not mark Apple Pay active on a payment method domain that
+	# does not serve this file. The file is extensionless, so without this
+	# header Caddy sends no Content-Type at all; Stripe's own payment hosts
+	# serve it as application/octet-stream.
+	handle /.well-known/apple-developer-merchantid-domain-association {
+		root * /srv
+		header Content-Type "application/octet-stream"
+		file_server
+	}
+
+	handle {
+		root * /srv
+		# SPA fallback: serve index.html for any path that is not a real
+		# file, so TanStack Router client routes resolve on hard refresh.
+		try_files {path} /index.html
+		file_server
+		# Long-cache fingerprinted assets; never cache index.html.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		header /index.html Cache-Control "no-cache"
+	}
 }

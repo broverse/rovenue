@@ -49,5 +49,9 @@ RUN pnpm --filter @rovenue/dashboard exec vite build
 # =============================================================
 FROM caddy:2-alpine AS runtime
 COPY deploy/caddy/Caddyfile.dashboard /etc/caddy/Caddyfile
+COPY deploy/dashboard/entrypoint.sh /usr/local/bin/rovenue-entrypoint.sh
 COPY --from=builder /app/apps/dashboard/dist /srv
+RUN chmod +x /usr/local/bin/rovenue-entrypoint.sh
 EXPOSE 80
+# Validates ROVENUE_* and refuses to start on a bad value, then execs caddy.
+ENTRYPOINT ["/usr/local/bin/rovenue-entrypoint.sh"]
