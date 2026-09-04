@@ -28,10 +28,8 @@ check_safe() {
 	value="$2"
 	case "$value" in
 	*'"'* | *'\'* | *'`'* | *'$'*) fail "$name contains a character that cannot be embedded in config.js" ;;
+	*[![:print:]]*) fail "$name contains a non-printable character" ;;
 	esac
-	if [ "$(printf '%s' "$value" | wc -l | tr -d ' ')" != "0" ]; then
-		fail "$name contains a newline"
-	fi
 }
 
 check_absolute_url() {

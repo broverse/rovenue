@@ -64,4 +64,21 @@ describe("dashboard entrypoint validation", () => {
       stderr: expect.stringContaining("ROVENUE_ALLOW_REGISTRATION"),
     });
   });
+
+  // A lone LF is a JS LineTerminator and breaks the unescaped string
+  // literal in config.js exactly like an embedded quote would. It also
+  // passes the http(s):// prefix check, so it must be caught by check_safe.
+  it("rejects a value containing an embedded newline", async () => {
+    await expect(
+      validate({ ROVENUE_API_URL: "https://a.example.com/\nx" }),
+    ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("ROVENUE_API_URL") });
+  });
+
+  // A lone CR is also a JS LineTerminator and survives the http(s)://
+  // prefix check the same way a lone LF does.
+  it("rejects a value containing an embedded carriage return", async () => {
+    await expect(
+      validate({ ROVENUE_API_URL: "https://a.example.com/\rx" }),
+    ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("ROVENUE_API_URL") });
+  });
 });
