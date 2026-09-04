@@ -18,13 +18,26 @@ Apple's root CAs (Apple Root CA G3 + Apple Inc Root) are vendored in
 `/etc/rovenue/apple-certs` — nothing to place on the host.
 
 ## 1. Secrets
-Copy `.env.example` to `.env` and fill, at minimum, the prod-required keys
-(enforced by `apps/api/src/lib/env.ts`):
-`DATABASE_URL`, `ENCRYPTION_KEY` (32-byte hex), `BETTER_AUTH_SECRET`,
+Copy `.env.example` to `.env` and fill, at minimum, the prod-required keys.
+
+**Enforced by `apps/api/src/lib/env.ts`** — its `superRefine` refuses to let
+the api boot in production without every one of these set:
+`DATABASE_URL`, `ENCRYPTION_KEY` (32-byte hex), `PUBSUB_PUSH_AUDIENCE`,
+`APPLE_ROOT_CERTS_DIR` (already defaulted to the vendored certs by the
+image/compose file — see §0 above — so the default compose topology needs
+nothing added here), `BETTER_AUTH_SECRET`, `UNSUB_SIGNING_KEY` (32-byte
+hex), `CLICKHOUSE_URL`, `CLICKHOUSE_PASSWORD`, `KAFKA_BROKERS`.
+
+**Required operationally, but NOT enforced by `env.ts`** — the api boots
+without these, but the feature each one gates silently doesn't work:
 `BETTER_AUTH_URL`, `DASHBOARD_URL=https://app.rovenue.io`,
-`VITE_API_URL=https://rovenue.io`, `GITHUB_CLIENT_ID/SECRET`,
-`GOOGLE_CLIENT_ID/SECRET`, `CLICKHOUSE_*`, `KAFKA_BROKERS`,
-`TLS_EMAIL`, `CANONICAL_HOSTS=rovenue.io,edge.rovenue.io,app.rovenue.io`,
+`VITE_API_URL=https://rovenue.io` (dashboard build-time value; see §6 below
+if you're running a published `rovenue-dashboard` image instead of building
+from source), `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`,
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (dashboard OAuth),
+`CLICKHOUSE_USER` (the api's analytics-read user — `CLICKHOUSE_PASSWORD`
+above is the one `env.ts` actually checks), `TLS_EMAIL`,
+`CANONICAL_HOSTS=rovenue.io,edge.rovenue.io,app.rovenue.io`,
 `OUTBOX_DISPATCHER_ENABLED=true`.
 
 ## 2. Build
