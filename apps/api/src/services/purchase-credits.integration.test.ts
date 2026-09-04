@@ -4,7 +4,7 @@ process.env.DATABASE_URL ??=
 import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
-import { grantPurchaseCurrencies } from "./purchase-credits";
+import { grantProductCurrencies } from "./purchase-credits";
 import { getBalance } from "./credit-engine";
 
 const RUN_ID = Date.now();
@@ -12,7 +12,7 @@ const PROJECT_ID = `prj_rc_${RUN_ID}`;
 const SUB_ID = `sub_rc_${RUN_ID}`;
 const PRODUCT_ID = `prod_rc_${RUN_ID}`;
 
-describe("grantPurchaseCurrencies", () => {
+describe("grantProductCurrencies", () => {
   let goldId: string;
   let gemId: string;
 
@@ -68,18 +68,20 @@ describe("grantPurchaseCurrencies", () => {
     );
 
     const purchaseId = `pur_${RUN_ID}`;
-    await grantPurchaseCurrencies({
+    await grantProductCurrencies({
       subscriberId: SUB_ID,
       productId: PRODUCT_ID,
-      purchaseId,
+      referenceId: purchaseId,
       productIdentifier: `pack_${RUN_ID}`,
+      trigger: "PURCHASE",
     });
     // Replay (at-least-once outbox / webhook retry).
-    await grantPurchaseCurrencies({
+    await grantProductCurrencies({
       subscriberId: SUB_ID,
       productId: PRODUCT_ID,
-      purchaseId,
+      referenceId: purchaseId,
       productIdentifier: `pack_${RUN_ID}`,
+      trigger: "PURCHASE",
     });
 
     expect(await getBalance(SUB_ID, goldId)).toBe(1000);

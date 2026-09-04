@@ -1,10 +1,7 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { createBullConnection } from "../lib/redis";
 import type Stripe from "stripe";
-import {
-  ProductType,
-  drizzle,
-} from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import {
   isRovenueEventKey,
   resolveStorePublicKey,
@@ -15,7 +12,7 @@ import { logger } from "../lib/logger";
 import { loadGoogleCredentials } from "../lib/project-credentials";
 import { requireConnectedStripe } from "../lib/stripe-platform";
 import { syncAccess } from "./access-engine";
-import { grantPurchaseCurrencies } from "./purchase-credits";
+import { grantProductCurrencies } from "./purchase-credits";
 import {
   handleAppleNotification,
   type HandleAppleNotificationResult,
@@ -301,13 +298,15 @@ async function maybeCreditConsumablePurchase(
     purchaseId,
   );
   if (!purchase) return;
-  if (purchase.product.type !== ProductType.CONSUMABLE) return;
 
-  await grantPurchaseCurrencies({
+  // No product-type gate: whether a grant fires is decided by the
+  // product's grant rows and their trigger, not by the product's type.
+  await grantProductCurrencies({
     subscriberId,
     productId: purchase.product.id,
-    purchaseId,
+    referenceId: purchaseId,
     productIdentifier: purchase.product.identifier,
+    trigger: "PURCHASE",
   });
 
   log.debug("credited consumable purchase", { subscriberId, purchaseId });

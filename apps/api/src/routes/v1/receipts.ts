@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
-import { ProductType, drizzle } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { getAllBalances } from "../../services/credit-engine";
-import { grantPurchaseCurrencies } from "../../services/purchase-credits";
+import { grantProductCurrencies } from "../../services/purchase-credits";
 import { syncAccess } from "../../services/access-engine";
 import { recordEvent } from "../../services/experiment-engine";
 import {
@@ -66,14 +66,15 @@ async function handleReceipt(
 
   await syncAccess(subscriber.id);
 
-  if (product.type === ProductType.CONSUMABLE) {
-    await grantPurchaseCurrencies({
-      subscriberId: subscriber.id,
-      productId: product.id,
-      purchaseId: purchase.id,
-      productIdentifier: product.identifier,
-    });
-  }
+  // No product-type gate: whether a grant fires is decided by the
+  // product's grant rows and their trigger, not by the product's type.
+  await grantProductCurrencies({
+    subscriberId: subscriber.id,
+    productId: product.id,
+    referenceId: purchase.id,
+    productIdentifier: product.identifier,
+    trigger: "PURCHASE",
+  });
 
   const [access, rawBalances, currencies] = await Promise.all([
     buildAccessResponse(subscriber.id),

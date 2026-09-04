@@ -1,41 +1,53 @@
 import { drizzle } from "@rovenue/db";
+import type { GrantEventTrigger } from "@rovenue/shared";
 import { addCredits } from "./credit-engine";
 
 // =============================================================
-// purchase-credits — bundle-currency grant service
+// purchase-credits — product currency grant service
 // =============================================================
 //
-// Grants every virtual currency in a product's product_currency_grants
-// table when a consumable IAP is purchased. Idempotent: duplicate calls
-// with the same purchaseId are safe — addCredits dedupes on
-// (referenceType="purchase", referenceId=purchaseId, currencyId).
+// Grants every virtual currency configured on a product for a given
+// lifecycle trigger. Idempotent: addCredits dedupes on
+// (referenceType, referenceId, currencyId), so a duplicate webhook or a
+// Kafka redelivery grants nothing further.
 //
-// Extracted as a standalone service (not inlined in receipts.ts) so
-// the webhook-processor can reuse it without a route→service→route
-// import cycle.
+// The two reference types are deliberately distinct. A consumable
+// purchase keyed on a purchaseId and a renewal keyed on a
+// revenueEventId could in principle collide; a shared referenceType
+// would let one silently swallow the other.
 
-export interface GrantPurchaseCurrenciesArgs {
+export const GRANT_REFERENCE_TYPE: Record<GrantEventTrigger, string> = {
+  PURCHASE: "purchase",
+  RENEWAL: "renewal",
+};
+
+export interface GrantProductCurrenciesArgs {
   subscriberId: string;
   productId: string;
-  purchaseId: string;
+  /** purchaseId for PURCHASE, revenueEventId for RENEWAL. */
+  referenceId: string;
   productIdentifier: string;
+  trigger: GrantEventTrigger;
 }
 
-export async function grantPurchaseCurrencies(
-  args: GrantPurchaseCurrenciesArgs,
+export async function grantProductCurrencies(
+  args: GrantProductCurrenciesArgs,
 ): Promise<void> {
-  const grants = await drizzle.productCurrencyGrantRepo.listProductGrants(
-    drizzle.db,
-    args.productId,
-  );
+  const grants =
+    await drizzle.productCurrencyGrantRepo.listProductGrantsForTrigger(
+      drizzle.db,
+      args.productId,
+      args.trigger,
+    );
+
   for (const grant of grants) {
     if (grant.amount <= 0) continue;
     await addCredits({
       subscriberId: args.subscriberId,
       currencyId: grant.currencyId,
       amount: grant.amount,
-      referenceType: "purchase",
-      referenceId: args.purchaseId,
+      referenceType: GRANT_REFERENCE_TYPE[args.trigger],
+      referenceId: args.referenceId,
       description: `Credits for ${args.productIdentifier}`,
       dedupeOnReference: true,
     });

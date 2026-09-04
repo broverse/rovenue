@@ -10,9 +10,9 @@ import {
 } from "./webhook-processor";
 
 vi.mock("./purchase-credits", () => ({
-  grantPurchaseCurrencies: vi.fn().mockResolvedValue(undefined),
+  grantProductCurrencies: vi.fn().mockResolvedValue(undefined),
 }));
-import { grantPurchaseCurrencies } from "./purchase-credits";
+import { grantProductCurrencies } from "./purchase-credits";
 
 vi.mock("./access-engine", () => ({
   syncAccess: vi.fn().mockResolvedValue(undefined),
@@ -69,12 +69,12 @@ const outboxInsertSpy = () => vi.mocked(drizzle.outboxRepo.insert);
 
 const mockFindPurchase = () =>
   vi.mocked(drizzle.purchaseExtRepo.findPurchaseWithCreditInfo);
-const mockGrant = () => vi.mocked(grantPurchaseCurrencies);
+const mockGrant = () => vi.mocked(grantProductCurrencies);
 
 describe("maybeCreditConsumablePurchase", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it("calls grantPurchaseCurrencies for a consumable purchase", async () => {
+  it("calls grantProductCurrencies with the purchase trigger", async () => {
     mockFindPurchase().mockResolvedValue({
       id: "purchase-1",
       subscriberId: "sub-1",
@@ -91,8 +91,9 @@ describe("maybeCreditConsumablePurchase", () => {
     expect(mockGrant()).toHaveBeenCalledWith({
       subscriberId: "sub-1",
       productId: "product-1",
-      purchaseId: "purchase-1",
+      referenceId: "purchase-1",
       productIdentifier: "com.example.coins100",
+      trigger: "PURCHASE",
     });
   });
 
@@ -104,7 +105,13 @@ describe("maybeCreditConsumablePurchase", () => {
     expect(mockGrant()).not.toHaveBeenCalled();
   });
 
-  it("does nothing for a non-consumable product", async () => {
+  // The old CONSUMABLE-only gate is gone: whether a grant fires is now
+  // decided by the product's grant rows (matched against the trigger
+  // inside grantProductCurrencies / the repository), not by the
+  // product's type. A non-consumable product with no grant rows still
+  // reaches grantProductCurrencies — it just resolves to zero grants
+  // there, which this unit doesn't need to re-assert.
+  it("calls grantProductCurrencies for a non-consumable product too", async () => {
     mockFindPurchase().mockResolvedValue({
       id: "purchase-2",
       subscriberId: "sub-1",
@@ -117,7 +124,14 @@ describe("maybeCreditConsumablePurchase", () => {
 
     await maybeCreditConsumablePurchase("sub-1", "purchase-2");
 
-    expect(mockGrant()).not.toHaveBeenCalled();
+    expect(mockGrant()).toHaveBeenCalledOnce();
+    expect(mockGrant()).toHaveBeenCalledWith({
+      subscriberId: "sub-1",
+      productId: "product-2",
+      referenceId: "purchase-2",
+      productIdentifier: "com.example.pro",
+      trigger: "PURCHASE",
+    });
   });
 });
 
