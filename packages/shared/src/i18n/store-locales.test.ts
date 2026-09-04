@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { STORE_LOCALES, localeLabel, searchLocales } from "./store-locales";
 
 // The App Store localization set is around forty entries; a list that has
@@ -48,6 +48,45 @@ describe("localeLabel", () => {
   it("does not throw on a structurally invalid tag — an author can type anything", () => {
     expect(() => localeLabel("not a tag")).not.toThrow();
     expect(localeLabel("not a tag")).toBe("not a tag");
+  });
+
+  it("builds Intl.DisplayNames at most once across many calls — hoisted, not rebuilt per call", async () => {
+    // `searchLocales` calls this once per STORE_LOCALES entry (~39) per
+    // keystroke; a fresh instance per call means ~39 constructions per
+    // keystroke. `vi.resetModules()` + a fresh dynamic import gives a
+    // clean module (the singleton hasn't been touched yet by an earlier
+    // test in this file) so the count is meaningful.
+    vi.resetModules();
+    const ctorSpy = vi.spyOn(Intl, "DisplayNames");
+    try {
+      const mod = await import("./store-locales");
+      for (const code of ["de-DE", "pt-BR", "fr-FR", "ja", "ko"]) mod.localeLabel(code);
+      expect(ctorSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      ctorSpy.mockRestore();
+    }
+  });
+
+  it("still falls back to the code when Intl.DisplayNames cannot be constructed at all", async () => {
+    vi.resetModules();
+    // Cast the whole namespace object rather than `@ts-expect-error`-ing
+    // the assignment: `Intl.DisplayNames` is declared read-only, and a
+    // stray `@ts-expect-error` would need repeating on the restore below
+    // too, which is easy to forget and leaves the OTHER line unchecked.
+    const intl = Intl as unknown as { DisplayNames: typeof Intl.DisplayNames };
+    const original = intl.DisplayNames;
+    intl.DisplayNames = class {
+      constructor() {
+        throw new Error("Intl.DisplayNames unsupported");
+      }
+    } as unknown as typeof Intl.DisplayNames;
+    try {
+      const mod = await import("./store-locales");
+      expect(() => mod.localeLabel("de-DE")).not.toThrow();
+      expect(mod.localeLabel("de-DE")).toBe("de-DE");
+    } finally {
+      intl.DisplayNames = original;
+    }
   });
 });
 

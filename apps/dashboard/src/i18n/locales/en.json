@@ -1821,7 +1821,9 @@
         "retranslateHint": "Every string is filled. Click twice to overwrite them all.",
         "translateCell": "Translate just this string",
         "rejected_one": "{{count}} string was left untranslated in {{locale}} — its price placeholders could not be preserved: {{keys}}",
-        "rejected_other": "{{count}} strings were left untranslated in {{locale}} — their price placeholders could not be preserved: {{keys}}"
+        "rejected_other": "{{count}} strings were left untranslated in {{locale}} — their price placeholders could not be preserved: {{keys}}",
+        "translateQuota": "Rovi's monthly quota is used up — try again next month or raise the limit.",
+        "translateFailed": "Couldn't translate — try again."
       },
       "start": {
         "title": "Start a paywall",

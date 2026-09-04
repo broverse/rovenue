@@ -32,6 +32,20 @@ vi.mock("../src/lib/edge-cache", () => ({
   purgeProjectCatalogCache: vi.fn(),
 }));
 
+// `roviQuotaGuard()` is called ONCE, at module-eval time, when paywalls.ts
+// builds its Hono chain — so `roviQuotaGuardFactory` records exactly one
+// call for the lifetime of this test file (never reset). The per-request
+// middleware behaviour (`roviQuotaGuardMiddleware`) IS reset per test. Same
+// idiom as `paywalls.generate.test.ts`'s guard-composition assertion —
+// without this, deleting `roviQuotaGuard()` from the `/translate` route
+// makes translation free and every OTHER test in this file stays green,
+// because they never make the guard reject.
+const roviQuotaGuardMiddleware = vi.hoisted(() => vi.fn(async (_c: any, next: any) => next()));
+const roviQuotaGuardFactory = vi.hoisted(() => vi.fn(() => roviQuotaGuardMiddleware));
+vi.mock("../src/middleware/rovi-quota-guard", () => ({
+  roviQuotaGuard: () => roviQuotaGuardFactory(),
+}));
+
 const { paywallsDashboardRoute } = await import("../src/routes/dashboard/paywalls");
 const { TranslationInvalidError } = await import("../src/services/paywall-ai/translate");
 const { RoviConfigError } = await import("../src/services/copilot/providers");
@@ -129,6 +143,7 @@ beforeEach(() => {
     entries: { title_1: "Hazte Pro" },
     rejected: [],
   });
+  roviQuotaGuardMiddleware.mockReset().mockImplementation(async (_c: any, next: any) => next());
 });
 
 describe("POST /paywalls/:id/translate", () => {
@@ -274,5 +289,33 @@ describe("POST /paywalls/:id/translate", () => {
     const res = await post(app, projectId, paywallId, cookie, BODY);
     expect(res.status).toBe(422);
     expect((await res.json()).error.code).toBe("TRANSLATION_INVALID");
+  });
+
+  it("mounts roviQuotaGuard on this route", async () => {
+    const app = buildApp();
+    const { projectId, paywallId } = await seedProjectWithPaywall("_guarded");
+    const { userId, cookie } = await createUserAndSession("guarded");
+    await seedMember(projectId, userId);
+
+    // Registered once, when paywalls.ts builds its Hono chain.
+    expect(roviQuotaGuardFactory).toHaveBeenCalled();
+    await post(app, projectId, paywallId, cookie, BODY);
+    expect(roviQuotaGuardMiddleware).toHaveBeenCalled();
+  });
+
+  it("short-circuits with the guard's own response when quota is exceeded, without translating", async () => {
+    const app = buildApp();
+    const { projectId, paywallId } = await seedProjectWithPaywall("_quota");
+    const { userId, cookie } = await createUserAndSession("quota");
+    await seedMember(projectId, userId);
+
+    roviQuotaGuardMiddleware.mockImplementation(async (c: any) =>
+      c.json({ error: { code: "ROVI_QUOTA_EXCEEDED", message: "Monthly limit reached" } }, 429),
+    );
+
+    const res = await post(app, projectId, paywallId, cookie, BODY);
+    expect(res.status).toBe(429);
+    expect((await res.json()).error.code).toBe("ROVI_QUOTA_EXCEEDED");
+    expect(translateEntriesMock).not.toHaveBeenCalled();
   });
 });

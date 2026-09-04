@@ -20,7 +20,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { localeLabel, searchLocales } from "@rovenue/shared/i18n";
+import { localeLabel, localeSuggestions } from "@rovenue/shared/i18n";
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { VersionMenu } from "./version-menu";
@@ -307,15 +307,14 @@ const LocaleSwitcher = component(() => {
   const [open, setOpen] = useState(false);
   const [newLocale, setNewLocale] = useState("");
 
-  // Store locales this paywall does not already carry. Matched
-  // case-insensitively against what is on the config, because `addLocale`
-  // lowercases what it stores while the store list keeps `zh-Hans` as the
-  // stores write it — comparing raw would offer a locale that is already
-  // there.
-  const suggestions = useMemo(() => {
-    const present = new Set(vm.locales.map((l) => l.toLowerCase()));
-    return searchLocales(newLocale).filter((code) => !present.has(code.toLowerCase()));
-  }, [newLocale, vm.locales]);
+  // Store locales this paywall does not already carry — the pure filter
+  // lives in `@rovenue/shared/i18n` (`localeSuggestions`) so its
+  // case-insensitive exclusion is tested directly rather than through a
+  // second, test-only reimplementation.
+  const suggestions = useMemo(
+    () => localeSuggestions(vm.locales, newLocale),
+    [newLocale, vm.locales],
+  );
 
   const addAndReset = (code: string) => {
     vm.addLocale(code);

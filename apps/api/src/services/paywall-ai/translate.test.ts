@@ -42,10 +42,11 @@ vi.mock("../copilot/providers", async (importOriginal) => {
   };
 });
 
-import { NoObjectGeneratedError } from "ai";
+import { NoObjectGeneratedError, zodSchema } from "ai";
 import {
   placeholdersPreserved,
   translateEntries,
+  translateResponseSchema,
   TranslationInvalidError,
   TRANSLATE_MAX_ENTRIES,
 } from "./translate";
@@ -66,9 +67,17 @@ beforeEach(() => {
   bumpUsageMock.mockReset().mockResolvedValue(undefined);
 });
 
-function objectGenerateResult(obj: unknown): LanguageModelV3GenerateResult {
+/**
+ * Wraps a flat `{ key: text }` record as the CLOSED `{ translations: [{key,
+ * text}] }` shape `translateResponseSchema` actually requires (Finding 4) —
+ * every test below scripts the model's answer as a flat record, and this is
+ * the one place that shape is serialized onto the wire, so the schema
+ * change doesn't need touching sixty call sites.
+ */
+function objectGenerateResult(obj: Record<string, unknown>): LanguageModelV3GenerateResult {
+  const wire = { translations: Object.entries(obj).map(([key, text]) => ({ key, text })) };
   return {
-    content: [{ type: "text", text: JSON.stringify(obj) }],
+    content: [{ type: "text", text: JSON.stringify(wire) }],
     finishReason: { unified: "stop", raw: "stop" },
     usage: {
       inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: undefined },
@@ -79,14 +88,14 @@ function objectGenerateResult(obj: unknown): LanguageModelV3GenerateResult {
 }
 
 /** A model that answers each successive call with the next scripted object. */
-function scriptedModel(responses: unknown[]): {
+function scriptedModel(responses: Record<string, unknown>[]): {
   model: MockLanguageModelV3;
   calls: () => number;
 } {
   let call = 0;
   const model = new MockLanguageModelV3({
     doGenerate: async () => {
-      const response = responses[Math.min(call, responses.length - 1)];
+      const response = responses[Math.min(call, responses.length - 1)]!;
       call += 1;
       return objectGenerateResult(response);
     },
@@ -96,7 +105,7 @@ function scriptedModel(responses: unknown[]): {
 
 function translate(
   entries: Record<string, string>,
-  responses: unknown[],
+  responses: Record<string, unknown>[],
   overrides: Partial<{ sourceLocale: string; targetLocale: string }> = {},
 ) {
   const { model, calls } = scriptedModel(responses);
@@ -256,6 +265,24 @@ describe("translateEntries", () => {
     await expect(promise).resolves.toEqual({ entries: {}, rejected: ["a"] });
   });
 
+  it("rejects a punctuation-only candidate for a source that carries real content", async () => {
+    // "—" and "..." are non-blank, so the blank check alone lets them
+    // through — but they are not a translation of "Restore Purchases" any
+    // more than "" is. Worse than the blank case, in fact: a gap falls back
+    // to the base locale and reads correctly, while "..." ships to a buyer
+    // as if it were the CTA.
+    const { promise } = translate({ a: "Restore Purchases" }, [{ a: "—" }, { a: "..." }]);
+    await expect(promise).resolves.toEqual({ entries: {}, rejected: ["a"] });
+  });
+
+  it("still round-trips when the SOURCE is itself punctuation-only", async () => {
+    // The letter-or-digit requirement is conditional on the SOURCE, not an
+    // absolute ban on punctuation-only output — a source that carries no
+    // letter or digit of its own must still be translatable.
+    const { promise } = translate({ a: "--" }, [{ a: "—" }]);
+    await expect(promise).resolves.toEqual({ entries: { a: "—" }, rejected: [] });
+  });
+
   it("translates strings with no placeholders at all", async () => {
     const { promise } = translate({ a: "Restore Purchases" }, [{ a: "Restaurar compras" }]);
     await expect(promise).resolves.toEqual({
@@ -338,5 +365,36 @@ describe("quota", () => {
     const { promise } = translate({}, [{}]);
     await expect(promise).rejects.toBeInstanceOf(TranslationInvalidError);
     expect(bumpUsageMock).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// `@ai-sdk/openai` v3 defaults to OpenAI's strict `json_schema` mode, which
+// rejects an object schema whose `additionalProperties` is anything but
+// `false` — a `z.record` compiles to `additionalProperties: {type:
+// "string"}`, an OPEN shape. `MockLanguageModelV3` never enforces this (it
+// happily accepts whatever `objectGenerateResult` hands it), so nothing
+// that exercises the mock can catch this — the only proof is inspecting
+// the ACTUAL JSON Schema `generateObject` would send, the same way `ai`'s
+// OpenAI provider itself derives it (`zodSchema(...).jsonSchema`).
+// =============================================================
+describe("generateObject schema — closed for OpenAI's strict json_schema mode", () => {
+  it("has additionalProperties: false at every object level it declares — not an open z.record", () => {
+    const { jsonSchema: schema } = zodSchema(translateResponseSchema);
+
+    const objectNodes: Record<string, unknown>[] = [];
+    function walk(node: unknown): void {
+      if (!node || typeof node !== "object") return;
+      const record = node as Record<string, unknown>;
+      if (record.type === "object") objectNodes.push(record);
+      for (const value of Object.values(record)) walk(value);
+    }
+    walk(schema);
+
+    // At least the top-level object and the array's item object.
+    expect(objectNodes.length).toBeGreaterThanOrEqual(2);
+    for (const node of objectNodes) {
+      expect(node.additionalProperties).toBe(false);
+    }
   });
 });

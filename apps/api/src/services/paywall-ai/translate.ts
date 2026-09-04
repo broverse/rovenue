@@ -83,6 +83,23 @@ RULES (NEVER VIOLATE):
    in the target language rather than word-for-word.
 5. Output ONLY the structured object requested by the schema.`;
 
+/**
+ * The `generateObject` response shape — an array of `{key, text}` pairs,
+ * not `z.record(z.string(), z.string())`.
+ *
+ * `@ai-sdk/openai` v3 defaults to OpenAI's strict `json_schema` mode, which
+ * requires every object in the schema to be CLOSED (`additionalProperties:
+ * false`). `z.record`'s values compile to `additionalProperties: {type:
+ * "string"}` — an open shape a string schema, not `false` — which strict
+ * mode rejects with a 400. Every other `generateObject` call in this repo
+ * (`generate.ts`) already uses a closed `z.object`; this one now matches.
+ * `translateEntries` maps the array back to the `Record<string, string>`
+ * the rest of the service and the API contract use.
+ */
+export const translateResponseSchema = z.object({
+  translations: z.array(z.object({ key: z.string(), text: z.string() })),
+});
+
 let modelFactory: (resolved: ResolvedProvider) => LanguageModel = buildAiSdkModel;
 
 /** Test seam, mirroring generate.ts's. */
@@ -132,6 +149,18 @@ async function bumpTokenUsage(
     inputTokens: usage.inputTokens ?? 0,
     outputTokens: usage.outputTokens ?? 0,
   });
+}
+
+/** Any Unicode letter or digit — a candidate that has none of these is
+ *  punctuation/whitespace/symbols only, i.e. not actual copy. */
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+
+/**
+ * True when `text` contains at least one letter or digit — i.e. it isn't
+ * made up entirely of punctuation, whitespace, or symbols (`"—"`, `"..."`).
+ */
+function hasTranslatableContent(text: string): boolean {
+  return LETTER_OR_DIGIT.test(text);
 }
 
 /**
@@ -216,14 +245,18 @@ export async function translateEntries(
     try {
       const result = await generateObject({
         model,
-        schema: z.record(z.string(), z.string()),
+        schema: translateResponseSchema,
         system: SYSTEM_PROMPT,
         prompt: buildPrompt(
           { ...input, entries: pendingEntries },
           attempt === 0 ? [] : pending,
         ),
       });
-      object = result.object;
+      // Keys the caller never asked for are dropped downstream (the loop
+      // below only ever reads `pending` keys out of `object`) — mapping to
+      // a plain record here doesn't widen that.
+      object = {};
+      for (const { key, text } of result.object.translations) object[key] = text;
       await bumpTokenUsage(input.projectId, result.usage);
     } catch (err) {
       if (NoObjectGeneratedError.isInstance(err)) {
@@ -250,7 +283,19 @@ export async function translateEntries(
         stillPending.push(key);
         continue;
       }
-      if (!placeholdersPreserved(input.entries[key]!, candidate)) {
+      // A candidate of "—" or "..." is non-blank and passes the placeholder
+      // check trivially (an empty placeholder multiset matches an empty
+      // one) but is not a translation — worse than a gap, because
+      // `isMissingLocaleValue` reads it as FILLED, so the completion badge
+      // and the publish gate both wave it through. Conditional on the
+      // SOURCE: a source that is itself punctuation-only must still
+      // round-trip.
+      const source = input.entries[key]!;
+      if (hasTranslatableContent(source) && !hasTranslatableContent(candidate)) {
+        stillPending.push(key);
+        continue;
+      }
+      if (!placeholdersPreserved(source, candidate)) {
         stillPending.push(key);
         continue;
       }

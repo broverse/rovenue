@@ -1647,8 +1647,21 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
 // ---------------------------------------------------------------------------
 // Auto-translate apply (ROADMAP §3). The translations arrive from the API as
 // plain entries; the VM merges them through the SAME `setLocalizations` op
-// the copilot's dry-run path uses, so a hand-written value is never
-// clobbered by a run that also returned that key.
+// the copilot's dry-run path uses.
+//
+// `setLocalizations` merges TABLE-level (other keys in the locale survive),
+// but WITHIN a key the entries win — so a hand-written edit is only safe
+// from a translate run if the run cannot see it in the first place. The
+// reachable case is a race: the matrix's cell inputs stay enabled while a
+// column translates (Finding 1's fix does not touch this), so an author can
+// type into `es:title_1` while that exact key is in flight. `applyTranslations`
+// protects that case via `beginTranslateRequest`, which snapshots what each
+// requested key's value was the moment the request went out; a key whose
+// live value has since moved is dropped from the merge rather than
+// overwritten. A key nobody snapshotted (no `beginTranslateRequest` call, or
+// a key that wasn't in it) is written unconditionally — that's the ordinary
+// happy path, not a race, and it's how every other test below still calls
+// `applyTranslations` directly with no snapshot at all.
 // ---------------------------------------------------------------------------
 describe("PaywallBuilderViewModel — applyTranslations", () => {
   async function vmWithLocales() {
@@ -1669,16 +1682,34 @@ describe("PaywallBuilderViewModel — applyTranslations", () => {
     expect(vm.config.localizations[vm.defaultLocale]).toEqual(englishBefore);
   });
 
-  it("does not overwrite a value the author already wrote by hand", async () => {
+  it("does not overwrite a value the author hand-edits WHILE that same key is in flight", async () => {
     const vm = await vmWithLocales();
+
+    // The modal calls this right before firing the translate request, with
+    // the keys it's about to ask for — snapshotting what they held at that
+    // moment (here, both still blank).
+    vm.beginTranslateRequest("es", ["title_1", "other_1"]);
+    // The author types into the SAME cell the in-flight request also
+    // covers, before the response lands.
     vm.setLocaleText("title_1", "es", "Mi propio texto");
 
-    // The caller fills gaps by sending only the MISSING keys; this asserts
-    // the merge itself is safe even when a key slips through.
-    vm.applyTranslations("es", { other_1: "Otro" });
+    // The response comes back naming BOTH keys — proving the merge
+    // discriminates per key rather than dropping (or keeping) the whole
+    // run: `other_1` was never hand-edited and must still apply.
+    vm.applyTranslations("es", { title_1: "Hazte Pro", other_1: "Otro" });
 
     expect(vm.config.localizations.es!.title_1).toBe("Mi propio texto");
     expect(vm.config.localizations.es!.other_1).toBe("Otro");
+  });
+
+  it("applies a key unconditionally when it was never snapshotted — the ordinary happy path", async () => {
+    const vm = await vmWithLocales();
+
+    // No `beginTranslateRequest` call at all — every other test in this
+    // file calls `applyTranslations` this way, and must keep working.
+    vm.applyTranslations("es", { title_1: "Hazte Pro" });
+
+    expect(vm.config.localizations.es!.title_1).toBe("Hazte Pro");
   });
 
   it("marks every applied cell machine-translated, scoped to its locale", async () => {
@@ -1730,6 +1761,25 @@ describe("PaywallBuilderViewModel — applyTranslations", () => {
     vm.revertAiChange();
 
     expect(vm.machineTranslated.size).toBe(0);
+  });
+
+  it("reverting run 2 keeps run 1's translations AND run 1's marks — the marks are snapshotted beside the config", async () => {
+    // configBeforeAiApply is overwritten by every run: after run 2 it holds
+    // the config as it stood after run 1 (run 1's translations included).
+    // The mark set must be snapshotted the SAME way, or a revert restores
+    // text that machineTranslated no longer says is unreviewed.
+    const vm = await vmWithLocales();
+
+    vm.applyTranslations("es", { title_1: "Uno" });
+    vm.applyTranslations("es", { other_1: "Otro" });
+    vm.revertAiChange();
+
+    // Run 1's translation is still in the config (revert only undoes run 2)...
+    expect(vm.config.localizations.es!.title_1).toBe("Uno");
+    expect(vm.config.localizations.es).not.toHaveProperty("other_1");
+    // ...and must still carry run 1's "unreviewed machine output" mark.
+    expect(vm.machineTranslated.has("es:title_1")).toBe(true);
+    expect(vm.machineTranslated.has("es:other_1")).toBe(false);
   });
 
   it("a manual edit after applying clears the revert snapshot, as it does for every AI path", async () => {

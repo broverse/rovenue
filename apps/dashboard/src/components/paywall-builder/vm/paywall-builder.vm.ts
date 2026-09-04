@@ -122,6 +122,21 @@ export class PaywallBuilderViewModel {
   @state configBeforeAiApply: BuilderConfig | null = null;
 
   /**
+   * `machineTranslated` as it stood the moment `configBeforeAiApply` was
+   * last snapshotted — set at the SAME three call sites, so a revert
+   * restores the marks that actually match the config it restores.
+   *
+   * Without this, `revertAiChange` had only one honest option: wipe
+   * `machineTranslated` to empty, which is correct after a SINGLE
+   * translate run but wrong after two — `configBeforeAiApply` is
+   * overwritten by every run (so a revert after run 2 restores run 1's
+   * translations, still present in the config), while `machineTranslated`
+   * was cleared wholesale, leaving run 1's translations in the config with
+   * no "unreviewed machine output" mark on them.
+   */
+  @state private machineTranslatedBeforeAiApply: ReadonlySet<string> | null = null;
+
+  /**
    * Cells filled by auto-translate and not yet read by a human, keyed
    * `${locale}:${key}`.
    *
@@ -135,6 +150,46 @@ export class PaywallBuilderViewModel {
    */
   @state machineTranslated: ReadonlySet<string> = new Set<string>();
 
+  /**
+   * What each `(locale, key)` the modal is about to request held at the
+   * moment the request went out — filled by `beginTranslateRequest`,
+   * consumed and cleared per-key by `applyTranslations`.
+   *
+   * `setLocalizations` merges the locale TABLE, but within a key the
+   * response wins — so a value the author edits WHILE that same key is
+   * in flight would otherwise be silently replaced when the response
+   * lands (the matrix's cell inputs stay enabled during a running
+   * request). A key present here whose live value no longer matches the
+   * snapshot was hand-edited mid-flight and is dropped from the merge
+   * rather than overwritten; a key never snapshotted (no
+   * `beginTranslateRequest` call, e.g. every direct `applyTranslations`
+   * call in tests) is written unconditionally — that's the ordinary
+   * happy path, not a race.
+   */
+  @state private translateRequestSnapshot: ReadonlyMap<string, string> = new Map();
+
+  /**
+   * Records what `keys` hold in `locale` right now, so `applyTranslations`
+   * can tell a hand-edit made while the request was in flight from an
+   * ordinary response. Called by the localization modal immediately before
+   * it fires the translate request.
+   */
+  beginTranslateRequest(locale: string, keys: readonly string[]) {
+    const next = new Map(this.translateRequestSnapshot);
+    for (const key of keys) {
+      next.set(machineTranslatedId(locale, key), this.config.localizations[locale]?.[key] ?? "");
+    }
+    this.translateRequestSnapshot = next;
+  }
+
+  /** Snapshots `config` AND `machineTranslated` together, right before an
+   *  AI-driven change overwrites either — see `machineTranslatedBeforeAiApply`
+   *  for why both must move in lockstep. */
+  private snapshotBeforeAiApply() {
+    this.configBeforeAiApply = this.config;
+    this.machineTranslatedBeforeAiApply = this.machineTranslated;
+  }
+
   /** Drops any pending AI-revert snapshot. Called at the top of every
    *  hand-drawn tree mutation (`addNode`/`removeNode`/`moveNode`/
    *  `updateNode`), `applyTemplate`, and every locale-op method
@@ -143,6 +198,7 @@ export class PaywallBuilderViewModel {
    *  must NOT call this, or it would erase the very snapshot it just set. */
   private clearAiSnapshotOnManualEdit() {
     if (this.configBeforeAiApply !== null) this.configBeforeAiApply = null;
+    if (this.machineTranslatedBeforeAiApply !== null) this.machineTranslatedBeforeAiApply = null;
   }
 
   /** Which inspector tab the author last chose. Read through `inspectorTab`,
@@ -752,7 +808,7 @@ export class PaywallBuilderViewModel {
    */
   applyExternalTreeOp(op: PaywallTreeOp) {
     const nextConfig = applyTreeOp(this.config, op);
-    this.configBeforeAiApply = this.config;
+    this.snapshotBeforeAiApply();
     this.config = nextConfig;
     // A `setLocalizations` op can create a locale that didn't exist a
     // moment ago (`applyTreeOp` creates the table if absent) — re-derive
@@ -769,7 +825,7 @@ export class PaywallBuilderViewModel {
    * pointing at tables that no longer exist.
    */
   applyExternalConfig(config: BuilderConfig) {
-    this.configBeforeAiApply = this.config;
+    this.snapshotBeforeAiApply();
     this.config = config;
     this.syncLocalesFromConfig();
     this.selectedNodeId = null;
@@ -779,10 +835,19 @@ export class PaywallBuilderViewModel {
    * Merges auto-translated `entries` into `locale`'s table.
    *
    * Goes through the SAME `setLocalizations` tree-op the copilot's
-   * server-dry-run path uses, which MERGES rather than replaces — so a
-   * value the author has already written by hand survives a translate run
-   * that also returned that key. Callers fill gaps by sending only the
-   * missing keys; a deliberate retranslate sends all of them.
+   * server-dry-run path uses, which merges TABLE-level — other keys already
+   * in the locale survive untouched. WITHIN a key, though, `entries` wins:
+   * callers normally only send the gap (missing keys), so this is safe in
+   * the ordinary case, but it is NOT a per-key merge.
+   *
+   * The one place that matters is a race: the matrix's cell inputs stay
+   * enabled while a column translates, so an author can hand-edit a key
+   * that is also in the in-flight request. That case is protected via
+   * `translateRequestSnapshot` (filled by `beginTranslateRequest`, called
+   * by the modal right before it fires the request): an entry whose key was
+   * snapshotted but whose live value has since moved was edited mid-flight
+   * and is dropped rather than overwritten. A key never snapshotted is
+   * written unconditionally.
    *
    * Snapshots for `revertAiChange` exactly as `applyExternalTreeOp` does,
    * so one undo restores the whole column, and marks every applied cell as
@@ -790,13 +855,31 @@ export class PaywallBuilderViewModel {
    */
   applyTranslations(locale: string, entries: Record<string, string>) {
     if (Object.keys(entries).length === 0) return;
-    const nextConfig = applyTreeOp(this.config, { kind: "setLocalizations", locale, entries });
-    this.configBeforeAiApply = this.config;
+
+    const survivors: Record<string, string> = {};
+    const snapshot = this.translateRequestSnapshot;
+    const nextSnapshot = new Map(snapshot);
+    for (const [key, value] of Object.entries(entries)) {
+      const id = machineTranslatedId(locale, key);
+      const sentValue = snapshot.get(id);
+      const liveValue = this.config.localizations[locale]?.[key] ?? "";
+      if (sentValue === undefined || liveValue === sentValue) survivors[key] = value;
+      nextSnapshot.delete(id);
+    }
+    this.translateRequestSnapshot = nextSnapshot;
+    if (Object.keys(survivors).length === 0) return;
+
+    const nextConfig = applyTreeOp(this.config, {
+      kind: "setLocalizations",
+      locale,
+      entries: survivors,
+    });
+    this.snapshotBeforeAiApply();
     this.config = nextConfig;
     // A brand-new locale table may have been created by the op.
     this.syncLocalesFromConfig();
     const marked = new Set(this.machineTranslated);
-    for (const key of Object.keys(entries)) marked.add(machineTranslatedId(locale, key));
+    for (const key of Object.keys(survivors)) marked.add(machineTranslatedId(locale, key));
     this.machineTranslated = marked;
   }
 
@@ -822,9 +905,14 @@ export class PaywallBuilderViewModel {
     this.configBeforeAiApply = null;
     this.syncLocalesFromConfig();
     this.selectedNodeId = null;
-    // Reverting a translate run removes the cells those marks pointed at,
-    // so keeping them would mark cells the author wrote themselves.
-    this.machineTranslated = new Set<string>();
+    // Restores the marks to what they were at the SAME moment the config
+    // snapshot was taken — not an empty set. Reverting the only run there's
+    // ever been and reverting the second of two are both handled by this:
+    // in the first case the snapshot IS empty (nothing was marked before
+    // it), in the second it still carries the earlier run's marks, which
+    // belong to translations the revert does NOT undo.
+    this.machineTranslated = this.machineTranslatedBeforeAiApply ?? new Set<string>();
+    this.machineTranslatedBeforeAiApply = null;
   }
 
   // ----- Derived -----

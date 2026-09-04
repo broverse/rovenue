@@ -59,6 +59,32 @@ export const STORE_LOCALES: readonly LocaleCode[] = [
 ];
 
 /**
+ * Lazily-constructed, process-wide `Intl.DisplayNames` instance. Building
+ * one is not free, and `searchLocales` calls `localeLabel` once per store
+ * locale (~39) on every keystroke — a fresh instance per call turned every
+ * keystroke into ~39 constructions. `undefined` = not yet attempted;
+ * `null` = attempted and unavailable (see below), so a construction
+ * failure is cached too rather than retried on every call.
+ */
+let displayNames: Intl.DisplayNames | null | undefined;
+
+/**
+ * `Intl.DisplayNames` itself can throw at CONSTRUCTION time in an engine
+ * that lacks it, not just at `.of()` time for a bad tag — this is the
+ * hoisted construction's own guard, separate from the per-call `try` in
+ * `localeLabel` below.
+ */
+function getDisplayNames(): Intl.DisplayNames | null {
+  if (displayNames !== undefined) return displayNames;
+  try {
+    displayNames = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
+  } catch {
+    displayNames = null;
+  }
+  return displayNames;
+}
+
+/**
  * An English display name for `code`, falling back to the code itself.
  *
  * `Intl.DisplayNames` rather than a hand-maintained name table: a table of
@@ -71,12 +97,14 @@ export const STORE_LOCALES: readonly LocaleCode[] = [
  * an author who simply mistyped. With `"none"` an unnameable tag returns
  * `undefined` and the author sees exactly what they typed.
  *
- * The `try` is not defensive decoration: `Intl.DisplayNames` THROWS on a
- * structurally invalid tag, and this is called with whatever was typed.
+ * The `try` is not defensive decoration: `Intl.DisplayNames.prototype.of`
+ * THROWS on a structurally invalid tag, and this is called with whatever
+ * was typed.
  */
 export function localeLabel(code: LocaleCode): string {
+  const display = getDisplayNames();
+  if (!display) return code;
   try {
-    const display = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
     return display.of(code) ?? code;
   } catch {
     return code;
@@ -94,4 +122,17 @@ export function searchLocales(query: string): LocaleCode[] {
     (code) =>
       code.toLowerCase().includes(needle) || localeLabel(code).toLowerCase().includes(needle),
   );
+}
+
+/**
+ * `searchLocales(query)`, minus whatever `present` already carries.
+ *
+ * Matched case-insensitively: the builder's `addLocale` lowercases what it
+ * stores (`vm.locales` says `zh-hans`), while this table keeps the case the
+ * stores write (`zh-Hans`). Comparing raw would offer a locale that is
+ * already on the paywall.
+ */
+export function localeSuggestions(present: readonly string[], query: string): LocaleCode[] {
+  const taken = new Set(present.map((l) => l.toLowerCase()));
+  return searchLocales(query).filter((code) => !taken.has(code.toLowerCase()));
 }

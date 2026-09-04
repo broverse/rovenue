@@ -3,6 +3,8 @@ import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import { CornerUpRight, Languages, Loader2, Sparkles, X } from "lucide-react";
 import { cn } from "../../lib/cn";
+import { ApiError } from "../../lib/api";
+import { RoviMissingConfig } from "../rovi/rovi-missing-config";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import {
   buildMatrixRows,
@@ -74,13 +76,21 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
   // visible gap.
   const [rejected, setRejected] = useState<{ locale: string; keys: string[] } | null>(null);
   const [confirmingRetranslate, setConfirmingRetranslate] = useState<string | null>(null);
+  // The request's failure, by ApiError code (or "HTTP_ERROR" for anything
+  // that isn't an ApiError — a network failure, say). `null` = last run
+  // (if any) succeeded. Same idiom `start-modal.tsx`'s AI tab uses for its
+  // import/generate errors, so a 412 gets the SAME "Rovi needs an API key"
+  // affordance rather than a second, differently-worded one.
+  const [translateError, setTranslateError] = useState<string | null>(null);
 
   /**
    * Fills `locale` from the base locale. `keys` is the gap by default; a
    * confirmed retranslate passes every key.
    *
-   * Merge-not-replace lives in `vm.applyTranslations`, so a hand-written
-   * value survives even if a key slips into the request.
+   * `vm.applyTranslations` merges the locale TABLE (other keys survive),
+   * and separately protects a key the author hand-edits WHILE this exact
+   * request is in flight (`vm.beginTranslateRequest`, called below right
+   * before the request fires) — see its doc comment.
    */
   const runTranslate = async (locale: string, keys: readonly string[]) => {
     const paywallId = vm.paywall?.id;
@@ -88,8 +98,10 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
     const entries = sourceEntriesFor(vm.config, vm.defaultLocale, keys);
     if (Object.keys(entries).length === 0) return;
 
+    vm.beginTranslateRequest(locale, keys);
     setTranslating(locale);
     setRejected(null);
+    setTranslateError(null);
     try {
       const result = await translate.mutateAsync({
         projectId: vm.projectId,
@@ -100,6 +112,13 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
       });
       vm.applyTranslations(locale, result.entries);
       if (result.rejected.length > 0) setRejected({ locale, keys: result.rejected });
+    } catch (err) {
+      // A 429 from `roviQuotaGuard` is the everyday free-tier outcome, not
+      // an edge case — it must read as "quota's out", not "button's
+      // broken". Caught here (not left to `translate.isError`) so the
+      // rejected `mutateAsync` promise never becomes an unhandled
+      // rejection.
+      setTranslateError(err instanceof ApiError ? err.code : "HTTP_ERROR");
     } finally {
       setTranslating(null);
       setConfirmingRetranslate(null);
@@ -361,6 +380,23 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
               keys: rejected.keys.join(", "),
             })}
           </div>
+        )}
+
+        {translateError === "ROVI_NOT_CONFIGURED" ? (
+          <div className="border-t border-rv-divider">
+            <RoviMissingConfig projectId={vm.projectId} />
+          </div>
+        ) : (
+          translateError !== null && (
+            <div className="border-t border-rv-divider bg-rv-danger/10 px-5 py-2 text-[12px] text-rv-danger">
+              {translateError === "ROVI_QUOTA_EXCEEDED"
+                ? t(
+                    "paywalls.builder.localization.translateQuota",
+                    "Rovi's monthly quota is used up — try again next month or raise the limit.",
+                  )
+                : t("paywalls.builder.localization.translateFailed", "Couldn't translate — try again.")}
+            </div>
+          )
         )}
 
         <div className="flex items-center gap-3 border-t border-rv-divider px-5 py-3">
