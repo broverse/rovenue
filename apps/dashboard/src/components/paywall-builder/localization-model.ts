@@ -69,3 +69,32 @@ export function localeCompletion(
     missingKeys,
   };
 }
+
+/**
+ * The `${locale}:${key}` identity used for the machine-translated marking.
+ * One function so the VM and the modal cannot disagree about the shape.
+ */
+export function machineTranslatedId(locale: string, key: string): string {
+  return `${locale}:${key}`;
+}
+
+/**
+ * Source-locale text for `keys`, ready to send to the translate endpoint.
+ *
+ * Keys whose SOURCE cell is itself empty are skipped: there is nothing to
+ * translate, and sending them would spend quota to have a model invent
+ * copy. `isCellMissing` is the same predicate the completion badges and
+ * the publish gate use, so all three agree about what "empty" means.
+ */
+export function sourceEntriesFor(
+  config: BuilderConfig,
+  sourceLocale: string,
+  keys: readonly string[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of keys) {
+    if (isCellMissing(config, key, sourceLocale)) continue;
+    out[key] = config.localizations[sourceLocale]![key]!;
+  }
+  return out;
+}

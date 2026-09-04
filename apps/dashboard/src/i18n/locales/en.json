@@ -1813,7 +1813,15 @@
         "warnings_one": "{{count}} untranslated string — it falls back to the base locale.",
         "warnings_other": "{{count}} untranslated strings — they fall back to the base locale.",
         "complete": "Every string is translated.",
-        "done": "Done"
+        "done": "Done",
+        "translate": "Translate",
+        "translateHint": "Fill the {{count}} empty cells from the base locale.",
+        "retranslate": "Retranslate",
+        "retranslateConfirm": "Overwrite all?",
+        "retranslateHint": "Every string is filled. Click twice to overwrite them all.",
+        "translateCell": "Translate just this string",
+        "rejected_one": "{{count}} string was left untranslated in {{locale}} — its price placeholders could not be preserved: {{keys}}",
+        "rejected_other": "{{count}} strings were left untranslated in {{locale}} — their price placeholders could not be preserved: {{keys}}"
       },
       "start": {
         "title": "Start a paywall",

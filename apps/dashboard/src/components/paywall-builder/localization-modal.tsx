@@ -1,10 +1,17 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
-import { CornerUpRight, X } from "lucide-react";
+import { CornerUpRight, Languages, Loader2, Sparkles, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
-import { buildMatrixRows, isCellMissing, localeCompletion } from "./localization-model";
+import {
+  buildMatrixRows,
+  isCellMissing,
+  localeCompletion,
+  machineTranslatedId,
+  sourceEntriesFor,
+} from "./localization-model";
+import { usePaywallTranslate } from "../../lib/hooks/usePaywallTranslate";
 
 type Props = {
   onClose: () => void;
@@ -58,6 +65,46 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
     if (!focusRowExists) return;
     focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [focusKey, focusRowExists]);
+
+  const translate = usePaywallTranslate();
+  // Which locale column is mid-request, so only that column shows a spinner.
+  const [translating, setTranslating] = useState<string | null>(null);
+  // Keys the last run could not translate, reported by name rather than
+  // swallowed: a locale that LOOKS complete but is not is worse than a
+  // visible gap.
+  const [rejected, setRejected] = useState<{ locale: string; keys: string[] } | null>(null);
+  const [confirmingRetranslate, setConfirmingRetranslate] = useState<string | null>(null);
+
+  /**
+   * Fills `locale` from the base locale. `keys` is the gap by default; a
+   * confirmed retranslate passes every key.
+   *
+   * Merge-not-replace lives in `vm.applyTranslations`, so a hand-written
+   * value survives even if a key slips into the request.
+   */
+  const runTranslate = async (locale: string, keys: readonly string[]) => {
+    const paywallId = vm.paywall?.id;
+    if (!paywallId || !vm.projectId || keys.length === 0) return;
+    const entries = sourceEntriesFor(vm.config, vm.defaultLocale, keys);
+    if (Object.keys(entries).length === 0) return;
+
+    setTranslating(locale);
+    setRejected(null);
+    try {
+      const result = await translate.mutateAsync({
+        projectId: vm.projectId,
+        paywallId,
+        sourceLocale: vm.defaultLocale,
+        targetLocale: locale,
+        entries,
+      });
+      vm.applyTranslations(locale, result.entries);
+      if (result.rejected.length > 0) setRejected({ locale, keys: result.rejected });
+    } finally {
+      setTranslating(null);
+      setConfirmingRetranslate(null);
+    }
+  };
 
   const completions = vm.locales.map((l) => localeCompletion(vm.config, rows, l));
   const baseGaps = completions.find((c) => c.locale === vm.defaultLocale)?.missingKeys.length ?? 0;
@@ -145,6 +192,50 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
                         >
                           {c.done}/{c.total}
                         </div>
+                        {/* The base locale has nothing to translate FROM,
+                            so it gets no control at all. */}
+                        {!isBase && (
+                          <button
+                            type="button"
+                            disabled={translating !== null}
+                            onClick={() =>
+                              complete
+                                ? confirmingRetranslate === c.locale
+                                  ? void runTranslate(c.locale, rows.map((r) => r.key))
+                                  : setConfirmingRetranslate(c.locale)
+                                : void runTranslate(c.locale, c.missingKeys)
+                            }
+                            title={
+                              complete
+                                ? t(
+                                    "paywalls.builder.localization.retranslateHint",
+                                    "Every string is filled. Click twice to overwrite them all.",
+                                  )
+                                : t(
+                                    "paywalls.builder.localization.translateHint",
+                                    "Fill the {{count}} empty cells from the base locale.",
+                                    { count: c.missingKeys.length },
+                                  )
+                            }
+                            className={cn(
+                              "mt-1 inline-flex h-6 cursor-pointer items-center gap-1 rounded border px-1.5 text-[10px] transition disabled:cursor-not-allowed disabled:opacity-50",
+                              confirmingRetranslate === c.locale
+                                ? "border-rv-warning bg-rv-warning/15 text-rv-warning"
+                                : "border-rv-divider bg-rv-c2 text-rv-mute-600 hover:bg-rv-c3 hover:text-foreground",
+                            )}
+                          >
+                            {translating === c.locale ? (
+                              <Loader2 size={10} className="animate-spin" />
+                            ) : (
+                              <Languages size={10} />
+                            )}
+                            {confirmingRetranslate === c.locale
+                              ? t("paywalls.builder.localization.retranslateConfirm", "Overwrite all?")
+                              : complete
+                                ? t("paywalls.builder.localization.retranslate", "Retranslate")
+                                : t("paywalls.builder.localization.translate", "Translate")}
+                          </button>
+                        )}
                       </th>
                     );
                   })}
@@ -209,8 +300,10 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
                     {vm.locales.map((locale) => {
                       const missing = isCellMissing(vm.config, row.key, locale);
                       const isBase = locale === vm.defaultLocale;
+                      const machine = vm.machineTranslated.has(machineTranslatedId(locale, row.key));
                       return (
                         <td key={locale} className="py-2 pr-3 align-top">
+                          <div className="flex items-center gap-1">
                           <input
                             value={vm.config.localizations[locale]?.[row.key] ?? ""}
                             onChange={(e) =>
@@ -226,9 +319,26 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
                                 ? isBase
                                   ? "border-rv-danger/50"
                                   : "border-rv-warning/50"
-                                : "border-rv-divider",
+                                : machine
+                                  ? "border-rv-violet/50"
+                                  : "border-rv-divider",
                             )}
                           />
+                          {!isBase && missing && (
+                            <button
+                              type="button"
+                              disabled={translating !== null}
+                              onClick={() => void runTranslate(locale, [row.key])}
+                              title={t(
+                                "paywalls.builder.localization.translateCell",
+                                "Translate just this string",
+                              )}
+                              className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Sparkles size={11} />
+                            </button>
+                          )}
+                          </div>
                         </td>
                       );
                     })}
@@ -238,6 +348,20 @@ export const LocalizationModal = component(({ onClose, focusKey = null }: Props)
             </table>
           )}
         </div>
+
+        {rejected !== null && (
+          <div className="border-t border-rv-divider bg-rv-warning/10 px-5 py-2 text-[12px] text-rv-warning">
+            {t("paywalls.builder.localization.rejected", {
+              count: rejected.keys.length,
+              locale: rejected.locale,
+              defaultValue:
+                "{{count}} string was left untranslated in {{locale}} — its price placeholders could not be preserved: {{keys}}",
+              defaultValue_other:
+                "{{count}} strings were left untranslated in {{locale}} — their price placeholders could not be preserved: {{keys}}",
+              keys: rejected.keys.join(", "),
+            })}
+          </div>
+        )}
 
         <div className="flex items-center gap-3 border-t border-rv-divider px-5 py-3">
           <div className="flex-1 text-[12px]">

@@ -1643,3 +1643,126 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
     expect(vm.configBeforeAiApply).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Auto-translate apply (ROADMAP §3). The translations arrive from the API as
+// plain entries; the VM merges them through the SAME `setLocalizations` op
+// the copilot's dry-run path uses, so a hand-written value is never
+// clobbered by a run that also returned that key.
+// ---------------------------------------------------------------------------
+describe("PaywallBuilderViewModel — applyTranslations", () => {
+  async function vmWithLocales() {
+    const get = vi.fn().mockResolvedValue(fakeDetail({ offeringPackageIds: [] }));
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    vm.addLocale("es");
+    return vm;
+  }
+
+  it("merges into the target locale and leaves other locales untouched", async () => {
+    const vm = await vmWithLocales();
+    const englishBefore = { ...vm.config.localizations[vm.defaultLocale] };
+
+    vm.applyTranslations("es", { title_1: "Hazte Pro" });
+
+    expect(vm.config.localizations.es).toMatchObject({ title_1: "Hazte Pro" });
+    expect(vm.config.localizations[vm.defaultLocale]).toEqual(englishBefore);
+  });
+
+  it("does not overwrite a value the author already wrote by hand", async () => {
+    const vm = await vmWithLocales();
+    vm.setLocaleText("title_1", "es", "Mi propio texto");
+
+    // The caller fills gaps by sending only the MISSING keys; this asserts
+    // the merge itself is safe even when a key slips through.
+    vm.applyTranslations("es", { other_1: "Otro" });
+
+    expect(vm.config.localizations.es!.title_1).toBe("Mi propio texto");
+    expect(vm.config.localizations.es!.other_1).toBe("Otro");
+  });
+
+  it("marks every applied cell machine-translated, scoped to its locale", async () => {
+    const vm = await vmWithLocales();
+    vm.applyTranslations("es", { title_1: "Hazte Pro" });
+
+    expect(vm.machineTranslated.has("es:title_1")).toBe(true);
+    expect(vm.machineTranslated.has("en:title_1")).toBe(false);
+  });
+
+  it("clears the mark when the author edits that cell", async () => {
+    const vm = await vmWithLocales();
+    vm.applyTranslations("es", { title_1: "Hazte Pro" });
+    vm.setLocaleText("title_1", "es", "Hazte Pro (revisado)");
+
+    expect(vm.machineTranslated.has("es:title_1")).toBe(false);
+  });
+
+  it("clears only the edited cell's mark", async () => {
+    const vm = await vmWithLocales();
+    vm.applyTranslations("es", { title_1: "Uno", other_1: "Otro" });
+    vm.setLocaleText("title_1", "es", "Uno revisado");
+
+    expect(vm.machineTranslated.has("es:title_1")).toBe(false);
+    expect(vm.machineTranslated.has("es:other_1")).toBe(true);
+  });
+
+  it("keeps the marking OUT of BuilderConfig — the config is the SDK wire format", async () => {
+    const vm = await vmWithLocales();
+    vm.applyTranslations("es", { title_1: "Hazte Pro" });
+
+    expect(JSON.stringify(vm.config)).not.toContain("machineTranslated");
+  });
+
+  it("one revert restores the whole pre-translation config", async () => {
+    const vm = await vmWithLocales();
+    const before = JSON.stringify(vm.config);
+
+    vm.applyTranslations("es", { title_1: "Uno", other_1: "Otro" });
+    expect(JSON.stringify(vm.config)).not.toBe(before);
+
+    vm.revertAiChange();
+    expect(JSON.stringify(vm.config)).toBe(before);
+  });
+
+  it("a revert also drops the marks, so no cell is marked machine-written after it", async () => {
+    const vm = await vmWithLocales();
+    vm.applyTranslations("es", { title_1: "Uno" });
+    vm.revertAiChange();
+
+    expect(vm.machineTranslated.size).toBe(0);
+  });
+
+  it("a manual edit after applying clears the revert snapshot, as it does for every AI path", async () => {
+    const vm = await vmWithLocales();
+    const afterApply = (() => {
+      vm.applyTranslations("es", { title_1: "Uno" });
+      return JSON.stringify(vm.config);
+    })();
+
+    vm.setLocaleText("title_1", "es", "Uno revisado");
+    vm.revertAiChange();
+
+    // Revert must be a no-op now: it cannot resurrect a config the author
+    // has since hand-edited.
+    expect(JSON.stringify(vm.config)).not.toBe(afterApply);
+    expect(vm.config.localizations.es!.title_1).toBe("Uno revisado");
+  });
+
+  it("is a no-op for an empty entries object — no snapshot, nothing to undo", async () => {
+    const vm = await vmWithLocales();
+    const before = JSON.stringify(vm.config);
+
+    vm.applyTranslations("es", {});
+
+    expect(JSON.stringify(vm.config)).toBe(before);
+    expect(vm.machineTranslated.size).toBe(0);
+  });
+
+  it("creates a locale table that did not exist, and surfaces it in vm.locales", async () => {
+    const vm = await vmWithLocales();
+    vm.applyTranslations("pt-br", { title_1: "Torne-se Pro" });
+
+    expect(vm.locales).toContain("pt-br");
+    expect(vm.config.localizations["pt-br"]).toMatchObject({ title_1: "Torne-se Pro" });
+  });
+});

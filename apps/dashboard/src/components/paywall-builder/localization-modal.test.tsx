@@ -2,11 +2,19 @@ import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { ServiceProvider, useService } from "impair";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "../../i18n/config";
 import { LocalizationModal } from "./localization-modal";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../lib/services/paywall-builder-api";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { emptyBuilderConfig, type BuilderConfig, type TextNode } from "@rovenue/shared/paywall";
+
+// The modal now owns a react-query mutation (auto-translate), so it needs the
+// provider the app mounts it under. Retries off: a test that reaches the
+// network path should fail fast rather than back off three times.
+const queryClient = new QueryClient({
+  defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+});
 
 // =============================================================
 // LocalizationModal — the `focusKey` jump-to-translation prop
@@ -60,13 +68,15 @@ async function renderHarness(focusKey?: string | null) {
   }
 
   const utils = render(
-    <ServiceProvider
-      provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
-      props={{ projectId: "p_1", paywallId: "pw_1" }}
-    >
-      <Probe />
-      <LocalizationModal onClose={() => {}} focusKey={focusKey} />
-    </ServiceProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ServiceProvider
+        provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
+        props={{ projectId: "p_1", paywallId: "pw_1" }}
+      >
+        <Probe />
+        <LocalizationModal onClose={() => {}} focusKey={focusKey} />
+      </ServiceProvider>
+    </QueryClientProvider>,
   );
 
   await act(async () => {
@@ -113,12 +123,14 @@ describe("LocalizationModal — focusKey", () => {
 
     await act(async () => {
       rerender(
-        <ServiceProvider
-          provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
-          props={{ projectId: "p_1", paywallId: "pw_1" }}
-        >
-          <LocalizationModal onClose={() => {}} focusKey={null} />
-        </ServiceProvider>,
+        <QueryClientProvider client={queryClient}>
+          <ServiceProvider
+            provide={[PaywallBuilderApi, PaywallBuilderViewModel]}
+            props={{ projectId: "p_1", paywallId: "pw_1" }}
+          >
+            <LocalizationModal onClose={() => {}} focusKey={null} />
+          </ServiceProvider>
+        </QueryClientProvider>,
       );
     });
 

@@ -32,6 +32,7 @@ import {
 } from "../../../lib/services/paywall-builder-api";
 import { ApiError } from "../../../lib/api";
 import * as treeOps from "../tree-ops";
+import { machineTranslatedId } from "../localization-model";
 import { TEMPLATES, type TemplateId } from "../templates";
 import { resolveActiveTab, type InspectorTabId } from "../inspector/tabs";
 import type { CanvasDevice, ColorScheme } from "../types";
@@ -119,6 +120,20 @@ export class PaywallBuilderViewModel {
    * time).
    */
   @state configBeforeAiApply: BuilderConfig | null = null;
+
+  /**
+   * Cells filled by auto-translate and not yet read by a human, keyed
+   * `${locale}:${key}`.
+   *
+   * BUILDER state, deliberately NOT a field on `BuilderConfig`. The config
+   * is the three-platform decoder contract and the SDK wire format; an
+   * authorship flag is a dashboard concern, and putting it there would push
+   * it into `render-fixtures.json` and into three decoders that have no use
+   * for it. The cost is that the marking does not survive a reload, which
+   * is the right trade: it marks "nobody has looked at this YET", and a
+   * reviewer who reopens the paywall tomorrow is looking at it now.
+   */
+  @state machineTranslated: ReadonlySet<string> = new Set<string>();
 
   /** Drops any pending AI-revert snapshot. Called at the top of every
    *  hand-drawn tree mutation (`addNode`/`removeNode`/`moveNode`/
@@ -618,6 +633,9 @@ export class PaywallBuilderViewModel {
   setLocaleText(key: string, locale: string, value: string) {
     this.clearAiSnapshotOnManualEdit();
     if (!this.locales.includes(locale)) return;
+    // The author has now read and edited this cell, so it is no longer
+    // unreviewed machine output.
+    this.clearMachineTranslated(locale, key);
     const localizations = {
       ...this.config.localizations,
       [locale]: { ...(this.config.localizations[locale] ?? {}), [key]: value },
@@ -757,6 +775,39 @@ export class PaywallBuilderViewModel {
     this.selectedNodeId = null;
   }
 
+  /**
+   * Merges auto-translated `entries` into `locale`'s table.
+   *
+   * Goes through the SAME `setLocalizations` tree-op the copilot's
+   * server-dry-run path uses, which MERGES rather than replaces — so a
+   * value the author has already written by hand survives a translate run
+   * that also returned that key. Callers fill gaps by sending only the
+   * missing keys; a deliberate retranslate sends all of them.
+   *
+   * Snapshots for `revertAiChange` exactly as `applyExternalTreeOp` does,
+   * so one undo restores the whole column, and marks every applied cell as
+   * unreviewed machine output.
+   */
+  applyTranslations(locale: string, entries: Record<string, string>) {
+    if (Object.keys(entries).length === 0) return;
+    const nextConfig = applyTreeOp(this.config, { kind: "setLocalizations", locale, entries });
+    this.configBeforeAiApply = this.config;
+    this.config = nextConfig;
+    // A brand-new locale table may have been created by the op.
+    this.syncLocalesFromConfig();
+    const marked = new Set(this.machineTranslated);
+    for (const key of Object.keys(entries)) marked.add(machineTranslatedId(locale, key));
+    this.machineTranslated = marked;
+  }
+
+  private clearMachineTranslated(locale: string, key: string) {
+    const id = machineTranslatedId(locale, key);
+    if (!this.machineTranslated.has(id)) return;
+    const next = new Set(this.machineTranslated);
+    next.delete(id);
+    this.machineTranslated = next;
+  }
+
   /** Restores the pre-apply snapshot taken by `applyExternalTreeOp`/
    *  `applyExternalConfig`. No-op once there's nothing to revert to
    *  (already reverted, or superseded by a manual edit). One-shot: clears
@@ -771,6 +822,9 @@ export class PaywallBuilderViewModel {
     this.configBeforeAiApply = null;
     this.syncLocalesFromConfig();
     this.selectedNodeId = null;
+    // Reverting a translate run removes the cells those marks pointed at,
+    // so keeping them would mark cells the author wrote themselves.
+    this.machineTranslated = new Set<string>();
   }
 
   // ----- Derived -----
