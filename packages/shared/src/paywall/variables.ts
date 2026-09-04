@@ -44,6 +44,27 @@ const KNOWN_VARIABLES: ReadonlySet<keyof PackageView> = new Set([
 ]);
 
 /**
+ * Every `{{var}}` placeholder in `text`, in order, INCLUDING repeats and
+ * including names `resolveVariables` does not know.
+ *
+ * Exported because the auto-translate service compares the placeholders in
+ * a model's output against those in its input, and that comparison has to
+ * use THIS pattern. A translated string that renames `{{price}}` to
+ * `{{precio}}` still renders — `resolveVariables` leaves an unknown
+ * placeholder verbatim rather than throwing — so the paywall would show
+ * literal braces to a paying customer and nothing downstream would notice.
+ * A second copy of the regex in the API package is exactly the kind of
+ * hand-maintained link that drifts.
+ *
+ * Repeats are kept because the comparison is a MULTISET comparison: a
+ * translation that says `{{price}}` twice where the source said it once is
+ * as wrong as one that drops it.
+ */
+export function extractVariables(text: string): string[] {
+  return [...text.matchAll(VARIABLE_PATTERN)].map((m) => m[1]!);
+}
+
+/**
  * Replaces `{{var}}` placeholders with values from `pkg`. Unknown
  * variable names are left verbatim. A KNOWN variable whose field is
  * absent or `undefined` on `pkg` is also left verbatim — this is the

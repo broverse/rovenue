@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveVariables, type PackageView } from "./variables";
+import { extractVariables, resolveVariables, type PackageView } from "./variables";
 
 const pkg: PackageView = {
   packageName: "Annual",
@@ -95,5 +95,55 @@ describe("resolveVariables — Phase D3 expanded variables", () => {
     expect(resolveVariables(text, pkg)).toBe(
       "Annual — $39.99 ($3.33/mo) / year",
     );
+  });
+});
+
+describe("extractVariables", () => {
+  it("returns every placeholder in order, repeats included", () => {
+    expect(extractVariables("{{price}} then {{period}} then {{price}}")).toEqual([
+      "price",
+      "period",
+      "price",
+    ]);
+  });
+
+  it("tolerates inner whitespace exactly as resolveVariables does", () => {
+    expect(extractVariables("{{ price }}")).toEqual(["price"]);
+  });
+
+  it("returns an empty list for text with no placeholders", () => {
+    expect(extractVariables("Continue")).toEqual([]);
+  });
+
+  it("reports UNKNOWN names too — the guard is about the token, not the vocabulary", () => {
+    expect(extractVariables("{{precio}}")).toEqual(["precio"]);
+  });
+
+  it("agrees with resolveVariables about what a placeholder is", () => {
+    // The two must share one pattern. If they ever drift, a string
+    // resolveVariables would substitute could pass a placeholder check that
+    // never saw it. Every name extractVariables reports for this text is one
+    // resolveVariables actually replaces.
+    const pkg = {
+      packageName: "Annual",
+      price: "$59.99",
+      pricePerPeriod: "$5.00/mo",
+      period: "1 year",
+    };
+    const text = "{{packageName}} — {{price}} ({{pricePerPeriod}}) for {{period}}, {{price}} again";
+    const names = extractVariables(text);
+    expect(names).toEqual([
+      "packageName",
+      "price",
+      "pricePerPeriod",
+      "period",
+      "price",
+    ]);
+    const resolved = resolveVariables(text, pkg);
+    for (const name of new Set(names)) {
+      expect(`${name} substituted: ${!resolved.includes(`{{${name}}}`)}`).toBe(
+        `${name} substituted: true`,
+      );
+    }
   });
 });

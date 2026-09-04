@@ -2151,13 +2151,13 @@ describe("resolveText locale matching", () => {
   // --- value: `pt-BR` at a `pt`-keyed table deliberately stops answering
   // --- English. That change IS the feature.
   const oldResolveText = (
-    c: typeof config,
+    c: { defaultLocale: string; localizations: Record<string, Record<string, string>> },
     locale: string,
     key: string,
   ): string | null => {
-    const direct = c.localizations[locale as keyof typeof c.localizations]?.[key];
+    const direct = c.localizations[locale]?.[key];
     if (direct !== undefined) return direct;
-    const fb = c.localizations[c.defaultLocale as keyof typeof c.localizations]?.[key];
+    const fb = c.localizations[c.defaultLocale]?.[key];
     return fb !== undefined ? fb : null;
   };
 
@@ -2167,7 +2167,7 @@ describe("resolveText locale matching", () => {
   it("keeps every EXACT hit byte-identical to the old rule", () => {
     for (const locale of LOCALES) {
       for (const key of KEYS) {
-        const table = config.localizations[locale as keyof typeof config.localizations];
+        const table = (config.localizations as Record<string, Record<string, string>>)[locale];
         if (table?.[key] === undefined) continue; // not an exact hit
         expect(`${locale}/${key}=${resolveText(config, locale, key)}`).toBe(
           `${locale}/${key}=${oldResolveText(config, locale, key)}`,
