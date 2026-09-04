@@ -8,8 +8,10 @@ from the repo root on the host.
 - DNS A records for `rovenue.io`, `edge.rovenue.io`, `app.rovenue.io`,
   `docs.rovenue.io` pointing at the host. CNAMEs for any custom domains
   pointing the same.
-- Apple Root CA `.cer` files placed in `./deploy/apple-certs/`
-  (Apple Root CA G3 + Apple Inc Root).
+
+Apple's root CAs (Apple Root CA G3 + Apple Inc Root) are vendored in
+`deploy/apple-certs/` and baked into the `api` image at
+`/etc/rovenue/apple-certs` — nothing to place on the host.
 
 ## 1. Secrets
 Copy `.env.example` to `.env` and fill, at minimum, the prod-required keys
@@ -58,6 +60,28 @@ Each image also carries a SLSA provenance attestation and an SPDX SBOM:
 
 Use it to answer "am I affected" when a transitive CVE is announced, without
 waiting for us.
+
+### Configuring a published `rovenue-dashboard` image
+
+A published dashboard image is a static build — the four `VITE_*` values in
+`.env.example` are compiled in and cannot be changed without rebuilding. To
+point one image at your own origin, set these on the **container**, not the
+build, and restart it (see `.env.example` for the full description of each):
+
+- `ROVENUE_API_URL` — absolute `http(s)://` URL of your API.
+- `ROVENUE_DASHBOARD_HOST` — bare hostname, optionally `:port` (e.g.
+  `app.example.com`, **not** `https://app.example.com` — a scheme prefix is
+  rejected at container start).
+- `ROVENUE_HOST_MODE` — `self` or `cloud`.
+- `ROVENUE_ALLOW_REGISTRATION` — `true` or `false`.
+
+All four are optional; the container refuses to start and names the
+offending variable if a value is invalid
+(`deploy/dashboard/entrypoint.sh`). `ROVENUE_API_URL` is the one exception
+to "optional": the published `rovenue-dashboard` image is built with
+`ROVENUE_REQUIRE_RUNTIME_CONFIG` set, so it also refuses to start if
+`ROVENUE_API_URL` is left unset — an image built from source (`docker
+compose build dashboard`) has no such requirement.
 
 ## 7. Smoke test
     curl -fsS https://rovenue.io/health
