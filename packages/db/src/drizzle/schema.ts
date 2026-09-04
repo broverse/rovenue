@@ -38,6 +38,7 @@ import {
   billingStateEnum,
   billingTierEnum,
   creditLedgerType,
+  currencyGrantTrigger,
   customDomainCertStatus,
   environment,
   experimentPrimaryMetric,
@@ -731,6 +732,10 @@ export const productCurrencyGrants = pgTable(
       .notNull()
       .references(() => virtualCurrencies.id, { onDelete: "cascade" }),
     amount: integer("amount").notNull(),
+    // Which lifecycle events this row fires on. Defaults to PURCHASE so
+    // every grant row that existed before this column keeps exactly its
+    // previous (purchase-only) behaviour.
+    grantOn: currencyGrantTrigger("grantOn").notNull().default("PURCHASE"),
   },
   (t) => ({
     productIdCurrencyIdKey: uniqueIndex(
@@ -2302,6 +2307,7 @@ export {
   billingStateEnum,
   billingTierEnum,
   creditLedgerType,
+  currencyGrantTrigger,
   customDomainCertStatus,
   environment,
   experimentPrimaryMetric,

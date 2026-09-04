@@ -255,6 +255,12 @@ export { stripeMinorUnitExponent, decimalToMinorUnits } from "./currency";
 export * from "./copilot";
 
 // =============================================================
+// Virtual currencies — grant trigger matrix (ROADMAP §12.4)
+// =============================================================
+
+export * from "./virtual-currencies";
+
+// =============================================================
 // Integrations — canonical event keys and provider types
 // =============================================================
 

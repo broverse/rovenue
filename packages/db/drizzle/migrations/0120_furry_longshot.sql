@@ -1,0 +1,2 @@
+CREATE TYPE "public"."CurrencyGrantTrigger" AS ENUM('PURCHASE', 'RENEWAL', 'BOTH');--> statement-breakpoint
+ALTER TABLE "product_currency_grants" ADD COLUMN "grantOn" "CurrencyGrantTrigger" DEFAULT 'PURCHASE' NOT NULL;

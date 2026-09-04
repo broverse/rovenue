@@ -411,3 +411,12 @@ export const importJobStatus = pgEnum("ImportJobStatus", [
   "VERIFICATION_INCOMPLETE",
   "VERIFYING",
 ]);
+
+// Which lifecycle events a product_currency_grants row fires on.
+// PURCHASE is the default so every row that existed before this
+// column keeps exactly its previous behaviour.
+export const currencyGrantTrigger = pgEnum("CurrencyGrantTrigger", [
+  "PURCHASE",
+  "RENEWAL",
+  "BOTH",
+]);
