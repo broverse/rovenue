@@ -10,6 +10,15 @@
 // would only assert that a mock agrees with itself; see
 // packages/shared/src/revenue-types.ts for the rest of the contract.
 //
+// This checks SET MEMBERSHIP, not cardinality: each ALL_REVENUE_TYPES
+// member gets its own subscriberId (the view's GROUP BY key), all at the
+// same amount, so a same-cardinality swap in the view's IN-list (e.g.
+// CANCELLATION substituted for NON_RENEWING_PURCHASE) fails and names
+// both the wrongly-dropped and the wrongly-counted type. A single shared
+// subscriber with a uniform per-type amount would make the view's total a
+// function only of HOW MANY types match, never WHICH ones, and would not
+// catch that swap.
+//
 // Fixed host port: CH_HOST_PORT = 8235 (not parallel-safe; not used by
 // any other integration test as of this writing).
 // =============================================================
@@ -22,7 +31,6 @@ import { ALL_REVENUE_TYPES, REVENUE_TYPES_LIFETIME_PURCHASED } from "@rovenue/sh
 let clickhouse: StartedTestContainer;
 let ch: ClickHouseClient;
 const CH_HOST_PORT = 8235;
-const CENTS_PER_ROW = 1000; // one $10.00 row per type, in cents
 
 async function waitFor(fn: () => Promise<boolean>, timeoutMs: number): Promise<void> {
   const start = Date.now();
@@ -144,32 +152,56 @@ afterAll(async () => {
 });
 
 describe("v_revenue_lifetime_subscriber vs. REVENUE_TYPES_LIFETIME_PURCHASED", () => {
-  it("counts every type the grouping says it should", async () => {
+  // Set-equality, not cardinality. A uniform amountUsd across ALL_REVENUE_TYPES
+  // would make the view's total a function only of HOW MANY types match its
+  // IN-list, never WHICH ones — a same-cardinality swap (e.g. CANCELLATION
+  // substituted for NON_RENEWING_PURCHASE, both six-member lists) would sum
+  // to the identical total and the test would say nothing. Routing each type
+  // to its OWN subscriberId (the view's GROUP BY key) makes membership
+  // directly observable per type, with no arithmetic trickery and no
+  // distinct-amount subset-sum ambiguity (1+4 = 2+3).
+  it("counts exactly the types REVENUE_TYPES_LIFETIME_PURCHASED names — no more, no fewer", async () => {
     const projectId = `ctr_${Date.now()}`;
-    const subscriberId = "s1";
+    const subscriberIdFor = (type: string) => `sub_${type}`;
 
-    // One $10 row of EVERY enum value, so a dropped type shows up as a
-    // $10 shortfall attributable by name.
+    // One $10 row per enum value, each under its own subscriberId, so the
+    // view's per-subscriber purchased-cents column becomes a direct
+    // membership test: "did the view's IN-list count THIS type or not."
     for (const type of ALL_REVENUE_TYPES) {
-      await insertRawRevenueEvent(ch, { projectId, subscriberId, type, amountUsd: 10 });
+      await insertRawRevenueEvent(ch, {
+        projectId,
+        subscriberId: subscriberIdFor(type),
+        type,
+        amountUsd: 10,
+      });
     }
 
     const res = await ch.query({
-      query: `SELECT toString(lifetime_dollars_purchased_cents) AS c
+      query: `SELECT subscriberId, toString(lifetime_dollars_purchased_cents) AS c
               FROM rovenue.v_revenue_lifetime_subscriber
-              WHERE projectId = {p:String} AND subscriberId = {s:String}`,
-      query_params: { p: projectId, s: subscriberId },
+              WHERE projectId = {p:String}`,
+      query_params: { p: projectId },
       format: "JSONEachRow",
     });
-    const row = ((await res.json()) as Array<{ c: string }>)[0];
+    const rows = (await res.json()) as Array<{ subscriberId: string; c: string }>;
 
-    const expected = REVENUE_TYPES_LIFETIME_PURCHASED.length * CENTS_PER_ROW;
-    const actual = Number(row?.c ?? 0);
+    // "Counted as purchased" = the view attributed a non-zero purchased-cents
+    // figure to that type's subscriberId.
+    const actualTypes = rows
+      .filter((r) => Number(r.c) > 0)
+      .map((r) => r.subscriberId.replace(/^sub_/, ""))
+      .sort();
+    const expectedTypes = [...REVENUE_TYPES_LIFETIME_PURCHASED].sort();
+
+    const missing = expectedTypes.filter((t) => !actualTypes.includes(t)); // view dropped
+    const extra = actualTypes.filter((t) => !expectedTypes.includes(t)); // view over-counts
 
     expect(
-      actual,
-      `view total ${actual} != ${expected}; the view's IN list has drifted from ` +
-        `REVENUE_TYPES_LIFETIME_PURCHASED (${REVENUE_TYPES_LIFETIME_PURCHASED.join(",")})`,
-    ).toBe(expected);
+      actualTypes,
+      `view's purchased-bucket membership differs from REVENUE_TYPES_LIFETIME_PURCHASED ` +
+        `(${expectedTypes.join(",")}); dropped by the view (expected, not counted): ` +
+        `${missing.join(",") || "(none)"}; over-counted by the view (counted, not expected): ` +
+        `${extra.join(",") || "(none)"}`,
+    ).toEqual(expectedTypes);
   }, 120_000);
 });
