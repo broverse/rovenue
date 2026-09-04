@@ -19,13 +19,13 @@
 #   PUB_DEV_CREDENTIALS   — `dart pub token` / OAuth credentials JSON for pub.dev publishing
 #
 # NOTE (spec §4.6): rovenue_flutter_ios wraps the native `Rovenue` CocoaPod via
-# a platform channel. Rovenue.podspec's `sha256` is still a placeholder over an
-# unpublished release zip (see publish-swift's release-pod.sh), so
-# rovenue_flutter_ios cannot function on a real iOS install until that pod is
-# actually published. publish-flutter below still publishes the Dart package to
-# pub.dev in dependency order — pub.dev has no way to gate on an unrelated
-# CocoaPods release — but do not treat a green publish-flutter run as proof the
-# iOS façade works end-to-end until the Rovenue pod ships.
+# a platform channel, so it cannot function on a real iOS install until that
+# pod is live on Trunk. This is now enforced by the graph, not by caution:
+# publish-flutter declares `needs: [verify, publish-swift]`, and publish-swift
+# itself uploads the release artifacts, pins both checksums, lints and pushes
+# to Trunk, and tags — all before it reports success. So a green publish-flutter
+# run in this workflow does mean the Rovenue pod already shipped at this
+# version.
 name: release-sdk
 
 on:
@@ -52,7 +52,8 @@ on:
         type: boolean
         default: true
 
-# release-pod.sh creates a GitHub Release for the Swift zip.
+# publish-swift creates a GitHub Release for the Swift zips and pushes a
+# podspec-sha256 pin commit back onto the branch that triggered the run.
 permissions:
   contents: write
 
@@ -168,30 +169,91 @@ jobs:
           MAVEN_SIGNING_PASSWORD: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
 
   publish-swift:
-    name: Publish Swift (CocoaPods)
+    name: Publish Swift (CocoaPods + SwiftPM)
     needs: verify
     if: ${{ inputs.swift }}
     runs-on: macos-14
+    # This job commits a podspec-sha256 pin back onto the branch and pushes
+    # it, so it needs write access and an attached-branch checkout (default
+    # actions/checkout leaves a detached HEAD, and `git push` with no
+    # refspec fails from one).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
-      # Builds the arm64 static lib, zips Sources + staticlib, creates the
-      # GitHub Release, and patches the podspec sha256 in place.
-      - name: Build + release artifact + patch podspec sha256
+
+      # 1. Build both artifacts. The script mutates nothing.
+      - name: Build release artifacts
         working-directory: packages/sdk-swift
         run: ./scripts/release-pod.sh
+
+      # 2. Upload before pinning: a checksum must describe a file that exists.
+      - name: Create GitHub Release
+        working-directory: packages/sdk-swift
+        run: |
+          VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
+          gh release create "sdk-swift-v$VERSION" \
+            "build/Rovenue-$VERSION.zip" \
+            "build/RovenueFFI-$VERSION.xcframework.zip" \
+            --title "sdk-swift v$VERSION" \
+            --notes "Rovenue Swift façade $VERSION."
         env:
           GH_TOKEN: ${{ github.token }}
+
+      # 3. Pin both checksums against the uploaded files.
+      - name: Pin podspec sha256
+        working-directory: packages/sdk-swift
+        run: |
+          VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
+          SHA=$(shasum -a 256 "build/Rovenue-$VERSION.zip" | awk '{print $1}')
+          sed -i'' -E "s/:sha256 => '[0-9a-fA-F]{64}'/:sha256 => '$SHA'/" Rovenue.podspec
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Rovenue.podspec
+          git commit -m "chore(sdk-swift): pin Rovenue podspec sha256 for v$VERSION"
+          git push
+
+      # 4. Release lint runs against the now-live :http source — this is where
+      #    `pod spec lint` belongs, and the only place it can pass.
+      - name: pod spec lint
+        working-directory: packages/sdk-swift
+        run: pod spec lint Rovenue.podspec --allow-warnings --skip-tests
+
       - name: pod trunk push
         working-directory: packages/sdk-swift
         run: pod trunk push Rovenue.podspec --allow-warnings
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
 
+      # 5. Generate and push the SwiftPM distribution repository, then tag it
+      #    LAST — a consumer resolving the tag must find the pinned checksum.
+      - name: Publish SwiftPM distribution package
+        working-directory: packages/sdk-swift
+        run: |
+          VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
+          SLUG=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['repoSlug']")
+          CHK=$(swift package compute-checksum "build/RovenueFFI-$VERSION.xcframework.zip")
+          ./scripts/generate-swift-dist.sh "$CHK"
+          cd build/swift-dist
+          git init -q .
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Rovenue Swift SDK $VERSION"
+          git tag "$VERSION"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${SLUG}-swift.git" HEAD:main --tags
+        env:
+          GH_TOKEN: ${{ secrets.SWIFT_DIST_REPO_TOKEN }}
+
   publish-flutter:
     name: Publish Flutter (pub.dev)
-    needs: verify
+    # rovenue_flutter_ios depends on the `Rovenue` pod from Trunk, so the
+    # Swift publish must land first. Previously a comment; now an edge.
+    needs: [verify, publish-swift]
     if: ${{ inputs.flutter }}
     runs-on: ubuntu-latest
     steps:
@@ -207,15 +269,6 @@ jobs:
           echo "$PUB_DEV_CREDENTIALS" > ~/.config/dart/pub-credentials.json
         env:
           PUB_DEV_CREDENTIALS: ${{ secrets.PUB_DEV_CREDENTIALS }}
-      # NOTE (spec §4.6): rovenue_flutter_ios wraps the native `Rovenue`
-      # CocoaPod via a platform channel. Rovenue.podspec's `sha256` is still a
-      # placeholder over an unpublished release zip (see publish-swift's
-      # release-pod.sh above), so a pub.dev publish of rovenue_flutter_ios
-      # does NOT mean the iOS façade works end-to-end on a real app — that
-      # additionally requires the Rovenue pod itself to be live. Publishing
-      # the Dart package here regardless, because pub.dev has no mechanism to
-      # gate on an unrelated CocoaPods release; do not treat a green run here
-      # as proof the iOS path is usable until the pod ships.
       - name: Publish packages in dependency order
         run: |
           for p in rovenue_flutter_platform_interface rovenue_flutter_ios rovenue_flutter_android rovenue_flutter; do
