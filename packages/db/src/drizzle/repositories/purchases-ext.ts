@@ -515,6 +515,11 @@ export async function findSupersedableApplePurchases(
     id: string;
     storeTransactionId: string;
     subscriberId: string;
+    // The tier being replaced. Callers emit it as the `previousProductId`
+    // of `subscription.product_changed`: on an Apple upgrade the replacing
+    // transaction gets a NEW transactionId, so the guard's before-image is
+    // null and THIS row is the only honest source of the old product.
+    productId: string;
     status: Purchase["status"];
   }>
 > {
@@ -522,6 +527,7 @@ export async function findSupersedableApplePurchases(
     SELECT p.id,
            p."storeTransactionId" AS "storeTransactionId",
            p."subscriberId"       AS "subscriberId",
+           p."productId"          AS "productId",
            p.status
     FROM ${purchases} p
     WHERE p."projectId" = ${args.projectId}
@@ -538,6 +544,7 @@ export async function findSupersedableApplePurchases(
         id: string;
         storeTransactionId: string;
         subscriberId: string;
+        productId: string;
         status: Purchase["status"];
       }>;
     }).rows ?? [];

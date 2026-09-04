@@ -1,11 +1,19 @@
 import type { Db } from "@rovenue/db";
 import { drizzle } from "@rovenue/db";
+import { PRODUCT_CHANGE_PHASE_EFFECTIVE } from "@rovenue/shared";
+import type { PlanChangeType } from "@rovenue/shared/subscription-status";
 import {
   APPLE_NOTIFICATION_SUBTYPE,
   type AppleNotificationSubtype,
 } from "./apple/apple-types";
 
-export type PlanChangeType = "UPGRADE" | "DOWNGRADE";
+/**
+ * Re-exported so this module stays the one place the api reads plan-change
+ * vocabulary from. It is DEFINED in `@rovenue/shared/subscription-status`
+ * because `packages/db`'s schema types `purchases.pendingChangeType` with
+ * it, and packages/db cannot import from apps/api.
+ */
+export type { PlanChangeType };
 
 /**
  * The public lifecycle key a plan change is announced under. Also present
@@ -126,6 +134,13 @@ export async function emitProductChanged(args: {
       previousProductId: args.previousProductId,
       productId: args.productId,
       changeType: args.changeType,
+      // Distinguishes this row from the outbox bridge's ANNOUNCEMENT row
+      // for the same key — one real plan change can deliver both, and
+      // without a discriminator a consumer cannot tell "a change is
+      // coming" from "the change happened". See the two-phase contract
+      // beside `subscription.product_changed` in
+      // packages/shared/src/integrations.ts.
+      phase: PRODUCT_CHANGE_PHASE_EFFECTIVE,
       timestamp: args.now.toISOString(),
     },
   });

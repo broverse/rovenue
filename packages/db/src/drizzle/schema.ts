@@ -3,6 +3,7 @@ import { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "@rovenue/shared/experiments";
 import {
   EXPIRY_SWEEP_STATUSES,
   RECONCILABLE_STATUSES,
+  type PlanChangeType,
   statusSqlList,
 } from "@rovenue/shared/subscription-status";
 import { sql } from "drizzle-orm";
@@ -998,7 +999,7 @@ export const purchases = pgTable(
     // a text column keeps a future store's vocabulary from needing an
     // enum migration.
     pendingProductId: text("pendingProductId").references(() => products.id),
-    pendingChangeType: text("pendingChangeType"),
+    pendingChangeType: text("pendingChangeType").$type<PlanChangeType>(),
     pendingChangeEffectiveAt: timestamp("pendingChangeEffectiveAt", {
       withTimezone: true,
     }),

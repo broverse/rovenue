@@ -17,6 +17,13 @@ const log = logger.child("google-supersede");
 // access across ALL of a subscriber's rows — keeps the old tier's
 // entitlements alive for up to a full billing period after a downgrade.
 
+/** The row this call actually moved to EXPIRED, if any. */
+export interface SupersededGooglePurchase {
+  purchaseId: string;
+  /** The product the subscriber was on before the replacement. */
+  productId: string;
+}
+
 /**
  * Expire the purchase row keyed by the superseded (old) purchase token and
  * revoke its denormalized access. Idempotent: a replay finds the row
@@ -24,6 +31,15 @@ const log = logger.child("google-supersede");
  * Terminal rows (REFUNDED/REVOKED) keep their status — the guard refuses
  * the EXPIRED write — but their access is revoked either way (it already
  * was; revoking again is harmless).
+ *
+ * Returns the row it ACTUALLY retired, or null. The caller emits it as the
+ * `previousProductId` of `subscription.product_changed`: an immediate Play
+ * upgrade/downgrade (replacement mode WITH_TIME_PRORATION /
+ * CHARGE_PRORATED_PRICE) issues a NEW purchase token, so the replacing
+ * row is an INSERT whose guard before-image is null — this retired row is
+ * the only place the old product survives. Returning only what this call
+ * moved is what keeps the emit replay-safe: a redelivered RTDN finds the
+ * old token already EXPIRED and returns null.
  */
 export async function expireSupersededGooglePurchase(args: {
   projectId: string;
@@ -33,9 +49,9 @@ export async function expireSupersededGooglePurchase(args: {
   currentToken: string;
   /** Origin tag for the transition audit trail. */
   source: string;
-}): Promise<void> {
+}): Promise<SupersededGooglePurchase | null> {
   const { projectId, supersededToken, currentToken, source } = args;
-  if (supersededToken === currentToken) return;
+  if (supersededToken === currentToken) return null;
 
   const old = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
@@ -45,7 +61,7 @@ export async function expireSupersededGooglePurchase(args: {
   );
   // No row for the old token: the chain predates this project's Rovenue
   // history (or the old token was never synced) — nothing to supersede.
-  if (!old) return;
+  if (!old) return null;
 
   const now = new Date();
   const guard = await guardStatusWrite({
@@ -57,13 +73,24 @@ export async function expireSupersededGooglePurchase(args: {
     source: `${source}:linked_token_supersede`,
     eventTime: now,
   });
+  let retired: SupersededGooglePurchase | null = null;
   if (guard.apply) {
+    // EXPIRED is not a TERMINAL status, so the guard applies an
+    // EXPIRED -> EXPIRED write on a redelivered RTDN too. Re-writing is
+    // harmless; reporting it as a supersession is not, because the caller
+    // emits `subscription.product_changed` for a returned row and would
+    // emit the same plan change twice. Only a row that actually MOVED
+    // counts as retired.
+    const alreadyExpired = guard.previous?.status === PurchaseStatus.EXPIRED;
     await drizzle.purchaseRepo.updatePurchase(drizzle.db, old.id, {
       status: PurchaseStatus.EXPIRED,
       expiresDate: now,
       autoRenewStatus: false,
       lastStoreEventAt: now,
     });
+    retired = alreadyExpired
+      ? null
+      : { purchaseId: old.id, productId: old.productId };
     log.info("expired superseded purchase", {
       projectId,
       purchaseId: old.id,
@@ -71,4 +98,5 @@ export async function expireSupersededGooglePurchase(args: {
     });
   }
   await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, old.id);
+  return retired;
 }

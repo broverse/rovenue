@@ -412,12 +412,36 @@ async function processSubscriptionNotification(
   // row (and revoke its access) or the old tier stays granted until its
   // frozen expiresDate lapses.
   if (purchase.linkedPurchaseToken) {
-    await expireSupersededGooglePurchase({
+    const retired = await expireSupersededGooglePurchase({
       projectId: ctx.projectId,
       supersededToken: purchase.linkedPurchaseToken,
       currentToken: ctx.notification.purchaseToken,
       source: `google:${ctx.notification.notificationType}`,
     });
+
+    // This is Google's COMMON plan change — an immediate upgrade/downgrade
+    // (replacement mode WITH_TIME_PRORATION / CHARGE_PRORATED_PRICE). It
+    // issues a NEW purchase token, so the write above was an INSERT and the
+    // guard's before-image was null; the emit inside the transaction cannot
+    // see it. The retired row carries the old product, and is returned only
+    // when THIS call actually expired it, so a redelivered RTDN emits
+    // nothing. No Google RTDN type maps to `product_changed` in the flat
+    // normalization table for this flow either, so without this the most
+    // common Google plan change produced no event at all.
+    if (retired && retired.productId !== product.id) {
+      await emitProductChanged({
+        db: drizzle.db,
+        projectId: ctx.projectId,
+        subscriberId: subscriber.id,
+        purchaseId: persisted.id,
+        previousProductId: retired.productId,
+        productId: product.id,
+        // Google states no direction, and a prorated charge is not a list
+        // price — see `applePlanChangeType`.
+        changeType: null,
+        now: eventTime,
+      });
+    }
   }
 
   // When the status write was withheld (illegal transition from a

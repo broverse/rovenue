@@ -87,6 +87,44 @@ export const SUBSCRIPTION_BRIDGE_EVENT_KEYS = [
  *  it has its own producer and rides the revenue topic. */
 export const TRIAL_STARTED_EVENT_KEY = "subscription.trial.started" as const;
 
+// ---------------------------------------------------------------------------
+// `subscription.product_changed` — the two-phase contract
+// ---------------------------------------------------------------------------
+//
+// This key has TWO producers, and one real-world plan change can legitimately
+// deliver it TWICE. That is deliberate, and consumers must be able to tell the
+// deliveries apart — so the payload carries `phase`:
+//
+//   * NO `phase` field  → ANNOUNCEMENT. Written by the outbox bridge
+//     (webhook-processor.ts) from STORE_EVENT_TO_PUBLIC_KEY, keyed on the
+//     store event type alone: Apple DID_CHANGE_RENEWAL_PREF, Google
+//     SUBSCRIPTION_DEFERRED, Google SUBSCRIPTION_PRICE_CHANGE_CONFIRMED. It
+//     means "the store says a change is coming". The product may not have
+//     moved at all (a price change on the same product is one of these), and
+//     for a scheduled downgrade it will not move for weeks. Payload carries
+//     `storeEventType` and `webhookEventId`.
+//
+//   * `phase: "effective"` → the change HAS TAKEN EFFECT. Written by
+//     `emitProductChanged` (apps/api/src/services/subscription-plan-change.ts)
+//     from inside the guarded purchase write's transaction, only when the
+//     product on the purchase actually moved. Payload carries
+//     `previousProductId`, `productId` and `changeType`.
+//
+// Google's DEFERRED flow is the case that genuinely produces both: an
+// announcement at deferral, then an effective row at the renewal that applies
+// it. They are separate outbox rows with distinct ids, so `outboxEventId`
+// dedup does NOT collapse them and a consumer receives both. Billing-state
+// consumers should act on `phase: "effective"`; "your plan changes on the
+// 14th" notifications want the announcement.
+//
+// A missing `phase` is the announcement rather than "unknown": the bridge
+// predates this field and is never retrofitted, so absence is meaningful and
+// stable. Check `payload.phase === PRODUCT_CHANGE_PHASE_EFFECTIVE`, never
+// truthiness of the other fields.
+export const PRODUCT_CHANGE_PHASE_EFFECTIVE = "effective" as const;
+
+export type ProductChangePhase = typeof PRODUCT_CHANGE_PHASE_EFFECTIVE;
+
 /**
  * What a provider mapper treats as "this envelope's eventType IS already a
  * public event key" — the bridge keys plus `subscription.trial.started`.

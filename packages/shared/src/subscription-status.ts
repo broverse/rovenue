@@ -184,3 +184,27 @@ export function statusSqlList(
 ): string {
   return statuses.map((s) => `'${s}'`).join(", ");
 }
+
+// =============================================================
+// Plan change direction
+// =============================================================
+
+/**
+ * The direction of a subscription plan change, when a store states one.
+ *
+ * Lives here — beside the status semantics — rather than in apps/api,
+ * because BOTH sides need it: the api's plan-change service produces it,
+ * and `packages/db`'s `purchases.pendingChangeType` column is typed by it
+ * (`.$type<PlanChangeType>()`), so a read comes back already narrowed
+ * instead of as a bare `string | null` every consumer re-narrows.
+ *
+ * Only Apple states a direction (its UPGRADE / DOWNGRADE notification
+ * subtypes). Google and Stripe do not, and it is NEVER derived from
+ * price: `purchases.priceAmount` is the amount the store CHARGED, and a
+ * prorated upgrade charges LESS than list price, so comparing prices
+ * labels upgrades as downgrades. A null direction is honest; a guessed
+ * one corrupts every cohort built on it.
+ */
+export const PLAN_CHANGE_TYPES = ["UPGRADE", "DOWNGRADE"] as const;
+
+export type PlanChangeType = (typeof PLAN_CHANGE_TYPES)[number];

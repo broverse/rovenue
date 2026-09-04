@@ -456,13 +456,23 @@ async function applyRenewal(ctx: DispatchContext): Promise<void> {
  *
  * Subtype DOWNGRADE and the no-subtype "reverted the pending change" case
  * take effect at the NEXT renewal (that DID_RENEW carries the new
- * product), so they intentionally change nothing now.
+ * product), so they change no status, no access and no revenue now — but
+ * they are the ONLY notifications that announce a pending change, so they
+ * do record it (see `recordApplePendingChange`). Skipping them entirely,
+ * as this path used to, meant Apple's pending columns were never written
+ * by anything: the UPGRADE arm below writes a brand-new transaction row,
+ * and by the following DID_RENEW `autoRenewProductId` already equals the
+ * transaction's own product, so nothing is pending any more.
  */
 async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
   if (ctx.notification.subtype !== APPLE_NOTIFICATION_SUBTYPE.UPGRADE) {
     log.debug("renewal pref change with no immediate effect", {
       subtype: ctx.notification.subtype ?? null,
     });
+    // Record the announcement; take no effect. A scheduled downgrade must
+    // NOT retire the paid-up term — the old row is retired only when the
+    // store says it was actually superseded.
+    await recordApplePendingChange(ctx);
     return;
   }
 
@@ -482,13 +492,34 @@ async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
   // syncAccess recomputes the whole desired set inside one transaction
   // under the per-subscriber advisory lock, so ordering it this way
   // means no gap and no double-grant.
-  await expireSupersededApplePurchases({
+  const { superseded } = await expireSupersededApplePurchases({
     projectId: ctx.projectId,
     originalTransactionId: ctx.transaction.originalTransactionId,
     currentStoreTransactionId: ctx.transaction.transactionId,
     now: appleNotificationEventTime(ctx),
     source: `apple:${ctx.notification.notificationType}`,
   });
+
+  // The plan change itself. `upsertPurchase` cannot emit it for an Apple
+  // upgrade: Apple mints a NEW transactionId, so the guard locks a key that
+  // has no row and its before-image is null. The row just retired above is
+  // the honest previous side, and `expireSupersededApplePurchases` returns
+  // only rows THIS call moved — so a redelivered upgrade retires nothing
+  // and emits nothing. Apple is the one store that states a direction, so
+  // this is also the only path on which `changeType` is ever non-null.
+  for (const retired of superseded) {
+    await emitProductChanged({
+      db: drizzle.db,
+      projectId: ctx.projectId,
+      subscriberId: subscriber.id,
+      purchaseId: purchase.id,
+      previousProductId: retired.productId,
+      productId: product.id,
+      changeType: applePlanChangeType(ctx.notification.subtype),
+      now: appleNotificationEventTime(ctx),
+    });
+  }
+
   await grantAccess({ subscriber, purchase, product, ctx });
   await emitRevenueEvent({
     ctx,
@@ -1174,6 +1205,55 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
   );
 
   return { product, purchase, statusApplied };
+}
+
+/**
+ * Record (or clear) the pending plan change a DID_CHANGE_RENEWAL_PREF
+ * announces, without taking any effect.
+ *
+ * This is the ONLY writer of Apple's pending columns. The subtypes that
+ * reach it — DOWNGRADE, and the no-subtype "reverted the pending change"
+ * case — deliberately change no status, no access and no revenue: the
+ * subscriber keeps the tier they paid for until the term ends. Both
+ * directions are handled by one code path because
+ * `pendingPlanChangeFields` clears when the store stops naming a future
+ * product, so the revert notification (whose `autoRenewProductId` is back
+ * to the current product, or absent) clears the columns the downgrade set.
+ *
+ * The write targets the chain's current row rather than the transaction
+ * key, because a renewal-pref notification carries whichever transaction
+ * is in force and the announcement belongs to the subscription, not to one
+ * billing period.
+ */
+async function recordApplePendingChange(ctx: DispatchContext): Promise<void> {
+  const current =
+    await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+      drizzle.db,
+      ctx.projectId,
+      ctx.transaction.originalTransactionId,
+    );
+  // No row yet: the announcement arrived before any purchase this project
+  // knows about. Nothing to annotate, and inventing a row here would be a
+  // purchase Apple never told us was bought.
+  if (!current) return;
+
+  const announcedProductId = await resolveAutoRenewProduct(ctx, ctx.transaction.productId);
+  const pendingFields = pendingPlanChangeFields({
+    // The row keeps the tier still in force; the announcement is about
+    // what replaces it.
+    writtenProductId: current.productId,
+    announcedProductId,
+    changeType: applePlanChangeType(ctx.notification.subtype),
+    // Apple applies the change when the current term ends.
+    effectiveAt: current.expiresDate,
+  });
+  await drizzle.purchaseRepo.updatePurchase(
+    drizzle.db,
+    current.id,
+    pendingFields,
+  );
+  ctx.outcome.subscriberId = current.subscriberId;
+  ctx.outcome.purchaseId = current.id;
 }
 
 /**

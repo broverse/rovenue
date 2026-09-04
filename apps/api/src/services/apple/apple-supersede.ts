@@ -21,11 +21,29 @@ const log = logger.child("apple-supersede");
 // row per billing period. Expiring every sibling would rewrite the
 // subscription's whole history and emit an audit row per period.
 
+/** A sibling row this call actually moved to EXPIRED. */
+export interface SupersededApplePurchase {
+  purchaseId: string;
+  subscriberId: string;
+  /** The product the subscriber was on before the upgrade replaced it. */
+  productId: string;
+}
+
 /**
  * Expire the (at most one) unexpired sibling purchase row that the
  * incoming upgrade transaction replaced, and recompute access for its
  * subscriber. Idempotent: a replay finds the row already EXPIRED (guard
  * withholds) and syncAccess is a no-op recompute of the same set.
+ *
+ * Returns the rows it ACTUALLY retired (guard applied), not every row it
+ * considered. `applyRenewalPrefChange` uses them as the `previousProductId`
+ * of `subscription.product_changed`: Apple mints a NEW transactionId for
+ * the replacing transaction, so `guardStatusWrite`'s before-image on that
+ * key is null and cannot see the plan change — the retired sibling is the
+ * honest source, and it is already in hand here. Restricting the result to
+ * rows this call moved is also what makes the emit replay-safe: a redelivered
+ * upgrade finds the sibling already EXPIRED, retires nothing, and emits
+ * nothing.
  */
 export async function expireSupersededApplePurchases(args: {
   projectId: string;
@@ -34,7 +52,7 @@ export async function expireSupersededApplePurchases(args: {
   currentStoreTransactionId: string;
   now: Date;
   source: string;
-}): Promise<{ expired: number }> {
+}): Promise<{ expired: number; superseded: SupersededApplePurchase[] }> {
   const siblings =
     await drizzle.purchaseExtRepo.findSupersedableApplePurchases(drizzle.db, {
       projectId: args.projectId,
@@ -43,7 +61,7 @@ export async function expireSupersededApplePurchases(args: {
       now: args.now,
     });
 
-  let expired = 0;
+  const superseded: SupersededApplePurchase[] = [];
   for (const sibling of siblings) {
     await drizzle.db.transaction(async (tx) => {
       const guard = await guardStatusWrite({
@@ -56,11 +74,26 @@ export async function expireSupersededApplePurchases(args: {
         eventTime: args.now,
       });
       if (!guard.apply) return;
+      // EXPIRED is not a TERMINAL status and this row keeps its frozen
+      // future expiresDate, so an already-expired sibling still matches
+      // `findSupersedableApplePurchases` and the guard still applies an
+      // EXPIRED -> EXPIRED write. That re-write is harmless, but treating
+      // it as a supersession is not: the caller emits
+      // `subscription.product_changed` per returned row, and a redelivered
+      // upgrade would emit the same plan change a second time. Only a row
+      // whose status actually MOVED counts.
+      const alreadyExpired =
+        guard.previous?.status === PurchaseStatus.EXPIRED;
       await drizzle.purchaseRepo.updatePurchase(tx, sibling.id, {
         status: PurchaseStatus.EXPIRED,
         lastStoreEventAt: args.now,
       });
-      expired += 1;
+      if (alreadyExpired) return;
+      superseded.push({
+        purchaseId: sibling.id,
+        subscriberId: sibling.subscriberId,
+        productId: sibling.productId,
+      });
     });
     // Access is re-derived from the whole purchase set, so this is safe
     // to run even when the guard withheld the status write (e.g. the
@@ -69,12 +102,12 @@ export async function expireSupersededApplePurchases(args: {
     await syncAccess(sibling.subscriberId);
   }
 
-  if (expired > 0) {
+  if (superseded.length > 0) {
     log.info("expired superseded Apple purchases", {
       projectId: args.projectId,
       originalTransactionId: args.originalTransactionId,
-      expired,
+      expired: superseded.length,
     });
   }
-  return { expired };
+  return { expired: superseded.length, superseded };
 }
