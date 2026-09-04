@@ -48,7 +48,7 @@ docker-compose stack).
 | `packages/db/src/drizzle/enums.ts` | `leaderboardMetric`, `leaderboardCadence`, `leaderboardSeasonStatus` |
 | `packages/db/src/drizzle/schema.ts` | three tables + enum re-exports |
 | `packages/db/src/drizzle/repositories/leaderboards.ts` | all three tables' reads/writes, including the conditional claim |
-| `apps/api/src/services/leaderboards/cadence.ts` | boundary arithmetic (pure, no I/O) |
+| `apps/api/src/services/leaderboards/cadence.ts` | boundary arithmetic (pure, no I/O); imports its cadence type from the enum |
 | `apps/api/src/services/leaderboards/standings-query.ts` | the ONE ClickHouse query, shared by worker and `/current` |
 | `apps/api/src/workers/leaderboard-scheduler.ts` | the sweep |
 | `apps/api/src/routes/dashboard/leaderboards.ts` | CRUD + seasons + standings + current |
@@ -56,309 +56,7 @@ docker-compose stack).
 
 ---
 
-### Task 1: Cadence boundary arithmetic
-
-Pure functions first, with no database and no I/O, because every later task
-depends on getting season windows right and this is the only part that is
-genuinely subtle.
-
-**Files:**
-- Create: `apps/api/src/services/leaderboards/cadence.ts`
-- Create: `apps/api/src/services/leaderboards/cadence.test.ts`
-
-**Interfaces:**
-- Produces: `export type LeaderboardCadence = "WEEKLY" | "MONTHLY" | "CUSTOM"`.
-- Produces: `export interface SeasonWindow { startsAt: Date; endsAt: Date }`
-  — `endsAt` is **exclusive**.
-- Produces: `export function seasonWindowContaining(instant: Date, cadence:
-  LeaderboardCadence, timezone: string, customPeriodDays: number | null,
-  anchorAt: Date): SeasonWindow`.
-- Produces: `export function nextSeasonWindow(previous: SeasonWindow, cadence:
-  LeaderboardCadence, timezone: string, customPeriodDays: number | null,
-  anchorAt: Date): SeasonWindow` — always starts exactly at
-  `previous.endsAt`.
-- Produces: `export function validateCadence(cadence: LeaderboardCadence,
-  customPeriodDays: number | null): string | null` — returns an error message
-  or null.
-
-**Rules:**
-- `WEEKLY` boundaries fall at local **Monday 00:00** in `timezone`.
-- `MONTHLY` boundaries fall at local **day-1 00:00** in `timezone`.
-- `CUSTOM` counts `customPeriodDays` from `anchorAt`, in whole local days.
-- `customPeriodDays` must be a positive integer for `CUSTOM` and must be null
-  otherwise.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `apps/api/src/services/leaderboards/cadence.test.ts`:
-
-```ts
-import { describe, expect, test } from "vitest";
-import {
-  nextSeasonWindow,
-  seasonWindowContaining,
-  validateCadence,
-} from "./cadence";
-
-const ISTANBUL = "Europe/Istanbul";   // UTC+3, no DST since 2016
-const BERLIN = "Europe/Berlin";       // UTC+1 / UTC+2, DST
-const UTC = "UTC";
-const ANCHOR = new Date("2026-01-01T00:00:00.000Z");
-
-describe("validateCadence", () => {
-  test("CUSTOM requires a positive customPeriodDays", () => {
-    expect(validateCadence("CUSTOM", null)).not.toBeNull();
-    expect(validateCadence("CUSTOM", 0)).not.toBeNull();
-    expect(validateCadence("CUSTOM", -3)).not.toBeNull();
-    expect(validateCadence("CUSTOM", 14)).toBeNull();
-  });
-
-  test("non-CUSTOM rejects customPeriodDays", () => {
-    expect(validateCadence("WEEKLY", 7)).not.toBeNull();
-    expect(validateCadence("MONTHLY", 30)).not.toBeNull();
-    expect(validateCadence("WEEKLY", null)).toBeNull();
-    expect(validateCadence("MONTHLY", null)).toBeNull();
-  });
-});
-
-describe("seasonWindowContaining — WEEKLY", () => {
-  test("a Wednesday resolves to that week's Monday 00:00 local", () => {
-    // 2026-09-02 is a Wednesday.
-    const w = seasonWindowContaining(
-      new Date("2026-09-02T12:00:00.000Z"),
-      "WEEKLY",
-      ISTANBUL,
-      null,
-      ANCHOR,
-    );
-
-    // Monday 2026-08-31 00:00 in UTC+3 is 2026-08-30T21:00Z.
-    expect(w.startsAt.toISOString()).toBe("2026-08-30T21:00:00.000Z");
-    expect(w.endsAt.toISOString()).toBe("2026-09-06T21:00:00.000Z");
-  });
-
-  test("Saturday evening local is inside the week, not cut off by UTC", () => {
-    // 2026-09-05T22:00Z is Sunday 01:00 in Istanbul, still in the week
-    // that began Monday 2026-08-31. A UTC-only boundary would have
-    // already rolled over.
-    const w = seasonWindowContaining(
-      new Date("2026-09-05T22:00:00.000Z"),
-      "WEEKLY",
-      ISTANBUL,
-      null,
-      ANCHOR,
-    );
-    expect(w.startsAt.toISOString()).toBe("2026-08-30T21:00:00.000Z");
-  });
-
-  test("a DST transition does not shorten or lengthen the local week", () => {
-    // Berlin leaves DST on 2026-10-25. The window must still start and
-    // end at local Monday 00:00, so its UTC length is 169 hours, not 168.
-    const w = seasonWindowContaining(
-      new Date("2026-10-21T12:00:00.000Z"),
-      "WEEKLY",
-      BERLIN,
-      null,
-      ANCHOR,
-    );
-    const hours = (w.endsAt.getTime() - w.startsAt.getTime()) / 3_600_000;
-    expect(hours).toBe(169);
-  });
-});
-
-describe("seasonWindowContaining — MONTHLY", () => {
-  test("mid-month resolves to the 1st at 00:00 local", () => {
-    const w = seasonWindowContaining(
-      new Date("2026-09-17T08:00:00.000Z"),
-      "MONTHLY",
-      UTC,
-      null,
-      ANCHOR,
-    );
-    expect(w.startsAt.toISOString()).toBe("2026-09-01T00:00:00.000Z");
-    expect(w.endsAt.toISOString()).toBe("2026-10-01T00:00:00.000Z");
-  });
-
-  test("a 31-day month rolls to the next 1st, not to day 31", () => {
-    // Anchoring off a 31st is the classic month-arithmetic bug: naive
-    // +1 month from Jan 31 lands on Mar 3.
-    const w = seasonWindowContaining(
-      new Date("2026-01-31T12:00:00.000Z"),
-      "MONTHLY",
-      UTC,
-      null,
-      new Date("2026-01-31T00:00:00.000Z"),
-    );
-    expect(w.startsAt.toISOString()).toBe("2026-01-01T00:00:00.000Z");
-    expect(w.endsAt.toISOString()).toBe("2026-02-01T00:00:00.000Z");
-  });
-});
-
-describe("seasonWindowContaining — CUSTOM", () => {
-  test("counts whole periods from the anchor", () => {
-    const w = seasonWindowContaining(
-      new Date("2026-01-16T00:00:00.000Z"),
-      "CUSTOM",
-      UTC,
-      14,
-      ANCHOR,
-    );
-    expect(w.startsAt.toISOString()).toBe("2026-01-15T00:00:00.000Z");
-    expect(w.endsAt.toISOString()).toBe("2026-01-29T00:00:00.000Z");
-  });
-});
-
-describe("nextSeasonWindow", () => {
-  test("starts exactly where the previous one ended, leaving no gap", () => {
-    const first = seasonWindowContaining(
-      new Date("2026-09-02T12:00:00.000Z"),
-      "WEEKLY",
-      ISTANBUL,
-      null,
-      ANCHOR,
-    );
-    const second = nextSeasonWindow(first, "WEEKLY", ISTANBUL, null, ANCHOR);
-
-    // No event may fall between two seasons. This is what lets the
-    // snapshot settle delay be safe: the next season already started.
-    expect(second.startsAt.getTime()).toBe(first.endsAt.getTime());
-    expect(second.endsAt.getTime()).toBeGreaterThan(second.startsAt.getTime());
-  });
-
-  test("chains across a month boundary without drift", () => {
-    let w = seasonWindowContaining(
-      new Date("2026-01-05T00:00:00.000Z"),
-      "MONTHLY",
-      UTC,
-      null,
-      ANCHOR,
-    );
-    for (let i = 0; i < 13; i += 1) {
-      const next = nextSeasonWindow(w, "MONTHLY", UTC, null, ANCHOR);
-      expect(next.startsAt.getTime()).toBe(w.endsAt.getTime());
-      w = next;
-    }
-    // 13 steps on from January 2026 is February 2027.
-    expect(w.startsAt.toISOString()).toBe("2027-02-01T00:00:00.000Z");
-  });
-});
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-```bash
-nice -n 19 npx vitest run apps/api/src/services/leaderboards/cadence.test.ts --maxWorkers=2
-```
-
-Expected: FAIL — module not found.
-
-- [ ] **Step 3: Implement**
-
-Create `apps/api/src/services/leaderboards/cadence.ts`. Build it on two
-`Intl`-based primitives, mirroring the approach in
-`apps/api/src/services/notifications/tz.ts`:
-
-```ts
-// =============================================================
-// Leaderboard cadence boundary arithmetic
-// =============================================================
-//
-// Season boundaries are LOCAL: a weekly leaderboard for a Turkish app
-// rolls at Monday 00:00 Istanbul time, not at UTC midnight, which would
-// cut Sunday evening in half. All arithmetic happens on the local
-// calendar and is converted back to a UTC instant for storage.
-//
-// No luxon, no date-fns: Node's Intl ships the full IANA database and
-// this repo already does timezone work this way (services/notifications/tz.ts).
-
-export type LeaderboardCadence = "WEEKLY" | "MONTHLY" | "CUSTOM";
-
-export interface SeasonWindow {
-  startsAt: Date;
-  /** Exclusive. */
-  endsAt: Date;
-}
-
-export const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-interface LocalParts {
-  year: number;
-  month: number;   // 1-12
-  day: number;     // 1-31
-  hour: number;
-  minute: number;
-  second: number;
-  weekday: number; // 1 = Monday .. 7 = Sunday
-}
-
-// Implement:
-//   localPartsIn(instant, timezone): LocalParts
-//     via Intl.DateTimeFormat(timezone, { ...numeric fields, weekday: "short",
-//     hour12: false }).formatToParts, with a cached formatter per timezone.
-//
-//   utcInstantForLocal(parts, timezone): Date
-//     Local -> UTC has no direct Intl inverse. Use the standard two-pass
-//     fixpoint: guess the instant as if the local parts were UTC, read the
-//     zone's offset at that guess, subtract it, then re-read the offset at
-//     the corrected instant and correct once more. Two passes is enough for
-//     every real zone including DST edges; assert the second pass is stable
-//     and throw if it is not, rather than returning a silently wrong instant.
-//
-// Then:
-//   WEEKLY  -> back up to weekday 1, zero the time, that is startsAt;
-//              endsAt is the same local wall-clock 7 local days later
-//              (NOT startsAt + 7*MS_PER_DAY -- that is what breaks across DST).
-//   MONTHLY -> set day = 1, zero the time; endsAt is day 1 of the next
-//              month, carrying the year.
-//   CUSTOM  -> floor((instant - anchorAt) / (customPeriodDays local days))
-//              periods from the anchor.
-```
-
-Write the real implementation — the block above is the algorithm, not a
-substitute for code. The DST test is the one that fails if `endsAt` is
-computed by adding milliseconds instead of local days; treat it as the
-specification.
-
-```ts
-export function validateCadence(
-  cadence: LeaderboardCadence,
-  customPeriodDays: number | null,
-): string | null {
-  if (cadence === "CUSTOM") {
-    if (customPeriodDays === null || !Number.isInteger(customPeriodDays) || customPeriodDays <= 0) {
-      return "customPeriodDays must be a positive integer when cadence is CUSTOM";
-    }
-    return null;
-  }
-  if (customPeriodDays !== null) {
-    return `customPeriodDays must be null when cadence is ${cadence}`;
-  }
-  return null;
-}
-```
-
-- [ ] **Step 4: Run it to verify it passes**
-
-```bash
-nice -n 19 npx vitest run apps/api/src/services/leaderboards/cadence.test.ts --maxWorkers=2
-```
-
-Expected: PASS (11 tests). The DST and 31st-of-the-month tests are the ones
-most likely to fail first — do not weaken them.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add apps/api/src/services/leaderboards/cadence.ts apps/api/src/services/leaderboards/cadence.test.ts
-git commit -m "feat(leaderboards): local-calendar season boundary arithmetic
-
-Boundaries are local, so a weekly season is 169 UTC hours across a DST
-exit rather than silently losing an hour of standings."
-```
-
----
-
-### Task 2: Schema and repository
+### Task 1: Schema and repository
 
 **Files:**
 - Modify: `packages/db/src/drizzle/enums.ts`
@@ -615,6 +313,316 @@ second live season a database error rather than a data bug."
 
 ---
 
+### Task 2: Cadence boundary arithmetic
+
+No database and no I/O — every later task depends on getting season windows
+right, and this is the only genuinely subtle part. It runs after the schema so
+it can import the cadence union from the enum rather than redeclare it: two
+hand-maintained copies of the same three values, in different packages with
+nothing pinning them equal, is how a value added to the enum later silently
+fails to exist for the cadence math.
+
+**Files:**
+- Create: `apps/api/src/services/leaderboards/cadence.ts`
+- Create: `apps/api/src/services/leaderboards/cadence.test.ts`
+
+**Interfaces:**
+- Consumes: `LeaderboardCadence` — `import type { LeaderboardCadence } from
+  "@rovenue/db"`, the type inferred from Task 1's `leaderboardCadence` pgEnum.
+  Do NOT redeclare the union here. A type-only import is erased at runtime and
+  cannot create a package cycle.
+- Produces: `export interface SeasonWindow { startsAt: Date; endsAt: Date }`
+  — `endsAt` is **exclusive**.
+- Produces: `export function seasonWindowContaining(instant: Date, cadence:
+  LeaderboardCadence, timezone: string, customPeriodDays: number | null,
+  anchorAt: Date): SeasonWindow`.
+- Produces: `export function nextSeasonWindow(previous: SeasonWindow, cadence:
+  LeaderboardCadence, timezone: string, customPeriodDays: number | null,
+  anchorAt: Date): SeasonWindow` — always starts exactly at
+  `previous.endsAt`.
+- Produces: `export function validateCadence(cadence: LeaderboardCadence,
+  customPeriodDays: number | null): string | null` — returns an error message
+  or null.
+
+**Rules:**
+- `WEEKLY` boundaries fall at local **Monday 00:00** in `timezone`.
+- `MONTHLY` boundaries fall at local **day-1 00:00** in `timezone`.
+- `CUSTOM` counts `customPeriodDays` from `anchorAt`, in whole local days.
+- `customPeriodDays` must be a positive integer for `CUSTOM` and must be null
+  otherwise.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/api/src/services/leaderboards/cadence.test.ts`:
+
+```ts
+import { describe, expect, test } from "vitest";
+import {
+  nextSeasonWindow,
+  seasonWindowContaining,
+  validateCadence,
+} from "./cadence";
+import type { LeaderboardCadence } from "@rovenue/db";
+
+const ISTANBUL = "Europe/Istanbul";   // UTC+3, no DST since 2016
+const BERLIN = "Europe/Berlin";       // UTC+1 / UTC+2, DST
+const UTC = "UTC";
+const ANCHOR = new Date("2026-01-01T00:00:00.000Z");
+
+describe("validateCadence", () => {
+  test("CUSTOM requires a positive customPeriodDays", () => {
+    expect(validateCadence("CUSTOM", null)).not.toBeNull();
+    expect(validateCadence("CUSTOM", 0)).not.toBeNull();
+    expect(validateCadence("CUSTOM", -3)).not.toBeNull();
+    expect(validateCadence("CUSTOM", 14)).toBeNull();
+  });
+
+  test("non-CUSTOM rejects customPeriodDays", () => {
+    expect(validateCadence("WEEKLY", 7)).not.toBeNull();
+    expect(validateCadence("MONTHLY", 30)).not.toBeNull();
+    expect(validateCadence("WEEKLY", null)).toBeNull();
+    expect(validateCadence("MONTHLY", null)).toBeNull();
+  });
+});
+
+describe("seasonWindowContaining — WEEKLY", () => {
+  test("a Wednesday resolves to that week's Monday 00:00 local", () => {
+    // 2026-09-02 is a Wednesday.
+    const w = seasonWindowContaining(
+      new Date("2026-09-02T12:00:00.000Z"),
+      "WEEKLY",
+      ISTANBUL,
+      null,
+      ANCHOR,
+    );
+
+    // Monday 2026-08-31 00:00 in UTC+3 is 2026-08-30T21:00Z.
+    expect(w.startsAt.toISOString()).toBe("2026-08-30T21:00:00.000Z");
+    expect(w.endsAt.toISOString()).toBe("2026-09-06T21:00:00.000Z");
+  });
+
+  test("Saturday evening local is inside the week, not cut off by UTC", () => {
+    // 2026-09-05T22:00Z is Sunday 01:00 in Istanbul, still in the week
+    // that began Monday 2026-08-31. A UTC-only boundary would have
+    // already rolled over.
+    const w = seasonWindowContaining(
+      new Date("2026-09-05T22:00:00.000Z"),
+      "WEEKLY",
+      ISTANBUL,
+      null,
+      ANCHOR,
+    );
+    expect(w.startsAt.toISOString()).toBe("2026-08-30T21:00:00.000Z");
+  });
+
+  test("a DST transition does not shorten or lengthen the local week", () => {
+    // Berlin leaves DST on 2026-10-25. The window must still start and
+    // end at local Monday 00:00, so its UTC length is 169 hours, not 168.
+    const w = seasonWindowContaining(
+      new Date("2026-10-21T12:00:00.000Z"),
+      "WEEKLY",
+      BERLIN,
+      null,
+      ANCHOR,
+    );
+    const hours = (w.endsAt.getTime() - w.startsAt.getTime()) / 3_600_000;
+    expect(hours).toBe(169);
+  });
+});
+
+describe("seasonWindowContaining — MONTHLY", () => {
+  test("mid-month resolves to the 1st at 00:00 local", () => {
+    const w = seasonWindowContaining(
+      new Date("2026-09-17T08:00:00.000Z"),
+      "MONTHLY",
+      UTC,
+      null,
+      ANCHOR,
+    );
+    expect(w.startsAt.toISOString()).toBe("2026-09-01T00:00:00.000Z");
+    expect(w.endsAt.toISOString()).toBe("2026-10-01T00:00:00.000Z");
+  });
+
+  test("a 31-day month rolls to the next 1st, not to day 31", () => {
+    // Anchoring off a 31st is the classic month-arithmetic bug: naive
+    // +1 month from Jan 31 lands on Mar 3.
+    const w = seasonWindowContaining(
+      new Date("2026-01-31T12:00:00.000Z"),
+      "MONTHLY",
+      UTC,
+      null,
+      new Date("2026-01-31T00:00:00.000Z"),
+    );
+    expect(w.startsAt.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+    expect(w.endsAt.toISOString()).toBe("2026-02-01T00:00:00.000Z");
+  });
+});
+
+describe("seasonWindowContaining — CUSTOM", () => {
+  test("counts whole periods from the anchor", () => {
+    const w = seasonWindowContaining(
+      new Date("2026-01-16T00:00:00.000Z"),
+      "CUSTOM",
+      UTC,
+      14,
+      ANCHOR,
+    );
+    expect(w.startsAt.toISOString()).toBe("2026-01-15T00:00:00.000Z");
+    expect(w.endsAt.toISOString()).toBe("2026-01-29T00:00:00.000Z");
+  });
+});
+
+describe("nextSeasonWindow", () => {
+  test("starts exactly where the previous one ended, leaving no gap", () => {
+    const first = seasonWindowContaining(
+      new Date("2026-09-02T12:00:00.000Z"),
+      "WEEKLY",
+      ISTANBUL,
+      null,
+      ANCHOR,
+    );
+    const second = nextSeasonWindow(first, "WEEKLY", ISTANBUL, null, ANCHOR);
+
+    // No event may fall between two seasons. This is what lets the
+    // snapshot settle delay be safe: the next season already started.
+    expect(second.startsAt.getTime()).toBe(first.endsAt.getTime());
+    expect(second.endsAt.getTime()).toBeGreaterThan(second.startsAt.getTime());
+  });
+
+  test("chains across a month boundary without drift", () => {
+    let w = seasonWindowContaining(
+      new Date("2026-01-05T00:00:00.000Z"),
+      "MONTHLY",
+      UTC,
+      null,
+      ANCHOR,
+    );
+    for (let i = 0; i < 13; i += 1) {
+      const next = nextSeasonWindow(w, "MONTHLY", UTC, null, ANCHOR);
+      expect(next.startsAt.getTime()).toBe(w.endsAt.getTime());
+      w = next;
+    }
+    // 13 steps on from January 2026 is February 2027.
+    expect(w.startsAt.toISOString()).toBe("2027-02-01T00:00:00.000Z");
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+```bash
+nice -n 19 npx vitest run apps/api/src/services/leaderboards/cadence.test.ts --maxWorkers=2
+```
+
+Expected: FAIL — module not found.
+
+- [ ] **Step 3: Implement**
+
+Create `apps/api/src/services/leaderboards/cadence.ts`. Build it on two
+`Intl`-based primitives, mirroring the approach in
+`apps/api/src/services/notifications/tz.ts`:
+
+```ts
+// =============================================================
+// Leaderboard cadence boundary arithmetic
+// =============================================================
+//
+// Season boundaries are LOCAL: a weekly leaderboard for a Turkish app
+// rolls at Monday 00:00 Istanbul time, not at UTC midnight, which would
+// cut Sunday evening in half. All arithmetic happens on the local
+// calendar and is converted back to a UTC instant for storage.
+//
+// No luxon, no date-fns: Node's Intl ships the full IANA database and
+// this repo already does timezone work this way (services/notifications/tz.ts).
+
+// The cadence union comes from the pgEnum (Task 1), never redeclared here.
+import type { LeaderboardCadence } from "@rovenue/db";
+
+export interface SeasonWindow {
+  startsAt: Date;
+  /** Exclusive. */
+  endsAt: Date;
+}
+
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+interface LocalParts {
+  year: number;
+  month: number;   // 1-12
+  day: number;     // 1-31
+  hour: number;
+  minute: number;
+  second: number;
+  weekday: number; // 1 = Monday .. 7 = Sunday
+}
+
+// Implement:
+//   localPartsIn(instant, timezone): LocalParts
+//     via Intl.DateTimeFormat(timezone, { ...numeric fields, weekday: "short",
+//     hour12: false }).formatToParts, with a cached formatter per timezone.
+//
+//   utcInstantForLocal(parts, timezone): Date
+//     Local -> UTC has no direct Intl inverse. Use the standard two-pass
+//     fixpoint: guess the instant as if the local parts were UTC, read the
+//     zone's offset at that guess, subtract it, then re-read the offset at
+//     the corrected instant and correct once more. Two passes is enough for
+//     every real zone including DST edges; assert the second pass is stable
+//     and throw if it is not, rather than returning a silently wrong instant.
+//
+// Then:
+//   WEEKLY  -> back up to weekday 1, zero the time, that is startsAt;
+//              endsAt is the same local wall-clock 7 local days later
+//              (NOT startsAt + 7*MS_PER_DAY -- that is what breaks across DST).
+//   MONTHLY -> set day = 1, zero the time; endsAt is day 1 of the next
+//              month, carrying the year.
+//   CUSTOM  -> floor((instant - anchorAt) / (customPeriodDays local days))
+//              periods from the anchor.
+```
+
+Write the real implementation — the block above is the algorithm, not a
+substitute for code. The DST test is the one that fails if `endsAt` is
+computed by adding milliseconds instead of local days; treat it as the
+specification.
+
+```ts
+export function validateCadence(
+  cadence: LeaderboardCadence,
+  customPeriodDays: number | null,
+): string | null {
+  if (cadence === "CUSTOM") {
+    if (customPeriodDays === null || !Number.isInteger(customPeriodDays) || customPeriodDays <= 0) {
+      return "customPeriodDays must be a positive integer when cadence is CUSTOM";
+    }
+    return null;
+  }
+  if (customPeriodDays !== null) {
+    return `customPeriodDays must be null when cadence is ${cadence}`;
+  }
+  return null;
+}
+```
+
+- [ ] **Step 4: Run it to verify it passes**
+
+```bash
+nice -n 19 npx vitest run apps/api/src/services/leaderboards/cadence.test.ts --maxWorkers=2
+```
+
+Expected: PASS (11 tests). The DST and 31st-of-the-month tests are the ones
+most likely to fail first — do not weaken them.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/services/leaderboards/cadence.ts apps/api/src/services/leaderboards/cadence.test.ts
+git commit -m "feat(leaderboards): local-calendar season boundary arithmetic
+
+Boundaries are local, so a weekly season is 169 UTC hours across a DST
+exit rather than silently losing an hour of standings."
+```
+
+---
+
 ### Task 3: The shared standings query
 
 **Files:**
@@ -624,9 +632,13 @@ second live season a database error rather than a data bug."
 **Interfaces:**
 - Produces: `export interface StandingRow { subscriberId: string; score:
   string; eventCount: number }`.
-- Produces: `export function buildStandingsQuery(metric: "TOP_SPENDERS" |
-  "TOP_CONSUMERS", currencyId: string | null): { sql: string }` — pure, so
-  the SQL shape is testable without ClickHouse.
+- Consumes: `LeaderboardMetric` — `import type { LeaderboardMetric } from
+  "@rovenue/db"`, inferred from Task 1's `leaderboardMetric` pgEnum. Do not
+  inline the `"TOP_SPENDERS" | "TOP_CONSUMERS"` union; same single-source rule
+  as the cadence type.
+- Produces: `export function buildStandingsQuery(metric: LeaderboardMetric,
+  currencyId: string | null): { sql: string }` — pure, so the SQL shape is
+  testable without ClickHouse.
 - Produces: `export async function queryStandings(args: { projectId: string;
   metric; currencyId: string | null; startsAt: Date; endsAt: Date; limit:
   number }): Promise<StandingRow[]>`.
