@@ -1,7 +1,11 @@
 import { queryAnalytics, isClickHouseConfigured } from "../lib/clickhouse";
 import { MATURATION_WINDOW_DAYS } from "../lib/experiment-constants";
 import { logger } from "../lib/logger";
-import { REVENUE_TYPES_LIFETIME_PURCHASED, sqlTypeList } from "@rovenue/shared";
+import {
+  REVENUE_TYPES_LIFETIME_PURCHASED,
+  REVENUE_TYPES_MONEY_OUT,
+  sqlTypeList,
+} from "@rovenue/shared";
 
 // =============================================================
 // Analytics router dispatcher
@@ -296,7 +300,7 @@ export async function runAnalyticsQuery(
               ) AS gross,
               sumIf(
                 abs(r.amountUsd),
-                r.type IN ('REFUND', 'CHARGEBACK')
+                r.type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})
                   AND r.eventDate >= e.firstExposedAt
                   AND r.eventDate <  e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY
               ) AS refunds
@@ -445,7 +449,7 @@ export async function runAnalyticsQuery(
               e.subscriberId AS subscriberId,
               r.store AS store,
               sumIf(r.amountUsd, r.type IN (${sqlTypeList(REVENUE_TYPES_LIFETIME_PURCHASED)})) AS gross,
-              sumIf(abs(r.amountUsd), r.type IN ('REFUND', 'CHARGEBACK'))                              AS refunds
+              sumIf(abs(r.amountUsd), r.type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}))                              AS refunds
             FROM exposure e
             INNER JOIN (
               SELECT subscriberId, store, type, amountUsd, eventDate
