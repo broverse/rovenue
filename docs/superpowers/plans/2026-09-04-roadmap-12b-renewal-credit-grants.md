@@ -981,7 +981,7 @@ import { toRenewalGrantJob } from "./consumer";
 // Shape confirmed against outbox-dispatcher.ts's Kafka envelope.
 function message(overrides: Record<string, unknown> = {}) {
   return {
-    outboxEventId: "obx_1",
+    eventId: "obx_1",
     eventType: "revenue.event.recorded",
     payload: {
       revenueEventId: "rev_1",
@@ -1088,7 +1088,11 @@ export function toRenewalGrantJob(
   if (typeof raw !== "object" || raw === null) return null;
   const envelope = raw as Record<string, unknown>;
 
-  const outboxEventId = str(envelope.outboxEventId);
+  // The wire field is `eventId`. outbox-dispatcher.ts's generic branch
+  // emits { eventId: row.id, eventType, aggregateId, createdAt, payload }.
+  // `outboxEventId` exists only on the parsed RovenueEventEnvelope, never
+  // on the raw message.
+  const outboxEventId = str(envelope.eventId);
   const payload = envelope.payload;
   if (!outboxEventId || typeof payload !== "object" || payload === null) {
     return null;

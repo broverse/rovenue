@@ -31,6 +31,14 @@ stream. Bursts coalesce on a trailing edge.
 - No SDK changes. The SDK already consumes `/v1/config/stream` unchanged.
 - No new tables, no `subscriber_audience_memberships`, no
   `audience.entered`/`audience.exited` events — those are explicit non-goals.
+- **Verify every wire/serialisation shape against the PRODUCING code before
+  trusting a test fixture.** A fixture invented from a plan's prose can carry
+  the same wrong field name as the parser it exercises, in which case the test
+  passes green while the feature is dead in production. This already happened
+  once in this batch (12.4's Kafka envelope: the plan said `outboxEventId`, the
+  wire says `eventId`). Open the emitter and read it.
+  For this plan the shape at risk is the Redis pub/sub message on
+  `rovenue:experiments:invalidate` — check `publishConfigInvalidation` itself.
 
 ## File Structure
 

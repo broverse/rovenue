@@ -40,6 +40,14 @@ docker-compose stack).
 - Throttled test runs: `nice -n 19 npx vitest run --maxWorkers=2`.
 - **Do not modify** the existing `top-spenders` / `top-consumers` endpoints or
   the dashboard view that consumes them. They stay as they are.
+- **Verify every wire/serialisation shape against the PRODUCING code before
+  trusting a test fixture.** A fixture invented from a plan's prose can carry
+  the same wrong field name as the parser it exercises, in which case the test
+  passes green while the feature is dead in production. This already happened
+  once in this batch (12.4's Kafka envelope: the plan said `outboxEventId`, the
+  wire says `eventId`). Open the emitter and read it.
+  For this plan the shapes at risk are the ClickHouse result rows — check the
+  existing `top-spenders` / `top-consumers` handlers for the real column names.
 
 ## File Structure
 
