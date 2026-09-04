@@ -277,6 +277,34 @@ Each item is a command with an expected result, not a claim:
    the check that `unsafeFlags` is really gone, which an in-repo `path:` build
    cannot show.
 
+**Verified 2026-09-05 — items 6 and 7 both PASS.** These were the two claims
+`pod lib lint` could not settle; both are now settled by real builds against a
+freshly built `RovenueFFI.xcframework`.
+
+- Item 6 (RN): `examples/sample-rn-expo` — `pod install` installs `Rovenue
+  (0.16.0)` and `RovenueSdkRn (0.16.0)` via `:path`;
+  `grep -rn SWIFT_INCLUDE_PATHS examples/sample-rn-expo/ios/` prints nothing;
+  `xcodebuild -workspace samplernexpo.xcworkspace -scheme samplernexpo -sdk
+  iphonesimulator` reports `** BUILD SUCCEEDED **`. The `Rovenue` pod's swiftc
+  invocation reaches the module map only through
+  `-Xcc -I…/XCFrameworkIntermediates/Rovenue/Headers` — the slice CocoaPods
+  copied out of the xcframework — and the linked image carries 159
+  `ffi_rovenue_*` / `uniffi_rovenue_*` symbols, so the module both resolves
+  and links.
+- Item 7 (Flutter): `packages/sdk-flutter/example` — `flutter build ios
+  --simulator --no-codesign` reports `✓ Built
+  build/ios/iphonesimulator/Runner.app` with the Podfile's
+  `SWIFT_INCLUDE_PATHS` `post_install` block absent (only Flutter's own
+  `flutter_additional_ios_build_settings` loop remains).
+  `Runner.app/Frameworks/Rovenue.framework` carries the same 159 FFI symbols.
+
+Two unrelated, pre-existing defects had to be fixed first, neither of them a
+module-path workaround: the app's iOS deployment target was below the `Rovenue`
+pod's 16.0 floor, and `packages/sdk-rn/ios/RovenueModule.swift` had never
+compiled since the enriched-`StoreProduct` change (see that file's history).
+The RN bridge is not covered by CI, which is why lint-only verification let
+both drift.
+
 ### Not required, so that nobody adds it
 
 Static-library xcframeworks are not code-signed; Apple's signing requirements
