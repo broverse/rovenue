@@ -22,6 +22,11 @@ const CONTRACT_MARKER = "-- rovenue:contract-phase";
  * Migrations that predate the policy. This list is FROZEN — never add to
  * it. A new migration needing destructive DDL carries CONTRACT_MARKER
  * instead, which is a reviewable decision rather than a silent append.
+ *
+ * Enforced below, not just asserted here: GRANDFATHERED_COUNT pins the
+ * size so an append shows up as a loud, reviewer-visible diff instead of
+ * a one-line addition, and the "list stays honest" test below checks
+ * every entry still exists and still matches DESTRUCTIVE_DDL.
  */
 const GRANDFATHERED = new Set<string>([
   "0012_drop_exposure_events.sql",
@@ -38,11 +43,38 @@ const GRANDFATHERED = new Set<string>([
   "0098_font_face_content_hash.sql",
 ]);
 
+/** The frozen size of GRANDFATHERED. See the comment on GRANDFATHERED. */
+const GRANDFATHERED_COUNT = 12;
+
 describe("migration policy", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql"));
 
   it("finds migrations to check", () => {
     expect(files.length).toBeGreaterThan(0);
+  });
+
+  it("GRANDFATHERED is frozen at its original size", () => {
+    expect(
+      GRANDFATHERED.size,
+      `GRANDFATHERED has ${GRANDFATHERED.size} entries but is frozen at ` +
+        `${GRANDFATHERED_COUNT}. A new migration needing destructive DDL ` +
+        `takes the ${CONTRACT_MARKER} marker instead of an allowlist entry. ` +
+        `Bumping GRANDFATHERED_COUNT is only correct if a grandfathered ` +
+        `migration file was deleted from the repo.`,
+    ).toBe(GRANDFATHERED_COUNT);
+  });
+
+  it.each(Array.from(GRANDFATHERED))("GRANDFATHERED entry %s is still real and still destructive", (file) => {
+    expect(files.includes(file), `${file} is in GRANDFATHERED but no longer exists in ${MIGRATIONS_DIR}.`).toBe(
+      true,
+    );
+    const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf8");
+    expect(
+      DESTRUCTIVE_DDL.test(sql),
+      `${file} is in GRANDFATHERED but no longer matches DESTRUCTIVE_DDL. It is stale ` +
+        `and should be removed from the list, or it was added to silence something ` +
+        `the policy should have caught.`,
+    ).toBe(true);
   });
 
   it.each(files)("%s has no unmarked destructive DDL", (file) => {
