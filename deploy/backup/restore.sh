@@ -177,6 +177,19 @@ MANIFEST_ASSETS_ENCRYPTED=""
 # print_summary can name them in the consumer-group-reset warning.
 KAFKA_TABLES=()
 KAFKA_VIEWS=()
+# Parallel to KAFKA_TABLES (same index) — the kafka_group_name and
+# kafka_topic_list each table's own ENGINE = Kafka(...) settings carry.
+# print_clickhouse_gap_warning names THESE, not the table names: `rpk
+# group seek` operates on a consumer group + topic, not a ClickHouse
+# table, and an operator who has never opened
+# packages/db/clickhouse/migrations has no way to turn "revenue_queue"
+# into "rovenue-ch-revenue" / "rovenue.revenue" by themselves at 3am.
+KAFKA_GROUPS=()
+KAFKA_TOPICS=()
+# Set once by run_clickhouse_restore, read by print_clickhouse_gap_warning
+# so the printed DETACH/ATTACH statements name the actual database this
+# run restored into.
+RESTORED_CLICKHOUSE_DATABASE=""
 
 # Step tracking for on_exit's failure-state summary (Fix 2): once services
 # are stopped, ANY subsequent failure needs to tell the operator what did
@@ -521,12 +534,26 @@ discover_kafka_objects() {
 
   KAFKA_TABLES=()
   KAFKA_VIEWS=()
+  KAFKA_GROUPS=()
+  KAFKA_TOPICS=()
   [ -n "$tables" ] || return 0
 
-  local t view_names v
+  local t view_names v create_query group topic
   while IFS= read -r t; do
     [ -n "$t" ] || continue
     KAFKA_TABLES+=("$t")
+
+    # kafka_group_name / kafka_topic_list live inside the table's own
+    # ENGINE = Kafka(...) SETTINGS clause — read create_table_query back
+    # and pull them out rather than assuming the naming convention
+    # (rovenue-ch-<x> / rovenue.<x>) every pipeline happens to follow
+    # today still holds for a pipeline added later.
+    create_query="$(ch_query "SELECT create_table_query FROM system.tables WHERE database = '${database}' AND name = '${t}' FORMAT TSVRaw")"
+    group="$(printf '%s' "$create_query" | sed -nE "s/.*kafka_group_name[[:space:]]*=[[:space:]]*'([^']*)'.*/\\1/p" | head -n1)"
+    topic="$(printf '%s' "$create_query" | sed -nE "s/.*kafka_topic_list[[:space:]]*=[[:space:]]*'([^']*)'.*/\\1/p" | head -n1)"
+    KAFKA_GROUPS+=("${group:-unknown-group}")
+    KAFKA_TOPICS+=("${topic:-unknown-topic}")
+
     # Materialized views are discovered by their create_table_query
     # referencing this Kafka table's fully-qualified name — the naming
     # convention (mv_<x>_to_raw reading FROM <x>_queue) is consistent
@@ -588,6 +615,7 @@ run_clickhouse_restore() {
   if [ -n "$MANIFEST_CLICKHOUSE_DATABASE" ] && [ "$MANIFEST_CLICKHOUSE_DATABASE" != "$database" ]; then
     echo "    NOTE: manifest recorded database '$MANIFEST_CLICKHOUSE_DATABASE'; restoring into '$database' per this environment's CLICKHOUSE_DATABASE"
   fi
+  RESTORED_CLICKHOUSE_DATABASE="$database"
 
   local src="$FROM_DIR/$MANIFEST_CLICKHOUSE_FILE"
   [ -f "$src" ] || fail "clickhouse artifact named in the manifest not found: $src"
@@ -683,14 +711,47 @@ verify_restore() {
   fi
 }
 
+# Best-effort ISO-8601 (manifest createdAt, always UTC "Z") -> epoch
+# milliseconds, for the `rpk group seek --to timestamp:<ms>` examples
+# below. Tries GNU date, then BSD/macOS date; on any failure returns
+# non-zero and the caller falls back to printing the ISO string with an
+# instruction to convert it, rather than emitting a bad command.
+iso8601_to_epoch_ms() {
+  local iso="$1" epoch
+  if epoch="$(date -u -d "$iso" +%s 2>/dev/null)"; then
+    printf '%s000\n' "$epoch"
+    return 0
+  fi
+  if epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$iso" +%s 2>/dev/null)"; then
+    printf '%s000\n' "$epoch"
+    return 0
+  fi
+  return 1
+}
+
 # Names the manifest's createdAt and states, in one place an operator is
 # likely to actually read (the end-of-run summary), the gap risk from the
 # file header comment: everything dispatched between createdAt and the
 # outage that prompted this restore was already marked consumed in
 # Redpanda before the incident and will NOT come back on its own. Only
 # printed when there were Kafka tables to begin with.
+#
+# The remedy is a DETACH -> rpk seek -> ATTACH sandwich, not a bare `rpk
+# group seek`, because by the time this prints, attach_kafka_objects
+# above has ALREADY re-attached every table — an attached ClickHouse
+# Kafka Engine table is a live member of its consumer group, and Kafka
+# refuses AlterConsumerGroupOffsets against a group with active members.
+# Re-attach could not simply be skipped or deferred past this warning
+# either: db:verify:clickhouse (Guard 4, which already ran) needs the
+# tables attached to report live consumer state. So the operator detaches
+# again here, seeks, then re-attaches — the tables sit detached a second
+# time, briefly, on purpose.
 print_clickhouse_gap_warning() {
   [ "${#KAFKA_TABLES[@]}" -gt 0 ] || return 0
+  local database="${RESTORED_CLICKHOUSE_DATABASE:-$CLICKHOUSE_DATABASE_DEFAULT}"
+  local epoch_ms
+  epoch_ms="$(iso8601_to_epoch_ms "$MANIFEST_CREATED_AT" || true)"
+
   echo
   echo "WARNING: ClickHouse analytics gap between this backup and the outage."
   echo "  This backup's manifest was created at $MANIFEST_CREATED_AT. The Kafka consumer"
@@ -702,12 +763,31 @@ print_clickhouse_gap_warning() {
   echo "  Postgres either: outbox_events rows are deleted after dispatch, and every event in"
   echo "  that gap is by definition already dispatched."
   echo
-  echo "  REMEDY, before resuming the dispatcher: reset the Kafka consumer group for each of"
-  echo "  the following tables to an offset at or before $MANIFEST_CREATED_AT, so the gap"
-  echo "  replays:"
-  local t
-  for t in "${KAFKA_TABLES[@]}"; do
-    echo "    - $t"
+  echo "  PRECONDITION: this only works if Redpanda still HAS the offset at or before"
+  echo "  $MANIFEST_CREATED_AT — i.e. it hasn't aged out of the topic's retention window yet."
+  echo "  The longer the gap between the backup and this restore, the more likely retention"
+  echo "  has already dropped it; if 'rpk group seek' below reports the target offset is out"
+  echo "  of range, the gap cannot be replayed and is permanent as described above."
+  echo
+  echo "  REMEDY, before resuming the dispatcher — the tables below are currently ATTACHED"
+  echo "  (this restore already re-attached them so db:verify:clickhouse above could run),"
+  echo "  which makes each one a LIVE member of its consumer group; Kafka refuses an offset"
+  echo "  seek against a group with active members, so DETACH, seek, THEN re-ATTACH:"
+  echo
+  local i table group topic
+  for i in "${!KAFKA_TABLES[@]}"; do
+    table="${KAFKA_TABLES[$i]}"
+    group="${KAFKA_GROUPS[$i]}"
+    topic="${KAFKA_TOPICS[$i]}"
+    echo "    -- ${group} / ${topic} (table: ${database}.${table})"
+    echo "    DETACH TABLE ${database}.${table};   -- ClickHouse SQL"
+    if [ -n "$epoch_ms" ]; then
+      echo "    rpk group seek ${group} --to timestamp:${epoch_ms} --topic ${topic}"
+    else
+      echo "    rpk group seek ${group} --to timestamp:<${MANIFEST_CREATED_AT} as epoch ms> --topic ${topic}"
+    fi
+    echo "    ATTACH TABLE ${database}.${table};   -- ClickHouse SQL"
+    echo
   done
   echo "  This replay is safe specifically in this codebase: ClickHouse's revenue rollups"
   echo "  already use query-time idempotent views, built for at-least-once outbox delivery —"

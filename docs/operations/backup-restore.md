@@ -167,19 +167,48 @@ gap was already dispatched (that's why it isn't redelivered) — so there is no
 surviving copy anywhere to replay from except the one Redpanda still has, if
 you reset the offset before it ages out.
 
-**The remedy — do this before resuming the dispatcher.** Reset the Kafka
-consumer group for each restored Kafka table to an offset **at or before**
-the manifest's `createdAt`, so the T0–T1 window replays:
+**Precondition: Redpanda has to still have the offset.** The replay below
+only works if the T0-or-earlier offset hasn't aged out of the topic's
+retention window yet — the longer the gap between the backup and this
+restore, the more likely it already has. If `rpk group seek` reports the
+target offset is out of range, the gap is unrecoverable, full stop; there
+is no second remedy to fall back to.
+
+**The remedy — do this before resuming the dispatcher, and it is a
+DETACH → seek → ATTACH sandwich, not a bare `rpk group seek`.** By the time
+`restore.sh` prints this warning it has *already* re-attached every Kafka
+table (`db:verify:clickhouse`, which ran just before, needs them attached to
+report live consumer state) — and an attached ClickHouse Kafka Engine table
+is a live member of its consumer group. Kafka refuses
+`AlterConsumerGroupOffsets` against a group with active members, so seeking
+against an already-re-attached table fails on the first attempt. Detach it
+again, seek, then re-attach:
+
+```sql
+-- ClickHouse SQL, per table restore.sh named in its gap warning:
+DETACH TABLE rovenue.exposures_queue;
+```
 
 ```bash
-# For each table restore.sh printed in its gap warning, e.g. via rpk:
+# rpk operates on a consumer group + topic, not a ClickHouse table name —
+# restore.sh's warning prints both, extracted from the table's own
+# kafka_group_name/kafka_topic_list settings, not guessed from a naming
+# convention:
 rpk group seek rovenue-ch-exposures --to timestamp:<createdAt, ms epoch> --topic rovenue.exposures
 ```
 
-`restore.sh` prints this warning itself at the end of a successful run,
-naming the manifest's `createdAt` and listing exactly which Kafka tables
-need their consumer group reset — you do not need to reconstruct this from
-memory at 3am.
+```sql
+ATTACH TABLE rovenue.exposures_queue;
+```
+
+Repeat for each of the five Kafka pipelines that was actually restored
+(`exposures`, `revenue`, `credit`, `sdk-sessions`, `paywall-events` — not
+every backup necessarily has traffic on all five). `restore.sh` prints this
+warning itself at the end of a successful run, with the consumer group,
+topic **and** the DETACH/ATTACH statements already filled in per table (and
+the `createdAt` timestamp pre-converted to epoch milliseconds where the
+host's `date` supports it) — you do not need to reconstruct this from memory
+at 3am.
 
 **Why the replay is safe here specifically.** Replaying T0-and-earlier
 messages means some of them arrive a second time (anything between the
