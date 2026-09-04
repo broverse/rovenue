@@ -149,6 +149,44 @@ the Stripe call errored. `unregistered` = never attempted. Anything other
 than `active` fails quietly — the card form still works — so it has to be
 checked, not assumed.
 
+## 9. Paywall asset origin (self-host)
+
+Self-hosted installs serve paywall assets from the `minio` container started
+by `docker compose up` (§4) — reachable at `http://localhost:9002` for local
+dev, but a production deploy puts a real hostname in front of it.
+`deploy/caddy/conf.d/assets.caddy.example` is that Caddy block; it ships
+`.example` and does nothing until copied — only files ending in `.caddy` are
+imported (`deploy/caddy/Caddyfile`):
+
+    cp deploy/caddy/conf.d/assets.caddy.example deploy/caddy/conf.d/assets.caddy
+    # edit the hostname on the site line (assets.example.com) to your own
+    docker compose restart caddy
+
+The hostname cannot ship as a default: naming a site in a Caddyfile makes
+Caddy solicit an ACME certificate for it at startup, and a placeholder
+hostname would mean a failing challenge — and repeated failures against a
+rate-limited CA — on every install that never intended to serve assets
+through Caddy.
+
+Point `ASSET_PUBLIC_BASE_URL` at the same origin (including the bucket
+segment — the S3 API is path-style here), then verify the origin actually
+serves the headers it promises against a real uploaded asset:
+
+    ASSET_PUBLIC_BASE_URL=https://assets.example.com/rovenue-assets \
+      npx tsx scripts/verify-asset-headers.ts <projectId>/<assetId>.webp
+
+Expected:
+
+    PASS https://assets.example.com/rovenue-assets/<projectId>/<assetId>.webp
+      x-content-type-options: nosniff
+      etag: "…"
+      cache-control: public, max-age=31536000, immutable
+      content-type: image/webp
+
+A non-empty `FAIL` list means either the copy step above was skipped, or the
+Caddy block matches the wrong hostname — see the file's own comments for what
+each header is for.
+
 ## Invariants
 - **Single dispatcher:** only `api` has `OUTBOX_DISPATCHER_ENABLED=true`
   and stays `replicas: 1`. Workers force it `false`. Two dispatchers
