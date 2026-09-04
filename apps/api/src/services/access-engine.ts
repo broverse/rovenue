@@ -11,6 +11,53 @@ const ACCESS_GRANTING: ReadonlySet<PurchaseStatus> = new Set<PurchaseStatus>(
   ACCESS_GRANTING_STATUSES,
 );
 
+// Derived from the repo's return type rather than re-declared, so this
+// stays byte-for-byte identical to what `findPurchasesWithAccessIds`
+// actually returns without packages/db needing to export it separately.
+type PurchaseWithAccessIds = Awaited<
+  ReturnType<typeof drizzle.accessRepo.findPurchasesWithAccessIds>
+>[number];
+
+export interface DesiredAccess {
+  purchaseId: string;
+  expiresDate: Date | null;
+  store: Store;
+}
+
+/**
+ * The authoritative answer to "what access should this subscriber have
+ * right now", derived purely from their purchases. Pure and exported so
+ * the drift reconciler (workers/access-reconciliation.ts) checks against
+ * the EXACT function syncAccess writes from — a second implementation of
+ * this rule would rot against the first, which is the failure this
+ * codebase has already paid for in analytics.
+ */
+export function computeDesiredAccess(
+  purchases: PurchaseWithAccessIds[],
+  now: Date,
+): Map<string, DesiredAccess> {
+  const desired = new Map<string, DesiredAccess>();
+  for (const purchase of purchases) {
+    if (!ACCESS_GRANTING.has(purchase.status as PurchaseStatus)) continue;
+    if (purchase.expiresDate && purchase.expiresDate < now) continue;
+
+    for (const accessId of purchase.accessIds) {
+      const existing = desired.get(accessId);
+      if (
+        !existing ||
+        isLaterExpiry(purchase.expiresDate, existing.expiresDate)
+      ) {
+        desired.set(accessId, {
+          purchaseId: purchase.id,
+          expiresDate: purchase.expiresDate,
+          store: purchase.store,
+        });
+      }
+    }
+  }
+  return desired;
+}
+
 export interface ActiveAccessEntry {
   isActive: boolean;
   expiresDate: Date | null;
@@ -35,32 +82,7 @@ export async function syncAccess(subscriberId: string): Promise<void> {
       subscriberId,
     );
 
-    const now = new Date();
-    interface Target {
-      purchaseId: string;
-      expiresDate: Date | null;
-      store: Store;
-    }
-    const desired = new Map<string, Target>();
-
-    for (const purchase of purchases) {
-      if (!ACCESS_GRANTING.has(purchase.status as PurchaseStatus)) continue;
-      if (purchase.expiresDate && purchase.expiresDate < now) continue;
-
-      for (const accessId of purchase.accessIds) {
-        const existing = desired.get(accessId);
-        if (
-          !existing ||
-          isLaterExpiry(purchase.expiresDate, existing.expiresDate)
-        ) {
-          desired.set(accessId, {
-            purchaseId: purchase.id,
-            expiresDate: purchase.expiresDate,
-            store: purchase.store,
-          });
-        }
-      }
-    }
+    const desired = computeDesiredAccess(purchases, new Date());
 
     const current = await drizzle.accessRepo.findAllAccessBySubscriber(
       tx,
