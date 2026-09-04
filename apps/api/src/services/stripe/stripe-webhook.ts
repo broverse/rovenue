@@ -27,6 +27,10 @@ import {
 } from "./stripe-types";
 import { hasPaidOrAttachedACard } from "./payment-settled";
 import { guardStatusWrite } from "../subscription-transition-guard";
+import {
+  emitProductChanged,
+  pendingPlanChangeFields,
+} from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
@@ -718,6 +722,33 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
         stripeEventTime(ctx),
         guard.from,
       );
+
+      // A Stripe plan change keeps the SAME subscription id, so the plan
+      // change is visible only as the row's product moving — there is no
+      // new purchase row to notice, and `customer.subscription.updated`
+      // (the event that carries it) is deliberately absent from the flat
+      // normalization table because that table cannot tell a price change
+      // from a metadata touch. `guard.previous` is the before-image read
+      // under the same FOR UPDATE lock as the write; null means this is
+      // the subscription's first write, i.e. a new purchase.
+      // `changeType` is null: Stripe states no direction, and deriving one
+      // from the charged amount mislabels every prorated upgrade.
+      if (guard.apply && guard.previous) {
+        await emitProductChanged({
+          db: dbTx,
+          projectId: ctx.projectId,
+          subscriberId: subscriber.id,
+          purchaseId: result.purchase.id,
+          previousProductId: guard.previous.productId,
+          productId: result.product.id,
+          changeType: null,
+          // Same fallback `upsertPurchaseFromSubscription` uses: an event
+          // with no `created` still gets a timestamp on the emitted key.
+          // It must NOT be substituted into the guard's `eventTime` above,
+          // where `undefined` deliberately means "no ordering information".
+          now: stripeEventTime(ctx) ?? new Date(),
+        });
+      }
       return { ...result, statusApplied: guard.apply };
     },
   );
@@ -1321,6 +1352,38 @@ async function upsertPurchaseFromSubscription(
     subscription.metadata?.rovenue_presented_context,
   );
 
+  // `pending_update` is the only announced-but-not-effective item change
+  // carried on the Subscription object itself: Stripe parks the new items
+  // there when the update needs a payment (SCA) before it can apply. A
+  // change parked on a subscription SCHEDULE is deliberately NOT read —
+  // that needs a second API call from the webhook path, and a null here is
+  // honest where a guess would not be. Direction is null for the same
+  // reason it is everywhere outside Apple.
+  const pendingPriceId =
+    subscription.pending_update?.subscription_items?.[0]?.price.id ?? null;
+  const pendingProduct =
+    pendingPriceId != null && pendingPriceId !== priceId
+      ? await drizzle.offeringRepo.findProductByStoreId(
+          drizzle.db,
+          ctx.projectId,
+          "stripe",
+          pendingPriceId,
+        )
+      : null;
+  const pendingFields = pendingPlanChangeFields({
+    writtenProductId: product.id,
+    // An unmapped pending price leaves the columns null rather than
+    // violating the FK; the change still lands when Stripe applies it.
+    announcedProductId: pendingProduct?.id ?? null,
+    changeType: null,
+    // `billing_cycle_anchor` is the date of the first full invoice under
+    // the pending items — the closest thing Stripe states to "when this
+    // takes effect". Absent on an update that would apply immediately.
+    effectiveAt: subscription.pending_update?.billing_cycle_anchor
+      ? new Date(subscription.pending_update.billing_cycle_anchor * 1000)
+      : null,
+  });
+
   const purchase = await drizzle.purchaseRepo.upsertPurchase(db, {
     store: Store.STRIPE,
     storeTransactionId: subscription.id,
@@ -1351,6 +1414,7 @@ async function upsertPurchaseFromSubscription(
       // write) — `from` is null (no prior row), so this only ever stamps or
       // is a no-op, never clears.
       ...billingIssueStamp(null, status, eventTime ?? new Date()),
+      ...pendingFields,
     },
     update: {
       ...(applyStatus && eventTime ? { lastStoreEventAt: eventTime } : {}),
@@ -1358,6 +1422,18 @@ async function upsertPurchaseFromSubscription(
         ? {
             status,
             ...billingIssueStamp(guardFrom ?? null, status, eventTime ?? new Date()),
+            // Converge the denormalized product onto the subscription's
+            // current price. Stripe keeps the same subscription id across
+            // a plan change, so without this write the row would keep its
+            // first-seen product forever — and the before-image comparison
+            // in the caller would re-fire `subscription.product_changed`
+            // on every later delivery. Withheld alongside `status`: a
+            // replayed event must not repaint a row the guard protected.
+            productId: product.id,
+            // Same gate, same reason: the pending columns are a projection
+            // of what the store says NOW, so a stale or illegal delivery
+            // must not repaint them either.
+            ...pendingFields,
           }
         : {}),
       isTrial,

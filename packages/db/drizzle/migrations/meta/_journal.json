@@ -820,6 +820,13 @@
       "when": 1788471031535,
       "tag": "0116_subscriber_sdk_installed_at",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1788520723283,
+      "tag": "0117_purchase_pending_plan_change",
+      "breakpoints": true
     }
   ]
 }

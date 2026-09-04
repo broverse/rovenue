@@ -982,6 +982,26 @@ export const purchases = pgTable(
     billingIssueDetectedAt: timestamp("billingIssueDetectedAt", {
       withTimezone: true,
     }),
+    // The product this subscription will renew into, when the store has
+    // told us a change is scheduled but not yet effective (Apple
+    // renewalInfo.autoRenewProductId, Google's deferred item replacement,
+    // Stripe's pending update item). A pending downgrade NEVER revokes
+    // access early — the old row is expired only when the store says it
+    // was actually superseded, never on intent. All three are a
+    // projection of the store's live announcement, rewritten together on
+    // every guarded sync (see `pendingPlanChangeFields`), so a change
+    // that took effect or was reverted clears itself.
+    //
+    // `pendingChangeType` is plain text holding a `PlanChangeType`
+    // ("UPGRADE" | "DOWNGRADE") or NULL, deliberately NOT a pgEnum: only
+    // Apple states a direction, so the column is null for most rows, and
+    // a text column keeps a future store's vocabulary from needing an
+    // enum migration.
+    pendingProductId: text("pendingProductId").references(() => products.id),
+    pendingChangeType: text("pendingChangeType"),
+    pendingChangeEffectiveAt: timestamp("pendingChangeEffectiveAt", {
+      withTimezone: true,
+    }),
     // Opaque paywall-attribution snapshot the SDK/webhook supplied at
     // purchase time: { placementId, paywallId, variantId?, experimentKey? }.
     // Never validated against live placement/paywall/experiment rows —

@@ -39,6 +39,11 @@ import {
   type AppleNotificationVerifier,
 } from "./apple-verify";
 import { guardStatusWrite } from "../subscription-transition-guard";
+import {
+  applePlanChangeType,
+  emitProductChanged,
+  pendingPlanChangeFields,
+} from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
 import { audit } from "../../lib/audit";
 import { expireSupersededApplePurchases } from "./apple-supersede";
@@ -1057,6 +1062,25 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
 
   const environment = mapEnvironment(tx);
 
+  // Apple announces a scheduled plan change on `renewalInfo`: once the
+  // subscriber picks a different tier, `autoRenewProductId` names the
+  // product the NEXT renewal will charge for, while `transaction.productId`
+  // stays on the tier they are currently entitled to. That announcement is
+  // recorded, never acted on — a scheduled downgrade must not revoke the
+  // paid-up term (see `pendingPlanChangeFields`). An unmapped
+  // autoRenewProductId (the developer added a product to App Store Connect
+  // but not to Rovenue) leaves the pending columns null rather than
+  // violating the FK — the real change still lands at renewal.
+  const announcedProductId = await resolveAutoRenewProduct(ctx, tx.productId);
+  const changeType = applePlanChangeType(ctx.notification.subtype);
+  const pendingFields = pendingPlanChangeFields({
+    writtenProductId: product.id,
+    announcedProductId,
+    changeType,
+    // Apple applies the change when the current term ends.
+    effectiveAt: tx.expiresDate ? new Date(tx.expiresDate) : null,
+  });
+
   // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
   // is held across the write (mechanism (a)); upsertPurchase also
   // CASE-guards the terminal status at SQL level (mechanism (b)).
@@ -1099,6 +1123,7 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           ownershipType: tx.inAppOwnershipType,
           verifiedAt: new Date(),
           lastStoreEventAt: eventTime,
+          ...pendingFields,
         },
         update: {
           ...(guard.apply
@@ -1106,6 +1131,18 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
                 status,
                 lastStoreEventAt: eventTime,
                 ...billingIssueStamp(guard.from, status, eventTime),
+                // Converge the denormalized product onto what the store
+                // says this transaction is now for. Without this write the
+                // row keeps its first-seen product forever, and the
+                // before-image comparison below would re-fire
+                // `subscription.product_changed` on every later delivery.
+                // Withheld alongside `status`: a replayed event must not
+                // repaint the product of a row the guard just protected.
+                productId: product.id,
+                // Same gate, same reason: the pending columns are a
+                // projection of what the store says NOW, so a stale or
+                // illegal delivery must not repaint them either.
+                ...pendingFields,
               }
             : {}),
           autoRenewStatus,
@@ -1113,11 +1150,59 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           verifiedAt: new Date(),
         },
       });
+
+      // A plan change is the product on this purchase actually moving —
+      // not the store merely announcing one (that is `pendingFields`).
+      // `guard.previous` is the before-image read under the same FOR
+      // UPDATE lock as the write, so this cannot race a concurrent
+      // delivery. Null `previous` = first write for this transaction,
+      // which is a new purchase, not a change.
+      if (guard.apply && guard.previous) {
+        await emitProductChanged({
+          db: dbTx,
+          projectId: ctx.projectId,
+          subscriberId,
+          purchaseId: persisted.id,
+          previousProductId: guard.previous.productId,
+          productId: product.id,
+          changeType,
+          now: eventTime,
+        });
+      }
       return { purchase: persisted, statusApplied: guard.apply };
     },
   );
 
   return { product, purchase, statusApplied };
+}
+
+/**
+ * Map Apple's `renewalInfo.autoRenewProductId` onto a Rovenue product id,
+ * or null when Apple names no future product, names the one already in
+ * force, or names one this project has not mapped.
+ */
+async function resolveAutoRenewProduct(
+  ctx: DispatchContext,
+  currentStoreProductId: string,
+): Promise<string | null> {
+  const autoRenewProductId = ctx.renewalInfo?.autoRenewProductId;
+  if (!autoRenewProductId || autoRenewProductId === currentStoreProductId) {
+    return null;
+  }
+  const pendingProduct = await drizzle.offeringRepo.findProductByStoreId(
+    drizzle.db,
+    ctx.projectId,
+    "apple",
+    autoRenewProductId,
+  );
+  if (!pendingProduct) {
+    log.debug("autoRenewProductId is not mapped to a Rovenue product", {
+      projectId: ctx.projectId,
+      autoRenewProductId,
+    });
+    return null;
+  }
+  return pendingProduct.id;
 }
 
 interface GrantAccessArgs {

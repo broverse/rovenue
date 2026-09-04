@@ -35,6 +35,10 @@ import {
 } from "./google-verify";
 import { resolveSubscriptionPricing } from "./google-pricing";
 import { guardStatusWrite } from "../subscription-transition-guard";
+import {
+  emitProductChanged,
+  pendingPlanChangeFields,
+} from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
@@ -282,6 +286,24 @@ async function processSubscriptionNotification(
     regionCode: purchase.regionCode,
   });
 
+  // A DEFERRED replacement keeps the SAME purchase token and leaves
+  // `lineItems[0].productId` on the tier still in force, naming the future
+  // product on `deferredItemReplacement` instead. Record it; never act on
+  // it. Google states no direction, so `changeType` is null — deriving one
+  // from price is unsound (a prorated charge is not a list price).
+  const announcedProductId = await resolveDeferredProduct(
+    ctx,
+    lineItem?.deferredItemReplacement?.productId,
+    productId,
+  );
+  const pendingFields = pendingPlanChangeFields({
+    writtenProductId: product.id,
+    announcedProductId,
+    changeType: null,
+    // The deferred product starts charging when the current term ends.
+    effectiveAt: expiresDate,
+  });
+
   // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
   // is held across the write (mechanism (a)); upsertPurchase also
   // CASE-guards the terminal status at SQL level (mechanism (b)).
@@ -330,6 +352,7 @@ async function processSubscriptionNotification(
         // the very first insert. `from` is null (no prior row), so this
         // only ever stamps or is a no-op, never clears.
         ...billingIssueStamp(null, status, eventTime),
+        ...pendingFields,
       },
       update: {
         ...(decided.apply
@@ -337,6 +360,18 @@ async function processSubscriptionNotification(
               status,
               lastStoreEventAt: eventTime,
               ...billingIssueStamp(decided.from, status, eventTime),
+              // Converge the denormalized product onto the live line item.
+              // A deferred replacement keeps the same purchase token, so
+              // without this write the row would keep the pre-change
+              // product forever — and the before-image comparison below
+              // would re-fire `subscription.product_changed` on every
+              // later RTDN. Withheld alongside `status`: a stale delivery
+              // must not repaint a row the guard just protected.
+              productId: product.id,
+              // Same gate, same reason: the pending columns are a
+              // projection of what the store says NOW, so a stale or
+              // illegal delivery must not repaint them either.
+              ...pendingFields,
             }
           : {}),
         expiresDate,
@@ -349,6 +384,26 @@ async function processSubscriptionNotification(
         verifiedAt: new Date(),
       },
     });
+
+    // The product on this token actually moved (a deferred change that
+    // came due, or a same-token plan swap) — not merely announced.
+    // `decided.previous` is the before-image read under the same FOR
+    // UPDATE lock; null means this is the token's first write, i.e. a new
+    // purchase rather than a change. An upgrade/downgrade that issues a
+    // NEW token does not come through here at all: it inserts a fresh row
+    // and retires the old one via `linkedPurchaseToken` below.
+    if (decided.apply && decided.previous) {
+      await emitProductChanged({
+        db: dbTx,
+        projectId: ctx.projectId,
+        subscriberId: subscriber.id,
+        purchaseId: row.id,
+        previousProductId: decided.previous.productId,
+        productId: product.id,
+        changeType: null,
+        now: eventTime,
+      });
+    }
     return { persisted: row, guard: decided };
   });
 
@@ -445,6 +500,40 @@ async function processSubscriptionNotification(
   }
 
   return { subscriberId: subscriber.id, purchaseId: persisted.id };
+}
+
+/**
+ * Map a Google deferred item replacement onto a Rovenue product id, or
+ * null when there is no deferred change, it names the product already in
+ * force, or this project has not mapped it. An unmapped product must not
+ * be written — the column carries an FK, and the real change still lands
+ * at the renewal that actually swaps the line item.
+ */
+async function resolveDeferredProduct(
+  ctx: SubscriptionCtx,
+  deferredStoreProductId: string | undefined,
+  currentStoreProductId: string,
+): Promise<string | null> {
+  if (
+    !deferredStoreProductId ||
+    deferredStoreProductId === currentStoreProductId
+  ) {
+    return null;
+  }
+  const pendingProduct = await drizzle.offeringRepo.findProductByStoreId(
+    drizzle.db,
+    ctx.projectId,
+    "google",
+    deferredStoreProductId,
+  );
+  if (!pendingProduct) {
+    log.debug("deferred replacement product is not mapped", {
+      projectId: ctx.projectId,
+      deferredStoreProductId,
+    });
+    return null;
+  }
+  return pendingProduct.id;
 }
 
 async function ensureAcknowledged(

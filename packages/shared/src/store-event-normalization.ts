@@ -65,21 +65,34 @@ import type { RovenueEventKey } from "./integrations";
 //   unconditionally, with no comparison against the prior value). Same
 //   judgment: drop rather than guess.
 //
-//   STILL DROPPED as of the same pass that resolved the Apple row above:
-//   the prior `cancel_at_period_end`/`autoRenewStatus` value is still not
+//   THE BEFORE-IMAGE NOW EXISTS, AND STILL DOESN'T BELONG HERE.
+//   `guardStatusWrite` (subscription-transition-guard.ts) now returns
+//   `previous` — `{ status, productId, autoRenewStatus }` read under the
+//   same FOR UPDATE lock as the write — so the delta this row wanted is
 //   reachable at `syncSubscription`/`upsertPurchaseFromSubscription`
-//   (stripe-webhook.ts) without widening a shared utility.
-//   `guardStatusWrite` (subscription-transition-guard.ts) locks and reads
-//   the prior row via `lockPurchaseStatusByStoreTransaction`, but that
-//   query only selects `id, status, lastStoreEventAt` — not
-//   `autoRenewStatus` — and it backs every store's status-guard path
-//   (Apple, Google, Stripe, refunds, google-supersede), not just this
-//   one. `upsertPurchaseFromSubscription`'s write is a single
-//   `INSERT … ON CONFLICT DO UPDATE`, which never reads the row it is
-//   about to overwrite either. Widening either one to smuggle the prior
-//   value through is exactly the wider refactor this row is not worth
-//   forcing — a row that misclassifies half its deliveries is worse than
-//   no row. Reinstating this one still requires that follow-up.
+//   (stripe-webhook.ts) after all. What that changed is WHERE the
+//   product-change signal is produced, not this table:
+//   `subscription.product_changed` is emitted directly by
+//   `emitProductChanged` (apps/api/src/services/subscription-plan-change.ts)
+//   from inside the guarded upsert's transaction, for all three stores,
+//   and only when the product on the purchase ACTUALLY moved.
+//
+//   This table cannot express that condition and is not being asked to.
+//   It is keyed by store event type alone: "a `customer.subscription.
+//   updated` arrived" is not "the plan changed", and mapping it here would
+//   fire on every metadata touch. The rows it does carry below stay —
+//   they announce that a store said a change is coming
+//   (DID_CHANGE_RENEWAL_PREF, SUBSCRIPTION_DEFERRED,
+//   SUBSCRIPTION_PRICE_CHANGE_CONFIRMED), which is a different and still
+//   useful fact, and covers the Apple DOWNGRADE case that takes effect at
+//   the next renewal and so performs no purchase write today.
+//
+//   `cancel_at_period_end` remains dropped for the original reason: the
+//   guard's `previous.autoRenewStatus` answers "did auto-renew flip", but
+//   the flip is written unconditionally by the handler, so reinstating the
+//   row means teaching THIS event-type-keyed table a per-delivery
+//   condition it has no place to hold. Same judgment as before: a row that
+//   misclassifies half its deliveries is worse than no row.
 export const STORE_EVENT_TO_PUBLIC_KEY: Record<string, RovenueEventKey> = {
   // Apple App Store Server Notifications v2 (notificationType)
   DID_FAIL_TO_RENEW: "subscription.billing_issue",

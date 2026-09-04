@@ -175,6 +175,16 @@ export interface GoogleSubscriptionPurchaseLineItem {
     offerId?: string;
     offerTags?: string[];
   };
+  /**
+   * Set when the subscriber changed plan with replacement mode DEFERRED:
+   * the purchase token and `productId` above stay on the tier still in
+   * force, and this names the product the NEXT renewal will charge for.
+   * Recorded as a pending change, never acted on — the current term is
+   * paid for and must not be revoked early.
+   */
+  deferredItemReplacement?: {
+    productId?: string;
+  };
 }
 
 export interface GoogleSubscriptionPurchaseV2 {
