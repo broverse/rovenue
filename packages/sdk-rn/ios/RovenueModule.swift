@@ -82,6 +82,10 @@ public class RovenueModule: Module {
     private var changesTask: Task<Void, Never>?
     private var funnelClaimsTask: Task<Void, Never>?
     private var logUnsubscribe: (() -> Void)?
+    /// The appVersion `configure` actually resolved — either the one JS
+    /// passed or the one auto-read from the host bundle. Read back by
+    /// `getAppVersion`. Mirrors `RovenueModule.kt`'s `resolvedAppVersion`.
+    private var resolvedAppVersion: String?
 
     public func definition() -> ModuleDefinition {
         Name("Rovenue")
@@ -109,7 +113,7 @@ public class RovenueModule: Module {
             }()
             let resolved = appVersion
                 ?? Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-            resolvedAppVersion = resolved
+            self.resolvedAppVersion = resolved
             try rovenueCallSync {
                 try Rovenue.configure(
                     apiKey: apiKey,
@@ -125,7 +129,7 @@ public class RovenueModule: Module {
         // `maxAppVersion` gating runs in JS and would otherwise be inert
         // for the documented default (callers are told to omit appVersion
         // and let the native side auto-read it).
-        Function("getAppVersion") { () -> String? in resolvedAppVersion }
+        Function("getAppVersion") { () -> String? in self.resolvedAppVersion }
 
         // The React Native paywall renders through the SwiftUI view rather
         // than a JS component tree — see the 2026-07-25 bridge design.
@@ -278,10 +282,34 @@ public class RovenueModule: Module {
             // JS sends the lowercase DTO string; reconstruct the façade
             // enum. The façade re-resolves the real StoreKit product by
             // id, so displayName/price are not needed here.
+            let type = Self.productType(from: productType)
             let product = StoreProduct(
                 id: productId,
-                type: Self.productType(from: productType),
-                displayName: ""
+                type: type,
+                // Inert for `purchase` (the façade re-resolves the real
+                // product), but derived rather than hardcoded so it is never
+                // wrong. Mirrors rovenue_flutter_ios' HostApiImpl.swift.
+                productCategory: type == .subscription ? .subscription : .nonSubscription,
+                displayName: "",
+                description: nil,
+                priceString: nil,
+                price: nil,
+                currencyCode: nil,
+                subscriptionPeriod: nil,
+                subscriptionGroupIdentifier: nil,
+                isFamilyShareable: false,
+                introPrice: nil,
+                discounts: [],
+                isEligibleForIntroOffer: nil,
+                subscriptionOptions: nil,
+                defaultOption: nil,
+                pricePerWeek: nil,
+                pricePerMonth: nil,
+                pricePerYear: nil,
+                pricePerWeekString: nil,
+                pricePerMonthString: nil,
+                pricePerYearString: nil,
+                rawStoreProduct: nil
             )
             do {
                 let r: PurchaseResult
