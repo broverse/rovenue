@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<!--
+  Declares a `backups` disk and allow-lists it (plus its path) as a
+  destination for native BACKUP/RESTORE statements.
+
+  Without this, `BACKUP DATABASE ... TO Disk(...)` refuses with
+  "disk is not allowed for backups" — CH requires every backup
+  destination to be explicitly named here, it does not infer one from
+  the storage_configuration disks list.
+
+  The disk lives under /var/lib/clickhouse, which is the
+  rovenue_rovenue-clickhouse-data named volume (see docker-compose.yml's
+  clickhouse service) — durable across container recreation, but NOT
+  host-visible as a bind mount. deploy/backup/backup.sh copies the
+  resulting backup archive out of the container (docker cp) into the
+  host-side backup directory after BACKUP completes; it is not left to
+  accumulate on this disk.
+
+  This file is picked up automatically: docker-compose.yml already
+  mounts ./deploy/clickhouse/config.d into the clickhouse service at
+  /etc/clickhouse-server/config.d (read-only) — no compose change
+  needed. A container restart (or CH's own config-reload) is required
+  to pick up a newly-added file.
+-->
+<clickhouse>
+  <storage_configuration>
+    <disks>
+      <backups>
+        <type>local</type>
+        <path>/var/lib/clickhouse/backups/</path>
+      </backups>
+    </disks>
+  </storage_configuration>
+
+  <backups>
+    <allowed_disk>backups</allowed_disk>
+    <allowed_path>/var/lib/clickhouse/backups/</allowed_path>
+  </backups>
+</clickhouse>
