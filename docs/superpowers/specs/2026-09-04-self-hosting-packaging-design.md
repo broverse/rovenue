@@ -83,23 +83,45 @@ published image.
 (`window.__ROVENUE_CONFIG__ = {};`) so the dev server and any operator who
 never sets an env var both get a 200 rather than a console error.
 
-`deploy/dashboard/entrypoint.sh` (new) overwrites `/srv/config.js` at container
-start from the process environment, then `exec caddy run`. Values are emitted
-with `jq` (added to the runtime image via `apk add --no-cache jq`) — a value
-containing a quote or a newline must not be able to produce a syntactically
-broken `config.js`, and `printf` with manual escaping is exactly the kind of
-thing that works until someone sets a password-shaped value. Keys whose env var
-is unset are **omitted**, not emitted as `""`, because `host-mode.ts`
-distinguishes unset from empty.
+In a container, `config.js` is **served, not written**.
+`deploy/caddy/Caddyfile.dashboard` gains a handler that responds from Caddy's
+own environment placeholders:
 
-`deploy/caddy/Caddyfile.dashboard` gains `header /config.js Cache-Control
-"no-cache"` alongside the existing `index.html` rule. A cached `config.js`
-survives a redeploy that changed the API origin — the failure is a dashboard
-talking to the wrong host, with no error anywhere.
+```
+handle /config.js {
+    header Content-Type "application/javascript"
+    header Cache-Control "no-cache"
+    respond `window.__ROVENUE_CONFIG__={"apiUrl":"{$ROVENUE_API_URL:}", ...};`
+}
+```
 
-The dashboard container therefore needs a writable `/srv`. The Helm chart must
-not set `readOnlyRootFilesystem: true` on that pod; this is noted in the chart's
-values comments.
+Nothing touches the filesystem, so the pod can run with
+`readOnlyRootFilesystem: true`, and the runtime image stays a stock
+`caddy:2-alpine` with no added packages.
+
+The static build's own `config.js` is still in `/srv`, so the Caddyfile is
+restructured to route every path through explicit `handle` blocks with the
+`/config.js` block first — leaving `file_server` reachable for that path would
+make which copy wins depend on Caddy's directive ordering, and the wrong answer
+is a container serving the dev placeholder with every value empty.
+
+The cost is that Caddy's `{$VAR}` substitution is textual — it does no JSON
+escaping, so a value containing a quote would emit a broken bundle-config and
+the dashboard would fail to boot with a syntax error and no explanation. That
+is paid for by `deploy/dashboard/entrypoint.sh` (new), which runs **before**
+`exec caddy run` and validates each value against a strict pattern — absolute
+`http(s)` URL for `apiUrl` and `dashboardHost`, a closed enum for `hostMode`,
+`true|false` for `allowRegistration` — refusing to start and naming the
+offending variable on any violation. A bad value must fail at container start,
+loudly, rather than at first paint, silently.
+
+Unset variables use Caddy's `{$VAR:}` empty default and are normalised to
+`undefined` by `runtime-config.ts` — `host-mode.ts` distinguishes unset from
+empty, so the module treats `""` as absent rather than the caller having to.
+
+`Cache-Control: no-cache` on `/config.js` is not optional: a cached copy
+survives a redeploy that changed the API origin, and the failure is a dashboard
+silently talking to the wrong host.
 
 `VITE_*` build args stay in `apps/dashboard/Dockerfile` and in the root compose
 file so the build-from-source path is unchanged and existing deployments keep
@@ -113,12 +135,20 @@ without it, so every packaging path would otherwise need an operator to fetch
 two files by hand before the stack works — a guaranteed support burden on a
 one-command install.
 
-Apple's root CAs are public, freely redistributable trust anchors. They are
-**baked into the `rovenue-api` image** at build time: `apps/api/Dockerfile`
-fetches `AppleRootCA-G3.cer` and `AppleIncRootCertificate.cer`, verifies each
-against a pinned SHA-256 recorded in the Dockerfile, and copies them to
-`/etc/rovenue/apple-certs`. A checksum mismatch fails the build — a trust root
-that silently changed is not a thing to ship past.
+Apple's root CAs are public, freely redistributable trust anchors — roughly
+1 KB each, and already present in every operating system's trust store. They
+are **committed to `deploy/apple-certs/`** (`AppleRootCA-G3.cer`,
+`AppleIncRootCertificate.cer`) and `COPY`d into the `rovenue-api` image at
+`/etc/rovenue/apple-certs`.
+
+Committed, not fetched during the build. Downloading a trust anchor at build
+time — even with a pinned SHA-256, which does protect integrity — makes every
+release depend on `apple.com` being reachable and on that URL never moving,
+rules out offline and air-gapped builds, and hides the actual bytes from code
+review. In git the certificates are auditable, diffable, and a rotation is a
+reviewed commit rather than a checksum bump nobody can verify. A test asserts
+each file parses as a certificate and is not expired, so a bad vendored file
+fails CI rather than production JWS verification.
 
 `APPLE_ROOT_CERTS_DIR` defaults to that directory. The existing volume mount in
 the root compose file stays and still wins, so an operator with their own copy
@@ -156,6 +186,30 @@ into an afternoon.
 `helm push` to `oci://ghcr.io/broverse/charts`, using the same version as the
 tag. Chart version and app version move together; a chart that can reference an
 image tag that was never built is a support ticket waiting to happen.
+
+### 3.1 Supply chain
+
+Operators pull these images and run them against their production databases.
+That makes the release pipeline a security boundary, not a convenience.
+
+- **Signing.** Every image and the chart are signed with `cosign` using keyless
+  GitHub OIDC. The verification command (`cosign verify --certificate-identity
+  … --certificate-oidc-issuer …`) goes in the deployment runbook, so an
+  operator can check that what they pulled came from this workflow.
+- **Provenance and SBOM.** `docker/build-push-action` with
+  `provenance: mode=max` and `sbom: true`, so each image carries a SLSA
+  provenance attestation and an SPDX SBOM. An operator hit by a future
+  transitive CVE can answer "am I affected" from the image itself.
+- **Vulnerability gate.** A `trivy image --severity HIGH,CRITICAL --exit-code
+  1` step runs before the manifest is published. This is the mechanism that
+  turns the standing `sharp >= 0.35.3` floor (CVE-2026-33327/33328/35590/35591,
+  GIF/TIFF/VIPS loaders) from a remembered obligation into an enforced one —
+  the reason it is a gate and not a report.
+- **Pinned actions.** Every third-party GitHub Action is pinned by commit SHA,
+  not by tag. A moving tag on an action that has registry push credentials is
+  the shape of a real, repeated supply-chain compromise.
+- **Tag generation** uses `docker/metadata-action` rather than hand-rolled
+  shell, so the tag set is declarative and cannot drift between images.
 
 ## 4. Coolify template
 
@@ -208,6 +262,23 @@ there is only one value.
 **Observability services are omitted.** They are a compose profile today;
 Coolify has no profile concept and shipping eight extra containers by default
 would make the template look heavier than the product is.
+
+**Healthchecks are mandatory in this file.** Coolify gates a deployment as
+healthy on container healthchecks; a service without one is reported healthy
+the moment it starts, so a stack that boots and then dies looks like a
+successful install. Postgres, ClickHouse, Redpanda and Redis carry the
+healthchecks the root compose file already defines; `api` gets one on
+`/health`, and the static `dashboard`/`docs` servers get a root-path probe.
+
+**Minimum host sizing is stated at the top of the template and the README.**
+A one-click install that gets OOM-killed on a 2 GB VPS is the single most
+common self-host failure, and the numbers here are knowable rather than
+guessed: Redpanda is already pinned to `--smp=1 --memory=1G`, ClickHouse wants
+~2 GB to be comfortable, Postgres and Redis ~1 GB together, and the seven Node
+processes (api, dispatcher, four notification workers, migrate) ~1.5 GB.
+The template documents **4 vCPU / 8 GB RAM / 40 GB disk** as the supported
+minimum and names what to disable to fit smaller — which is a real answer, not
+a disclaimer.
 
 `deploy/coolify/README.md` covers submission to Coolify's service catalogue
 (the `# documentation:` / `# slogan:` / `# tags:` / `# logo:` header comments)
@@ -291,24 +362,72 @@ Two details carry over from hard-won compose experience:
 
 ### 5.5 Secrets
 
-Secrets are rendered from values, with `existingSecret` supported for
-external-secrets users.
+**`existingSecret` is the supported production path.** Auto-generation exists,
+but only as a convenience for `helm install` from a laptop, and the chart says
+so in `NOTES.txt` and the README.
 
-`ENCRYPTION_KEY` and `BETTER_AUTH_SECRET` are generated on first install when
-not supplied, guarded by `lookup` against the already-installed Secret:
+The reason that ordering is not arbitrary:
+
+`ENCRYPTION_KEY` and `BETTER_AUTH_SECRET`, when not supplied, are generated
+once and preserved across upgrades by reading back the already-installed
+Secret:
 
 ```
 {{- $existing := (lookup "v1" "Secret" .Release.Namespace $name) }}
 ```
 
-Without the `lookup`, `randAlphaNum`/`genPrivateKey` re-evaluate on every
-`helm upgrade` and rotate the key. For `BETTER_AUTH_SECRET` that logs every
-user out; for `ENCRYPTION_KEY` it makes every stored store-credential
-permanently undecryptable, on an upgrade that reported success. This is the
-single most damaging thing a Helm chart of this shape can get wrong, and it is
-called out in the chart README as well as in the template.
+Without the `lookup`, `randAlphaNum` re-evaluates on every `helm upgrade` and
+rotates the key. For `BETTER_AUTH_SECRET` that logs every user out; for
+`ENCRYPTION_KEY` it makes every stored store-credential permanently
+undecryptable, on an upgrade that reported success.
 
-`ENCRYPTION_KEY` is generated as hex to satisfy the API's validation.
+**But `lookup` is not a general solution, and presenting it as one would be the
+worst error in this chart.** `lookup` returns an empty map whenever there is no
+live cluster read — `helm template`, `helm install --dry-run`, and critically
+**Argo CD and Flux**, which render manifests with `helm template` and apply the
+result. Under GitOps the auto-generation branch therefore fires on *every
+sync*, producing exactly the catastrophe the `lookup` was added to prevent, on
+a schedule.
+
+So the chart takes both sides:
+
+- `NOTES.txt` and the README state plainly that **GitOps users must set
+  `existingSecret`**, with the failure spelled out rather than implied.
+- When `existingSecret` is unset, the rendered Secret carries
+  `helm.sh/resource-policy: keep` and an annotation recording that it was
+  auto-generated, so a Secret that already exists is never deleted by an
+  uninstall/reinstall cycle.
+- The api's own startup check already rejects a malformed `ENCRYPTION_KEY`; a
+  *rotated* one is indistinguishable from a correct one at boot, which is why
+  the §7 backup manifest fingerprint is the backstop that actually catches it.
+
+`ENCRYPTION_KEY` is generated as 64 hex characters to satisfy the API's
+`^[0-9a-fA-F]{64}$` validation.
+
+### 5.6 Chart hygiene
+
+Table stakes for a chart other people install, listed because a chart that
+omits them reads as unfinished regardless of how correct the rest is:
+
+- **`resources`** requests and limits on every workload, with defaults derived
+  from the sizing figures in §4 and each one overridable.
+- **`securityContext`**: `runAsNonRoot: true`, dropped capabilities, and
+  `readOnlyRootFilesystem: true`. This is free — `apps/api/Dockerfile:116`
+  already ends in `USER rovenue`, and §2.2's Caddy-served `config.js` removed
+  the last reason the dashboard needed a writable filesystem.
+- **`PodDisruptionBudget`** for the api Deployment only. Not for the
+  dispatcher: it is pinned to one replica by design, and a PDB there would
+  block node drains forever.
+- **No ServiceAccount permissions.** Nothing in Rovenue talks to the Kubernetes
+  API, so the chart creates a ServiceAccount with no RoleBinding and disables
+  token automounting. Stated explicitly so a reviewer does not have to infer it
+  from absence.
+- **`NOTES.txt`** printing the resolved URLs, the `existingSecret` warning
+  above, and the next steps (OAuth callbacks, asset-header check).
+- **`helm test` hook** hitting `/health` and the dashboard root, so
+  `helm test` is a real post-install verification rather than a no-op.
+- **README generated by `helm-docs`** from `values.yaml` comments, so the
+  documented values cannot drift from the actual ones.
 
 ## 6. Upgrade runbook
 
@@ -323,6 +442,35 @@ Content:
 - **Order of operations**, per install path: compose (`docker compose pull`,
   `docker compose run --rm migrate`, then `up -d`), Coolify (redeploy with the
   new tag), Helm (`helm upgrade` — the `pre-upgrade` Job handles ordering).
+
+### 6.1 Expand/contract: the migration policy the ordering implies
+
+Running migrations before the new pods roll out is necessary but not
+sufficient, and the gap is easy to miss because it looks like the ordering
+already solved it. During a rolling update **the old image is still serving,
+against the already-migrated schema.** A release that drops or renames a column
+breaks every old pod for the length of the rollout — on the Helm path, and on
+compose with `API_REPLICAS > 1`.
+
+The fix is a policy on the migrations, not a step in the runbook. Schema
+changes are **expand/contract**, in three releases:
+
+1. **Expand.** Add the new column/table, nullable or defaulted. Deploy. Old and
+   new code both work.
+2. **Migrate + dual-write.** New code writes both shapes and backfills. Deploy.
+3. **Contract.** Only once no running version reads the old shape: drop it.
+
+So `DROP COLUMN`, `NOT NULL` on an existing column, renames, and narrowing type
+changes may never appear in the same release that introduces their replacement.
+This lives in `docs/operations/upgrade.md` for operators and, more importantly,
+in `CONTRIBUTING.md` and the migration-authoring notes for contributors —
+the operator cannot fix a destructive migration, only the author can avoid
+writing one.
+
+The escape hatch is named too, because pretending it never happens is worse
+than documenting it: a release that genuinely cannot be expand/contract is
+marked **downtime-required** in its notes, and the runbook's procedure for
+those is scale-to-zero, migrate, scale-up.
 - **Migration routing.** `db:migrate` self-routes: a database with no migration
   history gets the fresh-install runner, anything with history goes to
   drizzle's migrator. **Never point `db:migrate:fresh` at a database that has
@@ -393,7 +541,38 @@ at backup time are lost. Named, not glossed.
   from one snapshot and others from another breaks it and there is no repair.
   Restore is whole-database only; the script does not offer a table selector.
 
-### 7.3 Restore order
+### 7.3 Backups are encrypted at rest
+
+A Rovenue Postgres dump contains subscriber records, device identifiers, email
+addresses and purchase history. This is a product with GDPR/KVKK export and
+anonymise tooling built in; producing an unencrypted copy of the entire
+subject database and dropping it on a disk would undo that at the first step.
+
+`backup.sh` encrypts each artifact with `age` (recipient from
+`BACKUP_AGE_RECIPIENT`), and refuses to run unencrypted unless
+`--allow-plaintext` is passed explicitly — available, because a local dump
+piped straight into a restore is a legitimate thing to do, but never the
+default. `restore.sh` decrypts with the corresponding identity.
+
+The age recipient is a *separate* key from `ENCRYPTION_KEY` and the document
+says so: reusing the application's data key as the backup key means one
+compromise loses both.
+
+### 7.4 ClickHouse restore must not resume consuming
+
+`BACKUP DATABASE rovenue` captures the Kafka Engine tables and their
+materialised views along with the data tables. On restore those tables start
+consuming from the Redpanda topic immediately, at whatever offset the consumer
+group happens to be at — re-ingesting events that the restored data tables
+already contain.
+
+`restore.sh` therefore restores with the Kafka-facing objects **detached**,
+lets the data land, and only then re-attaches them. This also interacts with
+the known hazard that recreating a Kafka-fed materialised view loses in-flight
+events: the script stops the `dispatcher` service for the duration, so the
+outbox holds rather than the topic dropping.
+
+### 7.5 Restore order
 
 Postgres → MinIO → ClickHouse. Postgres first because it is the only store the
 others are consistent *against*; ClickHouse last because the api may re-drive
@@ -404,13 +583,23 @@ refuses to run against a database with existing Rovenue tables unless
 Verification is part of restore, not a separate step: row counts on the tables
 named in the script, `db:verify:clickhouse`, and the asset-header check.
 
-### 7.4 Scheduling
+### 7.6 A backup nobody has restored is not a backup
+
+The document prescribes a **quarterly test restore into a throwaway
+environment**, and gives the procedure: restore, run `db:verify:clickhouse`,
+compare the row counts the script prints against the source, and check the
+audit chain verifies. This is a calendar obligation stated as one, not an
+aspiration — the failure mode being avoided is discovering a broken backup
+pipeline on the day it is needed.
+
+### 7.7 Scheduling
 
 The scripts carry no policy — they take paths and an optional `mc` remote alias,
-print what they did, and enforce only the two correctness guards in §7.2/§7.3
-(key fingerprint, whole-database restore). Scheduling belongs to the operator; the
-document gives a cron example and a compose `backup` profile, and states a
-retention recommendation without implementing rotation.
+print what they did, and enforce only the correctness guards named above: the
+key fingerprint (§7.2), the encryption default (§7.3), the detach/attach
+ordering (§7.4), and whole-database-only restore (§7.2). Scheduling belongs to
+the operator; the document gives a cron example and a compose `backup` profile,
+and states a retention recommendation without implementing rotation.
 
 ## 8. Asset response-header verification
 
@@ -460,6 +649,11 @@ path.
 §6 is written last because it must name the real commands for all three install
 paths.
 
+**§6.1 is the exception to that ordering** and should land first, before any of
+it. The expand/contract policy constrains what contributors may write in a
+migration, so every week it is unwritten is another migration authored without
+it. It is a `CONTRIBUTING.md` change and does not depend on anything else here.
+
 ## 10. Global constraints
 
 - No magic values. Image names, registry, default ports, tag patterns, retry
@@ -471,7 +665,14 @@ paths.
   exercised against a real MinIO container serving a real object. The Helm
   chart is validated with `helm template` plus `kubeconform` against real
   Kubernetes schemas, and a `helm lint` run — not by asserting the strings we
-  just wrote.
+  just wrote. The backup scripts are exercised by an actual backup-then-restore
+  against testcontainers Postgres and ClickHouse, comparing row counts; a
+  mocked `pg_dump` would prove only that the script calls it.
+- Every guarantee this spec claims has a mechanism, not a sentence. The
+  `sharp` floor is a CI gate (§3.1), not a note; the key-rotation hazard is a
+  fingerprint check (§7.2), not a warning; the build-time-config regression is
+  an ESLint rule (§2.1), not a convention. Where a claim has only a document
+  behind it, the document says so.
 - Existing deployments must keep working. Every change is additive: `VITE_*`
   build args stay, the compose bind mounts stay, `APPLE_ROOT_CERTS_DIR` keeps
   its override, and the root `docker-compose.yml` continues to build from
