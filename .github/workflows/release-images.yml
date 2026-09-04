@@ -1,0 +1,126 @@
+name: Release images
+
+# Tagged releases only. These are multi-arch builds, and the upgrade
+# runbook pins versions rather than commits, so there is nothing for a
+# per-push build to serve.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to build, e.g. v1.2.0"
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: broverse
+
+jobs:
+  build:
+    name: build ${{ matrix.image.name }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: rovenue-api, dockerfile: apps/api/Dockerfile, context: "." }
+          - { name: rovenue-dashboard, dockerfile: apps/dashboard/Dockerfile, context: "." }
+          - { name: rovenue-docs, dockerfile: apps/docs/Dockerfile, context: "." }
+          - { name: rovenue-postgres, dockerfile: deploy/postgres/Dockerfile, context: "deploy/postgres" }
+        platform: [linux/amd64, linux/arm64]
+        # Native runners, not QEMU: pnpm install + vite build under emulated
+        # arm64 runs into tens of minutes and turns a release into an
+        # afternoon.
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          echo "${{ steps.build.outputs.digest }}" > \
+            "/tmp/digests/${{ matrix.image.name }}-$(echo '${{ matrix.platform }}' | tr / -)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image.name }}-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  manifest:
+    name: manifest ${{ matrix.image }}
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: [rovenue-api, rovenue-dashboard, rovenue-docs, rovenue-postgres]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-${{ matrix.image }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.tag }}"
+          [ -z "$VERSION" ] && VERSION="${GITHUB_REF#refs/tags/}"
+          MINOR="$(echo "${VERSION#v}" | cut -d. -f1,2)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push the multi-arch manifest
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
+          DIGESTS=""
+          for f in /tmp/digests/${{ matrix.image }}-*; do
+            DIGESTS="$DIGESTS ${IMAGE}@$(cat "$f")"
+          done
+          # shellcheck disable=SC2086
+          docker buildx imagetools create \
+            -t "${IMAGE}:${{ steps.version.outputs.version }}" \
+            -t "${IMAGE}:${{ steps.version.outputs.minor }}" \
+            -t "${IMAGE}:latest" \
+            $DIGESTS
+          docker buildx imagetools inspect "${IMAGE}:${{ steps.version.outputs.version }}"
