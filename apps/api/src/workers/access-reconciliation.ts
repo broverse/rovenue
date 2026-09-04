@@ -76,6 +76,25 @@ const log = logger.child("access-reconciliation");
 // the act. It changes nothing else: the repair is identical either way,
 // because a wrong entitlement is wrong regardless of when it broke.
 // The scheduled job always runs with `backfill: false`.
+//
+// -------------------------------------------------------------
+// Re-sweeping after a circuit-breaker incident (`staleAfterMs`)
+// -------------------------------------------------------------
+//
+// A tripped breaker still stamps its candidates (see the stamp site for
+// why: an un-stamped batch would be re-selected in full forever and the
+// sweep could never measure the blast radius). The cost of that is on
+// the other side of the incident — once the operator has fixed the root
+// cause, the very subscribers the alert was about are marked "checked"
+// and sit out of the worklist for ACCESS_RECONCILE_STALE_AFTER_MS.
+//
+// `{ staleAfterMs: 0 }` is the override: it makes every subscriber
+// stale, so the recovery run reconsiders the slice the incident stamped
+// without anyone hand-writing UPDATE statements against `subscribers`.
+// Any smaller-than-default window works too (`staleAfterMs: 60_000` to
+// re-sweep the last minute's stamps). Like backfill mode this exists
+// for an operator at a terminal, not for the schedule, which always
+// uses the default.
 
 export const ACCESS_RECONCILIATION_QUEUE_NAME = "rovenue-access-reconciliation";
 
@@ -170,6 +189,9 @@ export interface AccessReconciliationResult {
   drift: Record<DriftClass, number>;
   /** Candidates whose detection or heal threw — left unstamped for retry. */
   errors: number;
+  /** Drifted subscribers whose heal turned out to be a no-op (a raced
+   *  detection). No audit row and no `healed` increment for these. */
+  noops: number;
 }
 
 interface SubscriberDrift {
@@ -188,17 +210,32 @@ interface AccessSummaryRow {
 
 export async function runAccessReconciliationSweep(
   now: Date = new Date(),
-  opts?: { dryRun?: boolean; backfill?: boolean },
+  opts?: { dryRun?: boolean; backfill?: boolean; staleAfterMs?: number },
 ): Promise<AccessReconciliationResult> {
   const dryRun = opts?.dryRun ?? false;
   const backfill = opts?.backfill ?? false;
-  const staleBefore = new Date(now.getTime() - ACCESS_RECONCILE_STALE_AFTER_MS);
+  // Operator override — see the module doc. `?? ` rather than `||` so an
+  // explicit 0 ("everything is stale, re-check the lot") survives.
+  const staleAfterMs = opts?.staleAfterMs ?? ACCESS_RECONCILE_STALE_AFTER_MS;
+  const staleBefore = new Date(now.getTime() - staleAfterMs);
 
   const candidates =
     await drizzle.accessRepo.selectAccessReconciliationCandidates(drizzle.db, {
       staleBefore,
       limit: MAX_SUBSCRIBERS_PER_SWEEP,
     });
+
+  if (candidates.length === MAX_SUBSCRIBERS_PER_SWEEP) {
+    // Exact, free signal that the worklist is bigger than one sweep can
+    // drain. Sustained, it means the population has outgrown
+    // MAX_SUBSCRIBERS_PER_SWEEP / REPEAT_EVERY_MS and the true re-check
+    // interval is now longer than ACCESS_RECONCILE_STALE_AFTER_MS
+    // claims — i.e. drift persists longer than the window promises.
+    log.warn(
+      "access reconciliation sweep filled its per-run cap — the worklist exceeds one sweep",
+      { cap: MAX_SUBSCRIBERS_PER_SWEEP },
+    );
+  }
 
   const drift: Record<DriftClass, number> = {
     missing_grant: 0,
@@ -214,6 +251,10 @@ export async function runAccessReconciliationSweep(
   // a verification error.
   const unverified = new Set<string>();
   let errors = 0;
+  // Detected as drifted, but `syncAccess` changed nothing — a detection
+  // that raced a concurrent write. Reported so the gap between
+  // `drifted` and `healed` is explained rather than mysterious.
+  let noops = 0;
 
   // -------------------------------------------------------------
   // Pass 1 — detect only, write nothing.
@@ -284,6 +325,26 @@ export async function runAccessReconciliationSweep(
           drizzle.db,
           entry.subscriberId,
         );
+
+        // A detection that raced a live webhook (see `detectDrift`'s
+        // note on snapshot isolation) resolves itself before the heal
+        // runs, so `syncAccess` writes nothing and before === after.
+        // Neither the counter nor the audit log should claim a repair
+        // that did not happen: `healed` would overstate the worker's
+        // effect, and a no-op row is permanent noise in a DB-enforced
+        // append-only table an operator reads to answer "what changed
+        // this subscriber's access, and why".
+        const beforeSummary = summarize(before);
+        const afterSummary = summarize(after);
+        if (sameAccess(beforeSummary, afterSummary)) {
+          noops += 1;
+          log.debug("drift resolved itself before the heal ran", {
+            subscriberId: entry.subscriberId,
+            classes: entry.classes,
+          });
+          continue;
+        }
+
         healed += 1;
         accessDriftHealedTotal.inc();
 
@@ -292,15 +353,27 @@ export async function runAccessReconciliationSweep(
         // actually held for the read-compute-insert. Passing `drizzle.db`
         // as a pseudo-tx would release that lock after the LOCK statement
         // itself, which is the one thing the chain cannot tolerate.
+        //
+        // `userId` MUST be "system", never null, even though the column
+        // is nullable and this is not a dashboard action. `writeChained`
+        // hashes `entry.userId` as given, but `verifyAuditChain`
+        // re-hashes the stored row with `row.userId ?? ""` — so a null
+        // here writes `"userId":null` into the canonical JSON and
+        // verifies as `"userId":""`, and every row this worker produced
+        // would report `bad_hash`, the chain's tamper signal. `audit_logs`
+        // is DB-enforced append-only, so such rows can never be repaired.
+        // Every other non-dashboard caller passes "system" for this
+        // reason; access-reconciliation.integration.test.ts pins it by
+        // running verifyAuditChain over a healed project.
         await audit({
           projectId: entry.projectId,
-          userId: null,
+          userId: "system",
           action: "access.drift_repaired",
           resource: "subscriber",
           resourceId: entry.subscriberId,
-          before: { access: summarize(before) },
+          before: { access: beforeSummary },
           after: {
-            access: summarize(after),
+            access: afterSummary,
             classes: entry.classes,
             source: SWEEP_SOURCE,
             backfill,
@@ -341,6 +414,7 @@ export async function runAccessReconciliationSweep(
     circuitBroken,
     drift,
     errors,
+    noops,
   };
   log.info("access reconciliation sweep complete", {
     ...result,
@@ -420,7 +494,13 @@ async function detectDrift(
 }
 
 /** Audit-sized projection of an access row — no ids or internal columns
- *  beyond what an operator needs to see what the repair changed. */
+ *  beyond what an operator needs to see what the repair changed.
+ *
+ *  Sorted, because `findAllAccessBySubscriber` has no ORDER BY and
+ *  Postgres is free to return the same rows in a different order after
+ *  a write. Two consumers depend on that being deterministic: the audit
+ *  row's canonical JSON hashes arrays positionally, and `sameAccess`
+ *  compares the two projections pairwise. */
 function summarize(
   rows: Array<{
     accessId: string;
@@ -429,12 +509,37 @@ function summarize(
     expiresDate: Date | null;
   }>,
 ): AccessSummaryRow[] {
-  return rows.map((r) => ({
-    accessId: r.accessId,
-    purchaseId: r.purchaseId,
-    isActive: r.isActive,
-    expiresDate: r.expiresDate?.toISOString() ?? null,
-  }));
+  return rows
+    .map((r) => ({
+      accessId: r.accessId,
+      purchaseId: r.purchaseId,
+      isActive: r.isActive,
+      expiresDate: r.expiresDate?.toISOString() ?? null,
+    }))
+    .sort(
+      (a, b) =>
+        a.accessId.localeCompare(b.accessId) ||
+        a.purchaseId.localeCompare(b.purchaseId),
+    );
+}
+
+/** Whether a heal actually changed anything. Compares the audit-shaped
+ *  projections rather than raw rows so it judges exactly what the audit
+ *  row would have recorded — a row differing only in `updatedAt` is not
+ *  a change worth a permanent entry. Both sides are sorted by
+ *  `summarize`, so this is order-independent. */
+function sameAccess(a: AccessSummaryRow[], b: AccessSummaryRow[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((row, i) => {
+    const other = b[i];
+    return (
+      other !== undefined &&
+      row.accessId === other.accessId &&
+      row.purchaseId === other.purchaseId &&
+      row.isActive === other.isActive &&
+      row.expiresDate === other.expiresDate
+    );
+  });
 }
 
 // =============================================================

@@ -224,10 +224,16 @@ describe("POST /webhooks/stripe/connect", () => {
     );
     // Revoking Rovenue's authority to move money must leave a trace in
     // the append-only audit chain regardless of which side triggered it.
+    //
+    // `userId` is "system", not null, even though no dashboard session
+    // did this: `writeChained` hashes the value as given while
+    // `verifyAuditChain` re-hashes it as `row.userId ?? ""`, so a null
+    // would make this row — and the project's whole chain after it —
+    // report `bad_hash` forever in a table that cannot be repaired.
     expect(auditFn).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "stripe.disconnected",
-        userId: null,
+        userId: "system",
         projectId: "proj_1",
       }),
       expect.anything(),
