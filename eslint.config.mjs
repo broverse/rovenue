@@ -2,6 +2,11 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
+// Keep in sync with eslint.config.restricted-syntax.mjs, which enforces
+// this same rule in isolation in CI (see that file for why).
+const VITE_ENV_MESSAGE =
+  "Read deployment config through lib/runtime-config.ts. Vite inlines VITE_* at build time, which a published image cannot override.";
+
 export default [
   {
     ignores: [
@@ -35,10 +40,22 @@ export default [
       "no-restricted-syntax": [
         "error",
         {
+          // import.meta.env.VITE_X
           selector:
             "MemberExpression[object.object.type='MetaProperty'][property.name=/^VITE_/]",
-          message:
-            "Read deployment config through lib/runtime-config.ts. Vite inlines VITE_* at build time, which a published image cannot override.",
+          message: VITE_ENV_MESSAGE,
+        },
+        {
+          // import.meta.env["VITE_X"]
+          selector:
+            "MemberExpression[object.object.type='MetaProperty'][computed=true][property.value=/^VITE_/]",
+          message: VITE_ENV_MESSAGE,
+        },
+        {
+          // const { VITE_X } = import.meta.env
+          selector:
+            "VariableDeclarator[init.type='MemberExpression'][init.object.type='MetaProperty'] > ObjectPattern > Property[key.name=/^VITE_/]",
+          message: VITE_ENV_MESSAGE,
         },
       ],
     },

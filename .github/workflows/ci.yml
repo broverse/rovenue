@@ -27,3 +27,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm build
       - run: pnpm test
+      # Enforces only the VITE_* no-restricted-syntax rule from
+      # eslint.config.mjs (spec §10's mechanism for keeping deployment-config
+      # reads inside lib/runtime-config.ts). Deliberately narrow: the full
+      # `eslint apps/dashboard/src` run is red on main today from pre-existing
+      # react-hooks/exhaustive-deps + no-irregular-whitespace failures that
+      # are out of scope here. See eslint.config.restricted-syntax.mjs.
+      - name: Lint - VITE_* restricted syntax
+        run: npx eslint -c eslint.config.restricted-syntax.mjs apps/dashboard/src
