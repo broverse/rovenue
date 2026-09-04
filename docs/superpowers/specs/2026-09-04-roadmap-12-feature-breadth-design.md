@@ -18,6 +18,16 @@ Investigation found item 1 already implemented end-to-end. Items 2–4 are real
 gaps of three quite different sizes. Each is an independent sub-project; they
 share no tables and no code, so they can be built and reviewed in any order.
 
+Revised 2026-09-04 after a best-practice pass against the repo's own patterns.
+The material change is §12.4: an earlier draft migrated all eight
+`createRevenueEvent` call sites to a wrapper and added a bespoke
+reconciliation sweeper. Both were rebuilds of mechanisms the codebase already
+has — the transactional outbox and its Kafka consumers — so the grant is now a
+consumer group on `rovenue.revenue` and the call sites are untouched. Smaller
+corrections in the same pass: §12.3's snapshot transaction was ordered so that
+a ClickHouse failure needed a compensating write, and neither worker metrics
+nor dashboard i18n were specified at all.
+
 ## Non-goals
 
 - No SDK-facing leaderboard score submission. Leaderboards stay derived from
@@ -55,6 +65,14 @@ share no tables and no code, so they can be built and reviewed in any order.
   `--concurrency=2`, strictly sequential.
 - Any new enum must be re-exported from `packages/db/src/drizzle/schema.ts`,
   or `drizzle-kit` emits a spurious `DROP TYPE` on the next generate.
+- Every new worker declares Prometheus counters in `apps/api/src/lib/metrics.ts`,
+  following the access-reconciliation worker's shape
+  (`accessDriftDetectedTotal` / `accessDriftHealedTotal` /
+  `accessDriftCircuitBreakerTotal`). A worker whose failures are only visible
+  in logs is not finished.
+- Every new dashboard string goes through an i18n `t()` key. No literal copy in
+  a component, and no template-literal key names — a key assembled at runtime
+  cannot be found by the extractor and ships as a missing translation.
 
 ---
 
@@ -137,6 +155,14 @@ A stream that receives a message it does not match does no work at all: no
 Postgres read, no ClickHouse read, no push. This is the point of the change —
 attribute writes are far more frequent than config CRUD, and waking every
 stream in a project on each one would be worse than the gap it closes.
+
+**Rolling deploys.** Both replica generations share the channel during a
+deploy. An old replica reads only `projectId` and ignores `subscriberIds`, so
+it treats a per-subscriber invalidation as project-wide: it over-invalidates,
+which is exactly today's behaviour, and never under-invalidates. A new replica
+reading an old project-wide message sees no `subscriberIds` and wakes every
+stream, also correct. The widening is therefore safe in both directions with
+no version gate.
 
 **New publisher.** `publishSubscriberInvalidation(projectId, subscriberIds)` in
 `apps/api/src/lib/config-invalidation.ts`, alongside the existing
@@ -264,7 +290,7 @@ locking.
 | `id` | cuid2 |
 | `seasonId` | FK → leaderboard_seasons, cascade |
 | `rank` | int, 1-based; unique with `seasonId` |
-| `subscriberId` | text; deliberately **not** an FK — a season's standings must survive a GDPR erase of the subscriber row |
+| `subscriberId` | text; deliberately **not** an FK — standings are a historical snapshot, and a closed season's numbers must not change or vanish because a subscriber row was later removed. (`anonymizeSubscriberRow` pseudonymises in place rather than deleting, so an FK would survive today's GDPR path — the point is not to depend on that.) |
 | `score` | numeric as text, to avoid float drift on USD sums and large credit totals |
 | `eventCount` | int |
 
@@ -280,16 +306,28 @@ repeatable job id). Each sweep:
    index to reject a concurrent duplicate; a unique violation here is expected
    under concurrency and is logged at debug, not error.
 2. **Close due seasons.** For each `ACTIVE` season with
-   `endsAt + LEADERBOARD_SNAPSHOT_SETTLE_MS <= now`:
-   - claim it with a conditional `UPDATE leaderboard_seasons SET status =
-     'CLOSED', closedAt = now WHERE id = $1 AND status = 'ACTIVE' RETURNING *`
-     — never a SELECT then an UPDATE, so two replicas cannot both close it;
-   - query ClickHouse for the top-N over `[startsAt, endsAt)` using the same
-     SQL the existing endpoints use, parameterised by metric;
-   - insert standings with `ON CONFLICT (seasonId, rank) DO NOTHING`, so a
-     crash partway through the insert re-runs cleanly;
-   - `audit()` the close inside the caller's transaction;
-   - open the next season starting at `endsAt`.
+   `endsAt + LEADERBOARD_SNAPSHOT_SETTLE_MS <= now`, in this order:
+   - **query ClickHouse first**, for the top-N over `[startsAt, endsAt)`,
+     using the same SQL the existing endpoints use, parameterised by metric.
+     Nothing has been written yet, so a ClickHouse failure here is a plain
+     retry: log, skip this season, pick it up on the next sweep.
+   - then, in **one Postgres transaction**: claim the season with a
+     conditional `UPDATE leaderboard_seasons SET status = 'CLOSED', closedAt =
+     now WHERE id = $1 AND status = 'ACTIVE' RETURNING *` (never a SELECT
+     followed by an UPDATE), insert the standings, `audit()` the close, and
+     open the next season starting at `endsAt`. A zero-row claim means another
+     replica won — abandon the transaction and move on.
+
+   The ordering matters. Claiming before querying would mean a ClickHouse
+   outage leaves a season marked `CLOSED` with no standings, recoverable only
+   by a compensating write that un-closes it. Querying first removes that
+   state from the design entirely: either the whole close commits or nothing
+   did. Two replicas may both run the query — a wasted read, and the loser's
+   claim returns zero rows.
+
+   Standings still insert `ON CONFLICT (seasonId, rank) DO NOTHING` for
+   belt-and-braces, but with the claim in the same transaction it can no
+   longer be reached by a partial write.
 
 **Why the settle delay.** ClickHouse is fed asynchronously through Kafka from
 the outbox. Snapshotting at the instant a season ends would freeze standings
@@ -299,6 +337,12 @@ be permanently wrong with no way to notice. The worker therefore waits
 the *next* season still starts exactly at `endsAt`, so there is no gap in
 coverage and no event falls between two seasons. The delay affects only when
 the frozen numbers appear, never which events they include.
+
+**Observability.** Counters in `apps/api/src/lib/metrics.ts`: seasons opened,
+seasons closed, and closes abandoned by reason (ClickHouse failure, lost
+claim). A lost claim is normal with multiple replicas; a rising ClickHouse
+failure count means seasons are drifting past their boundary unclosed, which
+is otherwise invisible until a user notices stale standings.
 
 ### API
 
@@ -327,6 +371,12 @@ this SQL is how a live leaderboard and its own archive end up disagreeing.
 a configured-leaderboards list alongside the existing ad-hoc range view, a
 create/edit form, and a season selector (Current | past seasons) that switches
 between `/current` and a frozen `standings` fetch.
+
+Every string is a new `t()` key: the form's field labels and help text, the
+metric and cadence option labels, the season selector, and the empty state for
+a leaderboard whose first season has not closed yet. Cadence and metric labels
+are looked up through an explicit key map, never by interpolating the enum
+value into a key name.
 
 ### Tests
 
@@ -368,11 +418,11 @@ expressible.
 
 ### Design
 
-**Schema** (migration `01xx_currency_grant_trigger.sql`): add
-`grantOn` to `product_currency_grants`, a new enum `CurrencyGrantTrigger` with
-values `PURCHASE`, `RENEWAL`, `BOTH`, `NOT NULL DEFAULT 'PURCHASE'`. Every
-existing row therefore keeps exactly today's behaviour, and the migration is
-inert on existing databases.
+**Schema** (migration `01xx_currency_grant_trigger.sql`): add `grantOn` to
+`product_currency_grants`, a new enum `CurrencyGrantTrigger` with values
+`PURCHASE`, `RENEWAL`, `BOTH`, `NOT NULL DEFAULT 'PURCHASE'`. Every existing
+row therefore keeps exactly today's behaviour, and the migration is inert on
+existing databases.
 
 **Service.** `grantPurchaseCurrencies` gains a required
 `trigger: "PURCHASE" | "RENEWAL"` argument and filters grants to rows whose
@@ -384,49 +434,85 @@ replaced by the honest condition — "does this product have grant rows matching
 this trigger". A subscription with no grant rows does nothing; the cost is one
 indexed lookup per event.
 
-**Wiring.** There are eight `createRevenueEvent` call sites across Apple,
-Google, Stripe, receipt verification, import, Google reconciliation and the
-expiry checker. Adding a grant call to each is the failure mode the
-store-lifecycle work already paid for once: a per-site mapping is not a
-delivery guarantee, and the ninth provider added next year will silently omit
-it.
+### Wiring: a consumer group, not a call-site migration
 
-Instead, a single `apps/api/src/services/record-revenue-event.ts` wrapper
-becomes the only way a revenue event is written. All eight sites migrate to
-it. It writes the event, then — for the granting types only — grants.
+The eight `createRevenueEvent` call sites are **not touched**. They already
+emit a `REVENUE_EVENT` outbox row in the same transaction as the domain write,
+and the outbox dispatcher already publishes it to the `rovenue.revenue` Kafka
+topic (`AGGREGATE_TO_TOPIC` in `apps/api/src/lib/outbox-topics.ts`). The
+renewal grant is a **consumer of that topic**, not a side effect bolted onto
+the writers.
 
-Granting types are `RENEWAL`, `TRIAL_CONVERSION` and `REACTIVATION`, hoisted
-to `RENEWAL_GRANT_EVENT_TYPES`. `INITIAL` is deliberately excluded: an initial
-subscription purchase is the `PURCHASE` trigger, and letting it match both
-would double-grant a `BOTH` row on day one.
+This is the repo's existing pattern, not a new one: `rovenue.revenue` is
+already consumed by the `rovenue-integrations-fanout` group in
+`apps/api/src/services/integrations-fanout/consumer.ts`. Renewal grants get
+their own group, `rovenue-renewal-grants`, so the two are independent — a slow
+or failing grant cannot stall integration delivery and vice versa.
 
-**Ordering and transactions.** `addCredits` opens its own transaction (it takes
-an advisory xact lock and writes ledger plus outbox rows), so it cannot run
-inside a caller's transaction. Several call sites are tx-bound. The wrapper
-therefore grants *after* the revenue-event write, outside any caller
-transaction. That is safe to retry, because `addCredits` dedupes on
+Rejected alternative, recorded so it is not re-proposed: a
+`record-revenue-event.ts` wrapper that all eight sites migrate to, plus a
+bespoke reconciliation sweeper for the crash window between the write and the
+grant. That rebuilds both halves of a mechanism the codebase already has, and
+puts a refactor through every store integration's money path to do it. The
+outbox exists precisely so that a domain write and its downstream effects are
+never two writes in one code path.
+
+**Consumer shape.** The consumer is thin and does no work of its own: parse
+the envelope, filter to granting types, enqueue a BullMQ job. The grant itself
+runs in `apps/api/src/workers/renewal-grant.ts` with BullMQ's retry policy and
+the existing dead-letter handling.
+
+That split is deliberate, and the existing fanout consumer is the reason. It
+catches its own errors, logs them and returns — which commits the Kafka offset
+and drops the message. That is correct for integration delivery, because the
+BullMQ layer behind it owns the retries. A consumer that granted credits
+inline with the same error handling would silently lose a grant on any
+transient database error, permanently and with no signal. So the retry
+boundary has to be BullMQ here too.
+
+**Payload.** No extra lookups are needed to decide whether to grant: the
+`revenue.event.recorded` payload (`publishRevenueEvent` in
+`apps/api/src/services/event-bus.ts`) already carries `revenueEventId`,
+`projectId`, `subscriberId`, `purchaseId`, `productId` and `type`.
+
+**Granting types** are `RENEWAL`, `TRIAL_CONVERSION` and `REACTIVATION`,
+hoisted to `RENEWAL_GRANT_EVENT_TYPES`. `INITIAL` is deliberately excluded: an
+initial subscription purchase is the `PURCHASE` trigger, and letting it match
+both would double-grant a `BOTH` row on day one.
+
+**Idempotency.** Kafka delivery is at-least-once and the outbox is
+at-least-once, so the same revenue event will sometimes arrive twice. The
+guarantee is `addCredits`'s dedup on
 `(referenceType: "renewal", referenceId: revenueEventId, currencyId)` — a
-distinct `referenceType` from the purchase path, so a consumable purchase and
-a renewal can never collide even if ids coincide.
+`referenceType` distinct from the purchase path, so a consumable purchase and
+a renewal can never collide even if their reference ids coincide.
 
-**The residual hole, and the sweeper.** If the process dies between the
-revenue-event write and the grant, the grant is lost with nothing to notice.
-`apps/api/src/workers/renewal-grant-reconciliation.ts` closes it, in the shape
-of the existing `access-reconciliation` worker: sweep revenue events of a
-granting type from the last `RENEWAL_GRANT_LOOKBACK_DAYS`, whose product has
-at least one `RENEWAL`/`BOTH` grant row, and for which no matching
-`credit_ledger` row exists; grant those. Because the grant is idempotent, the
-sweeper is safe to run continuously, and a bounded lookback keeps its query
-indexed rather than growing without limit.
+The BullMQ job id is derived from the outbox event id so an obvious
+redelivery collapses before it reaches the worker at all. That is an
+optimisation only: BullMQ retains completed job ids for a bounded window, so
+a redelivery arriving after eviction will re-run — which is safe precisely
+because `addCredits` is the real guarantee. The job id must never be the thing
+correctness rests on.
 
-The sweeper is not a substitute for the wrapper — it is the audit that proves
-the wrapper works. Its steady-state result should be zero, and a non-zero
-count is a signal worth a metric.
+**Kafka availability.** Renewal grants become asynchronous — typically seconds
+behind the renewal — and stall while Kafka is down, resuming from the
+committed offset when it returns. Consumable purchase grants stay inline and
+synchronous, unchanged. That asymmetry is accepted: `KAFKA_BROKERS` is a
+required production variable, and a stalled grant that resumes is strictly
+better than a dropped one. In a local dev environment with no `KAFKA_BROKERS`
+the consumer logs and disables itself, exactly as `startIntegrationsFanout`
+already does.
+
+**Observability.** `apps/api/src/lib/metrics.ts` gains counters in the style of
+the access-reconciliation worker's: grants applied, grants skipped as
+duplicates, and grant failures by reason. A rising duplicate count is normal
+(redelivery); a rising failure count is not.
 
 ### Dashboard
 
 The product editor's currency-grants section (`routes/dashboard/products.ts`
-and its dashboard counterpart) gains a per-row "grant on" selector. A grant
+and its dashboard counterpart) gains a per-row "grant on" selector, with new
+`t()` keys for the three trigger labels and the section's help text. A grant
 row on a non-subscription product cannot select `RENEWAL` or `BOTH` —
 validated server-side, not only in the form.
 
@@ -435,30 +521,35 @@ validated server-side, not only in the form.
 - `packages/db/src/drizzle/enums.ts` + `schema.ts` — `CurrencyGrantTrigger`,
   re-exported from `schema.ts`.
 - `packages/db/src/drizzle/repositories/product-currency-grants.ts` — trigger
-  filter; the sweeper's missing-grant query.
-- `apps/api/src/services/purchase-credits.ts` — trigger argument.
-- `apps/api/src/services/record-revenue-event.ts` — new wrapper.
-- Eight call sites migrated to the wrapper.
-- `apps/api/src/workers/renewal-grant-reconciliation.ts` — new.
-- `apps/api/src/routes/dashboard/products.ts` + dashboard form.
+  filter.
+- `apps/api/src/services/purchase-credits.ts` — trigger argument, replacing
+  the `CONSUMABLE` gate at the two existing call sites.
+- `apps/api/src/services/renewal-grants/consumer.ts` — new Kafka consumer.
+- `apps/api/src/queues/renewal-grants.ts` — queue name, job type, job id
+  derivation, retry policy.
+- `apps/api/src/workers/renewal-grant.ts` — new worker.
+- `apps/api/src/lib/metrics.ts` — counters.
+- `apps/api/src/routes/dashboard/products.ts` + dashboard form + i18n keys.
+
+Unchanged, deliberately: all eight `createRevenueEvent` call sites, and
+`apps/api/src/services/event-bus.ts`.
 
 ### Tests
 
 - Unit: the trigger matrix — `PURCHASE` rows grant only on purchase, `RENEWAL`
   only on renewal, `BOTH` on both, and `INITIAL` never takes the renewal path.
 - Unit: a subscription product with no grant rows performs no writes.
-- Integration (testcontainers Postgres): a renewal grants once; replaying the
-  same webhook grants nothing further. The replay must go through the real
-  webhook path, not a hand-built duplicate call — the dedup being tested is
-  the one a real Apple retry would hit.
-- Integration: the sweeper finds and repairs a revenue event whose grant was
-  dropped, and is a no-op on a second run.
-- A guard test that fails if a `createRevenueEvent` call appears outside
-  `record-revenue-event.ts` — the structural guarantee, enforced rather than
-  documented. Implemented as a source scan in the same spirit as the
-  `Partial<Record>` provider-coverage guard from the store-lifecycle work.
-
----
+- Unit: the consumer enqueues rather than granting inline, and a worker
+  failure surfaces to BullMQ instead of being swallowed. This is the property
+  that distinguishes it from the fanout consumer, so it is asserted directly.
+- Integration (testcontainers Postgres): the worker grants once; running it
+  again with the same `revenueEventId` grants nothing further. The second run
+  must go through the real job path, not a hand-built duplicate call — the
+  dedup being tested is the one a real Kafka redelivery would hit.
+- Integration (testcontainers Postgres + Kafka): write a renewal revenue
+  event through a real provider path, let the outbox dispatcher publish it,
+  and assert the balance moves. This is the only test that proves the wiring
+  end to end; everything above pins a piece of it.
 
 ## Sequencing
 
@@ -466,22 +557,33 @@ The three sub-projects are independent. Recommended order, cheapest proof
 first:
 
 1. §12.1 regression test (small, closes a checkbox immediately)
-2. §12.4 renewal grants (schema + wrapper + sweeper; highest user value)
+2. §12.4 renewal grants (schema + consumer + worker; highest user value)
 3. §12.2 real-time audiences (subtle, but contained)
 4. §12.3 leaderboard seasons (largest; three tables, a worker and UI)
 
 ## Risks
 
-- **§12.4's eight-site migration** is the biggest blast radius in this spec.
-  It touches every store integration's money path. The guard test is what
-  makes it safe to do at all; without it the migration is worse than the
-  problem. Each site's existing tests must stay green unmodified — if a test
-  needs changing to accommodate the wrapper, that is a behaviour change and
-  needs explaining, not editing.
+- **§12.4 is now asynchronous.** Routing grants through `rovenue.revenue`
+  removed the eight-call-site refactor and its blast radius, and replaced it
+  with a delivery delay: a renewal's credits land seconds later, and not at
+  all while Kafka is down. The failure mode is *late*, never *lost* — the
+  offset is only committed once the job is enqueued. This is worth stating in
+  the docs the same way the leaderboard freshness budget already is, because
+  a support question about "my coins are missing" needs a documented answer.
+- **§12.4's grant path is not yet exercised by a Kafka test.** Everything else
+  in this repo that consumes `rovenue.revenue` is integration delivery, which
+  is allowed to drop a message. The end-to-end testcontainers Kafka test is
+  the one that proves this consumer is not, and it is not optional.
 - **§12.3's ClickHouse dependency.** The worker reads ClickHouse and writes
-  Postgres. A ClickHouse outage must leave the season `ACTIVE` and retry, not
-  close it with empty standings. The claim happens before the query, so this
-  needs explicit handling: on query failure, roll the claim back.
+  Postgres. The design orders the query before the claim precisely so that a
+  ClickHouse outage leaves the season `ACTIVE` with nothing written; the risk
+  is that a later refactor reorders them and reintroduces a half-closed
+  season. The integration test that kills ClickHouse mid-sweep is what keeps
+  that ordering honest.
 - **§12.2's coalescing window** trades push latency for push volume. If it is
   set too high, "real-time" stops being true. It is a named constant so it can
-  be tuned without a code change in more than one place.
+  be tuned in one place.
+- **Migration numbering collides with parallel work.** `0119` landed while
+  this spec was being written. Each sub-project should generate its migration
+  immediately before implementing it, not up front, and re-check the current
+  head first.
