@@ -86,6 +86,19 @@ The optional `locale` selects which localization of the remote config you
 receive. If the requested locale isn't configured, the paywall's default
 locale is served; `remoteConfigLocale` tells you which one you got.
 
+<Callout title="Builder paywalls resolve the locale on the device">
+A **builder** paywall ships every localization in its payload, so the
+`?locale` query parameter only slices the legacy `remoteConfig` field. Which
+language a buyer sees is decided on the device, from the `locale` you pass to
+`getPaywall` / the paywall view.
+
+Text resolves by **language**, not by exact tag: the requested tag is tried
+first, then each shorter prefix, then the paywall's default locale. So
+`pt-BR` finds a `pt` table, and `zh-Hans-CN` finds `zh-Hans` and then `zh`.
+Matching is case-insensitive, because BCP-47 tags are. Pass the device locale
+as the device reports it — you do not need to normalise it first.
+</Callout>
+
 ## How a placement resolves
 
 In the dashboard a placement is an ordered list of audience rows. The first
@@ -530,6 +543,78 @@ export function registerLottieRenderer(render: LottieRenderer | null): void;
 
 </Tab>
 </Tabs>
+
+## Footer links
+
+Every shipping paywall ends with the same row of fine print — Restore
+Purchases, Terms, Privacy. `footerLinks` is that row as one node, rather than
+a stack of small buttons:
+
+```json
+{
+  "type": "footerLinks",
+  "id": "footer",
+  "links": [
+    { "labelKey": "f_restore", "action": { "kind": "restore" } },
+    { "labelKey": "f_terms",   "action": { "kind": "url", "url": "https://example.com/terms" } },
+    { "labelKey": "f_privacy", "action": { "kind": "url", "url": "https://example.com/privacy" } }
+  ],
+  "separator": "dot",
+  "align": "center"
+}
+```
+
+- `links` — 1 to 5 entries. Each carries a localized `labelKey` and the same
+  `action` union a `button` node uses: `restore`, `url`, or `close`.
+- `separator` — `"dot"` (`·`, the default), `"pipe"` (`|`), or `"none"`.
+- `align` — `"start"`, `"center"` (the default), or `"end"`.
+- `color` — applies to both the labels and the separators.
+
+The row **wraps** when it does not fit, and the separators are drawn between
+the links that actually render:
+
+- A `restore` link is hidden when the host supplies no restore handler, the
+  same rule a `button` node follows — an inert Restore control implies restore
+  is possible when it is not.
+- A link whose label does not resolve is hidden.
+- Separators are computed over the surviving links, so there is never a
+  leading, trailing or doubled separator. If every link is hidden, the node
+  renders its `fallback`, or nothing.
+
+Separators are hidden from screen readers: the row reads as N links.
+
+## Localization workflow
+
+Builder paywall text is key-based. Each text-bearing node carries a key, and
+`localizations[locale][key]` holds the string, so a paywall's copy travels
+with it as one self-contained blob.
+
+**Adding a language.** The builder's locale picker searches the App Store
+localization set and labels each entry in English. A code the list does not
+carry can still be typed in, for anywhere the stores do not localize their own
+listings.
+
+**Auto-translate.** In the Localization matrix, each language column has a
+Translate button. By default it fills only that column's *empty* cells from
+the base locale — translations you have already reviewed are never overwritten.
+Replacing a whole column is a separate, two-click confirm. Individual cells can
+be translated one at a time, and one undo reverts a whole run.
+
+<Callout type="warn" title="Placeholders are preserved, or the string is not translated">
+Paywall copy interpolates the selected package's values — `{{price}}`,
+`{{period}}`, `{{packageName}}` and friends. An unknown placeholder renders
+**verbatim**, so a translation that renamed `{{price}}` would show literal
+braces to a paying customer and nothing downstream would notice.
+
+Every translation is therefore checked against its source: it must carry the
+same placeholders, the same number of times (order may change — languages
+reorder clauses). A string that fails is retried once, and if it fails again
+it is **left untranslated** and reported by name. A missing translation falls
+back to the base locale and reads correctly; a corrupted one does not.
+</Callout>
+
+Cells filled by auto-translate are marked until you edit them, so a reviewer
+can see what no human has read yet.
 
 ## Offline fallback file
 

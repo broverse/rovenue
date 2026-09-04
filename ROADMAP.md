@@ -7,7 +7,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 |---|------|-----|--------|
 | 1 | Store integrations & receipt validation | 85% | 95% |
 | 2 | Subscription state & entitlements | 85% | 95% |
-| 3 | Paywall builder & native rendering | 85% | 95% |
+| 3 | Paywall builder & native rendering | 94% | 95% |
 | 4 | A/B testing & experiments | 88% | 90%+ |
 | 5 | Analytics (MRR / LTV / cohorts) | 95% | 95% ✅ |
 | 6 | Third-party integrations | 95% | 95% |
@@ -120,7 +120,7 @@ rather than closing the section.
 - [ ] Apple Family Sharing + win-back offer states in the state machine
 - [ ] Continuous `subscriber_access` consistency checker (reconciliation job that detects drift)
 
-## 3. Paywall builder & native rendering (85 → 95)
+## 3. Paywall builder & native rendering (85 → 94) — five of six items closed 2026-09-04
 
 - [x] trialLabelKey override UI — the base editor already existed in the Binding tab; the
       **override** editor omitted it because its prop union was hand-written. The union is now a
@@ -132,15 +132,71 @@ rather than closing the section.
       purged, so rotating a key or disconnecting a store kept serving the previous account's prices
       for up to 15 minutes. The cache is now keyed on a digest of the stored credential ciphertext,
       so no purge call is needed and none can be forgotten (2026-09-01)
-- [ ] Element-level experiments (deferred from P7)
+- [x] Element-level experiments (deferred from P7) — **already shipped with §4** on
+      2026-09-02 (`materializeElementVariants`, save-time validation, and a builder
+      flow to launch one from the canvas); this line was a stale duplicate nobody
+      re-visited when §4 closed the same day. The only real gap left inside the
+      feature was in the builder: `border` was offered in the element-experiment
+      prop picker but no probe matched it, so it fell to the free-text editor where a
+      `NodeBorder` can never be typed and Create stayed disabled forever. Fixed, with
+      a test that walks every `OVERRIDABLE_PROP_KEYS` entry and fails by name on a
+      prop with no usable editor (2026-09-04)
 - [ ] On-device smoke test session (pending) — needs physical iOS/Android devices and store sandbox
       accounts; not automatable from this repo
-- [ ] New node types at RC Paywalls v2 parity — **recon 2026-09-01: mostly already done.**
-      `carousel`, `timeline` and `video` exist in the schema, in all three renderers and in
-      `render-fixtures.json`; only a **footer link group** appears genuinely absent. Scope this
-      sub-project from that finding, not from "four node types are missing"
-- [ ] Template gallery: 15–20 proven paywall templates (leverage App Store import)
-- [ ] Localization workflow: in-builder translation management + auto-translate (Rovi)
+- [x] New node types at RC Paywalls v2 parity — the 2026-09-01 recon held: `carousel`,
+      `timeline` and `video` already existed on all three platforms, and only a footer
+      link group was absent. `footerLinks` is now the **18th** node type — shared schema,
+      web/SwiftUI/Android renderers, and `render-fixtures.json` (edited last, after all
+      three could decode it). It reuses `ButtonNode`'s action union rather than inventing
+      a second one, and applies the renderers' existing "an inert restore control is
+      misleading" rule PER LINK, computing separators over the surviving links so a
+      hidden link can never leave a leading, trailing or doubled separator. Authoring
+      support closed a hole next door: the inspector's Content and Style switches ended
+      in `default: return null`, so a node type with no editor shipped an empty inspector
+      silently — both are now exhaustive (2026-09-04)
+- [x] Template gallery: 15–20 proven paywall templates — **18 templates** across six
+      categories, each a composition of a section-factory kit rather than a hand-written
+      tree, each ending in a `footerLinks` row. One test runs over EVERY entry: strict
+      schema parse, save-validity, no package ids, no `defaultSelected`, no asset URLs,
+      copy for every key, exactly one purchase button. The gallery gained category chips,
+      search, and cards that render the template's real tree through `PaywallRenderer`
+      against a synthetic offering — the abstract silhouette worked for two presets and
+      stops distinguishing anything at eighteen.
+
+      This is where the App Store import stayed *unused*: it hot-links Apple's CDN and is
+      driven by one listing, so it is a good tree-assembly reference and a poor template
+      source. It remains its own start tab.
+
+      Two defects surfaced from the work rather than from the item's wording. The spec
+      claimed a template's empty image URL "passes the save tier and is caught by the
+      publish gate" — the validator checked no URL of any kind, so a blank hero image has
+      always been publishable; `EMPTY_MEDIA_URL` and `EMPTY_ACTION_URL` are now
+      publish-tier issues, which is what makes the placeholder story true. And an image
+      node with a blank url rendered `<img src="">`, which a browser answers by
+      re-requesting the hosting document — eighteen cards made that eighteen wasted
+      page-sized requests. The `video` node had guarded exactly this for a wave; `image`
+      was simply never wired to the same rule (2026-09-04)
+- [x] Localization workflow: in-builder translation management + auto-translate (Rovi) —
+      a Rovi endpoint that returns entries the builder merges client-side through the
+      existing `setLocalizations` op (a server-side write would lose to the builder's next
+      autosave tick), per-column and per-cell translation that fills gaps by default and
+      overwrites only behind a confirm, one-undo revert, and machine-translated cells
+      marked in builder state rather than in `BuilderConfig` — the config is the SDK wire
+      format, not a place for dashboard bookkeeping.
+
+      The correctness guard is placeholder preservation: `resolveVariables` leaves an
+      unknown `{{token}}` verbatim rather than throwing, so a model renaming `{{price}}`
+      would ship literal braces to a paying customer with nothing to catch it. A string
+      whose placeholders cannot be preserved is retried once, then left untranslated and
+      reported by name — a gap falls back to the base locale and reads correctly, a
+      corrupted string does not.
+
+      Shipped with it, because the feature does not reach users without it: `resolveText`
+      matched locales EXACTLY, so a device passing `pt-BR` at a `pt`-keyed table fell
+      silently through to the default language. It now resolves by language across all
+      three renderers, and the free-text "add locale" box became a picker over the store
+      locale set — the two together are what make a translated table one the SDK can
+      actually find (2026-09-04)
 
 ## 4. A/B testing & experiments (75 → 88) — decision engine shipped
 
