@@ -66,7 +66,7 @@ end-to-end test needs an isolated broker).
 - Modify: `packages/db/src/drizzle/schema.ts` (`productCurrencyGrants`, ~line 723; enum re-export block ~line 2310)
 - Create: `packages/db/drizzle/migrations/01xx_currency_grant_trigger.sql` (generated)
 - Create: `packages/shared/src/virtual-currencies.grant-trigger.test.ts`
-- Modify: `packages/shared/src/virtual-currencies.ts`
+- Create: `packages/shared/src/virtual-currencies.ts` — the file does NOT exist yet. The neighbouring `virtual-currencies.test.ts` tests schemas that live in `./dashboard`, which makes the directory listing misleading.
 
 **Interfaces:**
 - Produces: `currencyGrantTrigger` pgEnum with values `PURCHASE`, `RENEWAL`,
