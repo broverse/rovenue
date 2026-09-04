@@ -36,18 +36,37 @@
 # restored first because it is the only store the others are consistent
 # AGAINST. ClickHouse is restored last, and its Kafka Engine tables and
 # their materialised views are DETACHED immediately after RESTORE DATABASE
-# completes, then re-ATTACHed right away: BACKUP DATABASE captures the
-# Kafka Engine tables (and the MVs reading from them) along with the data
-# tables, and RESTORE DATABASE attaches them as part of recreating them —
-# their consumer thread starts immediately, at whatever offset the
-# consumer group holds, before anything in this script can intervene. The
-# detach/re-attach pair closes that window as fast as a script can; it
-# does not extend it. Verification (below) runs only once the objects are
-# back — db:verify:clickhouse checks live Kafka consumer state and needs
-# them attached to see it. The api, dispatcher and every BullMQ worker are
-# stopped before any of this starts and are never restarted by this
-# script, so the outbox holds rather than the topic dropping work for the
-# entire run, not just the ClickHouse step.
+# completes, then re-ATTACHed once the ClickHouse restore itself is done —
+# not held detached through verification, because db:verify:clickhouse
+# checks live Kafka consumer state and needs them attached to see it, and
+# holding them detached longer does not reduce the real risk below, which
+# is a function of the consumer-group offset, not of how long the tables
+# sit detached.
+#
+# THE REAL RISK IS A GAP, NOT RE-INGESTION. The Kafka consumer-group
+# offset lives in Redpanda, not in the ClickHouse backup. RESTORE DATABASE
+# rolls the ClickHouse data tables back to the backup instant (the
+# manifest's createdAt, "T0"). The committed offset in Redpanda, though,
+# still reflects consumption up to whatever moment prompted this restore
+# ("T1", later than T0) — messages between T0 and T1 were already marked
+# consumed before the incident, so re-attaching does NOT redeliver them;
+# consumption just resumes forward from T1. The failure mode is a silent,
+# PERMANENT GAP in ClickHouse analytics for everything produced between T0
+# and T1 — and it is not recoverable from Postgres either, because
+# outbox_events rows are deleted after dispatch and every event in that
+# gap is by definition already dispatched. print_summary prints this as an
+# explicit warning naming the manifest's createdAt, with the remedy: reset
+# the consumer group for each restored Kafka table to an offset at or
+# before createdAt, BEFORE resuming the dispatcher, so the gap replays.
+# That replay is safe specifically in this codebase — ClickHouse's revenue
+# rollups already use query-time idempotent views because outbox delivery
+# is at-least-once by design, so messages at or before createdAt that
+# replay land as tolerated duplicates, not double-counted rows.
+#
+# The api, dispatcher and every BullMQ worker are stopped before any of
+# this starts and are never restarted by this script, so the outbox holds
+# rather than the topic dropping work for the entire run, not just the
+# ClickHouse step.
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -124,6 +143,7 @@ MC_ALIAS="$DEFAULT_MC_ALIAS"
 STAGING_DIR=""
 
 MANIFEST_PATH=""
+MANIFEST_CREATED_AT=""
 MANIFEST_ENCRYPTION_KEY_FINGERPRINT=""
 MANIFEST_POSTGRES_FILE=""
 MANIFEST_POSTGRES_ENCRYPTED=""
@@ -134,9 +154,18 @@ MANIFEST_ASSETS_FILE=""
 MANIFEST_ASSETS_ENCRYPTED=""
 
 # Kafka objects detached mid-restore, tracked so re-attach can walk the
-# same list without re-discovering it under a since-changed schema.
+# same list without re-discovering it under a since-changed schema, and so
+# print_summary can name them in the consumer-group-reset warning.
 KAFKA_TABLES=()
 KAFKA_VIEWS=()
+
+# Step tracking for on_exit's failure-state summary (Fix 2): once services
+# are stopped, ANY subsequent failure needs to tell the operator what did
+# and didn't complete, not just the one failing command's own error text.
+SERVICES_STOPPED=0
+STEP_POSTGRES_DONE=0
+STEP_ASSETS_DONE=0
+STEP_CLICKHOUSE_DONE=0
 
 # ---------------------------------------------------------------------------
 # Helpers.
@@ -283,6 +312,7 @@ load_manifest() {
 
   MANIFEST_ENCRYPTION_KEY_FINGERPRINT="$(json_scalar encryptionKeyFingerprint < "$MANIFEST_PATH")"
   [ -n "$MANIFEST_ENCRYPTION_KEY_FINGERPRINT" ] || fail "$MANIFEST_PATH has no encryptionKeyFingerprint field — refusing to restore a manifest that can't prove which key it was taken under."
+  MANIFEST_CREATED_AT="$(json_scalar createdAt < "$MANIFEST_PATH")"
 
   MANIFEST_POSTGRES_FILE="$(json_section "$MANIFEST_PATH" postgres | json_scalar file)"
   MANIFEST_POSTGRES_ENCRYPTED="$(json_section "$MANIFEST_PATH" postgres | json_scalar encrypted)"
@@ -321,6 +351,7 @@ check_fingerprint() {
 stop_services() {
   echo "==> Stopping services: ${COMPOSE_SERVICES_TO_STOP[*]}"
   docker compose --project-directory "$ROOT_DIR" stop "${COMPOSE_SERVICES_TO_STOP[@]}"
+  SERVICES_STOPPED=1
 }
 
 # ---------------------------------------------------------------------------
@@ -364,6 +395,7 @@ run_postgres_restore() {
     "$PG_RESTORE_BIN" -d "$DATABASE_URL" "$PG_DUMP_NO_OWNER_FLAG" "$PG_RESTORE_CLEAN_FLAG" "$PG_RESTORE_IF_EXISTS_FLAG" "$src"
   fi
   echo "    Postgres restore complete"
+  STEP_POSTGRES_DONE=1
 }
 
 # ---------------------------------------------------------------------------
@@ -395,6 +427,7 @@ run_assets_restore() {
   "$MC_BIN" mirror --quiet "$mirror_dir/" "$MC_ALIAS/$ASSET_STORAGE_BUCKET"
   rm -rf "$mirror_dir"
   echo "    Object storage restore complete ($file_count files)"
+  STEP_ASSETS_DONE=1
 }
 
 # ---------------------------------------------------------------------------
@@ -523,19 +556,19 @@ run_clickhouse_restore() {
   detach_kafka_objects "$database"
   echo "    detached ${#KAFKA_TABLES[@]} Kafka table(s), ${#KAFKA_VIEWS[@]} materialized view(s)"
 
-  # Re-attach immediately: the risk this guards against is the replay
-  # window at RESTORE time (the moment the Kafka tables are created, their
-  # consumer thread starts before anything can detach it) — that window is
-  # already closed by the time detach above returns. Holding them detached
-  # any longer only delays db:verify:clickhouse below, which checks Kafka
-  # consumer state (last_poll_time, num_messages_read) and needs them
-  # attached to see it. The dispatcher — the outbox's only publisher —
-  # stays stopped for the rest of this script regardless, so nothing new
-  # reaches the topic while verification runs.
+  # Re-attach immediately, not after verification: db:verify:clickhouse
+  # below checks live Kafka consumer state and needs the tables attached
+  # to see it, and holding them detached longer does not shrink the
+  # consumer-group-offset gap described in the file header — that gap is
+  # already fixed by the time RESTORE DATABASE above returns, regardless
+  # of how long the tables then sit detached. The dispatcher — the
+  # outbox's only publisher — stays stopped for the rest of this script
+  # regardless, so nothing new reaches the topic while verification runs.
   echo "==> ClickHouse: re-attaching Kafka-facing objects"
   attach_kafka_objects "$database"
 
   echo "==> ClickHouse restore complete"
+  STEP_CLICKHOUSE_DONE=1
 }
 
 # ---------------------------------------------------------------------------
@@ -560,15 +593,93 @@ verify_restore() {
   "$PNPM_BIN" --filter "$ASSET_HEADERS_VERIFY_FILTER" "$ASSET_HEADERS_VERIFY_SCRIPT"
 }
 
+# Names the manifest's createdAt and states, in one place an operator is
+# likely to actually read (the end-of-run summary), the gap risk from the
+# file header comment: everything dispatched between createdAt and the
+# outage that prompted this restore was already marked consumed in
+# Redpanda before the incident and will NOT come back on its own. Only
+# printed when there were Kafka tables to begin with.
+print_clickhouse_gap_warning() {
+  [ "${#KAFKA_TABLES[@]}" -gt 0 ] || return 0
+  echo
+  echo "WARNING: ClickHouse analytics gap between this backup and the outage."
+  echo "  This backup's manifest was created at $MANIFEST_CREATED_AT. The Kafka consumer"
+  echo "  group offsets in Redpanda were NOT rolled back by this restore — they still reflect"
+  echo "  whatever was consumed up to the outage, which is later than $MANIFEST_CREATED_AT."
+  echo "  Anything dispatched between $MANIFEST_CREATED_AT and the outage was already marked"
+  echo "  consumed before the incident, so resuming consumption as-is will NOT redeliver it —"
+  echo "  it is a silent, PERMANENT gap in ClickHouse analytics. It is not recoverable from"
+  echo "  Postgres either: outbox_events rows are deleted after dispatch, and every event in"
+  echo "  that gap is by definition already dispatched."
+  echo
+  echo "  REMEDY, before resuming the dispatcher: reset the Kafka consumer group for each of"
+  echo "  the following tables to an offset at or before $MANIFEST_CREATED_AT, so the gap"
+  echo "  replays:"
+  local t
+  for t in "${KAFKA_TABLES[@]}"; do
+    echo "    - $t"
+  done
+  echo "  This replay is safe specifically in this codebase: ClickHouse's revenue rollups"
+  echo "  already use query-time idempotent views, built for at-least-once outbox delivery —"
+  echo "  messages at or before $MANIFEST_CREATED_AT that replay land as tolerated duplicates,"
+  echo "  not double-counted rows."
+}
+
 print_summary() {
   echo
   echo "Restore complete from: $FROM_DIR"
   echo "  postgres:   restored, $PG_RESTORE_CLEAN_FLAG $PG_RESTORE_IF_EXISTS_FLAG"
   echo "  assets:     restored into $MC_ALIAS/$ASSET_STORAGE_BUCKET"
   echo "  clickhouse: restored, Kafka objects re-attached (${#KAFKA_TABLES[@]} table(s), ${#KAFKA_VIEWS[@]} view(s))"
+
+  print_clickhouse_gap_warning
+
   echo
   echo "${COMPOSE_SERVICES_TO_STOP[*]} remain stopped. Review the verification output above,"
   echo "then bring the stack back with: docker compose --project-directory \"$ROOT_DIR\" start ${COMPOSE_SERVICES_TO_STOP[*]}"
+}
+
+# ---------------------------------------------------------------------------
+# Fix 2: a failure after services are stopped leaves the operator with only
+# that one command's error text otherwise — no statement of what already
+# completed (e.g. Postgres restored, ClickHouse not) or that services are
+# still down. print_failure_state runs from on_exit on any non-zero exit
+# once SERVICES_STOPPED is set, regardless of which function raised it
+# (fail()'s own `exit 1` does not trigger an ERR trap in bash — verified:
+# a function calling `exit N` terminates the shell directly without going
+# through the ERR trap machinery — so this hooks EXIT instead, which fires
+# unconditionally and still sees the pending exit code).
+# ---------------------------------------------------------------------------
+print_failure_state() {
+  local exit_code="$1"
+  echo >&2
+  echo "restore.sh: FAILED (exit $exit_code). State of this run:" >&2
+  echo "  services stopped (${COMPOSE_SERVICES_TO_STOP[*]}): yes — NOT restarted by this script, still stopped" >&2
+  if [ "$STEP_POSTGRES_DONE" -eq 1 ]; then
+    echo "  postgres restore:   completed" >&2
+  else
+    echo "  postgres restore:   NOT completed" >&2
+  fi
+  if [ "$STEP_ASSETS_DONE" -eq 1 ]; then
+    echo "  assets restore:     completed" >&2
+  else
+    echo "  assets restore:     NOT completed" >&2
+  fi
+  if [ "$STEP_CLICKHOUSE_DONE" -eq 1 ]; then
+    echo "  clickhouse restore: completed" >&2
+  else
+    echo "  clickhouse restore: NOT completed" >&2
+  fi
+  echo "  This is a mixed state, not the whole-database restore this script promises. Resolve" >&2
+  echo "  the failure above and re-run before bringing services back." >&2
+}
+
+on_exit() {
+  local exit_code=$?
+  if [ "$exit_code" -ne 0 ] && [ "$SERVICES_STOPPED" -eq 1 ]; then
+    print_failure_state "$exit_code"
+  fi
+  [ -z "$STAGING_DIR" ] || rm -rf "$STAGING_DIR"
 }
 
 # ---------------------------------------------------------------------------
@@ -584,7 +695,7 @@ main() {
   require_env DATABASE_URL "pg_restore needs it to connect to Postgres (see .env.example)"
 
   STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rovenue-restore.XXXXXX")"
-  trap 'rm -rf "$STAGING_DIR"' EXIT
+  trap on_exit EXIT
 
   # Guard 2 — stop api, dispatcher and workers before touching anything.
   stop_services
