@@ -56,9 +56,15 @@ if [ "$DRY_RUN" -eq 0 ]; then
 fi
 
 # -------- Read version --------
-VERSION=$(grep -E "^\s*s\.version\s+=" "$PODSPEC" \
-  | sed -E "s/.*'([^']+)'.*/\1/" | head -n 1)
-test -n "$VERSION" || { echo "✗ could not parse version from $PODSPEC" >&2; exit 1; }
+# Rovenue.podspec no longer carries a literal `s.version = '...'` — it reads
+# `s.version = CONFIG['version']` from release.config.json (Task 1's
+# xcframework release work). A regex over the podspec text now matches the
+# `CONFIG['version']` key lookup itself and silently extracts the literal
+# string "version" instead of a real version — read the release config
+# directly instead, the same way Tests/config-version-parity.sh does.
+RELEASE_CONFIG="$SWIFT_DIR/release.config.json"
+VERSION=$(ruby -rjson -e "print JSON.parse(File.read('$RELEASE_CONFIG'))['version']")
+test -n "$VERSION" || { echo "✗ could not parse version from $RELEASE_CONFIG" >&2; exit 1; }
 echo "→ Rovenue.podspec version: $VERSION"
 
 ZIP_NAME="Rovenue-$VERSION.zip"
