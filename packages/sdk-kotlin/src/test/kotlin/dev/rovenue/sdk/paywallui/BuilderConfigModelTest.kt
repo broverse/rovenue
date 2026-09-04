@@ -572,9 +572,18 @@ class BuilderConfigModelTest {
         }
     }
 
+    /**
+     * Selected BY NAME, never by index. `accept.first()` happened to BE the
+     * multi-locale config, so this passed -- but a future PREPEND to the
+     * fixture's accept list would have silently repointed every vector at a
+     * config that never carried the keys they assert. That is the exact
+     * failure the sibling helpers already guard against
+     * (`entryWithNamePrefix`), and the TS side selects the same entry by the
+     * same prefix.
+     */
     @Test
-    fun `resolveText vectors match against accept0`() {
-        val config = decodeBuilderConfig(configJson(section("accept").first().jsonObject))!!
+    fun `resolveText vectors match against the canonical multi-locale config`() {
+        val config = decodeBuilderConfig(configJson(entryWithNamePrefix("accept", "canonical every-node")))!!
         for (el in section("resolveText")) {
             val v = el.jsonObject
             val locale = v["locale"]!!.jsonPrimitive.content

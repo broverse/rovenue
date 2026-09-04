@@ -30,13 +30,50 @@ data class PackageView(
 )
 
 /**
- * Locale → defaultLocale → null chain. An empty-string value is a VALID hit
- * (it round-trips as ""), only a missing key falls through.
+ * Candidates for [locale]: the tag itself, then each progressively shorter
+ * prefix — `zh-Hans-CN` → `zh-Hans` → `zh`. Mirrors validate.ts's
+ * `localeCandidates`.
+ */
+internal fun localeCandidates(locale: String): List<String> {
+    val parts = locale.split("-")
+    return (parts.size downTo 1).map { parts.take(it).joinToString("-") }
+}
+
+/**
+ * The table for [locale], matched case-insensitively. BCP-47 tags are
+ * case-insensitive and the two sides disagree in practice: the builder
+ * lowercases what an author types, a device reports `pt-BR` / `zh-Hans`.
+ * Mirrors validate.ts's `localeTable`.
+ */
+internal fun localeTable(config: BuilderConfigModel, locale: String): Map<String, String>? {
+    config.localizations[locale]?.let { return it }
+    val wanted = locale.lowercase()
+    for ((code, table) in config.localizations) {
+        if (code.lowercase() == wanted) return table
+    }
+    return null
+}
+
+/**
+ * Locale → each progressively shorter prefix of it → defaultLocale → null.
+ * An empty-string value is a VALID hit (it round-trips as ""), only a
+ * missing key falls through.
+ *
+ * The prefix step is what makes the device's locale usable: a host passing
+ * `pt-BR` at a paywall keyed `pt` used to fall straight through to the
+ * default language, silently — a renderer has no way to report a miss, so
+ * the paywall simply showed the default language and looked fine.
+ * Strictly widening: an exact match is still tried first and still wins.
  */
 fun resolveText(config: BuilderConfigModel, locale: String?, key: String): String? {
-    val requested = locale?.let { config.localizations[it] }
-    requested?.let { if (it.containsKey(key)) return it[key] }
-    val fallback = config.localizations[config.defaultLocale] ?: return null
+    if (locale != null) {
+        config.localizations[locale]?.let { if (it.containsKey(key)) return it[key] }
+        for (candidate in localeCandidates(locale)) {
+            val table = localeTable(config, candidate) ?: continue
+            if (table.containsKey(key)) return table[key]
+        }
+    }
+    val fallback = localeTable(config, config.defaultLocale) ?: return null
     return if (fallback.containsKey(key)) fallback[key] else null
 }
 

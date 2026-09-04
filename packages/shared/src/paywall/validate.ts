@@ -956,14 +956,73 @@ export function validateBuilderConfig(
 }
 
 /** locale → defaultLocale → null */
+/**
+ * Lookup order for `locale`: the tag itself, then each progressively
+ * shorter prefix — `zh-Hans-CN` -> `zh-Hans` -> `zh`.
+ *
+ * `@rovenue/shared/i18n`'s `expand()` applies the same truncation to
+ * remote-config values. It is duplicated rather than imported ON PURPOSE:
+ * this function is ported verbatim into the SwiftUI and Android renderers,
+ * and a cross-module import has nothing to port to.
+ */
+function localeCandidates(locale: string): string[] {
+  const parts = locale.split("-");
+  const out: string[] = [];
+  for (let i = parts.length; i > 0; i--) out.push(parts.slice(0, i).join("-"));
+  return out;
+}
+
+/**
+ * The table for `locale`, matched case-insensitively.
+ *
+ * The two sides genuinely disagree: the builder lowercases whatever an
+ * author types (`vm.addLocale`), while a device reports `pt-BR` and
+ * `zh-Hans`. BCP-47 tags are case-insensitive, so treating them otherwise
+ * loses a table that is right there.
+ */
+function localeTable(
+  config: BuilderConfig,
+  locale: string,
+): Record<string, string> | undefined {
+  const direct = config.localizations[locale];
+  if (direct !== undefined) return direct;
+  const wanted = locale.toLowerCase();
+  for (const code of Object.keys(config.localizations)) {
+    if (code.toLowerCase() === wanted) return config.localizations[code];
+  }
+  return undefined;
+}
+
+/**
+ * `locale` -> its shorter prefixes -> `defaultLocale` -> null.
+ *
+ * The prefix step is what makes a host app's device locale usable. Passing
+ * `pt-BR` at a paywall keyed `pt` used to fall straight through to the
+ * default language, silently — a renderer has no way to report a miss, so
+ * the paywall simply showed English and looked fine. The store locale sets
+ * an author now picks from are full of region tags, which would have made
+ * that the common case rather than the rare one.
+ *
+ * Strictly widening: an EXACT match is still tried first and still wins, so
+ * no paywall that resolves correctly today resolves differently. What
+ * changes is only what happens after a miss, where the old answer was
+ * always `defaultLocale`.
+ */
 export function resolveText(
   config: BuilderConfig,
   locale: string,
   key: string,
 ): string | null {
+  // The hot path is untouched: an exact hit still costs one lookup, which
+  // is what almost every call is.
   const direct = config.localizations[locale]?.[key];
   if (direct !== undefined) return direct;
-  const fallback = config.localizations[config.defaultLocale]?.[key];
+
+  for (const candidate of localeCandidates(locale)) {
+    const value = localeTable(config, candidate)?.[key];
+    if (value !== undefined) return value;
+  }
+  const fallback = localeTable(config, config.defaultLocale)?.[key];
   return fallback !== undefined ? fallback : null;
 }
 

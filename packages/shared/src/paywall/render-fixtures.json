@@ -2448,6 +2448,31 @@
       "locale": "tr",
       "key": "empty_1",
       "expected": ""
+    },
+    {
+      "locale": "tr-TR",
+      "key": "title_1",
+      "expected": "Pro'ya geç"
+    },
+    {
+      "locale": "TR",
+      "key": "title_1",
+      "expected": "Pro'ya geç"
+    },
+    {
+      "locale": "tr-tr",
+      "key": "title_1",
+      "expected": "Pro'ya geç"
+    },
+    {
+      "locale": "tr-TR",
+      "key": "sub_1",
+      "expected": "Unlock everything"
+    },
+    {
+      "locale": "de-DE",
+      "key": "title_1",
+      "expected": "Go Pro"
     }
   ],
   "visibility": [

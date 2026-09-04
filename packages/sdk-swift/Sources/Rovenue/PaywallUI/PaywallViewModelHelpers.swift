@@ -49,17 +49,52 @@ public struct PackageView: Equatable, Sendable {
     }
 }
 
-/// Resolves a localization `key`'s text: `locale` (when non-nil) first, then
-/// `config.defaultLocale`, else `nil`. An empty-string value is a valid hit
-/// at either step (it is NOT treated as "missing"). Mirrors validate.ts's
+/// Candidates for `locale`: the tag itself, then each progressively shorter
+/// prefix — `zh-Hans-CN` -> `zh-Hans` -> `zh`. Mirrors validate.ts's
+/// `localeCandidates`.
+func localeCandidates(_ locale: String) -> [String] {
+    let parts = locale.split(separator: "-", omittingEmptySubsequences: false)
+    guard !parts.isEmpty else { return [locale] }
+    return (1...parts.count).reversed().map { parts.prefix($0).joined(separator: "-") }
+}
+
+/// The table for `locale`, matched case-insensitively. BCP-47 tags are
+/// case-insensitive and the two sides disagree in practice: the builder
+/// lowercases what an author types, this device reports `pt-BR` / `zh-Hans`.
+/// Mirrors validate.ts's `localeTable`.
+func localeTable(_ config: BuilderConfigModel, _ locale: String) -> [String: String]? {
+    if let direct = config.localizations[locale] { return direct }
+    let wanted = locale.lowercased()
+    for (code, table) in config.localizations where code.lowercased() == wanted {
+        return table
+    }
+    return nil
+}
+
+/// Resolves a localization `key`'s text: `locale` (when non-nil), then each
+/// progressively shorter prefix of it, then `config.defaultLocale`, else
+/// `nil`. An empty-string value is a valid hit at any step (it is NOT
+/// treated as "missing"). Mirrors validate.ts's
 /// `resolveText(config, locale, key)`, generalized to accept `locale: nil`
 /// (skip straight to `defaultLocale`) for callers that haven't resolved a
 /// display locale yet.
+///
+/// The prefix step is what makes this device's locale usable: a host passing
+/// `pt-BR` at a paywall keyed `pt` used to fall straight through to the
+/// default language, silently. Strictly widening — an exact match is still
+/// tried first and still wins.
 public func resolveText(_ config: BuilderConfigModel, locale: String?, key: String) -> String? {
-    if let locale, let direct = config.localizations[locale]?[key] {
-        return direct
+    if let locale {
+        if let direct = config.localizations[locale]?[key] {
+            return direct
+        }
+        for candidate in localeCandidates(locale) {
+            if let value = localeTable(config, candidate)?[key] {
+                return value
+            }
+        }
     }
-    if let fallback = config.localizations[config.defaultLocale]?[key] {
+    if let fallback = localeTable(config, config.defaultLocale)?[key] {
         return fallback
     }
     return nil

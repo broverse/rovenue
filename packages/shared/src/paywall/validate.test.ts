@@ -2095,3 +2095,102 @@ describe("Task 8b: EMPTY_ACTION_URL", () => {
     expect(isPublishBlockingIssue(issue!)).toBe(true);
   });
 });
+
+describe("resolveText locale matching", () => {
+  const config = {
+    formatVersion: 2 as const,
+    defaultLocale: "en",
+    localizations: {
+      en: { k: "English" },
+      pt: { k: "Português" },
+      "zh-hans": { k: "简体中文" },
+    },
+    root: { type: "stack" as const, id: "root", axis: "v" as const, children: [] },
+  };
+
+  it("prefers an exact match", () => {
+    expect(resolveText(config, "pt", "k")).toBe("Português");
+  });
+
+  it("falls back from a region tag to its base language", () => {
+    expect(resolveText(config, "pt-BR", "k")).toBe("Português");
+  });
+
+  it("matches case-insensitively — a device reports zh-Hans, the builder stores zh-hans", () => {
+    expect(resolveText(config, "zh-Hans", "k")).toBe("简体中文");
+    expect(resolveText(config, "zh-Hans-CN", "k")).toBe("简体中文");
+  });
+
+  it("falls back to the default locale when no language matches", () => {
+    expect(resolveText(config, "de-DE", "k")).toBe("English");
+  });
+
+  it("returns null for a key no table carries", () => {
+    expect(resolveText(config, "pt", "missing")).toBeNull();
+  });
+
+  it("never prefers a base-language match over an exact one", () => {
+    const withRegion = {
+      ...config,
+      localizations: { ...config.localizations, "pt-br": { k: "Português (BR)" } },
+    };
+    expect(resolveText(withRegion, "pt-BR", "k")).toBe("Português (BR)");
+  });
+
+  it("does not throw on an empty localizations table or an empty locale", () => {
+    const bare = { ...config, localizations: {} };
+    expect(resolveText(bare, "en", "k")).toBeNull();
+    expect(resolveText(config, "", "k")).toBe("English");
+  });
+
+  // --- The widening properties, against a reference implementation of the
+  // --- OLD rule. Two things must hold, and they are different claims:
+  // ---   1. an exact hit is unchanged (the hot path nobody may regress)
+  // ---   2. the new rule is never LESS resolved than the old one
+  // --- What must NOT be claimed is that every resolved pair keeps its old
+  // --- value: `pt-BR` at a `pt`-keyed table deliberately stops answering
+  // --- English. That change IS the feature.
+  const oldResolveText = (
+    c: typeof config,
+    locale: string,
+    key: string,
+  ): string | null => {
+    const direct = c.localizations[locale as keyof typeof c.localizations]?.[key];
+    if (direct !== undefined) return direct;
+    const fb = c.localizations[c.defaultLocale as keyof typeof c.localizations]?.[key];
+    return fb !== undefined ? fb : null;
+  };
+
+  const LOCALES = ["en", "pt", "pt-BR", "PT", "zh-hans", "zh-Hans", "zh-Hans-CN", "de-DE", ""];
+  const KEYS = ["k", "missing"];
+
+  it("keeps every EXACT hit byte-identical to the old rule", () => {
+    for (const locale of LOCALES) {
+      for (const key of KEYS) {
+        const table = config.localizations[locale as keyof typeof config.localizations];
+        if (table?.[key] === undefined) continue; // not an exact hit
+        expect(`${locale}/${key}=${resolveText(config, locale, key)}`).toBe(
+          `${locale}/${key}=${oldResolveText(config, locale, key)}`,
+        );
+      }
+    }
+  });
+
+  it("is never less resolved than the old rule — it can only find more", () => {
+    for (const locale of LOCALES) {
+      for (const key of KEYS) {
+        if (oldResolveText(config, locale, key) === null) continue;
+        expect(`${locale}/${key}`).toBe(
+          resolveText(config, locale, key) === null ? "UNRESOLVED" : `${locale}/${key}`,
+        );
+      }
+    }
+  });
+
+  it("resolves strictly more than the old rule for at least one input", () => {
+    // Without this, the two properties above would also hold for a no-op
+    // change. `pt-BR` is the case the whole task exists for.
+    expect(oldResolveText(config, "pt-BR", "k")).toBe("English");
+    expect(resolveText(config, "pt-BR", "k")).toBe("Português");
+  });
+});
