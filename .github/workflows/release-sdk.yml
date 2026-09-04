@@ -16,6 +16,9 @@
 #   MAVEN_PUBLISH_USER / MAVEN_PUBLISH_PASSWORD — Maven repo credentials
 #   MAVEN_SIGNING_KEY / MAVEN_SIGNING_PASSWORD  — ASCII-armored GPG private key + passphrase (Central requires signed artifacts)
 #   COCOAPODS_TRUNK_TOKEN — `pod trunk` session token
+#   SWIFT_DIST_REPO_TOKEN — push access to `<repoSlug>-swift`, the generated
+#                           SwiftPM distribution repository — a DIFFERENT repo
+#                           from this one, so `github.token` cannot cover it
 #   PUB_DEV_CREDENTIALS   — `dart pub token` / OAuth credentials JSON for pub.dev publishing
 #
 # NOTE (spec §4.6): rovenue_flutter_ios wraps the native `Rovenue` CocoaPod via
@@ -196,9 +199,13 @@ jobs:
         working-directory: packages/sdk-swift
         run: |
           VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
+          POD_NAME=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['podName']")
+          XCF_NAME=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['xcframeworkName']")
+          POD_ZIP="build/$POD_NAME-$VERSION.zip"
+          XCF_ZIP="build/${XCF_NAME%.xcframework}-$VERSION.xcframework.zip"
           gh release create "sdk-swift-v$VERSION" \
-            "build/Rovenue-$VERSION.zip" \
-            "build/RovenueFFI-$VERSION.xcframework.zip" \
+            "$POD_ZIP" \
+            "$XCF_ZIP" \
             --title "sdk-swift v$VERSION" \
             --notes "Rovenue Swift façade $VERSION."
         env:
@@ -209,7 +216,9 @@ jobs:
         working-directory: packages/sdk-swift
         run: |
           VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
-          SHA=$(shasum -a 256 "build/Rovenue-$VERSION.zip" | awk '{print $1}')
+          POD_NAME=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['podName']")
+          POD_ZIP="build/$POD_NAME-$VERSION.zip"
+          SHA=$(shasum -a 256 "$POD_ZIP" | awk '{print $1}')
           sed -i'' -E "s/:sha256 => '[0-9a-fA-F]{64}'/:sha256 => '$SHA'/" Rovenue.podspec
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -236,7 +245,9 @@ jobs:
         run: |
           VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
           SLUG=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['repoSlug']")
-          CHK=$(swift package compute-checksum "build/RovenueFFI-$VERSION.xcframework.zip")
+          XCF_NAME=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['xcframeworkName']")
+          XCF_ZIP="build/${XCF_NAME%.xcframework}-$VERSION.xcframework.zip"
+          CHK=$(swift package compute-checksum "$XCF_ZIP")
           ./scripts/generate-swift-dist.sh "$CHK"
           cd build/swift-dist
           git init -q .
