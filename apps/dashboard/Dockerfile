@@ -35,6 +35,10 @@ COPY packages/db/package.json ./packages/db/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/sdk-rn/package.json ./packages/sdk-rn/
 
+# fumadocs-mdx postinstall resolves source.config.ts at install time;
+# copy it before pnpm install so the hook doesn't fail on a missing file.
+COPY apps/docs/source.config.ts ./apps/docs/
+
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
