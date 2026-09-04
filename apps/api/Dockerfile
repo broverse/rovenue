@@ -113,10 +113,22 @@ COPY --from=builder --chown=rovenue:rovenue /app/prod /app
 # = join('/app/dist', '..', 'locales') = /app/locales — copy them explicitly.
 COPY --from=builder --chown=rovenue:rovenue /app/packages/email-templates/locales /app/locales
 
+# Apple's public root CAs, vendored in deploy/apple-certs/ rather than
+# fetched here: a build that downloads a trust anchor depends on apple.com
+# being reachable and on that URL never moving, cannot run offline, and
+# hides the bytes from code review. apps/api/tests/apple-certs.test.ts
+# parses the committed files on every CI run.
+#
+# APPLE_ROOT_CERTS_DIR is required in production and the SignedDataVerifier
+# fails closed without it, so a packaging path that cannot mount host files
+# (Coolify, Helm) would otherwise have no way to satisfy it.
+COPY --chown=rovenue:rovenue deploy/apple-certs/*.cer /etc/rovenue/apple-certs/
+
 USER rovenue
 
 ENV NODE_ENV=production \
     PORT=3000 \
+    APPLE_ROOT_CERTS_DIR=/etc/rovenue/apple-certs \
     # Second layer behind the libvips loader allowlist applied in
     # apps/api/src/services/assets/sharp-hardening.ts (design spec §5.4)
     # — that allowlist is the primary control and does not depend on
