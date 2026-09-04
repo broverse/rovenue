@@ -299,3 +299,11 @@ export * from "./assets";
 // bucketing helpers would. Server-side callers import it explicitly via
 // `@rovenue/shared/import/keys`.
 export * from "./import";
+
+// =============================================================
+// Revenue-type groupings — named allow-lists replacing hand-copied
+// `IN (…)` literals across the metrics services and analytics router
+// (see revenue-types.ts's header for the full rationale).
+// =============================================================
+
+export * from "./revenue-types";

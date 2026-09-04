@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, sql as drizzleSql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
+import { ALL_REVENUE_TYPES } from "@rovenue/shared";
 import type {
   RevenueEventTypeName,
   TransactionRow,
@@ -167,16 +168,6 @@ interface ChTransactionRow {
   currency: string;
   event_date: string;
 }
-
-const ALL_REVENUE_TYPES: ReadonlyArray<RevenueEventTypeName> = [
-  "INITIAL",
-  "RENEWAL",
-  "TRIAL_CONVERSION",
-  "CANCELLATION",
-  "REFUND",
-  "REACTIVATION",
-  "CREDIT_PURCHASE",
-];
 
 function isKnownRevenueType(t: string): t is RevenueEventTypeName {
   return (ALL_REVENUE_TYPES as ReadonlyArray<string>).includes(t);
