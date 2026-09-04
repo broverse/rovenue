@@ -8,13 +8,13 @@
 # tables no longer exists in Postgres once dispatch has happened. A lost
 # ClickHouse means permanently lost analytics history, not a rebuild.
 #
-# Postgres and ClickHouse artifacts are age-encrypted by default — a Rovenue
-# Postgres dump holds subscriber records, device identifiers, email addresses
-# and purchase history, in a product that ships GDPR/KVKK export/anonymise
-# tooling. Leaving an unencrypted copy of the entire subject database on a
-# disk would undo that at the first step. --allow-plaintext exists because a
-# local dump piped straight into a restore is a legitimate thing to do, but
-# it is never the default.
+# Every artifact — Postgres, ClickHouse and the paywall-asset bucket — is
+# age-encrypted by default. A Rovenue Postgres dump holds subscriber records,
+# device identifiers, email addresses and purchase history, in a product that
+# ships GDPR/KVKK export/anonymise tooling. Leaving an unencrypted copy of the
+# entire subject database on a disk would undo that at the first step.
+# --allow-plaintext exists because a local dump piped straight into a restore
+# is a legitimate thing to do, but it is never the default.
 #
 # The `age` recipient (BACKUP_AGE_RECIPIENT) MUST be a different key from
 # ENCRYPTION_KEY. ENCRYPTION_KEY is the application's data key (AES-256-GCM
@@ -29,13 +29,19 @@
 # with a lost key, because it succeeds, and the damage only surfaces the next
 # time a receipt is verified.
 #
-# The paywall-asset bucket (assets/) is mirrored PLAINTEXT, not encrypted —
-# deliberately, not an oversight. Those objects are served with an anonymous
-# s3:GetObject-only bucket policy (see deploy/minio's bucket setup and
-# ASSET_PUBLIC_BASE_URL): they are already public on the internet, so
-# encrypting a local mirror of them adds no confidentiality this backup can
-# meaningfully claim, and it would prevent restore.sh from mirroring the
-# directory straight back with `mc mirror`.
+# The paywall-asset bucket IS encrypted too, even though its objects are
+# served publicly. deploy/minio/README.md documents why this matters: the
+# bucket's anonymous policy is HAND-AUTHORED to grant s3:GetObject only,
+# specifically because `mc anonymous set download` also grants
+# s3:ListBucket — considered and rejected. An asset's security rests
+# entirely on its unguessable cuid2 key; the live system deliberately
+# refuses enumeration. A plaintext local mirror of the whole bucket hands
+# over exactly the enumeration the running system refuses to give out, and
+# a local file is far easier to leak (a support ticket, an off-site copy, a
+# shared folder) than the encrypted database artifacts above. So `assets/`
+# is tarred and age-encrypted as one `assets.tar.age`, the same as the
+# other two artifacts — not per-object, which would multiply age
+# invocations by the object count for no benefit.
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -52,7 +58,11 @@ readonly MANIFEST_FILENAME="manifest.json"
 readonly POSTGRES_DUMP_FILENAME="postgres.dump"
 readonly CLICKHOUSE_OUT_SUBDIR="clickhouse"
 readonly CLICKHOUSE_OUT_FILENAME="clickhouse.zip"
-readonly ASSETS_OUT_SUBDIR="assets"
+readonly ASSETS_ARCHIVE_FILENAME="assets.tar"
+# Staging subdirectory (under STAGING_DIR, never under OUT_DIR) that `mc
+# mirror` fills before it's tarred — never written to disk unencrypted at
+# its final location.
+readonly ASSETS_MIRROR_SUBDIR="assets-mirror"
 readonly AGE_SUFFIX=".age"
 
 # Postgres.
@@ -105,6 +115,8 @@ CLICKHOUSE_ARTIFACT=""
 CLICKHOUSE_ENCRYPTED="false"
 CLICKHOUSE_BYTES="0"
 
+ASSETS_ARTIFACT=""
+ASSETS_ENCRYPTED="false"
 ASSETS_FILE_COUNT="0"
 ASSETS_BYTES="0"
 
@@ -158,11 +170,15 @@ json_str() {
 }
 
 read_rovenue_version() {
-  if [ ! -f "$PACKAGE_JSON_PATH" ]; then
-    printf 'unknown'
-    return 0
-  fi
-  grep -m1 '"version"' "$PACKAGE_JSON_PATH" | sed -E 's/.*"version": *"([^"]*)".*/\1/'
+  # rovenueVersion is decorative (informational manifest metadata, not a
+  # correctness guard like encryptionKeyFingerprint) — it must never be able
+  # to fail the whole backup. A no-match grep exits 1, which under
+  # pipefail/set -e would otherwise abort the entire run over a missing
+  # "version" line. The fallback below covers that the same way the
+  # missing-file case already did.
+  local version
+  version="$( { [ -f "$PACKAGE_JSON_PATH" ] && grep -m1 '"version"' "$PACKAGE_JSON_PATH" | sed -E 's/.*"version": *"([^"]*)".*/\1/'; } || true )"
+  printf '%s' "${version:-unknown}"
 }
 
 print_help() {
@@ -170,19 +186,22 @@ print_help() {
 Usage: deploy/backup/backup.sh --out <dir> [options]
 
 Backs up Postgres (pg_dump -Fc --no-owner), ClickHouse (native BACKUP
-DATABASE) and the paywall-asset bucket (mc mirror) into <dir>, writing
-$MANIFEST_FILENAME alongside them. Redis and Redpanda are skipped on
-purpose — see the reasons printed at run time.
+DATABASE) and the paywall-asset bucket (mc mirror, tarred) into <dir>,
+writing $MANIFEST_FILENAME alongside them. Redis and Redpanda are skipped
+on purpose — see the reasons printed at run time.
 
 Options:
   --out <dir>          Output directory for this backup. Required.
-  --allow-plaintext     Write postgres.dump and $CLICKHOUSE_OUT_SUBDIR/$CLICKHOUSE_OUT_FILENAME
-                         UNENCRYPTED instead of age-encrypted. Costs exactly
-                         what it sounds like: subscriber records, device
-                         identifiers, email addresses and purchase history
-                         sitting in plaintext on whatever disk <dir> is on.
-                         Legitimate for a local dump piped straight into a
-                         restore; never the default. Off by default.
+  --allow-plaintext     Write postgres.dump, $CLICKHOUSE_OUT_SUBDIR/$CLICKHOUSE_OUT_FILENAME and
+                         $ASSETS_ARCHIVE_FILENAME UNENCRYPTED instead of age-encrypted. Costs
+                         exactly what it sounds like: subscriber records,
+                         device identifiers, email addresses, purchase
+                         history AND every paywall asset key (which the
+                         live bucket policy deliberately refuses to let
+                         anyone enumerate) sitting in plaintext on whatever
+                         disk <dir> is on. Legitimate for a local dump piped
+                         straight into a restore; never the default. Off by
+                         default.
   --mc-alias <alias>    mc alias to mirror assets from (default: $DEFAULT_MC_ALIAS).
                          Configure it first: mc alias set <alias> <endpoint> <key> <secret>
   -h, --help            Show this help and exit.
@@ -324,22 +343,39 @@ run_clickhouse_backup() {
 }
 
 # ---------------------------------------------------------------------------
-# Object storage. Deliberately plaintext even when the rest of the backup is
-# encrypted — see the file header comment for why.
+# Object storage. Mirrored to a staging directory, tarred, then encrypted
+# the same as the database artifacts — see the file header comment for why
+# the bucket's public-read policy does NOT make this step exempt.
 # ---------------------------------------------------------------------------
 run_assets_backup() {
   require_bin "$MC_BIN" "mc (MinIO client) is required for the object-storage step and was not found on PATH. Install it — macOS: 'brew install minio/stable/mc'; see https://min.io/docs/minio/linux/reference/minio-mc.html#quickstart otherwise — then configure an alias pointing at your S3/MinIO/R2 endpoint: 'mc alias set $MC_ALIAS <endpoint> <access-key> <secret-key>' matching ASSET_STORAGE_* in your environment (pass a different alias name with --mc-alias)."
   require_env ASSET_STORAGE_BUCKET "the paywall-asset bucket to mirror (see .env.example)"
 
   echo "==> Object storage: mc mirror $MC_ALIAS/$ASSET_STORAGE_BUCKET"
-  mkdir -p "$OUT_DIR/$ASSETS_OUT_SUBDIR"
-  "$MC_BIN" mirror --quiet "$MC_ALIAS/$ASSET_STORAGE_BUCKET" "$OUT_DIR/$ASSETS_OUT_SUBDIR/"
+  local mirror_dir="$STAGING_DIR/$ASSETS_MIRROR_SUBDIR"
+  mkdir -p "$mirror_dir"
+  "$MC_BIN" mirror --quiet "$MC_ALIAS/$ASSET_STORAGE_BUCKET" "$mirror_dir/"
 
-  ASSETS_FILE_COUNT="$(find "$OUT_DIR/$ASSETS_OUT_SUBDIR" -type f | wc -l | tr -d ' ')"
-  local kib
-  kib="$(du -sk "$OUT_DIR/$ASSETS_OUT_SUBDIR" | cut -f1)"
-  ASSETS_BYTES=$((kib * 1024))
-  echo "    mirrored $ASSETS_FILE_COUNT files ($(human_size "$ASSETS_BYTES")) to $OUT_DIR/$ASSETS_OUT_SUBDIR/ — not encrypted: these objects are already served publicly (anonymous s3:GetObject bucket policy), so a plaintext local mirror adds no new exposure."
+  ASSETS_FILE_COUNT="$(find "$mirror_dir" -type f | wc -l | tr -d ' ')"
+
+  local tar_path="$STAGING_DIR/$ASSETS_ARCHIVE_FILENAME"
+  tar -C "$mirror_dir" -cf "$tar_path" .
+
+  if [ "$ALLOW_PLAINTEXT" -eq 1 ]; then
+    ASSETS_ARTIFACT="$ASSETS_ARCHIVE_FILENAME"
+    mv "$tar_path" "$OUT_DIR/$ASSETS_ARTIFACT"
+    ASSETS_ENCRYPTED="false"
+  else
+    require_bin "$AGE_BIN" "Install age (macOS: 'brew install age') to encrypt backup artifacts, or pass --allow-plaintext."
+    ASSETS_ARTIFACT="${ASSETS_ARCHIVE_FILENAME}${AGE_SUFFIX}"
+    "$AGE_BIN" -r "$BACKUP_AGE_RECIPIENT" -o "$OUT_DIR/$ASSETS_ARTIFACT" "$tar_path"
+    rm -f "$tar_path"
+    ASSETS_ENCRYPTED="true"
+  fi
+  rm -rf "$mirror_dir"
+
+  ASSETS_BYTES="$(wc -c < "$OUT_DIR/$ASSETS_ARTIFACT" | tr -d ' ')"
+  echo "    wrote $OUT_DIR/$ASSETS_ARTIFACT ($(human_size "$ASSETS_BYTES")), $ASSETS_FILE_COUNT files mirrored"
 }
 
 # ---------------------------------------------------------------------------
@@ -369,8 +405,8 @@ write_manifest() {
     printf '  },\n'
     printf '  "assets": {\n'
     printf '    "bucket": "%s",\n' "$(json_str "$ASSET_STORAGE_BUCKET")"
-    printf '    "dir": "%s",\n' "$(json_str "$ASSETS_OUT_SUBDIR/")"
-    printf '    "encrypted": false,\n'
+    printf '    "file": "%s",\n' "$(json_str "$ASSETS_ARTIFACT")"
+    printf '    "encrypted": %s,\n' "$ASSETS_ENCRYPTED"
     printf '    "fileCount": %s,\n' "$ASSETS_FILE_COUNT"
     printf '    "bytes": %s\n' "$ASSETS_BYTES"
     printf '  },\n'
@@ -389,12 +425,12 @@ print_summary() {
   echo "Backup complete: $OUT_DIR"
   echo "  postgres:   $POSTGRES_ARTIFACT ($(human_size "$POSTGRES_BYTES")), encrypted=$POSTGRES_ENCRYPTED"
   echo "  clickhouse: $CLICKHOUSE_ARTIFACT ($(human_size "$CLICKHOUSE_BYTES")), encrypted=$CLICKHOUSE_ENCRYPTED"
-  echo "  assets:     $ASSETS_OUT_SUBDIR/ ($ASSETS_FILE_COUNT files, $(human_size "$ASSETS_BYTES")), encrypted=false (public CDN content)"
+  echo "  assets:     $ASSETS_ARTIFACT ($ASSETS_FILE_COUNT files, $(human_size "$ASSETS_BYTES")), encrypted=$ASSETS_ENCRYPTED"
   echo "  skipped:    redis    — $REDIS_SKIP_REASON"
   echo "              redpanda — $REDPANDA_SKIP_REASON"
   if [ "$ALLOW_PLAINTEXT" -eq 1 ]; then
     echo
-    echo "WARNING: --allow-plaintext was set. $POSTGRES_ARTIFACT and $CLICKHOUSE_ARTIFACT in $OUT_DIR are UNENCRYPTED and contain subscriber PII. Do not leave them on a disk you do not fully control."
+    echo "WARNING: --allow-plaintext was set. $POSTGRES_ARTIFACT, $CLICKHOUSE_ARTIFACT and $ASSETS_ARTIFACT in $OUT_DIR are UNENCRYPTED. The first two contain subscriber PII; $ASSETS_ARTIFACT contains the full paywall-asset key listing the live bucket policy deliberately refuses to enumerate. Do not leave them on a disk you do not fully control."
   fi
 }
 
