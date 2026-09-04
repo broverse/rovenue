@@ -208,3 +208,20 @@ export function statusSqlList(
 export const PLAN_CHANGE_TYPES = ["UPGRADE", "DOWNGRADE"] as const;
 
 export type PlanChangeType = (typeof PLAN_CHANGE_TYPES)[number];
+
+// =============================================================
+// Family Sharing ownership
+// =============================================================
+
+/**
+ * Apple's `inAppOwnershipType` value for a subscription a family
+ * organiser shared with a member. Lives here — not in apps/api or
+ * packages/db alone — because BOTH sides must agree on the exact
+ * string: the API writes it onto `purchases.ownershipType` from the
+ * decoded JWS transaction, and the db repository's
+ * `createRevenueEvent` reads it back to suppress a second, double-
+ * counted revenue event for a member who didn't pay. A future Apple
+ * code path importing a different literal would silently break the
+ * suppression, so both sides derive from this one constant instead.
+ */
+export const APPLE_FAMILY_SHARED_OWNERSHIP_TYPE = "FAMILY_SHARED";

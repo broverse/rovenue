@@ -1,7 +1,13 @@
 import { and, desc, eq, gte } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
+import { APPLE_FAMILY_SHARED_OWNERSHIP_TYPE } from "@rovenue/shared/subscription-status";
 import type { Db } from "../client";
-import { revenueEvents, revenueEventDedupe, type RevenueEvent } from "../schema";
+import {
+  revenueEvents,
+  revenueEventDedupe,
+  purchases,
+  type RevenueEvent,
+} from "../schema";
 import { revenueEventType, store as storeEnum } from "../enums";
 import * as outboxRepo from "./outbox";
 
@@ -154,7 +160,25 @@ export interface CreateRevenueEventInput {
 export async function createRevenueEvent(
   db: DbOrTx,
   input: CreateRevenueEventInput,
-): Promise<RevenueEvent> {
+): Promise<RevenueEvent | null> {
+  // Family Sharing: the organiser already paid for this subscription.
+  // The member is entitled (the access engine grants normally off
+  // `purchases`/`subscriber_access`, untouched here) but must not
+  // produce a second economic event — that double-counts MRR and LTV.
+  // Checked here, inside the repository, rather than at each of the
+  // thirteen createRevenueEvent call sites (webhooks, receipt verify,
+  // data import, two workers) so no future Apple-reachable path can
+  // forget it, and so no downstream analytics query needs an
+  // ownershipType filter: the row simply never exists.
+  const [linkedPurchase] = await db
+    .select({ ownershipType: purchases.ownershipType })
+    .from(purchases)
+    .where(eq(purchases.id, input.purchaseId))
+    .limit(1);
+  if (linkedPurchase?.ownershipType === APPLE_FAMILY_SHARED_OWNERSHIP_TYPE) {
+    return null;
+  }
+
   return db.transaction(async (tx) => {
     // Idempotency gate: claim the dedupe key in the non-partitioned
     // revenue_event_dedupe table first. A conflict means this economic

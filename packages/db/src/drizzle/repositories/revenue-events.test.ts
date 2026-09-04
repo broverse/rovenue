@@ -126,6 +126,10 @@ describe("createRevenueEvent", () => {
       eventDate: new Date("2026-04-24T00:00:00Z"),
     });
 
+    // This purchase is not family-shared (seedPurchase leaves
+    // ownershipType null), so createRevenueEvent must not suppress.
+    if (!inserted) throw new Error("expected a revenue event, got null");
+
     // 1. Revenue row exists and ID matches the return value.
     const revenueRows = await db
       .select()
@@ -183,6 +187,8 @@ describe("createRevenueEvent", () => {
       country: "USA",
     });
 
+    if (!inserted) throw new Error("expected a revenue event, got null");
+
     // Assert on the real stored row, not createRevenueEvent's return value.
     const [outboxRow] = await db
       .select()
@@ -216,6 +222,8 @@ describe("createRevenueEvent", () => {
       eventDate: new Date("2026-04-24T00:00:00Z"),
       // country omitted — mirrors a store transaction with no storefront.
     });
+
+    if (!inserted) throw new Error("expected a revenue event, got null");
 
     const [outboxRow] = await db
       .select()
@@ -254,6 +262,7 @@ describe("createRevenueEvent", () => {
     };
 
     const created = await createRevenueEvent(db, baseEventInput);
+    if (!created) throw new Error("expected a revenue event, got null");
     const found = await findRevenueEventById(db, created.id);
     expect(found?.id).toBe(created.id);
     expect(found?.purchaseId).toBe(created.purchaseId);

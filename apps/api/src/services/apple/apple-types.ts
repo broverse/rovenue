@@ -3,6 +3,8 @@
 // https://developer.apple.com/documentation/appstoreservernotifications
 // =============================================================
 
+import { APPLE_FAMILY_SHARED_OWNERSHIP_TYPE } from "@rovenue/shared/subscription-status";
+
 export const APPLE_NOTIFICATION_TYPE = {
   SUBSCRIBED: "SUBSCRIBED",
   DID_CHANGE_RENEWAL_PREF: "DID_CHANGE_RENEWAL_PREF",
@@ -67,7 +69,10 @@ export type AppleTransactionType =
 
 export const APPLE_OWNERSHIP_TYPE = {
   PURCHASED: "PURCHASED",
-  FAMILY_SHARED: "FAMILY_SHARED",
+  // Sourced from @rovenue/shared so this and the db repository's revenue
+  // suppression (packages/db/src/drizzle/repositories/revenue-events.ts)
+  // can never drift onto different literals.
+  FAMILY_SHARED: APPLE_FAMILY_SHARED_OWNERSHIP_TYPE,
 } as const;
 export type AppleOwnershipType =
   (typeof APPLE_OWNERSHIP_TYPE)[keyof typeof APPLE_OWNERSHIP_TYPE];
