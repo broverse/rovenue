@@ -109,6 +109,34 @@ describe("template catalogue", () => {
       expect(collectMediaUrls(config)).toEqual([]);
     });
 
+    it("carries no baked link URL either — walked directly, not inferred", () => {
+      // `collectMediaUrls` deliberately does NOT walk `footerLinks`: a link's
+      // destination is an external URL the host opens, not a CDN asset the
+      // publish-time usage index should claim. So the media check above says
+      // nothing about link URLs, and `EMPTY_ACTION_URL` is a `.some(...)`
+      // existence check that a HALF-filled footer would still satisfy — one
+      // empty sibling keeps it true.
+      //
+      // Walk the actions instead. A template cannot know a project's legal
+      // URLs, so every url-action must be the empty placeholder. This is the
+      // assertion the catalogue's portability actually rests on.
+      const bakedUrls: string[] = [];
+      for (const node of nodesOf(config)) {
+        const actions =
+          node.type === "footerLinks"
+            ? node.links.map((l) => l.action)
+            : node.type === "button"
+              ? [node.action]
+              : [];
+        for (const action of actions) {
+          if (action.kind === "url" && action.url.trim().length > 0) {
+            bakedUrls.push(`${node.id}: ${action.url}`);
+          }
+        }
+      }
+      expect(bakedUrls).toEqual([]);
+    });
+
     it("gives every localization key its own non-empty copy in the default locale", () => {
       // UNKNOWN_LOC_KEY / EMPTY_LOC_VALUE would already have failed the
       // placeholder-code assertion above; this checks the table directly so a
@@ -130,8 +158,13 @@ describe("template catalogue", () => {
     });
 
     // --- The placeholder codes are ASSERTED, not merely tolerated. ---
-    // Tolerating them would let a template quietly ship a real baked URL,
-    // which is the one thing the catalogue's portability rests on.
+    //
+    // Read these two for what they are: they check that the VALIDATOR still
+    // flags the placeholders a template ships, so a future change that
+    // silently stopped flagging them (and therefore stopped blocking the
+    // publish) fails here. They are not what proves a template carries no
+    // real URL — the two direct walks above are, because these are
+    // `.some(...)` existence checks that a half-filled footer would satisfy.
 
     it("raises EMPTY_ACTION_URL for its footer's Terms/Privacy links", () => {
       expect(issues.some((i) => i.code === "EMPTY_ACTION_URL")).toBe(true);
