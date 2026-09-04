@@ -200,6 +200,12 @@ KAFKA_TOPICS=()
 # run restored into.
 RESTORED_CLICKHOUSE_DATABASE=""
 
+# Set by verify_restore, read by print_summary — carries the Guard 4
+# asset-header outcome into the FINAL block an operator reads, not only
+# the SKIPPED warning ~15 lines above it that a scrolling terminal may
+# have already pushed out of view by the time they reach the summary.
+ASSET_HEADERS_CHECK_STATE="not run"
+
 # Step tracking for on_exit's failure-state summary (Fix 2): once services
 # are stopped, ANY subsequent failure needs to tell the operator what did
 # and didn't complete, not just the one failing command's own error text.
@@ -745,6 +751,7 @@ verify_restore() {
   if [ -n "${ASSET_VERIFY_KEY:-}" ]; then
     echo "==> Verification: $ASSET_HEADERS_VERIFY_FILTER $ASSET_HEADERS_VERIFY_SCRIPT ($ASSET_VERIFY_KEY)"
     "$PNPM_BIN" --filter "$ASSET_HEADERS_VERIFY_FILTER" "$ASSET_HEADERS_VERIFY_SCRIPT"
+    ASSET_HEADERS_CHECK_STATE="VERIFIED ($ASSET_VERIFY_KEY)"
   else
     echo "==> Verification: $ASSET_HEADERS_VERIFY_FILTER $ASSET_HEADERS_VERIFY_SCRIPT — SKIPPED"
     echo "    WARNING: ASSET_VERIFY_KEY is not set, so the restored asset origin's response"
@@ -753,6 +760,7 @@ verify_restore() {
     echo "    \"<projectId>/<cuid2>.<ext>\" key (SELECT \"storageKey\" FROM paywall_assets LIMIT 1"
     echo "    against the restored database) and re-run \"$PNPM_BIN --filter"
     echo "    $ASSET_HEADERS_VERIFY_FILTER $ASSET_HEADERS_VERIFY_SCRIPT\" by hand to check it."
+    ASSET_HEADERS_CHECK_STATE="SKIPPED — ASSET_VERIFY_KEY unset, headers NOT checked"
   fi
 }
 
@@ -844,7 +852,7 @@ print_summary() {
   echo
   echo "Restore complete from: $FROM_DIR"
   echo "  postgres:   restored, $PG_RESTORE_CLEAN_FLAG $PG_RESTORE_IF_EXISTS_FLAG"
-  echo "  assets:     restored into $MC_ALIAS/$ASSET_STORAGE_BUCKET"
+  echo "  assets:     restored into $MC_ALIAS/$ASSET_STORAGE_BUCKET; header check: $ASSET_HEADERS_CHECK_STATE"
   echo "  clickhouse: restored, Kafka objects re-attached (${#KAFKA_TABLES[@]} table(s), ${#KAFKA_VIEWS[@]} view(s))"
 
   print_clickhouse_gap_warning

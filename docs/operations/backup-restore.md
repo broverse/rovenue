@@ -305,8 +305,14 @@ point `restore.sh` at anything that isn't disposable.
 
 **Scheduling.** This is an operator decision — `backup.sh`/`restore.sh` take
 no opinion on cadence, and neither does this document beyond "quarterly, on
-a calendar, not on memory." A cron entry for the recurring backup (not the
-quarterly *test*-restore, which stays a deliberate, watched exercise):
+a calendar, not on memory." This cron line assumes `mc alias set
+rovenue-backup $ASSET_STORAGE_ENDPOINT $ASSET_STORAGE_ACCESS_KEY_ID
+$ASSET_STORAGE_SECRET_ACCESS_KEY` has already been run once on this host
+(`mc`'s config persists at `~/.mc/config.json` for whichever user cron runs
+as, so it is not repeated per invocation) — on Docker Desktop specifically,
+point it at the socat relay instead, per "two things easy to get wrong"
+above. A cron entry for the recurring backup (not the quarterly
+*test*-restore, which stays a deliberate, watched exercise):
 
 ```cron
 # Nightly backup at 03:15 UTC, run on the docker host itself (see "two
@@ -359,7 +365,7 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - |
-        apk add --no-cache bash docker-cli postgresql16-client age curl \
+        apk add --no-cache bash docker-cli docker-cli-compose postgresql16-client age curl jq \
           && curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc \
           && chmod +x /usr/local/bin/mc \
           && mc alias set rovenue-backup "$$ASSET_STORAGE_ENDPOINT" "$$ASSET_STORAGE_ACCESS_KEY_ID" "$$ASSET_STORAGE_SECRET_ACCESS_KEY" \
@@ -380,6 +386,26 @@ happens before anything is touched, but still not what a nightly job
 should print into its log). `depends_on: minio` gates the same way as
 `db`/`clickhouse` so the alias-set step above doesn't race a MinIO that
 hasn't finished booting.
+
+Every binary `backup.sh` actually requires is installed above, checked
+against its own `require_bin` calls and its ClickHouse step's direct
+`docker compose`/`docker cp`/`docker exec` invocations, not assumed:
+`pg_dump` (`postgresql16-client`), `age`, `curl`, `docker` (`docker-cli`),
+`docker compose` (`docker-cli-compose` — a **separate** apk package from
+`docker-cli` in Alpine 3.20; without it `docker compose ps -q clickhouse`
+in the ClickHouse step fails immediately with "'compose' is not a docker
+command," before the script ever reaches the object-storage step below
+it), `mc` (installed by the `curl`/`chmod` lines, not by `apk`), and `jq`
+(`run_assets_backup`'s per-object metadata sidecar — omitting it means the
+container writes `postgres.dump` and `clickhouse.zip`, then aborts on the
+assets step **before `write_manifest` ever runs**, leaving a directory
+with no `manifest.json` that `restore.sh` cannot use at all). `bash`,
+`wc`, `awk`, `sha256sum`, `date`, `mktemp`, `tar`, `grep`, `sed` and
+`find` are the only other tools the script shells out to, and all of
+those ship in the base `alpine:3.20` image's busybox — verified directly
+(`apk add --no-cache bash docker-cli docker-cli-compose postgresql16-client
+age curl jq` installs cleanly together, and `jq --version` / `docker
+compose version` both work afterward).
 
 invoked as `docker compose --profile backup run --rm backup`. Installing
 tooling on every run is the honest tradeoff for staying out of the default

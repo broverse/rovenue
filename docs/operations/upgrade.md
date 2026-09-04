@@ -75,7 +75,15 @@ bash deploy/backup/backup.sh --out /backups/$(date -u +%Y%m%dT%H%M%SZ)
 `backup.sh` refuses to run without `BACKUP_AGE_RECIPIENT` set (unless
 `--allow-plaintext` is passed) — see
 [`backup-restore.md`](./backup-restore.md) for what that key is and why it
-must be a *different* keypair from `ENCRYPTION_KEY`.
+must be a *different* keypair from `ENCRYPTION_KEY`. `backup.sh` also
+needs an `mc` alias named `rovenue-backup` already configured
+(`mc alias set rovenue-backup $ASSET_STORAGE_ENDPOINT
+$ASSET_STORAGE_ACCESS_KEY_ID $ASSET_STORAGE_SECRET_ACCESS_KEY`, one-time
+per host — see
+[`backup-restore.md`'s "two things easy to get
+wrong"](./backup-restore.md#two-things-easy-to-get-wrong) for the
+Docker-Desktop-specific variant) or the object-storage step fails with
+"alias does not exist."
 
 Full detail — what's covered, the `ENCRYPTION_KEY` fingerprint guard, the
 `mc` install trap, the ClickHouse restore gap — is in
