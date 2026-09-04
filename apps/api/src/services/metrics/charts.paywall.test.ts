@@ -33,29 +33,21 @@ describe("readChartSeries", () => {
   });
 
   it("reports supported:false and no points for an id with no reader", async () => {
-    // `rev_per_install` stays unsupported per spec §4.3 (no install event
-    // exists anywhere in the product) — unlike `churn`, which task-3 wired,
-    // this id has no reader to eventually land here.
-    const res = asDateSeries(await readChartSeries("proj_1", "rev_per_install", 7));
+    // Three tests used to live here, pinning `rev_per_install`,
+    // `retention_curve` and `ltv` as permanently unsupported. All three
+    // were wired on 2026-09-04, so what they asserted is simply no
+    // longer true — see charts.installs.test.ts and
+    // charts.cohorts.test.ts for what those ids do now.
+    //
+    // The invariant they were REALLY guarding survives them and is
+    // asserted here against an id the dispatcher does not know: an
+    // unsupported id must cost zero ClickHouse round-trips, because
+    // that is how the old page ended up showing MRR data under another
+    // chart's name.
+    const res = asDateSeries(await readChartSeries("proj_1", "not_a_chart", 7));
     expect(res.supported).toBe(false);
     expect(res.points).toEqual([]);
-    expect(res.chartId).toBe("rev_per_install");
-    // An unwired chart must never trigger a query — that is how the
-    // old page ended up showing MRR data under another chart's name.
-    expect(queryAnalyticsMock).not.toHaveBeenCalled();
-  });
-
-  it("retention_curve stays unsupported (task-4 controller Ruling 4: its x-axis is periods-since-cohort-start, not a calendar date — /cohorts is its surface, not this dispatcher)", async () => {
-    const res = asDateSeries(await readChartSeries("proj_1", "retention_curve", 7));
-    expect(res.supported).toBe(false);
-    expect(res.points).toEqual([]);
-    expect(queryAnalyticsMock).not.toHaveBeenCalled();
-  });
-
-  it("ltv stays unsupported (task-4: no owning service has a day column to widen by — see charts.ts's dispatcher-header comment)", async () => {
-    const res = asDateSeries(await readChartSeries("proj_1", "ltv", 7));
-    expect(res.supported).toBe(false);
-    expect(res.points).toEqual([]);
+    expect(res.chartId).toBe("not_a_chart");
     expect(queryAnalyticsMock).not.toHaveBeenCalled();
   });
 

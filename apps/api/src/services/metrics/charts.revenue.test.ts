@@ -101,8 +101,13 @@ describe("readChartSeries — revenue ids", () => {
     expect(day?.value).toBeNull();
   });
 
-  it("issues zero ClickHouse round-trips for an id that isn't mrr/arr/gross_vs_net/arpu", async () => {
-    const res = asDateSeries(await readChartSeries("proj_1", "ltv", 7));
+  it("issues zero ClickHouse round-trips for an id the dispatcher does not know", async () => {
+    // Was written against `ltv`, which served no reader until
+    // 2026-09-04. The INVARIANT it guards is not about that id: an id
+    // with no case must cost nothing, or one chart's data leaks out
+    // under another chart's name. An unknown id is what still exercises
+    // it now that all sixteen catalog ids are wired.
+    const res = asDateSeries(await readChartSeries("proj_1", "not_a_chart", 7));
     expect(res.supported).toBe(false);
     expect(res.unit).toBe("count");
     expect(queryAnalyticsMock).not.toHaveBeenCalled();

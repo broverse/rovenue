@@ -42,10 +42,15 @@ describe("resolveOrCreateSubscriber", () => {
     upsert.mockResolvedValue({ id: "s2", rovenueId: "r2" });
     const sub = await resolveOrCreateSubscriber("p1", "r2");
     expect(sub).toEqual({ id: "s2", rovenueId: "r2" });
+    // This wrapper is reachable only from the SDK's public-key /v1
+    // surface, so creating here IS an install: it stamps
+    // `sdkInstalledAt`. Asserted as an instant rather than a
+    // truthiness check so a future change to `null` fails here.
     expect(upsert).toHaveBeenCalledWith({}, {
       projectId: "p1",
       rovenueId: "r2",
       createAttributes: {},
+      sdkInstalledAt: expect.any(Date),
     });
   });
 
@@ -88,10 +93,14 @@ describe("resolveSubscriberForWrite", () => {
     const result = await resolveSubscriberForWrite("p1", "r3", { a: 1 });
 
     expect(result.deadEnded).toBe(false);
+    // NULL sdkInstalledAt on this lower-level entry point, deliberately:
+    // the CSV importer calls it directly, and an imported subscriber is
+    // not an install. Only `resolveOrCreateSubscriber` opts in.
     expect(upsert).toHaveBeenCalledWith({}, {
       projectId: "p1",
       rovenueId: "r3",
       createAttributes: { a: 1 },
+      sdkInstalledAt: null,
     });
   });
 });

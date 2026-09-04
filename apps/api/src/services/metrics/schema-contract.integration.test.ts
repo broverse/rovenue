@@ -614,6 +614,12 @@ describe("schema-contract harness completeness", () => {
 
 describe("metrics service queries — real ClickHouse, empty result is a pass", () => {
   for (const { moduleName, invokers } of REGISTRY) {
+    // A module can be registered with NO invokers — `installs` is, because
+    // every one of its exports is Postgres-only and exempt. It still
+    // belongs in REGISTRY so the completeness test above watches its
+    // exports; it just has nothing to run here, and an empty `describe`
+    // is a suite-level failure in vitest ("No test found in suite").
+    if (Object.keys(invokers).length === 0) continue;
     describe(moduleName, () => {
       for (const [name, invoke] of Object.entries(invokers)) {
         it(`${name} runs against the real schema without a ClickHouse exception`, async () => {
