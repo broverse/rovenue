@@ -101,6 +101,7 @@ export * as assetRepo from "./repositories/assets";
 export * as importJobRepo from "./repositories/import-jobs";
 export * as revenueEventPartitionRepo from "./repositories/revenue-event-partitions";
 export * as commissionRateRepo from "./repositories/commission-rates";
+export * as leaderboardRepo from "./repositories/leaderboards";
 // Pure helpers re-exported at top level (same treatment as
 // `revenueDedupeKind`) so the dry-run planner can report the span
 // without pulling in the mockable repo namespace.

@@ -420,3 +420,19 @@ export const currencyGrantTrigger = pgEnum("CurrencyGrantTrigger", [
   "RENEWAL",
   "BOTH",
 ]);
+
+export const leaderboardMetric = pgEnum("LeaderboardMetric", [
+  "TOP_SPENDERS",
+  "TOP_CONSUMERS",
+]);
+
+export const leaderboardCadence = pgEnum("LeaderboardCadence", [
+  "WEEKLY",
+  "MONTHLY",
+  "CUSTOM",
+]);
+
+export const leaderboardSeasonStatus = pgEnum("LeaderboardSeasonStatus", [
+  "ACTIVE",
+  "CLOSED",
+]);

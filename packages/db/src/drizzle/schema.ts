@@ -54,6 +54,9 @@ import {
   importJobStatus,
   integrationDeliveryStatus,
   invitationDeliveryStatus,
+  leaderboardCadence,
+  leaderboardMetric,
+  leaderboardSeasonStatus,
   memberRole,
   notificationChannel,
   notificationDeliveryStatus,
@@ -2323,6 +2326,9 @@ export {
   importJobStatus,
   integrationDeliveryStatus,
   invitationDeliveryStatus,
+  leaderboardCadence,
+  leaderboardMetric,
+  leaderboardSeasonStatus,
   memberRole,
   notificationChannel,
   notificationDeliveryStatus,
@@ -3515,3 +3521,97 @@ export const paywallAssetReservations = pgTable(
 
 export type PaywallAssetReservation = typeof paywallAssetReservations.$inferSelect;
 export type NewPaywallAssetReservation = typeof paywallAssetReservations.$inferInsert;
+
+// =============================================================
+// leaderboards (configured, season-based)
+// =============================================================
+
+export const leaderboards = pgTable(
+  "leaderboards",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    identifier: text("identifier").notNull(),
+    name: text("name").notNull(),
+    metric: leaderboardMetric("metric").notNull(),
+    // Only meaningful for TOP_CONSUMERS. Null = every currency, which is
+    // what the existing ad-hoc endpoint does.
+    currencyId: text("currencyId").references(() => virtualCurrencies.id, {
+      onDelete: "set null",
+    }),
+    cadence: leaderboardCadence("cadence").notNull(),
+    customPeriodDays: integer("customPeriodDays"),
+    // IANA name. Season boundaries roll at local midnight in this zone.
+    timezone: text("timezone").notNull().default("UTC"),
+    entryLimit: integer("entryLimit").notNull().default(100),
+    anchorAt: timestamp("anchorAt", { withTimezone: true }).notNull(),
+    isEnabled: boolean("isEnabled").notNull().default(true),
+    createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    projectIdIdentifierKey: uniqueIndex("leaderboards_projectId_identifier_key").on(
+      t.projectId,
+      t.identifier,
+    ),
+    projectIdIdx: index("leaderboards_projectId_idx").on(t.projectId),
+  }),
+);
+
+export const leaderboardSeasons = pgTable(
+  "leaderboard_seasons",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    leaderboardId: text("leaderboardId")
+      .notNull()
+      .references(() => leaderboards.id, { onDelete: "cascade" }),
+    seasonNumber: integer("seasonNumber").notNull(),
+    startsAt: timestamp("startsAt", { withTimezone: true }).notNull(),
+    /** Exclusive. */
+    endsAt: timestamp("endsAt", { withTimezone: true }).notNull(),
+    status: leaderboardSeasonStatus("status").notNull().default("ACTIVE"),
+    closedAt: timestamp("closedAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leaderboardIdSeasonNumberKey: uniqueIndex(
+      "leaderboard_seasons_leaderboardId_seasonNumber_key",
+    ).on(t.leaderboardId, t.seasonNumber),
+    statusEndsAtIdx: index("leaderboard_seasons_status_endsAt_idx").on(
+      t.status,
+      t.endsAt,
+    ),
+  }),
+);
+
+export const leaderboardStandings = pgTable(
+  "leaderboard_standings",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    seasonId: text("seasonId")
+      .notNull()
+      .references(() => leaderboardSeasons.id, { onDelete: "cascade" }),
+    rank: integer("rank").notNull(),
+    // Deliberately NOT a foreign key: standings are a historical snapshot,
+    // and a closed season's numbers must not change or vanish because a
+    // subscriber row was later removed.
+    subscriberId: text("subscriberId").notNull(),
+    // Numeric as text: USD sums and large credit totals must not go
+    // through a float.
+    score: text("score").notNull(),
+    eventCount: integer("eventCount").notNull(),
+  },
+  (t) => ({
+    seasonIdRankKey: uniqueIndex("leaderboard_standings_seasonId_rank_key").on(
+      t.seasonId,
+      t.rank,
+    ),
+  }),
+);
+
+export type Leaderboard = typeof leaderboards.$inferSelect;
+export type NewLeaderboard = typeof leaderboards.$inferInsert;
+export type LeaderboardSeason = typeof leaderboardSeasons.$inferSelect;
+export type LeaderboardStanding = typeof leaderboardStandings.$inferSelect;
