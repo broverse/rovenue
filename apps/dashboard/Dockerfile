@@ -56,6 +56,18 @@ COPY deploy/caddy/Caddyfile.dashboard /etc/caddy/Caddyfile
 COPY deploy/dashboard/entrypoint.sh /usr/local/bin/rovenue-entrypoint.sh
 COPY --from=builder /app/apps/dashboard/dist /srv
 RUN chmod +x /usr/local/bin/rovenue-entrypoint.sh
+
+# Unset (default): entrypoint.sh accepts a missing ROVENUE_API_URL and
+# runtime-config.ts falls back to the baked-in VITE_API_URL above — the
+# right behavior for a from-source `docker compose up` build. Set to a
+# non-empty value ONLY for published GHCR images (see
+# .github/workflows/release-images.yml, rovenue-dashboard only): there the
+# baked-in default is meaningless (it points at localhost) and an operator
+# who forgets ROVENUE_API_URL should get a refused start, not a dashboard
+# that boots and silently talks to nothing.
+ARG ROVENUE_REQUIRE_RUNTIME_CONFIG=
+ENV ROVENUE_REQUIRE_RUNTIME_CONFIG=${ROVENUE_REQUIRE_RUNTIME_CONFIG}
+
 EXPOSE 80
 # Validates ROVENUE_* and refuses to start on a bad value, then execs caddy.
 ENTRYPOINT ["/usr/local/bin/rovenue-entrypoint.sh"]

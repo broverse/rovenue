@@ -30,9 +30,27 @@ describe("dashboard entrypoint validation", () => {
       ROVENUE_API_URL: "https://api.example.com",
       ROVENUE_HOST_MODE: "cloud",
       ROVENUE_ALLOW_REGISTRATION: "true",
-      ROVENUE_DASHBOARD_HOST: "https://app.example.com",
+      // Bare hostname, optionally with :port — matches .env.example's
+      // VITE_DASHBOARD_HOST=app.rovenue.io and custom-host.ts's
+      // `host.split(":")[0]` normalisation. NOT a URL: see the rejection
+      // case below.
+      ROVENUE_DASHBOARD_HOST: "app.example.com:5173",
     });
     expect(stdout).toContain("ok");
+  });
+
+  // custom-host.ts normalises with `host.split(":")[0].toLowerCase()`, so a
+  // scheme-bearing value like "https://app.example.com" would normalise to
+  // the string "https" and could never match window.location.hostname —
+  // silently disabling canonical-host detection instead of failing loudly.
+  // ROVENUE_DASHBOARD_HOST must be rejected at container start instead.
+  it("rejects a URL for ROVENUE_DASHBOARD_HOST", async () => {
+    await expect(
+      validate({ ROVENUE_DASHBOARD_HOST: "https://app.example.com" }),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("ROVENUE_DASHBOARD_HOST"),
+    });
   });
 
   it("rejects a non-absolute API URL", async () => {
@@ -80,5 +98,45 @@ describe("dashboard entrypoint validation", () => {
     await expect(
       validate({ ROVENUE_API_URL: "https://a.example.com/\rx" }),
     ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("ROVENUE_API_URL") });
+  });
+
+  // A backslash is both a JS string escape character and Caddy's own
+  // replacer escape character, so it gets the same treatment as the quote
+  // and backtick cases above.
+  it("rejects a value containing a backslash", async () => {
+    await expect(
+      validate({ ROVENUE_API_URL: "https://a.example.com/\\x" }),
+    ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("ROVENUE_API_URL") });
+  });
+
+  describe("ROVENUE_REQUIRE_RUNTIME_CONFIG", () => {
+    // The default, from-source-build path: unset and not required, so the
+    // Dockerfile's baked-in VITE_API_URL fallback in runtime-config.ts is
+    // allowed to stand.
+    it("accepts an unset ROVENUE_API_URL when not required", async () => {
+      const { stdout } = await validate({});
+      expect(stdout).toContain("ok");
+    });
+
+    // The published-image path (release-images.yml bakes this ARG in for
+    // rovenue-dashboard only): an operator who forgets ROVENUE_API_URL must
+    // get a refused start naming the missing variable, not a dashboard that
+    // boots and silently talks to localhost.
+    it("rejects an unset ROVENUE_API_URL when required", async () => {
+      await expect(
+        validate({ ROVENUE_REQUIRE_RUNTIME_CONFIG: "1" }),
+      ).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("ROVENUE_API_URL"),
+      });
+    });
+
+    it("accepts a set ROVENUE_API_URL when required", async () => {
+      const { stdout } = await validate({
+        ROVENUE_REQUIRE_RUNTIME_CONFIG: "1",
+        ROVENUE_API_URL: "https://api.example.com",
+      });
+      expect(stdout).toContain("ok");
+    });
   });
 });
