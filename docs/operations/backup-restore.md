@@ -126,7 +126,15 @@ bucket, then ClickHouse.** This isn't arbitrary:
    analytics reference has to exist before anything downstream is restored.
 2. **Assets second** — no ordering dependency on ClickHouse either way;
    restored right after Postgres purely to get the slower `mc mirror` step
-   out of the way before the more failure-prone ClickHouse step.
+   out of the way before the more failure-prone ClickHouse step. Unlike
+   Postgres (Guard 3, refuses without `--force`) and ClickHouse
+   (whole-database `RESTORE` only succeeds into an empty database), the
+   asset bucket has **no emptiness guard** — restored objects are written
+   over whatever is already at that key, and anything already in the
+   bucket that isn't in the backup is left untouched rather than removed.
+   That's a disk-only concern (orphaned, unreferenced objects at worst),
+   not a data-integrity one, which is why it doesn't get a guard of its
+   own.
 3. **ClickHouse last** — its Kafka Engine tables (and their materialized
    views) are `DETACH`ed immediately after `RESTORE DATABASE` completes and
    re-`ATTACH`ed once the ClickHouse restore itself finishes — not held

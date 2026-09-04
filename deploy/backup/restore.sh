@@ -464,8 +464,30 @@ run_postgres_restore() {
 restore_one_asset_with_metadata() {
   local mirror_dir="$1" metadata_file="$2" rel_path="$3"
   local attr_string
+  # `mc cp --attr` takes "key1=val1;key2=val2" — ";" is ITS OWN separator,
+  # not data. A captured value containing ";" (e.g. a Content-Type of
+  # "text/html; charset=utf-8") would silently split into a bogus extra
+  # attribute if joined naively. Safe today only because AssetStore
+  # happens not to set such a value — exactly the "correct by coincidence
+  # with the current policy" this backup/restore pipeline otherwise
+  # avoids — so this refuses with a named error instead of joining blind.
   # shellcheck disable=SC2016 # single-quoted jq filter — $k is jq's own --arg binding, not a shell variable.
-  attr_string="$("$JQ_BIN" -r --arg k "$rel_path" '(.[$k] // {}) | to_entries | map("\(.key)=\(.value)") | join(";")' "$metadata_file")"
+  attr_string="$("$JQ_BIN" -r --arg k "$rel_path" '
+    ($k) as $key
+    | ((.[$key] // {}) | to_entries) as $entries
+    | ($entries | map(select(.value | test(";")))) as $bad
+    | if ($bad | length) > 0 then
+        error(
+          "metadata value(s) for " + ($bad | map(.key) | join(", "))
+          + " on \"" + $key + "\" contain \";\", which mc --attr uses as"
+          + " its own key=value separator — refusing to silently split"
+          + " into bogus attributes"
+        )
+      else
+        ($entries | map("\(.key)=\(.value)") | join(";"))
+      end
+  ' "$metadata_file")" \
+    || fail "restoring metadata for '$rel_path' — see the jq error above (a captured Content-Type/Cache-Control/x-amz-meta-* value contains ';', which mc --attr cannot safely carry)"
   if [ -n "$attr_string" ]; then
     "$MC_BIN" cp --quiet --attr "$attr_string" "$mirror_dir/$rel_path" "$MC_ALIAS/$ASSET_STORAGE_BUCKET/$rel_path" >/dev/null
   else

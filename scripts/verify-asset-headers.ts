@@ -182,8 +182,9 @@ export async function verifyAssetHeaders(
       });
     }
   } catch (err) {
-    // A network-level rejection (e.g. connection reset) also counts as
-    // refused — it's not a successful write.
+    // A network-level rejection (e.g. connection reset) is NOT proof of a
+    // refusal — it's simply unverifiable, and this fails closed rather
+    // than silently treating "the request never completed" as a pass.
     failures.push({
       check: "put-refused",
       detail: `PUT request errored rather than returning a status (treating as unverifiable): ${(err as Error).message}`,

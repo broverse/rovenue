@@ -64,6 +64,13 @@ import { createClient, type ClickHouseClient } from "@clickhouse/client";
 import { Client as PgClient, type QueryResultRow } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { verifyAssetHeaders } from "../../scripts/verify-asset-headers";
+// Relative, not `@rovenue/shared` — same reasoning as the
+// verify-asset-headers import above: this file has no package.json of
+// its own and is run directly from the repo root
+// (`npx vitest run deploy/backup/backup-restore.integration.test.ts`),
+// where a workspace package name only resolves if the ROOT package.json
+// lists it as a dependency, which it does not.
+import { ASSET_CACHE_MAX_AGE_SECONDS } from "../../packages/shared/src/assets/constants";
 
 const execFileAsync = promisify(execFile);
 
@@ -104,11 +111,12 @@ const APP_USER_ID = `bkuptest-appuser-${RUN_ID}`;
 const CH_EVENT_ID = `bkuptest-event-${RUN_ID}`;
 const ASSET_KEY = `${PROJECT_ID}/probe-asset.json`;
 const ASSET_BODY = JSON.stringify({ probe: RUN_ID });
-// Matches what apps/api's asset-store.ts actually sets at PutObject time
-// (CacheControl: `public, max-age=${ASSET_CACHE_MAX_AGE_SECONDS}, immutable`)
-// — the exact value the metadata sidecar must carry through backup and
-// restore for restore.sh's own verify:asset-headers check to pass.
-const SEED_CACHE_CONTROL = "public, max-age=31536000, immutable";
+// Matches what apps/api's asset-store.ts actually sets at PutObject time —
+// the exact value the metadata sidecar must carry through backup and
+// restore for restore.sh's own verify:asset-headers check to pass. Derived
+// from the same named constant scripts/asset-headers.integration.test.ts
+// uses (OBJECT_CACHE_CONTROL there), not a second hardcoded literal.
+const SEED_CACHE_CONTROL = `public, max-age=${ASSET_CACHE_MAX_AGE_SECONDS}, immutable`;
 // Must match backup.sh's/restore.sh's own ASSETS_METADATA_SIDECAR_FILENAME
 // constant exactly — see either script's comment on it.
 const ASSETS_METADATA_SIDECAR_FILENAME = ".rovenue-asset-metadata.json";

@@ -13,8 +13,11 @@
   clickhouse service) — durable across container recreation, but NOT
   host-visible as a bind mount. deploy/backup/backup.sh copies the
   resulting backup archive out of the container (docker cp) into the
-  host-side backup directory after BACKUP completes; it is not left to
-  accumulate on this disk.
+  host-side backup directory and removes it from this disk once that
+  copy succeeds — true on the success path only. If backup.sh is
+  interrupted or killed between BACKUP completing and that cleanup step,
+  the archive is left behind here and grows this disk on every such run
+  until an operator notices and clears it by hand.
 
   This file is picked up automatically: docker-compose.yml already
   mounts ./deploy/clickhouse/config.d into the clickhouse service at

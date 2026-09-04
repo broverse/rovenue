@@ -192,7 +192,7 @@ segment — the S3 API is path-style here), then verify the origin actually
 serves the headers it promises against a real uploaded asset:
 
     ASSET_PUBLIC_BASE_URL=https://assets.example.com/rovenue-assets \
-      npx tsx scripts/verify-asset-headers.ts <projectId>/<assetId>.webp
+      pnpm --filter @rovenue/scripts verify:asset-headers <projectId>/<assetId>.webp
 
 Expected:
 
