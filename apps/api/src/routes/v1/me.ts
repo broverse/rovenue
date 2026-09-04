@@ -11,6 +11,7 @@ import {
 } from "@rovenue/shared";
 import { appUserContext } from "../../middleware/app-user-context";
 import { buildAccessResponse } from "../../lib/access-response";
+import { publishSubscriberInvalidation } from "../../lib/config-invalidation";
 import { ok } from "../../lib/response";
 
 // =============================================================
@@ -96,6 +97,8 @@ export const meRoute = new Hono()
           updateAttributes: merged,
         },
       );
+
+      await publishSubscriberInvalidation(project.id, [updated.id]);
 
       return c.json(
         ok({

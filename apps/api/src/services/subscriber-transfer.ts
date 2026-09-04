@@ -2,6 +2,7 @@ import { type Db, CreditLedgerType, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
 import { syncAccess } from "./access-engine";
+import { publishSubscriberInvalidation } from "../lib/config-invalidation";
 
 // =============================================================
 // Subscriber account lifecycle — merge + anonymize
@@ -233,6 +234,15 @@ export async function transferSubscriber(
   // Reconcile the surviving subscriber's denormalized access now that the
   // merged subscriber's purchases + access rows belong to it.
   await safeSyncAccessAfterMerge(result.toSubscriberId);
+
+  // Both ids: the device that initiated the merge may still be holding the
+  // retired one, and its stream needs waking so the next evaluation
+  // re-resolves onto the survivor.
+  await publishSubscriberInvalidation(projectId, [
+    result.fromSubscriberId,
+    result.toSubscriberId,
+  ]);
+
   return result;
 }
 
