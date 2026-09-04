@@ -89,6 +89,7 @@ For every other event type (`subscription.*`, `subscriber.identified`, `paywall.
 | `subscription.paused` | A subscriber pauses their subscription (Google `SUBSCRIPTION_PAUSED`). **Google only** — Apple has no pause notification. |
 | `subscription.recovered` | A billing failure resolves and the subscription is healthy again (Google `SUBSCRIPTION_RECOVERED`). **Google only** — see the coverage note below. |
 | `subscription.revoked` | Access is revoked immediately rather than lapsing at end of term — a refund, a family-sharing removal, or a store-initiated revocation (Apple `REVOKE`, Google `SUBSCRIPTION_REVOKED`). Distinct from `subscription.expired`, which is an end-of-term expiry. |
+| `subscription.offer_redeemed` | A subscriber redeems a promotional offer, an offer code, or a win-back offer (Apple `OFFER_REDEEMED`). **Apple only** — see the coverage note below. Distinct from `subscription.uncancelled` (the subscription may have fully lapsed) and from `subscription.product_changed` (the redeemed offer is often for the same product). |
 | `paywall.view` | A paywall is shown to a user. |
 | `paywall.close` | A paywall is dismissed or closed. |
 | `credit.ledger.appended` | A row is appended to the append-only credit ledger (a grant or a spend). |
@@ -109,6 +110,7 @@ Rovenue does not infer one:
 | `subscription.paused` | — | ✅ | — |
 | `subscription.recovered` | — | ✅ | — |
 | `subscription.revoked` | ✅ | ✅ | — |
+| `subscription.offer_redeemed` | ✅ | — | — |
 
 `subscription.recovered` in particular is Google-only, and deliberately so. Apple
 and Stripe send no recovery notification, so the only way to produce one would be to
@@ -117,6 +119,14 @@ follows a `payment_failed`, as a recovery. That guess fires on unrelated renewal
 and a false recovery would stop a dunning campaign for a subscriber who has not
 actually recovered. **If you rely on `subscription.recovered` to end a dunning flow,
 that flow is Android-only today.**
+
+`subscription.offer_redeemed` is the mirror case and Apple-only for the same
+reason. Apple has a dedicated `OFFER_REDEEMED` notification type; Google
+delivers an offer redemption as an ordinary purchase/recovery notification with
+the offer named inside the purchase resource rather than as its own event type,
+and Stripe has no equivalent event at all. **If you rely on
+`subscription.offer_redeemed` to stop a win-back campaign, that campaign is
+iOS-only today.**
 
 ## 4. Verifying signatures
 

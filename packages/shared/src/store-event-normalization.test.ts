@@ -25,6 +25,7 @@ describe("STORE_EVENT_TO_PUBLIC_KEY", () => {
       SUBSCRIPTION_RECOVERED: "subscription.recovered",
       SUBSCRIPTION_REVOKED: "subscription.revoked",
       REVOKE: "subscription.revoked",
+      OFFER_REDEEMED: "subscription.offer_redeemed",
       SUBSCRIPTION_DEFERRED: "subscription.product_changed",
       "invoice.payment_failed": "subscription.billing_issue",
     });

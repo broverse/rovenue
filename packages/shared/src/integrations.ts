@@ -24,6 +24,16 @@ export const ROVENUE_EVENT_KEYS = [
   "subscription.paused",
   "subscription.recovered",
   "subscription.revoked",
+  // 2026-09-03: Apple OFFER_REDEEMED had no key because it had no
+  // handler at all — the notification fell through the dispatch switch's
+  // default branch, so a subscriber could come back from a fully lapsed
+  // subscription on a win-back offer and produce no state change, no
+  // revenue event and no lifecycle key. It is not `uncancelled` (the
+  // subscription had already lapsed, there was nothing to un-cancel) and
+  // not `product_changed` (the product may be identical) — it is its own
+  // meaning, and the one a win-back campaign needs in order to stop
+  // targeting a subscriber who has already come back.
+  "subscription.offer_redeemed",
   "paywall.view",
   "paywall.close",
   "credit.ledger.appended",
@@ -67,9 +77,16 @@ export const REVENUE_EVENT_KEYS: readonly RovenueEventKey[] =
 /**
  * The subscription-lifecycle keys the outbox SUBSCRIPTION bridge publishes on
  * `rovenue.subscription`: two with dedicated producers (scheduled-actions /
- * expiry-checker) and four normalized from store-native signals via
+ * expiry-checker) and the rest normalized from store-native signals via
  * STORE_EVENT_TO_PUBLIC_KEY. The fan-out consumer's subscription envelope
  * builder accepts exactly these.
+ *
+ * Adding a key here widens STANDARD_PROVIDER_EVENT_KEYS, so every standard
+ * provider immediately ADVERTISES it — while its `DEFAULT_EVENT_MAPPING`
+ * table is a `Partial<Record>` and will happily have no entry, silently
+ * dropping the event. apps/api's event-mapping.catalog-coverage.test.ts is
+ * the guard: a new key here must be named in every provider's table (or
+ * declared as a deliberate omission there) or that test fails.
  */
 export const SUBSCRIPTION_BRIDGE_EVENT_KEYS = [
   "subscription.cancel_requested",
@@ -81,6 +98,9 @@ export const SUBSCRIPTION_BRIDGE_EVENT_KEYS = [
   "subscription.paused",
   "subscription.recovered",
   "subscription.revoked",
+  // Apple OFFER_REDEEMED (2026-09-03) — see ROVENUE_EVENT_KEYS above for
+  // why this is its own meaning rather than `uncancelled`.
+  "subscription.offer_redeemed",
 ] as const satisfies readonly RovenueEventKey[];
 
 /** The one lifecycle key that does NOT come from the SUBSCRIPTION bridge —

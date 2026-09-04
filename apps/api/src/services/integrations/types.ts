@@ -39,6 +39,8 @@ export type RovenueEventType =
   | "subscription.paused"
   | "subscription.recovered"
   | "subscription.revoked"
+  // 2026-09-03 — Apple OFFER_REDEEMED's lifecycle key.
+  | "subscription.offer_redeemed"
   | "paywall_view"
   | "paywall_close"
   | "credit.ledger.appended";

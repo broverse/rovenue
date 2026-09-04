@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   ROVENUE_EVENT_KEYS,
   isRovenueEventKey,
+  STANDARD_PROVIDER_EVENT_KEYS,
+  SUBSCRIPTION_BRIDGE_EVENT_KEYS,
+  SUBSCRIPTION_LIFECYCLE_KEYS,
   WEBHOOK_API_VERSION,
   type RovenueEventKey,
 } from "./integrations";
 
 describe("RovenueEventKey", () => {
-  it("includes all 20 canonical keys (v2, Wave-1 + 2026-09-03 paused/recovered/revoked)", () => {
+  it("includes all 21 canonical keys (v2, Wave-1 + 2026-09-03 paused/recovered/revoked/offer_redeemed)", () => {
     expect(ROVENUE_EVENT_KEYS).toEqual([
       "revenue.INITIAL",
       "revenue.TRIAL_CONVERSION",
@@ -26,6 +29,7 @@ describe("RovenueEventKey", () => {
       "subscription.paused",
       "subscription.recovered",
       "subscription.revoked",
+      "subscription.offer_redeemed",
       "paywall.view",
       "paywall.close",
       "credit.ledger.appended",
@@ -56,6 +60,10 @@ describe("RovenueEventKey", () => {
     expect(isRovenueEventKey("subscription.product_changed")).toBe(true);
   });
 
+  it("recognizes subscription.offer_redeemed (Apple OFFER_REDEEMED, 2026-09-03)", () => {
+    expect(isRovenueEventKey("subscription.offer_redeemed")).toBe(true);
+  });
+
   it("rejects unknown strings", () => {
     expect(isRovenueEventKey("revenue.UNKNOWN")).toBe(false);
     expect(isRovenueEventKey("billing.invoice.paid")).toBe(false);
@@ -65,5 +73,33 @@ describe("RovenueEventKey", () => {
   it("WEBHOOK_API_VERSION matches date format YYYY-MM-DD", () => {
     expect(WEBHOOK_API_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(WEBHOOK_API_VERSION).toBe("2026-08-24");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subset containment
+// ---------------------------------------------------------------------------
+//
+// The subsets are what widen every provider's advertised catalog, and a key
+// present in one but not the next is exactly the drift that ships a key
+// nothing can deliver. `satisfies` already proves each subset's members are
+// real catalog keys; these prove the CHAIN — bridge ⊂ lifecycle ⊂ standard ⊂
+// catalog — which `satisfies` does not.
+
+describe("event-key subsets", () => {
+  it("every bridge key is a catalog key, a lifecycle key and a standard-provider key", () => {
+    for (const key of SUBSCRIPTION_BRIDGE_EVENT_KEYS) {
+      expect(isRovenueEventKey(key), key).toBe(true);
+      expect(SUBSCRIPTION_LIFECYCLE_KEYS, key).toContain(key);
+      expect(STANDARD_PROVIDER_EVENT_KEYS, key).toContain(key);
+    }
+  });
+
+  it("carries subscription.offer_redeemed all the way through to the standard catalog", () => {
+    // Named explicitly rather than left to the loop above: this key is the
+    // one that had no handler at all, and the whole point of adding it is
+    // that it reaches the providers.
+    expect(SUBSCRIPTION_BRIDGE_EVENT_KEYS).toContain("subscription.offer_redeemed");
+    expect(STANDARD_PROVIDER_EVENT_KEYS).toContain("subscription.offer_redeemed");
   });
 });

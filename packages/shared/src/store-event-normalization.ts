@@ -139,6 +139,27 @@ export const STORE_EVENT_TO_PUBLIC_KEY: Record<string, RovenueEventKey> = {
   // downstream aggregate.
   REVOKE: "subscription.revoked",
 
+  // Apple — OFFER_REDEEMED (2026-09-03). The subscriber redeemed a
+  // promotional offer, an offer code, or a win-back offer. It had no row
+  // here because it had no handler at all: `apple-webhook.ts`'s dispatch
+  // switch never named it, so it fell through the default branch and a
+  // win-back return from a fully lapsed subscription produced no state
+  // change, no revenue and no event. `applyOfferRedeemed` now handles it,
+  // and this row is what carries the fact to consumers.
+  //
+  // NOT folded onto `subscription.uncancelled`: that means auto-renew was
+  // switched back on for a subscription that never lapsed. A win-back
+  // redemption is the opposite situation — the subscription HAD lapsed —
+  // and the two need opposite campaign follow-ups. NOT `product_changed`
+  // either: the redeemed offer is very often for the same product.
+  //
+  // Apple is the only store with a row here. Google delivers an offer
+  // redemption as an ordinary SUBSCRIPTION_PURCHASED/RECOVERED with the
+  // offer named inside the purchase resource rather than as its own
+  // notification type, and Stripe has no equivalent event at all — so
+  // there is nothing to key on for either without inventing one.
+  OFFER_REDEEMED: "subscription.offer_redeemed",
+
   // Stripe (event.type)
   "invoice.payment_failed": "subscription.billing_issue",
 

@@ -943,6 +943,21 @@ export const purchases = pgTable(
     status: purchaseStatus("status").notNull(),
     isTrial: boolean("isTrial").notNull().default(false),
     isIntroOffer: boolean("isIntroOffer").notNull().default(false),
+    // Which store offer produced this transaction, and its identifier.
+    // Apple's `offerType` (1 introductory, 2 promotional, 3 subscription
+    // offer code, 4 win-back — APPLE_OFFER_TYPE in apps/api's
+    // apple-types.ts) and `offerIdentifier`.
+    //
+    // `isIntroOffer` above collapses all four into one boolean and stays
+    // for compatibility (it is derived from `offerType` at the write), so
+    // until now a win-back redemption was indistinguishable from an
+    // introductory price. These two columns are what makes a win-back or
+    // offer-code cohort queryable at all. Plain integer/text rather than
+    // an enum: the numbering is Apple's, a future store's vocabulary
+    // would not fit it, and an unknown future value must be storable
+    // rather than rejected.
+    offerType: integer("offerType"),
+    offerIdentifier: text("offerIdentifier"),
     isSandbox: boolean("isSandbox").notNull().default(false),
     purchaseDate: timestamp("purchaseDate", { withTimezone: true }).notNull(),
     expiresDate: timestamp("expiresDate", { withTimezone: true }),

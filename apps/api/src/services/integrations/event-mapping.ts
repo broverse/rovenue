@@ -50,6 +50,7 @@ const ANALYTICS_DEFAULT_EVENT_NAMES: Partial<Record<RovenueEventKey, string>> = 
   "subscription.paused": "paused",
   "subscription.recovered": "recovered",
   "subscription.revoked": "revoked",
+  "subscription.offer_redeemed": "offer_redeemed",
 };
 
 // ---------------------------------------------------------------------------
@@ -219,6 +220,9 @@ const SINGULAR_LIFECYCLE_EVENT_NAMES: Readonly<
   "subscription.paused": "rovenue_paused",
   "subscription.recovered": "rovenue_recovered",
   "subscription.revoked": "rovenue_revoked",
+  // 21 chars — comfortably inside Singular's 32-ASCII `n` cap, unlike
+  // `rovenueCustomEventName`'s "rovenue_subscription_offer_redeemed" (35).
+  "subscription.offer_redeemed": "rovenue_offer_redeemed",
 };
 
 export const DEFAULT_EVENT_MAPPING: Readonly<
@@ -268,6 +272,7 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "subscription.paused": "af_paused",
     "subscription.recovered": "af_recovered",
     "subscription.revoked": "af_revoked",
+    "subscription.offer_redeemed": "af_offer_redeemed",
   },
   // DELIBERATELY EMPTY — see providers/adjust.ts's "Default event mapping"
   // header comment for the full PRE-FLIGHT RULING rationale: Adjust event tokens

@@ -53,9 +53,10 @@ GA4 constrains custom event names to the regex `^[A-Za-z]\w*$` (must start with 
 | `subscription.grace_period` | `rovenue_subscription_grace_period` |
 | `subscription.uncancelled` | `rovenue_subscription_uncancelled` |
 | `subscription.product_changed` | `rovenue_subscription_product_changed` |
-| `subscription.paused` | `paused` |
-| `subscription.recovered` | `recovered` |
-| `subscription.revoked` | `revoked` |
+| `subscription.paused` | `rovenue_subscription_paused` |
+| `subscription.recovered` | `rovenue_subscription_recovered` |
+| `subscription.revoked` | `rovenue_subscription_revoked` |
+| `subscription.offer_redeemed` | `rovenue_subscription_offer_redeemed` |
 
 Unlike Amplitude/Mixpanel's free-form event names, four distinct Rovenue revenue keys (`INITIAL`/`RENEWAL`/`TRIAL_CONVERSION`/`CREDIT_PURCHASE`) all collapse onto GA4's own recommended `purchase` event — GA4 has no separate vocabulary to distinguish an initial purchase from a renewal. Every subscription-lifecycle key is instead sent as a `rovenue_`-prefixed custom event, since GA4 has no standard vocabulary for subscription lifecycle at all.
 

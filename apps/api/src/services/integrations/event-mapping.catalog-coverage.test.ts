@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PROVIDERS } from "./registry";
-import { DEFAULT_EVENT_MAPPING } from "./event-mapping";
+import { applyEventMapping, DEFAULT_EVENT_MAPPING } from "./event-mapping";
 import type { IntegrationProviderId, RovenueEventKey } from "@rovenue/shared";
+import { SUBSCRIPTION_BRIDGE_EVENT_KEYS } from "@rovenue/shared";
 
 // =============================================================
 // Catalog coverage guard
@@ -109,5 +110,83 @@ describe("provider event-catalog coverage", () => {
         `${o.provider}/${o.key} is now mapped — remove the declared omission`,
       ).toBeUndefined();
     }
+  });
+});
+
+// =============================================================
+// Subscription-bridge key coverage
+// =============================================================
+//
+// The guard above asks "does every key a provider ADVERTISES resolve?".
+// This one comes at the same invariant from the producing side, because
+// that is the direction a new key travels: a key added to
+// SUBSCRIPTION_BRIDGE_EVENT_KEYS (@rovenue/shared) lands in
+// SUBSCRIPTION_LIFECYCLE_KEYS, then STANDARD_PROVIDER_EVENT_KEYS, and
+// every standard provider's `eventCatalog` starts claiming it in the same
+// commit — while `DEFAULT_EVENT_MAPPING`'s tables are
+// `Partial<Record<RovenueEventKey, string>>` and compile perfectly well
+// with no entry for it. Nothing in tsc says a word.
+//
+// That failure has shipped in this repo before (see MEMORY: a provider
+// event silently dropped because a Partial<Record> let a missing key
+// through), so it gets a test that names the provider and the key rather
+// than a review checklist.
+//
+// This resolves through `applyEventMapping` — the function the delivery
+// path actually calls — instead of reading the table directly, so a key
+// that resolves in the table but is skipped by the resolution logic still
+// fails here.
+describe("subscription-bridge key coverage", () => {
+  it("every bridge key a provider claims resolves to a provider event", () => {
+    const unresolved: string[] = [];
+    let checked = 0;
+
+    for (const [providerId, provider] of Object.entries(PROVIDERS)) {
+      if (IDENTITY_MAPPED_PROVIDERS.has(providerId as IntegrationProviderId)) continue;
+
+      for (const key of SUBSCRIPTION_BRIDGE_EVENT_KEYS) {
+        // META_CAPI / TIKTOK_EVENTS hand-pick a narrow catalog and claim
+        // no lifecycle keys at all; a key they never offer is not a gap.
+        if (!provider.eventCatalog.includes(key)) continue;
+        checked += 1;
+        const result = applyEventMapping({
+          providerId: providerId as IntegrationProviderId,
+          eventKey: key,
+          enabledEvents: [...provider.eventCatalog],
+          override: {},
+        });
+        if (result.kind !== "use") {
+          unresolved.push(
+            `${providerId} claims "${key}" but applyEventMapping returned ` +
+              `skip/${result.reason}`,
+          );
+        }
+      }
+    }
+
+    expect(unresolved).toEqual([]);
+    // A loop that iterated nothing would pass silently. Pin that it did
+    // real work: ten standard providers x the bridge keys, at minimum.
+    expect(checked).toBeGreaterThanOrEqual(SUBSCRIPTION_BRIDGE_EVENT_KEYS.length * 10);
+  });
+
+  it("a provider that claims one bridge key claims them all", () => {
+    // Half a bridge is worse than none: a consumer wiring up lifecycle
+    // events for a provider has no way to see that one meaning is missing
+    // from its catalog, and the drawer's event picker renders the catalog
+    // verbatim.
+    const partial: string[] = [];
+    for (const [providerId, provider] of Object.entries(PROVIDERS)) {
+      const claimed = SUBSCRIPTION_BRIDGE_EVENT_KEYS.filter((key) =>
+        provider.eventCatalog.includes(key),
+      );
+      if (claimed.length === 0) continue;
+      if (claimed.length === SUBSCRIPTION_BRIDGE_EVENT_KEYS.length) continue;
+      const missing = SUBSCRIPTION_BRIDGE_EVENT_KEYS.filter(
+        (key) => !provider.eventCatalog.includes(key),
+      );
+      partial.push(`${providerId} claims some bridge keys but not: ${missing.join(", ")}`);
+    }
+    expect(partial).toEqual([]);
   });
 });

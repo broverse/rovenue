@@ -52,9 +52,10 @@ Revenue keys ride Braze's `purchases` array, which has no vendor event-name conc
 | `subscription.grace_period` | `events[]` | `rovenue_subscription_grace_period` |
 | `subscription.uncancelled` | `events[]` | `rovenue_subscription_uncancelled` |
 | `subscription.product_changed` | `events[]` | `rovenue_subscription_product_changed` |
-| `subscription.paused` | `paused` |
-| `subscription.recovered` | `recovered` |
-| `subscription.revoked` | `revoked` |
+| `subscription.paused` | `events[]` | `rovenue_subscription_paused` |
+| `subscription.recovered` | `events[]` | `rovenue_subscription_recovered` |
+| `subscription.revoked` | `events[]` | `rovenue_subscription_revoked` |
+| `subscription.offer_redeemed` | `events[]` | `rovenue_subscription_offer_redeemed` |
 
 Every forwarded purchase and event carries `properties.rovenue_event` (the original Rovenue event key) and `properties.outbox_event_id`, so you can always trace a Braze record back to its Rovenue source.
 

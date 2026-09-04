@@ -73,6 +73,7 @@ Every forwarded key becomes a Singular event name, per the mapping table below (
 | `subscription.paused` | `rovenue_paused` |
 | `subscription.recovered` | `rovenue_recovered` |
 | `subscription.revoked` | `rovenue_revoked` |
+| `subscription.offer_redeemed` | `rovenue_offer_redeemed` |
 
 Singular's own EVENT endpoint reference caps event names at 32 ASCII characters — that's why the lifecycle names above drop the word "subscription" (Rovenue's usual `rovenue_subscription_<key>` convention would exceed the limit for several of these keys).
 

@@ -56,6 +56,7 @@ Unlike Amplitude, Mixpanel, and AppsFlyer, Adjust has **no built-in default even
 | `subscription.paused` | *(your own token)* |
 | `subscription.recovered` | *(your own token)* |
 | `subscription.revoked` | *(your own token)* |
+| `subscription.offer_redeemed` | *(your own token)* |
 
 Every forwarded event carries `deduplication_id` and `callback_params.outbox_event_id` (Rovenue's internal `outboxEventId`, for dedup — see below) and `callback_params.product_id` when known. For the six `revenue.*` keys only, it also carries `revenue`/`currency`; subscription-lifecycle events never carry revenue fields — they represent no money movement.
 

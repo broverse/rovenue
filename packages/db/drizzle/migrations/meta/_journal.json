@@ -827,6 +827,13 @@
       "when": 1788520723283,
       "tag": "0117_purchase_pending_plan_change",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1788531528324,
+      "tag": "0118_purchase_offer_metadata",
+      "breakpoints": true
     }
   ]
 }

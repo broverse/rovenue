@@ -366,6 +366,8 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
       return applyRenewalPrefChange(ctx);
     case APPLE_NOTIFICATION_TYPE.DID_CHANGE_RENEWAL_STATUS:
       return applyRenewalStatusChange(ctx);
+    case APPLE_NOTIFICATION_TYPE.OFFER_REDEEMED:
+      return applyOfferRedeemed(ctx);
     case APPLE_NOTIFICATION_TYPE.DID_FAIL_TO_RENEW:
       return applyFailedRenewal(ctx);
     case APPLE_NOTIFICATION_TYPE.GRACE_PERIOD_EXPIRED:
@@ -534,6 +536,129 @@ async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
     // First charge for the upgraded product — INITIAL keeps it in the
     // purchased-revenue bucket every analytics view already sums.
     type: RevenueEventType.INITIAL,
+  });
+}
+
+/**
+ * OFFER_REDEEMED: the subscriber redeemed a promotional offer, an offer
+ * code, or a win-back offer.
+ *
+ * Until now this notification type was absent from `dispatch` altogether
+ * and fell through the default branch, so a subscriber could come back
+ * from a fully lapsed subscription on a win-back offer and produce no
+ * state change, no revenue event and no lifecycle event. One handler has
+ * to cover both a resurrection and an ordinary new paid term, because one
+ * notification type carries both.
+ *
+ * THE REVENUE TYPE TURNS ON WHERE THE CHAIN WAS, not on the subtype: a
+ * redemption against an EXPIRED chain is a genuine resurrection
+ * (REACTIVATION); one against a live chain is a new paid term (INITIAL).
+ * The subtype is not load-bearing here because it is OPTIONAL on the
+ * envelope (`AppleResponseBodyV2DecodedPayload.subtype`) — a delivery
+ * that carries none would silently classify as the not-RESUBSCRIBE case,
+ * which is precisely the wrong answer for the win-back this exists for.
+ * The chain's own status is always present and is the fact the revenue
+ * rollups depend on.
+ */
+async function applyOfferRedeemed(ctx: DispatchContext): Promise<void> {
+  const subscriber = await resolveSubscriber(ctx);
+
+  // The chain's state BEFORE this delivery writes anything.
+  //
+  // `guard.previous` is the before-image of the (store, storeTransactionId)
+  // row, and Apple mints a NEW transactionId for a redemption that charges
+  // — which is precisely the delivery whose revenue type depends on where
+  // the subscription was. On those the guard's before-image is null by
+  // construction, so the chain's latest row is the only honest previous
+  // side. Read here, because `upsertPurchase` below is what creates the
+  // row that would otherwise answer this query.
+  const chainBefore =
+    await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+      drizzle.db,
+      ctx.projectId,
+      ctx.transaction.originalTransactionId,
+    );
+
+  const { product, purchase, statusApplied, guard } = await upsertPurchase({
+    ctx,
+    subscriberId: subscriber.id,
+    status: isTrial(ctx.transaction)
+      ? PurchaseStatus.TRIAL
+      : PurchaseStatus.ACTIVE,
+    autoRenewStatus: ctx.renewalInfo?.autoRenewStatus === 1,
+  });
+  ctx.outcome.subscriberId = subscriber.id;
+  ctx.outcome.purchaseId = purchase.id;
+  // A rejected transition means the row is already terminal
+  // (REFUNDED / REVOKED); a late or replayed redemption must not re-grant
+  // access or re-add revenue.
+  if (!statusApplied) return;
+
+  if (ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.UPGRADE) {
+    // An upgrade offer charges immediately on a NEW transaction and Apple
+    // sends nothing at all for the one it replaced — the same shape
+    // `applyRenewalPrefChange`'s UPGRADE arm handles, so it uses the same
+    // helper rather than a second retirement implementation. The plan
+    // change rides INSIDE that helper's transaction for the reason its
+    // `onSuperseded` doc gives: the emit is gated on a row having MOVED,
+    // so a crash between the retirement and a separate outbox write would
+    // make the redelivery suppress an event that was never written.
+    await expireSupersededApplePurchases({
+      projectId: ctx.projectId,
+      originalTransactionId: ctx.transaction.originalTransactionId,
+      currentStoreTransactionId: ctx.transaction.transactionId,
+      now: appleNotificationEventTime(ctx),
+      source: `apple:${ctx.notification.notificationType}`,
+      onSuperseded: async (tx, retired) => {
+        await emitProductChanged({
+          db: tx,
+          projectId: ctx.projectId,
+          subscriberId: subscriber.id,
+          purchaseId: purchase.id,
+          previousProductId: retired.productId,
+          productId: product.id,
+          changeType: applePlanChangeType(ctx.notification.subtype),
+          now: appleNotificationEventTime(ctx),
+        });
+      },
+    });
+  }
+
+  await grantAccess({ subscriber, purchase, product, ctx });
+
+  // Revenue only for a transaction we had never seen before.
+  //
+  // Apple can deliver OFFER_REDEEMED alongside a SUBSCRIBED/DID_RENEW for
+  // the SAME transaction, and `revenueDedupeKind` folds INITIAL and
+  // REACTIVATION onto DIFFERENT dedupe keys ("purchase" vs
+  // "reactivation") — so two handlers classifying one transaction
+  // differently would each write a row and double-count the charge. A
+  // transaction we already have a row for has already had its money
+  // recorded by whichever notification arrived first; Apple mints a new
+  // transactionId for every new charge, so "we already had this row"
+  // means "no new money", and this delivery contributes only the offer
+  // columns `upsertPurchase` just wrote.
+  if (guard.previous) {
+    log.debug("offer redeemed on a transaction already recorded", {
+      transactionId: ctx.transaction.transactionId,
+    });
+    return;
+  }
+
+  await emitRevenueEvent({
+    ctx,
+    subscriberId: subscriber.id,
+    purchaseId: purchase.id,
+    productId: product.id,
+    // EXPIRED specifically, not "any non-granting status": a redemption
+    // against a chain that lapsed at end of term is the resurrection a
+    // win-back offer exists to produce. REFUNDED/REVOKED chains are
+    // terminal for a different reason (money reversed, access pulled) and
+    // a new paid term there is an INITIAL, not the recovery of one.
+    type:
+      chainBefore?.status === PurchaseStatus.EXPIRED
+        ? RevenueEventType.REACTIVATION
+        : RevenueEventType.INITIAL,
   });
 }
 
@@ -1080,6 +1205,12 @@ function appleNotificationEventTime(ctx: DispatchContext): Date {
   return new Date(ctx.notification.signedDate);
 }
 
+/**
+ * Returns the guard result alongside the row so a caller can read the
+ * before-image it took under the FOR UPDATE lock without a second query.
+ * `applyOfferRedeemed` uses `guard.previous` to tell "we have never seen
+ * this transaction" (new charge) from "we already recorded it".
+ */
 async function upsertPurchase(args: UpsertPurchaseArgs) {
   const { ctx, subscriberId, status, autoRenewStatus } = args;
   const tx = ctx.transaction;
@@ -1121,7 +1252,7 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
   // is held across the write (mechanism (a)); upsertPurchase also
   // CASE-guards the terminal status at SQL level (mechanism (b)).
   const eventTime = appleNotificationEventTime(ctx);
-  const { purchase, statusApplied } = await drizzle.db.transaction(
+  const { purchase, statusApplied, guard } = await drizzle.db.transaction(
     async (dbTx) => {
       const guard = await guardStatusWrite({
         db: dbTx,
@@ -1146,6 +1277,10 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           status,
           isTrial: isTrial(tx),
           isIntroOffer: tx.offerType !== undefined,
+          // The offer this transaction came from, kept at full fidelity
+          // beside the boolean that collapses all four kinds into one.
+          offerType: tx.offerType ?? null,
+          offerIdentifier: tx.offerIdentifier ?? null,
           isSandbox: environment === Environment.SANDBOX,
           environment,
           purchaseDate: new Date(tx.purchaseDate),
@@ -1179,6 +1314,11 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
                 // projection of what the store says NOW, so a stale or
                 // illegal delivery must not repaint them either.
                 ...pendingFields,
+                // Likewise the offer columns: they describe what the
+                // store says this transaction is, and a withheld write
+                // must not repaint them from a stale delivery.
+                offerType: tx.offerType ?? null,
+                offerIdentifier: tx.offerIdentifier ?? null,
               }
             : {}),
           autoRenewStatus,
@@ -1205,11 +1345,11 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           now: eventTime,
         });
       }
-      return { purchase: persisted, statusApplied: guard.apply };
+      return { purchase: persisted, statusApplied: guard.apply, guard };
     },
   );
 
-  return { product, purchase, statusApplied };
+  return { product, purchase, statusApplied, guard };
 }
 
 /**
