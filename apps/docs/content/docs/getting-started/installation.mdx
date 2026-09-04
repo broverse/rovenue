@@ -53,7 +53,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
     In Xcode: **File → Add Package Dependencies** and enter:
 
     ```
-    https://github.com/rovenue/sdk-swift.git
+    https://github.com/broverse/rovenue-swift.git
     ```
 
     Or add to your `Package.swift`:
@@ -61,8 +61,8 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
     ```swift
     dependencies: [
       .package(
-        url: "https://github.com/rovenue/sdk-swift.git",
-        from: "0.6.0"
+        url: "https://github.com/broverse/rovenue-swift.git",
+        from: "0.16.0"
       )
     ],
     targets: [
@@ -72,12 +72,14 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
       )
     ]
     ```
+
+    Supported platforms: iOS 16.0+ (device and simulator) and macOS 12.0+.
   </Tab>
   <Tab value="Swift (CocoaPods)">
     Add to your `Podfile`:
 
     ```ruby
-    pod 'Rovenue', '~> 0.6'
+    pod 'Rovenue'
     ```
 
     Then run:

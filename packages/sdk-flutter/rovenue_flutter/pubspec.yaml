@@ -4,7 +4,7 @@ description: >-
   the open-source Rovenue backend. Federated plugin app-facing package.
 version: 0.16.0
 homepage: https://rovenue.app
-repository: https://github.com/rovenue/rovenue
+repository: https://github.com/broverse/rovenue
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

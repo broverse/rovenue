@@ -288,7 +288,7 @@ freshly built `RovenueFFI.xcframework`.
   iphonesimulator` reports `** BUILD SUCCEEDED **`. The `Rovenue` pod's swiftc
   invocation reaches the module map only through
   `-Xcc -I…/XCFrameworkIntermediates/Rovenue/Headers` — the slice CocoaPods
-  copied out of the xcframework — and the linked image carries 159
+  copied out of the xcframework — and the linked image carries 158
   `ffi_rovenue_*` / `uniffi_rovenue_*` symbols, so the module both resolves
   and links.
 - Item 7 (Flutter): `packages/sdk-flutter/example` — `flutter build ios
@@ -296,7 +296,7 @@ freshly built `RovenueFFI.xcframework`.
   build/ios/iphonesimulator/Runner.app` with the Podfile's
   `SWIFT_INCLUDE_PATHS` `post_install` block absent (only Flutter's own
   `flutter_additional_ios_build_settings` loop remains).
-  `Runner.app/Frameworks/Rovenue.framework` carries the same 159 FFI symbols.
+  `Runner.app/Frameworks/Rovenue.framework` carries the same 158 FFI symbols.
 
 Two unrelated, pre-existing defects had to be fixed first, neither of them a
 module-path workaround: the app's iOS deployment target was below the `Rovenue`

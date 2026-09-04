@@ -1,6 +1,6 @@
 # Rovenue Swift SDK
 
-Open-source subscription management SDK for iOS, macOS, tvOS, and watchOS. Integrates with the Rovenue API server to provide entitlement checks, receipt verification, and event tracking.
+Open-source subscription management SDK for iOS and macOS. Integrates with the Rovenue API server to provide entitlement checks, receipt verification, and event tracking. Supported platforms: iOS 16.0+ (device and simulator) and macOS 12.0+. tvOS, watchOS, and visionOS are not yet supported.
 
 ## Installation
 
@@ -9,7 +9,7 @@ Open-source subscription management SDK for iOS, macOS, tvOS, and watchOS. Integ
 Add the following to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/rovenue/sdk-swift", from: "0.6.0")
+.package(url: "https://github.com/broverse/rovenue-swift", from: "0.16.0")
 ```
 
 ## Quick Start
