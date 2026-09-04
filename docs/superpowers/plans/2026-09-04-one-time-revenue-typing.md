@@ -22,6 +22,8 @@
 - **In Drizzle `sql` templates, qualify columns** (`"revenue_events"."type"`). A bare `${table.col}` renders unqualified and breaks correlated subqueries.
 - **Integration tests need Docker running.** `docker ps` first — vitest hangs silently otherwise. After adding a Postgres migration, drop the template database (`rovenue_test_tpl`) or the new migration will not be applied to test databases.
 - **`@rovenue/db` vitest runs need `DATABASE_URL` exported** in the shell.
+- **Test-helper names in this plan are illustrative, not binding.** Where a task's test code calls a helper (`verifyAndCapture`, `seedPendingOneTimeSession`, `insertRawRevenueEvent`, `runMigration`, …), use the helper the target test file already has, or write one in that file's existing style. Do not invent a new helper module because this plan spelled a name.
+- **`@rovenue/shared` must not import `@rovenue/db`** — the dashboard and the SDK consume shared. Lists in shared are literals guarded by `satisfies`; the correspondence to the Postgres enum is held in `apps/api`, which can see both (Task 9).
 - **In `apps/api` tests, top-of-file `process.env` assignments before imports are dead code** (hoisting). Use `vi.hoisted` or `tests/setup.ts`.
 - **ClickHouse from the host fails with "password is incorrect"** — that is the IP allow-list, not the credentials. Run CH commands from inside the compose network, or use the socat bridge documented in CLAUDE.md.
 
@@ -1217,7 +1219,19 @@ import type { RovenueEventKey } from "@rovenue/shared";
 // test somebody can skip. The SQL allow-list axis is held instead by the
 // named groupings in @rovenue/shared and the ClickHouse contract test.
 
+import { ALL_REVENUE_TYPES } from "@rovenue/shared";
+
 type RevenueKeyFor<T extends string> = `revenue.${T}`;
+
+/**
+ * Fails to instantiate unless `T` is `never`.
+ *
+ * NOT `const x: SomeType = undefined as never` — `never` is assignable to
+ * every type, so that form compiles no matter what `SomeType` resolves to
+ * and the guard would assert nothing. The constraint is what does the
+ * work here.
+ */
+type AssertNever<T extends never> = T;
 
 /** Every RevenueEventType has a public key. */
 type MissingKeys = Exclude<RevenueKeyFor<RevenueEventType>, RovenueEventKey>;
@@ -1228,11 +1242,19 @@ type OrphanKeys = Exclude<
   RevenueKeyFor<RevenueEventType>
 >;
 
-// Both must be `never`. A failure reads as
-// "Type '"revenue.REACTIVATION"' is not assignable to type 'never'",
-// which names the missing key directly.
-export const _everyRevenueTypeHasAKey: MissingKeys = undefined as never;
-export const _everyRevenueKeyHasAType: OrphanKeys = undefined as never;
+/**
+ * @rovenue/shared cannot import @rovenue/db (the dashboard and the SDK
+ * consume shared), so ALL_REVENUE_TYPES is a literal list there. This is
+ * the one place that can see both, so this is where the list is held to
+ * the enum.
+ */
+type UnlistedTypes = Exclude<RevenueEventType, (typeof ALL_REVENUE_TYPES)[number]>;
+
+// A failure reads as "Type '"revenue.REACTIVATION"' does not satisfy the
+// constraint 'never'", which names the missing key directly.
+type _EveryRevenueTypeHasAKey = AssertNever<MissingKeys>;
+type _EveryRevenueKeyHasAType = AssertNever<OrphanKeys>;
+type _AllRevenueTypesCoversTheEnum = AssertNever<UnlistedTypes>;
 ```
 
 - [ ] **Step 2: Run tsc and watch it fail**
