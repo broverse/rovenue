@@ -9,6 +9,12 @@
 # outbox-dispatcher worker (apps/api/src/workers/outbox-dispatcher.ts)
 # drains it into Redpanda, and ClickHouse's Kafka Engine consumes
 # the topic. No CDC. See docs/superpowers/specs/2026-04-20-tech-stack-upgrade/06-clickhouse.md §14.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # One-shot migration runner. Applies Drizzle (Postgres) then
   # ClickHouse migrations, then exits 0. api + workers gate on its
@@ -17,6 +23,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    cpus: 2
+    mem_limit: 2g
+    logging: *default-logging
     env_file:
       - .env
     environment:
@@ -62,6 +71,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    cpus: 2
+    mem_limit: 2g
+    logging: *default-logging
     env_file:
       - .env
     environment:
@@ -123,6 +135,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    cpus: 1
+    mem_limit: 1g
+    logging: *default-logging
     command: ["node_modules/.bin/tsx", "src/workers/outbox-dispatcher-process.ts"]
     env_file:
       - .env
@@ -164,6 +179,9 @@ services:
   # forces full cert re-issuance and risks Let's Encrypt rate-limits.
   caddy:
     image: caddy:2-alpine
+    cpus: 0.5
+    mem_limit: 256m
+    logging: *default-logging
     environment:
       TLS_EMAIL: ${TLS_EMAIL:-ops@rovenue.io}
     ports:
@@ -200,6 +218,9 @@ services:
         # sync with the API's HOST_MODE / ALLOW_REGISTRATION below.
         VITE_HOST_MODE: ${HOST_MODE:-self}
         VITE_ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-}
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *default-logging
     restart: unless-stopped
     # No published ports — only the edge Caddy reaches it on the
     # docker network. Exposed container port is 80.
@@ -212,6 +233,9 @@ services:
     build:
       context: .
       dockerfile: apps/docs/Dockerfile
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *default-logging
     restart: unless-stopped
     # No published ports — only the edge Caddy reaches it on the
     # docker network. Exposed container port is 80.
@@ -228,6 +252,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    cpus: 1
+    mem_limit: 1g
+    logging: *default-logging
     command: ["node_modules/.bin/tsx", "src/workers/notifier-process.ts"]
     env_file:
       - .env
@@ -254,6 +281,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    cpus: 1
+    mem_limit: 1g
+    logging: *default-logging
     command: ["node_modules/.bin/tsx", "src/workers/digest-scheduler-process.ts"]
     env_file:
       - .env
@@ -283,6 +313,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    cpus: 1
+    mem_limit: 1g
+    logging: *default-logging
     command: ["node_modules/.bin/tsx", "src/workers/send-email-process.ts"]
     env_file:
       - .env
@@ -304,6 +337,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    cpus: 1
+    mem_limit: 1g
+    logging: *default-logging
     command: ["node_modules/.bin/tsx", "src/workers/send-push-process.ts"]
     env_file:
       - .env
@@ -330,6 +366,9 @@ services:
     # called from a BullMQ worker.
     build:
       context: ./deploy/postgres
+    cpus: 2
+    mem_limit: 2g
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rovenue}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rovenue}
@@ -349,6 +388,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *default-logging
     ports:
       # Host 6380 → container 6379 so rovenue can coexist with other
       # Redis instances bound to 6379 on the host.
@@ -384,6 +426,9 @@ services:
   # goes unused; stop it with `docker compose stop minio minio-init`.
   minio:
     image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+    cpus: 1
+    mem_limit: 1g
+    logging: *default-logging
     environment:
       MINIO_ROOT_USER: ${ASSET_STORAGE_ACCESS_KEY_ID:-rovenue-assets}
       MINIO_ROOT_PASSWORD: ${ASSET_STORAGE_SECRET_ACCESS_KEY:-rovenue-assets-dev-secret}
@@ -440,6 +485,9 @@ services:
   # the s3:GetObject-only-or-less shape this bucket must never exceed.
   minio-init:
     image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *default-logging
     depends_on:
       minio:
         condition: service_healthy
@@ -485,6 +533,9 @@ services:
     # protocol we depend on. Upgrading to 24.x+ is safe within the
     # 24-series but should trigger a verify-clickhouse run.
     image: clickhouse/clickhouse-server:24.3-alpine
+    cpus: 2
+    mem_limit: 3g
+    logging: *default-logging
     environment:
       # CLICKHOUSE_DB creates the rovenue database on first boot. We
       # intentionally do NOT set CLICKHOUSE_USER/CLICKHOUSE_PASSWORD —
@@ -537,6 +588,9 @@ services:
     # for a self-hosted subscription platform. Rovenue does not need
     # multi-broker durability at Plan 1 scale.
     image: redpandadata/redpanda:v24.2.13
+    cpus: 2
+    mem_limit: 2g
+    logging: *default-logging
     container_name: rovenue-redpanda
     command:
       - redpanda
@@ -572,6 +626,9 @@ services:
     # compose is self-host dev; Coolify operator should put it
     # behind basic auth if exposed).
     image: redpandadata/console:v2.6.1
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *default-logging
     container_name: rovenue-redpanda-console
     environment:
       KAFKA_BROKERS: redpanda:9092
@@ -590,6 +647,9 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.54.1
+    cpus: 1
+    mem_limit: 2g
+    logging: *default-logging
     profiles: ["observability"]
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -604,6 +664,9 @@ services:
 
   loki:
     image: grafana/loki:3.1.1
+    cpus: 1
+    mem_limit: 2g
+    logging: *default-logging
     profiles: ["observability"]
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
@@ -615,6 +678,9 @@ services:
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.15.0
+    cpus: 0.25
+    mem_limit: 256m
+    logging: *default-logging
     profiles: ["observability"]
     environment:
       # sslmode=disable is safe here: the exporter reaches Postgres only over the
@@ -629,6 +695,9 @@ services:
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.62.0
+    cpus: 0.25
+    mem_limit: 256m
+    logging: *default-logging
     profiles: ["observability"]
     environment:
       REDIS_ADDR: "redis://redis:6379"
@@ -641,6 +710,9 @@ services:
 
   alloy:
     image: grafana/alloy:v1.4.2
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *default-logging
     profiles: ["observability"]
     command:
       - "run"
@@ -656,6 +728,9 @@ services:
 
   grafana:
     image: grafana/grafana:11.2.2
+    cpus: 1
+    mem_limit: 1g
+    logging: *default-logging
     profiles: ["observability"]
     ports:
       - "3300:3000"

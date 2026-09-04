@@ -433,9 +433,10 @@ export async function runAccessReconciliationSweep(
  * between them can make a correct subscriber look drifted. That is
  * tolerated rather than fixed: the "repair" for a false positive is
  * `syncAccess`, which re-derives everything under its own advisory lock
- * and therefore writes nothing, leaving only an audit row whose before
- * and after are identical. The window is milliseconds against a
- * threshold of 5% of a batch, so it cannot move the circuit breaker.
+ * and therefore writes nothing — and the no-op guard in pass 2 then sees
+ * `before === after`, counts the candidate as a `noop`, and writes no
+ * audit row at all. The window is milliseconds against a threshold of 5%
+ * of a batch, so it cannot move the circuit breaker either.
  */
 async function detectDrift(
   subscriberId: string,

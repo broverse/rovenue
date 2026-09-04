@@ -116,6 +116,10 @@ export interface PurchaseWithAccessIds {
   id: string;
   status: string;
   expiresDate: Date | null;
+  /** Read by `computeDesiredAccess`: a GRACE_PERIOD purchase's paid
+   *  period has always lapsed, so its entitlement runs to here, not to
+   *  `expiresDate`. Nullable — the stores do not always state a window. */
+  gracePeriodExpires: Date | null;
   store: Store;
   accessIds: string[];
 }
@@ -132,6 +136,7 @@ export async function findPurchasesWithAccessIds(
       id: purchases.id,
       status: purchases.status,
       expiresDate: purchases.expiresDate,
+      gracePeriodExpires: purchases.gracePeriodExpires,
       store: purchases.store,
       accessIds: products.accessIds,
     })
@@ -142,6 +147,7 @@ export async function findPurchasesWithAccessIds(
     id: r.id,
     status: r.status,
     expiresDate: r.expiresDate,
+    gracePeriodExpires: r.gracePeriodExpires,
     store: r.store,
     accessIds: (r.accessIds ?? []) as string[],
   }));

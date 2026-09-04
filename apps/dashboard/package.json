@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --minWorkers=1 --maxWorkers=2 --passWithNoTests"
   },
   "dependencies": {
     "@ai-sdk/react": "^2",

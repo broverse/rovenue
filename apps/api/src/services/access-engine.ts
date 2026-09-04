@@ -25,12 +25,68 @@ export interface DesiredAccess {
 }
 
 /**
+ * When a purchase's entitlement actually ends — which is not always its
+ * `expiresDate`.
+ *
+ * For every status but GRACE_PERIOD it IS `expiresDate`. GRACE_PERIOD is
+ * the exception, and it has to be: a subscription only enters grace once
+ * its paid period has LAPSED, so a grace purchase's `expiresDate` is in
+ * the past by definition. Reading grace access off `expiresDate` meant
+ * `grantsAccess: true` in the shared status table (packages/shared/src/
+ * subscription-status.ts) granted precisely nothing, and the distinction
+ * between GRACE_PERIOD (payment retry WITH access) and BILLING_ISSUE
+ * (retry without) existed only on paper.
+ *
+ * Two deliberate decisions live here:
+ *
+ * 1. A NULL `gracePeriodExpires` is NOT infinite. It means the store did
+ *    not state a window, so there is no known grace period to honour and
+ *    the purchase falls back to `expiresDate` — exactly the pre-existing
+ *    behaviour. Treating unknown as unbounded would hand permanent
+ *    access to someone who has not paid, on the strength of a missing
+ *    field.
+ *
+ * 2. The answer is the LATER of the two dates, never just the grace one.
+ *    A store can mark a subscription in grace before its paid period
+ *    ends (Stripe `past_due` on a renewal invoice, for one), and such a
+ *    purchase grants access until `expiresDate` today. Taking the max
+ *    makes this change strictly additive: no purchase's entitlement
+ *    window can come out shorter than it is now.
+ *
+ * `isLaterExpiry` below is NOT reused for the comparison: it treats null
+ * as "longest-lived", which is right for `expiresDate` (a lifetime
+ * purchase never lapses) and wrong for `gracePeriodExpires` (an unstated
+ * window is unknown, not eternal).
+ */
+function entitlementExpiry(purchase: PurchaseWithAccessIds): Date | null {
+  if (purchase.status !== PurchaseStatus.GRACE_PERIOD) {
+    return purchase.expiresDate;
+  }
+  // A non-expiring purchase in grace is already the longest-lived grant
+  // there is; no grace window can extend it.
+  if (purchase.expiresDate === null) return null;
+  const grace = purchase.gracePeriodExpires;
+  if (grace === null) return purchase.expiresDate;
+  return grace.getTime() > purchase.expiresDate.getTime()
+    ? grace
+    : purchase.expiresDate;
+}
+
+/**
  * The authoritative answer to "what access should this subscriber have
  * right now", derived purely from their purchases. Pure and exported so
  * the drift reconciler (workers/access-reconciliation.ts) checks against
  * the EXACT function syncAccess writes from — a second implementation of
  * this rule would rot against the first, which is the failure this
  * codebase has already paid for in analytics.
+ *
+ * The expiry this returns is written verbatim onto `subscriber_access`
+ * by `syncAccess`, and the read path (`accessRepo.findActiveAccess`)
+ * serves a row only while `expiresDate > now`. So the entitlement window
+ * computed here IS the window the SDK sees: writing a grace purchase's
+ * past `expiresDate` onto the row would store a grant that serves
+ * nothing. Write and read agree on one date, and `entitlementExpiry`
+ * above is where that date is decided.
  */
 export function computeDesiredAccess(
   purchases: PurchaseWithAccessIds[],
@@ -39,17 +95,15 @@ export function computeDesiredAccess(
   const desired = new Map<string, DesiredAccess>();
   for (const purchase of purchases) {
     if (!ACCESS_GRANTING.has(purchase.status as PurchaseStatus)) continue;
-    if (purchase.expiresDate && purchase.expiresDate < now) continue;
+    const expiresDate = entitlementExpiry(purchase);
+    if (expiresDate && expiresDate < now) continue;
 
     for (const accessId of purchase.accessIds) {
       const existing = desired.get(accessId);
-      if (
-        !existing ||
-        isLaterExpiry(purchase.expiresDate, existing.expiresDate)
-      ) {
+      if (!existing || isLaterExpiry(expiresDate, existing.expiresDate)) {
         desired.set(accessId, {
           purchaseId: purchase.id,
-          expiresDate: purchase.expiresDate,
+          expiresDate,
           store: purchase.store,
         });
       }

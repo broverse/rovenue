@@ -42,7 +42,7 @@ import {
   runAccessReconciliationSweep,
 } from "./access-reconciliation";
 import { verifyAuditChain } from "../lib/audit";
-import { syncAccess } from "../services/access-engine";
+import { hasAccess, syncAccess } from "../services/access-engine";
 
 const RUN_ID = Date.now();
 
@@ -550,11 +550,13 @@ describe("runAccessReconciliationSweep", () => {
   // GRACE_PERIOD — the empirical question (review Important 4)
   // -------------------------------------------------------------
   //
-  // `subscription-status.ts` declares GRACE_PERIOD access-granting, but
-  // `computeDesiredAccess` skips any purchase whose `expiresDate < now`,
-  // which is definitionally every grace-period purchase. The question is
-  // whether that makes grace subscribers show up as DRIFT — which would
-  // put them in the metric and in the breaker's ratio.
+  // `subscription-status.ts` declares GRACE_PERIOD access-granting. Until
+  // Task 12b `computeDesiredAccess` skipped any purchase whose
+  // `expiresDate < now` — definitionally every grace-period purchase,
+  // since a subscription only enters grace once its paid period lapsed —
+  // so that declaration granted nothing and the whole GRACE_PERIOD vs
+  // BILLING_ISSUE distinction was empty in entitlement terms. A grace
+  // purchase's entitlement now runs to `gracePeriodExpires`.
   //
   // The stored rows here are whatever the WRITER produces: seeded
   // without an access row, then `syncAccess` is called. Whatever it
@@ -575,10 +577,18 @@ describe("runAccessReconciliationSweep", () => {
     expect(result.drifted).toBe(0);
     expect(result.drift.stale_grant).toBe(0);
     expect(result.drift.missing_grant).toBe(0);
-    // Recorded so the writer's actual answer is visible in the test, not
-    // just asserted away: this pins what syncAccess grants a grace-period
-    // purchase whose expiresDate has passed.
-    expect(storedByWriter).toEqual([]);
+    // CHANGED BY TASK 12b — this asserted `[]` before, which is exactly
+    // the contradiction the task fixed: the writer granted a grace
+    // subscriber nothing at all. It now grants the access, and the
+    // checker agrees with it (drifted: 0), because both call
+    // `computeDesiredAccess`.
+    expect(storedByWriter).toEqual([grace.accessId]);
+    // Asserted through the READ path, not just the table: a row whose
+    // stored expiry were the purchase's lapsed `expiresDate` would be
+    // filtered out by `findActiveAccess` and grant nothing.
+    await expect(hasAccess(grace.subscriberId, grace.accessId)).resolves.toBe(
+      true,
+    );
   });
 
   // The shape ABOVE is not how a grace-period subscriber actually reaches
@@ -586,31 +596,84 @@ describe("runAccessReconciliationSweep", () => {
   // the purchase's status + `gracePeriodExpires`; it calls neither
   // `grantAccess` nor `revokeAccessForTransaction`, so the access row
   // from the prior ACTIVE period survives untouched — still `isActive`,
-  // still carrying the now-past expiry. THAT is the production shape,
-  // and this reproduces it with direct SQL.
-  it("reports drift for a real Apple grace-period subscriber", async () => {
-    const grace = await seedActiveSubscriberWithAccess();
-    // Exactly what applyFailedRenewal writes: status + gracePeriodExpires
-    // on the purchase, and nothing at all on subscriber_access.
+  // still carrying the lapsed period's expiry. THAT is the production
+  // shape: seeded already-lapsed (purchase AND access row carry the same
+  // past expiry, as they do the moment a renewal fails), then only the
+  // status is flipped, which is all the webhook writes.
+  it("heals a real Apple grace-period subscriber into live access", async () => {
+    const grace = await seedActiveSubscriberWithAccess({
+      expiredAlready: true,
+    });
+    // Exactly what applyFailedRenewal writes: the status. The seed
+    // already carries the lapsed `expiresDate` and the future
+    // `gracePeriodExpires`, and `subscriber_access` is left untouched.
     await getDb().execute(
-      sql`UPDATE "purchases"
-          SET "status" = 'GRACE_PERIOD',
-              "expiresDate" = now() - interval '1 day',
-              "gracePeriodExpires" = now() + interval '14 days'
-          WHERE "id" = ${grace.purchaseId}`,
+      sql`UPDATE "purchases" SET "status" = 'GRACE_PERIOD' WHERE "id" = ${grace.purchaseId}`,
     );
 
-    const result = await runAccessReconciliationSweep(new Date(), {
+    // Nothing serves this subscriber before the sweep: the surviving row
+    // is active but its expiry is in the past.
+    await expect(hasAccess(grace.subscriberId, grace.accessId)).resolves.toBe(
+      false,
+    );
+
+    const dry = await runAccessReconciliationSweep(new Date(), {
       dryRun: true,
     });
 
-    // Documents the measured answer rather than the desired one. See the
-    // task report's Important 4 section: GRACE_PERIOD is declared
-    // access-granting in subscription-status.ts, but computeDesiredAccess
-    // drops any purchase whose expiresDate has passed — which is every
-    // grace-period purchase — so the surviving access row has no desired
-    // counterpart and classifies as stale_grant.
-    expect(result.drifted).toBe(1);
+    // CHANGED BY TASK 12b. This case asserted `stale_grant: 1` before:
+    // the grace purchase produced no desired entry at all, so the
+    // surviving row had no counterpart and the sweep's "repair" was to
+    // REVOKE it. The purchase now grants until `gracePeriodExpires`, so
+    // the row has a counterpart and the only disagreement left is its
+    // expiry — the lapsed period's end rather than the grace window's.
+    //
+    // Note this is `wrong_expiry`, not "no drift": the stored row was
+    // written before the grace window existed and genuinely must be
+    // rewritten for the read path (`expiresDate > now`) to serve it. The
+    // heal below EXTENDS the entitlement; nothing is taken away.
+    expect(dry.drift.stale_grant).toBe(0);
+    expect(dry.drift.wrong_expiry).toBe(1);
+    expect(dry.drifted).toBe(1);
+
+    const healed = await runAccessReconciliationSweep(new Date(), {
+      staleAfterMs: 0,
+    });
+    expect(healed.healed).toBe(1);
+
+    // The observable proof: a subscriber who could not read their
+    // entitlement now can, through the same read path the SDK uses.
+    await expect(hasAccess(grace.subscriberId, grace.accessId)).resolves.toBe(
+      true,
+    );
+    const [row] = await getDb()
+      .select({ expiresDate: subscriberAccess.expiresDate })
+      .from(subscriberAccess)
+      .where(eq(subscriberAccess.subscriberId, grace.subscriberId));
+    expect(row?.expiresDate?.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  // The other half of the rule: a grace window that has itself elapsed
+  // grants nothing, so the row is revoked rather than extended. Without
+  // this, "grace grants access" would have no upper bound in the tests.
+  it("revokes a grace-period subscriber whose grace window has elapsed", async () => {
+    const grace = await seedActiveSubscriberWithAccess({
+      expiredAlready: true,
+    });
+    await getDb().execute(
+      sql`UPDATE "purchases"
+          SET "status" = 'GRACE_PERIOD',
+              "gracePeriodExpires" = now() - interval '1 hour'
+          WHERE "id" = ${grace.purchaseId}`,
+    );
+
+    const result = await runAccessReconciliationSweep(new Date());
+
     expect(result.drift.stale_grant).toBe(1);
+    expect(result.healed).toBe(1);
+    await expect(activeAccessIds(grace.subscriberId)).resolves.toEqual([]);
+    await expect(hasAccess(grace.subscriberId, grace.accessId)).resolves.toBe(
+      false,
+    );
   });
 });

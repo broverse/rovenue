@@ -18,12 +18,15 @@ import { configDefaults, defineConfig } from "vitest/config";
 // throttling the ~350 files that have no such problem. `pnpm test` runs both
 // passes; neither is optional and no file belongs to both.
 //
-// These are exactly the files that pin fixed host ports — they pin them
-// BECAUSE a Kafka client connects on the address the broker advertises, which
-// has to be known before the container starts. tests/host-port-allocations.test.ts
-// keeps those pins unique; this list keeps them from starving each other.
+// The heaviest files pin fixed host ports because Kafka clients connect on the
+// address the broker advertises, which has to be known before the container
+// starts. The lighter Redis/Postgres/MinIO Testcontainers suites live here too,
+// so every Docker-starting API test shares the same bounded worker pool.
+// tests/host-port-allocations.test.ts keeps the fixed pins unique.
 const CONTAINER_SUITES = [
+  "src/lib/redis-lock.integration.test.ts",
   "tests/ch-kafka-engine.integration.test.ts",
+  "tests/billing-backfill-migration.integration.test.ts",
   "tests/outbox-replay-idempotency.test.ts",
   "tests/outbox-revenue-credit-replay.integration.test.ts",
   "tests/mrr-clickhouse-only.integration.test.ts",
@@ -33,6 +36,8 @@ const CONTAINER_SUITES = [
   "tests/notifier.integration.test.ts",
   "tests/notifier-entry.integration.test.ts",
   "tests/outbox-dispatcher.integration.test.ts",
+  "tests/routes/dashboard/assets.integration.test.ts",
+  "tests/workers/asset-orphan-sweeper.integration.test.ts",
   "src/services/metrics/schema-contract.integration.test.ts",
   "src/services/analytics-router.experiment.integration.test.ts",
 ];
@@ -54,7 +59,7 @@ export default defineConfig({
     // `rovenue_test_w*` database. One pass tearing those down while the other
     // is still using them would trade a capacity problem for a data race.
     // Sequential invocations each get a complete, private lifecycle.
-    ...(containerPass ? { maxWorkers: 2 } : {}),
+    maxWorkers: containerPass ? 2 : 4,
     setupFiles: ["./tests/setup.ts"],
     // Builds the migrated template database the per-worker clones come from,
     // and drops every worker database afterwards. See global-setup.ts for why
