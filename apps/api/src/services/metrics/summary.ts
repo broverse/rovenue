@@ -2,6 +2,7 @@ import { queryAnalytics } from "../../lib/clickhouse";
 import { and, eq, gte, inArray, isNotNull, isNull, lte, or, countDistinct, sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import { toDateOnly } from "./_utils";
+import { REVENUE_TYPES_MONEY_OUT, sqlTypeList } from "@rovenue/shared";
 
 // =============================================================
 // Revenue summary read service — ClickHouse exclusive
@@ -70,9 +71,9 @@ export async function getRevenueSummary(
       input.projectId,
       `
         SELECT
-          toString(sumIf(amountUsd, type NOT IN ('REFUND','CHARGEBACK')))          AS gross_usd,
-          toString(sumIf(abs(amountUsd), type IN ('REFUND','CHARGEBACK')))         AS refunds_usd,
-          toString(uniqExactIf(subscriberId, type NOT IN ('REFUND','CHARGEBACK'))) AS paying_subs,
+          toString(sumIf(amountUsd, type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})))          AS gross_usd,
+          toString(sumIf(abs(amountUsd), type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})))         AS refunds_usd,
+          toString(uniqExactIf(subscriberId, type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}))) AS paying_subs,
           toString(uniqExactIf(subscriberId, type = 'TRIAL_CONVERSION'))           AS trial_conversions
         FROM rovenue.raw_revenue_events FINAL
         WHERE projectId = {projectId:String}

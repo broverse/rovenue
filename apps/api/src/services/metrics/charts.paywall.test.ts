@@ -94,12 +94,16 @@ describe("readChartSeries", () => {
     expect(purchasersSql).toContain("raw_revenue_events");
     // Pre-0019 rows carry '' and must not be counted as attributed.
     expect(purchasersSql).toContain("paywallId != ''");
-    // Numerator is INITIAL only — RENEWAL/REACTIVATION recur long
-    // after the view that earned them, and TRIAL_CONVERSION has the
-    // same lag (trial starts are already INITIAL events), so counting
-    // any of them against *today's* viewers inflates this same-day
-    // rate past 100%. See PURCHASE_NUMERATOR_EVENT_TYPE in charts.ts.
-    expect(purchasersSql).toContain("type = 'INITIAL'");
+    // Numerator is INITIAL/CREDIT_PURCHASE/NON_RENEWING_PURCHASE —
+    // RENEWAL/REACTIVATION recur long after the view that earned them,
+    // and TRIAL_CONVERSION has the same lag (trial starts are already
+    // INITIAL events), so counting any of them against *today's*
+    // viewers inflates this same-day rate past 100%. One-time purchase
+    // types have no such lag (2026-09-04 ruling) and join the
+    // numerator. See PURCHASE_NUMERATOR_EVENT_TYPES in charts.ts.
+    expect(purchasersSql).toContain(
+      "type IN ('INITIAL','CREDIT_PURCHASE','NON_RENEWING_PURCHASE')",
+    );
     expect(purchasersSql).not.toContain("RENEWAL");
     expect(purchasersSql).not.toContain("TRIAL_CONVERSION");
     expect(purchasersSql).not.toContain("REACTIVATION");
@@ -123,7 +127,10 @@ describe("readChartSeries", () => {
     const purchasersSql = (
       queryAnalyticsMock.mock.calls[0] as [string, string, unknown]
     )[1];
-    expect(purchasersSql).toMatch(/type\s*=\s*'INITIAL'/);
+    expect(purchasersSql).toMatch(
+      /type IN \('INITIAL','CREDIT_PURCHASE','NON_RENEWING_PURCHASE'\)/,
+    );
+    expect(purchasersSql).not.toContain("'RENEWAL'");
   });
 
   it("throws when ClickHouse is not configured", async () => {

@@ -1,6 +1,10 @@
 import { and, eq, inArray, isNull, sql as drizzleSql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
-import { ALL_REVENUE_TYPES } from "@rovenue/shared";
+import {
+  ALL_REVENUE_TYPES,
+  REVENUE_TYPES_PURCHASE_COUNT,
+  sqlTypeList,
+} from "@rovenue/shared";
 import type {
   RevenueEventTypeName,
   TransactionRow,
@@ -51,9 +55,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Scope → CH `type` filter
 // =============================================================
 
-const SCOPE_TYPES: Record<TransactionScope, ReadonlyArray<RevenueEventTypeName> | null> = {
+export const SCOPE_TYPES: Record<TransactionScope, ReadonlyArray<RevenueEventTypeName> | null> = {
   all: null,
-  purchase: ["INITIAL", "REACTIVATION", "CREDIT_PURCHASE"],
+  purchase: REVENUE_TYPES_PURCHASE_COUNT,
   renewal: ["RENEWAL"],
   refund: ["REFUND"],
   trial: ["TRIAL_CONVERSION"],
@@ -599,7 +603,7 @@ export async function listTransactionsVolume(
     `
       SELECT
         toString(toDate(eventDate))                                            AS day,
-        toString(countIf(type IN ('INITIAL','REACTIVATION','CREDIT_PURCHASE'))) AS purchases,
+        toString(countIf(type IN (${sqlTypeList(REVENUE_TYPES_PURCHASE_COUNT)}))) AS purchases,
         toString(countIf(type = 'RENEWAL'))                                     AS renewals,
         toString(countIf(type IN ('REFUND','CHARGEBACK')))                       AS refunds
       FROM rovenue.raw_revenue_events FINAL

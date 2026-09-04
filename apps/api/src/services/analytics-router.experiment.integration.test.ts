@@ -164,6 +164,10 @@ const V_DUP_EVENT = "v_dup_event";
 const V_STORE_SPLIT = "v_store_split";
 /** Net-NEGATIVE subscriber: refunded past their gross. */
 const V_NET_NEGATIVE = "v_net_negative";
+// 2026-09-04 ruling: an experiment's gross must count every sale it
+// caused, including one-time purchases (NON_RENEWING_PURCHASE) and
+// coin-pack buys (CREDIT_PURCHASE) — the old allow-list excluded both.
+const V_ONE_TIME_TYPES = "v_one_time_types";
 
 async function waitFor(
   fn: () => Promise<boolean>,
@@ -445,6 +449,13 @@ beforeAll(async () => {
         subscriberId: `sub_store_google_${RUN_ID}`,
         exposedAt: matureExposedAt,
       }),
+      // 2026-09-04 ruling: one-time purchase types must count in gross.
+      exposureRow({
+        suffix: "one_time_types",
+        variantId: V_ONE_TIME_TYPES,
+        subscriberId: `sub_one_time_types_${RUN_ID}`,
+        exposedAt: matureExposedAt,
+      }),
     ],
     format: "JSONEachRow",
   });
@@ -530,6 +541,25 @@ beforeAll(async () => {
         amountUsd: 15,
         eventDate: daysAgo(MATURE_EXPOSURE_DAYS_AGO - 1),
         store: "PLAY_STORE",
+      }),
+      // 2026-09-04 ruling: NON_RENEWING_PURCHASE and CREDIT_PURCHASE must
+      // both land in an experiment's gross. Neither type is produced by
+      // any code path yet (Tasks 6/7), so this row is constructed by
+      // hand — the honest test proves the QUERY counts these types, not
+      // that anything currently emits them.
+      revenueRow({
+        eventId: `rev_one_time_nonrenewing_${RUN_ID}`,
+        subscriberId: `sub_one_time_types_${RUN_ID}`,
+        type: "NON_RENEWING_PURCHASE",
+        amountUsd: 25,
+        eventDate: daysAgo(MATURE_EXPOSURE_DAYS_AGO - 1),
+      }),
+      revenueRow({
+        eventId: `rev_one_time_credit_${RUN_ID}`,
+        subscriberId: `sub_one_time_types_${RUN_ID}`,
+        type: "CREDIT_PURCHASE",
+        amountUsd: 5,
+        eventDate: daysAgo(MATURE_EXPOSURE_DAYS_AGO - 1),
       }),
     ],
     format: "JSONEachRow",
@@ -682,6 +712,20 @@ describe("runAnalyticsQuery experiment_results — subscriber-level windowed val
     expect(row.converters).toBe(1);
     // If FINAL dedup were missing, this would be 40, not 20.
     expect(row.revenue_usd).toBeCloseTo(20, 4);
+  });
+
+  it("counts a NON_RENEWING_PURCHASE and a CREDIT_PURCHASE in an experiment's gross", () => {
+    // Task 4 ruling: the gross list excluded CREDIT_PURCHASE, so a paywall
+    // experiment never counted coin-pack revenue it caused, and would have
+    // gone on to miss one-time purchases too — an experiment's revenue
+    // counts every sale it caused. Executes the real query against real
+    // ClickHouse rather than asserting on a SQL string.
+    const row = rowFor(V_ONE_TIME_TYPES);
+    expect(row.mature_users).toBe(1);
+    expect(row.converters).toBe(1);
+    // gross = 25 (NON_RENEWING_PURCHASE) + 5 (CREDIT_PURCHASE) = 30.
+    expect(row.revenue_usd).toBeCloseTo(30, 4);
+    expect(row.refunds_usd).toBeCloseTo(0, 4);
   });
 });
 

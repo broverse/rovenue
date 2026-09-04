@@ -44,6 +44,10 @@ const MAX_LOOKBACK_MONTHS = 36;
 
 export async function getLtvPrediction(input: GetLtvPredictionInput) {
   const lookback = `toStartOfMonth(now() - INTERVAL ${MAX_LOOKBACK_MONTHS} MONTH)`;
+  // Ruled UNCHANGED 2026-09-04: the cohort anchor stays INITIAL +
+  // TRIAL_CONVERSION. A coin-pack or one-time buyer is not a member of a
+  // subscription cohort; anchoring them here would project recurring
+  // revenue for someone who bought once.
   const joinsCte = `
     joins AS (
       SELECT

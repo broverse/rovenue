@@ -13,6 +13,7 @@ import type {
   ChartSeriesPoint,
   ChartSeriesResponse,
 } from "@rovenue/shared";
+import { sqlTypeList } from "@rovenue/shared";
 import { drizzle, type Store } from "@rovenue/db";
 import {
   ClickHouseUnavailableError,
@@ -725,8 +726,18 @@ export function buildPerInstallPoints(
  *     trial *start* at the paywall doesn't need separate counting:
  *     it is already an INITIAL event (carrying `isTrial`), distinct
  *     from the later TRIAL_CONVERSION.
+ *
+ * 2026-09-04: NON_RENEWING_PURCHASE and CREDIT_PURCHASE join the
+ * numerator. The lag argument that excludes RENEWAL / REACTIVATION /
+ * TRIAL_CONVERSION does not apply to them — a one-time purchase happens
+ * at the paywall view that earned it, which is exactly the same-day
+ * conversion this numerator exists to count.
  */
-const PURCHASE_NUMERATOR_EVENT_TYPE = "'INITIAL'";
+const PURCHASE_NUMERATOR_EVENT_TYPES = sqlTypeList([
+  "INITIAL",
+  "CREDIT_PURCHASE",
+  "NON_RENEWING_PURCHASE",
+]);
 
 /** Daily unique subscribers who saw any paywall in this project. */
 async function readPaywallViewers(
@@ -841,7 +852,7 @@ async function readPaywallPurchasers(
         AND toDate(eventDate) >= {from:Date}
         AND toDate(eventDate) <= {to:Date}
         AND paywallId != ''
-        AND type = ${PURCHASE_NUMERATOR_EVENT_TYPE}
+        AND type IN (${PURCHASE_NUMERATOR_EVENT_TYPES})
       GROUP BY day
       ORDER BY day
     `,
@@ -1116,7 +1127,7 @@ export async function readChartSeries(
       // getTrialStartsDaily for the same day — would divide by the
       // WRONG day's denominator (trials converting today mostly
       // started on an earlier day), the identical lag mismatch this
-      // file's own PURCHASE_NUMERATOR_EVENT_TYPE comment already rules
+      // file's own PURCHASE_NUMERATOR_EVENT_TYPES comment already rules
       // out for TRIAL_CONVERSION. ClickHouse, FINAL retained.
       assertClickHouseReady();
       const rows = await getTrialConversionsDaily({

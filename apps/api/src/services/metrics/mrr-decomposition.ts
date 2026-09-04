@@ -1,5 +1,10 @@
 import { queryAnalytics } from "../../lib/clickhouse";
 import { toDateOnly, moneyStr } from "./_utils";
+import {
+  REVENUE_TYPES_MONEY_OUT,
+  REVENUE_TYPES_NEW_RECURRING,
+  sqlTypeList,
+} from "@rovenue/shared";
 
 export interface GetMrrDecompositionInput {
   projectId: string;
@@ -55,10 +60,14 @@ export async function getMrrDecomposition(
     input.projectId,
     `
       SELECT
-        toString(sumIf(amountUsd, type IN ('INITIAL','TRIAL_CONVERSION'))) AS new_usd,
+        -- NON_RENEWING_PURCHASE and CREDIT_PURCHASE stay out by construction —
+        -- this is the RECURRING decomposition. Before 2026-09-04 one-time sales
+        -- arrived typed INITIAL and landed here anyway, which is what made this
+        -- file's documented scope untrue.
+        toString(sumIf(amountUsd, type IN (${sqlTypeList(REVENUE_TYPES_NEW_RECURRING)}))) AS new_usd,
         toString(sumIf(amountUsd, type = 'RENEWAL'))                       AS retained_usd,
         toString(sumIf(amountUsd, type = 'REACTIVATION'))                  AS reactivation_usd,
-        toString(sumIf(abs(amountUsd), type IN ('REFUND','CHARGEBACK')))   AS churned_usd
+        toString(sumIf(abs(amountUsd), type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})))   AS churned_usd
       FROM rovenue.raw_revenue_events FINAL
       WHERE projectId = {projectId:String}
         AND toDate(eventDate) >= {from:Date}
@@ -130,7 +139,7 @@ export async function getMrrDecompositionDailyCounts(
     `
       SELECT
         toString(toDate(eventDate))                                AS day,
-        toString(countIf(type IN ('INITIAL','TRIAL_CONVERSION')))  AS new_subs,
+        toString(countIf(type IN (${sqlTypeList(REVENUE_TYPES_NEW_RECURRING)})))  AS new_subs,
         toString(countIf(type = 'REACTIVATION'))                   AS reactivations
       FROM rovenue.raw_revenue_events FINAL
       WHERE projectId = {projectId:String}
