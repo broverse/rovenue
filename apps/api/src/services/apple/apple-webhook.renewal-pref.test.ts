@@ -64,6 +64,12 @@ const { drizzleMock } = vi.hoisted(() => {
     },
     revenueEventRepo: {
       createRevenueEvent: vi.fn(async () => undefined),
+      // The first-charge emits (SUBSCRIBED, an UPGRADE renewal-pref change,
+      // OFFER_REDEEMED) ask whether either INITIAL's or REACTIVATION's
+      // dedupe key is already claimed for the transaction — those two
+      // labels are the same charge and must not both be written. `false` =
+      // nothing recorded yet, which is this fixture's situation.
+      anyDedupeKeyClaimed: vi.fn(async () => false),
     },
     refundShieldResponseRepo: {
       insertConsumptionRequest: vi.fn(async () => true),

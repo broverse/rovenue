@@ -421,6 +421,10 @@ async function applySubscribed(ctx: DispatchContext): Promise<void> {
       ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.RESUBSCRIBE
         ? RevenueEventType.REACTIVATION
         : RevenueEventType.INITIAL,
+    // Same charge, possibly a different label than `applyOfferRedeemed`
+    // would pick for it. Gated on both labels so whichever notification
+    // arrives second records nothing.
+    firstChargeOfTransaction: true,
   });
 }
 
@@ -536,6 +540,9 @@ async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
     // First charge for the upgraded product — INITIAL keeps it in the
     // purchased-revenue bucket every analytics view already sums.
     type: RevenueEventType.INITIAL,
+    // An upgrade can also arrive as OFFER_REDEEMED/UPGRADE, which labels
+    // the same charge from the chain's status instead.
+    firstChargeOfTransaction: true,
   });
 }
 
@@ -561,25 +568,51 @@ async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
  * rollups depend on.
  */
 async function applyOfferRedeemed(ctx: DispatchContext): Promise<void> {
-  const subscriber = await resolveSubscriber(ctx);
-
   // The chain's state BEFORE this delivery writes anything.
   //
-  // `guard.previous` is the before-image of the (store, storeTransactionId)
-  // row, and Apple mints a NEW transactionId for a redemption that charges
-  // — which is precisely the delivery whose revenue type depends on where
-  // the subscription was. On those the guard's before-image is null by
-  // construction, so the chain's latest row is the only honest previous
-  // side. Read here, because `upsertPurchase` below is what creates the
-  // row that would otherwise answer this query.
+  // `guard.previous` (the before-image `upsertPurchase`'s guard takes) is
+  // keyed on (store, storeTransactionId), and Apple mints a NEW
+  // transactionId for a redemption that charges — precisely the delivery
+  // whose revenue type depends on where the subscription was. On those the
+  // guard's before-image is null by construction, so the chain's latest
+  // row is the only honest previous side. Read first, before anything
+  // writes: `upsertPurchase` below is what creates the row that would
+  // otherwise answer this query.
   const chainBefore =
     await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
       drizzle.db,
       ctx.projectId,
       ctx.transaction.originalTransactionId,
+      // Scoped and ordered deterministically: an `originalTransactionId`
+      // is Apple's, but the column is shared by every store and the CSV
+      // importer can create a whole chain inside one statement, leaving
+      // `createdAt` tied across rows. An arbitrary winner here would pick
+      // the revenue label at random.
+      { store: Store.APP_STORE },
     );
 
-  const { product, purchase, statusApplied, guard } = await upsertPurchase({
+  // A DOWNGRADE redemption takes effect at the NEXT renewal and carries
+  // the transaction currently in force — there is no new money and no new
+  // entitlement, only an announcement. Writing ACTIVE for it is not the
+  // no-op it looks like: if the row sits in GRACE_PERIOD or BILLING_ISSUE
+  // the guard would APPLY that transition and `grantAccess` would re-grant
+  // entitlement on the strength of an announcement, with nothing paid.
+  //
+  // Same ruling, same helper, as `applyRenewalPrefChange`'s non-UPGRADE
+  // arm: record the pending change, take no effect. That helper stamps
+  // `ctx.outcome` itself, so the `subscription.offer_redeemed` lifecycle
+  // key still reaches the outbox — a campaign wants to know the offer was
+  // redeemed even when the plan does not move until renewal.
+  if (ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.DOWNGRADE) {
+    log.debug("offer redeemed with no immediate effect", {
+      subtype: ctx.notification.subtype,
+    });
+    await recordApplePendingChange(ctx);
+    return;
+  }
+
+  const subscriber = await resolveSubscriber(ctx);
+  const { product, purchase, statusApplied } = await upsertPurchase({
     ctx,
     subscriberId: subscriber.id,
     status: isTrial(ctx.transaction)
@@ -626,25 +659,6 @@ async function applyOfferRedeemed(ctx: DispatchContext): Promise<void> {
 
   await grantAccess({ subscriber, purchase, product, ctx });
 
-  // Revenue only for a transaction we had never seen before.
-  //
-  // Apple can deliver OFFER_REDEEMED alongside a SUBSCRIBED/DID_RENEW for
-  // the SAME transaction, and `revenueDedupeKind` folds INITIAL and
-  // REACTIVATION onto DIFFERENT dedupe keys ("purchase" vs
-  // "reactivation") — so two handlers classifying one transaction
-  // differently would each write a row and double-count the charge. A
-  // transaction we already have a row for has already had its money
-  // recorded by whichever notification arrived first; Apple mints a new
-  // transactionId for every new charge, so "we already had this row"
-  // means "no new money", and this delivery contributes only the offer
-  // columns `upsertPurchase` just wrote.
-  if (guard.previous) {
-    log.debug("offer redeemed on a transaction already recorded", {
-      transactionId: ctx.transaction.transactionId,
-    });
-    return;
-  }
-
   await emitRevenueEvent({
     ctx,
     subscriberId: subscriber.id,
@@ -659,6 +673,11 @@ async function applyOfferRedeemed(ctx: DispatchContext): Promise<void> {
       chainBefore?.status === PurchaseStatus.EXPIRED
         ? RevenueEventType.REACTIVATION
         : RevenueEventType.INITIAL,
+    // This IS the first charge of this transaction, and the label above
+    // can disagree with the one `applySubscribed` would pick for the same
+    // transaction — see APPLE_FIRST_CHARGE_DEDUPE_KINDS. The gate is
+    // symmetric: it holds whichever of the two notifications lands first.
+    firstChargeOfTransaction: true,
   });
 }
 
@@ -1205,12 +1224,6 @@ function appleNotificationEventTime(ctx: DispatchContext): Date {
   return new Date(ctx.notification.signedDate);
 }
 
-/**
- * Returns the guard result alongside the row so a caller can read the
- * before-image it took under the FOR UPDATE lock without a second query.
- * `applyOfferRedeemed` uses `guard.previous` to tell "we have never seen
- * this transaction" (new charge) from "we already recorded it".
- */
 async function upsertPurchase(args: UpsertPurchaseArgs) {
   const { ctx, subscriberId, status, autoRenewStatus } = args;
   const tx = ctx.transaction;
@@ -1252,7 +1265,7 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
   // is held across the write (mechanism (a)); upsertPurchase also
   // CASE-guards the terminal status at SQL level (mechanism (b)).
   const eventTime = appleNotificationEventTime(ctx);
-  const { purchase, statusApplied, guard } = await drizzle.db.transaction(
+  const { purchase, statusApplied } = await drizzle.db.transaction(
     async (dbTx) => {
       const guard = await guardStatusWrite({
         db: dbTx,
@@ -1317,8 +1330,19 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
                 // Likewise the offer columns: they describe what the
                 // store says this transaction is, and a withheld write
                 // must not repaint them from a stale delivery.
-                offerType: tx.offerType ?? null,
-                offerIdentifier: tx.offerIdentifier ?? null,
+                //
+                // Written only when the field is PRESENT. `?? null` would
+                // erase the recorded offer the moment any later delivery
+                // for this transaction omitted it — and these columns
+                // exist precisely so a win-back cohort stays queryable
+                // afterwards. An absent field means "this payload says
+                // nothing", never "there was no offer".
+                ...(tx.offerType !== undefined
+                  ? { offerType: tx.offerType }
+                  : {}),
+                ...(tx.offerIdentifier !== undefined
+                  ? { offerIdentifier: tx.offerIdentifier }
+                  : {}),
               }
             : {}),
           autoRenewStatus,
@@ -1345,11 +1369,11 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           now: eventTime,
         });
       }
-      return { purchase: persisted, statusApplied: guard.apply, guard };
+      return { purchase: persisted, statusApplied: guard.apply };
     },
   );
 
-  return { product, purchase, statusApplied, guard };
+  return { product, purchase, statusApplied };
 }
 
 /**
@@ -1510,17 +1534,70 @@ async function revokeAccessForTransaction(ctx: DispatchContext): Promise<void> {
   );
 }
 
+/**
+ * The two dedupe kinds THE FIRST CHARGE of one Apple transaction can be
+ * filed under. `revenueDedupeKind` maps INITIAL -> "purchase" and
+ * REACTIVATION -> "reactivation", and keeping those apart is deliberate
+ * (a REACTIVATION after a REFUND must not collide with the original
+ * purchase). The cost is that two handlers looking at the SAME
+ * transaction and disagreeing about the label each claim a different key
+ * and each write a row — one charge, counted twice.
+ *
+ * They can disagree, and not hypothetically: `applySubscribed` classifies
+ * on Apple's SUBTYPE (RESUBSCRIBE -> REACTIVATION) while
+ * `applyOfferRedeemed` classifies on CHAIN STATUS (EXPIRED ->
+ * REACTIVATION). A chain sitting in BILLING_ISSUE because the
+ * expiry-checker has not caught up yet, whose win-back arrives as
+ * OFFER_REDEEMED and then SUBSCRIBED/RESUBSCRIBE, produces INITIAL from
+ * one and REACTIVATION from the other.
+ */
+const APPLE_FIRST_CHARGE_DEDUPE_KINDS = [
+  revenueDedupeKind(RevenueEventType.INITIAL),
+  revenueDedupeKind(RevenueEventType.REACTIVATION),
+] as const;
+
 interface EmitRevenueArgs {
   ctx: DispatchContext;
   subscriberId: string;
   purchaseId: string;
   productId: string;
   type: RevenueEventType;
+  /**
+   * Set by the handlers that mean "this is the FIRST charge of
+   * `transaction.transactionId`" — SUBSCRIBED, an UPGRADE renewal-pref
+   * change, and OFFER_REDEEMED. Those three can each label that one charge
+   * INITIAL or REACTIVATION, so the emit is additionally gated on NEITHER
+   * label having been claimed yet (see APPLE_FIRST_CHARGE_DEDUPE_KINDS).
+   *
+   * Deliberately opt-in rather than applied to every emit: RENEWAL, REFUND
+   * and `applyRefundReversed`'s REACTIVATION all legitimately share a
+   * transaction id with an earlier purchase row, and a blanket
+   * "any revenue for this transaction" gate would silently drop them.
+   */
+  firstChargeOfTransaction?: boolean;
 }
 
 async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
   const { ctx, subscriberId, purchaseId, productId, type } = args;
   const tx = ctx.transaction;
+
+  if (args.firstChargeOfTransaction) {
+    const alreadyRecorded =
+      await drizzle.revenueEventRepo.anyDedupeKeyClaimed(
+        drizzle.db,
+        ctx.projectId,
+        APPLE_FIRST_CHARGE_DEDUPE_KINDS.map(
+          (kind) => `apple:${tx.transactionId}:${kind}`,
+        ),
+      );
+    if (alreadyRecorded) {
+      log.debug("first charge already recorded under either label", {
+        transactionId: tx.transactionId,
+        type,
+      });
+      return;
+    }
+  }
 
   if (tx.price == null || !tx.currency) {
     log.debug("skipping revenue event: no price", {

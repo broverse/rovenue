@@ -256,6 +256,15 @@ async function verifyAppleReceipt(
         status,
         isTrial,
         isIntroOffer: transaction.offerType !== undefined,
+        // The offer this transaction came from, at full fidelity beside
+        // the boolean that collapses all four kinds into one. Written
+        // here as well as on the webhook path because a purchase is very
+        // often FIRST observed here: a promotional, offer-code or
+        // win-back purchase whose columns were left null until (or
+        // unless) an Apple notification arrived would be missing from
+        // exactly the cohort these columns exist to make queryable.
+        offerType: transaction.offerType ?? null,
+        offerIdentifier: transaction.offerIdentifier ?? null,
         isSandbox: environment === Environment.SANDBOX,
         environment,
         purchaseDate: new Date(transaction.purchaseDate),
@@ -295,6 +304,17 @@ async function verifyAppleReceipt(
         }),
         ...(transaction.currency != null && {
           priceCurrency: transaction.currency,
+        }),
+        // Present-only, exactly like `priceAmount`/`priceCurrency` above
+        // and like the webhook's update path: `?? null` would erase a
+        // recorded offer as soon as any later verify for this transaction
+        // omitted the field. An absent field says nothing about the
+        // offer; it does not say there wasn't one.
+        ...(transaction.offerType !== undefined && {
+          offerType: transaction.offerType,
+        }),
+        ...(transaction.offerIdentifier !== undefined && {
+          offerIdentifier: transaction.offerIdentifier,
         }),
         // Only overwrite an already-recorded attribution when this call
         // actually supplies one — a later renewal-triggering verify (no

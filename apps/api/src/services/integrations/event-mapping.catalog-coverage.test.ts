@@ -38,6 +38,17 @@ const IDENTITY_MAPPED_PROVIDERS: ReadonlyMap<IntegrationProviderId, string> = ne
   ],
 ]);
 
+/**
+ * Providers that hand-pick a narrow `eventCatalog` instead of taking
+ * STANDARD_PROVIDER_EVENT_KEYS wholesale, and so advertise no
+ * subscription-lifecycle key at all. Both ad platforms: forwarding a
+ * lifecycle signal as a conversion would corrupt their optimization.
+ */
+const NARROW_CATALOG_PROVIDERS: ReadonlySet<IntegrationProviderId> = new Set([
+  "META_CAPI",
+  "TIKTOK_EVENTS",
+]);
+
 /** Specific (provider, key) omissions that are deliberate. */
 const DECLARED_OMISSIONS: ReadonlyArray<{
   provider: IntegrationProviderId;
@@ -145,8 +156,8 @@ describe("subscription-bridge key coverage", () => {
       if (IDENTITY_MAPPED_PROVIDERS.has(providerId as IntegrationProviderId)) continue;
 
       for (const key of SUBSCRIPTION_BRIDGE_EVENT_KEYS) {
-        // META_CAPI / TIKTOK_EVENTS hand-pick a narrow catalog and claim
-        // no lifecycle keys at all; a key they never offer is not a gap.
+        // NARROW_CATALOG_PROVIDERS claim no lifecycle keys at all; a key
+        // they never offer is not a gap.
         if (!provider.eventCatalog.includes(key)) continue;
         checked += 1;
         const result = applyEventMapping({
@@ -165,12 +176,25 @@ describe("subscription-bridge key coverage", () => {
     }
 
     expect(unresolved).toEqual([]);
-    // A loop that iterated nothing would pass silently. Pin that it did
-    // real work: ten standard providers x the bridge keys, at minimum.
-    expect(checked).toBeGreaterThanOrEqual(SUBSCRIPTION_BRIDGE_EVENT_KEYS.length * 10);
+    // A loop that iterated nothing would pass silently, so pin that it did
+    // the work. The expected count is DERIVED, not a literal: every
+    // registered provider except the identity-mapped ones and the two that
+    // hand-pick a narrow catalog claims the whole bridge set, so a new
+    // provider raises this floor automatically instead of leaving the guard
+    // quietly under-scoped.
+    const expectedProviders =
+      Object.keys(PROVIDERS).length -
+      IDENTITY_MAPPED_PROVIDERS.size -
+      NARROW_CATALOG_PROVIDERS.size;
+    expect(checked).toBe(SUBSCRIPTION_BRIDGE_EVENT_KEYS.length * expectedProviders);
   });
 
   it("a provider that claims one bridge key claims them all", () => {
+    // Unreachable today: every catalog is all-or-nothing (either
+    // STANDARD_PROVIDER_EVENT_KEYS / ROVENUE_EVENT_KEYS wholesale, or a
+    // hand-picked list with no lifecycle keys at all). It guards the case
+    // where a future provider hand-lists a catalog and takes some bridge
+    // keys but not others — not a live condition.
     // Half a bridge is worse than none: a consumer wiring up lifecycle
     // events for a provider has no way to see that one meaning is missing
     // from its catalog, and the drawer's event picker renders the catalog

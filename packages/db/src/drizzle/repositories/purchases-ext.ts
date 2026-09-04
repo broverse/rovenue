@@ -6,6 +6,9 @@ import {
 } from "@rovenue/shared/subscription-status";
 import type { Db } from "../client";
 import { products, purchases, subscribers, type Purchase } from "../schema";
+import { store as storeEnum } from "../enums";
+
+type Store = (typeof storeEnum.enumValues)[number];
 
 // =============================================================
 // Extended purchase reads — used by webhook handlers + workers
@@ -88,14 +91,28 @@ export async function findStripePurchaseWithSubscriberState(
 }
 
 /**
- * First purchase under a project that matches the Apple
+ * The newest purchase under a project that matches the Apple
  * `originalTransactionId` — used by apple-webhook to reconnect
- * renewals/refunds to the subscriber record.
+ * renewals/refunds to the subscriber record, and to read a chain's state
+ * before a delivery writes to it.
+ *
+ * `createdAt` alone does not order a chain deterministically: the CSV
+ * importer creates a whole chain inside one statement, so several rows can
+ * share a timestamp to the microsecond and the "newest" was whichever the
+ * planner returned. `purchaseDate` then the primary key break the tie, so
+ * repeated reads of the same chain agree — it matters wherever the answer
+ * decides something durable, such as whether a redemption is labelled
+ * INITIAL or REACTIVATION.
+ *
+ * `opts.store` narrows to one store. `originalTransactionId` is Apple's
+ * concept but the column is shared by all three stores, so a caller that
+ * knows which store it is looking at should say so.
  */
 export async function findPurchaseByOriginalTransaction(
   db: Db,
   projectId: string,
   originalTransactionId: string,
+  opts?: { store?: Store },
 ): Promise<Purchase | null> {
   const rows = await db
     .select()
@@ -104,9 +121,14 @@ export async function findPurchaseByOriginalTransaction(
       and(
         eq(purchases.projectId, projectId),
         eq(purchases.originalTransactionId, originalTransactionId),
+        ...(opts?.store ? [eq(purchases.store, opts.store)] : []),
       ),
     )
-    .orderBy(desc(purchases.createdAt))
+    .orderBy(
+      desc(purchases.createdAt),
+      desc(purchases.purchaseDate),
+      desc(purchases.id),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
