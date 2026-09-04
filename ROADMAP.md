@@ -617,7 +617,10 @@ else in the framework/provider-breadth dimension is done.
 
 ## 12. Feature breadth (85 → 95)
 
-- [ ] Feature flags: percentage rollout + kill switch
+- [x] Feature flags: percentage rollout + kill switch — already implemented
+      (`isEnabled` kill switch + per-rule `rolloutPercentage` through
+      `isInRollout`); regression-tested in
+      `apps/api/tests/flag-engine.rollout-kill.test.ts` (2026-09-04)
 - [ ] Real-time audience segment updates
 - [ ] Leaderboards: season/reset automation
 - [ ] Subscription-renewing credit grant automation (merges with the PR3
