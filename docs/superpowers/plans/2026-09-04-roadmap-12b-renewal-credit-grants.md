@@ -77,6 +77,9 @@ end-to-end test needs an isolated broker).
   `@rovenue/shared`.
 - Produces: `export function grantTriggerMatches(grantOn: CurrencyGrantTrigger,
   trigger: GrantEventTrigger): boolean` from `@rovenue/shared`.
+- Produces: `export function grantTriggersMatching(trigger: GrantEventTrigger):
+  CurrencyGrantTrigger[]` from `@rovenue/shared` — the inverse lookup the
+  repository uses to build its SQL filter, so the matrix is written once.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -86,6 +89,7 @@ Create `packages/shared/src/virtual-currencies.grant-trigger.test.ts`:
 import { describe, expect, test } from "vitest";
 import {
   grantTriggerMatches,
+  grantTriggersMatching,
   type CurrencyGrantTrigger,
   type GrantEventTrigger,
 } from "./virtual-currencies";
@@ -106,6 +110,13 @@ describe("grantTriggerMatches", () => {
       expect(grantTriggerMatches(grantOn, trigger)).toBe(expected);
     },
   );
+
+  test("grantTriggersMatching is the inverse of grantTriggerMatches", () => {
+    // The repository builds its SQL filter from this. If the two ever
+    // disagree, grants silently fire on the wrong events.
+    expect(grantTriggersMatching("PURCHASE").sort()).toEqual(["BOTH", "PURCHASE"]);
+    expect(grantTriggersMatching("RENEWAL").sort()).toEqual(["BOTH", "RENEWAL"]);
+  });
 
   test("an unknown grantOn never matches", () => {
     // Defensive: a row written by a newer build, read by an older one.
@@ -159,6 +170,20 @@ export function grantTriggerMatches(
   trigger: GrantEventTrigger,
 ): boolean {
   return GRANT_TRIGGER_MATCHES[grantOn]?.includes(trigger) ?? false;
+}
+
+/**
+ * The inverse lookup: which stored `grantOn` values fire on this event.
+ * The repository uses this to build its SQL filter, so the matrix above is
+ * the ONLY place the mapping is written down. Without it the repository
+ * would carry a second hand-maintained copy that can drift silently.
+ */
+export function grantTriggersMatching(
+  trigger: GrantEventTrigger,
+): CurrencyGrantTrigger[] {
+  return (Object.keys(GRANT_TRIGGER_MATCHES) as CurrencyGrantTrigger[]).filter(
+    (grantOn) => grantTriggerMatches(grantOn, trigger),
+  );
 }
 ```
 
@@ -381,7 +406,7 @@ In `packages/db/src/drizzle/repositories/product-currency-grants.ts`, add:
 
 ```ts
 import { and, eq, inArray } from "drizzle-orm";
-import type { GrantEventTrigger } from "@rovenue/shared";
+import { grantTriggersMatching, type GrantEventTrigger } from "@rovenue/shared";
 
 /**
  * Grants for a product that fire on `trigger`. Filtering in SQL rather
@@ -394,9 +419,8 @@ export async function listProductGrantsForTrigger(
   productId: string,
   trigger: GrantEventTrigger,
 ): Promise<ProductCurrencyGrantRow[]> {
-  const matching = trigger === "PURCHASE"
-    ? (["PURCHASE", "BOTH"] as const)
-    : (["RENEWAL", "BOTH"] as const);
+  // Derived from the shared matrix, never re-hardcoded here.
+  const matching = grantTriggersMatching(trigger);
 
   return db
     .select()
@@ -404,7 +428,7 @@ export async function listProductGrantsForTrigger(
     .where(
       and(
         eq(productCurrencyGrants.productId, productId),
-        inArray(productCurrencyGrants.grantOn, [...matching]),
+        inArray(productCurrencyGrants.grantOn, matching),
       ),
     );
 }
@@ -608,7 +632,9 @@ let loadProduct: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   grant = vi.fn(async () => {});
-  loadProduct = vi.fn(async () => ({ identifier: "pro_monthly" }));
+  loadProduct = vi.fn(async (_projectId: string, _productId: string) => ({
+    identifier: "pro_monthly",
+  }));
 });
 
 describe("runRenewalGrant", () => {
@@ -775,7 +801,12 @@ export interface RenewalGrantDeps {
     productIdentifier: string;
     trigger: "RENEWAL";
   }) => Promise<void>;
-  loadProduct: (productId: string) => Promise<{ identifier: string } | null>;
+  /** Project-scoped: findProductById is (db, projectId, id), and a
+   *  product id must never be resolved across project boundaries. */
+  loadProduct: (
+    projectId: string,
+    productId: string,
+  ) => Promise<{ identifier: string } | null>;
 }
 
 /**
@@ -788,7 +819,7 @@ export async function runRenewalGrant(
 ): Promise<"granted" | "skipped"> {
   if (!RENEWAL_GRANT_EVENT_TYPES.includes(job.type)) return "skipped";
 
-  const product = await deps.loadProduct(job.productId);
+  const product = await deps.loadProduct(job.projectId, job.productId);
   if (!product) {
     log.warn("product missing for renewal grant", {
       productId: job.productId,
@@ -810,9 +841,10 @@ export async function runRenewalGrant(
 
 const liveDeps: RenewalGrantDeps = {
   grant: (args) => grantProductCurrencies(args),
-  loadProduct: async (productId) => {
+  loadProduct: async (projectId, productId) => {
     const product = await drizzle.productRepo.findProductById(
       drizzle.db,
+      projectId,
       productId,
     );
     return product ? { identifier: product.identifier } : null;
@@ -856,9 +888,11 @@ export async function ensureRenewalGrantWorker(
 }
 ```
 
-Check the exact name of the product lookup before writing `loadProduct` —
-`grep -n "findProductById" packages/db/src/drizzle/repositories/products.ts`.
-If it differs, use the real one; do not invent a repository function.
+`findProductById` is confirmed to exist with the signature
+`(db: Db, projectId: string, id: string): Promise<Product | null>`, exported
+through the `drizzle.productRepo` namespace. `assertTopics` (used in Task 4)
+is confirmed exported from `apps/api/src/workers/outbox-dispatcher.ts`, and
+`getKafka` from `apps/api/src/lib/kafka.ts`.
 
 - [ ] **Step 5: Add the counters**
 
