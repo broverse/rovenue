@@ -332,9 +332,19 @@ describe("config stream real-time audience updates", () => {
     const subscriberA = `sub_a_${nextSuffix()}`;
     const subscriberB = `sub_b_${nextSuffix()}`;
 
-    const streamA = await openConfigStream(publicKey, subscriberA);
-    const streamB = await openConfigStream(publicKey, subscriberB);
+    // Close-what-opened: handles land in this array only once
+    // openConfigStream has actually resolved, so a throw while opening
+    // streamB (transient auth/connection failure) can never strand
+    // streamA's SSE response and dedicated ioredis subscriber connection
+    // outside the cleanup in `finally` — there is no window where a
+    // successfully-opened stream sits unregistered.
+    const opened: OpenStream[] = [];
     try {
+      const streamA = await openConfigStream(publicKey, subscriberA);
+      opened.push(streamA);
+      const streamB = await openConfigStream(publicKey, subscriberB);
+      opened.push(streamB);
+
       // Prove BOTH streams are live before writing anything: B receiving
       // nothing later is only meaningful if B's stream demonstrably works.
       const initialA = parseConfigFrame(
@@ -364,8 +374,7 @@ describe("config stream real-time audience updates", () => {
       // property. Without it, every write would wake every open stream.
       expect(pushedToB).toBeNull();
     } finally {
-      await closeStream(streamA);
-      await closeStream(streamB);
+      await Promise.all(opened.map((s) => closeStream(s)));
     }
   });
 
