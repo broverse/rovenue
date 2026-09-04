@@ -422,8 +422,8 @@ async function applySubscribed(ctx: DispatchContext): Promise<void> {
         ? RevenueEventType.REACTIVATION
         : RevenueEventType.INITIAL,
     // Same charge, possibly a different label than `applyOfferRedeemed`
-    // would pick for it. Gated on both labels so whichever notification
-    // arrives second records nothing.
+    // would pick for it — filed under the one canonical key so whichever
+    // notification arrives second loses the claim.
     firstChargeOfTransaction: true,
   });
 }
@@ -675,8 +675,9 @@ async function applyOfferRedeemed(ctx: DispatchContext): Promise<void> {
         : RevenueEventType.INITIAL,
     // This IS the first charge of this transaction, and the label above
     // can disagree with the one `applySubscribed` would pick for the same
-    // transaction — see APPLE_FIRST_CHARGE_DEDUPE_KINDS. The gate is
-    // symmetric: it holds whichever of the two notifications lands first.
+    // transaction — so it is filed under the canonical first-charge key
+    // and the unique index keeps whichever notification lands first. See
+    // APPLE_FIRST_CHARGE_DEDUPE_KIND.
     firstChargeOfTransaction: true,
   });
 }
@@ -1535,26 +1536,38 @@ async function revokeAccessForTransaction(ctx: DispatchContext): Promise<void> {
 }
 
 /**
- * The two dedupe kinds THE FIRST CHARGE of one Apple transaction can be
- * filed under. `revenueDedupeKind` maps INITIAL -> "purchase" and
- * REACTIVATION -> "reactivation", and keeping those apart is deliberate
- * (a REACTIVATION after a REFUND must not collide with the original
- * purchase). The cost is that two handlers looking at the SAME
- * transaction and disagreeing about the label each claim a different key
- * and each write a row — one charge, counted twice.
+ * The ONE dedupe kind the first charge of an Apple transaction is filed
+ * under, whichever label the handler that saw it chose.
  *
- * They can disagree, and not hypothetically: `applySubscribed` classifies
- * on Apple's SUBTYPE (RESUBSCRIBE -> REACTIVATION) while
- * `applyOfferRedeemed` classifies on CHAIN STATUS (EXPIRED ->
- * REACTIVATION). A chain sitting in BILLING_ISSUE because the
- * expiry-checker has not caught up yet, whose win-back arrives as
- * OFFER_REDEEMED and then SUBSCRIBED/RESUBSCRIBE, produces INITIAL from
- * one and REACTIVATION from the other.
+ * The first charge of a transaction is one economic event. It is
+ * legitimately called INITIAL by a handler classifying on Apple's SUBTYPE
+ * (`applySubscribed`: RESUBSCRIBE -> REACTIVATION) and REACTIVATION by one
+ * classifying on CHAIN STATUS (`applyOfferRedeemed`: EXPIRED ->
+ * REACTIVATION), and those two labels carry different
+ * `revenueDedupeKind`s. Letting each claim its own key meant a chain
+ * sitting in BILLING_ISSUE (the expiry-checker has not caught up), whose
+ * win-back arrives as OFFER_REDEEMED and then SUBSCRIBED/RESUBSCRIBE,
+ * wrote two rows for one charge.
+ *
+ * So the KEY answers "which economic event is this", not "what did we call
+ * it": all three first-charge handlers claim this one key while the row
+ * keeps its own `type`. `(projectId, dedupeKey)` is unique and the claim is
+ * an `onConflictDoNothing` insert, so the second handler to arrive loses
+ * the claim inside the database. That matters beyond tidiness: the webhook
+ * worker runs at concurrency 8 with no per-transaction advisory lock on
+ * this path, so a check-then-act read could be passed by both deliveries
+ * at once. Nothing to race here — the unique index decides.
+ *
+ * `revenueDedupeKind` itself is deliberately NOT changed to fold the two
+ * kinds: `applyRefundReversed` emits a compensating REACTIVATION for a
+ * transaction whose first charge is already recorded, and folding would
+ * make that reversal collide with the purchase it exists to reverse.
+ * Keeping first-charge on "purchase" is what holds them apart — the
+ * reversal keeps claiming "reactivation".
  */
-const APPLE_FIRST_CHARGE_DEDUPE_KINDS = [
-  revenueDedupeKind(RevenueEventType.INITIAL),
-  revenueDedupeKind(RevenueEventType.REACTIVATION),
-] as const;
+const APPLE_FIRST_CHARGE_DEDUPE_KIND = revenueDedupeKind(
+  RevenueEventType.INITIAL,
+);
 
 interface EmitRevenueArgs {
   ctx: DispatchContext;
@@ -1566,13 +1579,15 @@ interface EmitRevenueArgs {
    * Set by the handlers that mean "this is the FIRST charge of
    * `transaction.transactionId`" — SUBSCRIBED, an UPGRADE renewal-pref
    * change, and OFFER_REDEEMED. Those three can each label that one charge
-   * INITIAL or REACTIVATION, so the emit is additionally gated on NEITHER
-   * label having been claimed yet (see APPLE_FIRST_CHARGE_DEDUPE_KINDS).
+   * INITIAL or REACTIVATION; setting this files it under the canonical
+   * first-charge key regardless (see APPLE_FIRST_CHARGE_DEDUPE_KIND).
    *
-   * Deliberately opt-in rather than applied to every emit: RENEWAL, REFUND
-   * and `applyRefundReversed`'s REACTIVATION all legitimately share a
-   * transaction id with an earlier purchase row, and a blanket
-   * "any revenue for this transaction" gate would silently drop them.
+   * Deliberately opt-in rather than applied to every emit.
+   * `applyRefundReversed`'s REACTIVATION is the case that proves it must
+   * be: it shares a transaction id with the first charge and is a
+   * genuinely different economic event, so it must keep its own key.
+   * (`applyRenewal` is not at risk either way — Apple mints a new
+   * transactionId per renewal, so a renewal never shares one.)
    */
   firstChargeOfTransaction?: boolean;
 }
@@ -1580,24 +1595,6 @@ interface EmitRevenueArgs {
 async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
   const { ctx, subscriberId, purchaseId, productId, type } = args;
   const tx = ctx.transaction;
-
-  if (args.firstChargeOfTransaction) {
-    const alreadyRecorded =
-      await drizzle.revenueEventRepo.anyDedupeKeyClaimed(
-        drizzle.db,
-        ctx.projectId,
-        APPLE_FIRST_CHARGE_DEDUPE_KINDS.map(
-          (kind) => `apple:${tx.transactionId}:${kind}`,
-        ),
-      );
-    if (alreadyRecorded) {
-      log.debug("first charge already recorded under either label", {
-        transactionId: tx.transactionId,
-        type,
-      });
-      return;
-    }
-  }
 
   if (tx.price == null || !tx.currency) {
     log.debug("skipping revenue event: no price", {
@@ -1637,7 +1634,26 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
     // transactionId is unique per Apple transaction (renewals get a new
     // one); the coarse kind lets the receipt-verify path converge on the
     // same key for this transaction. Idempotent across replays.
-    dedupeKey: `apple:${tx.transactionId}:${revenueDedupeKind(type)}`,
+    // One economic event, one key. For a first charge that is the
+    // canonical kind rather than this row's own label — see
+    // APPLE_FIRST_CHARGE_DEDUPE_KIND. It is also what keeps this path
+    // converging with receipt-verify.ts, which spells the same
+    // `apple:<txn>:purchase` for the transaction it verifies.
+    //
+    // RESIDUAL, stated rather than papered over: this only dedupes against
+    // claims in the `apple:` namespace. The CSV importer claims revenue
+    // under its own scheme (`import:<store>:<txnId>:<renewalNumber>`, see
+    // packages/shared/src/import/keys.ts), so for a project that migrated
+    // history through the importer a live notification whose transaction id
+    // matches an imported `storeTransactionId` still writes a second row.
+    // That namespace split affects every Apple handler equally and predates
+    // this one; closing it means unifying the importer's key scheme, which
+    // is a data migration, not a change here.
+    dedupeKey: `apple:${tx.transactionId}:${
+      args.firstChargeOfTransaction
+        ? APPLE_FIRST_CHARGE_DEDUPE_KIND
+        : revenueDedupeKind(type)
+    }`,
   });
 
   if (type === RevenueEventType.REFUND) {

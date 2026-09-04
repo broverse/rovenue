@@ -452,4 +452,33 @@ describe("handleAppleNotification — OFFER_REDEEMED", () => {
     // REACTIVATION dedupe under different keys, so both rows would stand.
     expect(types).not.toContain("INITIAL");
   });
+
+  it("a later REFUND_REVERSED still records its compensating REACTIVATION", async () => {
+    // The reason the first charge is filed under the CANONICAL "purchase"
+    // kind rather than under its own label. `applyRefundReversed` emits a
+    // compensating REACTIVATION for a transaction whose first charge is
+    // already recorded, and it claims `apple:<txn>:reactivation`. If a
+    // win-back's first charge had claimed that key — which it did while
+    // the label picked the key — the reversal would collide with the
+    // purchase it exists to reverse and be silently dropped.
+    const purchase = await purchaseRow(LAPSED.newTransactionId);
+    const before = await revenueTypesFor(purchase!.id);
+    expect(before).toEqual(["REACTIVATION"]);
+
+    const result = await redeem({
+      uuidSuffix: "refund-reversed",
+      transactionId: LAPSED.newTransactionId,
+      originalTransactionId: LAPSED.originalTransactionId,
+      offerType: APPLE_OFFER_TYPE.WIN_BACK,
+      offerIdentifier: LAPSED.offerIdentifier,
+      notificationType: APPLE_NOTIFICATION_TYPE.REFUND_REVERSED,
+    });
+    expect(result.status).toBe("processed");
+
+    // Two REACTIVATION rows now: the win-back charge, and the reversal's
+    // compensation. Distinct economic events, distinct dedupe keys.
+    const after = await revenueTypesFor(purchase!.id);
+    expect(after).toHaveLength(2);
+    expect(after.every((t) => t === "REACTIVATION")).toBe(true);
+  });
 });

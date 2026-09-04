@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { APPLE_FAMILY_SHARED_OWNERSHIP_TYPE } from "@rovenue/shared/subscription-status";
 import type { Db } from "../client";
@@ -45,44 +45,6 @@ export function revenueDedupeKind(type: RevenueEventType): string {
     default:
       return type;
   }
-}
-
-/**
- * Has any of `dedupeKeys` already been claimed for this project?
- *
- * `revenue_event_dedupe` is the idempotency table `createRevenueEvent`
- * claims into, so this answers "was an economic event of that class already
- * recorded" without reading `revenue_events` (which is partitioned).
- *
- * It exists for the ONE case a single dedupeKey cannot express: the first
- * charge of a transaction is legitimately labelled INITIAL by one code path
- * and REACTIVATION by another, and `revenueDedupeKind` deliberately keeps
- * those two classes apart (a REACTIVATION after a REFUND must not collide
- * with the original purchase — see its doc above). So a caller that knows it
- * is emitting THE first charge of a transaction passes both candidate keys
- * here and skips when either is already claimed. Callers that are not in
- * that situation must keep relying on their single dedupeKey; this is not a
- * general "has this transaction any revenue" check and must not be used as
- * one, or it would suppress the refund and refund-reversal rows that
- * legitimately share a transaction id with the purchase.
- */
-export async function anyDedupeKeyClaimed(
-  db: Db,
-  projectId: string,
-  dedupeKeys: readonly string[],
-): Promise<boolean> {
-  if (dedupeKeys.length === 0) return false;
-  const rows = await db
-    .select({ dedupeKey: revenueEventDedupe.dedupeKey })
-    .from(revenueEventDedupe)
-    .where(
-      and(
-        eq(revenueEventDedupe.projectId, projectId),
-        inArray(revenueEventDedupe.dedupeKey, [...dedupeKeys]),
-      ),
-    )
-    .limit(1);
-  return rows.length > 0;
 }
 
 // =============================================================
