@@ -85,3 +85,24 @@ export const accessDriftCircuitBreakerTotal = new Counter({
   help: "Sweeps that refused to auto-heal because the batch drift ratio was above threshold",
   registers: [registry],
 });
+
+// =============================================================
+// Renewal-grant worker (workers/renewal-grant.ts)
+// =============================================================
+
+// Incremented once per renewal that actually granted currency.
+export const renewalGrantsAppliedTotal = new Counter({
+  name: "rovenue_renewal_grants_applied_total",
+  help: "Renewal events that granted product currency",
+  registers: [registry],
+});
+
+// Incremented on every failed grant attempt, before BullMQ retries it.
+// A steady low rate is transient infrastructure; a sustained rate means
+// renewals are reaching their attempt ceiling and credits are not landing.
+export const renewalGrantsFailedTotal = new Counter({
+  name: "rovenue_renewal_grants_failed_total",
+  help: "Renewal grant attempts that threw, by error name",
+  labelNames: ["reason"] as const,
+  registers: [registry],
+});
