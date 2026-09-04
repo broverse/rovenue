@@ -33,6 +33,25 @@ MACOS_MIN="$(cfg macosDeploymentTarget)"
 
 fail() { echo "✗ $*" >&2; exit 1; }
 
+# Numeric (not lexical) version compare: "9.0" must not sort above "14.0".
+# Missing components compare as 0, so "16" == "16.0". Echoes nothing; use in
+# an `if` (never bare, so a false result doesn't trip `set -e`).
+version_gt() {
+  local a="${1:-0}" b="${2:-0}"
+  local IFS=.
+  local -a av=($a) bv=($b)
+  local n=${#av[@]}
+  [ "${#bv[@]}" -gt "$n" ] && n=${#bv[@]}
+  local i ai bi
+  for ((i = 0; i < n; i++)); do
+    ai="${av[i]:-0}"
+    bi="${bv[i]:-0}"
+    if ((10#$ai > 10#$bi)); then return 0; fi
+    if ((10#$ai < 10#$bi)); then return 1; fi
+  done
+  return 1
+}
+
 test -d "$XCF" || fail "no xcframework at $XCF"
 
 # Expected slice directory → Mach-O platform id → expected minimum OS version.
@@ -55,9 +74,23 @@ for entry in $EXPECTED_SLICES; do
   [ "$got_platform" = "$want_platform" ] \
     || fail "$dir: Mach-O platform is '$got_platform', expected '$want_platform'"
 
-  got_minos=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; f=0}' | sort -u | tr '\n' ' ' | xargs)
-  [ "$got_minos" = "$want_minos" ] \
-    || fail "$dir: minimum OS is '$got_minos', expected '$want_minos' — export the *_DEPLOYMENT_TARGET vars before cargo build"
+  # rustc's own precompiled std for some targets bakes in a minos *older* than
+  # what we build with (harmless — an older floor links and warns about
+  # nothing) — so the real defect to catch is an object *newer* than our
+  # deployment target (that's what produced hundreds of "object file was
+  # built for newer ... version" linker warnings before). Assert the ceiling,
+  # not equality.
+  max_minos="0"
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    if version_gt "$v" "$max_minos"; then
+      max_minos="$v"
+    fi
+  done < <(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; f=0}' | sort -u)
+
+  if version_gt "$max_minos" "$want_minos"; then
+    fail "$dir: minimum OS is '$max_minos', which exceeds the configured deployment target '$want_minos' — export the *_DEPLOYMENT_TARGET vars before cargo build"
+  fi
 
   test -f "$XCF/$dir/Headers/RovenueFFI.h" || fail "$dir: Headers/RovenueFFI.h missing"
   test -f "$XCF/$dir/Headers/module.modulemap" || fail "$dir: Headers/module.modulemap missing"
