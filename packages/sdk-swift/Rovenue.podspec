@@ -1,44 +1,34 @@
-# Rovenue.podspec — CocoaPods wrapper for the M3 Swift façade.
+# Rovenue.podspec — CocoaPods wrapper for the Swift façade.
 #
-# Publishable to CocoaPods Trunk. The release artifact is a sha256-pinned
-# zip on GitHub Releases that contains Sources/ + a pre-built single-arch
-# arm64-device librovenue.a (built by packages/sdk-swift/scripts/build-ios-static.sh).
-#
-# Single-platform: arm64 iOS devices only. Simulators + Intel-Mac dev loops
-# require an XCFramework — tracked as M7.1 Open Question 1.
+# The release artifact is a sha256-pinned zip on GitHub Releases containing
+# Sources/ + RovenueFFI.xcframework + this podspec. The xcframework carries
+# three slices (iOS device, iOS simulator, macOS) and uniffi's own module map,
+# which is why this spec needs no SWIFT_INCLUDE_PATHS: consumers resolve the
+# RovenueFFI Clang module from inside the vendored artifact.
+require 'json'
+
+CONFIG = JSON.parse(File.read(File.join(__dir__, 'release.config.json'))).freeze
 
 Pod::Spec.new do |s|
-  s.name             = 'Rovenue'
-  s.version          = '0.16.0'
+  s.name             = CONFIG['podName']
+  s.version          = CONFIG['version']
   s.summary          = 'Rovenue Swift façade'
-  s.homepage         = 'https://rovenue.io'
+  s.homepage         = 'https://rovenue.app'
   s.license          = { :type => 'AGPL-3.0' }
   s.authors          = 'Rovenue'
-  s.platforms        = { :ios => '16.0' }
+  s.platforms        = {
+    :ios => CONFIG['iosDeploymentTarget'],
+    :osx => CONFIG['macosDeploymentTarget'],
+  }
   s.swift_version    = '5.9'
   s.source           = {
-    :http   => "https://github.com/rovenue/rovenue/releases/download/sdk-swift-v#{s.version}/Rovenue-#{s.version}.zip",
+    :http   => "https://github.com/#{CONFIG['repoSlug']}/releases/download/sdk-swift-v#{s.version}/#{s.name}-#{s.version}.zip",
     :sha256 => '0000000000000000000000000000000000000000000000000000000000000000'
   }
-  s.source_files       = 'Sources/Rovenue/**/*.swift'
-  # NOTE: must NOT be `librovenue.a` — CocoaPods names this pod's own
-  # compiled static lib `libRovenue.a`, which collides case-insensitively
-  # with a vendored `librovenue.a` on macOS ("conflicting names"). Use a
-  # distinct basename for the vendored Rust core.
-  s.vendored_libraries = 'Sources/Rovenue/librovenue_ffi.a'
+  s.source_files        = 'Sources/Rovenue/**/*.swift'
+  s.vendored_frameworks = CONFIG['xcframeworkName']
 
-  # Expose the uniffi C FFI layer (RustBuffer / RustCallStatus / ForeignBytes,
-  # declared in Sources/Rovenue/Generated/RovenueFFI.h) as an importable clang
-  # module so the generated RovenueFFI.swift's `#if canImport(RovenueFFI)`
-  # branch succeeds. SPM wires this through a `systemLibrary` target; under
-  # CocoaPods we put the module.modulemap directory on the Swift import path.
-  s.preserve_paths      = 'Sources/RovenueFFI/**/*'
-  s.pod_target_xcconfig = {
-    'SWIFT_INCLUDE_PATHS' => '$(PODS_TARGET_SRCROOT)/Sources/RovenueFFI'
-  }
-
-  # Apple privacy manifest — bundled so the publishable CocoaPods artifact (the
-  # pod that ships the collecting code) carries its own PrivacyInfo.xcprivacy,
-  # not just the Expo bridge pod. The file lives in Sources/Rovenue/ already.
-  s.resource_bundles   = { 'Rovenue_privacy' => ['Sources/Rovenue/PrivacyInfo.xcprivacy'] }
+  # Apple privacy manifest — bundled so the publishable artifact carries its
+  # own PrivacyInfo.xcprivacy, not just the Expo bridge pod.
+  s.resource_bundles    = { 'Rovenue_privacy' => ['Sources/Rovenue/PrivacyInfo.xcprivacy'] }
 end
