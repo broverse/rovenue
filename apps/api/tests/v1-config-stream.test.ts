@@ -25,6 +25,8 @@ vi.mock("../src/services/subscriber-config", () => ({
   evaluateSubscriberConfig: vi.fn(async () => ({
     flags: { feature_x: true },
     experiments: [],
+    // Internal resolved row id — must never leak onto the SSE wire.
+    subscriberId: "sub_internal_row_id",
   })),
 }));
 
@@ -75,6 +77,11 @@ describe("GET /v1/config/stream", () => {
     expect(text).toContain("event: initial");
     expect(text).toContain('"projectId":"proj_test"');
     expect(text).toContain('"flags"');
+    expect(text).toContain('"experiments"');
+    // The evaluation result's internal resolved-row id must never leak onto
+    // the public SDK wire — only { flags, experiments, projectId } may ship.
+    expect(text).not.toContain("subscriberId");
+    expect(text).not.toContain("sub_internal_row_id");
 
     controller.abort();
     await reader.cancel();
