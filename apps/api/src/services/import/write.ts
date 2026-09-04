@@ -50,6 +50,7 @@ import { audit } from "../../lib/audit";
 import { resolveSubscriberForWrite } from "../../lib/resolve-or-create-subscriber";
 import { syncAccess } from "../access-engine";
 import { resolveProduct } from "./plan";
+import { oneTimeRevenueTypeFor } from "../revenue/one-time-type";
 import { IMPORT_OUTCOMES, type ImportOutcome, type ReportRow } from "./report";
 
 // =============================================================
@@ -569,7 +570,14 @@ export async function writeImportBatch(
         subscriberId: subscriber.id,
         purchaseId: purchase.id,
         productId: product.id,
-        type: deriveRevenueEventType(normalized, storeTransactionId),
+        // A one-time product's revenue type never comes from the
+        // transaction-id/renewal-counter heuristic below — see
+        // services/revenue/one-time-type.ts. Historical rows may already
+        // be mistyped, but an import run after this release must not
+        // mint fresh ones.
+        type:
+          oneTimeRevenueTypeFor(product.type) ??
+          deriveRevenueEventType(normalized, storeTransactionId),
         amount: normalized.priceAmount!,
         currency: normalized.priceCurrency!,
         // `normalizeMoney` only ever produces a USD-denominated amount
