@@ -168,6 +168,33 @@ export function paywallEventId(
     .digest("hex");
 }
 
+/**
+ * The generic (non-paywall) Kafka message shape: every topic except
+ * PAYWALL_EVENT gets this envelope verbatim. Exported (rather than left
+ * inline in the `producer.send` call below, the way it used to be) so
+ * every consumer of this wire format — production and tests alike —
+ * reads it off ONE definition. Before this was extracted,
+ * `renewal-grant.integration.test.ts` carried its own hand-copied literal
+ * of this object to reconstruct the wire envelope from a re-read outbox
+ * row; that copy could have silently drifted from this one (e.g. a
+ * rename of `eventId` back to `outboxEventId`) without the test failing.
+ */
+export function toOutboxKafkaMessage(r: OutboxEvent): {
+  key: string;
+  value: string;
+} {
+  return {
+    key: r.aggregateId,
+    value: JSON.stringify({
+      eventId: r.id,
+      eventType: r.eventType,
+      aggregateId: r.aggregateId,
+      createdAt: r.createdAt.toISOString(),
+      payload: r.payload,
+    }),
+  };
+}
+
 export function shapePaywallEventMessage(row: OutboxEvent): {
   key: string;
   value: string;
@@ -322,16 +349,7 @@ export async function runOnce(
         messages: rows.map((r) =>
           topic === AGGREGATE_TO_TOPIC.PAYWALL_EVENT
             ? shapePaywallEventMessage(r)
-            : {
-                key: r.aggregateId,
-                value: JSON.stringify({
-                  eventId: r.id,
-                  eventType: r.eventType,
-                  aggregateId: r.aggregateId,
-                  createdAt: r.createdAt.toISOString(),
-                  payload: r.payload,
-                }),
-              },
+            : toOutboxKafkaMessage(r),
         ),
       });
       return { topic, rows };

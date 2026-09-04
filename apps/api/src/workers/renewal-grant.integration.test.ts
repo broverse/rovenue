@@ -5,25 +5,46 @@
 // Every other consumer of `rovenue.revenue` in this repo is integration
 // delivery, which is allowed to drop a message. This consumer is not: a
 // dropped message means a subscriber's purchased credits never arrive.
-// The unit tests (renewal-grant.test.ts, consumer.test.ts,
-// virtual-currencies.grant-trigger.test.ts) pin the pieces in isolation;
-// this file proves they are actually wired together.
+//
+// WHAT THIS FILE PROVES, PRECISELY:
+//   - A REAL Postgres write through the real writer
+//     (drizzle.revenueEventRepo.createRevenueEvent) produces an outbox row
+//     whose payload shape `toRenewalGrantJob` actually accepts (not a
+//     hand-built fixture that could carry a wrong field name both sides
+//     happen to agree on).
+//   - `toRenewalGrantJob`'s event-type filter (RENEWAL/TRIAL_CONVERSION/
+//     REACTIVATION granted, INITIAL dropped) runs against that real row.
+//   - `runRenewalGrant` + LIVE (non-mocked) `grantProductCurrencies` /
+//     `productRepo.findProductById` deps — the same pair
+//     workers/renewal-grant.ts's own `liveDeps` wires up — actually moves
+//     a subscriber's real credit_ledger balance, and that `addCredits`'
+//     (referenceType, referenceId, currencyId) dedup really does swallow a
+//     second run of the identical job (the redelivery case).
+//
+// WHAT THIS FILE DOES NOT PROVE — the seams left for a future test:
+//   - The real Kafka wire hop. This file starts no Redpanda container and
+//     publishes nothing to `rovenue.revenue`; it reads the outbox row back
+//     and reconstructs the message bytes via `toOutboxKafkaMessage`
+//     (imported from workers/outbox-dispatcher.ts, not a local copy — see
+//     that file for why this used to be its own literal). The dispatcher's
+//     OWN publish of that exact function against a real Redpanda is
+//     covered by outbox-dispatcher.integration.test.ts, but not for the
+//     REVENUE_EVENT topic specifically and not chained into this consumer.
+//   - `startRenewalGrantConsumer`'s `consumer.run` loop — the
+//     `JSON.parse(message.value)` + `deps.enqueue(...)` hop in
+//     services/renewal-grants/consumer.ts — is exercised only by
+//     consumer.test.ts's synthetic messages, not here.
+//   - The BullMQ leg: `renewal-grants-boot.ts`'s `queue.add(...)` and
+//     `ensureRenewalGrantWorker`'s `Worker` picking the job back up. This
+//     file calls `runRenewalGrant` directly, never through a real queue.
+//   Driving consumer→queue→worker end-to-end against a real Redpanda is a
+//   separate, larger task; this file does not attempt it.
 //
 // The seed goes through the REAL writer — drizzle.revenueEventRepo
 // .createRevenueEvent — so the outbox row is produced exactly the way
 // production produces it (see insertRevenueRow in
 // packages/db/src/drizzle/repositories/revenue-events.ts), never a
-// hand-built outbox row. The Kafka leg itself is not driven: this file
-// starts no Redpanda container and enqueues no BullMQ job. Instead it
-// reads the real outbox row back, reconstructs the exact envelope
-// workers/outbox-dispatcher.ts's generic (non-paywall) producer.send
-// branch would have put on the wire (`{ eventId: row.id, eventType,
-// aggregateId, createdAt, payload }` — verified against that file; note
-// the wire field is `eventId`, not `outboxEventId`), and hands it to
-// `toRenewalGrantJob` + `runRenewalGrant` with LIVE (non-mocked) deps —
-// the same `grantProductCurrencies` / `productRepo.findProductById` pair
-// renewal-grant.ts's own `liveDeps` wires up, which is the same code path
-// renewal-grants-boot.ts's `bootRenewalGrants` puts behind the queue.
+// hand-built outbox row.
 //
 // Follows the inline-seed convention of the other worker integration
 // tests (access-reconciliation, google-reconciliation, expiry-checker):
@@ -47,6 +68,7 @@ import {
 import { getBalance } from "../services/credit-engine";
 import { grantProductCurrencies } from "../services/purchase-credits";
 import { toRenewalGrantJob } from "../services/renewal-grants/consumer";
+import { toOutboxKafkaMessage } from "./outbox-dispatcher";
 import { runRenewalGrant, type RenewalGrantDeps } from "./renewal-grant";
 
 const RUN_ID = Date.now();
@@ -179,21 +201,6 @@ async function readRevenueOutboxRow(revenueEventId: string): Promise<OutboxEvent
   return row;
 }
 
-/** The exact shape workers/outbox-dispatcher.ts's generic (non-paywall)
- *  producer.send branch puts on the wire for every topic including
- *  rovenue.revenue -- `eventId`, never `outboxEventId` (that name only
- *  exists internally, after the integrations-fanout consumer parses this
- *  same wrapper). */
-function toWireEnvelope(row: OutboxEvent): unknown {
-  return {
-    eventId: row.id,
-    eventType: row.eventType,
-    aggregateId: row.aggregateId,
-    createdAt: row.createdAt.toISOString(),
-    payload: row.payload,
-  };
-}
-
 beforeEach(async () => {
   // CASCADE reaches purchases, revenue_events, outbox_events rows keyed
   // on these subscribers/products are NOT cascaded from subscribers, so
@@ -240,7 +247,7 @@ describe("renewal grant end to end", () => {
     //    toRenewalGrantJob + runRenewalGrant with LIVE deps (not mocks),
     //    which is the same path bootRenewalGrants wires up.
     const outboxRow = await readRevenueOutboxRow(revenueEvent.id);
-    const parsed = toRenewalGrantJob(toWireEnvelope(outboxRow));
+    const parsed = toRenewalGrantJob(JSON.parse(toOutboxKafkaMessage(outboxRow).value));
     expect(parsed).not.toBeNull();
     if (!parsed) throw new Error("toRenewalGrantJob returned null");
     expect(parsed.job).toEqual({
@@ -297,7 +304,7 @@ describe("renewal grant end to end", () => {
     if (!revenueEvent) throw new Error("createRevenueEvent returned null");
 
     const outboxRow = await readRevenueOutboxRow(revenueEvent.id);
-    const parsed = toRenewalGrantJob(toWireEnvelope(outboxRow));
+    const parsed = toRenewalGrantJob(JSON.parse(toOutboxKafkaMessage(outboxRow).value));
 
     // RENEWAL_GRANT_EVENT_TYPES deliberately excludes INITIAL -- it is the
     // PURCHASE trigger's event, and matching both here would double-grant
