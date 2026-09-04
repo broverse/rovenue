@@ -61,3 +61,9 @@ pubspec.lock
 # ...except packages/sdk-flutter/example, which IS an application package
 # (Task 8) — pub convention is that applications DO commit their lockfile.
 !packages/sdk-flutter/example/pubspec.lock
+
+# Apple binary artifacts are built by packages/sdk-swift/scripts/build-xcframework.sh,
+# never committed. A 32 MB librovenue_ffi.a used to live in the tree — and it
+# was the wrong platform slice for its entire life.
+**/RovenueFFI.xcframework
+packages/sdk-swift/build/

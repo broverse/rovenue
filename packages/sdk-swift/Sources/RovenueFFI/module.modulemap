@@ -1,4 +1,0 @@
-module RovenueFFI {
-    header "../Rovenue/Generated/RovenueFFI.h"
-    export *
-}
