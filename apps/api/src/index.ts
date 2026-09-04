@@ -96,6 +96,7 @@ import {
   scheduleExperimentScheduler,
 } from "./workers/experiment-scheduler";
 import { bootIntegrations } from "./integrations-boot";
+import { bootRenewalGrants } from "./renewal-grants-boot";
 import { checkConnectWebhookEvents } from "./services/stripe/connect-endpoint-check";
 import { applySharpHardening } from "./services/assets/sharp-hardening";
 
@@ -327,6 +328,11 @@ scheduleExperimentScheduler().catch((err: unknown) => {
 // bootIntegrations() no-ops gracefully when KAFKA_BROKERS is unset.
 const integrationsHandle = bootIntegrations();
 
+// Renewal-credit-grant consumer (Kafka rovenue.revenue → BullMQ → worker).
+// A second, independent consumer group beside rovenue-integrations-fanout.
+// bootRenewalGrants() no-ops gracefully when KAFKA_BROKERS is unset.
+const renewalGrantsHandle = bootRenewalGrants();
+
 // Advisory: the funnel's one-time backstop depends on the platform's
 // Connect endpoint having `payment_intent.succeeded` selected, and
 // nothing else in the process would ever notice its absence. No-ops when
@@ -347,6 +353,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     void getScheduledActionsWorker().close();
     void getScheduledActionsQueue().close();
     void integrationsHandle.then((h) => h.stop());
+    void renewalGrantsHandle.then((h) => h.stop());
   });
 }
 
