@@ -38,13 +38,34 @@ run it explicitly the first time:
 ## 5. (Optional) Seed dev data
     docker compose run --rm migrate pnpm --filter @rovenue/db seed
 
-## 6. Smoke test
+## 6. Verifying the images you pulled
+
+Released images are signed with cosign using the release workflow's GitHub
+OIDC identity — there is no key to distribute, and no key for an attacker
+to steal. Verify before a production deploy:
+
+    cosign verify \
+      --certificate-identity-regexp '^https://github.com/broverse/rovenue/\.github/workflows/release-images\.yml@refs/tags/v' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      ghcr.io/broverse/rovenue-api:v1.0.0
+
+Expected: a JSON payload listing the verified signature. A failure means the
+image was not produced by that workflow — do not deploy it.
+
+Each image also carries a SLSA provenance attestation and an SPDX SBOM:
+
+    cosign download sbom ghcr.io/broverse/rovenue-api:v1.0.0
+
+Use it to answer "am I affected" when a transitive CVE is announced, without
+waiting for us.
+
+## 7. Smoke test
     curl -fsS https://rovenue.io/health
     curl -fsS -o /dev/null -w '%{http_code}\n' https://app.rovenue.io/
     curl -I https://docs.rovenue.io
 Expected: health 200, dashboard 200, docs 200.
 
-## 7. Apple Pay on funnel paywalls
+## 8. Apple Pay on funnel paywalls
 
 Funnel paywalls are served from one Rovenue-controlled host and charge
 through each customer's own connected Stripe account. Stripe offers Apple
