@@ -621,7 +621,11 @@ else in the framework/provider-breadth dimension is done.
       (`isEnabled` kill switch + per-rule `rolloutPercentage` through
       `isInRollout`); regression-tested in
       `apps/api/tests/flag-engine.rollout-kill.test.ts` (2026-09-04)
-- [ ] Real-time audience segment updates
+- [x] Real-time audience segment updates — attribute writes publish a
+      per-subscriber Redis invalidation that the SSE `/v1/config/stream`
+      matches against its own resolved subscriber id and coalesces, proven
+      end-to-end over real Postgres/Redis in
+      `apps/api/src/routes/v1/config-stream.integration.test.ts` (2026-09-05)
 - [ ] Leaderboards: season/reset automation
 - [x] Subscription-renewing credit grant automation (merges with the PR3
       `product_currency_grants` work) — `grantOn` (PURCHASE/RENEWAL/BOTH)
