@@ -28,8 +28,22 @@ VERSION="$(cfg version)"
 POD_NAME="$(cfg podName)"
 
 # A 64-character lowercase hex string is the only thing SwiftPM accepts.
-echo "$CHECKSUM" | grep -Eq '^[0-9a-f]{64}$' \
+# `[[ =~ ]]` anchors against the WHOLE argument, not line-by-line like
+# `grep` does (`grep -Eq '^...$'` matches if ANY line in the input matches —
+# a checksum with an embedded newline still has one matching line, so a
+# grep-based guard here would let a corrupt checksum through into the
+# generated manifest, and `swift package dump-package` would only fail on
+# the resulting tree, not on this script).
+[[ "$CHECKSUM" =~ ^[0-9a-f]{64}$ ]] \
   || { echo "✗ checksum is not 64 hex chars: $CHECKSUM" >&2; exit 1; }
+
+GENERATED_DIR="$SWIFT_DIR/Sources/Rovenue/Generated"
+for f in RovenueFFI.swift RovenueFFI.h RovenueFFI.modulemap; do
+  [ -s "$GENERATED_DIR/$f" ] \
+    || { echo "✗ missing or empty uniffi binding: $GENERATED_DIR/$f" >&2
+         echo "  Run packages/core-rs/scripts/build-bindings.sh first — the distribution package cannot ship without a real Swift binding." >&2
+         exit 1; }
+done
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR/Sources"
