@@ -467,6 +467,40 @@ describe("seasonWindowContaining — MONTHLY", () => {
 });
 
 describe("seasonWindowContaining — CUSTOM", () => {
+  test("chains across a spring-forward without sticking", () => {
+    // THE REGRESSION TEST. A ms-based periodsElapsed division makes
+    // nextSeasonWindow a fixed point for the whole summer in a DST zone:
+    // it returns the SAME window instead of the next one. Chain across
+    // Berlin's 2026-03-29 spring-forward and assert every step advances.
+    let w = seasonWindowContaining(
+      new Date("2026-03-27T00:00:00.000Z"),
+      "CUSTOM",
+      BERLIN,
+      1,
+      new Date("2026-01-01T00:00:00.000Z"),
+    );
+    for (let i = 0; i < 10; i += 1) {
+      const next = nextSeasonWindow(w, "CUSTOM", BERLIN, 1, new Date("2026-01-01T00:00:00.000Z"));
+      expect(next.startsAt.getTime()).toBe(w.endsAt.getTime());
+      expect(next.startsAt.getTime()).toBeGreaterThan(w.startsAt.getTime());
+      w = next;
+    }
+  });
+
+  test("a window's own end resolves to the NEXT window, not itself", () => {
+    // The fixed-point symptom stated directly.
+    const anchor = new Date("2026-01-01T00:00:00.000Z");
+    const w = seasonWindowContaining(
+      new Date("2026-06-15T12:00:00.000Z"),
+      "CUSTOM",
+      BERLIN,
+      7,
+      anchor,
+    );
+    const atEnd = seasonWindowContaining(w.endsAt, "CUSTOM", BERLIN, 7, anchor);
+    expect(atEnd.startsAt.getTime()).toBe(w.endsAt.getTime());
+  });
+
   test("counts whole periods from the anchor", () => {
     const w = seasonWindowContaining(
       new Date("2026-01-16T00:00:00.000Z"),
@@ -583,8 +617,23 @@ interface LocalParts {
 //              (NOT startsAt + 7*MS_PER_DAY -- that is what breaks across DST).
 //   MONTHLY -> set day = 1, zero the time; endsAt is day 1 of the next
 //              month, carrying the year.
-//   CUSTOM  -> floor((instant - anchorAt) / (customPeriodDays local days))
-//              periods from the anchor.
+//   CUSTOM  -> count the number of whole LOCAL CALENDAR DAYS between the
+//              anchor's local date and the instant's local date, then
+//              periodsElapsed = floor(localDays / customPeriodDays).
+//              Advance the anchor by periodsElapsed * customPeriodDays
+//              LOCAL days for startsAt, and one more period for endsAt.
+//
+//              DO NOT compute periodsElapsed by dividing a millisecond
+//              difference by customPeriodDays * MS_PER_DAY. That is the
+//              same milliseconds-vs-local-calendar error item 1 forbids
+//              for WEEKLY, and it is WORSE here: once a DST zone crosses
+//              its spring-forward, the anchor's captured offset and the
+//              current offset differ by the DST delta, the division lands
+//              one period short, and nextSeasonWindow becomes a FIXED
+//              POINT -- it returns the same window forever instead of the
+//              next one, until the following fall-back. In Europe/Berlin
+//              that is roughly seven months of every year during which a
+//              CUSTOM leaderboard never rolls over.
 ```
 
 Write the real implementation — the block above is the algorithm, not a
