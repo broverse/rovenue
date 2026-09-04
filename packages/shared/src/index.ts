@@ -24,6 +24,12 @@ export const ERROR_CODE = {
   APPLE_OFFER_SIGNING_UNAVAILABLE: "apple_offer_signing_unavailable",
   APPLE_OFFER_SIGNING_FAILED: "apple_offer_signing_failed",
   GENERATION_INVALID: "GENERATION_INVALID",
+  // Auto-translate (ROADMAP §3): the request itself is unusable — empty,
+  // over the per-call cap, or asking to translate a locale into itself.
+  // A model that produced BAD translations is NOT this: those keys come
+  // back in `rejected` with a 200, because the good ones are still worth
+  // applying.
+  TRANSLATION_INVALID: "TRANSLATION_INVALID",
   // P9 on-device preview (§6.17): missing, expired, revoked, and garbage
   // preview tokens must be indistinguishable — this single code covers
   // all of them, always behind a generic 404 message (no oracle).

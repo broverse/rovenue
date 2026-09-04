@@ -35,6 +35,11 @@ import {
   GenerationInvalidError,
   generatePaywallConfig,
 } from "../../services/paywall-ai/generate";
+import {
+  TranslationInvalidError,
+  translateEntries,
+  TRANSLATE_MAX_ENTRIES,
+} from "../../services/paywall-ai/translate";
 import { RoviConfigError } from "../../services/copilot/providers";
 import { generateClaimToken, hashToken } from "../../services/funnel/token";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -262,6 +267,26 @@ function requestOrigin(c: { req: { url: string; header(name: string): string | u
 const generateBodySchema = z.object({
   prompt: z.string().trim().min(1).max(4000),
 });
+
+/**
+ * The strings arrive in the REQUEST, not read from the paywall row. The
+ * builder autosaves on its own schedule, so the stored `builderConfig` is
+ * stale by design — see the route below.
+ */
+const translateBodySchema = z
+  .object({
+    sourceLocale: z.string().trim().min(2).max(35),
+    targetLocale: z.string().trim().min(2).max(35),
+    entries: z
+      .record(z.string().min(1), z.string())
+      .refine(
+        (e) => Object.keys(e).length > 0 && Object.keys(e).length <= TRANSLATE_MAX_ENTRIES,
+        { message: `entries must hold 1..${TRANSLATE_MAX_ENTRIES} keys` },
+      ),
+  })
+  .refine((b) => b.sourceLocale !== b.targetLocale, {
+    message: "sourceLocale and targetLocale must differ",
+  });
 
 const DEFAULT_GENERATION_LOCALE = "en";
 
@@ -603,6 +628,60 @@ export const paywallsDashboardRoute = new Hono()
         }
         if (err instanceof GenerationInvalidError) {
           return c.json(fail("GENERATION_INVALID", err.message), 422);
+        }
+        throw err;
+      }
+    },
+  )
+  // ===========================================================
+  // Auto-translate (ROADMAP §3). Read-gated and WRITE-FREE, exactly like
+  // /paywall-generate and /from-app-store above: the translations go back
+  // in the response and the dashboard merges them client-side through the
+  // builder VM's `setLocalizations` op. A server-side builderConfig write
+  // here would be clobbered by the builder's next autosave tick, which
+  // still holds the pre-translation client state.
+  //
+  // The source strings come from the BODY for the same reason: the row
+  // this route could read is stale by design.
+  //
+  // `roviQuotaGuard()` is composed per-route (every other paywalls route
+  // is unrelated to Rovi usage), and the service feeds the counter the
+  // guard reads — guarding without feeding would make translation free.
+  // ===========================================================
+  .post(
+    "/:id/translate",
+    roviQuotaGuard(),
+    validate("json", translateBodySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      const id = c.req.param("id");
+      if (!projectId || !id) {
+        throw new HTTPException(400, { message: "Missing identifier" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+      const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+      if (!paywall) {
+        throw new HTTPException(404, { message: "Paywall not found" });
+      }
+
+      const { sourceLocale, targetLocale, entries } = c.req.valid("json");
+
+      try {
+        const result = await translateEntries({
+          projectId,
+          sourceLocale,
+          targetLocale,
+          entries,
+        });
+        return c.json(ok(result));
+      } catch (err) {
+        if (err instanceof RoviConfigError) {
+          return c.json(fail("ROVI_NOT_CONFIGURED", err.message), 412);
+        }
+        if (err instanceof TranslationInvalidError) {
+          return c.json(fail("TRANSLATION_INVALID", err.message), 422);
         }
         throw err;
       }
