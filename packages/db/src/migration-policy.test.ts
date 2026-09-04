@@ -90,3 +90,36 @@ describe("migration policy", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * The migrations on disk today happen to exercise three of the four
+ * DESTRUCTIVE_DDL alternations (DROP COLUMN, DROP TABLE, SET NOT NULL) via
+ * GRANDFATHERED entries — but RENAME COLUMN is matched by ZERO of them.
+ * Nothing above would notice if that alternation were silently dropped
+ * from the regex; it would just stop firing on future migrations. This
+ * exercises the regex directly, independent of what's on disk.
+ */
+describe("DESTRUCTIVE_DDL regex", () => {
+  it.each([
+    ["DROP COLUMN", "ALTER TABLE t DROP COLUMN c;"],
+    ["DROP TABLE", "DROP TABLE t;"],
+    ["RENAME COLUMN", "ALTER TABLE t RENAME COLUMN a TO b;"],
+    ["SET NOT NULL", "ALTER TABLE t ALTER COLUMN c SET NOT NULL;"],
+  ])("matches %s", (_label, sql) => {
+    expect(DESTRUCTIVE_DDL.test(sql)).toBe(true);
+  });
+
+  it("does not match ADD COLUMN", () => {
+    expect(DESTRUCTIVE_DDL.test("ALTER TABLE t ADD COLUMN c int;")).toBe(false);
+  });
+
+  // CONTRACT_MARKER is an opt-out from the OUTER policy check above, not
+  // from the regex itself: destructive SQL still matches DESTRUCTIVE_DDL
+  // even with the marker present, and it's `sql.includes(CONTRACT_MARKER)`
+  // — checked separately — that lets an author's marked migration through.
+  it("CONTRACT_MARKER does not suppress the regex match itself", () => {
+    const sql = `-- rovenue:contract-phase dropping the legacy column\nALTER TABLE t DROP COLUMN c;`;
+    expect(DESTRUCTIVE_DDL.test(sql)).toBe(true);
+    expect(sql.includes(CONTRACT_MARKER)).toBe(true);
+  });
+});
