@@ -923,7 +923,7 @@ export const renewalGrantsFailedTotal = new Counter({
 nice -n 19 npx vitest run apps/api/src/workers/renewal-grant.test.ts --maxWorkers=2
 ```
 
-Expected: PASS (12 tests including the `test.each` expansions).
+Expected: PASS (11 tests).
 
 - [ ] **Step 7: Commit**
 
