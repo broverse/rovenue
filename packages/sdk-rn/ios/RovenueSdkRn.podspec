@@ -20,26 +20,13 @@ Pod::Spec.new do |s|
   # Expo Modules runtime — provided by the consuming app via autolinking
   s.dependency 'ExpoModulesCore'
 
-  # M3 Swift façade — provided by the consumer's Podfile via
-  # `pod 'Rovenue', :path => '<monorepo-relative path>'` injected by
-  # our config plugin (plugin/withRovenueIos.ts).
-  s.dependency 'Rovenue'
-
-  # Importing the `Rovenue` Swift module pulls in its transitive clang
-  # module `RovenueFFI` (the uniffi C layer). CocoaPods does not propagate
-  # SWIFT_INCLUDE_PATHS from a dependency, so this bridge pod must also put
-  # the RovenueFFI module.modulemap (in the sibling sdk-swift package) on
-  # its Swift import path or the build fails with
-  # "Unable to resolve module dependency: 'RovenueFFI'".
-  s.pod_target_xcconfig = {
-    'SWIFT_INCLUDE_PATHS' => '$(PODS_TARGET_SRCROOT)/../../sdk-swift/Sources/RovenueFFI'
-  }
-  # The app target also imports these modules (via the generated
-  # ExpoModulesProvider), so it needs RovenueFFI on its import path too.
-  # user_target_xcconfig propagates the setting to the integrating app
-  # target. PODS_ROOT is <app>/ios/Pods, so the sibling sdk-swift package
-  # sits four levels up.
-  s.user_target_xcconfig = {
-    'SWIFT_INCLUDE_PATHS' => '$(inherited) "${PODS_ROOT}/../../../../packages/sdk-swift/Sources/RovenueFFI"'
-  }
+  # Swift façade. Pinned exactly: the bridge is compiled against this façade's
+  # generated types.
+  #
+  # No xcconfig import-path overrides here. The `Rovenue` pod vendors
+  # RovenueFFI.xcframework, which carries uniffi's module map inside each
+  # slice, so the transitive `RovenueFFI` Clang module resolves without any
+  # target needing a path into this monorepo. That path is precisely what made
+  # this pod impossible to consume from npm.
+  s.dependency 'Rovenue', package['version']
 end
