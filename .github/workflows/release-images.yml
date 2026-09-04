@@ -68,7 +68,7 @@ jobs:
       # (CVE-2026-33327/33328/35590/35591, GIF/TIFF/VIPS loaders) is a
       # standing obligation; this is what turns it into an enforced one.
       - name: Scan for HIGH/CRITICAL vulnerabilities
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # 0.28.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
           severity: HIGH,CRITICAL
