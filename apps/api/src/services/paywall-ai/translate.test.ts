@@ -247,6 +247,15 @@ describe("translateEntries", () => {
     await expect(promise).resolves.toEqual({ entries: {}, rejected: ["a"] });
   });
 
+  it("rejects a BLANK translation, even for a source with no placeholders", async () => {
+    // "Restore Purchases" has no placeholders, so the placeholder check
+    // passes against "" — blankness has to be its own rule, or an empty
+    // value lands silently and the matrix shows the cell as still missing
+    // while nothing is reported as rejected.
+    const { promise } = translate({ a: "Restore Purchases" }, [{ a: "" }, { a: "   " }]);
+    await expect(promise).resolves.toEqual({ entries: {}, rejected: ["a"] });
+  });
+
   it("translates strings with no placeholders at all", async () => {
     const { promise } = translate({ a: "Restore Purchases" }, [{ a: "Restaurar compras" }]);
     await expect(promise).resolves.toEqual({

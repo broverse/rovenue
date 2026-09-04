@@ -239,9 +239,14 @@ export async function translateEntries(
     const stillPending: string[] = [];
     for (const key of pending) {
       const candidate = object[key];
-      // A key the model skipped, or answered with a non-string, is not a
-      // translation. It stays pending for the retry and is reported after.
-      if (typeof candidate !== "string") {
+      // A key the model skipped, answered with a non-string, or answered
+      // with a blank string is not a translation. Blank matters on its own:
+      // a source string with no placeholders (say "Restore Purchases")
+      // would otherwise pass the placeholder check against "" and be
+      // ACCEPTED, landing an empty value that the matrix then shows as
+      // still-missing while reporting nothing rejected. Each of these stays
+      // pending for the retry and is reported after.
+      if (typeof candidate !== "string" || candidate.trim().length === 0) {
         stillPending.push(key);
         continue;
       }
