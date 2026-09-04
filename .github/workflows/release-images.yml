@@ -27,10 +27,25 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - { name: rovenue-api, dockerfile: apps/api/Dockerfile, context: "." }
-          - { name: rovenue-dashboard, dockerfile: apps/dashboard/Dockerfile, context: "." }
-          - { name: rovenue-docs, dockerfile: apps/docs/Dockerfile, context: "." }
-          - { name: rovenue-postgres, dockerfile: deploy/postgres/Dockerfile, context: "deploy/postgres" }
+          - { name: rovenue-api, dockerfile: apps/api/Dockerfile, context: ".", build_args: "" }
+          # ROVENUE_REQUIRE_RUNTIME_CONFIG=1 makes the dashboard entrypoint
+          # refuse to start with ROVENUE_API_URL unset — correct for a
+          # published image (whose baked-in VITE_API_URL default is
+          # meaningless), wrong for the other three images, which don't have
+          # this build arg at all.
+          - {
+              name: rovenue-dashboard,
+              dockerfile: apps/dashboard/Dockerfile,
+              context: ".",
+              build_args: "ROVENUE_REQUIRE_RUNTIME_CONFIG=1",
+            }
+          - { name: rovenue-docs, dockerfile: apps/docs/Dockerfile, context: ".", build_args: "" }
+          - {
+              name: rovenue-postgres,
+              dockerfile: deploy/postgres/Dockerfile,
+              context: "deploy/postgres",
+              build_args: "",
+            }
         platform: [linux/amd64, linux/arm64]
         # Native runners, not QEMU: pnpm install + vite build under emulated
         # arm64 runs into tens of minutes and turns a release into an
@@ -41,7 +56,15 @@ jobs:
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
     steps:
+      # workflow_dispatch has no tag ref of its own — without this, a manual
+      # dispatch builds the default branch's HEAD while the manifest job
+      # below labels and signs the result as the dispatched tag. That's a
+      # signed, attested image whose provenance points at a commit that
+      # isn't the tag, and it silently overwrites a genuine tag's image if
+      # one already exists.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -57,6 +80,7 @@ jobs:
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
+          build-args: ${{ matrix.image.build_args }}
           platforms: ${{ matrix.platform }}
           provenance: mode=max
           sbom: true
@@ -122,6 +146,14 @@ jobs:
           MINOR="$(echo "${VERSION#v}" | cut -d. -f1,2)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
+          # The trigger (tags: ["v*.*.*"]) also matches a prerelease like
+          # v1.0.0-rc1. The floating X.Y and latest tags are what an
+          # unpinned Coolify one-click install resolves to, so a prerelease
+          # must publish ONLY its exact vX.Y.Z tag — never move those.
+          case "$VERSION" in
+          *-*) echo "floating_tags=false" >> "$GITHUB_OUTPUT" ;;
+          *) echo "floating_tags=true" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Create and push the multi-arch manifest
         run: |
@@ -130,12 +162,12 @@ jobs:
           for f in /tmp/digests/${{ matrix.image }}-*; do
             DIGESTS="$DIGESTS ${IMAGE}@$(cat "$f")"
           done
+          TAG_ARGS="-t ${IMAGE}:${{ steps.version.outputs.version }}"
+          if [ "${{ steps.version.outputs.floating_tags }}" = "true" ]; then
+            TAG_ARGS="$TAG_ARGS -t ${IMAGE}:${{ steps.version.outputs.minor }} -t ${IMAGE}:latest"
+          fi
           # shellcheck disable=SC2086
-          docker buildx imagetools create \
-            -t "${IMAGE}:${{ steps.version.outputs.version }}" \
-            -t "${IMAGE}:${{ steps.version.outputs.minor }}" \
-            -t "${IMAGE}:latest" \
-            $DIGESTS
+          docker buildx imagetools create $TAG_ARGS $DIGESTS
           docker buildx imagetools inspect "${IMAGE}:${{ steps.version.outputs.version }}"
 
       - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
@@ -146,7 +178,11 @@ jobs:
       - name: Sign the published tags
         run: |
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
-          for TAG in "${{ steps.version.outputs.version }}" "${{ steps.version.outputs.minor }}" latest; do
+          TAGS="${{ steps.version.outputs.version }}"
+          if [ "${{ steps.version.outputs.floating_tags }}" = "true" ]; then
+            TAGS="$TAGS ${{ steps.version.outputs.minor }} latest"
+          fi
+          for TAG in $TAGS; do
             DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')"
             cosign sign --yes "${IMAGE}@${DIGEST}"
           done
