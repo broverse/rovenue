@@ -112,6 +112,53 @@ describe("seasonWindowContaining — CUSTOM", () => {
     expect(w.startsAt.toISOString()).toBe("2026-01-15T00:00:00.000Z");
     expect(w.endsAt.toISOString()).toBe("2026-01-29T00:00:00.000Z");
   });
+
+  // Regression: elapsed-period counting must use local calendar days, not
+  // a millisecond division against a fixed nominal period length. Once
+  // the anchor (winter, UTC+1) and the instant sit on opposite sides of a
+  // DST transition, a millisecond-based count is off by the DST delta —
+  // and because that delta persists for months (not just on the
+  // transition day), the bug turns `nextSeasonWindow` into a fixed point:
+  // it returns the SAME window instead of the next one, for roughly half
+  // of every year, in every DST-observing zone.
+  test("customPeriodDays=1 keeps advancing across Berlin's spring-forward", () => {
+    // Berlin leaves standard time for DST on 2026-03-29. Chain ten daily
+    // CUSTOM periods starting a few days before the transition and
+    // through it; a millisecond-based elapsed count gets stuck on one
+    // side of 2026-03-29 and stops advancing.
+    let w = seasonWindowContaining(
+      new Date("2026-03-25T12:00:00.000Z"),
+      "CUSTOM",
+      BERLIN,
+      1,
+      ANCHOR,
+    );
+    for (let i = 0; i < 10; i += 1) {
+      const next = nextSeasonWindow(w, "CUSTOM", BERLIN, 1, ANCHOR);
+      expect(next.startsAt.getTime()).toBe(w.endsAt.getTime());
+      // The fixed-point bug returns the SAME window (next.startsAt equal
+      // to w.startsAt) instead of advancing — this assertion is what
+      // catches it.
+      expect(next.startsAt.getTime()).toBeGreaterThan(w.startsAt.getTime());
+      w = next;
+    }
+  });
+
+  test("customPeriodDays=7 resolves to the next window in Berlin summer, not the same one", () => {
+    // ANCHOR (2026-01-01) is winter (UTC+1); mid-July is deep in DST
+    // (UTC+2). Any instant on the DST side of the anchor exposes the bug,
+    // not just instants exactly at the transition.
+    const w = seasonWindowContaining(
+      new Date("2026-07-15T12:00:00.000Z"),
+      "CUSTOM",
+      BERLIN,
+      7,
+      ANCHOR,
+    );
+    const next = seasonWindowContaining(w.endsAt, "CUSTOM", BERLIN, 7, ANCHOR);
+    expect(next.startsAt.getTime()).toBe(w.endsAt.getTime());
+    expect(next.endsAt.getTime()).toBeGreaterThan(next.startsAt.getTime());
+  });
 });
 
 describe("nextSeasonWindow", () => {

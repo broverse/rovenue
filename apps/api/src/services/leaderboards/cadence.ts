@@ -246,6 +246,22 @@ function monthlyWindowContaining(instant: Date, timezone: string): SeasonWindow 
   };
 }
 
+/**
+ * Whole calendar days from `from` to `to` (both local year/month/day
+ * triples, no time-of-day). Pure calendar arithmetic — like
+ * `addLocalDays`, this never touches a real timezone offset, so it can't
+ * pick up DST drift the way a millisecond difference between two real
+ * UTC instants would.
+ */
+function localDateDiffDays(
+  from: { year: number; month: number; day: number },
+  to: { year: number; month: number; day: number },
+): number {
+  const fromUtcMs = Date.UTC(from.year, from.month - 1, from.day);
+  const toUtcMs = Date.UTC(to.year, to.month - 1, to.day);
+  return Math.round((toUtcMs - fromUtcMs) / MS_PER_DAY);
+}
+
 function customWindowContaining(
   instant: Date,
   timezone: string,
@@ -253,17 +269,16 @@ function customWindowContaining(
   anchorAt: Date,
 ): SeasonWindow {
   const anchorParts = localPartsIn(anchorAt, timezone);
-  const anchorUtc = toUtc(
-    anchorParts.year,
-    anchorParts.month,
-    anchorParts.day,
-    timezone,
-  );
+  const instantParts = localPartsIn(instant, timezone);
 
-  const periodMs = customPeriodDays * MS_PER_DAY;
-  const periodsElapsed = Math.floor(
-    (instant.getTime() - anchorUtc.getTime()) / periodMs,
-  );
+  // Elapsed periods must come from a count of whole LOCAL calendar days,
+  // not a millisecond difference between two real UTC instants: once the
+  // anchor and the instant sit on opposite sides of a DST transition,
+  // their instants differ from their local-day distance by the DST delta,
+  // which silently swallows whole periods (see the regression tests
+  // below — this is the bug the reviewer caught).
+  const localDaysElapsed = localDateDiffDays(anchorParts, instantParts);
+  const periodsElapsed = Math.floor(localDaysElapsed / customPeriodDays);
 
   const start = addLocalDays(
     anchorParts.year,
