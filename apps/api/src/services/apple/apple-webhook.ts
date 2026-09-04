@@ -48,6 +48,7 @@ import { billingIssueStamp } from "../subscription-state";
 import { audit } from "../../lib/audit";
 import { expireSupersededApplePurchases } from "./apple-supersede";
 import type { StoreEventContext } from "@rovenue/shared";
+import { TERMINAL_STATUSES } from "@rovenue/shared/subscription-status";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -492,33 +493,37 @@ async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
   // syncAccess recomputes the whole desired set inside one transaction
   // under the per-subscriber advisory lock, so ordering it this way
   // means no gap and no double-grant.
-  const { superseded } = await expireSupersededApplePurchases({
+  //
+  // The plan change itself rides along INSIDE that helper's transaction
+  // (`onSuperseded`), not after it. `upsertPurchase` cannot emit it for an
+  // Apple upgrade: Apple mints a NEW transactionId, so the guard locks a
+  // key that has no row and its before-image is null. The row being
+  // retired is the honest previous side, and the callback fires only for
+  // rows this call actually MOVED — so a redelivered upgrade retires
+  // nothing and emits nothing. Because that gate keys on movement, the
+  // outbox row must commit with the retirement: a crash between the two
+  // would make the redelivery suppress an event that was never written.
+  // Apple is the one store that states a direction, so this is also the
+  // only path on which `changeType` is ever non-null.
+  await expireSupersededApplePurchases({
     projectId: ctx.projectId,
     originalTransactionId: ctx.transaction.originalTransactionId,
     currentStoreTransactionId: ctx.transaction.transactionId,
     now: appleNotificationEventTime(ctx),
     source: `apple:${ctx.notification.notificationType}`,
+    onSuperseded: async (tx, retired) => {
+      await emitProductChanged({
+        db: tx,
+        projectId: ctx.projectId,
+        subscriberId: subscriber.id,
+        purchaseId: purchase.id,
+        previousProductId: retired.productId,
+        productId: product.id,
+        changeType: applePlanChangeType(ctx.notification.subtype),
+        now: appleNotificationEventTime(ctx),
+      });
+    },
   });
-
-  // The plan change itself. `upsertPurchase` cannot emit it for an Apple
-  // upgrade: Apple mints a NEW transactionId, so the guard locks a key that
-  // has no row and its before-image is null. The row just retired above is
-  // the honest previous side, and `expireSupersededApplePurchases` returns
-  // only rows THIS call moved — so a redelivered upgrade retires nothing
-  // and emits nothing. Apple is the one store that states a direction, so
-  // this is also the only path on which `changeType` is ever non-null.
-  for (const retired of superseded) {
-    await emitProductChanged({
-      db: drizzle.db,
-      projectId: ctx.projectId,
-      subscriberId: subscriber.id,
-      purchaseId: purchase.id,
-      previousProductId: retired.productId,
-      productId: product.id,
-      changeType: applePlanChangeType(ctx.notification.subtype),
-      now: appleNotificationEventTime(ctx),
-    });
-  }
 
   await grantAccess({ subscriber, purchase, product, ctx });
   await emitRevenueEvent({
@@ -1237,21 +1242,53 @@ async function recordApplePendingChange(ctx: DispatchContext): Promise<void> {
   // purchase Apple never told us was bought.
   if (!current) return;
 
-  const announcedProductId = await resolveAutoRenewProduct(ctx, ctx.transaction.productId);
-  const pendingFields = pendingPlanChangeFields({
-    // The row keeps the tier still in force; the announcement is about
-    // what replaces it.
-    writtenProductId: current.productId,
-    announcedProductId,
-    changeType: applePlanChangeType(ctx.notification.subtype),
-    // Apple applies the change when the current term ends.
-    effectiveAt: current.expiresDate,
-  });
-  await drizzle.purchaseRepo.updatePurchase(
-    drizzle.db,
-    current.id,
-    pendingFields,
+  // Resolved BEFORE the transaction opens: it is a read of the product
+  // catalogue, not of the row, and doing it under the row lock would hold
+  // that lock across an unrelated query.
+  const announcedProductId = await resolveAutoRenewProduct(
+    ctx,
+    ctx.transaction.productId,
   );
+
+  // The pending columns are store-announced state, and the same rule
+  // applies to them here as on the guarded upsert paths: a terminal row
+  // must not be repainted, and a concurrent sync must not interleave.
+  // `guardStatusWrite` is not the mechanism — it decides STATUS
+  // transitions and would audit a transition this path does not make — so
+  // this takes the lock the guard itself uses (mechanism (a),
+  // `lockPurchaseStatusByStoreTransaction`) and re-reads the row under it.
+  await drizzle.db.transaction(async (tx) => {
+    const locked = await drizzle.purchaseRepo.lockPurchaseStatusByStoreTransaction(
+      tx,
+      Store.APP_STORE,
+      current.storeTransactionId,
+    );
+    // Deleted between the read above and the lock.
+    if (!locked) return;
+    if (TERMINAL_STATUSES.includes(locked.status)) {
+      // REFUNDED / REVOKED. The subscription is over; a renewal-pref
+      // announcement against it is stale or illegal, and recording a
+      // future product on a terminal row would have every reader believe a
+      // change is coming that never can.
+      log.debug("ignoring renewal pref change on a terminal purchase", {
+        projectId: ctx.projectId,
+        purchaseId: locked.id,
+        status: locked.status,
+      });
+      return;
+    }
+    const pendingFields = pendingPlanChangeFields({
+      // Re-read under the lock: the row keeps the tier still in force, and
+      // the announcement is about what replaces it.
+      writtenProductId: locked.productId,
+      announcedProductId,
+      changeType: applePlanChangeType(ctx.notification.subtype),
+      // Apple applies the change when the current term ends.
+      effectiveAt: current.expiresDate,
+    });
+    await drizzle.purchaseRepo.updatePurchase(tx, locked.id, pendingFields);
+  });
+
   ctx.outcome.subscriberId = current.subscriberId;
   ctx.outcome.purchaseId = current.id;
 }

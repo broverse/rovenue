@@ -141,6 +141,24 @@ async function basicRow() {
   return row;
 }
 
+async function proRow() {
+  const [row] = await getDb()
+    .select({
+      status: purchases.status,
+      pendingProductId: purchases.pendingProductId,
+      pendingChangeType: purchases.pendingChangeType,
+      pendingChangeEffectiveAt: purchases.pendingChangeEffectiveAt,
+    })
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.store, "APP_STORE"),
+        eq(purchases.storeTransactionId, UPGRADE_TXN_ID),
+      ),
+    );
+  return row;
+}
+
 async function productChangedRows() {
   return getDb()
     .select()
@@ -309,5 +327,40 @@ describe("handleAppleNotification — plan change", () => {
     });
     expect(result.status).toBe("processed");
     expect(await productChangedRows()).toHaveLength(1);
+  });
+
+  it("refuses to record a pending change onto a terminal purchase", async () => {
+    // The chain's current row is the upgraded (Pro) one from the previous
+    // test. Put it beyond recovery, the way a refund does.
+    await getDb()
+      .update(purchases)
+      .set({ status: "REFUNDED" })
+      .where(
+        and(
+          eq(purchases.store, "APP_STORE"),
+          eq(purchases.storeTransactionId, UPGRADE_TXN_ID),
+        ),
+      );
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier: makeStubVerifier({
+        uuidSuffix: "downgrade_on_terminal",
+        subtype: APPLE_NOTIFICATION_SUBTYPE.DOWNGRADE,
+        transactionId: UPGRADE_TXN_ID,
+        appleProductId: APPLE_PRO_ID,
+        autoRenewProductId: APPLE_BASIC_ID,
+      }),
+    });
+    expect(result.status).toBe("processed");
+
+    // A REFUNDED subscription is over. Recording a future product on it
+    // would have every reader believe a change is coming that never can.
+    const row = await proRow();
+    expect(row?.status).toBe("REFUNDED");
+    expect(row?.pendingProductId).toBeNull();
+    expect(row?.pendingChangeType).toBeNull();
+    expect(row?.pendingChangeEffectiveAt).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { PurchaseStatus, Store, drizzle } from "@rovenue/db";
+import { PurchaseStatus, Store, type Db, drizzle } from "@rovenue/db";
 import { guardStatusWrite } from "../subscription-transition-guard";
 import { syncAccess } from "../access-engine";
 import { logger } from "../../lib/logger";
@@ -52,6 +52,19 @@ export async function expireSupersededApplePurchases(args: {
   currentStoreTransactionId: string;
   now: Date;
   source: string;
+  /**
+   * Invoked INSIDE the same transaction as the expiry write, once per row
+   * this call actually retired, with that transaction's handle.
+   *
+   * This exists so the caller's `subscription.product_changed` outbox row
+   * commits atomically with the retirement that makes the plan change
+   * true. It matters more than it looks: the caller's emit is gated on a
+   * row having MOVED, so if the retirement committed and a separate outbox
+   * write then failed, the redelivery would find the sibling already
+   * EXPIRED, suppress the emit, and lose the event permanently. Same
+   * transaction, or the gate turns a crash into silent data loss.
+   */
+  onSuperseded?: (tx: Db, retired: SupersededApplePurchase) => Promise<void>;
 }): Promise<{ expired: number; superseded: SupersededApplePurchase[] }> {
   const siblings =
     await drizzle.purchaseExtRepo.findSupersedableApplePurchases(drizzle.db, {
@@ -89,11 +102,13 @@ export async function expireSupersededApplePurchases(args: {
         lastStoreEventAt: args.now,
       });
       if (alreadyExpired) return;
-      superseded.push({
+      const retired: SupersededApplePurchase = {
         purchaseId: sibling.id,
         subscriberId: sibling.subscriberId,
         productId: sibling.productId,
-      });
+      };
+      superseded.push(retired);
+      await args.onSuperseded?.(tx, retired);
     });
     // Access is re-derived from the whole purchase set, so this is safe
     // to run even when the guard withheld the status write (e.g. the

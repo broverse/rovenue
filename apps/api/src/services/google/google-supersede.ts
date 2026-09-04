@@ -1,4 +1,4 @@
-import { PurchaseStatus, Store, drizzle } from "@rovenue/db";
+import { PurchaseStatus, Store, type Db, drizzle } from "@rovenue/db";
 import { guardStatusWrite } from "../subscription-transition-guard";
 import { logger } from "../../lib/logger";
 
@@ -49,6 +49,17 @@ export async function expireSupersededGooglePurchase(args: {
   currentToken: string;
   /** Origin tag for the transition audit trail. */
   source: string;
+  /**
+   * Invoked INSIDE the same transaction as the expiry write, when this
+   * call actually retired the row, with that transaction's handle.
+   *
+   * The caller's `subscription.product_changed` outbox row must commit
+   * with the retirement that makes the plan change true: the emit is gated
+   * on the row having MOVED, so a crash between a committed retirement and
+   * a separate outbox write would make the redelivery suppress an event
+   * that was never written, losing it permanently.
+   */
+  onSuperseded?: (tx: Db, retired: SupersededGooglePurchase) => Promise<void>;
 }): Promise<SupersededGooglePurchase | null> {
   const { projectId, supersededToken, currentToken, source } = args;
   if (supersededToken === currentToken) return null;
@@ -64,17 +75,25 @@ export async function expireSupersededGooglePurchase(args: {
   if (!old) return null;
 
   const now = new Date();
-  const guard = await guardStatusWrite({
-    db: drizzle.db,
-    projectId,
-    store: Store.PLAY_STORE,
-    storeTransactionId: supersededToken,
-    to: PurchaseStatus.EXPIRED,
-    source: `${source}:linked_token_supersede`,
-    eventTime: now,
-  });
   let retired: SupersededGooglePurchase | null = null;
-  if (guard.apply) {
+  // Guard + expiry write + the caller's emit in ONE transaction. The guard
+  // takes a FOR UPDATE lock; running it on the pool handle (as this did
+  // before) released that lock before the write, so this also brings the
+  // path in line with mechanism (a) used by every other supersede/upsert
+  // site. Access is revoked AFTER the commit, mirroring apple-supersede:
+  // it is re-derived from the whole purchase set and must not hold the
+  // subscriber's advisory lock inside this transaction.
+  await drizzle.db.transaction(async (tx) => {
+    const guard = await guardStatusWrite({
+      db: tx,
+      projectId,
+      store: Store.PLAY_STORE,
+      storeTransactionId: supersededToken,
+      to: PurchaseStatus.EXPIRED,
+      source: `${source}:linked_token_supersede`,
+      eventTime: now,
+    });
+    if (!guard.apply) return;
     // EXPIRED is not a TERMINAL status, so the guard applies an
     // EXPIRED -> EXPIRED write on a redelivered RTDN too. Re-writing is
     // harmless; reporting it as a supersession is not, because the caller
@@ -82,21 +101,26 @@ export async function expireSupersededGooglePurchase(args: {
     // emit the same plan change twice. Only a row that actually MOVED
     // counts as retired.
     const alreadyExpired = guard.previous?.status === PurchaseStatus.EXPIRED;
-    await drizzle.purchaseRepo.updatePurchase(drizzle.db, old.id, {
+    await drizzle.purchaseRepo.updatePurchase(tx, old.id, {
       status: PurchaseStatus.EXPIRED,
       expiresDate: now,
       autoRenewStatus: false,
       lastStoreEventAt: now,
     });
-    retired = alreadyExpired
-      ? null
-      : { purchaseId: old.id, productId: old.productId };
+    if (!alreadyExpired) {
+      const row: SupersededGooglePurchase = {
+        purchaseId: old.id,
+        productId: old.productId,
+      };
+      retired = row;
+      await args.onSuperseded?.(tx, row);
+    }
     log.info("expired superseded purchase", {
       projectId,
       purchaseId: old.id,
       tokenPrefix: supersededToken.slice(0, 12),
     });
-  }
+  });
   await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, old.id);
   return retired;
 }

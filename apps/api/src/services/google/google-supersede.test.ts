@@ -12,9 +12,18 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // after a downgrade).
 // =============================================================
 
-const { drizzleMock, guardStatusWriteMock } = vi.hoisted(() => ({
+const { drizzleMock, guardStatusWriteMock, TX } = vi.hoisted(() => {
+  // The supersede runs guard + expiry write + the caller's outbox emit in
+  // ONE transaction, so the mock db must hand out a transaction handle.
+  const TX = { __tx: "google-supersede" };
+  return {
+  TX,
   drizzleMock: {
-    db: {},
+    db: {
+      transaction: vi.fn(
+        async (fn: (tx: unknown) => Promise<unknown>) => fn(TX),
+      ),
+    },
     purchaseExtRepo: {
       findPurchaseByStoreTransaction: vi.fn(),
     },
@@ -26,7 +35,8 @@ const { drizzleMock, guardStatusWriteMock } = vi.hoisted(() => ({
     },
   },
   guardStatusWriteMock: vi.fn(),
-}));
+  };
+});
 
 vi.mock("@rovenue/db", async () => {
   const actual =
@@ -52,7 +62,10 @@ describe("expireSupersededGooglePurchase", () => {
     drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
       { id: "pur_old", status: "ACTIVE" },
     );
-    guardStatusWriteMock.mockResolvedValue({ apply: true });
+    guardStatusWriteMock.mockResolvedValue({
+      apply: true,
+      previous: { status: "ACTIVE" },
+    });
 
     await expireSupersededGooglePurchase({
       projectId: "proj_1",
@@ -129,5 +142,64 @@ describe("expireSupersededGooglePurchase", () => {
     expect(
       drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction,
     ).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------
+  // onSuperseded — the seam that keeps `subscription.product_changed`
+  // atomic with the retirement that makes the plan change true.
+  // ---------------------------------------------------------------------
+
+  test("onSuperseded runs INSIDE the expiry transaction, with that tx handle", async () => {
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      { id: "pur_old", status: "ACTIVE", productId: "prod_basic" },
+    );
+    guardStatusWriteMock.mockResolvedValue({
+      apply: true,
+      previous: { status: "ACTIVE" },
+    });
+    const onSuperseded = vi.fn(async () => undefined);
+
+    const retired = await expireSupersededGooglePurchase({
+      projectId: "proj_1",
+      supersededToken: OLD_TOKEN,
+      currentToken: NEW_TOKEN,
+      source: "google:SUBSCRIPTION_PURCHASED",
+      onSuperseded,
+    });
+
+    // The handle it receives must be the TRANSACTION, never the pool: the
+    // outbox row has to commit or roll back with the expiry write.
+    expect(onSuperseded).toHaveBeenCalledWith(TX, {
+      purchaseId: "pur_old",
+      productId: "prod_basic",
+    });
+    expect(retired).toEqual({ purchaseId: "pur_old", productId: "prod_basic" });
+  });
+
+  test("onSuperseded is NOT called when the row was already EXPIRED", async () => {
+    // A redelivered RTDN. EXPIRED is not terminal, so the guard still
+    // applies an EXPIRED -> EXPIRED write — but nothing MOVED, so there is
+    // no plan change to announce a second time.
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      { id: "pur_old", status: "EXPIRED", productId: "prod_basic" },
+    );
+    guardStatusWriteMock.mockResolvedValue({
+      apply: true,
+      previous: { status: "EXPIRED" },
+    });
+    const onSuperseded = vi.fn(async () => undefined);
+
+    const retired = await expireSupersededGooglePurchase({
+      projectId: "proj_1",
+      supersededToken: OLD_TOKEN,
+      currentToken: NEW_TOKEN,
+      source: "google:SUBSCRIPTION_PURCHASED",
+      onSuperseded,
+    });
+
+    expect(onSuperseded).not.toHaveBeenCalled();
+    expect(retired).toBeNull();
+    // The idempotent re-write still happens — only the REPORTING narrows.
+    expect(drizzleMock.purchaseRepo.updatePurchase).toHaveBeenCalled();
   });
 });
