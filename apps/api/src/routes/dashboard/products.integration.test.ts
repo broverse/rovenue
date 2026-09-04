@@ -362,6 +362,139 @@ describe("PATCH /projects/:projectId/products/:id — currencyGrants persistence
 });
 
 // =============================================================
+// grantOn — Task 6 (renewal credit grants, roadmap-12b)
+// =============================================================
+
+describe("currencyGrants.grantOn — RENEWAL/BOTH require a subscription product", () => {
+  it("rejects RENEWAL grantOn on a non-subscription product (POST)", async () => {
+    const { userId, cookie } = await createUserAndSession("grant-on-post-reject");
+    const project = await seedProject("grant-on-post-reject");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const vc = await seedVirtualCurrency(project.id, "GRO1");
+
+    const app = buildApp();
+    const res = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "com.test.grant-on.consumable",
+        type: "CONSUMABLE",
+        displayName: "Consumable Pack",
+        currencyGrants: [{ currencyId: vc.id, amount: 100, grantOn: "RENEWAL" }],
+      }),
+    });
+
+    // A consumable never renews, so a RENEWAL grant on one would be
+    // configured and then silently never fire — reject it server-side.
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects BOTH grantOn on a non-subscription product (PATCH)", async () => {
+    const { userId, cookie } = await createUserAndSession("grant-on-patch-reject");
+    const project = await seedProject("grant-on-patch-reject");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const vc = await seedVirtualCurrency(project.id, "GRO2");
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "com.test.grant-on.nonconsumable",
+        type: "NON_CONSUMABLE",
+        displayName: "Non-consumable Item",
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const { data: createData } = (await createRes.json()) as {
+      data: { product: { id: string } };
+    };
+
+    const patchRes = await app.request(
+      `/projects/${project.id}/products/${createData.product.id}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          currencyGrants: [{ currencyId: vc.id, amount: 100, grantOn: "BOTH" }],
+        }),
+      },
+    );
+
+    expect(patchRes.status).toBe(400);
+  });
+
+  it("accepts RENEWAL grantOn on a subscription product", async () => {
+    const { userId, cookie } = await createUserAndSession("grant-on-accept");
+    const project = await seedProject("grant-on-accept");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const vc = await seedVirtualCurrency(project.id, "GRO3");
+
+    const app = buildApp();
+    const res = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "com.test.grant-on.subscription",
+        type: "SUBSCRIPTION",
+        displayName: "Pro Monthly",
+        currencyGrants: [{ currencyId: vc.id, amount: 500, grantOn: "RENEWAL" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: { product: { id: string; currencyGrants: Array<{ currencyId: string; amount: number }> } };
+    };
+    expect(data.product.currencyGrants).toHaveLength(1);
+
+    const dbGrants = await drizzle.productCurrencyGrantRepo.listProductGrants(
+      drizzle.db,
+      data.product.id,
+    );
+    expect(dbGrants[0]?.grantOn).toBe("RENEWAL");
+  });
+
+  it("defaults grantOn to PURCHASE when omitted", async () => {
+    const { userId, cookie } = await createUserAndSession("grant-on-default");
+    const project = await seedProject("grant-on-default");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const vc = await seedVirtualCurrency(project.id, "GRO4");
+
+    const app = buildApp();
+    const res = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "com.test.grant-on.default",
+        type: "CONSUMABLE",
+        displayName: "Default Trigger Pack",
+        currencyGrants: [{ currencyId: vc.id, amount: 100 }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: { product: { id: string } };
+    };
+
+    const dbGrants = await drizzle.productCurrencyGrantRepo.listProductGrants(
+      drizzle.db,
+      data.product.id,
+    );
+    expect(dbGrants[0]?.grantOn).toBe("PURCHASE");
+  });
+});
+
+// =============================================================
 // androidBasePlanId / androidOfferId — Task 2
 // =============================================================
 

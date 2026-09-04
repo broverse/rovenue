@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
-import { MemberRole, accessIdSchema, drizzle } from "@rovenue/db";
+import { MemberRole, ProductType, accessIdSchema, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
@@ -12,6 +12,8 @@ import { getStoreCatalog, StoreCatalogError } from "../../services/store-catalog
 import { purgeResolvedPriceCache } from "../../services/offering-price-resolver";
 import { logger } from "../../lib/logger";
 import type {
+  CurrencyGrantTrigger,
+  DashboardProductCurrencyGrant,
   DashboardProductImportResponse,
   DashboardProductImportResultRow,
   DashboardProductRow,
@@ -118,10 +120,36 @@ const storeCatalogQuerySchema = z.object({
   store: z.enum(["ios", "android"] as const),
 });
 
+const grantTriggerSchema = z.enum(["PURCHASE", "RENEWAL", "BOTH"] as const);
+
 const currencyGrantSchema = z.object({
   currencyId: z.string().min(1),
   amount: z.number().int().positive(),
+  // Omitted → PURCHASE, so existing API clients (written before RENEWAL
+  // grants existed) are unaffected.
+  grantOn: grantTriggerSchema.default("PURCHASE"),
 });
+
+/**
+ * A RENEWAL/BOTH grant only ever fires from the renewal worker, which only
+ * runs for subscriptions — configuring one on a CONSUMABLE/NON_CONSUMABLE
+ * product would be accepted and then silently never pay out. Reject it
+ * server-side rather than relying on the form to disable the control.
+ */
+function assertGrantTriggersMatchProductType(
+  productType: ProductTypeName,
+  grants: ReadonlyArray<{ grantOn: CurrencyGrantTrigger }>,
+): void {
+  if (productType === ProductType.SUBSCRIPTION) return;
+  const offending = grants.find(
+    (g) => g.grantOn === "RENEWAL" || g.grantOn === "BOTH",
+  );
+  if (offending) {
+    throw new HTTPException(400, {
+      message: `grantOn "${offending.grantOn}" requires a SUBSCRIPTION product (renewals only fire for subscriptions)`,
+    });
+  }
+}
 
 export const createBodySchema = z
   .object({
@@ -229,7 +257,7 @@ function toWire(
     androidBasePlanId?: string | null;
     androidOfferId?: string | null;
   },
-  currencyGrants: Array<{ currencyId: string; amount: number }> = [],
+  currencyGrants: DashboardProductCurrencyGrant[] = [],
 ): DashboardProductRow {
   return {
     id: row.id,
@@ -315,6 +343,7 @@ export const productsDashboardRoute = new Hono()
     }
 
     await assertAccessIdsExist(projectId, body.accessIds ?? []);
+    assertGrantTriggersMatchProductType(body.type, body.currencyGrants ?? []);
 
     const row = await drizzle.productRepo.createProduct(drizzle.db, {
       projectId,
@@ -329,7 +358,7 @@ export const productsDashboardRoute = new Hono()
       androidOfferId: body.androidOfferId ?? null,
     });
 
-    let grants: Array<{ currencyId: string; amount: number }> = [];
+    let grants: DashboardProductCurrencyGrant[] = [];
     if (body.currencyGrants !== undefined) {
       for (const g of body.currencyGrants) {
         const vc = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
@@ -471,24 +500,34 @@ export const productsDashboardRoute = new Hono()
     await assertProjectCapability(projectId, user.id, "products:write");
     const body = c.req.valid("json");
 
-    if (body.identifier) {
-      const existingProduct = await drizzle.productRepo.findProductById(
-        drizzle.db,
-        projectId,
-        id,
-      );
-      if (existingProduct && body.identifier !== existingProduct.identifier) {
-        throw new HTTPException(400, {
-          message: "identifier is immutable once set",
-        });
-      }
+    const { currencyGrants: bodyGrants, ...productUpdateFields } = body;
+
+    // Needed both for identifier-immutability and for validating grantOn
+    // against the product's type when the request doesn't also change it.
+    const needsExisting = Boolean(body.identifier) || bodyGrants !== undefined;
+    const existingProduct = needsExisting
+      ? await drizzle.productRepo.findProductById(drizzle.db, projectId, id)
+      : null;
+
+    if (body.identifier && existingProduct && body.identifier !== existingProduct.identifier) {
+      throw new HTTPException(400, {
+        message: "identifier is immutable once set",
+      });
     }
 
     if (body.accessIds) {
       await assertAccessIdsExist(projectId, body.accessIds);
     }
 
-    const { currencyGrants: bodyGrants, ...productUpdateFields } = body;
+    if (bodyGrants !== undefined) {
+      // The type this request leaves the product in: `body.type` if this
+      // same PATCH changes it, otherwise whatever it already is.
+      const effectiveType = (body.type ??
+        existingProduct?.type) as ProductTypeName | undefined;
+      if (effectiveType) {
+        assertGrantTriggersMatchProductType(effectiveType, bodyGrants);
+      }
+    }
 
     const row = await drizzle.productRepo.updateProduct(
       drizzle.db,
@@ -500,7 +539,7 @@ export const productsDashboardRoute = new Hono()
       throw new HTTPException(404, { message: "Product not found" });
     }
 
-    let grants: Array<{ currencyId: string; amount: number }> = [];
+    let grants: DashboardProductCurrencyGrant[] = [];
     if (bodyGrants !== undefined) {
       for (const g of bodyGrants) {
         const vc = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(

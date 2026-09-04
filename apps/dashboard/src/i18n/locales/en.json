@@ -1113,6 +1113,16 @@
         "imported": "Imported"
       }
     },
+    "grants": {
+      "trigger": {
+        "label": "Grant on",
+        "purchase": "Purchase",
+        "renewal": "Renewal",
+        "both": "Purchase & renewal",
+        "hint": "Choose when this grant fires. Renewal (and purchase & renewal) requires a subscription product.",
+        "subscriptionOnly": "Only subscription products renew, so this product can only grant on purchase."
+      }
+    },
     "import": {
       "title": "Import from store",
       "subtitle": "Paste store identifiers to bulk-create products. Anything that already exists is skipped.",
