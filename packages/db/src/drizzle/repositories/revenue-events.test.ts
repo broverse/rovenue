@@ -13,7 +13,12 @@ import { eq, sql, and } from "drizzle-orm";
 import { Pool } from "pg";
 import { drizzle as drizzleClient } from "drizzle-orm/node-postgres";
 import * as schema from "../schema";
-import { createRevenueEvent, findRevenueEventById } from "./revenue-events";
+import {
+  createRevenueEvent,
+  findRevenueEventById,
+  revenueDedupeKind,
+} from "./revenue-events";
+import { revenueEventType } from "../enums";
 
 // ---------------------------------------------------------------------------
 // Env bootstrap (mirrors apps/api/tests/setup.ts approach)
@@ -101,6 +106,29 @@ async function seedPurchase(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("revenueDedupeKind", () => {
+  it("files a non-renewing purchase under the shared purchase key", () => {
+    // Convergence matters: if a store webhook ever writes INITIAL for the
+    // same transaction a receipt typed NON_RENEWING_PURCHASE, the two must
+    // claim ONE dedupe key or the charge is counted twice.
+    expect(revenueDedupeKind("NON_RENEWING_PURCHASE")).toBe("purchase");
+    expect(revenueDedupeKind("INITIAL")).toBe("purchase");
+    expect(revenueDedupeKind("CREDIT_PURCHASE")).toBe("purchase");
+  });
+
+  it("names a kind for every enum value — no silent fallback", () => {
+    // The old switch ended in `default: return type`, so a new enum value
+    // silently became its own dedupe class. Enumerating from the enum
+    // itself is what makes this test fail on the next added value.
+    for (const type of revenueEventType.enumValues) {
+      expect(
+        ["purchase", "reactivation", "refund", "cancel"],
+        `no dedupe kind declared for ${type}`,
+      ).toContain(revenueDedupeKind(type));
+    }
+  });
+});
 
 describe("createRevenueEvent", () => {
   it("writes exactly one outbox row per revenue row", async () => {

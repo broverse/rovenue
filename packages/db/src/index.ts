@@ -135,6 +135,7 @@ export const RevenueEventType = {
   REFUND: "REFUND",
   REACTIVATION: "REACTIVATION",
   CREDIT_PURCHASE: "CREDIT_PURCHASE",
+  NON_RENEWING_PURCHASE: "NON_RENEWING_PURCHASE",
 } as const;
 export type RevenueEventType =
   (typeof RevenueEventType)[keyof typeof RevenueEventType];

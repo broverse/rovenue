@@ -20,31 +20,34 @@ type RevenueEventType = (typeof revenueEventType.enumValues)[number];
 // =============================================================
 
 /**
- * Coarse economic class for a revenue event, used as the trailing segment of
- * a `dedupeKey` (`<store>:<transactionId>:<kind>`). Using the class — not the
- * fine-grained `RevenueEventType` — lets the client receipt-verify path and
- * the store webhook converge on the SAME key for one transaction even when
- * they classify it differently (e.g. receipt sees INITIAL, webhook sees
- * RENEWAL), while keeping genuinely distinct events on the same transaction
- * id apart (a REACTIVATION after a REFUND must not collide with the original
- * purchase).
+ * Coarse economic class for a revenue event, used as the trailing segment
+ * of a `dedupeKey` (`<store>:<transactionId>:<kind>`). Using the class —
+ * not the fine-grained `RevenueEventType` — lets the client receipt-verify
+ * path and the store webhook converge on the SAME key for one transaction
+ * even when they classify it differently (e.g. receipt sees INITIAL,
+ * webhook sees RENEWAL), while keeping genuinely distinct events on the
+ * same transaction id apart (a REACTIVATION after a REFUND must not
+ * collide with the original purchase).
+ *
+ * A total Record, not a switch with a `default`. The old default returned
+ * the type verbatim, so a newly added enum value silently became its own
+ * dedupe class — the same failure shape as a `Partial<Record>` with a
+ * missing key. A new value is now a compile error that forces the author
+ * to decide whether it converges with an existing charge or stands alone.
  */
+const DEDUPE_KIND: Record<RevenueEventType, string> = {
+  INITIAL: "purchase",
+  RENEWAL: "purchase",
+  TRIAL_CONVERSION: "purchase",
+  CREDIT_PURCHASE: "purchase",
+  NON_RENEWING_PURCHASE: "purchase",
+  REACTIVATION: "reactivation",
+  REFUND: "refund",
+  CANCELLATION: "cancel",
+};
+
 export function revenueDedupeKind(type: RevenueEventType): string {
-  switch (type) {
-    case "INITIAL":
-    case "RENEWAL":
-    case "TRIAL_CONVERSION":
-    case "CREDIT_PURCHASE":
-      return "purchase";
-    case "REACTIVATION":
-      return "reactivation";
-    case "REFUND":
-      return "refund";
-    case "CANCELLATION":
-      return "cancel";
-    default:
-      return type;
-  }
+  return DEDUPE_KIND[type];
 }
 
 // =============================================================

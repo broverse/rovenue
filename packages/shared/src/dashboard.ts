@@ -1093,7 +1093,8 @@ export type RevenueEventTypeName =
   | "CANCELLATION"
   | "REFUND"
   | "REACTIVATION"
-  | "CREDIT_PURCHASE";
+  | "CREDIT_PURCHASE"
+  | "NON_RENEWING_PURCHASE";
 
 export interface OverviewMrrKpi {
   /** Latest day's gross USD. Decimal-as-string for precision. */

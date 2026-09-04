@@ -110,6 +110,7 @@ const ACTIVITY_VISUAL: Record<
   REFUND: { icon: "down", color: "var(--color-rv-mute-600)", labelKey: "refund", signAmount: -1 },
   REACTIVATION: { icon: "up", color: "var(--color-rv-accent-500)", labelKey: "renewal", signAmount: 1 },
   CREDIT_PURCHASE: { icon: "up", color: "var(--color-rv-cyan)", labelKey: "new_subscription", signAmount: 1 },
+  NON_RENEWING_PURCHASE: { icon: "up", color: "var(--color-rv-cyan)", labelKey: "new_purchase", signAmount: 1 },
 };
 
 function shortSubscriberId(id: string): string {

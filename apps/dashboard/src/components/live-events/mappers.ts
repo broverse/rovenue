@@ -20,6 +20,7 @@ const REVENUE_TYPE: Record<string, EventTypeKey> = {
   CANCELLATION: "cancellation",
   REFUND: "refund",
   CREDIT_PURCHASE: "credit_purchase",
+  NON_RENEWING_PURCHASE: "non_renewing_purchase",
 };
 
 const CREDIT_TYPE: Record<string, EventTypeKey> = {

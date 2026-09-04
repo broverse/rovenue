@@ -1,0 +1,19 @@
+-- A purchase that does not renew (non-consumable IAP, one-time Stripe
+-- funnel package). See docs/superpowers/specs/2026-09-04-one-time-revenue-typing-design.md
+--
+-- Bare ADD VALUE, deliberately NOT the type-recreate shape of
+-- 0115_billing_issue_status.sql. That migration had to recreate its type
+-- because it USED the new value in index predicates; PG16 permits ADD
+-- VALUE inside drizzle's single migration transaction as long as nothing
+-- in the same run uses the value. Nothing here does. The precedent is
+-- 0107_import_verification_incomplete.sql and 0108_import_verifying.sql.
+--
+-- This matters more here than it did there: revenue_events is
+-- range-partitioned, so a type recreate would rewrite EVERY partition
+-- under an ACCESS EXCLUSIVE lock.
+--
+-- hand-written, NOT `drizzle-kit generate` output — with only enums.ts
+-- touched, generate has repeatedly proposed DROP TYPE against this repo's
+-- drifted meta snapshot (see 0107/0108's own headers). The snapshot was
+-- hand-authored from 0120_snapshot.json.
+ALTER TYPE "public"."RevenueEventType" ADD VALUE IF NOT EXISTS 'NON_RENEWING_PURCHASE';

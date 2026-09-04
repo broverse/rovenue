@@ -17,9 +17,10 @@ export type EventTypeKey =
   | "trial_converted"
   | "reactivation"
   | "cancellation"
-  // billing (REVENUE_EVENT refund/credit purchase + platform BILLING)
+  // billing (REVENUE_EVENT refund/credit purchase/non-renewing purchase + platform BILLING)
   | "refund"
   | "credit_purchase"
+  | "non_renewing_purchase"
   | "invoice_paid"
   | "payment_method_added"
   | "plan_activated"

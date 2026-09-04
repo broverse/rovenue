@@ -98,6 +98,11 @@ export const revenueEventType = pgEnum("RevenueEventType", [
   "REFUND",
   "REACTIVATION",
   "CREDIT_PURCHASE",
+  // 2026-09-04 — a purchase that does not renew: a non-consumable IAP, or
+  // a one-time Stripe funnel package. Distinct from INITIAL because the
+  // recurring MRR decomposition must exclude it and the ad platforms must
+  // not receive "Subscribe" for it.
+  "NON_RENEWING_PURCHASE",
 ]);
 
 export const experimentType = pgEnum("ExperimentType", [
