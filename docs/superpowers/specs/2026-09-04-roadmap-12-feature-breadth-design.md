@@ -58,9 +58,12 @@ nor dashboard i18n were specified at all.
   never bare `${table.col}` — that renders unqualified and breaks correlated
   subqueries.
 - Tests that claim a concurrency, rollback or cross-service property must run
-  against real infrastructure (testcontainers Postgres / ClickHouse, real
-  Redis), not mocks. A test whose failure mode is "the mock was wrong" proves
-  nothing.
+  against real infrastructure, not mocks. Integration tests here run against
+  the ambient docker-compose stack via `apps/api/tests/setup.ts` and seed
+  inline with `getDb()`; only a file that starts its own container belongs in
+  `CONTAINER_SUITES` (and must pin a host port registered in
+  `tests/host-port-allocations.test.ts`). A test whose failure mode is "the
+  mock was wrong" proves nothing.
 - Throttled test runs: `nice -n 19 npx vitest run --maxWorkers=2`, builds with
   `--concurrency=2`, strictly sequential.
 - Any new enum must be re-exported from `packages/db/src/drizzle/schema.ts`,
@@ -384,10 +387,10 @@ value into a key name.
   non-UTC timezone and a month boundary from a 31st anchor.
 - Unit: `customPeriodDays` validation both ways (required when `CUSTOM`,
   rejected otherwise).
-- Integration (testcontainers Postgres): two concurrent sweeps cannot open two
+- Integration (real Postgres): two concurrent sweeps cannot open two
   `ACTIVE` seasons, and cannot both close one. Asserted against a real
   database, since the property being claimed *is* the database constraint.
-- Integration (testcontainers Postgres + ClickHouse): seed revenue and credit
+- Integration (real Postgres + ClickHouse): seed revenue and credit
   events either side of a season boundary, run the sweep, and assert the
   frozen standings contain exactly the in-window events — this is what proves
   the settle delay does not shift the window.
@@ -542,11 +545,11 @@ Unchanged, deliberately: all eight `createRevenueEvent` call sites, and
 - Unit: the consumer enqueues rather than granting inline, and a worker
   failure surfaces to BullMQ instead of being swallowed. This is the property
   that distinguishes it from the fanout consumer, so it is asserted directly.
-- Integration (testcontainers Postgres): the worker grants once; running it
+- Integration (real Postgres): the worker grants once; running it
   again with the same `revenueEventId` grants nothing further. The second run
   must go through the real job path, not a hand-built duplicate call — the
   dedup being tested is the one a real Kafka redelivery would hit.
-- Integration (testcontainers Postgres + Kafka): write a renewal revenue
+- Integration (real Postgres + Kafka): write a renewal revenue
   event through a real provider path, let the outbox dispatcher publish it,
   and assert the balance moves. This is the only test that proves the wiring
   end to end; everything above pins a piece of it.
@@ -572,7 +575,7 @@ first:
   a support question about "my coins are missing" needs a documented answer.
 - **§12.4's grant path is not yet exercised by a Kafka test.** Everything else
   in this repo that consumes `rovenue.revenue` is integration delivery, which
-  is allowed to drop a message. The end-to-end testcontainers Kafka test is
+  is allowed to drop a message. The end-to-end Kafka test is
   the one that proves this consumer is not, and it is not optional.
 - **§12.3's ClickHouse dependency.** The worker reads ClickHouse and writes
   Postgres. The design orders the query before the claim precisely so that a
