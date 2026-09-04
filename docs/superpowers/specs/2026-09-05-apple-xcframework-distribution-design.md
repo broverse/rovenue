@@ -22,10 +22,15 @@ Two concrete defects, both verified:
    is tracked in git (commit `51866667`, 32 MB). `Rovenue.podspec` documents it as
    "arm64 iOS devices only", but `otool -l` reports `platform 7` —
    **iOS Simulator**. A pod published today would fail to link on device.
-2. **`Package.swift` cannot be consumed as a dependency at all.** It carries
-   `.unsafeFlags(["-L../../target/release"])`. SwiftPM refuses to resolve any
-   package that uses `unsafeFlags` as a dependency, so the Swift SDK has no
-   working SPM channel today — independent of the binary problem.
+2. **`Package.swift` cannot be consumed as a versioned dependency.** It carries
+   `.unsafeFlags(["-L../../target/release"])`. SwiftPM rejects a *version-based*
+   dependency whose product contains a target with unsafe flags:
+   `error: the target 'Dep' in product 'Dep' contains unsafe build flags`
+   (reproduced locally against a tagged package on 2026-09-05). A local `path:`
+   dependency is exempt, which is why in-repo builds never surfaced it, and
+   wrapping the flag in `.when(platforms: [.macOS])` does **not** exempt it.
+   So the Swift SDK has no working SPM channel today, independent of the
+   binary problem.
 
 ## What we build
 
@@ -100,6 +105,25 @@ Both channels ship the same xcframework; neither keeps a binary in git.
   version instead of `'~> 0.1'`, matching what `rovenue_flutter_ios.podspec`
   already does (`s.dependency 'Rovenue', '0.16.0'`)
 
+### Every site carrying the module-path workaround
+
+The same missing module map is worked around in **five** places. All five are
+removed by this change; a grep for `RovenueFFI` outside `Generated/` is the
+completeness check.
+
+| Site | What it does today |
+|---|---|
+| `packages/sdk-swift/Package.swift` | `systemLibrary` target + `unsafeFlags(-L…)` |
+| `packages/sdk-swift/Rovenue.podspec` | `preserve_paths` + `SWIFT_INCLUDE_PATHS` |
+| `packages/sdk-rn/ios/RovenueSdkRn.podspec` | `pod_target_xcconfig` **and** `user_target_xcconfig` reaching `${PODS_ROOT}/../../../..` |
+| `packages/sdk-flutter/example/ios/Podfile` | a `post_install` block that rewrites `SWIFT_INCLUDE_PATHS` on the `Rovenue` and `rovenue_flutter_ios` targets, because CocoaPods drops the `RovenueFFI` leaf segment when re-deriving the propagated path |
+| `.github/workflows/sdk.yml` | references the FFI directory in the Swift job |
+
+The Flutter Podfile's own comment says the problem is *"not fixable from
+`Rovenue.podspec`"*. That was true of a bare `.a`; it stops being true once the
+module map ships inside the xcframework. Removing that block is therefore a
+verification that the fix is real, not merely a tidy-up.
+
 ### SwiftPM
 
 The monorepo's `Package.swift` keeps a **local** `.binaryTarget(path:)`. It is
@@ -117,6 +141,16 @@ The distribution repo is generated, never hand-edited: the release job writes
 its `Package.swift`, copies the Swift façade sources into it, commits, and
 pushes a tag.
 
+### Two release artifacts, not one
+
+The two channels need differently-shaped zips, and conflating them is the
+easiest way to ship a broken release:
+
+| Artifact | Contents | Checksum tool | Pinned in |
+|---|---|---|---|
+| `Rovenue-<v>.zip` | `Sources/` + `RovenueFFI.xcframework` + `Rovenue.podspec` | `shasum -a 256` | `Rovenue.podspec`'s `:sha256` |
+| `RovenueFFI-<v>.xcframework.zip` | the xcframework **at the zip root**, nothing else | `swift package compute-checksum` | the distribution repo's `binaryTarget(checksum:)` |
+
 ### Release ordering
 
 `release-pod.sh` today does: create release → patch podspec sha256 → commit.
@@ -125,13 +159,42 @@ git tag, which is why nobody has hit it. It is **not** safe for SwiftPM, where
 consumers resolve a tag: the tag would point at the commit *before* the
 checksum landed.
 
-Corrected order, and the script enforces it:
+Corrected order:
 
-1. build xcframework → zip
-2. upload zip to the GitHub release
-3. `shasum -a 256` (CocoaPods) and `swift package compute-checksum` (SwiftPM)
-4. commit both pinned files
-5. **create the tag / push the distribution repo tag last**
+1. build the xcframework; produce **both** zips
+2. upload both to the GitHub release
+3. `shasum -a 256` on the pod zip; `swift package compute-checksum` on the
+   xcframework zip
+4. commit the pinned podspec; generate and commit the distribution repo
+5. **create both tags last** — the monorepo's `sdk-swift-v<x>` and the
+   distribution repo's `<x>`
+
+### One authoritative release path
+
+Release artifacts are built by `release-sdk.yml` on a macOS runner, not on a
+developer machine. `release-pod.sh` keeps only its `--dry-run` role: build,
+zip, print checksums, lint, change nothing. Two paths that can both cut a
+release is how a release gets cut from an unclean tree.
+
+### Guarding the distribution repo against drift
+
+The distribution repo is generated output, so it can silently diverge from the
+monorepo. The release job regenerates it from scratch every time and refuses to
+push if regeneration produces a tree that differs from the previous tag in any
+file other than `Package.swift`'s pinned `url`/`checksum` and the copied
+sources — i.e. drift must come from a real source change, never from a hand
+edit.
+
+## Versioning
+
+All five SDK packages (core-rs, sdk-swift, sdk-kotlin, sdk-rn, sdk-flutter) are
+aligned at `0.16.0`, and §7 counts that alignment as a closed item. This change
+alters the Apple distribution shape, so it ships as a coordinated **minor bump
+to `0.17.0` across all five**, keeping the alignment invariant true. The pinned
+cross-references move with it: `rovenue_flutter_ios.podspec`'s
+`s.dependency 'Rovenue', '<version>'` and `withRovenueIos.ts`'s default pod
+line both read the version rather than restating it where the file format
+allows.
 
 ## CI
 
@@ -172,8 +235,22 @@ Each item is a command with an expected result, not a claim:
    build with no `SWIFT_INCLUDE_PATHS` entry anywhere in the app's Podfile or
    the pod's xcconfig. This is the only claim in this design that the earlier
    probe could not settle.
-7. `rovenue_flutter_ios`'s example app resolves `Rovenue` (local `:path`
-   override during development).
+7. **Flutter**: `packages/sdk-flutter/example` builds for iOS with its
+   `post_install` `SWIFT_INCLUDE_PATHS` block **deleted**. Like item 6, this is
+   a build-only claim — it cannot be settled by lint.
+8. `grep -rn RovenueFFI` over `packages/`, `examples/` and `.github/`, excluding
+   `Generated/`, returns nothing outside the xcframework's own name. That is
+   the completeness check for the five-site table above.
+9. A versioned SPM consumer resolves the distribution repo's tag and builds —
+   the check that `unsafeFlags` is really gone, which an in-repo `path:` build
+   cannot show.
+
+### Not required, so that nobody adds it
+
+Static-library xcframeworks are not code-signed; Apple's signing requirements
+apply to *framework* bundles. `--allow-warnings` stays on the lint invocations
+because the pod carries pre-existing warnings unrelated to this change; it is
+not there to hide a signing or validation failure.
 
 ## Out of scope
 
