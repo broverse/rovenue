@@ -48,10 +48,24 @@ Before touching anything, read the release notes for:
 
 ## 3. Back up first
 
-This is the rollback plan. Take a backup before pulling anything. `backup.sh`
-does not read `.env` itself — load it into the shell first (`DATABASE_URL`,
-`ENCRYPTION_KEY`, `BACKUP_AGE_RECIPIENT`, `ASSET_STORAGE_*`, ... all come
-from the environment it's invoked with), then run it:
+This is the rollback plan. Take a backup before pulling anything.
+
+**If you are upgrading from a release older than this one, `deploy/clickhouse/config.d/backup.xml`
+(which declares the `backups` disk `BACKUP DATABASE` writes to) is new.**
+ClickHouse only reads `config.d/*.xml` at startup or on its own config
+reload — `docker compose pull && docker compose run --rm migrate` in step 4
+does not restart the already-running `clickhouse` container, so a first
+backup attempted on the still-old process fails with "disk is not allowed
+for backups" (the file's own comment concedes this). Restart or reload
+ClickHouse before running `backup.sh` for the first time on this host:
+
+```bash
+docker compose restart clickhouse
+```
+
+`backup.sh` does not read `.env` itself — load it into the shell first
+(`DATABASE_URL`, `ENCRYPTION_KEY`, `BACKUP_AGE_RECIPIENT`, `ASSET_STORAGE_*`,
+... all come from the environment it's invoked with), then run it:
 
 ```bash
 set -a; . ./.env; set +a

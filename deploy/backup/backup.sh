@@ -96,6 +96,15 @@ readonly CLICKHOUSE_ARCHIVE_EXTENSION=".zip"
 readonly CLICKHOUSE_CONTAINER_BACKUP_DIR="/var/lib/clickhouse/backups"
 readonly CLICKHOUSE_COMPOSE_SERVICE="clickhouse"
 
+# curl -w format for the BACKUP call below: appends a newline then the
+# HTTP status code after the response body, so one request yields both.
+# 2xx is the only success range — same convention
+# verify-asset-headers.ts's REFUSAL_STATUS_MIN/MAX_EXCLUSIVE uses: name
+# the bound rather than embed it in a regex.
+readonly CURL_STATUS_SUFFIX_FORMAT='\n%{http_code}'
+readonly HTTP_SUCCESS_STATUS_MIN=200
+readonly HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE=300
+
 # Object storage.
 readonly MC_BIN="mc"
 readonly JQ_BIN="jq"
@@ -326,9 +335,20 @@ run_clickhouse_backup() {
   local query="BACKUP DATABASE ${database} TO Disk('${CLICKHOUSE_BACKUP_DISK_NAME}', '${archive_name}')"
 
   echo "==> ClickHouse: BACKUP DATABASE $database TO Disk('$CLICKHOUSE_BACKUP_DISK_NAME', '$archive_name')"
-  local response
-  response="$(curl -sf -u "${CLICKHOUSE_BACKUP_USER}:${CLICKHOUSE_WRITE_PASSWORD}" --data-binary "$query" "$CLICKHOUSE_URL/")" \
-    || fail "ClickHouse BACKUP failed against $CLICKHOUSE_URL. If curl reported an auth failure ('password is incorrect'), check the IP allow-list in deploy/clickhouse/users.d/rovenue.xml before the credentials — see CLAUDE.md's ClickHouse note."
+  # Unlike `curl -sf`, this surfaces ClickHouse's own error text on an HTTP
+  # failure — `-f` makes curl exit nonzero on 4xx/5xx with NO body
+  # captured, so the only diagnostic ever shown was this script's
+  # hardcoded allow-list/credentials hint below, even when the real cause
+  # was something curl actually reported (e.g. "Disk 'backups' is not
+  # allowed for backups", "Database rovenue already exists", disk full)
+  # and the hint was wrong.
+  local raw http_code response
+  raw="$(curl -s -w "$CURL_STATUS_SUFFIX_FORMAT" -u "${CLICKHOUSE_BACKUP_USER}:${CLICKHOUSE_WRITE_PASSWORD}" --data-binary "$query" "$CLICKHOUSE_URL/")"
+  http_code="${raw##*$'\n'}"
+  response="${raw%$'\n'*}"
+  if ! [ "$http_code" -ge "$HTTP_SUCCESS_STATUS_MIN" ] 2>/dev/null || ! [ "$http_code" -lt "$HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE" ] 2>/dev/null; then
+    fail "ClickHouse BACKUP failed against $CLICKHOUSE_URL (HTTP ${http_code:-(no response)}): $response. If curl reported an auth failure ('password is incorrect'), check the IP allow-list in deploy/clickhouse/users.d/rovenue.xml before the credentials — see CLAUDE.md's ClickHouse note."
+  fi
   echo "    $response"
 
   local container_id

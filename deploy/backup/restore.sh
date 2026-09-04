@@ -114,6 +114,15 @@ readonly CLICKHOUSE_ARCHIVE_EXTENSION=".zip"
 readonly CLICKHOUSE_CONTAINER_BACKUP_DIR="/var/lib/clickhouse/backups"
 readonly CLICKHOUSE_COMPOSE_SERVICE="clickhouse"
 
+# ch_query's own curl -w format: appends a newline then the HTTP status
+# code after the response body, so a single curl invocation yields both
+# without a second request. 2xx is the only success range — matches
+# verify-asset-headers.ts's REFUSAL_STATUS_MIN/MAX_EXCLUSIVE convention of
+# naming the bound rather than embedding it in a regex.
+readonly CURL_STATUS_SUFFIX_FORMAT='\n%{http_code}'
+readonly HTTP_SUCCESS_STATUS_MIN=200
+readonly HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE=300
+
 readonly MC_BIN="mc"
 readonly JQ_BIN="jq"
 readonly DEFAULT_MC_ALIAS="rovenue-backup"
@@ -522,9 +531,23 @@ run_assets_restore() {
 # next statements — no other work happens between RESTORE completing and
 # the detach calls.
 # ---------------------------------------------------------------------------
+# Unlike `curl -sf`, this prints ClickHouse's own error text on an HTTP
+# failure instead of discarding it — `-f` makes curl exit nonzero on 4xx/5xx
+# with NO body captured, so the only diagnostic an operator ever saw was
+# this script's own hardcoded allow-list/credentials hint, even when the
+# real cause was something curl actually reported (e.g. "Database rovenue
+# already exists", disk full, a malformed query) and the hint was wrong.
 ch_query() {
   local query="$1"
-  curl -sf -u "${CLICKHOUSE_BACKUP_USER}:${CLICKHOUSE_WRITE_PASSWORD}" --data-binary "$query" "$CLICKHOUSE_URL/"
+  local raw http_code body
+  raw="$(curl -s -w "$CURL_STATUS_SUFFIX_FORMAT" -u "${CLICKHOUSE_BACKUP_USER}:${CLICKHOUSE_WRITE_PASSWORD}" --data-binary "$query" "$CLICKHOUSE_URL/")"
+  http_code="${raw##*$'\n'}"
+  body="${raw%$'\n'*}"
+  if ! [ "$http_code" -ge "$HTTP_SUCCESS_STATUS_MIN" ] 2>/dev/null || ! [ "$http_code" -lt "$HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE" ] 2>/dev/null; then
+    echo "    ClickHouse HTTP ${http_code:-(no response)}: $body" >&2
+    return 1
+  fi
+  printf '%s' "$body"
 }
 
 discover_kafka_objects() {
