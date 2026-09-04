@@ -170,6 +170,28 @@ export async function createRevenueEvent(
   // data import, two workers) so no future Apple-reachable path can
   // forget it, and so no downstream analytics query needs an
   // ownershipType filter: the row simply never exists.
+  //
+  // This read happens BEFORE the transaction below, not inside it, and
+  // that leaves a narrow window: apps/api/src/services/import/write.ts
+  // (~line 557) is the one reachable path that can change ownershipType
+  // on an EXISTING purchase row — its onConflictDoUpdate conditionally
+  // sets it from a re-imported CSV row. If that update commits between
+  // this SELECT and this call's own insert, a webhook or receipt-verify
+  // call already past this check can still write the very row this
+  // suppression exists to prevent. The Apple webhook and receipt-verify
+  // upsert paths never touch this column, so they are not a source of
+  // the race — only a concurrent re-import is.
+  //
+  // The window is accepted deliberately, not overlooked: closing it
+  // would require `SELECT ... FOR UPDATE` on the purchase row for every
+  // revenue-event write (a lock on a hot path, since nothing short of a
+  // lock closes a window under READ COMMITTED — reading inside the
+  // transaction below without one would still miss a concurrent update
+  // that commits after the read). That cost buys protection against, at
+  // most, one over-counted row from a rare interleaving (a live
+  // transaction being re-imported at the same moment a store event
+  // arrives for it) — a visible, correctable extra row, not a silent
+  // systemic double-count. Not worth it.
   const [linkedPurchase] = await db
     .select({ ownershipType: purchases.ownershipType })
     .from(purchases)
