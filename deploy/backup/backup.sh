@@ -63,6 +63,18 @@ readonly ASSETS_ARCHIVE_FILENAME="assets.tar"
 # mirror` fills before it's tarred — never written to disk unencrypted at
 # its final location.
 readonly ASSETS_MIRROR_SUBDIR="assets-mirror"
+# Per-object S3 metadata (Content-Type, Cache-Control, every x-amz-meta-*
+# key — whatever AssetStore actually set at PutObject time, not a
+# re-derivation of its policy) captured at backup time and re-applied at
+# restore time via `mc cp --attr`. `mc mirror` moves object BYTES; it does
+# not round-trip object metadata, so without this sidecar a restored asset
+# silently loses its Cache-Control (and everything else) — see restore.sh's
+# run_assets_restore for the read side of this contract. Named with a
+# leading dot so it never collides with a real asset key (paywall asset
+# keys are `<projectId>/<cuid2>.<ext>`, never dotfiles) and sorts first in
+# a directory listing, which is irrelevant to correctness but makes it
+# obvious in a manual `tar tf` inspection.
+readonly ASSETS_METADATA_SIDECAR_FILENAME=".rovenue-asset-metadata.json"
 readonly AGE_SUFFIX=".age"
 
 # Postgres.
@@ -86,6 +98,7 @@ readonly CLICKHOUSE_COMPOSE_SERVICE="clickhouse"
 
 # Object storage.
 readonly MC_BIN="mc"
+readonly JQ_BIN="jq"
 readonly DEFAULT_MC_ALIAS="rovenue-backup"
 
 # Encryption.
@@ -347,8 +360,40 @@ run_clickhouse_backup() {
 # the same as the database artifacts — see the file header comment for why
 # the bucket's public-read policy does NOT make this step exempt.
 # ---------------------------------------------------------------------------
+# `mc mirror` moves object BYTES only — it does not round-trip S3 object
+# metadata (Content-Type, Cache-Control, x-amz-meta-* — verified directly
+# against a throwaway MinIO container: a mirror-down/tar/mirror-up round
+# trip drops Cache-Control entirely even though the bytes and the
+# extension-inferred Content-Type survive). Rather than have restore.sh
+# re-derive Cache-Control/Content-Type from the key's extension — which
+# would only be correct by coincidence with AssetStore's current policy,
+# and silently drift the moment that policy changes without this file
+# being touched — this captures the ACTUAL metadata `mc stat` reports for
+# every mirrored object into a JSON sidecar inside the archive, keyed by
+# the object's relative path. restore.sh reads it back and re-applies it
+# per object via `mc cp --attr`.
+capture_assets_metadata() {
+  local mirror_dir="$1"
+  local metadata_file="$2"
+
+  printf '{}' > "$metadata_file"
+
+  local abs_path rel_path stat_json obj_metadata
+  while IFS= read -r abs_path; do
+    [ -n "$abs_path" ] || continue
+    rel_path="${abs_path#"$mirror_dir"/}"
+    stat_json="$("$MC_BIN" stat --json "$MC_ALIAS/$ASSET_STORAGE_BUCKET/$rel_path")" \
+      || fail "mc stat failed for $MC_ALIAS/$ASSET_STORAGE_BUCKET/$rel_path while capturing asset metadata for backup"
+    obj_metadata="$(printf '%s' "$stat_json" | "$JQ_BIN" -c '.metadata // {}')"
+    # shellcheck disable=SC2016 # single-quoted jq filter — $k/$v are jq's own --arg/--argjson bindings, not shell variables.
+    "$JQ_BIN" --arg k "$rel_path" --argjson v "$obj_metadata" '.[$k] = $v' "$metadata_file" > "${metadata_file}.tmp"
+    mv "${metadata_file}.tmp" "$metadata_file"
+  done < <(find "$mirror_dir" -type f)
+}
+
 run_assets_backup() {
   require_bin "$MC_BIN" "mc (MinIO client) is required for the object-storage step and was not found on PATH. Install it — macOS: 'brew install minio/stable/mc'; see https://min.io/docs/minio/linux/reference/minio-mc.html#quickstart otherwise — then configure an alias pointing at your S3/MinIO/R2 endpoint: 'mc alias set $MC_ALIAS <endpoint> <access-key> <secret-key>' matching ASSET_STORAGE_* in your environment (pass a different alias name with --mc-alias)."
+  require_bin "$JQ_BIN" "jq is required to build the per-object metadata sidecar (Content-Type/Cache-Control/x-amz-meta-* survive the backup/restore round trip through it) — macOS: 'brew install jq'; Debian/Ubuntu: 'apt-get install jq'."
   require_env ASSET_STORAGE_BUCKET "the paywall-asset bucket to mirror (see .env.example)"
 
   echo "==> Object storage: mc mirror $MC_ALIAS/$ASSET_STORAGE_BUCKET"
@@ -357,6 +402,15 @@ run_assets_backup() {
   "$MC_BIN" mirror --quiet "$MC_ALIAS/$ASSET_STORAGE_BUCKET" "$mirror_dir/"
 
   ASSETS_FILE_COUNT="$(find "$mirror_dir" -type f | wc -l | tr -d ' ')"
+
+  # Captured into $STAGING_DIR, NOT $mirror_dir, and moved into place only
+  # after every real object has been stat'd — building it in place would
+  # make find(1) walk into its own half-written sidecar file as though it
+  # were an asset to capture metadata for.
+  echo "==> Object storage: capturing per-object metadata (Content-Type/Cache-Control/x-amz-meta-*)"
+  local metadata_staging="$STAGING_DIR/$ASSETS_METADATA_SIDECAR_FILENAME"
+  capture_assets_metadata "$mirror_dir" "$metadata_staging"
+  mv "$metadata_staging" "$mirror_dir/$ASSETS_METADATA_SIDECAR_FILENAME"
 
   local tar_path="$STAGING_DIR/$ASSETS_ARCHIVE_FILENAME"
   tar -C "$mirror_dir" -cf "$tar_path" .

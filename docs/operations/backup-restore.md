@@ -198,6 +198,16 @@ point `restore.sh` at anything that isn't disposable.
    `ClickHouse schema: OK` with no drift (re-run
    `pnpm --filter @rovenue/db db:verify:clickhouse` by hand against the
    throwaway environment if you want a second, human-triggered look).
+   `restore.sh`'s Guard 4 also runs `pnpm --filter @rovenue/scripts
+   verify:asset-headers`, which checks a restored asset's actual
+   `Content-Type`/`Cache-Control`/`X-Content-Type-Options` against what
+   was originally uploaded — a failure there means the asset-restore step
+   did not fully succeed (object bytes came back, but its S3 metadata
+   didn't), not a quirk safe to shrug off. `restore.sh` already exits
+   non-zero on this the same as on any other verification failure, so a
+   green `restore.sh` run is itself the pass signal for this check; treat
+   a red one as blocking the quarterly sign-off, the same as a ClickHouse
+   schema-drift failure would.
 5. Verify the audit hash chain for every restored project. There's no
    wrapped CLI for this yet — `verifyAuditChain(projectId)`
    (`apps/api/src/lib/audit.ts`) is the primitive; it returns

@@ -104,6 +104,14 @@ const APP_USER_ID = `bkuptest-appuser-${RUN_ID}`;
 const CH_EVENT_ID = `bkuptest-event-${RUN_ID}`;
 const ASSET_KEY = `${PROJECT_ID}/probe-asset.json`;
 const ASSET_BODY = JSON.stringify({ probe: RUN_ID });
+// Matches what apps/api's asset-store.ts actually sets at PutObject time
+// (CacheControl: `public, max-age=${ASSET_CACHE_MAX_AGE_SECONDS}, immutable`)
+// — the exact value the metadata sidecar must carry through backup and
+// restore for restore.sh's own verify:asset-headers check to pass.
+const SEED_CACHE_CONTROL = "public, max-age=31536000, immutable";
+// Must match backup.sh's/restore.sh's own ASSETS_METADATA_SIDECAR_FILENAME
+// constant exactly — see either script's comment on it.
+const ASSETS_METADATA_SIDECAR_FILENAME = ".rovenue-asset-metadata.json";
 
 interface CmdResult {
   code: number;
@@ -529,7 +537,7 @@ describe("backup.sh / restore.sh round trip", () => {
       await runCmd("mc", [
         "cp",
         "--attr",
-        "Cache-Control=public, max-age=31536000, immutable",
+        `Cache-Control=${SEED_CACHE_CONTROL}`,
         seedAssetPath,
         `${MC_ALIAS}/${ASSET_BUCKET}/${ASSET_KEY}`,
       ]),
@@ -690,6 +698,21 @@ describe("backup.sh / restore.sh round trip", () => {
       expect(manifest.assets.bytes).toBeGreaterThan(0);
       expect(manifest.assets.fileCount).toBe(1);
 
+      // Prove the metadata sidecar backup.sh's capture_assets_metadata
+      // wrote is real, not just asserted to exist: decrypt the actual
+      // assets archive this run produced and pull the sidecar member back
+      // out of the tar, the same way restore.sh would.
+      const sidecar = await readAssetsMetadataSidecar(
+        path.join(backupOutDir, manifest.assets.file),
+        ageIdentityPath,
+      );
+      console.log(
+        `metadata sidecar (${manifest.assets.file}) contents:\n${JSON.stringify(sidecar, null, 2)}`,
+      );
+      expect(sidecar[ASSET_KEY]).toBeDefined();
+      expect(sidecar[ASSET_KEY]["Cache-Control"]).toBe(SEED_CACHE_CONTROL);
+      expect(sidecar[ASSET_KEY]["Content-Type"]).toBe("application/json");
+
       // -----------------------------------------------------------
       // Drop everything — a real disaster, not a filtered subset.
       // -----------------------------------------------------------
@@ -704,14 +727,18 @@ describe("backup.sh / restore.sh round trip", () => {
       expect(postDropSubscriberTable).toBe(false);
 
       // -----------------------------------------------------------
-      // restore.sh — a real subprocess. NOT asserted to exit 0
-      // unconditionally: see the note below the run.
+      // restore.sh — a real subprocess, asserted to exit 0. The asset
+      // metadata sidecar (below) is what makes that possible: restore.sh's
+      // own built-in verify:asset-headers check requires the restored
+      // Cache-Control to still contain "immutable", which only holds if
+      // the object's real S3 metadata survived the tar round trip.
       // -----------------------------------------------------------
       const restoreResult = await runCmd(
         "bash",
         [RESTORE_SH, "--from", backupOutDir, "--mc-alias", MC_ALIAS],
         { cwd: ROOT_DIR, env: scriptEnv, timeout: 240_000 },
       );
+      assertOk("restore.sh", restoreResult);
 
       expect(restoreResult.stdout).toContain("Fingerprint guard OK");
       expect(restoreResult.stdout).toContain("Postgres restore complete");
@@ -763,47 +790,39 @@ describe("backup.sh / restore.sh round trip", () => {
         country: "US",
       });
 
-      // The restored asset's bytes and Content-Type survive the
-      // mc-mirror -> tar -> mc-mirror round trip; its Cache-Control does
-      // not — see the defect note below and docs/operations/backup-restore.md.
+      // The restored asset's bytes, Content-Type AND Cache-Control all
+      // survive the mc-mirror -> tar -> metadata-sidecar -> mc-cp-attr
+      // round trip — see capture_assets_metadata (backup.sh) and
+      // restore_one_asset_with_metadata (restore.sh). Checked three ways
+      // below: the raw HTTP response, `mc stat` directly against MinIO,
+      // and verify-asset-headers.ts's own check logic (which restore.sh
+      // itself runs as Guard 4 — this is why restoreResult was asserted
+      // to exit 0 above).
       const restoredAssetResponse = await fetch(`${assetPublicBaseUrl}/${ASSET_KEY}`);
       expect(restoredAssetResponse.status).toBe(200);
       expect(await restoredAssetResponse.text()).toBe(ASSET_BODY);
+      expect(restoredAssetResponse.headers.get("cache-control")).toBe(SEED_CACHE_CONTROL);
+      expect(restoredAssetResponse.headers.get("content-type")).toBe("application/json");
 
-      // -----------------------------------------------------------
-      // DEFECT FOUND BY THIS ROUND TRIP (reported here and in
-      // docs/operations/backup-restore.md, not papered over):
-      //
-      // restore.sh's own built-in verification (Guard 4, verify_restore)
-      // runs `pnpm --filter @rovenue/scripts verify:asset-headers`
-      // unconditionally. That check requires Cache-Control to contain
-      // "immutable" on every restored asset. backup.sh's asset pipeline
-      // is `mc mirror <bucket> -> local dir -> tar`, and restore.sh's is
-      // the reverse (`tar -> local dir -> mc mirror -> <bucket>`) —
-      // local files carry no S3-metadata sidecar, so Content-Type is
-      // re-inferred by mc from the file extension on the way back up
-      // (verified correct above), but Cache-Control is NOT reconstructed
-      // by anything in that pipeline and is silently absent on the
-      // restored object. verify:asset-headers.ts's own logic is
-      // imported directly below to pin exactly which check regresses,
-      // independent of restore.sh's overall exit code.
-      //
-      // The consequence: restore.sh's exit code is non-zero for ANY
-      // real backup that includes an asset with a Cache-Control header
-      // set at upload time (i.e. every real paywall asset uploaded
-      // through apps/api's asset-store.ts) — even though Postgres,
-      // ClickHouse and the asset BYTES all restored correctly, as this
-      // test independently proves above.
-      // -----------------------------------------------------------
+      // Query MinIO directly (not just the HTTP response) for the same
+      // proof, via the real `mc` binary — independent evidence the
+      // restored object's actual S3 metadata, not just what a proxy or
+      // cache added in front of it, matches what was originally uploaded.
+      const restoredStatResult = await runCmd("mc", [
+        "stat",
+        "--json",
+        `${MC_ALIAS}/${ASSET_BUCKET}/${ASSET_KEY}`,
+      ]);
+      assertOk("mc stat (restored asset)", restoredStatResult);
+      const restoredStat = JSON.parse(restoredStatResult.stdout) as {
+        metadata: Record<string, string>;
+      };
+      console.log(`mc stat --json (restored asset) metadata:\n${JSON.stringify(restoredStat.metadata, null, 2)}`);
+      expect(restoredStat.metadata["Cache-Control"]).toBe(SEED_CACHE_CONTROL);
+      expect(restoredStat.metadata["Content-Type"]).toBe("application/json");
+
       const headerCheck = await verifyAssetHeaders(assetPublicBaseUrl, ASSET_KEY);
-      const cacheControlFailure = headerCheck.failures.find((f) => f.check === "cache-control");
-      expect(
-        cacheControlFailure,
-        "expected verify-asset-headers' cache-control check to regress after restore.sh's tar-based asset round trip (this is the defect this test exists to surface — see the comment above and docs/operations/backup-restore.md)",
-      ).toBeDefined();
-
-      expect(restoreResult.code).not.toBe(0);
-      expect(restoreResult.stdout + restoreResult.stderr).toMatch(/cache-control/i);
+      expect(headerCheck.failures).toEqual([]);
 
       // -----------------------------------------------------------
       // Fingerprint guard, against the same backup: a different
@@ -903,4 +922,32 @@ async function queryRawExposures(): Promise<RawExposureRow[]> {
     format: "JSONEachRow",
   });
   return (await result.json()) as RawExposureRow[];
+}
+
+// Decrypts a real assets archive backup.sh produced and pulls the
+// metadata sidecar member back out of the tar — the same two steps
+// restore.sh's run_assets_restore performs, done independently here so
+// the test can inspect the sidecar's actual content rather than trust
+// that it exists.
+async function readAssetsMetadataSidecar(
+  archivePath: string,
+  identityPath: string,
+): Promise<Record<string, Record<string, string>>> {
+  const decryptedTarPath = `${archivePath}.decrypted-for-test.tar`;
+  assertOk(
+    "age -d (assets archive, for sidecar inspection)",
+    await runCmd("age", ["-d", "-i", identityPath, "-o", decryptedTarPath, archivePath]),
+  );
+  try {
+    const extractResult = await runCmd("tar", [
+      "-xO",
+      "-f",
+      decryptedTarPath,
+      ASSETS_METADATA_SIDECAR_FILENAME,
+    ]);
+    assertOk("tar -xO (metadata sidecar member)", extractResult);
+    return JSON.parse(extractResult.stdout) as Record<string, Record<string, string>>;
+  } finally {
+    await rm(decryptedTarPath, { force: true });
+  }
 }

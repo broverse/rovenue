@@ -18,9 +18,19 @@
 # service is stopped and before any database, bucket or ClickHouse table is
 # touched.
 #
-# RUN THIS FROM INSIDE THE COMPOSE NETWORK, not from the host. Two
-# reproducible traps documented in deploy/backup/backup.sh and CLAUDE.md
-# apply here too:
+# WHAT THIS SCRIPT NEEDS FROM WHEREVER IT RUNS: direct Docker daemon access
+# (the ClickHouse step locates its container with `docker compose ps -q
+# clickhouse` and moves the backup archive with `docker cp` — neither works
+# through a remote/proxied network, only a real socket) PLUS network
+# reachability to Postgres/ClickHouse/the asset store. In practice that
+# means the operator's own host (or whatever already drives `docker
+# compose` for this stack) — NOT an arbitrary container attached to the
+# compose network's bridge, which typically has no Docker socket mounted
+# and so cannot do the `docker cp`/`docker compose ps` half of this at all.
+# See docs/operations/backup-restore.md for the recommended invocation.
+#
+# Two reproducible traps documented in deploy/backup/backup.sh, CLAUDE.md
+# and docs/operations/backup-restore.md apply to the host-reachability half:
 #   - Reaching MinIO from the host over the Docker-Desktop-forwarded port
 #     (127.0.0.1:9002) fails on `?location=` (GetBucketLocation) queries.
 #   - ClickHouse reports a network allow-list rejection (the allow-list in
@@ -28,9 +38,13 @@
 #     172.16/12 + 10/8; Docker-Desktop host traffic arrives from
 #     192.168.65.1) to the client as "password is incorrect" — check the
 #     allow-list before assuming the credentials below are wrong.
-# Run this from a container on the compose network (e.g. `docker compose
-# run --rm migrate ...`), or bridge with a one-off socat forwarder the same
-# way CLAUDE.md documents for ClickHouse.
+# Both are chiefly a Docker-Desktop-for-Mac artifact (a native Linux Docker
+# host's port publishing doesn't rewrite the source address the same way,
+# and may not hit either). Where they do apply, bridge with a one-off
+# socat forwarder into the compose network — the same recipe CLAUDE.md
+# documents for `db:clickhouse:migrate`, run from the same host that has
+# the Docker socket and the CLI tools this script needs either way; see
+# docs/operations/backup-restore.md for the exact commands.
 #
 # Order: Postgres, then object storage, then ClickHouse. Postgres is
 # restored first because it is the only store the others are consistent
@@ -84,6 +98,10 @@ readonly CLICKHOUSE_OUT_SUBDIR="clickhouse"
 readonly CLICKHOUSE_OUT_FILENAME="clickhouse.zip"
 readonly ASSETS_ARCHIVE_FILENAME="assets.tar"
 readonly ASSETS_MIRROR_SUBDIR="assets-mirror"
+# See backup.sh's own comment on this constant — the sidecar carrying
+# per-object Content-Type/Cache-Control/x-amz-meta-* metadata that `mc
+# mirror` alone does not round-trip.
+readonly ASSETS_METADATA_SIDECAR_FILENAME=".rovenue-asset-metadata.json"
 readonly AGE_SUFFIX=".age"
 
 readonly PG_DUMP_NO_OWNER_FLAG="--no-owner"
@@ -97,6 +115,7 @@ readonly CLICKHOUSE_CONTAINER_BACKUP_DIR="/var/lib/clickhouse/backups"
 readonly CLICKHOUSE_COMPOSE_SERVICE="clickhouse"
 
 readonly MC_BIN="mc"
+readonly JQ_BIN="jq"
 readonly DEFAULT_MC_ALIAS="rovenue-backup"
 
 readonly AGE_BIN="age"
@@ -401,6 +420,27 @@ run_postgres_restore() {
 # ---------------------------------------------------------------------------
 # Object storage.
 # ---------------------------------------------------------------------------
+# Re-applies the metadata backup.sh's capture_assets_metadata captured for
+# one object, via `mc cp --attr`. Whatever was actually set (Content-Type,
+# Cache-Control, every x-amz-meta-*) is what gets re-applied — nothing here
+# re-derives a header from the key's extension or a hardcoded policy, so
+# this never drifts out of sync with a future change to AssetStore's own
+# policy the way a re-derivation would.
+restore_one_asset_with_metadata() {
+  local mirror_dir="$1" metadata_file="$2" rel_path="$3"
+  local attr_string
+  # shellcheck disable=SC2016 # single-quoted jq filter — $k is jq's own --arg binding, not a shell variable.
+  attr_string="$("$JQ_BIN" -r --arg k "$rel_path" '(.[$k] // {}) | to_entries | map("\(.key)=\(.value)") | join(";")' "$metadata_file")"
+  if [ -n "$attr_string" ]; then
+    "$MC_BIN" cp --quiet --attr "$attr_string" "$mirror_dir/$rel_path" "$MC_ALIAS/$ASSET_STORAGE_BUCKET/$rel_path" >/dev/null
+  else
+    # No captured metadata for this key (shouldn't happen for a sidecar
+    # backup.sh itself wrote, but a hand-edited manifest/archive is
+    # possible) — still restore the bytes rather than fail the whole step.
+    "$MC_BIN" cp --quiet "$mirror_dir/$rel_path" "$MC_ALIAS/$ASSET_STORAGE_BUCKET/$rel_path" >/dev/null
+  fi
+}
+
 run_assets_restore() {
   require_bin "$MC_BIN" "mc (MinIO client) is required for the object-storage step and was not found on PATH. Install it — macOS: 'brew install minio/stable/mc'."
   require_env ASSET_STORAGE_BUCKET "the paywall-asset bucket to restore INTO (see .env.example)"
@@ -422,9 +462,27 @@ run_assets_restore() {
     tar -x -C "$mirror_dir" -f "$src"
   fi
 
-  local file_count
-  file_count="$(find "$mirror_dir" -type f | wc -l | tr -d ' ')"
-  "$MC_BIN" mirror --quiet "$mirror_dir/" "$MC_ALIAS/$ASSET_STORAGE_BUCKET"
+  local metadata_file="$mirror_dir/$ASSETS_METADATA_SIDECAR_FILENAME"
+  local file_count=0
+
+  if [ -f "$metadata_file" ]; then
+    require_bin "$JQ_BIN" "jq is required to re-apply the per-object metadata sidecar backup.sh wrote (Content-Type/Cache-Control/x-amz-meta-*) — macOS: 'brew install jq'; Debian/Ubuntu: 'apt-get install jq'."
+    echo "    restoring per-object metadata from $ASSETS_METADATA_SIDECAR_FILENAME"
+    local rel_path
+    while IFS= read -r rel_path; do
+      [ -n "$rel_path" ] || continue
+      restore_one_asset_with_metadata "$mirror_dir" "$metadata_file" "$rel_path"
+      file_count=$((file_count + 1))
+    done < <("$JQ_BIN" -r 'keys_unsorted[]' "$metadata_file")
+  else
+    # A backup written before this sidecar existed. Still restorable —
+    # just without Content-Type/Cache-Control/x-amz-meta-* fidelity, the
+    # same gap a bare `mc mirror` always had.
+    echo "    NOTE: no $ASSETS_METADATA_SIDECAR_FILENAME in this archive (backup predates per-object metadata capture) — restoring bytes only via mc mirror; Content-Type/Cache-Control/x-amz-meta-* on restored objects will not match what was originally uploaded."
+    file_count="$(find "$mirror_dir" -type f | wc -l | tr -d ' ')"
+    "$MC_BIN" mirror --quiet "$mirror_dir/" "$MC_ALIAS/$ASSET_STORAGE_BUCKET"
+  fi
+
   rm -rf "$mirror_dir"
   echo "    Object storage restore complete ($file_count files)"
   STEP_ASSETS_DONE=1
