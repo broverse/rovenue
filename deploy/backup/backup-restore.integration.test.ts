@@ -117,6 +117,13 @@ const ASSET_BODY = JSON.stringify({ probe: RUN_ID });
 // from the same named constant scripts/asset-headers.integration.test.ts
 // uses (OBJECT_CACHE_CONTROL there), not a second hardcoded literal.
 const SEED_CACHE_CONTROL = `public, max-age=${ASSET_CACHE_MAX_AGE_SECONDS}, immutable`;
+// A user-metadata key, so the sidecar's x-amz-meta-* half — otherwise
+// unproven by CI, since Content-Type/Cache-Control are standard S3
+// headers and x-amz-meta-* is a materially different code path through
+// `mc stat --json`'s metadata map — round-trips through backup and
+// restore too, not just the two headers already covered above.
+const SEED_USER_METADATA_KEY = "X-Amz-Meta-Rovenue-Probe";
+const SEED_USER_METADATA_VALUE = `probe-${RUN_ID}`;
 // Must match backup.sh's/restore.sh's own ASSETS_METADATA_SIDECAR_FILENAME
 // constant exactly — see either script's comment on it.
 const ASSETS_METADATA_SIDECAR_FILENAME = ".rovenue-asset-metadata.json";
@@ -545,7 +552,7 @@ describe("backup.sh / restore.sh round trip", () => {
       await runCmd("mc", [
         "cp",
         "--attr",
-        `Cache-Control=${SEED_CACHE_CONTROL}`,
+        `Cache-Control=${SEED_CACHE_CONTROL};${SEED_USER_METADATA_KEY}=${SEED_USER_METADATA_VALUE}`,
         seedAssetPath,
         `${MC_ALIAS}/${ASSET_BUCKET}/${ASSET_KEY}`,
       ]),
@@ -720,6 +727,7 @@ describe("backup.sh / restore.sh round trip", () => {
       expect(sidecar[ASSET_KEY]).toBeDefined();
       expect(sidecar[ASSET_KEY]["Cache-Control"]).toBe(SEED_CACHE_CONTROL);
       expect(sidecar[ASSET_KEY]["Content-Type"]).toBe("application/json");
+      expect(sidecar[ASSET_KEY][SEED_USER_METADATA_KEY]).toBe(SEED_USER_METADATA_VALUE);
 
       // -----------------------------------------------------------
       // Drop everything — a real disaster, not a filtered subset.
@@ -828,6 +836,7 @@ describe("backup.sh / restore.sh round trip", () => {
       console.log(`mc stat --json (restored asset) metadata:\n${JSON.stringify(restoredStat.metadata, null, 2)}`);
       expect(restoredStat.metadata["Cache-Control"]).toBe(SEED_CACHE_CONTROL);
       expect(restoredStat.metadata["Content-Type"]).toBe("application/json");
+      expect(restoredStat.metadata[SEED_USER_METADATA_KEY]).toBe(SEED_USER_METADATA_VALUE);
 
       const headerCheck = await verifyAssetHeaders(assetPublicBaseUrl, ASSET_KEY);
       expect(headerCheck.failures).toEqual([]);
@@ -849,6 +858,129 @@ describe("backup.sh / restore.sh round trip", () => {
       );
       expect(mismatchResult.code).not.toBe(0);
       expect(mismatchResult.stderr).toContain("ENCRYPTION_KEY fingerprint mismatch");
+    },
+    ROUND_TRIP_TEST_TIMEOUT_MS,
+  );
+
+  // The round trip above always encrypts — --allow-plaintext (backup.sh)
+  // and the encrypted=false read path (restore.sh) were previously
+  // exercised by ZERO tests in either script, i.e. half of every
+  // encryption branch. Reuses the containers from beforeAll with its own
+  // distinct rows so it doesn't collide with the round trip above.
+  it(
+    "round-trips through --allow-plaintext and writes genuinely unencrypted artifacts",
+    async () => {
+      const plainProjectId = `${PROJECT_ID}-plain`;
+      const plainSubscriberId = `${SUBSCRIBER_ID}-plain`;
+      const plainRovenueId = `${ROVENUE_ID}-plain`;
+      const plainAppUserId = `${APP_USER_ID}-plain`;
+
+      const pg = new PgClient({ connectionString: pgUrl });
+      await pg.connect();
+      try {
+        await pg.query('INSERT INTO projects (id, name) VALUES ($1, $2)', [
+          plainProjectId,
+          "backup-restore-it plaintext project",
+        ]);
+        await pg.query(
+          'INSERT INTO subscribers (id, "projectId", "rovenueId", "appUserId") VALUES ($1, $2, $3, $4)',
+          [plainSubscriberId, plainProjectId, plainRovenueId, plainAppUserId],
+        );
+      } finally {
+        await pg.end();
+      }
+
+      const plainOutDir = await mkdtemp(path.join(tmpdir(), "rovenue-backup-it-plain-out-"));
+      registerCleanup(async () => {
+        await rm(plainOutDir, { recursive: true, force: true });
+      });
+
+      const backupResult = await runCmd(
+        "bash",
+        [BACKUP_SH, "--out", plainOutDir, "--mc-alias", MC_ALIAS, "--allow-plaintext"],
+        { cwd: ROOT_DIR, env: scriptEnv, timeout: 180_000 },
+      );
+      assertOk("backup.sh --allow-plaintext", backupResult);
+      expect(backupResult.stdout).toContain("--allow-plaintext was set");
+
+      const manifestRaw = await readFile(path.join(plainOutDir, "manifest.json"), "utf8");
+      const manifest = JSON.parse(manifestRaw) as BackupManifest;
+      expect(manifest.postgres.encrypted).toBe(false);
+      expect(manifest.postgres.file).toBe("postgres.dump");
+      expect(manifest.clickhouse.encrypted).toBe(false);
+      expect(manifest.clickhouse.file).toBe("clickhouse/clickhouse.zip");
+      expect(manifest.assets.encrypted).toBe(false);
+      expect(manifest.assets.file).toBe("assets.tar");
+
+      // Genuinely plaintext, not just labeled that way: pg_dump -Fc's own
+      // 5-byte magic, read back with no `age` involved at all — an
+      // age-encrypted stream would not start with this.
+      const rawDump = await readFile(path.join(plainOutDir, manifest.postgres.file));
+      expect(rawDump.length).toBeGreaterThan(0);
+      expect(rawDump.subarray(0, 5).toString("latin1")).toBe("PGDMP");
+
+      await dropAllPostgresSchemas(pgUrl);
+      await chClient.command({ query: "DROP DATABASE IF EXISTS rovenue" });
+      assertOk(
+        "mc rm --recursive (empty bucket for plaintext restore)",
+        await runCmd("mc", ["rm", "--recursive", "--force", `${MC_ALIAS}/${ASSET_BUCKET}/`]),
+      );
+
+      // restore.sh must read encrypted=false from the manifest and skip
+      // BACKUP_AGE_IDENTITY entirely, not assume every backup is encrypted.
+      const restoreResult = await runCmd(
+        "bash",
+        [RESTORE_SH, "--from", plainOutDir, "--mc-alias", MC_ALIAS],
+        { cwd: ROOT_DIR, env: scriptEnv, timeout: 240_000 },
+      );
+      assertOk("restore.sh (plaintext backup)", restoreResult);
+
+      const restoredSubscriber = await queryOne<{ id: string }>(
+        pgUrl,
+        "SELECT id FROM subscribers WHERE id = $1",
+        [plainSubscriberId],
+      );
+      expect(restoredSubscriber?.id).toBe(plainSubscriberId);
+    },
+    ROUND_TRIP_TEST_TIMEOUT_MS,
+  );
+
+  // Guard 3's refusal path never fired in the round-trip test above (it
+  // always drops everything before restoring), so inverting
+  // check_existing_tables's condition would go unnoticed. By this point
+  // in the suite the target Postgres already has Rovenue tables (from the
+  // tests above) — exactly the condition Guard 3 exists to catch.
+  it(
+    "Guard 3 refuses to restore into a non-empty database without --force",
+    async () => {
+      const guardOutDir = await mkdtemp(path.join(tmpdir(), "rovenue-backup-it-guard3-out-"));
+      registerCleanup(async () => {
+        await rm(guardOutDir, { recursive: true, force: true });
+      });
+
+      const backupResult = await runCmd(
+        "bash",
+        [BACKUP_SH, "--out", guardOutDir, "--mc-alias", MC_ALIAS],
+        { cwd: ROOT_DIR, env: scriptEnv, timeout: 180_000 },
+      );
+      assertOk("backup.sh (for Guard 3 probe)", backupResult);
+
+      const preCount = await countRows(pgUrl, "subscribers");
+      expect(preCount).toBeGreaterThan(0);
+
+      const restoreResult = await runCmd(
+        "bash",
+        [RESTORE_SH, "--from", guardOutDir, "--mc-alias", MC_ALIAS],
+        { cwd: ROOT_DIR, env: scriptEnv, timeout: 60_000 },
+      );
+
+      expect(restoreResult.code).not.toBe(0);
+      expect(restoreResult.stderr).toContain("already has Rovenue tables");
+      expect(restoreResult.stderr).toContain("--force");
+
+      // Refused BEFORE touching data — row count must be untouched.
+      const postCount = await countRows(pgUrl, "subscribers");
+      expect(postCount).toBe(preCount);
     },
     ROUND_TRIP_TEST_TIMEOUT_MS,
   );
