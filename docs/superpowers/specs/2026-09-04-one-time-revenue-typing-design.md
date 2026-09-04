@@ -94,9 +94,11 @@ Out of scope, deliberately:
 
 - **Backfilling historical rows.** Rows written before this ships keep
   `INITIAL`. `mv_mrr_daily`'s gross/net does not partition by type
-  (`0006_mv_mrr_daily.sql:30` splits refund vs non-refund only), so total
-  revenue does not move; only the decomposition and the credit metrics
-  change, and only going forward. Stated in the docs.
+  (`0006_mv_mrr_daily.sql:30` splits refund vs non-refund only), so the
+  headline revenue series does not move for history. Every *other*
+  consumer filters by an explicit type list and therefore does change
+  going forward — see §3.8, which is where most of this work lives.
+  Stated in the docs.
 - Stripe `customer.subscription.updated`'s prior `cancel_at_period_end`
   (§6's other named exclusion, unchanged).
 - Non-funnel Stripe one-time checkout — no such flow exists today.
@@ -185,11 +187,20 @@ in the **same transaction**:
 
 - `createRevenueEvent(tx, …)` with the type from §3.1, `amount`/`currency`
   from the funnel purchase row already in hand.
-- `amountUsd` from `convertToUsd(amount, currency, eventDate, tx)`. The
-  function's ladder is Redis → `fx_rates` in Postgres → a static table
-  (`services/fx.ts:94-142`); it makes **no** HTTP call, and passing `tx`
-  keeps the `fx_rates` read on the connection already held rather than
-  taking a second one while a transaction is open.
+- `amountUsd` is computed **before the transaction opens**, not inside it.
+  `completeFunnelPurchase` reads the funnel purchase row (`findBySession`)
+  once outside the transaction, converts with
+  `convertToUsd(amount, currency, eventDate)`, and passes the resulting
+  number in. The transaction re-reads the row anyway — that read is what
+  decides the paid/already-paid race — so the extra read is cheap and
+  changes no semantics.
+
+  This matters because `convertToUsd`'s ladder is Redis → `fx_rates` in
+  Postgres → a static table (`services/fx.ts:94-142`): no HTTP, but two
+  Redis round trips. This transaction sits on the paid-conversion critical
+  path and holds the `funnel_claim_tokens.session_id` unique-index race;
+  a cache round trip does not belong inside it. Hoisting it out also
+  removes the `tx as Db` cast the alternative would have needed.
 - `dedupeKey: stripe:<paymentIntentId>:purchase` via `revenueDedupeKind`, so
   the `/confirm` and webhook-backstop racers converge on one key.
 - `country` deliberately omitted: a PaymentIntent carries no
@@ -254,11 +265,105 @@ conditional type asserts both directions:
 Drift fails `tsc`. This is the guard that would have caught `REACTIVATION`
 on the day it was added, and a compile error beats a test somebody can skip.
 
+It does **not** cover SQL type allow-lists — a string literal inside a
+query is invisible to the type system. That axis is closed by the named
+groupings and the ClickHouse contract test in §3.8.
+
 `CREDIT_PURCHASE`'s "public key with no producer" cannot be caught
 statically. It is instead documented: `outbound-webhooks.mdx` gains a table
 naming, for each revenue key, which store and which code path produces it —
 the same shape as the per-store paused/recovered coverage table shipped on
 2026-09-03.
+
+### 3.8 The allow-lists — where most of this work actually is
+
+Adding an enum value is the small half. Revenue types are enumerated by
+hand in fourteen places, and an `IN (…)` allow-list drops a new type
+silently — the SQL form of the `Partial<Record>` failure this project has
+already been bitten by twice.
+
+That these lists are unmaintained is not a hypothesis. **`CHARGEBACK`
+appears in eight predicates and has never been a `RevenueEventType`
+value** — `enums.ts:93` lists seven values, and `git log -S CHARGEBACK`
+on that file returns nothing, so no row can ever have carried it. The
+lists have already drifted from the enum in both directions.
+
+Every site gets an explicit ruling, recorded in the implementation
+ledger. Shipping without a ruling per site would turn "invisible
+everywhere" into "visible in `mv_mrr_daily` only".
+
+**Named groupings replace the inline literals** (project rule: no magic
+values). One decision point per grouping instead of fourteen:
+
+| Constant | Members | Rationale |
+|---|---|---|
+| `ALL_REVENUE_TYPES` | derived from `revenueEventType.enumValues` | today hand-copied *twice* (`overview.ts:39`, `transactions.ts:171`); both become one import, and a new value can no longer be forgotten |
+| `REVENUE_TYPES_MONEY_OUT` | `REFUND`, `CHARGEBACK` | behaviour preserved exactly; `CHARGEBACK` is declared in the guard's exemption list as a phantom retained as a no-op, with "do not add new uses" |
+| `REVENUE_TYPES_PURCHASE_COUNT` | `INITIAL`, `REACTIVATION`, `CREDIT_PURCHASE`, `NON_RENEWING_PURCHASE` | "a purchase happened" — a one-time buy is one |
+| `REVENUE_TYPES_NEW_RECURRING` | `INITIAL`, `TRIAL_CONVERSION` | unchanged; one-time revenue must stay out of a *recurring* MRR decomposition — the whole reason for the new type |
+| `REVENUE_TYPES_LIFETIME_PURCHASED` | money-in minus `CANCELLATION` (a $0 marker), **plus** `NON_RENEWING_PURCHASE` | lifetime value must include money the subscriber actually paid |
+
+Per-site rulings:
+
+- `overview.ts:39`, `transactions.ts:171` → `ALL_REVENUE_TYPES`. These
+  feed `isKnownRevenueType`, so a missing value is dropped or mislabelled
+  rather than merely uncounted.
+- `transactions.ts:55` (`SCOPE_TYPES.purchase`), `:611` →
+  `REVENUE_TYPES_PURCHASE_COUNT`.
+- `transactions.ts:613`, `:724`, `summary.ts:73-75`,
+  `mrr-decomposition.ts:61`, `mv_mrr_daily` → `NOT IN` money-out. **Safe
+  as written**: a new type is included automatically. Left alone beyond
+  the constant swap; noted so a reviewer does not go looking.
+- `mrr-decomposition.ts:58`, `:133` → `REVENUE_TYPES_NEW_RECURRING`,
+  unchanged in membership.
+- `v_revenue_lifetime_subscriber` (`0014_refund_sign_robust_aggregates.sql:50`)
+  → `REVENUE_TYPES_LIFETIME_PURCHASED`. A new ClickHouse migration
+  redefines the view; it is a query-time view, so no data is rewritten.
+- `analytics-router.ts:288, 354, 369, 442, 521` — the experiment-results
+  and placement revenue engine. Its gross list excludes `CREDIT_PURCHASE`
+  today, so a paywall experiment already fails to count coin-pack
+  revenue. Ruled **in**: an experiment's revenue must count every sale it
+  caused. Becomes money-in.
+- `charts.ts:729` (`PURCHASE_NUMERATOR_EVENT_TYPE`) → gains
+  `NON_RENEWING_PURCHASE` and `CREDIT_PURCHASE`, and stops being a single
+  literal. The file's own argument decides it: `RENEWAL`,
+  `REACTIVATION` and `TRIAL_CONVERSION` are excluded because they *lag*
+  the paywall view that earned them. A one-time purchase has no lag — it
+  is the same-day conversion this numerator exists to count.
+- `ltv-prediction.ts:56` — the cohort *anchor* (`joins`). Ruled
+  **unchanged**: a coin-pack buyer is not a member of a subscription
+  cohort, and anchoring them there would project recurring revenue for
+  someone who bought once. Documented as a deliberate exclusion.
+- `credits.ts:299`, `:391` — left exactly as they are. These are the
+  queries that read zero today; §3.1 is what makes them return money.
+
+### 3.9 Existing integration connections must not lose events
+
+`integration_connections.enabled_events` is a stored `text[]`
+(`schema.ts:3114`) written from whatever the dashboard submits
+(`routes/dashboard/integrations.ts:326`) — there is no defaulting to the
+catalog. So a connection created before this release holds an array that
+cannot contain a key that did not exist.
+
+Today a coin-pack purchase reaches those connections as `revenue.INITIAL`,
+which is enabled. After §3.1 the same purchase becomes
+`revenue.CREDIT_PURCHASE` (enabled only if the operator ticked it) or
+`revenue.NON_RENEWING_PURCHASE` (impossible on an existing row). Shipping
+§3.1 alone would therefore **stop deliveries that work today** — a silent
+regression on live customer integrations.
+
+A data migration widens every existing connection that has
+`revenue.INITIAL` enabled to also enable `revenue.CREDIT_PURCHASE` and
+`revenue.NON_RENEWING_PURCHASE`. Rationale: those connections have already
+declared that they want to hear about purchases; the change splits one key
+into three without changing what the operator asked for. Connections that
+do not have `revenue.INITIAL` enabled are left untouched — they opted out
+of purchase events and this must not opt them back in.
+
+`revenue.REACTIVATION` is deliberately **not** added by that migration: it
+is a genuinely new signal nobody has ever received, so enabling it silently
+would be a change of behaviour rather than a preservation of one. It ships
+opt-in through the dashboard's event picker.
 
 ---
 
@@ -279,6 +384,18 @@ the same shape as the per-store paused/recovered coverage table shipped on
   fail `tsc`; a stale `DECLARED_OMISSIONS` entry must fail its test.
 - **Dedupe convergence:** `revenueDedupeKind(NON_RENEWING_PURCHASE)` is
   `"purchase"`, pinned.
+- **ClickHouse contract (§3.8):** the real
+  `v_revenue_lifetime_subscriber` SQL runs against a testcontainer
+  ClickHouse with one row of every `RevenueEventType`, and the test fails
+  **by name** on a type the view drops. The view is a SQL file and cannot
+  import the TypeScript constant, so this test is the only thing holding
+  the two in step. Precedent: the schema-contract test shipped in the
+  2026-09-01 analytics batch.
+- **No-loss on existing connections (§3.9):** a connection row with
+  `revenue.INITIAL` enabled receives a `NON_RENEWING_PURCHASE` envelope
+  after the migration; a connection without it still receives nothing.
+- **Allow-list rulings:** one assertion per grouping constant, so a future
+  enum value fails a named test rather than vanishing from a report.
 
 ## 5. Documentation
 
@@ -287,3 +404,7 @@ keys, the per-key producer table, `CREDIT_PURCHASE`'s meaning ("a consumable
 IAP"), `revenue.REACTIVATION`'s `metadata.reason` discriminator, and the
 plain statement that rows written before this release carry `INITIAL` for
 one-time purchases.
+
+Release notes carry the §3.9 migration in operator-facing terms: existing
+connections that receive purchase events keep receiving them, now split
+across three keys; `revenue.REACTIVATION` is available but opt-in.
