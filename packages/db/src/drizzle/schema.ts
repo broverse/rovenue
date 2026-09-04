@@ -437,6 +437,14 @@ export const subscribers = pgTable(
     // subscriber from an inbound webhook payload. See Refund Shield
     // design spec (docs/superpowers/specs/2026-05-28-refund-shield-design.md).
     appleAppAccountToken: uuid("apple_app_account_token"),
+    // Last time the entitlement drift reconciler
+    // (apps/api/src/workers/access-reconciliation.ts) checked this
+    // subscriber, independent of whether it found drift. NULL means
+    // "never checked" and must sort FIRST — a subscriber created before
+    // this worker existed has no evidence their access is correct.
+    lastAccessReconciledAt: timestamp("lastAccessReconciledAt", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -460,6 +468,13 @@ export const subscribers = pgTable(
     sdkInstalledAtIdx: index("subscribers_projectId_sdkInstalledAt_idx")
       .on(t.projectId, t.sdkInstalledAt)
       .where(sql`${t.sdkInstalledAt} IS NOT NULL`),
+    // Sole access path for the drift reconciler's candidate worklist
+    // (`selectAccessReconciliationCandidates`): "oldest checked first,
+    // never-checked first of all". NOT partial — the never-checked rows
+    // this must find are exactly the NULLs a partial index would omit.
+    accessReconciliationIdx: index("subscribers_access_reconciliation_idx").on(
+      t.lastAccessReconciledAt,
+    ),
   }),
 );
 

@@ -1,0 +1,2 @@
+ALTER TABLE "subscribers" ADD COLUMN "lastAccessReconciledAt" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "subscribers_access_reconciliation_idx" ON "subscribers" USING btree ("lastAccessReconciledAt");

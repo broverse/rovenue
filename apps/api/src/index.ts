@@ -13,6 +13,10 @@ import {
   scheduleGoogleReconciliation,
 } from "./workers/google-reconciliation";
 import {
+  createAccessReconciliationWorker,
+  scheduleAccessReconciliation,
+} from "./workers/access-reconciliation";
+import {
   createFxWorker,
   scheduleFxFetch,
 } from "./services/fx";
@@ -119,6 +123,18 @@ scheduleExpiryCheck().catch((err: unknown) => {
 createGoogleReconciliationWorker();
 scheduleGoogleReconciliation().catch((err: unknown) => {
   logger.error("failed to schedule google reconciliation sweep", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Entitlement drift reconciler — 30-minute repeatable BullMQ job that
+// re-derives every subscriber's desired access with the same function
+// syncAccess writes from, and heals what drifted behind a circuit
+// breaker that refuses to auto-repair an implausibly large batch (see
+// workers/access-reconciliation.ts).
+createAccessReconciliationWorker();
+scheduleAccessReconciliation().catch((err: unknown) => {
+  logger.error("failed to schedule access reconciliation sweep", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

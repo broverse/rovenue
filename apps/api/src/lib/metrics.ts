@@ -51,3 +51,37 @@ export const webhookEventsReclaimedTotal = new Counter({
   help: "Number of stale PROCESSING webhook_events rows reclaimed by the reaper",
   registers: [registry],
 });
+
+// =============================================================
+// Entitlement drift reconciler (workers/access-reconciliation.ts)
+// =============================================================
+
+// Incremented per drift class each time the reconciler finds a
+// subscriber whose `subscriber_access` rows disagree with what
+// `computeDesiredAccess` says they should be. A steady low rate is
+// expected on a busy install (a sweep can race a live webhook); a step
+// change means an ingestion path stopped calling syncAccess.
+export const accessDriftDetectedTotal = new Counter({
+  name: "rovenue_access_drift_detected_total",
+  help: "Subscribers found with subscriber_access drift, by drift class",
+  labelNames: ["class"] as const,
+  registers: [registry],
+});
+
+// Incremented once per subscriber the reconciler actually rewrote.
+export const accessDriftHealedTotal = new Counter({
+  name: "rovenue_access_drift_healed_total",
+  help: "Subscribers whose subscriber_access rows the reconciler rewrote",
+  registers: [registry],
+});
+
+// Incremented once per sweep that refused to heal because the batch's
+// drift ratio exceeded MAX_DRIFT_HEAL_RATIO. ALERT ON ANY NON-ZERO
+// VALUE: it means either a genuine mass-corruption incident or a bug in
+// `computeDesiredAccess` itself — in both cases the entitlement data is
+// untrustworthy and no automated repair should be allowed to proceed.
+export const accessDriftCircuitBreakerTotal = new Counter({
+  name: "rovenue_access_drift_circuit_breaker_total",
+  help: "Sweeps that refused to auto-heal because the batch drift ratio was above threshold",
+  registers: [registry],
+});

@@ -1,10 +1,11 @@
-import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { store } from "../enums";
 import {
   products,
   purchases,
   subscriberAccess,
+  subscribers,
   type SubscriberAccessRow,
 } from "../schema";
 
@@ -231,4 +232,69 @@ export async function revokeAccessByPurchaseId(
     .update(subscriberAccess)
     .set({ isActive: false })
     .where(eq(subscriberAccess.purchaseId, purchaseId));
+}
+
+// =============================================================
+// Entitlement drift reconciliation — worklist
+// =============================================================
+//
+// Read by apps/api/src/workers/access-reconciliation.ts. The worklist
+// lives here rather than in the worker so it stays a Drizzle query
+// against the same schema every other access read uses.
+
+export interface AccessReconciliationCandidate {
+  id: string;
+  projectId: string;
+}
+
+/**
+ * Subscribers due an entitlement drift check: never checked (NULL sorts
+ * first), or not checked within `staleBefore`. Bounded by `limit` — the
+ * caller's named per-sweep constant.
+ *
+ * Deliberately NOT project-scoped: drift is a property of the write
+ * path, not of a project, so a sweep that only ever looked at one
+ * project would leave every other project unchecked.
+ *
+ * Served by `subscribers_access_reconciliation_idx`.
+ */
+export async function selectAccessReconciliationCandidates(
+  db: Db,
+  args: { staleBefore: Date; limit: number },
+): Promise<AccessReconciliationCandidate[]> {
+  return db
+    .select({ id: subscribers.id, projectId: subscribers.projectId })
+    .from(subscribers)
+    .where(
+      or(
+        isNull(subscribers.lastAccessReconciledAt),
+        lt(subscribers.lastAccessReconciledAt, args.staleBefore),
+      ),
+    )
+    // Raw, qualified SQL because Drizzle's `asc()` has no NULLS FIRST
+    // modifier. Qualified per CLAUDE.md — a bare `${subscribers.col}`
+    // renders unqualified.
+    .orderBy(sql`"subscribers"."lastAccessReconciledAt" ASC NULLS FIRST`)
+    .limit(args.limit);
+}
+
+/**
+ * Record that the reconciler looked at these subscribers, whatever it
+ * found. Stamped rows drop out of the candidate set until they go stale
+ * again, so successive sweeps drain the population rather than
+ * re-scanning its head.
+ *
+ * Takes the whole batch: a sweep stamps up to its per-run cap of rows,
+ * and one statement beats that many round-trips.
+ */
+export async function stampAccessReconciled(
+  db: DbOrTx,
+  subscriberIds: string[],
+  at: Date,
+): Promise<void> {
+  if (subscriberIds.length === 0) return;
+  await db
+    .update(subscribers)
+    .set({ lastAccessReconciledAt: at })
+    .where(inArray(subscribers.id, subscriberIds));
 }

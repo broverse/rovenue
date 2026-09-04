@@ -166,7 +166,13 @@ export type AuditAction =
   | "import.cancelled"
   | "import.resumed"
   // --- final-fix-wave FIX 6: sandbox/anchorless opt-in actually wired ---
-  | "import.options_updated";
+  | "import.options_updated"
+  // --- entitlement drift reconciler (workers/access-reconciliation.ts) ---
+  // Written once per subscriber whose `subscriber_access` rows the sweep
+  // rewrote. `resource` is "subscriber"; before/after carry the access
+  // row summaries and the drift classes that were detected, so an
+  // operator can tell an automated repair apart from a webhook write.
+  | "access.drift_repaired";
 
 export type AuditResource =
   | "audience"
