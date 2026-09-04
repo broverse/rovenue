@@ -253,6 +253,18 @@ jobs:
     name: Publish Flutter (pub.dev)
     # rovenue_flutter_ios depends on the `Rovenue` pod from Trunk, so the
     # Swift publish must land first. Previously a comment; now an edge.
+    #
+    # Effect: a run with swift: false skips this job too — a skipped `needs`
+    # job fails the implicit success() gate GitHub Actions uses to decide
+    # whether a dependent job runs. This is deliberate, not a bug: this repo
+    # has never published anything, so the first release is swift+flutter
+    # together, and a soft edge (e.g. `if: always() && !failure()`) would only
+    # prove Swift didn't fail *in this run*, not that the pod is live on
+    # Trunk at this version — the actual invariant rovenue_flutter_ios needs.
+    # If you hit the skip and need Flutter alone: either re-run with
+    # swift: true so publish-swift republishes in the same run, or — only
+    # once you've independently confirmed the Rovenue pod is live on Trunk
+    # at the pinned version — deliberately relax this edge.
     needs: [verify, publish-swift]
     if: ${{ inputs.flutter }}
     runs-on: ubuntu-latest
