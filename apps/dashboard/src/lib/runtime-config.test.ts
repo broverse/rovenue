@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_API_BASE_URL, resolveRuntimeConfig } from "./runtime-config";
 
 describe("resolveRuntimeConfig", () => {
@@ -57,5 +57,37 @@ describe("resolveRuntimeConfig", () => {
       allowRegistration: "true",
       dashboardHost: "app.example.com",
     });
+  });
+});
+
+// The suite above only covers the pure resolveRuntimeConfig function. It
+// never exercises the module-scope read of window.__ROVENUE_CONFIG__ or the
+// four exported accessors — so renaming that global, or making apiBaseUrl()
+// return the default, would still pass the whole suite. That is exactly the
+// published-image bug this module exists to prevent, so this suite drives
+// the module the way the real app does: set the global, THEN import.
+describe("runtime-config module wiring", () => {
+  afterEach(() => {
+    delete window.__ROVENUE_CONFIG__;
+  });
+
+  it("resolves apiBaseUrl/hostModeValue/allowRegistrationValue/dashboardHostValue from window.__ROVENUE_CONFIG__", async () => {
+    window.__ROVENUE_CONFIG__ = {
+      apiUrl: "https://runtime.example.com",
+      hostMode: "cloud",
+      allowRegistration: "true",
+      dashboardHost: "runtime.example.com",
+    };
+
+    // The module resolves its config once, at module-evaluation time (see
+    // the top-level `const resolved = ...` in runtime-config.ts), so the
+    // global must be set BEFORE the module is (re-)imported.
+    vi.resetModules();
+    const mod = await import("./runtime-config");
+
+    expect(mod.apiBaseUrl()).toBe("https://runtime.example.com");
+    expect(mod.hostModeValue()).toBe("cloud");
+    expect(mod.allowRegistrationValue()).toBe("true");
+    expect(mod.dashboardHostValue()).toBe("runtime.example.com");
   });
 });
