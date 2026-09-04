@@ -3,6 +3,10 @@
 Production deploy via Docker Compose (Coolify-ready). All commands run
 from the repo root on the host.
 
+This document covers the **first install**. For moving an existing install
+to a new version, see [`upgrade.md`](./upgrade.md). For what's backed up
+and how to restore it, see [`backup-restore.md`](./backup-restore.md).
+
 ## 0. Prerequisites
 - Docker + Compose v2.
 - DNS A records for `rovenue.io`, `edge.rovenue.io`, `app.rovenue.io`,
@@ -35,7 +39,9 @@ run it explicitly the first time:
 
 ## 4. Start everything
     docker compose up -d
-`api` and the four workers wait for `migrate` to exit 0.
+`api` and the five workers (`dispatcher`, `notifier-worker`,
+`digest-scheduler`, `send-email-worker`, `send-push-worker`) wait for
+`migrate` to exit 0.
 
 ## 5. (Optional) Seed dev data
     docker compose run --rm migrate pnpm --filter @rovenue/db seed
@@ -188,16 +194,27 @@ Caddy block matches the wrong hostname — see the file's own comments for what
 each header is for.
 
 ## Invariants
-- **Single dispatcher:** only `api` has `OUTBOX_DISPATCHER_ENABLED=true`
-  and stays `replicas: 1`. Workers force it `false`. Two dispatchers
-  double-count ClickHouse revenue aggregates.
-  See `docs/architecture/outbox-dispatcher.md`.
+- **Single dispatcher:** only the dedicated `dispatcher` service has
+  `OUTBOX_DISPATCHER_ENABLED=true` and stays `replicas: 1`. `api` and every
+  worker force it `false`. Two dispatchers double-count ClickHouse revenue
+  aggregates. See `docs/architecture/outbox-dispatcher.md`.
 - **Persist `caddy-data`:** losing it re-issues every TLS cert and risks
   Let's Encrypt rate limits.
 - **`VITE_API_URL` is build-time:** changing the api origin requires
   rebuilding the `dashboard` image (`docker compose build dashboard`).
 
 ## Rollback
+
+This section is about an **upgrade** going wrong, not the first install
+above — see [`upgrade.md`](./upgrade.md#10-rollback) for the full
+treatment. Stated plainly here too, because it's easy to get wrong:
+Postgres migrations are forward-only, so rolling back the *image* to a
+previous tag is safe only when that release's notes say the schema is
+unchanged. Otherwise the new schema is already in place and rollback means
+restoring the backup taken before the upgrade
+([`backup-restore.md`](./backup-restore.md)), not just checking out old
+code.
+
+    # Only after confirming the release notes say the schema is unchanged:
     docker compose down       # keeps named volumes (data safe)
     git checkout <prev-tag> && docker compose up -d --build
-Migrations are forward-only; roll back code, not schema.
