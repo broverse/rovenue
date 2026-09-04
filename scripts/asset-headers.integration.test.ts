@@ -30,6 +30,14 @@
 // binds no fixed host port (unlike the Kafka-advertised-address suites) —
 // testcontainers assigns an ephemeral one, so no host-port-allocations
 // registry entry is needed.
+//
+// Lives in scripts/ (its subject's own package, @rovenue/scripts) rather
+// than apps/api: apps/api's tsconfig pins rootDir to "./src" for its build
+// (tsup && tsc --noEmit), and this file's whole point is importing
+// verify-asset-headers.ts directly — not copying it — which would cross
+// that rootDir boundary from inside apps/api and break `pnpm --filter
+// @rovenue/api build` (TS6059). Here the import is local, no boundary is
+// crossed, and no apps/api config needs loosening.
 
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -40,7 +48,7 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { ASSET_CACHE_MAX_AGE_SECONDS } from "@rovenue/shared";
-import { verifyAssetHeaders } from "../../../../../scripts/verify-asset-headers";
+import { verifyAssetHeaders } from "./verify-asset-headers";
 
 // Same tag docker-compose.yml pins for the `minio` service — keeping the
 // version identical means "it worked in this test" says something about
