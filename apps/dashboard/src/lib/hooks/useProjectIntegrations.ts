@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import type { IntegrationProviderId } from "@rovenue/shared";
 import { api } from "../api";
+import { apiBaseUrl } from "../runtime-config";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -115,7 +116,7 @@ export function useDeleteIntegration(projectId: string) {
   return useMutation({
     mutationFn: async (connectionId: string) => {
       // DELETE returns 204 with no envelope — bypass api() unwrap.
-      const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+      const BASE_URL = apiBaseUrl();
       const res = await fetch(
         `${BASE_URL}/dashboard/projects/${projectId}/integrations/${connectionId}`,
         { method: "DELETE", credentials: "include" },

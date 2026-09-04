@@ -4,6 +4,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { api } from "../api";
+import { apiBaseUrl } from "../runtime-config";
 
 export interface PushDevice {
   id: string;
@@ -58,7 +59,7 @@ export function useRevokePushDevice() {
       // The endpoint returns 204 No Content; api() expects a JSON
       // envelope, so we go straight to fetch and trust the status.
       const res = await fetch(
-        `${import.meta.env.VITE_API_URL ?? "http://localhost:3000"}/dashboard/push-devices/${id}`,
+        `${apiBaseUrl()}/dashboard/push-devices/${id}`,
         { method: "DELETE", credentials: "include" },
       );
       if (!res.ok && res.status !== 204) {

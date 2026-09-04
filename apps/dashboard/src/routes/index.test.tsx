@@ -58,11 +58,11 @@ vi.mock("../lib/auth", () => ({
   getSession: vi.fn(async () => ({ data: null as { user: unknown } | null })),
 }));
 
-// `dashboardHostEnv` is derived from `import.meta.env` at module load,
+// `dashboardHostEnv` is derived from lib/runtime-config.ts at module load,
 // same idiom as lib/host-mode.ts — swap it for a mutable test double so
 // each test can drive `isCanonicalDashboardHost` (kept real) without
 // stubbing `import.meta.env`.
-const hostEnv = vi.hoisted<{ VITE_DASHBOARD_HOST?: string }>(() => ({}));
+const hostEnv = vi.hoisted<{ dashboardHost?: string }>(() => ({}));
 vi.mock("../lib/custom-host", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/custom-host")>();
   return { ...actual, dashboardHostEnv: hostEnv };
@@ -118,7 +118,7 @@ describe("custom-domain funnel serving", () => {
   beforeEach(() => {
     queryClient.clear();
     redirectMock.mockClear();
-    hostEnv.VITE_DASHBOARD_HOST = undefined;
+    hostEnv.dashboardHost = undefined;
     // The lookup is memoised for the life of the document so `/` and the
     // root outlet cannot ask twice and get different answers. Each test is
     // a fresh document, so drop it here.
@@ -131,7 +131,7 @@ describe("custom-domain funnel serving", () => {
 
   it("renders the funnel runner on a host that resolves", async () => {
     setHostname("quiz.acme.com");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
     const lookupMock = vi.fn();
     server.use(
       http.get(`${API_BASE_URL}/public/host/lookup`, ({ request }) => {
@@ -166,7 +166,7 @@ describe("custom-domain funnel serving", () => {
     // that says "funnel" while the route says "dashboard" would render a
     // contradiction.
     setHostname("quiz.acme.com");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
     const lookupMock = vi.fn();
     server.use(
       http.get(`${API_BASE_URL}/public/host/lookup`, () => {
@@ -191,7 +191,7 @@ describe("custom-domain funnel serving", () => {
     // funnel, leaving a blank screen. One lookup, one answer; a failure
     // is surfaced honestly instead (see the unavailable-page test).
     setHostname("quiz.acme.com");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
     const lookupMock = vi.fn();
     server.use(
       http.get(`${API_BASE_URL}/public/host/lookup`, () => {
@@ -214,7 +214,7 @@ describe("custom-domain funnel serving", () => {
     // credential-looking page on DNS we do not own. A definitive 404 is
     // different and still falls through to the dashboard.
     setHostname("quiz.acme.com");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
     server.use(
       http.get(`${API_BASE_URL}/public/host/lookup`, () =>
         HttpResponse.json(
@@ -232,7 +232,7 @@ describe("custom-domain funnel serving", () => {
 
   it("remembers a 404 — that IS an answer", async () => {
     setHostname("not-ours.example.com");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
     const lookupMock = vi.fn();
     server.use(
       http.get(`${API_BASE_URL}/public/host/lookup`, () => {
@@ -252,7 +252,7 @@ describe("custom-domain funnel serving", () => {
 
   it("keeps the dashboard landing behaviour on the canonical host", async () => {
     setHostname("app.rovenue.io");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
     const lookupMock = vi.fn();
     server.use(
       http.get(`${API_BASE_URL}/public/host/lookup`, () => {
@@ -276,7 +276,7 @@ describe("custom-domain funnel serving", () => {
 
   it("keeps the dashboard landing behaviour when the host resolves to nothing", async () => {
     setHostname("quiz.acme.com");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
     server.use(
       http.get(`${API_BASE_URL}/public/host/lookup`, () =>
         HttpResponse.json(
@@ -294,7 +294,7 @@ describe("custom-domain funnel serving", () => {
 
   it("renders the funnel runner for a non-root path on a resolving host", async () => {
     setHostname("quiz.acme.com");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
     server.use(
       http.get(`${API_BASE_URL}/public/host/lookup`, () =>
         HttpResponse.json({ data: { funnelId: "fun_1", slug: "quiz" } }),
@@ -309,7 +309,7 @@ describe("custom-domain funnel serving", () => {
 
   it("still renders the login form on the canonical host", async () => {
     setHostname("app.rovenue.io");
-    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    hostEnv.dashboardHost = "app.rovenue.io";
 
     renderApp("/login");
 

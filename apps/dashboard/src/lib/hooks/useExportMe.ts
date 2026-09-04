@@ -1,7 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
 import { ApiError } from "../api";
+import { apiBaseUrl } from "../runtime-config";
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+const BASE_URL = apiBaseUrl();
 
 /**
  * Fetches the GDPR Art. 15 dump and drives a browser download.

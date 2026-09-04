@@ -10,8 +10,10 @@
 // Pure function + env-shaped argument, mirroring lib/host-mode.ts, so
 // tests never have to stub `import.meta.env`.
 
+import { dashboardHostValue } from "./runtime-config";
+
 export interface CustomHostEnv {
-  VITE_DASHBOARD_HOST?: string | undefined;
+  dashboardHost?: string | undefined;
 }
 
 /** Strip an optional :port and lowercase, matching the API-side
@@ -33,11 +35,11 @@ export function isCanonicalDashboardHost(
   env: CustomHostEnv,
   hostname: string,
 ): boolean {
-  const configured = env.VITE_DASHBOARD_HOST;
+  const configured = env.dashboardHost;
   if (!configured) return false;
   return normalize(configured) === normalize(hostname);
 }
 
 export const dashboardHostEnv: CustomHostEnv = {
-  VITE_DASHBOARD_HOST: import.meta.env.VITE_DASHBOARD_HOST as string | undefined,
+  dashboardHost: dashboardHostValue(),
 };

@@ -1,16 +1,19 @@
 /**
- * Build-time deployment-mode flags, mirrored from the API's HOST_MODE helper.
+ * Deployment-mode flags, mirrored from the API's HOST_MODE helper.
  *
- * Self-hosters set VITE_HOST_MODE=self (the default) at image build time.
- * Rovenue Cloud sets VITE_HOST_MODE=cloud.
+ * Values come from lib/runtime-config.ts — the container's /config.js at
+ * runtime, or the VITE_* build args in a from-source build. Self-hosters
+ * get `self` (the default); Rovenue Cloud sets `cloud`.
  *
  * Export a pure `computeHostMode(env)` so unit tests can drive it without
  * needing to stub `import.meta.env` at module-evaluation time.
  */
 
+import { allowRegistrationValue, hostModeValue } from "./runtime-config";
+
 export interface HostModeEnv {
-  VITE_HOST_MODE?: string;
-  VITE_ALLOW_REGISTRATION?: string;
+  hostMode?: string;
+  allowRegistration?: string;
 }
 
 export interface HostModeFlags {
@@ -26,8 +29,8 @@ export interface HostModeFlags {
  * Constants below are derived from `import.meta.env` at module load time.
  */
 export function computeHostMode(env: HostModeEnv): HostModeFlags {
-  const hostMode = env.VITE_HOST_MODE ?? "self";
-  const allowRegistrationRaw = env.VITE_ALLOW_REGISTRATION;
+  const hostMode = env.hostMode ?? "self";
+  const allowRegistrationRaw = env.allowRegistration;
 
   const isCloud = hostMode === "cloud";
   const isSelfHosted = !isCloud;
@@ -42,8 +45,8 @@ export function computeHostMode(env: HostModeEnv): HostModeFlags {
 }
 
 const _flags = computeHostMode({
-  VITE_HOST_MODE: import.meta.env.VITE_HOST_MODE as string | undefined,
-  VITE_ALLOW_REGISTRATION: import.meta.env.VITE_ALLOW_REGISTRATION as string | undefined,
+  hostMode: hostModeValue(),
+  allowRegistration: allowRegistrationValue(),
 });
 
 export const isCloud = _flags.isCloud;

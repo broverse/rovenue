@@ -4,13 +4,13 @@ import { isCanonicalDashboardHost } from "./custom-host";
 describe("isCanonicalDashboardHost", () => {
   it("is true when the hostname matches the configured dashboard host", () => {
     expect(
-      isCanonicalDashboardHost({ VITE_DASHBOARD_HOST: "app.rovenue.io" }, "app.rovenue.io"),
+      isCanonicalDashboardHost({ dashboardHost: "app.rovenue.io" }, "app.rovenue.io"),
     ).toBe(true);
   });
 
   it("is false for a different hostname", () => {
     expect(
-      isCanonicalDashboardHost({ VITE_DASHBOARD_HOST: "app.rovenue.io" }, "quiz.acme.com"),
+      isCanonicalDashboardHost({ dashboardHost: "app.rovenue.io" }, "quiz.acme.com"),
     ).toBe(false);
   });
 
@@ -23,7 +23,7 @@ describe("isCanonicalDashboardHost", () => {
 
   it("ignores case and a port suffix", () => {
     expect(
-      isCanonicalDashboardHost({ VITE_DASHBOARD_HOST: "App.Rovenue.IO:5173" }, "app.rovenue.io"),
+      isCanonicalDashboardHost({ dashboardHost: "App.Rovenue.IO:5173" }, "app.rovenue.io"),
     ).toBe(true);
   });
 });

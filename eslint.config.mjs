@@ -24,4 +24,23 @@ export default [
       "@typescript-eslint/consistent-type-imports": "warn",
     },
   },
+  {
+    // Deployment config is read in exactly one place. Vite inlines
+    // import.meta.env.VITE_* at BUILD time, so a direct read anywhere else
+    // silently re-breaks the published dashboard image — a bug that never
+    // reproduces in dev and never fails a test.
+    files: ["apps/dashboard/src/**/*.ts", "apps/dashboard/src/**/*.tsx"],
+    ignores: ["apps/dashboard/src/lib/runtime-config.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "MemberExpression[object.object.type='MetaProperty'][property.name=/^VITE_/]",
+          message:
+            "Read deployment config through lib/runtime-config.ts. Vite inlines VITE_* at build time, which a published image cannot override.",
+        },
+      ],
+    },
+  },
 ];

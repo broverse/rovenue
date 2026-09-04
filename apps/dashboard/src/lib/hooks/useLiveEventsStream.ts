@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { LiveEventMessage } from "@rovenue/shared";
+import { apiBaseUrl } from "../runtime-config";
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+const BASE_URL = apiBaseUrl();
 
 export type LiveEventsStatus = "connecting" | "open" | "error" | "closed";
 

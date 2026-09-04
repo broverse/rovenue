@@ -1,8 +1,8 @@
 import { hc, type InferRequestType, type InferResponseType } from "hono/client";
 import type { AppType } from "@rovenue/api";
+import { apiBaseUrl } from "./runtime-config";
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+export const API_BASE_URL = apiBaseUrl();
 
 export class ApiError extends Error {
   constructor(

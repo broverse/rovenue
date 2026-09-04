@@ -9,8 +9,9 @@ import type {
   CreditHistoryResponse,
 } from "@rovenue/shared";
 import { ApiError, api } from "../api";
+import { apiBaseUrl } from "../runtime-config";
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+const BASE_URL = apiBaseUrl();
 
 interface IdVars {
   id: string;

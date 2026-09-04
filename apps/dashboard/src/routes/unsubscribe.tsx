@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
+import { apiBaseUrl } from "../lib/runtime-config";
 
 // =============================================================
 // /unsubscribe — public RFC 8058 confirmation page
@@ -13,7 +14,7 @@ import { Button } from "../ui/button";
 //
 // No auth required — the token IS the auth.
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+const API_BASE = apiBaseUrl();
 
 interface Search {
   token?: string;

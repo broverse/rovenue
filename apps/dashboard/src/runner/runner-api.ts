@@ -15,8 +15,9 @@
 // =============================================================
 
 import type { Page, Theme } from "../components/funnel-builder/types";
+import { apiBaseUrl } from "../lib/runtime-config";
 
-const BASE_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3000") as string;
+const BASE_URL = apiBaseUrl();
 
 export class RunnerApiError extends Error {
   constructor(
