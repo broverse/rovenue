@@ -1757,8 +1757,9 @@
         "title": "Locales",
         "default": "default",
         "remove": "Remove {{locale}}",
-        "addPlaceholder": "e.g. tr",
-        "add": "Add locale"
+        "addPlaceholder": "Search languages",
+        "add": "Add locale",
+        "useCustom": "Use custom code"
       },
       "validation": {
         "title": "Paywall issues",

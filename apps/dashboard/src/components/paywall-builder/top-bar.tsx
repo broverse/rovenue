@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { component, useService } from "impair";
 import { Link } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
@@ -20,6 +20,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { localeLabel, searchLocales } from "@rovenue/shared/i18n";
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { VersionMenu } from "./version-menu";
@@ -306,6 +307,21 @@ const LocaleSwitcher = component(() => {
   const [open, setOpen] = useState(false);
   const [newLocale, setNewLocale] = useState("");
 
+  // Store locales this paywall does not already carry. Matched
+  // case-insensitively against what is on the config, because `addLocale`
+  // lowercases what it stores while the store list keeps `zh-Hans` as the
+  // stores write it — comparing raw would offer a locale that is already
+  // there.
+  const suggestions = useMemo(() => {
+    const present = new Set(vm.locales.map((l) => l.toLowerCase()));
+    return searchLocales(newLocale).filter((code) => !present.has(code.toLowerCase()));
+  }, [newLocale, vm.locales]);
+
+  const addAndReset = (code: string) => {
+    vm.addLocale(code);
+    setNewLocale("");
+  };
+
   return (
     <div className="relative">
       <button
@@ -359,29 +375,66 @@ const LocaleSwitcher = component(() => {
                 )}
               </div>
             ))}
-            <form
-              className="mt-1.5 flex items-center gap-1 border-t border-rv-divider pt-1.5"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!newLocale.trim()) return;
-                vm.addLocale(newLocale);
-                setNewLocale("");
-              }}
-            >
-              <input
-                value={newLocale}
-                onChange={(e) => setNewLocale(e.currentTarget.value)}
-                placeholder={t("paywalls.builder.locales.addPlaceholder", "e.g. tr")}
-                className="h-7 min-w-0 flex-1 rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
-              />
-              <button
-                type="submit"
-                title={t("paywalls.builder.locales.add", "Add locale")}
-                className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
+            {/* Adding a locale used to be a free-text box, so a typo produced a
+                locale table no device will ever ask for. It is now a search
+                over the store localization set, with the typed code kept as an
+                escape hatch for anywhere the stores do not localize. */}
+            <div className="mt-1.5 border-t border-rv-divider pt-1.5">
+              <form
+                className="flex items-center gap-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const first = suggestions[0];
+                  if (first !== undefined) {
+                    addAndReset(first);
+                  } else if (newLocale.trim()) {
+                    addAndReset(newLocale);
+                  }
+                }}
               >
-                <Plus size={12} />
-              </button>
-            </form>
+                <input
+                  value={newLocale}
+                  onChange={(e) => setNewLocale(e.currentTarget.value)}
+                  placeholder={t("paywalls.builder.locales.addPlaceholder", "Search languages")}
+                  aria-label={t("paywalls.builder.locales.add", "Add locale")}
+                  className="h-7 min-w-0 flex-1 rounded border border-rv-divider bg-rv-c2 px-2 text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+                <button
+                  type="submit"
+                  title={t("paywalls.builder.locales.add", "Add locale")}
+                  className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
+                >
+                  <Plus size={12} />
+                </button>
+              </form>
+              <div className="mt-1 max-h-[168px] overflow-auto">
+                {suggestions.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => addAndReset(code)}
+                    className="flex w-full cursor-pointer items-center justify-between gap-2 rounded px-2 py-1 text-left text-[12px] text-foreground transition hover:bg-rv-c2"
+                  >
+                    <span>{localeLabel(code)}</span>
+                    <span className="font-rv-mono text-[10px] uppercase text-rv-mute-500">{code}</span>
+                  </button>
+                ))}
+                {suggestions.length === 0 && newLocale.trim().length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => addAndReset(newLocale)}
+                    className="flex w-full cursor-pointer items-center justify-between gap-2 rounded px-2 py-1 text-left text-[12px] text-rv-mute-600 transition hover:bg-rv-c2"
+                  >
+                    <span>
+                      {t("paywalls.builder.locales.useCustom", "Use custom code")}
+                    </span>
+                    <span className="font-rv-mono text-[10px] uppercase text-foreground">
+                      {newLocale.trim()}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </>
       )}
