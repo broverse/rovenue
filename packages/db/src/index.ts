@@ -174,6 +174,12 @@ export const FeatureFlagEnv = {
 export type FeatureFlagEnv =
   (typeof FeatureFlagEnv)[keyof typeof FeatureFlagEnv];
 
+// LeaderboardCadence is inferred from the `leaderboardCadence` pgEnum
+// (Task 1) rather than hand-copied as a union above: a value added to
+// the enum later must not silently fail to exist here too.
+export type LeaderboardCadence =
+  (typeof drizzleNamespace.leaderboardCadence)["enumValues"][number];
+
 // =============================================================
 // Row types
 // =============================================================
