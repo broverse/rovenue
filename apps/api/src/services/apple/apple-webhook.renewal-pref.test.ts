@@ -41,6 +41,10 @@ const { drizzleMock } = vi.hoisted(() => {
     purchaseExtRepo: {
       findPurchaseByOriginalTransaction: vi.fn(async () => null),
       findPurchaseByStoreTransaction: vi.fn(async () => null),
+      // No prior-period sibling to supersede in these tests — the
+      // upgrade-supersession path (apple-supersede.ts) is covered by
+      // its own integration test.
+      findSupersedableApplePurchases: vi.fn(async () => []),
     },
     purchaseRepo: {
       upsertPurchase: vi.fn(),

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import {
   RECONCILABLE_STATUSES,
+  TERMINAL_STATUSES,
   statusSqlList,
 } from "@rovenue/shared/subscription-status";
 import type { Db } from "../client";
@@ -479,6 +480,68 @@ export async function claimGoogleReconciliationCandidateById(
     [];
   const row = rows[0];
   return row ? rowToCandidate(row) : null;
+}
+
+/**
+ * Rows in the same Apple subscription chain that the incoming
+ * transaction replaced. Deliberately narrow: an Apple chain holds one
+ * row per BILLING PERIOD (each renewal gets its own transactionId), so
+ * matching on originalTransactionId alone would sweep the entire
+ * renewal history. Every conjunct earns its place:
+ *   - projectId + store = 'APP_STORE': scope to this tenant's Apple rows.
+ *   - originalTransactionId: the subscription chain the upgrade belongs to.
+ *   - storeTransactionId <> excludeStoreTransactionId: never self-expire
+ *     the incoming (upgrade) row itself.
+ *   - status NOT IN (TERMINAL_STATUSES): a REFUNDED/REVOKED sibling stays
+ *     put — the guard would reject the write anyway, but excluding it
+ *     here keeps the candidate set (and the audit trail) honest.
+ *   - expiresDate IS NOT NULL AND expiresDate > now: the load-bearing
+ *     bound. Past billing periods already have PAST expiries and fall
+ *     out on this condition alone — without it, every prior renewal row
+ *     would be swept too, rewriting the subscription's entire history.
+ *     Only a row whose period has NOT yet ended can be the one an
+ *     upgrade cut short.
+ */
+export async function findSupersedableApplePurchases(
+  db: Db,
+  args: {
+    projectId: string;
+    originalTransactionId: string;
+    excludeStoreTransactionId: string;
+    now: Date;
+  },
+): Promise<
+  Array<{
+    id: string;
+    storeTransactionId: string;
+    subscriberId: string;
+    status: Purchase["status"];
+  }>
+> {
+  const result = await db.execute(sql`
+    SELECT p.id,
+           p."storeTransactionId" AS "storeTransactionId",
+           p."subscriberId"       AS "subscriberId",
+           p.status
+    FROM ${purchases} p
+    WHERE p."projectId" = ${args.projectId}
+      AND p.store = 'APP_STORE'
+      AND p."originalTransactionId" = ${args.originalTransactionId}
+      AND p."storeTransactionId" <> ${args.excludeStoreTransactionId}
+      AND p.status NOT IN (${sql.raw(statusSqlList(TERMINAL_STATUSES))})
+      AND p."expiresDate" IS NOT NULL
+      AND p."expiresDate" > ${args.now}
+  `);
+  const rows =
+    (result as unknown as {
+      rows: Array<{
+        id: string;
+        storeTransactionId: string;
+        subscriberId: string;
+        status: Purchase["status"];
+      }>;
+    }).rows ?? [];
+  return rows;
 }
 
 // Export sql for callers that need to compose additional

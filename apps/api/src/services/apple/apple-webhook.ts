@@ -41,6 +41,7 @@ import {
 import { guardStatusWrite } from "../subscription-transition-guard";
 import { billingIssueStamp } from "../subscription-state";
 import { audit } from "../../lib/audit";
+import { expireSupersededApplePurchases } from "./apple-supersede";
 import type { StoreEventContext } from "@rovenue/shared";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
@@ -472,6 +473,17 @@ async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
   // Rejected transition = the row is already terminal (REFUNDED/REVOKED);
   // a late/replayed upgrade must not re-grant access or re-add revenue.
   if (!statusApplied) return;
+  // Retire the tier this upgrade replaced BEFORE granting the new one:
+  // syncAccess recomputes the whole desired set inside one transaction
+  // under the per-subscriber advisory lock, so ordering it this way
+  // means no gap and no double-grant.
+  await expireSupersededApplePurchases({
+    projectId: ctx.projectId,
+    originalTransactionId: ctx.transaction.originalTransactionId,
+    currentStoreTransactionId: ctx.transaction.transactionId,
+    now: appleNotificationEventTime(ctx),
+    source: `apple:${ctx.notification.notificationType}`,
+  });
   await grantAccess({ subscriber, purchase, product, ctx });
   await emitRevenueEvent({
     ctx,
