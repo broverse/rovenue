@@ -500,7 +500,7 @@ export const TEMPLATES = [
   },
   {
     id: "minimalCta",
-    name: "Minimal",
+    name: "Bare minimum",
     tag: "Fastest to read",
     category: "minimal",
     description: "A title, the plans, and nothing else in the way.",
@@ -540,7 +540,7 @@ export const TEMPLATES = [
   },
   {
     id: "comparison",
-    name: "Comparison",
+    name: "Plan comparison",
     tag: "Feature-rich",
     category: "comparison",
     description: "Title, plan list and a caption for the fine print.",

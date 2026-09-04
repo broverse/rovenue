@@ -1857,18 +1857,6 @@
         "generateFailed": "Couldn't generate a paywall — try rephrasing.",
         "generateQuota": "Rovi's monthly quota is used up — try again next month or raise the limit.",
         "generatedTitle": "Draft ready",
-        "presets": {
-          "hero": {
-            "tag": "Highest converting",
-            "name": "Hero",
-            "description": "Full-bleed image, plan list, sticky purchase button."
-          },
-          "comparison": {
-            "tag": "Feature-rich",
-            "name": "Comparison",
-            "description": "Title, plan list and a caption for the fine print."
-          }
-        },
         "categoryAll": "All",
         "categories": {
           "minimal": "Minimal",
