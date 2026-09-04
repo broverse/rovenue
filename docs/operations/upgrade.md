@@ -48,11 +48,20 @@ Before touching anything, read the release notes for:
 
 ## 3. Back up first
 
-This is the rollback plan. Take a backup before pulling anything:
+This is the rollback plan. Take a backup before pulling anything. `backup.sh`
+does not read `.env` itself — load it into the shell first (`DATABASE_URL`,
+`ENCRYPTION_KEY`, `BACKUP_AGE_RECIPIENT`, `ASSET_STORAGE_*`, ... all come
+from the environment it's invoked with), then run it:
 
 ```bash
+set -a; . ./.env; set +a
 bash deploy/backup/backup.sh --out /backups/$(date -u +%Y%m%dT%H%M%SZ)
 ```
+
+`backup.sh` refuses to run without `BACKUP_AGE_RECIPIENT` set (unless
+`--allow-plaintext` is passed) — see
+[`backup-restore.md`](./backup-restore.md) for what that key is and why it
+must be a *different* keypair from `ENCRYPTION_KEY`.
 
 Full detail — what's covered, the `ENCRYPTION_KEY` fingerprint guard, the
 `mc` install trap, the ClickHouse restore gap — is in

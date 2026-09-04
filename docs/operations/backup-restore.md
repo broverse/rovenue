@@ -19,6 +19,17 @@ backups" from being a claim nobody has tested.
 > which is a *different* key — see `backup.sh`'s header) in whatever secret
 > store backs the rest of production, and make sure whoever restores a
 > backup has both, or they cannot restore it at all — by design.
+>
+> **A second key pair, `BACKUP_AGE_RECIPIENT`/`BACKUP_AGE_IDENTITY`, is what
+> actually encrypts the backup artifacts** — `backup.sh` refuses to run
+> without `BACKUP_AGE_RECIPIENT` set unless `--allow-plaintext` is passed.
+> Generate it once with `age-keygen -o backup-age-key.txt`: the printed (and
+> file-header) `Public key: age1...` is `BACKUP_AGE_RECIPIENT`; the file
+> path is `BACKUP_AGE_IDENTITY`. This MUST be a separate keypair from
+> `ENCRYPTION_KEY` — reusing the application's data key as the backup key
+> means one compromise loses both the live application data and every
+> backup ever taken with it. Both variables are documented in
+> `.env.example`.
 
 ## What is, and is not, backed up
 
@@ -85,6 +96,11 @@ docker run -d --rm --name backup-ch-relay --network rovenue_default -p 8125:8125
   alpine/socat tcp-listen:8125,fork,reuseaddr tcp-connect:clickhouse:8123
 docker run -d --rm --name backup-minio-relay --network rovenue_default -p 9125:9125 \
   alpine/socat tcp-listen:9125,fork,reuseaddr tcp-connect:minio:9000
+
+# Load DATABASE_URL, ENCRYPTION_KEY, ASSET_STORAGE_*, BACKUP_AGE_RECIPIENT,
+# etc. from .env into this shell — backup.sh does NOT read .env itself, it
+# only reads the process environment it's invoked with.
+set -a; . ./.env; set +a
 
 # backup.sh reads CLICKHOUSE_URL from the environment, but `mc mirror`
 # reads its endpoint from a pre-configured alias, not from an env var —
@@ -189,6 +205,12 @@ point `restore.sh` at anything that isn't disposable.
    `docker compose` project, or the `backup` profile below) and run
    `restore.sh --from <dir>` against them, with `ENCRYPTION_KEY` and
    `BACKUP_AGE_IDENTITY` pulled from the same secret store production uses.
+   Also set `ASSET_VERIFY_KEY` to a real `storageKey` from this backup's
+   *source* database (`SELECT "storageKey" FROM paywall_assets LIMIT 1`
+   run against production, or against the throwaway restore once step 3's
+   row counts confirm `paywall_assets` came back non-empty) — without it,
+   `restore.sh`'s asset-header check in step 4 below SKIPS with a warning
+   instead of running, which defeats the point of this quarterly exercise.
 3. Compare the row counts `restore.sh` prints (`subscribers`,
    `credit_ledger`, `audit_logs`, `outbox_events`, `projects`) against a
    count taken from the production source **at the time the backup was
@@ -199,7 +221,8 @@ point `restore.sh` at anything that isn't disposable.
    `pnpm --filter @rovenue/db db:verify:clickhouse` by hand against the
    throwaway environment if you want a second, human-triggered look).
    `restore.sh`'s Guard 4 also runs `pnpm --filter @rovenue/scripts
-   verify:asset-headers`, which checks a restored asset's actual
+   verify:asset-headers` **when `ASSET_VERIFY_KEY` is set** (step 2 above),
+   which checks a restored asset's actual
    `Content-Type`/`Cache-Control`/`X-Content-Type-Options` against what
    was originally uploaded — a failure there means the asset-restore step
    did not fully succeed (object bytes came back, but its S3 metadata
@@ -207,7 +230,11 @@ point `restore.sh` at anything that isn't disposable.
    non-zero on this the same as on any other verification failure, so a
    green `restore.sh` run is itself the pass signal for this check; treat
    a red one as blocking the quarterly sign-off, the same as a ClickHouse
-   schema-drift failure would.
+   schema-drift failure would. If the run instead printed the "SKIPPED"
+   warning, `ASSET_VERIFY_KEY` wasn't set — that is not a pass for this
+   check, it's an unproven step; set the variable and re-run
+   `pnpm --filter @rovenue/scripts verify:asset-headers` by hand before
+   signing off.
 5. Verify the audit hash chain for every restored project. There's no
    wrapped CLI for this yet — `verifyAuditChain(projectId)`
    (`apps/api/src/lib/audit.ts`) is the primitive; it returns
@@ -247,8 +274,14 @@ quarterly *test*-restore, which stays a deliberate, watched exercise):
 ```cron
 # Nightly backup at 03:15 UTC, run on the docker host itself (see "two
 # things easy to get wrong" above for why this isn't run through a
-# container on the compose network).
-15 3 * * * cd /opt/rovenue && bash deploy/backup/backup.sh --out /backups/$(date -u +\%Y\%m\%dT\%H\%M\%SZ) >> /var/log/rovenue-backup.log 2>&1
+# container on the compose network). cron gives the job a near-empty
+# environment and backup.sh does NOT read .env itself — without loading
+# it first, this fails every night on a missing BACKUP_AGE_RECIPIENT (or
+# DATABASE_URL, ENCRYPTION_KEY, ...) straight into the log file, which
+# looks like nothing is wrong until the day a restore is needed. `set -a`
+# auto-exports everything `. /opt/rovenue/.env` defines to the `bash
+# deploy/backup/backup.sh` child process that follows.
+15 3 * * * cd /opt/rovenue && set -a && . ./.env && set +a && bash deploy/backup/backup.sh --out /backups/$(date -u +\%Y\%m\%dT\%H\%M\%SZ) >> /var/log/rovenue-backup.log 2>&1
 ```
 
 `backup.sh` itself needs `docker compose ps`/`docker cp` (direct daemon
@@ -269,6 +302,13 @@ services:
     image: alpine:3.20
     profiles: ["backup"]
     env_file: [.env]
+    environment:
+      # env_file above loads the host-dev defaults (localhost:...) from
+      # .env; this container runs ON the compose network, so it reaches
+      # both services by their service name instead — same override
+      # pattern the api/migrate services already use for the same reason.
+      CLICKHOUSE_URL: http://clickhouse:8123
+      ASSET_STORAGE_ENDPOINT: http://minio:9000
     volumes:
       - .:/repo:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -285,11 +325,24 @@ services:
         apk add --no-cache bash docker-cli postgresql16-client age curl \
           && curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc \
           && chmod +x /usr/local/bin/mc \
+          && mc alias set rovenue-backup "$$ASSET_STORAGE_ENDPOINT" "$$ASSET_STORAGE_ACCESS_KEY_ID" "$$ASSET_STORAGE_SECRET_ACCESS_KEY" \
           && exec bash deploy/backup/backup.sh --out /backups/$$(date -u +%Y%m%dT%H%M%SZ)
     depends_on:
       db: { condition: service_healthy }
       clickhouse: { condition: service_healthy }
+      minio: { condition: service_healthy }
 ```
+
+`backup.sh`'s object-storage step shells out to `mc mirror` against a
+*pre-configured* `mc` alias (default name `rovenue-backup`, matching what
+`command` sets up above) — unlike `CLICKHOUSE_URL`, there is no env var
+`mc` reads per-invocation, so the `mc alias set` step is not optional; a
+compose profile that ran `backup.sh` without it would fail the object
+storage step every time with "alias does not exist" (harmless, since it
+happens before anything is touched, but still not what a nightly job
+should print into its log). `depends_on: minio` gates the same way as
+`db`/`clickhouse` so the alias-set step above doesn't race a MinIO that
+hasn't finished booting.
 
 invoked as `docker compose --profile backup run --rm backup`. Installing
 tooling on every run is the honest tradeoff for staying out of the default

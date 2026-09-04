@@ -284,6 +284,19 @@ Required environment (no defaults are guessed):
   CLICKHOUSE_WRITE_PASSWORD    Password for the '$CLICKHOUSE_BACKUP_USER' (schema-owner) user.
   ASSET_STORAGE_BUCKET         Bucket to restore assets INTO (see .env.example).
 
+Optional environment:
+  ASSET_VERIFY_KEY             A real "<projectId>/<cuid2>.<ext>" storageKey
+                              from the target's paywall_assets table
+                              (SELECT "storageKey" FROM paywall_assets
+                              LIMIT 1) that $ASSET_HEADERS_VERIFY_SCRIPT
+                              HEADs to confirm the asset origin still
+                              serves the headers it promises. Unset: Guard
+                              4 SKIPS this one check with a loud warning
+                              instead of failing the whole restore (a
+                              first restore may have no assets yet) — row
+                              counts and $DB_VERIFY_CLICKHOUSE_SCRIPT still
+                              run and still fail the restore on error.
+
 Exit status is non-zero on any failure, including a failed verification
 step — verification is part of the restore, not a separate step.
 EOF
@@ -647,8 +660,27 @@ verify_restore() {
   CLICKHOUSE_USER="$CLICKHOUSE_BACKUP_USER" CLICKHOUSE_PASSWORD="$CLICKHOUSE_WRITE_PASSWORD" \
     "$PNPM_BIN" --filter "$DB_VERIFY_CLICKHOUSE_FILTER" "$DB_VERIFY_CLICKHOUSE_SCRIPT"
 
-  echo "==> Verification: $ASSET_HEADERS_VERIFY_FILTER $ASSET_HEADERS_VERIFY_SCRIPT"
-  "$PNPM_BIN" --filter "$ASSET_HEADERS_VERIFY_FILTER" "$ASSET_HEADERS_VERIFY_SCRIPT"
+  # ASSET_VERIFY_KEY has to name a REAL, already-uploaded object
+  # ("<projectId>/<cuid2>.<ext>" — SELECT "storageKey" FROM paywall_assets
+  # LIMIT 1 on the target) for verify:asset-headers to check anything; a
+  # first restore into a database with no assets yet has none to give.
+  # Unlike the row-count and db:verify:clickhouse checks above, which
+  # apply unconditionally, this one is SKIPPED (loudly) rather than
+  # failing the whole restore when the variable is unset — the asset
+  # bytes/metadata are still restored either way (run_assets_restore
+  # above), only this one confirmation step is unavailable without a key.
+  if [ -n "${ASSET_VERIFY_KEY:-}" ]; then
+    echo "==> Verification: $ASSET_HEADERS_VERIFY_FILTER $ASSET_HEADERS_VERIFY_SCRIPT ($ASSET_VERIFY_KEY)"
+    "$PNPM_BIN" --filter "$ASSET_HEADERS_VERIFY_FILTER" "$ASSET_HEADERS_VERIFY_SCRIPT"
+  else
+    echo "==> Verification: $ASSET_HEADERS_VERIFY_FILTER $ASSET_HEADERS_VERIFY_SCRIPT — SKIPPED"
+    echo "    WARNING: ASSET_VERIFY_KEY is not set, so the restored asset origin's response"
+    echo "    headers were NOT checked. This does not mean the asset restore itself failed —"
+    echo "    only that nothing verified it. Set ASSET_VERIFY_KEY to a real"
+    echo "    \"<projectId>/<cuid2>.<ext>\" key (SELECT \"storageKey\" FROM paywall_assets LIMIT 1"
+    echo "    against the restored database) and re-run \"$PNPM_BIN --filter"
+    echo "    $ASSET_HEADERS_VERIFY_FILTER $ASSET_HEADERS_VERIFY_SCRIPT\" by hand to check it."
+  fi
 }
 
 # Names the manifest's createdAt and states, in one place an operator is
