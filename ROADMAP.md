@@ -623,5 +623,9 @@ else in the framework/provider-breadth dimension is done.
       `apps/api/tests/flag-engine.rollout-kill.test.ts` (2026-09-04)
 - [ ] Real-time audience segment updates
 - [ ] Leaderboards: season/reset automation
-- [ ] Subscription-renewing credit grant automation (merges with the PR3
-      `product_currency_grants` work)
+- [x] Subscription-renewing credit grant automation (merges with the PR3
+      `product_currency_grants` work) — `grantOn` (PURCHASE/RENEWAL/BOTH)
+      end-to-end: schema + trigger matrix, trigger-aware grant service,
+      BullMQ queue/worker, Kafka renewal consumer, dashboard selector with
+      server-side rejection of RENEWAL/BOTH on non-subscription products
+      (2026-09-05)
