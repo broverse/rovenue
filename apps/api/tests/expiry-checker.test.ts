@@ -338,6 +338,53 @@ describe("runExpiryCheck — ACTIVE expiration", () => {
     });
     expect(result.expired).toBe(1);
   });
+
+  // Task 12c: a row already in GRACE_PERIOD is a sweep candidate purely
+  // because expiresDate (the underlying renewal date) is in the past — that
+  // is not the date that governs a grace row's retirement. While
+  // gracePeriodExpires is still in the future the row must be left alone,
+  // not retired to EXPIRED on the next sweep.
+  test("GRACE_PERIOD with gracePeriodExpires still in the future is left alone (not retired)", async () => {
+    dbMock.purchase.findMany.mockResolvedValue([
+      buildCandidate({
+        id: "pur_grace_open",
+        status: "GRACE_PERIOD",
+        gracePeriodExpires: new Date(NOW.getTime() + 60 * 60 * 1000),
+      }),
+    ]);
+
+    const result = await runExpiryCheck(NOW);
+
+    expect(dbMock.purchase.updateMany).not.toHaveBeenCalled();
+    expect(syncAccessMock).not.toHaveBeenCalled();
+    expect(dbMock.outgoingWebhook.create).not.toHaveBeenCalled();
+    expect(dbMock.revenueEvent.create).not.toHaveBeenCalled();
+    // Still counted as checked so the row stays visible to sweep counters.
+    expect(result.checked).toBe(1);
+    expect(result.expired).toBe(0);
+    expect(result.movedToGracePeriod).toBe(0);
+    expect(result.errors).toBe(0);
+  });
+
+  // A GRACE_PERIOD row with no known window (NULL gracePeriodExpires) must
+  // keep today's behaviour — NULL is never an open-ended grant.
+  test("GRACE_PERIOD with NULL gracePeriodExpires is still retired to EXPIRED", async () => {
+    dbMock.purchase.findMany.mockResolvedValue([
+      buildCandidate({
+        id: "pur_grace_null",
+        status: "GRACE_PERIOD",
+        gracePeriodExpires: null,
+      }),
+    ]);
+
+    const result = await runExpiryCheck(NOW);
+
+    expect(dbMock.purchase.updateMany).toHaveBeenCalledWith({
+      where: { id: "pur_grace_null", status: "GRACE_PERIOD" },
+      data: { status: "EXPIRED" },
+    });
+    expect(result.expired).toBe(1);
+  });
 });
 
 describe("runExpiryCheck — grace period transitions", () => {

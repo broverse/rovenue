@@ -22,8 +22,10 @@ import { syncAccess } from "../services/access-engine";
 // error) is retried on the next run instead of staying ACTIVE forever —
 // and transitions them through the state machine:
 //
-//   ACTIVE/TRIAL + gracePeriodExpires in the future → GRACE_PERIOD
-//   ACTIVE/TRIAL/GRACE_PERIOD otherwise               → EXPIRED
+//   ACTIVE/TRIAL + gracePeriodExpires in the future   → GRACE_PERIOD
+//   GRACE_PERIOD with gracePeriodExpires still open   → left alone
+//     (re-swept later; becomes eligible once it closes)
+//   ACTIVE/TRIAL/GRACE_PERIOD/PAUSED otherwise         → EXPIRED
 //
 // On EXPIRED we also reconcile the subscriber's access rows, emit
 // an outgoing EXPIRATION webhook, and log a zero-amount CANCELLATION
@@ -156,6 +158,21 @@ async function processCandidate(
     await safeSyncAccess(candidate.subscriberId);
     return "GRACE_PERIOD";
   }
+
+  // A row ALREADY in GRACE_PERIOD whose window hasn't closed yet is a
+  // sweep candidate only because its expiresDate (the underlying renewal
+  // date) is in the past by definition — that's not the date that governs
+  // a grace row's retirement. Leave it alone; it becomes eligible again
+  // once gracePeriodExpires itself passes. This is separate from
+  // hasActiveGrace above, which governs PROMOTING a row into GRACE_PERIOD,
+  // not retiring one already there. A NULL gracePeriodExpires means no
+  // known window, so it must NOT be treated as open-ended — such a row
+  // falls through to EXPIRED below, same as today.
+  const graceWindowStillOpen =
+    candidate.status === PurchaseStatus.GRACE_PERIOD &&
+    candidate.gracePeriodExpires !== null &&
+    candidate.gracePeriodExpires > now;
+  if (graceWindowStillOpen) return "SKIPPED";
 
   const updated = await drizzle.purchaseRepo.updatePurchaseStatusIf(
     drizzle.db,
