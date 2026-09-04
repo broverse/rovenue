@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# verify-xcframework.sh — asserts that a built RovenueFFI.xcframework is
+# actually shaped the way consumers require. Every check here exists because
+# its absence has already cost us something:
+#
+#  * platform ids     — the previously shipped librovenue_ffi.a claimed to be
+#                       an arm64 *device* library but was an iOS *simulator*
+#                       build (Mach-O platform 7). It would not have linked on
+#                       device.
+#  * identical names  — CocoaPods refuses a static-library xcframework whose
+#                       slices have differing binary names, and reports it with
+#                       a truncated message that reads like a blanket refusal.
+#  * bundled headers  — the module map travelling inside the artifact is the
+#                       whole point; without it every consumer needs a
+#                       SWIFT_INCLUDE_PATHS hack pointing into this monorepo.
+
+if [ $# -ne 1 ]; then
+  echo "usage: $0 <XCFRAMEWORK_PATH>" >&2
+  exit 2
+fi
+
+XCF="$1"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG="$HERE/../release.config.json"
+
+cfg() { ruby -rjson -e "print JSON.parse(File.read('$CONFIG'))['$1']"; }
+
+SLICE_LIB_NAME="$(cfg sliceLibName)"
+IOS_MIN="$(cfg iosDeploymentTarget)"
+MACOS_MIN="$(cfg macosDeploymentTarget)"
+
+fail() { echo "✗ $*" >&2; exit 1; }
+
+test -d "$XCF" || fail "no xcframework at $XCF"
+
+# Expected slice directory → Mach-O platform id → expected minimum OS version.
+# Mach-O platform ids: 1 = macOS, 2 = iOS, 7 = iOS Simulator.
+EXPECTED_SLICES="ios-arm64:2:$IOS_MIN ios-arm64_x86_64-simulator:7:$IOS_MIN macos-arm64_x86_64:1:$MACOS_MIN"
+
+slice_count=$(find "$XCF" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+[ "$slice_count" -eq 3 ] || fail "expected 3 slices, found $slice_count"
+
+for entry in $EXPECTED_SLICES; do
+  dir="${entry%%:*}"
+  rest="${entry#*:}"
+  want_platform="${rest%%:*}"
+  want_minos="${rest#*:}"
+
+  lib="$XCF/$dir/$SLICE_LIB_NAME"
+  test -f "$lib" || fail "$dir: missing $SLICE_LIB_NAME (all slices must share this basename)"
+
+  got_platform=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f&&/platform/{print $2; f=0}' | sort -u | tr '\n' ' ' | xargs)
+  [ "$got_platform" = "$want_platform" ] \
+    || fail "$dir: Mach-O platform is '$got_platform', expected '$want_platform'"
+
+  got_minos=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; f=0}' | sort -u | tr '\n' ' ' | xargs)
+  [ "$got_minos" = "$want_minos" ] \
+    || fail "$dir: minimum OS is '$got_minos', expected '$want_minos' — export the *_DEPLOYMENT_TARGET vars before cargo build"
+
+  test -f "$XCF/$dir/Headers/RovenueFFI.h" || fail "$dir: Headers/RovenueFFI.h missing"
+  test -f "$XCF/$dir/Headers/module.modulemap" || fail "$dir: Headers/module.modulemap missing"
+done
+
+echo "✓ $XCF — 3 slices, matching basenames, correct platforms and deployment targets"

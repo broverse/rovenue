@@ -1,0 +1,9 @@
+{
+  "repoSlug": "broverse/rovenue",
+  "podName": "Rovenue",
+  "version": "0.16.0",
+  "xcframeworkName": "RovenueFFI.xcframework",
+  "sliceLibName": "librovenue_ffi.a",
+  "iosDeploymentTarget": "16.0",
+  "macosDeploymentTarget": "12.0"
+}
