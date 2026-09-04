@@ -1857,7 +1857,19 @@
             "name": "Comparison",
             "description": "Title, plan list and a caption for the fine print."
           }
-        }
+        },
+        "categoryAll": "All",
+        "categories": {
+          "minimal": "Minimal",
+          "featureLed": "Feature-led",
+          "comparison": "Comparison",
+          "trialLed": "Trial-led",
+          "urgency": "Urgency",
+          "mediaLed": "Media-led"
+        },
+        "searchPlaceholder": "Search templates",
+        "searchLabel": "Search templates",
+        "noMatches": "No templates match that search."
       },
       "versions": {
         "title": "Version history",

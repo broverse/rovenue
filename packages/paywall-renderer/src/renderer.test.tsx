@@ -3456,3 +3456,64 @@ describe("video and lottie nodes", () => {
     expect(VIDEO_OBJECT_FIT_CSS).toBe("contain");
   });
 });
+
+describe("image node with no usable source", () => {
+  const offering = { identifier: "o", packages: [] };
+
+  const imageNode = (extra: Record<string, unknown> = {}) => ({
+    type: "image" as const,
+    id: "img",
+    url: { light: "" },
+    height: 100,
+    ...extra,
+  });
+
+  function configWith(node: unknown) {
+    return {
+      formatVersion: 2 as const,
+      defaultLocale: "en",
+      localizations: { en: { fb: "Fallback text" } },
+      root: { type: "stack" as const, id: "root", axis: "v" as const, children: [node] },
+    } as never;
+  }
+
+  function mount(node: unknown, colorScheme: "light" | "dark" = "light") {
+    return render(
+      <PaywallRenderer
+        config={configWith(node)}
+        offering={offering}
+        colorScheme={colorScheme}
+        onPurchase={noop}
+      />,
+    );
+  }
+
+  it('renders NO img element for a blank url -- `<img src="">` re-requests the whole page', () => {
+    expect(mount(imageNode()).container.querySelector("img")).toBeNull();
+  });
+
+  it("treats a whitespace-only url as blank too", () => {
+    expect(mount(imageNode({ url: { light: "   " } })).container.querySelector("img")).toBeNull();
+  });
+
+  it("renders the node's fallback when the source is blank", () => {
+    const { container, getByText } = mount(
+      imageNode({ fallback: { type: "text", id: "fb_node", key: "fb", role: "body" } }),
+    );
+    expect(container.querySelector("img")).toBeNull();
+    expect(getByText("Fallback text")).toBeTruthy();
+  });
+
+  it("still renders a real image -- the guard is about blankness, not about images", () => {
+    const { container } = mount(imageNode({ url: { light: "https://cdn.example/a.webp" } }));
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("https://cdn.example/a.webp");
+  });
+
+  it("resolves per colour scheme: a dark-only blank falls back in dark, renders in light", () => {
+    const node = imageNode({ url: { light: "https://cdn.example/a.webp", dark: "" } });
+    const light = mount(node, "light");
+    expect(light.container.querySelector("img")).not.toBeNull();
+    light.unmount();
+    expect(mount(node, "dark").container.querySelector("img")).toBeNull();
+  });
+});

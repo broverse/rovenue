@@ -1253,8 +1253,9 @@ const BLANK_MEDIA_SOURCE = "";
  * renderer cannot recover from: a source that is ABSENT, which is exactly the
  * `newNode` default (`url: { light: "" }`) and its whitespace cousins, so
  * every freshly added media node in the builder is in exactly this state
- * until a URL is pasted. Left unguarded, `<video src="">` re-requests the
- * hosting document itself.
+ * until a URL is pasted. Left unguarded, `<video src="">` — and equally
+ * `<img src="">` — re-requests the hosting document itself. All three media
+ * node types (image, video, lottie) ask this one question.
  *
  * Why not "whatever a URL parser says": the three platforms' parsers do not
  * agree and never will. `URL(string:)` on iOS accepts `" "`, `"not a url"`
@@ -1494,7 +1495,18 @@ export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | nu
         return renderStack(resolved, ctx);
       case "text":
         return renderText(resolved, ctx);
+      // The THIRD media type, asking the same source-present question video
+      // and lottie ask below, by the same `hasUsableSource` rule. It used to
+      // be unguarded, which meant a blank `url` — the `newNode` default, and
+      // now every template's placeholder art — rendered `<img src="">`, and a
+      // browser answers that by re-requesting the hosting document itself.
+      // One gallery of eighteen template cards made that eighteen wasted
+      // page-sized requests, but the bug predates the gallery: the `hero`
+      // preset has shipped a blank image since it was written.
       case "image":
+        if (!hasUsableSource(resolveThemeUrl(resolved.url, ctx.colorScheme))) {
+          return renderFallbackOrNull(resolved, ctx);
+        }
         return renderImage(resolved, ctx);
       case "button":
         return renderButton(resolved, ctx);

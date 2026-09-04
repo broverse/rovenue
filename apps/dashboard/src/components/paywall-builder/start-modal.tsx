@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
-import { FilePlus2, Sparkles, Store, X } from "lucide-react";
+import { FilePlus2, Search, Sparkles, Store, X } from "lucide-react";
 import type { BuilderConfig, PaywallNode } from "@rovenue/shared/paywall";
 import { cn } from "../../lib/cn";
 import { ApiError, rpc, unwrap } from "../../lib/api";
 import { RoviMissingConfig } from "../rovi/rovi-missing-config";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
-import { TEMPLATES, type TemplateId } from "./templates";
-import { previewBlocks, type PreviewBlock } from "./start-model";
+import { TEMPLATES, TEMPLATE_CATEGORIES, type TemplateId } from "./templates";
+import { filterTemplates } from "./start-model";
+import { TemplatePreview, TEMPLATE_PREVIEW_WIDTH } from "./template-preview";
 
 type Props = { onClose: () => void };
 
@@ -28,55 +29,17 @@ function countNodes(node: PaywallNode): number {
   return 1 + children.reduce((sum, child) => sum + countNodes(child), 0);
 }
 
+/**
+ * Card preview geometry. The card renders the template's REAL tree through
+ * `PaywallRenderer` at `CARD_PREVIEW_SCALE`, then clips it to
+ * `THUMB_HEIGHT` — the top of a paywall (art, headline, the first plan
+ * rows) is what tells two templates apart, and showing all 780pt scaled to
+ * fit would make every card an illegible smudge.
+ */
+const CARD_PREVIEW_SCALE = 0.44;
+const CARD_PREVIEW_RENDER_WIDTH = TEMPLATE_PREVIEW_WIDTH * CARD_PREVIEW_SCALE;
 /** Card thumbnail height in px. */
-const THUMB_HEIGHT = 132;
-/** Silhouette band heights in px, by kind. */
-const BAND_HEIGHT = { media: 34, line: 6, cells: 26, action: 12, gap: 8 } as const;
-
-function Silhouette({ blocks }: { blocks: PreviewBlock[] }) {
-  return (
-    <div
-      className="flex flex-col gap-1.5 rounded-md bg-rv-c3 p-2.5"
-      style={{ height: THUMB_HEIGHT }}
-    >
-      {blocks.map((block, i) => {
-        const key = `${block.kind}-${i}`;
-        if (block.kind === "media") {
-          return (
-            <div key={key} style={{ height: BAND_HEIGHT.media }} className="rounded bg-rv-c4" />
-          );
-        }
-        if (block.kind === "line") {
-          return (
-            <div
-              key={key}
-              style={{ height: BAND_HEIGHT.line, width: `${block.width * 100}%` }}
-              className="mx-auto rounded-full bg-rv-mute-600/50"
-            />
-          );
-        }
-        if (block.kind === "cells") {
-          return (
-            <div key={key} style={{ height: BAND_HEIGHT.cells }} className="flex flex-col gap-1">
-              <div className="flex-1 rounded border border-rv-divider-strong bg-rv-c4" />
-              <div className="flex-1 rounded border border-rv-accent-500/50 bg-rv-accent-500/15" />
-            </div>
-          );
-        }
-        if (block.kind === "action") {
-          return (
-            <div
-              key={key}
-              style={{ height: BAND_HEIGHT.action }}
-              className="rounded bg-rv-accent-500/70"
-            />
-          );
-        }
-        return <div key={key} style={{ height: BAND_HEIGHT.gap }} />;
-      })}
-    </div>
-  );
-}
+const THUMB_HEIGHT = 208;
 
 /**
  * Starting points for a paywall. Applying a preset REPLACES the whole
@@ -88,6 +51,12 @@ export const StartModal = component(({ onClose }: Props) => {
   const { t } = useTranslation();
   const [confirmingId, setConfirmingId] = useState<TemplateId | null>(null);
   const [tab, setTab] = useState<StartTab>("presets");
+
+  // Gallery filters. `null` category means "All" — the catalogue is
+  // eighteen entries, which is past the point where one flat grid is
+  // browsable.
+  const [category, setCategory] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   // Shared apply-with-confirm for the two config-producing tabs: same
   // two-click data-loss semantics as the preset cards (applying REPLACES
@@ -115,12 +84,17 @@ export const StartModal = component(({ onClose }: Props) => {
   // locale (and every translated string in it) is silently dropped.
   const otherLocalesLost = vm.locales.filter((l) => l !== vm.defaultLocale).length;
 
-  // Building a preset's config just to draw its silhouette is pure work —
-  // do it once per locale rather than on every re-render.
-  const silhouettes = useMemo(() => {
+  // Building eighteen configs is pure work — do it once per locale rather
+  // than on every keystroke in the search box.
+  const configs = useMemo(() => {
     const locale = vm.defaultLocale || "en";
-    return new Map(TEMPLATES.map((t) => [t.id, previewBlocks(t.build(locale))] as const));
+    return new Map(TEMPLATES.map((t) => [t.id, t.build(locale)] as const));
   }, [vm.defaultLocale]);
+
+  const visibleTemplates = useMemo(
+    () => filterTemplates(TEMPLATES, { category, query }),
+    [category, query],
+  );
 
   const choose = (id: TemplateId) => {
     if (!treeIsEmpty && confirmingId !== id) {
@@ -419,8 +393,52 @@ export const StartModal = component(({ onClose }: Props) => {
 
         {tab === "presets" && (
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+          {/* Category chips + search. Both narrow the same grid; "All" is a
+              chip rather than a cleared state so there is always exactly one
+              selected chip to read. */}
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            {[{ id: null, label: t("paywalls.builder.start.categoryAll", "All") }, ...TEMPLATE_CATEGORIES.map((c) => ({ id: c.id as string | null, label: t(`paywalls.builder.start.categories.${c.id}`, c.label) }))].map(
+              (chip) => (
+                <button
+                  key={chip.id ?? "all"}
+                  type="button"
+                  onClick={() => setCategory(chip.id)}
+                  aria-pressed={category === chip.id}
+                  className={cn(
+                    "cursor-pointer rounded-full border px-2.5 py-1 text-[11px] transition",
+                    category === chip.id
+                      ? "border-rv-accent-500 bg-rv-accent-500/15 text-foreground"
+                      : "border-rv-divider bg-rv-c2 text-rv-mute-600 hover:bg-rv-c3",
+                  )}
+                >
+                  {chip.label}
+                </button>
+              ),
+            )}
+            <div className="relative ml-auto">
+              <Search
+                size={13}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-rv-mute-500"
+                aria-hidden
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("paywalls.builder.start.searchPlaceholder", "Search templates")}
+                aria-label={t("paywalls.builder.start.searchLabel", "Search templates")}
+                className="h-7 w-48 rounded-md border border-rv-divider bg-rv-c2 pl-7 pr-2 text-[12px] text-foreground placeholder:text-rv-mute-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rv-accent-500"
+              />
+            </div>
+          </div>
+
+          {visibleTemplates.length === 0 && (
+            <div className="rounded-lg border border-rv-divider bg-rv-c2 px-4 py-6 text-center text-[12px] text-rv-mute-500">
+              {t("paywalls.builder.start.noMatches", "No templates match that search.")}
+            </div>
+          )}
+
           <div className="grid grid-cols-3 gap-4">
-            {TEMPLATES.map((preset) => {
+            {visibleTemplates.map((preset) => {
               const confirming = confirmingId === preset.id;
               return (
                 <button
@@ -434,7 +452,17 @@ export const StartModal = component(({ onClose }: Props) => {
                       : "border-rv-divider bg-rv-c2 hover:border-rv-accent-500/50 hover:bg-rv-c3",
                   )}
                 >
-                  <Silhouette blocks={silhouettes.get(preset.id) ?? []} />
+                  <div
+                    className="mx-auto overflow-hidden rounded-md bg-rv-c3"
+                    style={{ height: THUMB_HEIGHT, width: CARD_PREVIEW_RENDER_WIDTH }}
+                  >
+                    <TemplatePreview
+                      config={configs.get(preset.id)!}
+                      scale={CARD_PREVIEW_SCALE}
+                      colorScheme={vm.colorScheme}
+                      locale={vm.defaultLocale || "en"}
+                    />
+                  </div>
                   <div className="mt-2.5">
                     <span className="rounded bg-rv-accent-500/15 px-1.5 py-0.5 font-rv-mono text-[9px] uppercase tracking-wider text-rv-accent-500">
                       {t(`paywalls.builder.start.presets.${preset.id}.tag`, preset.tag)}
@@ -473,8 +501,8 @@ export const StartModal = component(({ onClose }: Props) => {
               className="cursor-pointer rounded-lg border border-rv-divider bg-rv-c2 p-2.5 text-left transition hover:border-rv-accent-500/50 hover:bg-rv-c3"
             >
               <div
-                className="flex flex-col items-center justify-center gap-1.5 rounded-md bg-rv-c3 text-rv-mute-500"
-                style={{ height: THUMB_HEIGHT }}
+                className="mx-auto flex flex-col items-center justify-center gap-1.5 rounded-md bg-rv-c3 text-rv-mute-500"
+                style={{ height: THUMB_HEIGHT, width: CARD_PREVIEW_RENDER_WIDTH }}
               >
                 <FilePlus2 size={20} />
                 <span className="text-[11px]">

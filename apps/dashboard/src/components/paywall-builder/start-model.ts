@@ -1,62 +1,50 @@
-import type { BuilderConfig, PaywallNode, TextNode } from "@rovenue/shared/paywall";
+import type { BuilderConfig } from "@rovenue/shared/paywall";
 
 // =============================================================
-// Pure helpers behind the start gallery. The card preview is derived
-// from a preset's OWN node tree rather than hand-drawn per template,
-// so a newly-added preset gets a silhouette for free.
+// Pure helpers behind the start gallery.
+//
+// The abstract silhouette that used to live here is gone: with eighteen
+// templates the cards render the real tree through `PaywallRenderer`
+// (`template-preview.tsx`), because four minimal templates produce four
+// indistinguishable stacks of bars and a silhouette cannot show copy.
 // =============================================================
-
-/** One band in a card's silhouette. */
-export type PreviewBlock =
-  | { kind: "media" }
-  | { kind: "line"; width: number }
-  | { kind: "cells" }
-  | { kind: "action" }
-  | { kind: "gap" };
-
-/**
- * Bar width per text role, as a fraction of the card width — so the
- * silhouette reads like a paywall instead of a stack of identical bars.
- */
-const LINE_WIDTH_BY_ROLE: Record<TextNode["role"], number> = {
-  title: 0.8,
-  subtitle: 0.65,
-  body: 0.7,
-  caption: 0.5,
-};
-/** Fallback width for a text node whose role isn't in the table. */
-const LINE_WIDTH_DEFAULT = 0.7;
-
-function blockFor(node: PaywallNode): PreviewBlock | null {
-  switch (node.type) {
-    case "image":
-      return { kind: "media" };
-    case "text":
-      return { kind: "line", width: LINE_WIDTH_BY_ROLE[node.role] ?? LINE_WIDTH_DEFAULT };
-    case "packageList":
-      return { kind: "cells" };
-    case "purchaseButton":
-    case "button":
-      return { kind: "action" };
-    case "spacer":
-      return { kind: "gap" };
-    default:
-      // A silhouette, not a rendering — nested structure is ignored.
-      return null;
-  }
-}
-
-/** The root's DIRECT children as silhouette bands, in document order. */
-export function previewBlocks(config: BuilderConfig): PreviewBlock[] {
-  const blocks: PreviewBlock[] = [];
-  for (const child of config.root.children) {
-    const block = blockFor(child);
-    if (block) blocks.push(block);
-  }
-  return blocks;
-}
 
 /** True when there is nothing in the tree yet — the "just created it" moment. */
 export function shouldAutoOpenStart(config: BuilderConfig): boolean {
   return config.root.children.length === 0;
+}
+
+// =============================================================
+// Gallery filtering. Pure, so the modal keeps no search logic of its own.
+// =============================================================
+
+/** What a gallery card exposes to the filter — the fields an author reads. */
+export interface FilterableTemplate {
+  id: string;
+  name: string;
+  tag: string;
+  description: string;
+  category: string;
+}
+
+/**
+ * Templates matching `category` (null = all) AND `query`.
+ *
+ * The query matches name, tag, description and category together rather
+ * than name alone: an author looking for "trial" should find the
+ * trial-led templates whether the word sits in the name, the badge or the
+ * one-line description, and searching for a word that appears only in a
+ * description is the common case with eighteen entries.
+ */
+export function filterTemplates<T extends FilterableTemplate>(
+  templates: readonly T[],
+  opts: { category: string | null; query: string },
+): T[] {
+  const needle = opts.query.trim().toLowerCase();
+  return templates.filter((t) => {
+    if (opts.category !== null && t.category !== opts.category) return false;
+    if (needle.length === 0) return true;
+    const haystack = `${t.name} ${t.tag} ${t.description} ${t.category}`.toLowerCase();
+    return haystack.includes(needle);
+  });
 }
