@@ -107,9 +107,8 @@ Both channels ship the same xcframework; neither keeps a binary in git.
 
 ### Every site carrying the module-path workaround
 
-The same missing module map is worked around in **five** places. All five are
-removed by this change; a grep for `RovenueFFI` outside `Generated/` is the
-completeness check.
+The same missing module map is worked around in **four** places, all removed by
+this change:
 
 | Site | What it does today |
 |---|---|
@@ -117,7 +116,13 @@ completeness check.
 | `packages/sdk-swift/Rovenue.podspec` | `preserve_paths` + `SWIFT_INCLUDE_PATHS` |
 | `packages/sdk-rn/ios/RovenueSdkRn.podspec` | `pod_target_xcconfig` **and** `user_target_xcconfig` reaching `${PODS_ROOT}/../../../..` |
 | `packages/sdk-flutter/example/ios/Podfile` | a `post_install` block that rewrites `SWIFT_INCLUDE_PATHS` on the `Rovenue` and `rovenue_flutter_ios` targets, because CocoaPods drops the `RovenueFFI` leaf segment when re-deriving the propagated path |
-| `.github/workflows/sdk.yml` | references the FFI directory in the Swift job |
+
+`.github/workflows/sdk.yml` also matches a grep for `RovenueFFI`, but its
+reference is benign — it checks that `Generated/RovenueFFI.swift` was emitted.
+It changes for a different reason (it must build the xcframework before
+`swift test`, replacing today's `DYLD_LIBRARY_PATH` hop into `target/release`).
+The completeness grep in Verification must therefore allow that one line
+rather than demand zero matches.
 
 The Flutter Podfile's own comment says the problem is *"not fixable from
 `Rovenue.podspec`"*. That was true of a bare `.a`; it stops being true once the
@@ -185,16 +190,42 @@ file other than `Package.swift`'s pinned `url`/`checksum` and the copied
 sources — i.e. drift must come from a real source change, never from a hand
 edit.
 
-## Versioning
+## Versioning: no bump
 
-All five SDK packages (core-rs, sdk-swift, sdk-kotlin, sdk-rn, sdk-flutter) are
-aligned at `0.16.0`, and §7 counts that alignment as a closed item. This change
-alters the Apple distribution shape, so it ships as a coordinated **minor bump
-to `0.17.0` across all five**, keeping the alignment invariant true. The pinned
-cross-references move with it: `rovenue_flutter_ios.podspec`'s
-`s.dependency 'Rovenue', '<version>'` and `withRovenueIos.ts`'s default pod
-line both read the version rather than restating it where the file format
-allows.
+An earlier draft of this design called for a coordinated `0.17.0` bump across
+all five SDK packages. That was wrong, and checking beats assuming — **nothing
+has ever been published**, verified 2026-09-05:
+
+| Channel | Result |
+|---|---|
+| CocoaPods Trunk (`Rovenue`) | HTTP 404 |
+| pub.dev (`rovenue_flutter`) | HTTP 404 |
+| npm (`@rovenue/react-native-sdk`) | no published version |
+| GitHub Releases | none exist on the remote |
+
+`0.16.0` therefore has no consumers and is free to change under our feet. The
+work ships **at `0.16.0`**, and the alignment invariant stays trivially true.
+A bump would have touched roughly fifteen files across four packages that this
+change does not otherwise concern, inflating a delicate diff for no consumer.
+
+## A defect found while planning: the release URL points at a repository that does not exist
+
+`Rovenue.podspec`'s source is
+
+```ruby
+:http => "https://github.com/rovenue/rovenue/releases/download/sdk-swift-v#{s.version}/Rovenue-#{s.version}.zip"
+```
+
+but the remote is `github.com/broverse/rovenue`, and `rovenue/rovenue` does not
+resolve. Four Flutter `pubspec.yaml` files repeat the same wrong
+`repository:` URL. Nothing has caught it because no release has ever been cut —
+the first `pod install` by an external consumer would 404.
+
+The fix is not to retype the right URL in six places. The owner/repo is
+declared **once** as a named constant that the release script reads, and every
+generated or pinned URL derives from it. Whether the canonical home is
+`broverse/rovenue` or a future `rovenue/rovenue` org is a decision for the
+operator; the point is that it is stated in one place either way.
 
 ## CI
 
@@ -239,8 +270,9 @@ Each item is a command with an expected result, not a claim:
    `post_install` `SWIFT_INCLUDE_PATHS` block **deleted**. Like item 6, this is
    a build-only claim — it cannot be settled by lint.
 8. `grep -rn RovenueFFI` over `packages/`, `examples/` and `.github/`, excluding
-   `Generated/`, returns nothing outside the xcframework's own name. That is
-   the completeness check for the five-site table above.
+   `Generated/`, returns only the xcframework's own name and `sdk.yml`'s
+   generated-binding existence check. That is the completeness check for the
+   four-site table above.
 9. A versioned SPM consumer resolves the distribution repo's tag and builds —
    the check that `unsafeFlags` is really gone, which an in-repo `path:` build
    cannot show.
