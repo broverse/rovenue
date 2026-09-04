@@ -1325,6 +1325,83 @@ class NodeViewFactoryTest {
 
     private fun bareLottieRequest() = lottieRenderRequest(bareLottieNode(), playing = true, dark = false)
 
+    // ---- image blank-source guard (Task 10c) -----------------------------
+    //
+    // `buildImage` used to hand ANY string -- including the "" that every
+    // freshly created image carries -- straight into `ImageView`/
+    // `ctx.loadImage`, unlike `buildVideo`/`buildLottie`, which already
+    // guarded on `mediaSourceIsUsable`. That let a not-yet-filled image node
+    // render one way on web (dropped, fallback shown, carousel page and dot
+    // removed) and another way on Android (kept, no fallback, phantom page
+    // and dot) -- a three-platform contract break this section closes,
+    // mirroring the lottie section above exactly, node type swapped.
+
+    private fun bareImageNode(url: String = "https://x/a.png") =
+        BuilderNode.Image(id = "img", url = ThemePair(light = url))
+
+    @Test
+    fun `an image with a blank source renders nothing`() {
+        val view = NodeViewFactory.build(mockContext(), bareImageNode(url = ""), renderContext(), cell = null)
+
+        // Drawing nothing is what drops the node from a carousel's page and
+        // dot counts, exactly as a blank video/lottie source already does.
+        assertNull(view)
+    }
+
+    @Test
+    fun `an image with a whitespace-only source renders nothing`() {
+        val view = NodeViewFactory.build(mockContext(), bareImageNode(url = "   "), renderContext(), cell = null)
+        assertNull(view)
+    }
+
+    @Test
+    fun `an image with a blank source draws its fallback when it has one`() {
+        val view = NodeViewFactory.build(
+            mockContext(),
+            bareImageNode(url = "").copy(fallback = textNode()),
+            renderContext(),
+            cell = null,
+        )
+
+        assertTrue(view != null, "an absent source takes the same fallback path a blank video/lottie source takes")
+    }
+
+    @Test
+    fun `an image with a real source still renders -- the control`() {
+        // Without this, the guard above could be "always hide" and every
+        // other test in this section would still pass.
+        val view = NodeViewFactory.build(
+            mockContext(),
+            bareImageNode(url = "https://x/a.png"),
+            renderContext(),
+            cell = null,
+        )
+
+        assertTrue(view != null)
+    }
+
+    @Test
+    fun `a blank-source image inside a carousel does not occupy a page or a dot`() {
+        // CarouselPagerView (private, in this same file below buildCarousel)
+        // sets `pageCount = pageViews.size` directly and derives BOTH the
+        // pager's page count and the dot row's dot count from that one
+        // field -- nothing else decides either. `pageViews` itself is
+        // exactly `node.children.mapNotNull { build(context, child, ctx,
+        // cell) }`, reproduced here verbatim, so this equality IS the
+        // page/dot count buildCarousel would produce -- without needing a
+        // real Looper to construct CarouselPagerView/ViewPager2 under this
+        // module's Robolectric-less unit-test runtime.
+        val children = listOf(
+            bareImageNode(url = "https://x/real.png"),
+            bareImageNode(url = ""),
+        )
+        val pageViews = children.mapNotNull { child ->
+            NodeViewFactory.build(mockContext(), child, renderContext(), cell = null)
+        }
+
+        assertEquals(1, pageViews.size, "the blank-source image must not occupy a carousel page")
+    }
+
     // ---- carousel dot colour (I9) ---------------------------------------
     //
     // resolvedInkTintColorInt is already pinned above; what was NOT pinned

@@ -797,8 +797,14 @@ struct BuilderNodeView: View {
 
     @ViewBuilder
     private func imageView(_ p: ImageProps) -> some View {
+        // Mirrors `videoHasUsableSource` / `lottieCanRender`'s render path: a
+        // blank source (the builder's `newNode` default, and every freshly
+        // added image node until a URL is pasted) never mounts an empty
+        // `AsyncImage` — that renders `<img src="">`'s SwiftUI equivalent, an
+        // image view that never resolves. It falls to `fallback`, or nothing,
+        // exactly like web's `hasUsableSource` guard in nodes.tsx.
         let urlString = themeValue(p.url, dark: ctx.dark)
-        if let url = URL(string: urlString) {
+        if imageHasUsableSource(p, dark: ctx.dark), let url = URL(string: urlString) {
             AsyncImage(url: url) { image in
                 image.resizable().scaledToFit()
             } placeholder: {
@@ -808,6 +814,8 @@ struct BuilderNodeView: View {
             .cornerRadius(CGFloat(p.cornerRadius ?? 0))
             .overlay(imageBorderOverlay(p))
             .accessibilityLabel(p.alt.map { ctx.label($0, cell: cell) } ?? "")
+        } else if let fallback = p.fallback {
+            BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
         }
     }
 
@@ -1705,6 +1713,9 @@ func nodeRendersContent(_ node: BuilderNode, ctx: PaywallRenderContext, cell: Ce
     case .carousel(let p):
         return !renderableCarouselPages(p.children, ctx: ctx, cell: cell).isEmpty
             || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
+    case .image(let p):
+        return imageHasUsableSource(p, dark: ctx.dark)
+            || fallbackRendersContent(p.fallback, ctx: ctx, cell: cell)
     case .video(let p):
         // KNOWN AND DELIBERATE PARTIAL ANSWER. Only the SYNCHRONOUS half of
         // "will this video draw?" is decidable here: whether a source is
@@ -1992,6 +2003,15 @@ func videoPlaybackCommand(visibility: NodeVisibilityState, autoplay: Bool) -> Vi
 /// shared with `lottieCanRender` here and with web and Android — it is not
 /// spelled out again here, on purpose.
 func videoHasUsableSource(_ props: VideoProps, dark: Bool) -> Bool {
+    mediaSourceIsUsable(themeValue(props.url, dark: dark))
+}
+
+/// Whether an `image`'s theme-resolved source is USABLE — the same
+/// pre-mount question `videoHasUsableSource` and `lottieCanRender` answer for
+/// their node types, delegating to the SAME `mediaSourceIsUsable` rule rather
+/// than restating blankness a third way. See the `.image` arm of
+/// `nodeRendersContent` for how this feeds the render decision.
+func imageHasUsableSource(_ props: ImageProps, dark: Bool) -> Bool {
     mediaSourceIsUsable(themeValue(props.url, dark: dark))
 }
 

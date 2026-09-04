@@ -587,6 +587,7 @@ final class PaywallRenderSupportTests: XCTestCase {
             case .text(let p): return p.id
             case .stickyFooter(let p): return p.id
             case .stack(let p): return p.id
+            case .image(let p): return p.id
             default: return "?"
             }
         }
@@ -1067,6 +1068,56 @@ final class PaywallRenderSupportTests: XCTestCase {
         // asynchronously and routed to `fallback` — not this predicate's.
         let notAUrl = VideoProps(id: "v1", url: ThemePair(light: "not a url", dark: nil))
         XCTAssertTrue(nodeRendersContent(.video(notAUrl), ctx: ctx, cell: nil))
+    }
+
+    // Task 10c: `image` converges on the same rule `video` and `lottie`
+    // already apply — commit `9b6fc6d9` fixed the web renderer and claimed
+    // (wrongly) that no native change was needed. `.image` had no case in
+    // `nodeRendersContent` at all, so it fell to `default: return true`, and
+    // `imageView(p)` mounted an `AsyncImage` unconditionally and never
+    // rendered `fallback`. These pin the fix the same way the video test
+    // above pins its own node type.
+
+    private var bareImageProps: ImageProps {
+        ImageProps(id: "img1", url: ThemePair(light: "https://x/a.png", dark: nil))
+    }
+
+    /// The control (a real source still renders) plus the two blank rows —
+    /// mirrors `test_aVideoWithNoUsableSourceIsNotACarouselPage` node-type for
+    /// node-type, including the `" "` row that used to diverge because
+    /// `URL(string: " ")` is non-nil.
+    func test_anImageWithNoUsableSourceIsNotACarouselPage() throws {
+        let ctx = try makeCtx(appVersion: nil)
+        XCTAssertTrue(nodeRendersContent(.image(bareImageProps), ctx: ctx, cell: nil))
+        for blank in ["", " "] {
+            let unusable = ImageProps(id: "img1", url: ThemePair(light: blank, dark: nil))
+            XCTAssertFalse(
+                nodeRendersContent(.image(unusable), ctx: ctx, cell: nil),
+                "\(String(reflecting: blank)) must buy no page")
+        }
+    }
+
+    /// A blank source with a `fallback` that itself draws must still count as
+    /// content — the other half of the rule, same shape as the countdown/
+    /// carousel fallback tests above.
+    func test_anImageWithNoUsableSourceDrawsItsFallback() throws {
+        let ctx = try makeCtx(appVersion: nil)
+        let withFallback = ImageProps(
+            id: "img1", url: ThemePair(light: "", dark: nil),
+            fallback: BuilderNodeBox(node: carouselPage("imgFallback")))
+        XCTAssertTrue(nodeRendersContent(.image(withFallback), ctx: ctx, cell: nil))
+    }
+
+    /// The carousel CONSEQUENCE, through a real `CarouselView` — the case the
+    /// brief calls out as the one that most distinguishes the platforms
+    /// today: a blank-source image page buys neither a swipeable page nor a
+    /// dot, exactly like a blank video/lottie page already does not.
+    func test_carousel_dropsABlankSourceImagePage() throws {
+        let view = try carousel([
+            .image(ImageProps(id: "p1", url: ThemePair(light: "https://x/real.png", dark: nil))),
+            .image(ImageProps(id: "p2", url: ThemePair(light: "", dark: nil))),
+        ])
+        XCTAssertEqual(nodeIds(view.pages), ["p1"])
     }
 
     /// `video`'s playback rule, through the SAME function

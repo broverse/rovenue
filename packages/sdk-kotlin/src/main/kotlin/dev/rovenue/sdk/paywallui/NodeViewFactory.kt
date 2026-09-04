@@ -1597,7 +1597,15 @@ internal object NodeViewFactory {
         node: BuilderNode.Image,
         ctx: PaywallRenderContext,
         cell: CellScope?,
-    ): ImageView {
+    ): View? {
+        // Same guard, same position, same null-return shape as `buildVideo`
+        // and `buildLottie`: a blank source (the builder's `newNode` default
+        // until a URL is pasted) never mounts an `ImageView` with nothing to
+        // load — it renders `fallback`, or nothing, so `mapNotNull` drops the
+        // carousel page exactly as it already does for video/lottie.
+        if (!mediaSourceIsUsable(node.url, ctx.dark)) {
+            return node.fallback?.let { build(context, it, ctx, cell) }
+        }
         val iv = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             adjustViewBounds = true

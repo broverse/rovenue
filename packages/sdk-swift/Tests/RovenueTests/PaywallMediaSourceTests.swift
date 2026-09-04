@@ -82,4 +82,16 @@ final class PaywallMediaSourceTests: XCTestCase {
                 "lottie: \(String(reflecting: row.source))")
         }
     }
+
+    /// Task 10c: `image` now asks exactly this rule too, through
+    /// `imageHasUsableSource` — the same delegation `video` and `lottie`
+    /// already use, not a fourth spelling of blankness.
+    func test_imageAsksExactlyThisRule() {
+        for row in sourceUsabilityTable {
+            let props = ImageProps(id: "img1", url: ThemePair(light: row.source, dark: nil))
+            XCTAssertEqual(
+                imageHasUsableSource(props, dark: false), row.usable,
+                "image: \(String(reflecting: row.source))")
+        }
+    }
 }
