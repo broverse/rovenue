@@ -51,6 +51,7 @@ import {
   funnelSessionState,
   funnelStatus,
   funnelTemplateScope,
+  importJobKind,
   importJobStatus,
   integrationDeliveryStatus,
   invitationDeliveryStatus,
@@ -2361,6 +2362,7 @@ export {
   funnelSessionState,
   funnelStatus,
   funnelTemplateScope,
+  importJobKind,
   importJobStatus,
   integrationDeliveryStatus,
   invitationDeliveryStatus,
@@ -3271,6 +3273,11 @@ export const importJobs = pgTable(
     }),
     sourceLabel: text("source_label").notNull(),
     presetId: text("preset_id"),
+    // Discriminates a history import (creates purchases from a mapped
+    // export) from a Google-token enrichment pass (patches a token onto
+    // rows a prior history import already wrote; creates nothing). Every
+    // pre-existing row is a history import — see migration 0126.
+    kind: importJobKind("kind").notNull().default("HISTORY"),
     storageKey: text("storage_key").notNull(),
     fileName: text("file_name").notNull(),
     fileBytes: integer("file_bytes").notNull(),

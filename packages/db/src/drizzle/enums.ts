@@ -416,3 +416,20 @@ export const importJobStatus = pgEnum("ImportJobStatus", [
   "VERIFICATION_INCOMPLETE",
   "VERIFYING",
 ]);
+
+// An enrichment import is a fundamentally different operation from a
+// history import: it creates no purchases, accepts no mapping in the
+// normal sense, and has its own required-field set (a Google purchase
+// token per row, not a full transaction history). Modelling it as a
+// variant of the history import is what made the revenuecat_google_token
+// preset detectable-but-unimportable. See ROADMAP §11.
+//
+// packages/shared cannot depend on @rovenue/db (layering), so
+// packages/shared/src/import/canonical.ts declares the matching
+// `ImportJobKind` string union independently. Keep the two lists in step —
+// packages/db/tests/import-jobs-kind.test.ts asserts this Postgres enum's
+// labels equal that union's members, in order.
+export const importJobKind = pgEnum("ImportJobKind", [
+  "HISTORY",
+  "GOOGLE_TOKEN_ENRICHMENT",
+]);
