@@ -136,3 +136,34 @@ export const leaderboardSeasonCloseSkippedTotal = new Counter({
   labelNames: ["reason"] as const,
   registers: [registry],
 });
+
+// =============================================================
+// Retention sweep (workers/retention-sweep.ts, ROADMAP §9.2 Task 3)
+// =============================================================
+
+// Incremented by the count of rows actually deleted by a DELETE_ROWS
+// policy, per table. Tasks 4/5 (DROP_PARTITION, CHECKPOINT_TRUNCATE)
+// increment this too once implemented, so it reads as "space reclaimed
+// by the sweep" regardless of strategy.
+export const retentionRowsReclaimedTotal = new Counter({
+  name: "rovenue_retention_rows_reclaimed_total",
+  help: "Rows reclaimed by the retention sweep, by table",
+  labelNames: ["table"] as const,
+  registers: [registry],
+});
+
+// Incremented once per (project, policy) unit the sweep did not act
+// on, by reason: "no-window" (neither a billing tier nor an override —
+// expected and safe on a self-hosted install), "strategy-not-implemented"
+// (DROP_PARTITION/CHECKPOINT_TRUNCATE, until Tasks 4/5 ship), or "error"
+// (the unit's own lookup or delete threw). A sustained "error" rate
+// means the sweep is silently failing to reclaim space somewhere; a
+// sustained "strategy-not-implemented" rate outside audit_logs/
+// credit_ledger/revenue_events means a policy was added without its
+// strategy ever landing.
+export const retentionSweepSkippedTotal = new Counter({
+  name: "rovenue_retention_sweep_skipped_total",
+  help: "Retention sweep units skipped, by reason and table",
+  labelNames: ["reason", "table"] as const,
+  registers: [registry],
+});
