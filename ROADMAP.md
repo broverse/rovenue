@@ -717,6 +717,21 @@ else in the framework/provider-breadth dimension is done.
       `cancel_at_period_end` — §6's other named exclusion from the
       2026-09-03 entry above — is untouched and stays open; this plan did
       not touch it.
+      Open residuals from the whole-branch review's final fix wave
+      (2026-09-05), recorded rather than fixed:
+      - **A `CONSUMABLE` sold through a Stripe funnel books
+        `CREDIT_PURCHASE` revenue while granting zero credits.**
+        `grantPurchaseCurrencies` has exactly two call sites
+        (`routes/v1/receipts.ts`, `services/webhook-processor.ts`); the
+        funnel path grants `subscriber_access` only. Before this plan the
+        divergence was invisible because no revenue row existed at all;
+        now the credit-revenue panels report money for packages that
+        granted nothing. Fixing it means changing what the funnel grants,
+        which needs its own design.
+      - `apps/api`'s test typecheck (`tsconfig.tests.json`) is red on
+        `main` with ~358 pre-existing errors from a repo-wide `vi.fn()`
+        typing idiom. Nothing gates on it — `typecheck:tests` is not in
+        `build` or the turbo pipeline.
 - Architecture note (now implemented, not just planned): the outbox → Kafka
   fanout consumer + deliver worker is the "integration dispatcher"; each
   integration = registry entry (mapping + credential schema) + credential
