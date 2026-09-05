@@ -646,7 +646,13 @@ else in the framework/provider-breadth dimension is done.
       matches against its own resolved subscriber id and coalesces, proven
       end-to-end over real Postgres/Redis in
       `apps/api/src/routes/v1/config-stream.integration.test.ts` (2026-09-05)
-- [ ] Leaderboards: season/reset automation
+- [x] Leaderboards: season/reset automation — three tables, season-window
+      arithmetic, a shared ClickHouse standings query, a
+      `leaderboard-scheduler` worker that opens/closes seasons on cadence,
+      dashboard CRUD + season/standings endpoints, and a dashboard UI
+      (configured-leaderboards list, create/edit form, season selector)
+      surfacing all of it alongside the pre-existing ad-hoc range view
+      (2026-09-05)
 - [x] Subscription-renewing credit grant automation (merges with the PR3
       `product_currency_grants` work) — `grantOn` (PURCHASE/RENEWAL/BOTH)
       end-to-end: schema + trigger matrix, trigger-aware grant service,
