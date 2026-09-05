@@ -14,15 +14,26 @@ import { listAuditProofRows } from "./audit-logs";
 const RUN_ID = Date.now();
 const PROJECT_ID = `prj_alp_${RUN_ID}`;
 const OTHER_PROJECT_ID = `prj_alp_other_${RUN_ID}`;
+const TIE_PROJECT_ID = `prj_alp_tie_${RUN_ID}`;
 const HASH0 = `hash-0-${RUN_ID}`;
 const HASH1 = `hash-1-${RUN_ID}`;
 const HASH2 = `hash-2-${RUN_ID}`;
 const OTHER_HASH0 = `hash-other-0-${RUN_ID}`;
+const TIE_HASH_A = `hash-tie-a-${RUN_ID}`;
+const TIE_HASH_B = `hash-tie-b-${RUN_ID}`;
+// Ids chosen so lexicographic (id ASC) order is the OPPOSITE of
+// insertion order below (b is inserted first, a second) — a test
+// that inserted in id order could pass on physical/insertion order
+// alone and never actually exercise the tie-break.
+const TIE_ID_A = `alp_tie_a_${RUN_ID}`;
+const TIE_ID_B = `alp_tie_b_${RUN_ID}`;
 const ALL_ROW_IDS = [
   `alp_row1_${RUN_ID}`,
   `alp_row2_${RUN_ID}`,
   `alp_row3_${RUN_ID}`,
   `alp_other_row_${RUN_ID}`,
+  TIE_ID_A,
+  TIE_ID_B,
 ];
 
 describe("listAuditProofRows", () => {
@@ -35,6 +46,7 @@ describe("listAuditProofRows", () => {
     await db.delete(auditLogs).where(inArray(auditLogs.id, ALL_ROW_IDS));
     await db.delete(projects).where(eq(projects.id, PROJECT_ID));
     await db.delete(projects).where(eq(projects.id, OTHER_PROJECT_ID));
+    await db.delete(projects).where(eq(projects.id, TIE_PROJECT_ID));
   });
 
   it("returns exactly the hashed fields, chain-ordered", async () => {
@@ -179,5 +191,59 @@ describe("listAuditProofRows", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows.every((r) => r.projectId === OTHER_PROJECT_ID)).toBe(true);
+  });
+
+  it("breaks a createdAt tie by id, not insertion order", async () => {
+    const db = getDb();
+
+    await db
+      .insert(projects)
+      .values({ id: TIE_PROJECT_ID, name: `ALP tie ${RUN_ID}` });
+
+    const tieCreatedAt = new Date(Date.UTC(2026, 0, 1, 0, 0, 0));
+
+    // Insert id B before id A: insertion order is the reverse of id
+    // order, so a read that (incorrectly) fell back on physical/
+    // insertion order instead of `ORDER BY createdAt, id` would come
+    // back [B, A] instead of the correct [A, B].
+    await db.insert(auditLogs).values([
+      {
+        id: TIE_ID_B,
+        projectId: TIE_PROJECT_ID,
+        userId: "user_alp",
+        action: "project.updated",
+        resource: "project",
+        resourceId: TIE_PROJECT_ID,
+        before: { name: "a" },
+        after: { name: "b" },
+        ipAddress: "10.0.0.3",
+        userAgent: "vitest/1",
+        prevHash: null,
+        rowHash: TIE_HASH_B,
+        createdAt: tieCreatedAt,
+      },
+      {
+        id: TIE_ID_A,
+        projectId: TIE_PROJECT_ID,
+        userId: "user_alp",
+        action: "project.created",
+        resource: "project",
+        resourceId: TIE_PROJECT_ID,
+        before: null,
+        after: { name: "a" },
+        ipAddress: "10.0.0.3",
+        userAgent: "vitest/1",
+        prevHash: null,
+        rowHash: TIE_HASH_A,
+        createdAt: tieCreatedAt,
+      },
+    ]);
+
+    const rows = await listAuditProofRows(db, {
+      projectId: TIE_PROJECT_ID,
+      limit: 100,
+    });
+
+    expect(rows.map((r) => r.id)).toEqual([TIE_ID_A, TIE_ID_B]);
   });
 });

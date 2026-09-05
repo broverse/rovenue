@@ -199,10 +199,19 @@ export async function findProjectChain(
  * `user`) or the raw Drizzle row shape (`createdAt` as a `Date`),
  * and a proof row that carried either would silently fail to
  * re-hash to its stored `rowHash`.
+ *
+ * `rowHash` is nullable: the column itself is nullable (rows
+ * predating the hash chain have no hash state — schema.ts), and
+ * this read applies no `WHERE rowHash IS NOT NULL` filter, so a
+ * legacy row inside a proof-export range flows through here. A
+ * proof export needs to KNOW an unhashed row was in range rather
+ * than have it silently omitted or coerced into looking hashed —
+ * so the type says exactly what can come back, and the caller
+ * (an export/verify step) decides what a null means.
  */
 export interface AuditProofRow extends AuditChainPayload {
   id: string;
-  rowHash: string;
+  rowHash: string | null;
 }
 
 /**
@@ -249,9 +258,11 @@ export async function listAuditProofRows(
     .limit(args.limit);
 
   // WHERE filters to a specific projectId, so orphan rows with a
-  // null projectId (post-cascade SET NULL) cannot appear here, and
-  // a chained row (one written by writeChained) always has a
-  // rowHash — the non-null assertion mirrors findProjectChain's.
+  // null projectId (post-cascade SET NULL) cannot appear here — that
+  // non-null assertion mirrors findProjectChain's. `rowHash` has no
+  // such filter and is mapped through as-is (possibly null): a
+  // legacy pre-chain row must surface to the caller, not be coerced
+  // or hidden.
   return rows.map((r) => ({
     id: r.id,
     projectId: r.projectId!,
@@ -265,7 +276,7 @@ export async function listAuditProofRows(
     userAgent: r.userAgent,
     createdAt: r.createdAt.toISOString(),
     prevHash: r.prevHash,
-    rowHash: r.rowHash!,
+    rowHash: r.rowHash,
   }));
 }
 
