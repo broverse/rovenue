@@ -603,6 +603,65 @@ export async function findSupersedableApplePurchases(
   return rows;
 }
 
+/**
+ * Rows in the same Apple subscription chain that are still parked in
+ * BILLING_ISSUE, excluding the incoming transaction's own row.
+ *
+ * `applyFailedRenewal` writes BILLING_ISSUE chain-wide, but Apple mints a
+ * NEW transactionId for the renewal that RECOVERS that failure. The
+ * recovering delivery therefore lands on a key with no row, the guard's
+ * before-image is null, and the BILLING_ISSUE row it resolved is left
+ * behind — invisible to the recovery emit, and eventually retired by
+ * `runBillingIssueAgeing` 60 days later as a false `subscription.expired`
+ * for a subscriber who is actively paying. This query is how the
+ * recovering delivery finds those rows.
+ *
+ * Deliberately NOT bounded by `expiresDate > now` the way
+ * `findSupersedableApplePurchases` is: a row lands in BILLING_ISSUE
+ * precisely because its period already lapsed, so that bound would match
+ * nothing. The narrowing here is `status = 'BILLING_ISSUE'` instead, which
+ * is just as tight — an ordinary past renewal row is ACTIVE or EXPIRED and
+ * never matches.
+ */
+export async function findChainBillingIssuePurchases(
+  db: Db,
+  args: {
+    projectId: string;
+    originalTransactionId: string;
+    excludeStoreTransactionId: string;
+  },
+): Promise<
+  Array<{
+    id: string;
+    storeTransactionId: string;
+    subscriberId: string;
+    productId: string;
+  }>
+> {
+  const result = await db.execute(sql`
+    SELECT p.id,
+           p."storeTransactionId" AS "storeTransactionId",
+           p."subscriberId"       AS "subscriberId",
+           p."productId"          AS "productId"
+    FROM ${purchases} p
+    WHERE p."projectId" = ${args.projectId}
+      AND p.store = 'APP_STORE'
+      AND p."originalTransactionId" = ${args.originalTransactionId}
+      AND p."storeTransactionId" <> ${args.excludeStoreTransactionId}
+      AND p.status = 'BILLING_ISSUE'
+  `);
+  const rows =
+    (result as unknown as {
+      rows: Array<{
+        id: string;
+        storeTransactionId: string;
+        subscriberId: string;
+        productId: string;
+      }>;
+    }).rows ?? [];
+  return rows;
+}
+
 // Export sql for callers that need to compose additional
 // conditions on top of what the repo exposes.
 export { sql };

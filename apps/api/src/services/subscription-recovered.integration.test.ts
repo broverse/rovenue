@@ -395,3 +395,178 @@ describe("processStripeEvent — subscription.recovered", () => {
     expect(await recoveredRows(subscriberId)).toHaveLength(1);
   });
 });
+
+// =============================================================
+// Apple — the recovery that lands on a DIFFERENT transactionId
+// =============================================================
+//
+// The suite above pins the case where the BILLING_ISSUE row and the
+// recovering delivery share a transactionId. That is Stripe's shape (one
+// stable subscription id), and it is the shape a hand-written fixture
+// naturally takes — but it is NOT Apple's. Apple mints a new
+// transactionId per billing period, and `applyFailedRenewal` stamps
+// BILLING_ISSUE onto the row of the transaction that FAILED. The renewal
+// that recovers it therefore arrives on a key with no row at all: the
+// guard's before-image is null and, before this fix, `recovered` returned
+// early every single time. Half the feature was inert for Apple.
+//
+// Two things must hold, and both are asserted here:
+//   1. the recovering delivery emits `subscription.recovered` exactly once;
+//   2. it leaves no stale BILLING_ISSUE row behind — otherwise
+//      `runBillingIssueAgeing` retires it 60 days later and emits
+//      `subscription.expired` plus a zero-amount CANCELLATION for a
+//      subscriber who is actively paying.
+
+describe("handleAppleNotification — recovery across an Apple renewal chain", () => {
+  const PROJECT_ID = `prj_recov_ch_${RUN_ID}`;
+  const SUBSCRIBER_ID = `sub_recov_ch_${RUN_ID}`;
+  const PRODUCT_ID = `prod_recov_ch_${RUN_ID}`;
+  const APPLE_PRODUCT_ID = `com.app.recovch.${RUN_ID}`;
+  // One chain, two billing periods: the period that failed to renew, and
+  // the period whose successful charge recovers it.
+  const CHAIN_OTXN_ID = `otxn_recov_ch_${RUN_ID}`;
+  const FAILED_TXN_ID = `txn_recov_ch_failed_${RUN_ID}`;
+  const RECOVERING_TXN_ID = `txn_recov_ch_renewed_${RUN_ID}`;
+
+  function makeStubVerifier(uuidSuffix: string): AppleNotificationVerifier {
+    const notification = {
+      notificationType: APPLE_NOTIFICATION_TYPE.DID_RENEW,
+      notificationUUID: `nfn_recov_ch_${RUN_ID}_${uuidSuffix}`,
+      version: "2.0",
+      signedDate: NOW_MS,
+      data: {
+        environment: APPLE_ENVIRONMENT.SANDBOX,
+        signedTransactionInfo: "stub-transaction-jws",
+      },
+    } as AppleResponseBodyV2DecodedPayload;
+
+    return {
+      verifyNotification: vi.fn(async () => notification),
+      verifyTransaction: vi.fn(
+        async () =>
+          ({
+            transactionId: RECOVERING_TXN_ID,
+            originalTransactionId: CHAIN_OTXN_ID,
+            productId: APPLE_PRODUCT_ID,
+            purchaseDate: NOW_MS,
+            originalPurchaseDate: NOW_MS,
+            expiresDate: NOW_MS + TERM_MS,
+            signedDate: NOW_MS,
+            price: 9_990_000,
+            currency: "USD",
+            environment: APPLE_ENVIRONMENT.SANDBOX,
+          }) as AppleJwsTransactionPayload,
+      ),
+      verifyRenewalInfo: vi.fn(async () => ({
+        originalTransactionId: CHAIN_OTXN_ID,
+        productId: APPLE_PRODUCT_ID,
+        autoRenewStatus: 1 as const,
+        signedDate: NOW_MS,
+        environment: APPLE_ENVIRONMENT.SANDBOX,
+      })),
+    };
+  }
+
+  async function statusOfTransaction(
+    storeTransactionId: string,
+  ): Promise<string | undefined> {
+    const [row] = await getDb()
+      .select({ status: purchases.status })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.store, "APP_STORE"),
+          eq(purchases.storeTransactionId, storeTransactionId),
+        ),
+      );
+    return row?.status;
+  }
+
+  beforeAll(async () => {
+    const db = getDb();
+    await db
+      .insert(projects)
+      .values({ id: PROJECT_ID, name: `Recov CH ${RUN_ID}` });
+    await db.insert(subscribers).values({
+      id: SUBSCRIBER_ID,
+      projectId: PROJECT_ID,
+      rovenueId: `app_user_recov_ch_${RUN_ID}`,
+      appUserId: `app_user_recov_ch_${RUN_ID}`,
+    });
+    await db.insert(products).values({
+      id: PRODUCT_ID,
+      projectId: PROJECT_ID,
+      identifier: APPLE_PRODUCT_ID,
+      type: "SUBSCRIPTION",
+      storeIds: { apple: APPLE_PRODUCT_ID },
+      displayName: `Recov CH Product ${RUN_ID}`,
+      accessIds: [],
+    });
+    // The failed period. Its expiresDate is in the PAST — that is what a
+    // billing failure means — which is also why nothing else in the system
+    // ever retires it: BILLING_ISSUE is not sweepable.
+    await db.insert(purchases).values({
+      projectId: PROJECT_ID,
+      subscriberId: SUBSCRIBER_ID,
+      productId: PRODUCT_ID,
+      store: "APP_STORE",
+      storeTransactionId: FAILED_TXN_ID,
+      originalTransactionId: CHAIN_OTXN_ID,
+      status: "BILLING_ISSUE",
+      isTrial: false,
+      isIntroOffer: false,
+      isSandbox: true,
+      environment: "SANDBOX",
+      purchaseDate: new Date(NOW_MS - TERM_MS),
+      originalPurchaseDate: new Date(NOW_MS - TERM_MS),
+      expiresDate: new Date(NOW_MS - 1),
+      billingIssueDetectedAt: new Date(NOW_MS - 1),
+      priceAmount: "9.99",
+      priceCurrency: "USD",
+      autoRenewStatus: true,
+    });
+  });
+
+  afterAll(async () => {
+    await getDb()
+      .delete(outboxEvents)
+      .where(eq(outboxEvents.aggregateId, SUBSCRIBER_ID));
+    await getDb().delete(projects).where(eq(projects.id, PROJECT_ID));
+  });
+
+  it("emits recovered once for a renewal on a NEW transactionId, and leaves no BILLING_ISSUE row to age out", async () => {
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier: makeStubVerifier("renewed"),
+    });
+    expect(result.status).toBe("processed");
+
+    const rows = await recoveredRows(SUBSCRIBER_ID);
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.previousStatus).toBe("BILLING_ISSUE");
+    expect(payload.status).toBe("ACTIVE");
+
+    await expect(statusOfTransaction(RECOVERING_TXN_ID)).resolves.toBe(
+      "ACTIVE",
+    );
+    // The whole second half of the bug: without the chain retirement this
+    // is still "BILLING_ISSUE", and 60 days later the ageing pass fires a
+    // false expiry for a paying subscriber.
+    await expect(statusOfTransaction(FAILED_TXN_ID)).resolves.not.toBe(
+      "BILLING_ISSUE",
+    );
+  });
+
+  it("a redelivery of the same renewal emits nothing further", async () => {
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier: makeStubVerifier("redelivery"),
+    });
+    expect(result.status).toBe("processed");
+
+    expect(await recoveredRows(SUBSCRIBER_ID)).toHaveLength(1);
+  });
+});

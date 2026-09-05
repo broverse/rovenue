@@ -761,7 +761,12 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
         projectId: ctx.projectId,
         subscriberId: subscriber.id,
         purchaseId: result.purchase.id,
-        guard,
+        // Stripe keys a subscription by a STABLE id across the whole
+        // dunning cycle, so the recovering delivery lands on the very row
+        // that held BILLING_ISSUE and the guard's own before-image is the
+        // right answer. (Apple does not — see `retireChainBillingIssue`.)
+        apply: guard.apply,
+        previousStatus: guard.previous?.status ?? null,
         status,
         now: stripeEventTime(ctx) ?? new Date(),
       });

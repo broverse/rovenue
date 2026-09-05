@@ -48,8 +48,12 @@ import {
 import { billingIssueStamp } from "../subscription-state";
 import { audit } from "../../lib/audit";
 import { expireSupersededApplePurchases } from "./apple-supersede";
+import { retireChainBillingIssue } from "./apple-recovery";
 import type { StoreEventContext } from "@rovenue/shared";
-import { TERMINAL_STATUSES } from "@rovenue/shared/subscription-status";
+import {
+  SUBSCRIPTION_STATUS_SEMANTICS,
+  TERMINAL_STATUSES,
+} from "@rovenue/shared/subscription-status";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -1383,12 +1387,48 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
       // store resolved the payment failure. Unlike inferring it from an
       // invoice, this cannot fire on an unrelated renewal, because the
       // before-image says where the row actually was.
+      //
+      // On Apple that before-image is usually null even for a real
+      // recovery: `applyFailedRenewal` stamps BILLING_ISSUE chain-wide onto
+      // the transaction that failed, and Apple mints a NEW transactionId
+      // for the renewal that recovers it — so THIS key has no row and
+      // `guard.previous` says nothing. The chain is the honest scope. When
+      // this delivery grants access and its own key was not the one
+      // holding the failure, resolve the chain's stale BILLING_ISSUE rows;
+      // if any actually moved, the chain WAS in billing trouble and this
+      // delivery is what ended it.
+      //
+      // Exactly-once: the two arms are mutually exclusive. A recovery
+      // visible on this key uses `guard.previous`; one visible only on a
+      // sibling uses the chain. A replay retires nothing (the rows are
+      // already EXPIRED) and emits nothing.
+      const recoveredOnThisKey =
+        guard.previous?.status === PurchaseStatus.BILLING_ISSUE;
+      const recoveredOnChain =
+        !recoveredOnThisKey &&
+        guard.apply &&
+        SUBSCRIPTION_STATUS_SEMANTICS[status].grantsAccess &&
+        (
+          await retireChainBillingIssue({
+            db: dbTx,
+            projectId: ctx.projectId,
+            originalTransactionId: tx.originalTransactionId,
+            excludeStoreTransactionId: tx.transactionId,
+            now: eventTime,
+            source: `apple:${ctx.notification.notificationType}`,
+          })
+        ).retired > 0;
+
       await emitSubscriptionRecovered({
         db: dbTx,
         projectId: ctx.projectId,
         subscriberId,
         purchaseId: persisted.id,
-        guard,
+        apply: guard.apply,
+        previousStatus:
+          recoveredOnThisKey || recoveredOnChain
+            ? PurchaseStatus.BILLING_ISSUE
+            : (guard.previous?.status ?? null),
         status,
         now: eventTime,
       });

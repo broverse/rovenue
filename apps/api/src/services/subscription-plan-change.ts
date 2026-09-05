@@ -8,7 +8,6 @@ import {
   APPLE_NOTIFICATION_SUBTYPE,
   type AppleNotificationSubtype,
 } from "./apple/apple-types";
-import type { GuardStatusWriteResult } from "./subscription-transition-guard";
 
 /**
  * Re-exported so this module stays the one place the api reads plan-change
@@ -179,22 +178,34 @@ const SUBSCRIPTION_RECOVERED_EVENT_KEY = "subscription.recovered";
  *
  * `db` must be the caller's transaction handle — same invariant as
  * `emitProductChanged`: the outbox row and the purchase write commit
- * together or not at all. Callers must also gate on `guard.apply` being
- * true themselves before relying on `status` — this function additionally
+ * together or not at all. Callers must also gate on `apply` being true
+ * themselves before relying on `status` — this function additionally
  * checks it so a caller can never accidentally announce a withheld write.
+ *
+ * `previousStatus` is the guard's before-image (`guard.previous?.status`)
+ * for every store whose recovering delivery lands on the SAME key that
+ * held the failure — Stripe (stable subscription id) and Google. Apple is
+ * the exception: it mints a new transactionId for the renewal that
+ * recovers a failed one, so the recovering delivery's own before-image is
+ * null and the BILLING_ISSUE lives on a SIBLING row in the same chain.
+ * The parameter is therefore a plain status rather than the whole guard
+ * result, so the Apple path can supply the status it established
+ * chain-wide (see `retireChainBillingIssue`) instead of being silently
+ * inert.
  */
 export async function emitSubscriptionRecovered(args: {
   db: Db;
   projectId: string;
   subscriberId: string;
   purchaseId: string;
-  guard: Pick<GuardStatusWriteResult, "apply" | "previous">;
+  apply: boolean;
+  previousStatus: PurchaseStatus | null;
   status: PurchaseStatus;
   now: Date;
 }): Promise<void> {
   if (
-    !args.guard.apply ||
-    args.guard.previous?.status !== PurchaseStatus.BILLING_ISSUE ||
+    !args.apply ||
+    args.previousStatus !== PurchaseStatus.BILLING_ISSUE ||
     !SUBSCRIPTION_STATUS_SEMANTICS[args.status].grantsAccess
   ) {
     return;
@@ -207,7 +218,7 @@ export async function emitSubscriptionRecovered(args: {
       projectId: args.projectId,
       subscriberId: args.subscriberId,
       purchaseId: args.purchaseId,
-      previousStatus: args.guard.previous.status,
+      previousStatus: args.previousStatus,
       status: args.status,
       timestamp: args.now.toISOString(),
     },
