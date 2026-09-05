@@ -1,10 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { db } from "../../packages/db/src/drizzle/client";
-import {
-  billingSubscriptions,
-  projects,
-} from "../../packages/db/src/drizzle/schema";
+import { db, projects, billingSubscriptions } from "@rovenue/db";
 import { createFreeSubscription } from "../src/services/billing/create-free-subscription";
 
 const PID = "proj_test_hook";

@@ -1,17 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { db } from "../../packages/db/src/drizzle/client";
-import {
-  billingInvoices,
-  projects,
-  user,
-} from "../../packages/db/src/drizzle/schema";
+import { db, projects } from "@rovenue/db";
+import { billingInvoices, user } from "@rovenue/db/src/drizzle/schema";
 import {
   upsertInvoiceFromStripe,
   listInvoicesForProject,
   findInvoiceByStripeId,
   incrementRefundedAmount,
-} from "../../packages/db/src/drizzle/repositories/billing-invoices";
+} from "@rovenue/db/src/drizzle/repositories/billing-invoices";
 
 const PID = "proj_test_inv";
 

@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { ASSET_STORAGE_TIER_LIMIT_BYTES } from "@rovenue/shared";
-import { db } from "../../packages/db/src/drizzle/client";
-import { billingTierLimits } from "../../packages/db/src/drizzle/schema";
+import { db, billingTierLimits } from "@rovenue/db";
 
 // This test runs against a seeded database.
 // Boot Postgres + run `pnpm db:migrate && pnpm db:seed` before running.

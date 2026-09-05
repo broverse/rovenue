@@ -1,16 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { db } from "../../packages/db/src/drizzle/client";
-import {
-  billingDunningState,
-  projects,
-  user,
-} from "../../packages/db/src/drizzle/schema";
+import { db, projects } from "@rovenue/db";
+import { billingDunningState, user } from "@rovenue/db/src/drizzle/schema";
 import {
   upsertDunningState,
   findDunningStateForProject,
   clearDunningState,
-} from "../../packages/db/src/drizzle/repositories/billing-dunning-state";
+} from "@rovenue/db/src/drizzle/repositories/billing-dunning-state";
 
 const PID = "proj_test_dun";
 
