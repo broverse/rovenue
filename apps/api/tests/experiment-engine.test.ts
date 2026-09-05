@@ -33,16 +33,28 @@ const {
     }),
   };
 
+  // Real db.<model>.findMany/findUnique/findFirst calls in this mock all
+  // pass a `where`/`include` args object (see experimentRepo/offeringRepo/
+  // featureFlagRepo below) and the tests reassign each with real fixture
+  // shapes via `.mockResolvedValue`. Left as zero-arg `vi.fn(async () =>
+  // [])`/`vi.fn(async () => null)`, TS infers `never[]`/`null`-only return
+  // types (nothing to widen from) AND rejects the `where`-arg call sites
+  // below as "expected 0 arguments" — give every member its real args
+  // shape and a `Record<string, unknown>`-based return type instead.
+  type MockRow = Record<string, unknown>;
+  type FindOne = (args?: MockRow) => Promise<MockRow | null>;
+  type FindMany = (args?: MockRow) => Promise<MockRow[]>;
+
   const dbMock = {
     experiment: {
-      findMany: vi.fn(async () => []),
-      findUnique: vi.fn(async () => null),
+      findMany: vi.fn<FindMany>(async () => []),
+      findUnique: vi.fn<FindOne>(async () => null),
     },
     audience: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn<FindMany>(async () => []),
     },
     experimentAssignment: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn<FindMany>(async () => []),
       createMany: vi.fn(
         async (_args: { data: Array<Record<string, unknown>>; skipDuplicates?: boolean }) => ({
           count: 0,
@@ -51,10 +63,10 @@ const {
       update: vi.fn(async (args: any) => args.data),
     },
     productGroup: {
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn<FindOne>(async () => null),
     },
     offering: {
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn<FindOne>(async () => null),
     },
   };
 

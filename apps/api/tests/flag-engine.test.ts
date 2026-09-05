@@ -30,12 +30,19 @@ const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(
     }),
   };
 
+  // Both members are called below with a `where` args object
+  // (featureFlagRepo.findFeatureFlagsByProject/findAudiencesByProject) and
+  // reassigned in tests via `.mockResolvedValue` with real fixture arrays —
+  // a zero-arg `vi.fn(async () => [])` infers a `never[]`-only return type
+  // and rejects the `where`-arg calls as "expected 0 arguments".
+  type FindMany = (args?: Record<string, unknown>) => Promise<Record<string, unknown>[]>;
+
   const dbMock = {
     featureFlag: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn<FindMany>(async () => []),
     },
     audience: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn<FindMany>(async () => []),
     },
   };
 
