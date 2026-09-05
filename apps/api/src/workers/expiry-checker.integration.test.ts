@@ -305,7 +305,7 @@ async function seedLivelockFixture({
 
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["E1", "E2", "AF", "AS", "AN", "GO", "GC", "GN", "LL"]) {
+  for (const suffix of ["E1", "E2", "AF", "AS", "AN", "GO", "GC", "GN", "LL", "PZ"]) {
     const projectId = `prj_exp_${RUN_ID}${suffix}`;
     await db.delete(outboxEvents).where(
       inArray(
@@ -527,5 +527,58 @@ describe("runExpiryCheck — Task 12c: an open GRACE_PERIOD window survives the 
         ),
       );
     expect(stillInGrace.length).toBe(MAX_CANDIDATES_PER_RUN + 1);
+  });
+});
+
+// =============================================================
+// Is PAUSED observably live? (measurement, not reasoning)
+// =============================================================
+//
+// `subscription-status.ts` declares PAUSED `{ isLive: true, sweepable:
+// true }` on the rationale that the subscription is expected back. But
+// processCandidate excludes PAUSED from grace promotion and falls it
+// through to EXPIRED, so a pause that outlives its paid term is retired
+// on the next five-minute run. This test does not argue the point — it
+// seeds the row and reports what the sweeper actually does to it.
+
+describe("PAUSED — what the sweeper actually does to a lapsed pause", () => {
+  it("retires a PAUSED purchase whose expiresDate has passed", async () => {
+    const db = getDb();
+    const now = new Date();
+    const project = await seedProject("PZ");
+    const subscriber = await seedSubscriber(project.id, "PZ");
+    const product = await seedProduct(project.id, "PZ");
+    const synth = `comp_exp_${RUN_ID}_PZ`;
+
+    const [purchase] = await db
+      .insert(purchases)
+      .values({
+        projectId: project.id,
+        subscriberId: subscriber.id,
+        productId: product.id,
+        store: "APP_STORE",
+        storeTransactionId: synth,
+        originalTransactionId: synth,
+        status: "PAUSED",
+        isTrial: false,
+        isIntroOffer: false,
+        isSandbox: false,
+        environment: "PRODUCTION",
+        purchaseDate: now,
+        originalPurchaseDate: now,
+        expiresDate: new Date(now.getTime() - 10 * 60 * 1000),
+        priceAmount: "9.99",
+        priceCurrency: "USD",
+        autoRenewStatus: false,
+      })
+      .returning();
+    if (!purchase) throw new Error("PAUSED seed: no row returned");
+
+    await runExpiryCheck(now);
+
+    // Measured 2026-09-05: EXPIRED. A pause whose paid term has lapsed is
+    // retired within one sweep, so PAUSED is not observably live and the
+    // `isLive: true` declaration was false.
+    await expect(statusOf(purchase.id)).resolves.toBe("EXPIRED");
   });
 });
