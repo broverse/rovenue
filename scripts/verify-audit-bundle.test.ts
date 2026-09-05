@@ -109,7 +109,11 @@ describe("verifyAuditBundle", () => {
 
   test("rejects an unknown format version rather than guessing", () => {
     const b = { ...bundle(chainOf(2)), formatVersion: "rovenue.audit-chain.v99" };
-    expect(verifyAuditBundle(b).ok).toBe(false);
+    const r = verifyAuditBundle(b);
+    expect(r.ok).toBe(false);
+    expect(r.failure?.reason).toBe("UNSUPPORTED_FORMAT_VERSION");
+    expect(r.failure?.index).toBeNull();
+    expect(r.failure?.entryId).toBeNull();
   });
 
   test("rejects an entry with no rowHash", () => {
@@ -163,5 +167,113 @@ describe("verifyAuditBundle", () => {
     // that test goes red; if the verifier ever drifts, this one does.
     const r = verifyAuditBundle(fixture);
     expect(r.ok).toBe(true);
+  });
+
+  // =============================================================
+  // Fix round 1 (review findings): a bundle the verifier CANNOT read
+  // must never verify clean. Deleting rows, or lying about the tip, is
+  // the easiest tamper there is -- these are hard failures, not a
+  // silent "nothing to check".
+  // =============================================================
+
+  describe("malformed bundles never verify clean", () => {
+    test("a missing `entries` key is MALFORMED_BUNDLE, not an empty-but-ok bundle", () => {
+      const { entries: _entries, ...rest } = bundle(chainOf(3));
+      const r = verifyAuditBundle(rest);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("MALFORMED_BUNDLE");
+      expect(r.failure?.index).toBeNull();
+      expect(r.failure?.entryId).toBeNull();
+      expect(r.entriesChecked).toBe(0);
+    });
+
+    test("a null `entries` is MALFORMED_BUNDLE", () => {
+      const b = { ...bundle(chainOf(3)), entries: null };
+      const r = verifyAuditBundle(b);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("MALFORMED_BUNDLE");
+    });
+
+    test("a non-array `entries` is MALFORMED_BUNDLE", () => {
+      const b = { ...bundle(chainOf(3)), entries: "not-an-array" };
+      const r = verifyAuditBundle(b);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("MALFORMED_BUNDLE");
+    });
+
+    test("an origin object with no string rowHash is MALFORMED_BUNDLE, not a mismatch", () => {
+      // A naive `String(bundle.origin.rowHash)` coercion would turn this
+      // into the literal string "undefined" and compare it as if it
+      // were a real (if wrong) hash -- that must never happen.
+      const b = { ...bundle(chainOf(2)), origin: {} };
+      const r = verifyAuditBundle(b);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("MALFORMED_BUNDLE");
+      expect(r.failure?.index).toBeNull();
+      expect(r.failure?.entryId).toBeNull();
+    });
+
+    test("an origin that isn't an object at all is MALFORMED_BUNDLE", () => {
+      const b = { ...bundle(chainOf(2)), origin: "0".repeat(64) };
+      const r = verifyAuditBundle(b);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("MALFORMED_BUNDLE");
+    });
+
+    test("a tip with a non-string, non-null rowHash is MALFORMED_BUNDLE", () => {
+      const entries = chainOf(2);
+      const b = { ...bundle(entries), tip: { rowHash: 12345, createdAt: entries[1]!.createdAt } };
+      const r = verifyAuditBundle(b);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("MALFORMED_BUNDLE");
+    });
+  });
+
+  describe("the tip rule catches a deleted tail", () => {
+    test("truncating the newest rows leaves a stale tip that must fail", () => {
+      // The prevHash walk only ever looks BACKWARD, so deleting the
+      // chain's newest rows leaves every remaining link internally
+      // consistent -- this is the one case only the tip check can see.
+      const all = chainOf(3);
+      const truncated = { ...bundle(all), entries: all.slice(0, 1) };
+      const r = verifyAuditBundle(truncated);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("TIP_MISMATCH");
+      expect(r.failure?.index).toBeNull();
+      expect(r.failure?.entryId).toBeNull();
+    });
+
+    test("a non-null tip on an empty entries array is TIP_MISMATCH", () => {
+      const all = chainOf(1);
+      const b = { ...bundle([]), tip: { rowHash: all[0]!.rowHash, createdAt: all[0]!.createdAt } };
+      const r = verifyAuditBundle(b);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("TIP_MISMATCH");
+    });
+
+    test("a null tip on a non-empty entries array is TIP_MISMATCH", () => {
+      const b = { ...bundle(chainOf(2)), tip: null };
+      const r = verifyAuditBundle(b);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("TIP_MISMATCH");
+    });
+  });
+
+  test("every ok:false result carries a failure reason", () => {
+    const cases: unknown[] = [
+      { ...bundle(chainOf(2)), formatVersion: "rovenue.audit-chain.v99" },
+      (() => {
+        const { entries: _e, ...rest } = bundle(chainOf(2));
+        return rest;
+      })(),
+      { ...bundle(chainOf(2)), origin: {} },
+      { ...bundle(chainOf(2)), entries: chainOf(2).slice(0, 1) },
+    ];
+    for (const c of cases) {
+      const r = verifyAuditBundle(c);
+      expect(r.ok).toBe(false);
+      expect(r.failure).toBeDefined();
+      expect(r.failure?.reason).toBeTruthy();
+    }
   });
 });
