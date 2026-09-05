@@ -235,24 +235,37 @@ async function grantOneTimePurchase(
       purchaseId: purchase.id,
     });
   } else {
-    await drizzle.revenueEventRepo.createRevenueEvent(tx, {
-      projectId: args.projectId,
-      subscriberId: args.subscriberId,
-      purchaseId: purchase.id,
-      productId: args.productId,
-      type: revenueType,
-      amount: priceAmount,
-      currency: priceCurrency,
-      amountUsd: args.amountUsd,
-      store: Store.STRIPE,
-      eventDate: purchasedAt,
-      // Both racers converge on one key; the loser's transaction rolls
-      // back anyway, and a redelivered webhook is a no-op.
-      dedupeKey: `stripe:${args.stripePaymentIntentId}:${revenueDedupeKind(revenueType)}`,
-      // No country: a PaymentIntent carries no per-transaction country, and
-      // reading the Charge would put a Stripe call inside an open
-      // transaction. Same documented gap, same reason, as applyInvoicePaid.
-    });
+    // createRevenueEvent can throw (e.g. a dedupe-key conflict), and this
+    // function's contract is that NOTHING here throws — a throw would roll
+    // back the paid transition and strand a buyer who really paid. Every
+    // other call site in this codebase shares this same unguarded gap; this
+    // one gets the guard because it is the call this fix wave is about.
+    try {
+      await drizzle.revenueEventRepo.createRevenueEvent(tx, {
+        projectId: args.projectId,
+        subscriberId: args.subscriberId,
+        purchaseId: purchase.id,
+        productId: args.productId,
+        type: revenueType,
+        amount: priceAmount,
+        currency: priceCurrency,
+        amountUsd: args.amountUsd,
+        store: Store.STRIPE,
+        eventDate: purchasedAt,
+        // Both racers converge on one key; the loser's transaction rolls
+        // back anyway, and a redelivered webhook is a no-op.
+        dedupeKey: `stripe:${args.stripePaymentIntentId}:${revenueDedupeKind(revenueType)}`,
+        // No country: a PaymentIntent carries no per-transaction country, and
+        // reading the Charge would put a Stripe call inside an open
+        // transaction. Same documented gap, same reason, as applyInvoicePaid.
+      });
+    } catch (err) {
+      log.error("createRevenueEvent threw while granting a one-time funnel purchase", {
+        sessionId: args.sessionId,
+        purchaseId: purchase.id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   log.info("granted a one-time funnel purchase", {
