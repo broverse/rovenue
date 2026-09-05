@@ -873,9 +873,21 @@ format version rather than guessing."
 ### Task 5: Document the format and tick the checkbox
 
 **Files:**
-- Create: `docs/` page for the proof format (find the docs app's structure first:
-  `ls apps/docs/content` or equivalent, and match the neighbouring pages)
+- Create: `apps/docs/content/docs/guides/audit-proof.mdx`
+- Modify: `apps/docs/content/docs/guides/meta.json`
 - Modify: `ROADMAP.md`
+
+**Two things that will silently break the docs site if you miss them:**
+
+1. Fumadocs builds its sidebar from the explicit `pages` array in
+   `apps/docs/content/docs/guides/meta.json`. A new `.mdx` file that is not added
+   to that array exists but is unreachable — no error, no link. Add
+   `"audit-proof"` to the array.
+2. The docs site is statically prerendered, and a BARE `{{something}}` in MDX
+   prose is parsed as a JSX expression and breaks the prerender. This page is
+   full of JSON shapes, so keep every brace inside a fenced code block. Read a
+   neighbouring page such as `identity-consent.mdx` first and match its
+   frontmatter and heading conventions exactly.
 
 **Interfaces:** consumes everything above; produces no code.
 
@@ -891,6 +903,30 @@ encoding rule (sorted keys, recursive, non-finite numbers as null, `createdAt` a
 ISO-8601); the bundle shape field by field; the origin rule; how to obtain a
 bundle; how to run the verifier; and what each failure reason means.
 
+Do not write any of this from memory or from this plan's prose. Read the shipped
+code and describe what it actually does:
+
+- `packages/shared/src/audit-chain.ts` — the canonical encoder and the exact
+  field list the hash covers. `id` is NOT hashed; do not imply it is.
+- `apps/api/src/routes/dashboard/audit-logs.ts` — the endpoint, its query
+  params, its cap, and the assembled bundle including `truncated`.
+- `scripts/verify-audit-bundle.ts` — every reason in the failure union, and what
+  each one means for the operator holding the bundle.
+- `packages/shared/src/audit-proof-bundle-fixture.json` — a real bundle to show.
+
+Three specific things the page MUST state plainly, because each is a limit a
+reader would otherwise assume away:
+
+1. `rowHash` can be null on an entry. Rows written before the chain existed were
+   never hashed; the export deliberately includes them rather than hiding them,
+   and the verifier fails such a bundle with `UNHASHED_ROW`. That is a finding
+   about the data, not a bug in the tool.
+2. A `truncated` bundle is a partial export that hit the cap. It can still
+   verify `ok`, and it does not mean the history is intact — only that what was
+   exported is.
+3. The chain detects alteration of RECORDED rows. It does not prove that
+   everything which happened was recorded.
+
 State plainly what the chain does NOT prove: it detects alteration of recorded
 rows, it does not prove that everything which happened was recorded.
 
@@ -903,6 +939,7 @@ the tests do not have.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs ROADMAP.md
+git add apps/docs/content/docs/guides/audit-proof.mdx \
+        apps/docs/content/docs/guides/meta.json ROADMAP.md
 git commit -m "docs(audit): describe the proof bundle and its verification"
 ```
