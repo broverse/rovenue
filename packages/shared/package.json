@@ -45,6 +45,10 @@
     "./import/keys": {
       "types": "./src/import/keys.ts",
       "default": "./src/import/keys.ts"
+    },
+    "./experiments/bucketing-web": {
+      "types": "./src/experiments/bucketing-web.ts",
+      "default": "./src/experiments/bucketing-web.ts"
     }
   },
   "scripts": {

@@ -14,6 +14,10 @@
     "./react": {
       "types": "./src/react/index.ts",
       "default": "./src/react/index.ts"
+    },
+    "./paywall": {
+      "types": "./src/paywall/index.tsx",
+      "default": "./src/paywall/index.tsx"
     }
   },
   "scripts": {
@@ -22,7 +26,8 @@
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^2.2.2",
-    "@rovenue/shared": "workspace:*"
+    "@rovenue/shared": "workspace:*",
+    "@rovenue/paywall-renderer": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
