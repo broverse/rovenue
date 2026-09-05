@@ -61,6 +61,21 @@ import type { WebhookPostProcess } from "../webhook-processor";
 const log = logger.child("apple-webhook");
 
 /**
+ * Every `findPurchaseByOriginalTransaction` lookup in this file is a
+ * lookup of an APPLE chain, so every one of them says so.
+ *
+ * `originalTransactionId` is Apple's concept but the COLUMN is shared by
+ * all three stores, so an unscoped read can return another store's row on
+ * an id collision. Some call sites passed the scope and some did not, and
+ * the divergence was load-bearing in at least one place:
+ * `applyFailedRenewal` uses its unscoped read to decide the dunning
+ * stamp, so a collision mis-stamped `billingIssueDetectedAt` — the clock
+ * `runBillingIssueAgeing` retires the subscription on. One constant, one
+ * behaviour.
+ */
+const APPLE_CHAIN_SCOPE = { store: Store.APP_STORE } as const;
+
+/**
  * Chain-wide status write that refuses to resurrect a terminal row.
  *
  * The three non-refund chain transitions (DID_FAIL_TO_RENEW,
@@ -600,12 +615,11 @@ async function applyOfferRedeemed(ctx: DispatchContext): Promise<void> {
       drizzle.db,
       ctx.projectId,
       ctx.transaction.originalTransactionId,
-      // Scoped and ordered deterministically: an `originalTransactionId`
-      // is Apple's, but the column is shared by every store and the CSV
-      // importer can create a whole chain inside one statement, leaving
-      // `createdAt` tied across rows. An arbitrary winner here would pick
-      // the revenue label at random.
-      { store: Store.APP_STORE },
+      // Ordered deterministically as well as scoped: the CSV importer can
+      // create a whole chain inside one statement, leaving `createdAt`
+      // tied across rows, and an arbitrary winner here would pick the
+      // revenue label at random.
+      APPLE_CHAIN_SCOPE,
     );
 
   // A DOWNGRADE redemption takes effect at the NEXT renewal and carries
@@ -730,6 +744,7 @@ async function applyRenewalStatusChange(ctx: DispatchContext): Promise<void> {
       drizzle.db,
       ctx.projectId,
       ctx.transaction.originalTransactionId,
+      APPLE_CHAIN_SCOPE,
     );
   if (!purchase) return;
 
@@ -777,6 +792,7 @@ async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
       drizzle.db,
       ctx.projectId,
       ctx.transaction.originalTransactionId,
+      APPLE_CHAIN_SCOPE,
     );
 
   await guardedChainStatusWrite(ctx, {
@@ -912,6 +928,7 @@ async function applyRevoke(ctx: DispatchContext): Promise<void> {
       drizzle.db,
       ctx.projectId,
       ctx.transaction.originalTransactionId,
+      APPLE_CHAIN_SCOPE,
     );
   if (!purchase) return;
 
@@ -1125,6 +1142,7 @@ async function applyConsumptionRequest(ctx: DispatchContext): Promise<void> {
         drizzle.db,
         projectId,
         transaction.originalTransactionId,
+        APPLE_CHAIN_SCOPE,
       );
     subscriberId = purchase?.subscriberId ?? null;
   }
@@ -1230,6 +1248,7 @@ async function resolveSubscriber(ctx: DispatchContext) {
       drizzle.db,
       projectId,
       transaction.originalTransactionId,
+      APPLE_CHAIN_SCOPE,
     );
   if (existingPurchase) {
     const existingSubscriber = await drizzle.subscriberRepo.findSubscriberById(
@@ -1495,6 +1514,7 @@ async function recordApplePendingChange(ctx: DispatchContext): Promise<void> {
       drizzle.db,
       ctx.projectId,
       ctx.transaction.originalTransactionId,
+      APPLE_CHAIN_SCOPE,
     );
   // No row yet: the announcement arrived before any purchase this project
   // knows about. Nothing to annotate, and inventing a row here would be a
@@ -1805,6 +1825,7 @@ async function emitCancellationEvent(ctx: DispatchContext): Promise<void> {
       drizzle.db,
       ctx.projectId,
       ctx.transaction.originalTransactionId,
+      APPLE_CHAIN_SCOPE,
     );
   if (!purchase) return;
 

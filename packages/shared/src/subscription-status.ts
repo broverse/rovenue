@@ -125,8 +125,12 @@ export const SUBSCRIPTION_STATUS_SEMANTICS: Record<
   // ALREADY past when the hold arrives, so the expiry sweeper would move
   // it straight to EXPIRED and erase the dunning signal the moment it
   // appeared. Retiring a stale hold is therefore a separate ageing pass
-  // in expiry-checker.ts, landing with the store routing that first
-  // writes this status; until then nothing produces a BILLING_ISSUE row.
+  // in expiry-checker.ts (`runBillingIssueAgeing`, bounded by
+  // BILLING_ISSUE_MAX_AGE_DAYS).
+  //
+  // All three stores route to this status: Google's account hold
+  // (SUBSCRIPTION_ON_HOLD), Apple's DID_FAIL_TO_RENEW on every subtype
+  // but GRACE_PERIOD, and Stripe's `unpaid` / `incomplete`.
   BILLING_ISSUE: {
     grantsAccess: false,
     isLive: true,
