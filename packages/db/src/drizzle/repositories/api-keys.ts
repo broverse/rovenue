@@ -105,6 +105,7 @@ export interface ActiveApiKeyRow {
   keyPublic: string;
   environment: "PRODUCTION" | "SANDBOX";
   createdAt: Date;
+  allowedOrigins: string[];
 }
 
 /**
@@ -122,6 +123,7 @@ export async function listActiveApiKeys(
       keyPublic: apiKeys.keyPublic,
       environment: apiKeys.environment,
       createdAt: apiKeys.createdAt,
+      allowedOrigins: apiKeys.allowedOrigins,
     })
     .from(apiKeys)
     .where(
@@ -214,6 +216,7 @@ export async function revokeApiKey(
       keyPublic: apiKeys.keyPublic,
       environment: apiKeys.environment,
       createdAt: apiKeys.createdAt,
+      allowedOrigins: apiKeys.allowedOrigins,
     });
   return rows[0] ?? null;
 }
@@ -252,6 +255,7 @@ export async function updateApiKeyAllowedOrigins(
       keyPublic: apiKeys.keyPublic,
       environment: apiKeys.environment,
       createdAt: apiKeys.createdAt,
+      allowedOrigins: apiKeys.allowedOrigins,
     });
   return rows[0] ?? null;
 }

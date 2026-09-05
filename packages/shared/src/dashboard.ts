@@ -42,6 +42,12 @@ export interface ProjectApiKey {
   publicKey: string; // the keyPublic column — plaintext identifier, safe to expose
   environment: ApiKeyEnvironment;
   createdAt: string;
+  /**
+   * Browser origins permitted to use this key. Empty means the key cannot be
+   * used from a web page at all — which is the default, so every key that
+   * predates the Web SDK is unaffected.
+   */
+  allowedOrigins: string[];
 }
 
 export interface CreateApiKeyRequest {

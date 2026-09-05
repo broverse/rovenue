@@ -97,6 +97,7 @@ type ApiKeyRow = {
   keyPublic: string;
   environment: "PRODUCTION" | "SANDBOX";
   createdAt: Date;
+  allowedOrigins: string[];
 };
 
 type ProjectDetailCounts = {
@@ -147,6 +148,7 @@ function toProjectDetail(
     publicKey: k.keyPublic,
     environment: k.environment,
     createdAt: k.createdAt.toISOString(),
+    allowedOrigins: k.allowedOrigins,
   }));
   return {
     id: project.id,
@@ -519,6 +521,7 @@ export const projectsRoute = new Hono()
         publicKey: apiKey.keyPublic,
         environment: apiKey.environment,
         createdAt: apiKey.createdAt.toISOString(),
+        allowedOrigins: apiKey.allowedOrigins,
       },
       secretKey,
     };
