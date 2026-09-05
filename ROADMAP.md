@@ -818,8 +818,11 @@ else in the framework/provider-breadth dimension is done.
 ## 8. Self-hosting & data ownership (95 — keep)
 
 - [ ] One-command install: Coolify template + Helm chart
-- [ ] Version upgrade runbook
-- [ ] Backup / restore documentation
+- [x] Version upgrade runbook — `docs/operations/upgrade.md` (296 lines).
+      Covers Docker Compose in full; it says itself that Coolify and Helm are
+      not covered, which is the open item above, not this one.
+- [x] Backup / restore documentation — `docs/operations/backup-restore.md`
+      (422 lines), alongside `deploy/backup/restore.sh` and its test suite.
 - [ ] Close the nosniff/ETag edge-layer gap (asset CDN)
 
 ## 9. GDPR / KVKK tooling (85 → 95)
