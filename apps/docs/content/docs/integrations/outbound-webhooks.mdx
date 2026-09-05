@@ -77,7 +77,7 @@ For every other event type (`subscription.*`, `subscriber.identified`, `paywall.
 | `revenue.RENEWAL` | A recurring subscription renews for another billing period. |
 | `revenue.CREDIT_PURCHASE` | A consumable in-app product is purchased — Apple, Google, or a one-time Stripe funnel purchase of a consumable product. See [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. |
 | `revenue.NON_RENEWING_PURCHASE` | A non-consumable one-time purchase — Apple, Google, or a one-time Stripe funnel purchase of a non-consumable product. See [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. |
-| `revenue.REACTIVATION` | A lapsed subscriber returns (a win-back offer redemption or a resubscribe), or an accounting reversal of a previously-applied refund. **Apple only** — see [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below for how the two cases are told apart internally. |
+| `revenue.REACTIVATION` | A lapsed subscriber returns (a win-back offer redemption, a resubscribe, or a Google billing-issue recovery), or an accounting reversal of a previously-applied refund. **Apple and Google** — see [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below for how the two cases are told apart internally. |
 | `revenue.REFUND` | A refund is recorded (`data.amount` is always a positive value). |
 | `revenue.CANCELLATION` | A cancellation is recorded as a revenue-affecting event. |
 | `subscription.trial.started` [^not-yet-emitted] | A new trial period begins. |
@@ -146,12 +146,15 @@ property of the product, not of what the purchase happened to grant.
 reconciling historical numbers against numbers recorded after this date,
 older one-time purchases will only ever appear under `revenue.INITIAL`.
 
-**`revenue.REACTIVATION` is Apple-only** and carries two different
-economic meanings under one key: a lapsed subscriber returning (a win-back
-offer redemption, or a plain resubscribe), and an accounting reversal —
-Apple un-does a refund that had already been applied. Internally, the
-underlying revenue event is tagged `metadata.reason: "refund_reversed"`
-(the exported `REACTIVATION_REVERSAL_REASON` constant in
+**`revenue.REACTIVATION` fires on both Apple and Google** and carries two
+different economic meanings under one key: a lapsed subscriber returning
+(a win-back offer redemption, a plain resubscribe, or Google's
+`SUBSCRIPTION_RECOVERED` / `SUBSCRIPTION_RESTARTED` notifications), and an
+accounting reversal — Apple un-does a refund that had already been
+applied. Only Apple produces the reversal case; every Google
+`revenue.REACTIVATION` is the win-back case. Internally, the underlying
+revenue event is tagged `metadata.reason: "refund_reversed"` (the exported
+`REACTIVATION_REVERSAL_REASON` constant in
 `apps/api/src/services/apple/apple-webhook.ts`) for the reversal case only;
 an unmarked one is the win-back case. **This tag is not currently included
 in the delivered Custom Webhook payload** — `data` for a revenue event is
