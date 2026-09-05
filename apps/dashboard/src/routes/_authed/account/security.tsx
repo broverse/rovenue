@@ -258,6 +258,20 @@ function TwoFactorSetupDialog({
         setState({ step: "error", message: res.error?.message ?? "Failed to start setup" });
         return;
       }
+      // better-auth 1.6.22 made this a discriminated union: the server
+      // answers `{ method: "otp" }` when the twoFactor plugin is configured
+      // for emailed one-time codes, and only the `totp` arm carries a
+      // totpURI and backup codes. This dialog IS the TOTP flow — QR, secret,
+      // recovery codes — so the other arm has nothing to render. Say so
+      // instead of narrowing it away: an empty QR that never verifies is a
+      // worse outcome than a message naming the misconfiguration.
+      if (res.data.method !== "totp") {
+        setState({
+          step: "error",
+          message: "Server is configured for one-time codes, not an authenticator app",
+        });
+        return;
+      }
       setState({
         step: "connect",
         totpURI: res.data.totpURI,

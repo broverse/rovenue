@@ -26,7 +26,7 @@
     "@tanstack/react-table": "^8.20.0",
     "ai": "^6",
     "ai-elements": "^1.9.0",
-    "better-auth": "^1.6.11",
+    "better-auth": "^1.6.22",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^11.5.0",
