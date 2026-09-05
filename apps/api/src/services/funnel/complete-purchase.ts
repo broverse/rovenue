@@ -2,6 +2,7 @@ import {
   type Db,
   Environment,
   PurchaseStatus,
+  RevenueEventType,
   Store,
   drizzle,
   revenueDedupeKind,
@@ -214,13 +215,21 @@ async function grantOneTimePurchase(
   // Skips rather than throws on missing data, matching this function's
   // documented contract — a throw would roll back the paid transition and
   // leave a buyer who really paid with no claim token.
-  const revenueType = oneTimeRevenueTypeFor(product.type);
-  if (revenueType == null) {
-    log.error("one-time funnel purchase names a subscription product", {
+  //
+  // grantOneTimePurchase is only reached when stripeSubscriptionId == null
+  // — a bare PaymentIntent, which by definition does not renew. So a
+  // SUBSCRIPTION-typed product here (the dashboard defaults new products to
+  // that type) is a misconfiguration, not a reason to drop the money: fall
+  // back to NON_RENEWING_PURCHASE rather than skip the revenue row.
+  const declaredRevenueType = oneTimeRevenueTypeFor(product.type);
+  const revenueType = declaredRevenueType ?? RevenueEventType.NON_RENEWING_PURCHASE;
+  if (declaredRevenueType == null) {
+    log.warn("one-time funnel purchase names a SUBSCRIPTION-typed product; recording as NON_RENEWING_PURCHASE", {
       sessionId: args.sessionId,
       productId: args.productId,
     });
-  } else if (priceAmount == null || priceCurrency == null || args.amountUsd == null) {
+  }
+  if (priceAmount == null || priceCurrency == null || args.amountUsd == null) {
     log.error("one-time funnel purchase has no price to record as revenue", {
       sessionId: args.sessionId,
       purchaseId: purchase.id,

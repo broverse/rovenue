@@ -445,6 +445,37 @@ describe("completeFunnelPurchase — one-time Stripe revenue", () => {
     expect(outbox[0]!.aggregateType).toBe("REVENUE_EVENT");
   });
 
+  it("Fix 2 (final review): a SUBSCRIPTION-typed product sold through the one-time funnel path still records revenue, as NON_RENEWING_PURCHASE", async () => {
+    // The funnel decides one-time-vs-recurring from the Stripe price
+    // (stripeSubscriptionId == null), not from the Rovenue product's
+    // declared type — and the dashboard defaults new products to
+    // type: "SUBSCRIPTION". An operator who leaves that default, attaches
+    // a one-time price, and sells it through a funnel must still get a
+    // revenue row, not silence.
+    const { sessionId, paymentIntentId, projectId } = await seedPendingOneTimeSession({
+      amountCents: 1999,
+      currency: "usd",
+      productType: ProductType.SUBSCRIPTION,
+    });
+
+    const result = await completeFunnelPurchase({
+      sessionId,
+      stripeCustomerId: `cus_1t_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    });
+    expect(result.alreadyIssued).toBe(false);
+
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, projectId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe("NON_RENEWING_PURCHASE");
+    expect(rows[0]!.amount).toBe("19.9900");
+  });
+
   it("does not record a second revenue row when /confirm is replayed", async () => {
     // Both /confirm and the webhook backstop can arrive. The second
     // caller must not double-count the charge. In practice this second
