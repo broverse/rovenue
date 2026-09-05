@@ -830,8 +830,32 @@ else in the framework/provider-breadth dimension is done.
 
 ## 10. Production maturity & scale proof (45 → 95) — earned over time
 
-- [ ] Load-test suite: k6/vegeta with realistic traffic profiles (receipt spikes,
-      webhook storms) + published benchmark page
+- [x] Load-test suite (2026-09-05, `load/k6/`) — **benchmark page WON'T DO**.
+      Three profiles: steady SDK reads (`/v1/me/entitlements` +
+      `/v1/placements/:identifier`), an event storm ramping into `/v1/events`
+      (the OLTP write path that backpressures clients on a release day), and a
+      receipt spike.
+
+      All three use an OPEN model — arrival rate, never a fixed VU pool. With
+      fixed VUs each one waits for its response before sending the next, so a
+      server that gets slower receives less traffic and the throughput number
+      stays flat: the suite cannot see the regression it exists to find.
+
+      Pass criteria are imported from `deploy/prometheus/rules/slo.yml` rather
+      than chosen locally, so a passing run and a paging service cannot
+      disagree about what "fast enough" means.
+
+      The receipt profile aborts unless `LOAD_ALLOW_OUTBOUND=1`: `verifyReceipt`
+      calls Apple's App Store Server API, so that endpoint points a load
+      generator at a third party with your credentials. Its docs also refuse to
+      conflate two numbers — with synthetic payloads it measures the REJECTION
+      path, not a successful purchase.
+
+      The **published benchmark page is won't-do**: a throughput figure means
+      nothing without the hardware and dataset that produced it, and there is no
+      reference deployment here. A laptop number presented as characterising the
+      software is worse than no number.
+
 - [x] ClickHouse lag under a Kafka-fed materialized view — the third chaos
       scenario (2026-09-05, `apps/api/tests/ch-kafka-engine.integration.test.ts`).
       ClickHouse sits downstream of Kafka, so its absence must be invisible to
@@ -852,7 +876,32 @@ else in the framework/provider-breadth dimension is done.
       Detaching the Kafka Engine queue table is the real thing; the group
       offset lives in Kafka, so it survives. Verified falsifiable by removing
       the DETACH, which turns the zero-rows assertion red.
-- [ ] SLOs + status page
+- [x] SLOs (2026-09-05, `deploy/prometheus/rules/slo.yml`) — **status page
+      WON'T DO**. `deploy/prometheus/` had a config with no rules in it. Two
+      objectives now exist on the API's own RED metrics: 99.9% non-5xx and 99%
+      under 500ms, both over 30 days. 4xx burns neither budget — a rejected key
+      is the caller's outcome, not an outage — and there is a test that floods
+      the service with 401s and asserts perfect availability. 500ms is an actual
+      histogram bucket boundary, not a tidy-looking number; a threshold between
+      boundaries would interpolate and the SLI would stop meaning what it says.
+
+      Alerts are multi-window multi-burn-rate. A single "error rate above X"
+      must choose between catching a fast outage and not paging on a blip;
+      pairing a long window with a short one removes the choice, so an incident
+      that has already recovered stops paging on its own. That behaviour has its
+      own test.
+
+      Four more alerts come from sentences already written beside the counters
+      in `lib/metrics.ts` that nothing had ever acted on — the circuit-breaker
+      comment literally says "ALERT ON ANY NON-ZERO VALUE".
+
+      Verified with compose's own Prometheus (v2.54.1): `promtool check config`
+      and `check rules` pass, `promtool test rules` passes 6 scenarios, and the
+      tests were proven falsifiable by raising the burn threshold.
+
+      The **status page is won't-do here**: it needs hosting and a domain, which
+      is an operator decision, not a repository one. Nothing in the repo can
+      close it.
 - [x] Chaos tests: dispatcher death + Kafka outage/recovery (2026-09-05,
       `apps/api/tests/outbox-dispatcher.integration.test.ts`). The
       dispatcher's crash window is between `producer.send` and
@@ -878,9 +927,42 @@ else in the framework/provider-breadth dimension is done.
       ~2.8s where it previously timed out.
 
       ClickHouse lag is covered by the item above.
-- [ ] 3–5 pilot apps in production; millions of live events as reference
-- [ ] All CI green and required (including pre-existing red tests); testcontainers
-      suite running in CI
+- [ ] 3–5 pilot apps in production; millions of live events as reference —
+      **CANNOT BE DONE FROM THE REPOSITORY.** This is earned by shipping to real
+      customers over real time. No commit closes it.
+- [~] CI unblocked and the testcontainer pass given a database (2026-09-05).
+      **"Required" remains the repository owner's** — it is a branch-protection
+      setting, not a file.
+
+      CI had been red since July, failing in under twenty seconds, before a
+      single test ran: the workflow pinned `node-version: 20` while the root
+      package.json requires `>=22.7`, so `pnpm install` refused outright. Every
+      red run since was that. Fixed, along with the pnpm version pin, which lived
+      in two places (workflow `version: 9`, package.json `pnpm@9.15.9`) and now
+      lives in one.
+
+      Behind it was a second wall: `pnpm audit --prod --audit-level=high` gates
+      the pipeline and was failing with 56 high and 2 critical across 15
+      packages. It now exits 0 with zero unignored high-or-critical advisories —
+      twelve pinned through per-major pnpm overrides, three bumped (better-auth,
+      react-router, a sharp override), three suppressed because they enter
+      through an example app's Expo CLI or a Prisma peer that is not installed
+      at all. The better-auth bump was not version-only: `twoFactor.enable()`
+      became a discriminated union and the account-security dialog read
+      `totpURI` off it unconditionally.
+
+      The suppression list had its own problem — seventeen opaque GHSA ids in
+      JSON whose rationale lived in a git-ignored scratch directory. A
+      suppression nobody can audit is one nobody can retire, so it is now
+      `docs/security/dependency-audit-suppressions.md`.
+
+      The workflow also now runs Postgres (built from `deploy/postgres`, since
+      the suites need pg_partman and `services:` can only pull) and Redis.
+      apps/api's `test` script has always been two passes, so CI was already
+      invoking the testcontainer suites — they just had nothing to connect to.
+
+      UNVERIFIED until pushed: none of this can be confirmed green from a
+      workstation, and the container pass has never executed on a runner.
 - [x] `pnpm db:migrate`'s "misfire" diagnosed and the real defect fixed
       (2026-09-05). The routing was never wrong: a database created by the
       fresh-install runner is stamped `__rovenue_install.mode = 'fresh'`
