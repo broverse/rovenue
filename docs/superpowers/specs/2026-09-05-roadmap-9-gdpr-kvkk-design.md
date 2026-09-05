@@ -109,10 +109,21 @@ a bundle:
 
 ```
 { formatVersion, projectId, exportedAt,
-  origin: { rowHash, createdAt } | null,     // null = chain start
-  tip:    { rowHash, createdAt },
+  origin: { rowHash } | null,               // null = chain start
+  tip:    { rowHash, createdAt } | null,    // null = empty range
+  truncated,                                // the export hit its cap
   entries: [ { ...the exact fields the hash covers..., prevHash, rowHash } ] }
 ```
+
+`origin` carries the anchor hash and nothing else: it is `entries[0].prevHash`,
+so no predecessor row is read and no timestamp is claimed that the bundle cannot
+substantiate. `rowHash` is nullable on an entry and on the tip, because
+`audit_logs.rowHash` is null for rows written before the chain existed and the
+export deliberately does not filter them out — a bundle that silently hid
+unhashed rows would let a verifier report "all verified" over a range containing
+rows nothing ever hashed. `truncated` says whether the export hit
+`AUDIT_PROOF_MAX_ENTRIES`; without it a capped bundle is indistinguishable from a
+complete one, which is the one thing an audit export must never be.
 
 The entry fields are whatever `canonicalJSON` hashes — not a prettified subset.
 A bundle whose entries cannot reproduce their own `rowHash` is worthless, so the

@@ -462,7 +462,11 @@ id) since createdAt alone is not a total order."
   its sibling list route takes `projectId` as a required query param — this route
   matches it; there is no `/projects/:projectId` router to hang it off)
   `{ data: AuditProofBundle }` where
-  `AuditProofBundle = { formatVersion: string; projectId: string; exportedAt: string; origin: { rowHash: string } | null; tip: { rowHash: string | null; createdAt: string } | null; entries: AuditProofRow[] }`.
+  `AuditProofBundle = { formatVersion: string; projectId: string; exportedAt: string; origin: { rowHash: string } | null; tip: { rowHash: string | null; createdAt: string } | null; entries: AuditProofRow[]; truncated: boolean }`.
+  `truncated` is `entries.length === AUDIT_PROOF_MAX_ENTRIES`. Without it a
+  capped export is byte-indistinguishable from a complete one, and a verifier
+  declares a partial segment valid while the operator believes they hold the
+  whole history. A cap that hides itself is worse than no cap.
   `origin` is derived purely from `entries[0].prevHash` — no second read, no
   predecessor timestamp; the anchor a verifier needs is the hash. `rowHash` is
   nullable on both an entry and the tip: `audit_logs.rowHash` is nullable for
@@ -578,7 +582,13 @@ existing list route is."
 **Interfaces:**
 - Consumes: `canonicalJSON`, `hashAuditRow`, `AUDIT_CHAIN_FORMAT_V1`,
   `AuditChainPayload` from `@rovenue/shared/audit-chain` (Task 1).
-- Produces: `export interface VerifyResult { ok: boolean; entriesChecked: number; failure?: { index: number; entryId: string; reason: "ROW_HASH_MISMATCH" | "PREV_HASH_MISMATCH" | "UNHASHED_ROW" } }`.
+- Produces: `export interface VerifyResult { ok: boolean; entriesChecked: number; truncated: boolean; failure?: { index: number; entryId: string; reason: "ROW_HASH_MISMATCH" | "PREV_HASH_MISMATCH" | "UNHASHED_ROW" } }`.
+  `truncated` mirrors the bundle's own flag. A truncated bundle whose entries are
+  intact is still `ok: true` — truncation is a legitimate export state, not
+  tampering — but a programmatic consumer must not be able to read `ok` without
+  seeing it, and the CLI must print it as a prominent line, not a footnote.
+  A bundle missing the field entirely is treated as `truncated: true`: an export
+  that will not say whether it is complete has not earned the benefit of the doubt.
 - Produces: `export function verifyAuditBundle(bundle: unknown): VerifyResult`.
 - Produces: a CLI entry point reading a bundle path from `process.argv[2]`,
   printing a human-readable result and exiting non-zero on failure.
@@ -650,6 +660,7 @@ function bundle(entries: ReturnType<typeof chainOf>) {
     projectId: "prj_1",
     exportedAt: "2026-09-05T01:00:00.000Z",
     origin: null,
+    truncated: false,
     tip: entries.length
       ? { rowHash: entries[entries.length - 1]!.rowHash, createdAt: entries[entries.length - 1]!.createdAt }
       : null,
@@ -794,11 +805,35 @@ Then wire both ends to it:
 Together these two prove the verifier accepts what the endpoint emits, with no
 package-boundary violation in either direction.
 
+Two pieces of plumbing this needs, both following patterns already in the repo:
+
+1. `packages/shared/package.json` has an explicit `exports` map with no wildcard,
+   so the fixture is unreachable until you add a subpath beside `./audit-chain`:
+
+```json
+    "./audit-proof-bundle-fixture.json": "./src/audit-proof-bundle-fixture.json",
+```
+
+   `resolveJsonModule` is already true in `tsconfig.base.json`, which every
+   package extends, so `import fixture from "@rovenue/shared/audit-proof-bundle-fixture.json"`
+   type-checks in both `apps/api` and `scripts` once that entry exists.
+
+2. Register the CLI in `scripts/package.json`, matching the existing
+   `verify:asset-headers` entry exactly in form:
+
+```json
+    "verify:audit-bundle": "tsx verify-audit-bundle.ts",
+```
+
+   Task 5 documents how an auditor runs the verifier; without this entry the only
+   documentable invocation is a raw `tsx` path.
+
 - [ ] **Step 6: Commit**
 
 ```bash
 git add scripts/verify-audit-bundle.ts scripts/verify-audit-bundle.test.ts \
         packages/shared/src/audit-proof-bundle-fixture.json \
+        packages/shared/package.json scripts/package.json \
         apps/api/src/routes/dashboard/audit-logs.proof.test.ts
 git commit -m "feat(audit): standalone offline bundle verifier
 
