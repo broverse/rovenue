@@ -154,7 +154,7 @@ It exits `0` and prints `OK -- N entries verified` when the chain holds, or exit
 | `UNHASHED_ROW` | An entry's `rowHash` is missing, not a string, or an empty string. See [Unhashed rows](#unhashed-rows) — this is a finding about the data, not a bug in the verifier. |
 | `PREV_HASH_MISMATCH` | An entry's `prevHash` doesn't match the previous entry's `rowHash` (or `origin.rowHash` / `null` for the first entry). The link between two specific rows is broken. |
 | `ROW_HASH_MISMATCH` | An entry's own `rowHash` doesn't reproduce from recomputing the canonical encoding over its fields — the row's content was altered after it was hashed. |
-| `TIP_MISMATCH` | `tip` disagrees with the last entry actually present, including a bundle that has entries but no `tip`, or a `tip` but no entries. This is the only check that can catch a deleted **tail**: the `prevHash` walk only ever looks backward, so removing a chain's newest rows leaves every remaining link internally consistent. |
+| `TIP_MISMATCH` | `tip` disagrees with the last entry actually present in either `rowHash` or `createdAt`, including a bundle that has entries but no `tip`, or a `tip` but no entries. This is the only check that can catch a deleted **tail**: the `prevHash` walk only ever looks backward, so removing a chain's newest rows leaves every remaining link internally consistent. |
 
 ## Unhashed rows
 
