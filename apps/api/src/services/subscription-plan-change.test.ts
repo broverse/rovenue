@@ -78,12 +78,21 @@ describe("pendingPlanChangeFields", () => {
 // is already correct and a new enum value would reach ClickHouse for
 // nothing. This pins the decision: adding a member here is a deliberate
 // act that fails this test first.
+//
+// It has fired once, as designed. `NON_RENEWING_PURCHASE` was added by the
+// repo owner in `256d1eb2` for one-time (non-subscription) purchases, and
+// it is NOT a proration type: it classifies a charge that has no renewal
+// cycle at all, whereas a proration type would classify the *difference*
+// between two subscription prices at a plan switch. Admitting it here keeps
+// the pin meaning exactly what it was written to mean — a new member that
+// IS proration-shaped still has to argue for itself in this list first.
 describe("proration revenue invariant", () => {
   it("records no proration-specific revenue event type", () => {
     expect(Object.keys(RevenueEventType).sort()).toEqual([
       "CANCELLATION",
       "CREDIT_PURCHASE",
       "INITIAL",
+      "NON_RENEWING_PURCHASE",
       "REACTIVATION",
       "REFUND",
       "RENEWAL",
