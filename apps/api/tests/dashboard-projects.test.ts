@@ -23,20 +23,39 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
     projectMember: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
     project: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     audience: { create: vi.fn() },
-    apiKey: { create: vi.fn(), findMany: vi.fn(async () => []) },
-    subscriber: { count: vi.fn(async () => 0) },
-    experiment: { count: vi.fn(async () => 0) },
-    featureFlag: { count: vi.fn(async () => 0) },
+    // findMany is called with no args here, but is reassigned via
+    // .mockResolvedValue with real apiKey fixtures below — a bare
+    // `async () => []` infers a never[]-only return no fixture satisfies.
+    apiKey: {
+      create: vi.fn(),
+      findMany: vi.fn<
+        (args?: Record<string, unknown>) => Promise<Record<string, unknown>[]>
+      >(async () => []),
+    },
+    // Each is called with a `where` args object below
+    // (countActiveSubscribers/countExperiments/countFeatureFlags) — a
+    // zero-arg vi.fn now surfaces as "expected 0 arguments" now that
+    // fixing $transaction's self-reference gives dbMock a concrete
+    // (non-`any`) type.
+    subscriber: { count: vi.fn(async (_args?: Record<string, unknown>) => 0) },
+    experiment: { count: vi.fn(async (_args?: Record<string, unknown>) => 0) },
+    featureFlag: { count: vi.fn(async (_args?: Record<string, unknown>) => 0) },
     auditLog: {
       create: vi.fn(async () => ({ id: "al_1" })),
       findFirst: vi.fn(async () => null),
     },
     $executeRaw: vi.fn(async () => 0),
-    $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) => fn(dbMock)),
+    // Explicit param + return types on the arrow itself let TS type this
+    // property from its declared signature, without needing to evaluate
+    // `fn(dbMock)` (which would require `dbMock`'s type before its own
+    // initializer finishes — TS7022/TS7024).
+    $transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(dbMock),
+    ),
   };
   const drizzleDb = {
-    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(drizzleDb),
+    transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(drizzleDb),
     ),
   };
   const drizzleMock = {

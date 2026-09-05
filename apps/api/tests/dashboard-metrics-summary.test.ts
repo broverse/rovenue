@@ -31,7 +31,11 @@ vi.mock("../src/lib/audit", () => auditMock);
 
 const { summaryMock } = vi.hoisted(() => ({
   summaryMock: {
-    getRevenueSummary: vi.fn(async () => ({
+    // Real signature is (input: { projectId, from, to }) => Promise<
+    // RevenueSummary> (src/services/metrics/summary.ts). A test below
+    // reads `.mock.calls[0]![0]` — a zero-arg mock makes that an empty
+    // tuple.
+    getRevenueSummary: vi.fn(async (_input: { projectId: string; from: Date; to: Date }) => ({
       grossUsd: "1000.0000",
       refundsUsd: "100.0000",
       netUsd: "900.0000",

@@ -35,7 +35,13 @@ const { redisMock, redisStore } = vi.hoisted(() => {
 
 const { dbMock, fxRateRepoMock } = vi.hoisted(() => {
   const fxRateRepoMock = {
-    upsertDailyRates: vi.fn(async () => undefined),
+    // Real signature is (db, rows) => Promise<void> (packages/db/src/
+    // drizzle/repositories/fx-rates.ts). A test below reads
+    // `.mock.calls[0]!` destructured as `[, pgRows]` — a zero-arg mock
+    // makes that an empty tuple with no element at index 1.
+    upsertDailyRates: vi.fn(
+      async (_db: unknown, _rows: Record<string, unknown>[]) => undefined,
+    ),
     getRate: vi.fn(async (_db: unknown, _date: string, _quote: string) => null as string | null),
     getRatesForRange: vi.fn(async () => []),
   };

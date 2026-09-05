@@ -28,8 +28,14 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
       findFirst: vi.fn(async () => null),
     },
     $executeRaw: vi.fn(async () => 0),
-    $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(dbMock),
+    // Both the param and return types are explicit here (fn's own
+    // signature, and the arrow's `: Promise<T>`) so TS can type this
+    // property from its declared signature alone, without evaluating the
+    // `fn(dbMock)` body — which would otherwise need `dbMock`'s type
+    // before `dbMock`'s own initializer has finished (TS7022 "implicitly
+    // has type any... referenced in its own initializer").
+    $transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(dbMock),
     ),
   };
 
@@ -39,8 +45,8 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   // findProjectCredentials; tests that need to exercise that path
   // override it explicitly.
   const drizzleDb = {
-    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(drizzleDb),
+    transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(drizzleDb),
     ),
   };
   const drizzleMock = {

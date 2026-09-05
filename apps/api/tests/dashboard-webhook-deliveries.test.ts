@@ -40,7 +40,9 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
       upsertPreferences: vi.fn(async () => null),
     },
     outgoingWebhookRepo: {
-      listRecentOutgoingWebhooks: vi.fn(async () => []),
+      listRecentOutgoingWebhooks: vi.fn<
+        () => Promise<Record<string, unknown>[]>
+      >(async () => []),
       countOutgoingWebhooks: vi.fn(async () => 0),
       findOutgoingWebhookById: vi.fn(async () => null),
       resetWebhookForRetry: vi.fn(async () => null),

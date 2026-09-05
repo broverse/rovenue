@@ -17,7 +17,10 @@ const mocks = vi.hoisted(() => {
 
   const verifyPubSubPushToken = vi.fn(async () => undefined);
 
-  const loadAppleCredentials = vi.fn(async () => ({
+  // Real return type is `AppleCredentials | null`
+  // (src/lib/project-credentials.ts) — a test below reassigns this via
+  // .mockResolvedValue(null) for the "no credentials" 401 case.
+  const loadAppleCredentials = vi.fn(async (): Promise<{ bundleId: string } | null> => ({
     bundleId: "com.example.app",
   }));
 
@@ -27,6 +30,10 @@ const mocks = vi.hoisted(() => {
       | string
       | undefined,
     PUBSUB_PUSH_SERVICE_ACCOUNT: undefined as string | undefined,
+    // Real fail-closed bypass gate the middleware reads (src/lib/env.ts,
+    // src/middleware/webhook-verify.ts) — tests below opt into it
+    // explicitly.
+    ALLOW_UNVERIFIED_WEBHOOKS: false as boolean,
   };
 
   return {

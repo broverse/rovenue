@@ -33,7 +33,10 @@ vi.mock("../src/lib/audit", () => auditMock);
 
 const { mrrMock } = vi.hoisted(() => ({
   mrrMock: {
-    listDailyMrr: vi.fn(async () => [
+    // Real signature is (input: { projectId, from, to }) => Promise<
+    // MrrPoint[]> (src/services/metrics/mrr.ts). A test below reads
+    // `.mock.calls[0]![0]` — a zero-arg mock makes that an empty tuple.
+    listDailyMrr: vi.fn(async (_input: { projectId: string; from: Date; to: Date }) => [
       {
         bucket: new Date("2026-04-01T00:00:00Z"),
         grossUsd: "99.90",

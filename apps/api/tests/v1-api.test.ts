@@ -101,8 +101,12 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
   };
 
   const drizzleDb = {
-    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(drizzleDb),
+    // Explicit param + return types on the arrow itself let TS type this
+    // property from its declared signature, without needing to evaluate
+    // `fn(drizzleDb)` (which would require `drizzleDb`'s type before its
+    // own initializer finishes — TS7022/TS7024).
+    transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(drizzleDb),
     ),
   };
 

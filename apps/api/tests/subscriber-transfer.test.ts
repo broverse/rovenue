@@ -54,8 +54,12 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
   }
 
   const drizzleDb = {
-    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(drizzleDb),
+    // Explicit param + return types on the arrow itself let TS type this
+    // property from its declared signature, without needing to evaluate
+    // `fn(drizzleDb)` (which would require `drizzleDb`'s type before its
+    // own initializer finishes — TS7022/TS7024).
+    transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(drizzleDb),
     ),
   };
 
@@ -118,7 +122,13 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
     async (_tx: unknown, _subscriberId: string, _currencyId: string) =>
       null as null | { balance: number },
   );
-  const insertCreditLedger = vi.fn(async () => undefined);
+  // Real signature is (db, entry) => Promise<CreditLedgerRow> (packages/db/
+  // src/drizzle/repositories/credit-ledger.ts). The test below reads
+  // `.mock.calls.map((c) => c[1])` — a zero-arg mock makes `c` an empty
+  // tuple with no element at index 1.
+  const insertCreditLedger = vi.fn(
+    async (_db: unknown, _entry: Record<string, unknown>) => undefined,
+  );
   const advisoryXactLock = vi.fn(async () => undefined);
   const advisoryXactLock2 = vi.fn(async () => undefined);
 
