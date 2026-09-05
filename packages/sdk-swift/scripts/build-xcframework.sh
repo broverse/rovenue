@@ -16,6 +16,14 @@ SWIFT_DIR="$(cd "$HERE/.." && pwd)"
 ROOT="$(cd "$SWIFT_DIR/../.." && pwd)"
 CONFIG="$SWIFT_DIR/release.config.json"
 
+# -------- Preflight --------
+# ruby is listed first and checked BEFORE the cfg() calls below, because cfg()
+# shells out to it — without this a machine lacking ruby gets an empty XCF_NAME
+# and a confusing failure deep in xcodebuild instead of this message.
+command -v ruby >/dev/null 2>&1 || { echo "✗ ruby not found — required to read $CONFIG" >&2; exit 1; }
+command -v rustup >/dev/null 2>&1 || { echo "✗ rustup not found — https://rustup.rs" >&2; exit 1; }
+command -v xcodebuild >/dev/null 2>&1 || { echo "✗ xcodebuild not found — install Xcode" >&2; exit 1; }
+
 cfg() { ruby -rjson -e "print JSON.parse(File.read('$CONFIG'))['$1']"; }
 
 OUT_DIR="${1:-$SWIFT_DIR}"
@@ -26,9 +34,6 @@ MACOS_MIN="$(cfg macosDeploymentTarget)"
 
 GEN="$SWIFT_DIR/Sources/Rovenue/Generated"
 STAGE="$SWIFT_DIR/build/xcframework"
-
-command -v rustup >/dev/null 2>&1 || { echo "✗ rustup not found — https://rustup.rs" >&2; exit 1; }
-command -v xcodebuild >/dev/null 2>&1 || { echo "✗ xcodebuild not found — install Xcode" >&2; exit 1; }
 
 # uniffi emits RovenueFFI.h and RovenueFFI.modulemap; both are gitignored build
 # artifacts, so regenerate rather than assume they are present.

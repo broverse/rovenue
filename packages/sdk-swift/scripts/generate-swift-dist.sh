@@ -26,6 +26,14 @@ cfg() { ruby -rjson -e "print JSON.parse(File.read('$CONFIG'))['$1']"; }
 REPO_SLUG="$(cfg repoSlug)"
 VERSION="$(cfg version)"
 POD_NAME="$(cfg podName)"
+XCF_NAME="$(cfg xcframeworkName)"
+
+# The release asset's filename is DERIVED, never written out: release-pod.sh
+# names the zip `${xcframeworkName%.xcframework}-$VERSION.xcframework.zip` and
+# release-sdk.yml uploads it under that name. Spelling it literally here is how
+# a rename of `xcframeworkName` produces a manifest whose url 404s — on a tag
+# that is already published and cannot be moved.
+XCF_ASSET="${XCF_NAME%.xcframework}-$VERSION.xcframework.zip"
 
 # A 64-character lowercase hex string is the only thing SwiftPM accepts.
 # `[[ =~ ]]` anchors against the WHOLE argument, not line-by-line like
@@ -65,7 +73,7 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "RovenueFFI",
-            url: "https://github.com/$REPO_SLUG/releases/download/sdk-swift-v$VERSION/RovenueFFI-$VERSION.xcframework.zip",
+            url: "https://github.com/$REPO_SLUG/releases/download/sdk-swift-v$VERSION/$XCF_ASSET",
             checksum: "$CHECKSUM"
         ),
         .target(
