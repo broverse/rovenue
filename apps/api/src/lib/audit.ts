@@ -317,6 +317,17 @@ function buildCanonicalPayload(
 export async function audit(
   entry: AuditEntry,
   callerTx?: AuditTx,
+  // The connection to open audit()'s OWN transaction on when there is
+  // no `callerTx` — never passed as `callerTx` itself: `db` here is an
+  // ordinary (non-transactional) handle, and starting the advisory
+  // lock on one of those releases it right after the LOCK statement
+  // itself, before the read-compute-insert it exists to serialise ever
+  // runs (see access-reconciliation.ts's comment on the same trap).
+  // Defaults to the module singleton so all but one caller
+  // (workers/retention-sweep.ts, which threads through whatever `Db`
+  // it was actually given rather than silently reaching around it)
+  // need not pass this at all.
+  db: DrizzleDb = drizzle.db,
 ): Promise<void> {
   if (entry.resource === "credential") {
     for (const snapshot of [entry.before, entry.after]) {
@@ -333,7 +344,7 @@ export async function audit(
     return;
   }
 
-  await drizzle.db.transaction(async (innerTx) =>
+  await db.transaction(async (innerTx) =>
     writeChained(entry, innerTx as unknown as AuditTx),
   );
 }

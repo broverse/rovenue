@@ -19,11 +19,14 @@
 // see `PartitionDropAuditContext`'s doc comment in retention-sweep.ts
 // for why: `auditLogs.projectId` is a real FK to `projects.id`, and a
 // global row would sit outside every project's own chain, invisible to
-// `verifyAuditChain` and the §9.3 `/proof` export). The
-// "writes the audit row" case below seeds two real projects and proves
-// both: a real row lands in EACH project's audit_logs with that
-// project's OWN resolved window, AND `listAuditProofRows` — the exact
-// read `/proof` uses — returns it for that project's bundle.
+// `verifyAuditChain` and the §9.3 `/proof` export), and each row's
+// `rowCount` is THAT project's own row count in the partition — never
+// the whole partition's total, which would leak other tenants' row
+// counts into a per-tenant compliance export. The scratch table below
+// carries its own `project_id` column so
+// `countPartitionRowsWhereColumnEquals` (the exact SQL production's
+// per-table counting wiring is built from) can be exercised directly,
+// without ever touching `credit_ledger`/`revenue_events`.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
@@ -33,16 +36,37 @@ import {
   verifyAuditChain,
 } from "../lib/audit";
 import {
+  countPartitionRowsWhereColumnEquals,
   dropTablePartitionsOlderThan,
   writeRetentionPartitionAuditRow,
+  type CountProjectPartitionRows,
   type PartitionDropAuditContext,
 } from "./retention-sweep";
 
 const PARENT_TABLE = "retention_sweep_scratch_parent";
+const SCRATCH_PROJECT_COLUMN = "project_id";
+
+// The real per-project counting SQL, scoped to the scratch table's own
+// `project_id` column — exactly what `countProjectPartitionRowsFor`
+// does for `credit_ledger`/`revenue_events` in production, just
+// pointed at a table this suite is allowed to drop.
+const countScratchProjectRows: CountProjectPartitionRows = (
+  db,
+  partitionName,
+  projectId,
+) =>
+  countPartitionRowsWhereColumnEquals(
+    db,
+    partitionName,
+    SCRATCH_PROJECT_COLUMN,
+    projectId,
+  );
+
 // Used only by the stub-writer tests below (mechanics of the drop
 // itself), which never reach the real `audit()` call and so never
 // touch the FK to `projects.id`.
-const STUB_PROJECT_WINDOWS = new Map([["prj_stub_partition_sweep", 365]]);
+const STUB_PROJECT_ID = "prj_stub_partition_sweep";
+const STUB_PROJECT_WINDOWS = new Map([[STUB_PROJECT_ID, 365]]);
 
 async function resetScratchTable(): Promise<void> {
   const db = getDb();
@@ -50,7 +74,8 @@ async function resetScratchTable(): Promise<void> {
   await db.execute(sql`
     CREATE TABLE ${sql.raw(`"${PARENT_TABLE}"`)} (
       id text NOT NULL,
-      ts timestamptz NOT NULL
+      ts timestamptz NOT NULL,
+      ${sql.raw(`"${SCRATCH_PROJECT_COLUMN}"`)} text NOT NULL
     ) PARTITION BY RANGE (ts)
   `);
 }
@@ -68,11 +93,14 @@ async function createScratchPartition(
   `);
 }
 
-async function insertScratchRow(ts: string): Promise<void> {
+async function insertScratchRow(
+  ts: string,
+  projectId: string = STUB_PROJECT_ID,
+): Promise<void> {
   const db = getDb();
   await db.execute(sql`
-    INSERT INTO ${sql.raw(`"${PARENT_TABLE}"`)} (id, ts)
-    VALUES (${`row-${Math.random().toString(36).slice(2)}`}, ${ts}::timestamptz)
+    INSERT INTO ${sql.raw(`"${PARENT_TABLE}"`)} (id, ts, ${sql.raw(`"${SCRATCH_PROJECT_COLUMN}"`)})
+    VALUES (${`row-${Math.random().toString(36).slice(2)}`}, ${ts}::timestamptz, ${projectId})
   `);
 }
 
@@ -128,9 +156,10 @@ describe("DROP_PARTITION strategy", () => {
       PARENT_TABLE,
       cutoff,
       STUB_PROJECT_WINDOWS,
-      async (ctx) => {
+      async (_db, ctx) => {
         writes.push(ctx);
       },
+      countScratchProjectRows,
     );
 
     expect(result.partitionsDropped).toEqual([partition]);
@@ -138,7 +167,8 @@ describe("DROP_PARTITION strategy", () => {
     expect(await partitionExists(partition)).toBe(false);
     // One audit write per project in `projectWindows` — one project here.
     expect(writes).toHaveLength(1);
-    expect(writes[0]!.projectId).toBe("prj_stub_partition_sweep");
+    expect(writes[0]!.projectId).toBe(STUB_PROJECT_ID);
+    expect(writes[0]!.rowCount).toBe(1);
   });
 
   it("leaves a partition alone when the cutoff falls INSIDE its range", async () => {
@@ -161,6 +191,7 @@ describe("DROP_PARTITION strategy", () => {
           "writeAuditRow must not be called for an in-window partition",
         );
       },
+      countScratchProjectRows,
     );
 
     expect(result.partitionsDropped).toEqual([]);
@@ -186,43 +217,53 @@ describe("DROP_PARTITION strategy", () => {
           "writeAuditRow must not be called for a not-yet-expired partition",
         );
       },
+      countScratchProjectRows,
     );
 
     expect(result.partitionsDropped).toEqual([]);
     expect(await partitionExists(partition)).toBe(true);
   });
 
-  it("writes one audit row per affected project before the drop, each carrying its own window and the shared row count, and each shows up in that project's own proof bundle", async () => {
+  it("writes one audit row per affected project before the drop, each carrying its OWN row count and window, and each shows up in that project's own proof bundle", async () => {
     // Two REAL projects — a partition drop affects every project
     // sharing it, so this is what actually happens on a real sweep,
     // not a simplification. Deliberately different resolved windows
-    // (200 vs 400) to prove each row carries ITS OWN project's window,
-    // not the fleet-wide maximum the cutoff was computed from.
+    // (200 vs 400) AND different row counts (2 vs 1) so each row must
+    // carry ITS OWN project's values, not the other project's, not the
+    // fleet-wide max window, and not the partition's total row count.
     await seedProject("prj_partsweep_a");
     await seedProject("prj_partsweep_b");
     const projectWindows = new Map([
       ["prj_partsweep_a", 200],
       ["prj_partsweep_b", 400],
     ]);
+    const expectedRowCounts = new Map([
+      ["prj_partsweep_a", 2],
+      ["prj_partsweep_b", 1],
+    ]);
 
     const partition = "retention_sweep_scratch_2023_06";
     await createScratchPartition(partition, "2023-06-01", "2023-07-01");
-    await insertScratchRow("2023-06-05T00:00:00.000Z");
-    await insertScratchRow("2023-06-20T00:00:00.000Z");
-    await insertScratchRow("2023-06-25T00:00:00.000Z");
+    await insertScratchRow("2023-06-05T00:00:00.000Z", "prj_partsweep_a");
+    await insertScratchRow("2023-06-12T00:00:00.000Z", "prj_partsweep_a");
+    await insertScratchRow("2023-06-20T00:00:00.000Z", "prj_partsweep_b");
 
     const cutoff = new Date("2024-06-01T00:00:00.000Z");
-    // The REAL production writer — exercises the full path into
-    // audit_logs, once per project.
+    // The REAL production writer AND the real per-table counting SQL —
+    // exercises the full path into audit_logs, once per project, each
+    // with its own project-scoped count.
     const result = await dropTablePartitionsOlderThan(
       getDb(),
       PARENT_TABLE,
       cutoff,
       projectWindows,
       writeRetentionPartitionAuditRow,
+      countScratchProjectRows,
     );
 
     expect(result.partitionsDropped).toEqual([partition]);
+    // Sum of the two projects' own counts, not a separate whole-
+    // partition query — see dropTablePartitionsOlderThan's doc comment.
     expect(result.rowsDropped).toBe(3);
     expect(await partitionExists(partition)).toBe(false);
 
@@ -247,7 +288,9 @@ describe("DROP_PARTITION strategy", () => {
       const after = row!.after as Record<string, unknown>;
       expect(after.table).toBe(PARENT_TABLE);
       expect(after.partition).toBe(partition);
-      expect(after.rowCount).toBe(3);
+      // THIS project's own row count — 2 for a, 1 for b — never the
+      // shared partition total (3) and never the other project's count.
+      expect(after.rowCount).toBe(expectedRowCounts.get(projectId));
       // THIS project's own window, not the other project's or the max.
       expect(after.windowDays).toBe(windowDays);
       expect(new Date(after.cutoff as string).toISOString()).toBe(
@@ -293,6 +336,7 @@ describe("DROP_PARTITION strategy", () => {
         async () => {
           throw new Error("audit write rejected");
         },
+        countScratchProjectRows,
       ),
     ).rejects.toThrow("audit write rejected");
 
@@ -315,14 +359,15 @@ describe("DROP_PARTITION strategy", () => {
     // The partition must still not be dropped, and no result should
     // claim it was.
     await seedProject("prj_partsweep_partial");
+    const secondProjectId = "prj_stub_partition_sweep_2";
     const projectWindows = new Map([
       ["prj_partsweep_partial", 365],
-      ["prj_stub_partition_sweep_2", 365],
+      [secondProjectId, 365],
     ]);
 
     const partition = "retention_sweep_scratch_2023_03";
     await createScratchPartition(partition, "2023-03-01", "2023-04-01");
-    await insertScratchRow("2023-03-10T00:00:00.000Z");
+    await insertScratchRow("2023-03-10T00:00:00.000Z", "prj_partsweep_partial");
 
     const cutoff = new Date("2024-06-01T00:00:00.000Z");
     let calls = 0;
@@ -332,14 +377,15 @@ describe("DROP_PARTITION strategy", () => {
         PARENT_TABLE,
         cutoff,
         projectWindows,
-        async (ctx) => {
+        async (db, ctx) => {
           calls += 1;
           if (calls === 1) {
-            await writeRetentionPartitionAuditRow(ctx);
+            await writeRetentionPartitionAuditRow(db, ctx);
             return;
           }
           throw new Error("second project's audit write rejected");
         },
+        countScratchProjectRows,
       ),
     ).rejects.toThrow("second project's audit write rejected");
 

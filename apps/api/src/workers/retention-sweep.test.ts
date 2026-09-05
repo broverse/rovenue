@@ -139,6 +139,7 @@ describe("runRetentionSweep", () => {
       expectedCutoff,
       new Map([["prj_1", 365]]),
       expect.any(Function),
+      expect.any(Function),
     );
   });
 
@@ -192,6 +193,7 @@ describe("runRetentionSweep", () => {
         ["prj_1", 900],
         ["prj_2", 365],
       ]),
+      expect.any(Function),
       expect.any(Function),
     );
   });

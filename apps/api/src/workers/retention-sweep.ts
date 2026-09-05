@@ -71,7 +71,10 @@ import {
 // `PartitionDropAuditContext` for why a single global row was
 // rejected (it would sit outside every project's chain, invisible to
 // `verifyAuditChain` and the §9.3 proof export — the exact tamper-
-// evidence this row exists to provide).
+// evidence this row exists to provide). Each row's `rowCount` is THAT
+// project's own row count in the partition too, not the partition's
+// whole total — a per-tenant compliance export must not disclose a
+// number that includes other tenants' rows.
 //
 // --- Window resolution: three rules, because a project's billing
 // tier is optional ---
@@ -157,8 +160,8 @@ const PARTITION_IDENTIFIER_PATTERN = /^[a-z_][a-z0-9_]*$/;
 // Every partition this sweep touches lives in `public`, matching every
 // migration in this repo (see `revenue-event-partitions.ts`, which
 // hardcodes `public.revenue_events` for the same reason). Named rather
-// than inlined so `listTablePartitions`, `countPartitionRows` and
-// `dropPartitionTable` cannot silently drift apart on which schema
+// than inlined so `listTablePartitions`, `countPartitionRowsWhereColumnEquals`
+// and `dropPartitionTable` cannot silently drift apart on which schema
 // they mean.
 const PARTITION_SCHEMA = "public";
 
@@ -174,6 +177,22 @@ function assertSafePartitionIdentifier(name: string): string {
 function qualifiedPartitionIdentifier(partitionName: string): string {
   assertSafePartitionIdentifier(partitionName);
   return `"${PARTITION_SCHEMA}"."${partitionName}"`;
+}
+
+// Column identifiers (e.g. `projectId`) are quoted camelCase, unlike
+// partition names — `PARTITION_IDENTIFIER_PATTERN` above is lowercase
+// only and would wrongly reject them. A separate pattern, still
+// defence in depth against interpolating anything but a real
+// identifier into DDL/DML via `sql.raw`.
+const SQL_COLUMN_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function assertSafeColumnIdentifier(name: string): string {
+  if (!SQL_COLUMN_IDENTIFIER_PATTERN.test(name)) {
+    throw new Error(
+      `retention-sweep: refusing unsafe column identifier "${name}"`,
+    );
+  }
+  return name;
 }
 
 // A RANGE bound literal as `pg_get_expr` renders a `timestamptz` value,
@@ -249,7 +268,10 @@ export function isPartitionDroppable(
 
 type CatalogRow = {
   name: string;
-  bound_expr: string;
+  // NULL for a legacy plain-`INHERITS` child (see the `relispartition`
+  // filter below) — belt and braces, since that filter should already
+  // rule these out entirely.
+  bound_expr: string | null;
 };
 
 /**
@@ -267,6 +289,26 @@ export async function listTablePartitions(
   db: Db,
   table: string,
 ): Promise<PartitionBound[]> {
+  // Two schema-consistency requirements this query enforces, both
+  // needed together (neither alone is sufficient):
+  //
+  //   - The CHILD's own namespace must ALSO be PARTITION_SCHEMA, not
+  //     just the parent's (the `cn` join/`cn.nspname` predicate below).
+  //     Without it, a child table of the same relname in a DIFFERENT
+  //     schema off a PARTITION_SCHEMA parent would still be returned
+  //     here (probed directly against this repo's Postgres) as a bare,
+  //     unqualified name — and the later DROP TABLE
+  //     (qualifiedPartitionIdentifier, countProjectPartitionRowsFor,
+  //     dropPartitionTable) would target whatever happens to sit in
+  //     PARTITION_SCHEMA under that same name instead. Normally a
+  //     harmless "does not exist", but a genuine same-name collision
+  //     would drop the WRONG TABLE.
+  //   - `child.relispartition` restricts to actual partitions: a
+  //     legacy plain INHERITS child (not a partition) satisfies
+  //     `pg_inherits` too but has a NULL `relpartbound`, so
+  //     `pg_get_expr` returns NULL and `bound_expr.trim()` below would
+  //     throw on that. Filtering it out up front is simpler and more
+  //     honest than parsing around it.
   const result = await db.execute<CatalogRow>(sql`
     SELECT child.relname AS name,
            pg_get_expr(child.relpartbound, child.oid) AS bound_expr
@@ -274,11 +316,27 @@ export async function listTablePartitions(
     JOIN pg_class parent ON parent.oid = pg_inherits.inhparent
     JOIN pg_namespace pn ON pn.oid = parent.relnamespace
     JOIN pg_class child ON child.oid = pg_inherits.inhrelid
-    WHERE parent.relname = ${table} AND pn.nspname = ${PARTITION_SCHEMA}
+    JOIN pg_namespace cn ON cn.oid = child.relnamespace
+    WHERE parent.relname = ${table}
+      AND pn.nspname = ${PARTITION_SCHEMA}
+      AND cn.nspname = ${PARTITION_SCHEMA}
+      AND child.relispartition
     ORDER BY child.relname
   `);
   const bounds: PartitionBound[] = [];
   for (const row of result.rows) {
+    // Belt and braces alongside `relispartition` above: a NULL
+    // `bound_expr` must never reach `parsePartitionBoundExpr` (whose
+    // `.trim()` would throw), so this is a partition-level failure —
+    // reported per-partition, no different from an unparseable bound —
+    // never a whole-policy exception.
+    if (row.bound_expr === null) {
+      log.warn("retention sweep found a partition with no bound expression; treating it as never droppable", {
+        table,
+        partition: row.name,
+      });
+      continue;
+    }
     const parsed = parsePartitionBoundExpr(row.name, row.bound_expr);
     if (parsed) {
       bounds.push(parsed);
@@ -300,14 +358,6 @@ export async function listTablePartitions(
     }
   }
   return bounds;
-}
-
-async function countPartitionRows(db: Db, partitionName: string): Promise<number> {
-  const qualified = qualifiedPartitionIdentifier(partitionName);
-  const result = await db.execute<{ count: string }>(
-    sql`SELECT count(*)::text AS count FROM ${sql.raw(qualified)}`,
-  );
-  return Number(result.rows[0]?.count ?? 0);
 }
 
 async function dropPartitionTable(db: Db, partitionName: string): Promise<void> {
@@ -345,12 +395,35 @@ export interface PartitionDropAuditContext {
   // them), so this is strictly more informative to that project's own
   // audit trail than the shared maximum would be.
   windowDays: number;
+  // THIS project's own row count in the partition — never the whole
+  // partition's total. A per-tenant compliance export must not carry a
+  // number that includes other tenants' rows (the same shape problem
+  // fix round 1 rejected for `windowDays`, applied here to `rowCount`
+  // too): see `CountProjectPartitionRows` for how it's computed.
   rowCount: number;
 }
 
 export type WriteRetentionPartitionAuditRow = (
+  db: Db,
   ctx: PartitionDropAuditContext,
 ) => Promise<void>;
+
+/**
+ * Counts ONE project's own rows in a not-yet-dropped partition —
+ * always scoped, never a whole-partition total. Injected rather than
+ * hardcoded inside `dropTablePartitionsOlderThan` for the same reason
+ * `writeAuditRow` is: that function is exercised against a scratch
+ * table with no project-ownership column at all in
+ * retention-sweep.partitions.integration.test.ts, so it must not know
+ * or care how a real table identifies project ownership.
+ * `countProjectPartitionRowsFor` below is the real implementation used
+ * in production.
+ */
+export type CountProjectPartitionRows = (
+  db: Db,
+  partitionName: string,
+  projectId: string,
+) => Promise<number>;
 
 export interface DropTablePartitionsResult {
   partitionsDropped: string[];
@@ -360,17 +433,25 @@ export interface DropTablePartitionsResult {
 /**
  * Drops every partition of `table` whose entire range predates
  * `cutoff`, auditing each one FIRST and unconditionally: for every
- * project in `projectWindows`, `writeAuditRow` is awaited — and must
- * succeed — before `dropPartitionTable` is ever called for that
- * partition. If any one of those writes rejects, this function
- * propagates that rejection immediately: nothing is dropped, any
- * partition not yet reached is left for the next sweep run, and any
- * project not yet reached this partition gets no audit row for it
+ * project in `projectWindows`, `countProjectRows` then `writeAuditRow`
+ * are awaited — and must succeed — before `dropPartitionTable` is ever
+ * called for that partition. If any one of those rejects, this
+ * function propagates that rejection immediately: nothing is dropped,
+ * any partition not yet reached is left for the next sweep run, and
+ * any project not yet reached this partition gets no audit row for it
  * either — never a partial record claiming an event that did not
- * happen. `rowCount` is read from the live partition once (not once
- * per project) immediately before the first audit write, because it is
- * the only surviving evidence of what was destroyed once the partition
- * is gone.
+ * happen. Each project's row count is read from the live partition,
+ * scoped to that project, immediately before ITS audit write, because
+ * it is the only surviving evidence of what was destroyed once the
+ * partition is gone. The aggregate `rowsDropped` returned is simply
+ * the sum of every project's own count — not a separate whole-
+ * partition query — which is exact as long as `projectWindows` truly
+ * covers every project with rows in `table` (guaranteed by the caller:
+ * `runRetentionSweep` only reaches this function once every project in
+ * the fleet has resolved a window, and both `credit_ledger` and
+ * `revenue_events` have a NOT NULL `projectId` with `ON DELETE
+ * CASCADE` — no row can belong to a project this sweep doesn't know
+ * about).
  */
 export async function dropTablePartitionsOlderThan(
   db: Db,
@@ -378,6 +459,7 @@ export async function dropTablePartitionsOlderThan(
   cutoff: Date,
   projectWindows: ReadonlyMap<string, number>,
   writeAuditRow: WriteRetentionPartitionAuditRow,
+  countProjectRows: CountProjectPartitionRows,
 ): Promise<DropTablePartitionsResult> {
   const partitions = await listTablePartitions(db, table);
   const partitionsDropped: string[] = [];
@@ -387,15 +469,16 @@ export async function dropTablePartitionsOlderThan(
     if (!isPartitionDroppable(partition, cutoff)) continue;
     const upperBound = partition.upperBound!; // non-null: isPartitionDroppable ruled out null above
 
-    const rowCount = await countPartitionRows(db, partition.name);
-
-    // Audit BEFORE the drop — once per affected project. If the
-    // process dies partway through this loop, whichever project rows
-    // already committed survive and describe a drop that may or may
-    // not have happened yet; an operator can check the partition and
-    // re-run the sweep. Dropping first would leave no record at all.
+    // Audit BEFORE the drop — once per affected project, each with its
+    // OWN row count. If the process dies partway through this loop,
+    // whichever project rows already committed survive and describe a
+    // drop that may or may not have happened yet; an operator can
+    // check the partition and re-run the sweep. Dropping first would
+    // leave no record at all.
+    let partitionRowsDropped = 0;
     for (const [projectId, windowDays] of projectWindows) {
-      await writeAuditRow({
+      const rowCount = await countProjectRows(db, partition.name, projectId);
+      await writeAuditRow(db, {
         table,
         partition: partition.name,
         lowerBound: partition.lowerBound,
@@ -405,44 +488,110 @@ export async function dropTablePartitionsOlderThan(
         windowDays,
         rowCount,
       });
+      partitionRowsDropped += rowCount;
     }
 
     // Only reached if every audit write above succeeded.
     await dropPartitionTable(db, partition.name);
     partitionsDropped.push(partition.name);
-    rowsDropped += rowCount;
+    rowsDropped += partitionRowsDropped;
   }
 
   return { partitionsDropped, rowsDropped };
+}
+
+// Physical project-ownership column for each DROP_PARTITION table,
+// resolved through Drizzle's own schema metadata rather than typed by
+// hand — the same defence `retention-rows.ts`'s DELETE_ROWS_TABLES
+// registry takes against the property-name-vs-physical-name divergence
+// `RetentionPolicy.timestampColumn` documents (established fact 2).
+// Both tables' Drizzle field and physical column happen to match here
+// ("projectId"), but resolution still goes through the schema object,
+// not a guess.
+const PARTITION_TABLE_PROJECT_COLUMN: Record<string, string> = {
+  credit_ledger: drizzle.schema.creditLedger.projectId.name,
+  revenue_events: drizzle.schema.revenueEvents.projectId.name,
+};
+
+/**
+ * `SELECT count(*) FROM <schema>.<partitionName> WHERE "<column>" =
+ * <value>` — the single piece of SQL every DROP_PARTITION table's
+ * per-project count is built from. Exported (unlike
+ * `countProjectPartitionRowsFor` below, which is production-only
+ * table→column wiring) so it can be exercised directly against a
+ * scratch table in retention-sweep.partitions.integration.test.ts —
+ * the same real counting SQL production uses, without needing to
+ * touch `credit_ledger`/`revenue_events` to prove it scopes correctly.
+ */
+export async function countPartitionRowsWhereColumnEquals(
+  db: Db,
+  partitionName: string,
+  column: string,
+  value: string,
+): Promise<number> {
+  const safeColumn = assertSafeColumnIdentifier(column);
+  const qualified = qualifiedPartitionIdentifier(partitionName);
+  const result = await db.execute<{ count: string }>(
+    sql`SELECT count(*)::text AS count FROM ${sql.raw(qualified)} WHERE ${sql.raw(`"${safeColumn}"`)} = ${value}`,
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+/**
+ * Builds the real `CountProjectPartitionRows` for one DROP_PARTITION
+ * table, used in production (see `runRetentionSweep`'s finalize loop).
+ * Throws if `table` isn't registered above — a DROP_PARTITION policy
+ * with no known project column is a configuration bug that must fail
+ * loudly, not silently attribute a table's rows to nobody.
+ */
+function countProjectPartitionRowsFor(table: string): CountProjectPartitionRows {
+  const column = PARTITION_TABLE_PROJECT_COLUMN[table];
+  if (!column) {
+    throw new Error(
+      `retention-sweep: no project-ownership column registered for DROP_PARTITION table "${table}"`,
+    );
+  }
+  return (db, partitionName, projectId) =>
+    countPartitionRowsWhereColumnEquals(db, partitionName, column, projectId);
 }
 
 /**
  * The real `writeAuditRow` for production use — a plain, project-scoped
  * write like any other `audit()` call. `userId` is the `"system"`
  * sentinel every other non-dashboard worker in this codebase uses.
+ * Takes the SAME `db` handle `dropTablePartitionsOlderThan` was given
+ * rather than reaching for the module-level default inside `audit()` —
+ * identical in practice today (the sweep always runs against the one
+ * real connection), but this keeps it that way if the injected handle
+ * ever differs (a test database, a read replica routed elsewhere).
  */
 export async function writeRetentionPartitionAuditRow(
+  db: Db,
   ctx: PartitionDropAuditContext,
 ): Promise<void> {
-  await audit({
-    projectId: ctx.projectId,
-    userId: "system",
-    action: AUDIT_ACTION_RETENTION_PARTITION_DROPPED,
-    resource: "retention_partition",
-    resourceId: ctx.partition,
-    before: null,
-    after: {
-      table: ctx.table,
-      partition: ctx.partition,
-      lowerBound: ctx.lowerBound ? ctx.lowerBound.toISOString() : null,
-      upperBound: ctx.upperBound.toISOString(),
-      cutoff: ctx.cutoff.toISOString(),
-      windowDays: ctx.windowDays,
-      rowCount: ctx.rowCount,
+  await audit(
+    {
+      projectId: ctx.projectId,
+      userId: "system",
+      action: AUDIT_ACTION_RETENTION_PARTITION_DROPPED,
+      resource: "retention_partition",
+      resourceId: ctx.partition,
+      before: null,
+      after: {
+        table: ctx.table,
+        partition: ctx.partition,
+        lowerBound: ctx.lowerBound ? ctx.lowerBound.toISOString() : null,
+        upperBound: ctx.upperBound.toISOString(),
+        cutoff: ctx.cutoff.toISOString(),
+        windowDays: ctx.windowDays,
+        rowCount: ctx.rowCount,
+      },
+      ipAddress: null,
+      userAgent: null,
     },
-    ipAddress: null,
-    userAgent: null,
-  });
+    undefined,
+    db,
+  );
 }
 
 // A DROP_PARTITION policy's aggregate is blocked by whichever of these
@@ -534,6 +683,7 @@ export interface RetentionDeps {
     cutoff: Date,
     projectWindows: ReadonlyMap<string, number>,
     writeAuditRow: WriteRetentionPartitionAuditRow,
+    countProjectRows: CountProjectPartitionRows,
   ) => Promise<DropTablePartitionsResult>;
 }
 
@@ -832,6 +982,7 @@ export async function runRetentionSweep(
           cutoff,
           aggregate.projectWindows,
           writeRetentionPartitionAuditRow,
+          countProjectPartitionRowsFor(policy.table),
         );
       rowsReclaimed += rowsDropped;
       retentionRowsReclaimedTotal.inc({ table: policy.table }, rowsDropped);
