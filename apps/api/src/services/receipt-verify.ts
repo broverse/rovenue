@@ -25,6 +25,7 @@ import {
   type AppleNotificationVerifier,
 } from "./apple/apple-verify";
 import { appleStorefrontToCountry } from "./apple/apple-country";
+import { isAppleRenewalCharge } from "./apple/renewal-charge";
 import { normalizeAlpha2Country } from "./country";
 import {
   APPLE_ENVIRONMENT,
@@ -387,13 +388,12 @@ async function verifyAppleReceipt(
     subscriber,
     product,
     purchase,
-    // Apple's own signal for "this charge is an auto-renewal, not a
-    // customer purchase" — set on the JWS transaction since the earliest
-    // App Store Server API v2 release. Absent on payloads too old to
-    // carry it; default to `false` (not a renewal) rather than
-    // withholding the grant on an unknown value — see
-    // VerifyReceiptResult.isRenewalCharge.
-    isRenewalCharge: transaction.transactionReason === "RENEWAL",
+    // "This charge is an auto-renewal, not a customer purchase" — see
+    // VerifyReceiptResult.isRenewalCharge for why the distinction gates a
+    // grant, and isAppleRenewalCharge for how a payload that predates
+    // Apple's own `transactionReason` field is resolved from the
+    // transaction chain instead of defaulting.
+    isRenewalCharge: isAppleRenewalCharge(transaction),
   };
 }
 
