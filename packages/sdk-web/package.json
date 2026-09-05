@@ -1,0 +1,27 @@
+{
+  "name": "@rovenue/web-sdk",
+  "version": "0.16.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run --minWorkers=1 --maxWorkers=2"
+  },
+  "dependencies": {
+    "@paralleldrive/cuid2": "^2.2.2",
+    "@rovenue/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^3.2.6"
+  }
+}

@@ -610,6 +610,22 @@ importers:
         specifier: ^3.2.6
         version: 3.2.6(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@20.10.6)(jsdom@25.0.1)(lightningcss@1.32.0)(msw@2.13.4(@types/node@22.19.17)(typescript@5.9.3))(terser@5.46.1)
 
+  packages/sdk-web:
+    dependencies:
+      '@paralleldrive/cuid2':
+        specifier: ^2.2.2
+        version: 2.3.1
+      '@rovenue/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@25.9.3)(happy-dom@20.10.6)(jsdom@25.0.1)(lightningcss@1.32.0)(msw@2.13.4(@types/node@25.9.3)(typescript@5.9.3))(terser@5.46.1)
+
   packages/shared:
     dependencies:
       pino:
@@ -813,6 +829,9 @@ packages:
   '@aws-sdk/core@3.977.2':
     resolution: {integrity: sha512-8sT/M5vDcagx5/iM0Bfx7f6i3mfVOQkA34+GTMwp0lIWZb6ma+bjkzDS/r9yqU2yTPBqqMBFPT3+d9kUuuNDJA==}
     engines: {node: '>=20.0.0'}
+    deprecated: |-
+      Deprecated due to Document number parsing bug in JSON, see
+        https://github.com/aws/aws-sdk-js-v3/issues/8246. Newer version available.
 
   '@aws-sdk/credential-provider-env@3.972.63':
     resolution: {integrity: sha512-VSS9dftt7r7GiZ4gs8z0PNaMLVAaSj/MXVr6WQBtsrQQB9miJo7I6lQuJND1/ugFwK9x7OHCYZDkLSYh0FIZtA==}
