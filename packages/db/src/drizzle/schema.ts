@@ -1443,6 +1443,56 @@ export type NewProjectStoreCommissionRate =
   typeof projectStoreCommissionRates.$inferInsert;
 
 // =============================================================
+// project_retention_overrides (per-table retention windows)
+// =============================================================
+
+export const projectRetentionOverrides = pgTable(
+  "project_retention_overrides",
+  {
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    // The physical table this override applies to. Deliberately a plain
+    // text column rather than an enum: the set of retainable tables lives
+    // in @rovenue/shared/retention's RETENTION_POLICIES, which is code
+    // because it names physical tables. An enum here would be a second
+    // copy of that list, free to drift, and a migration away from the
+    // registry it is supposed to mirror.
+    tableName: text("tableName").notNull(),
+    // A SHORTER window than the project's tier allows. The clamping is
+    // done by resolveRetentionWindowDays, not here — a stored value that
+    // exceeds the tier is simply ignored at read time rather than
+    // rejected at write time, so a tier downgrade cannot strand a row
+    // that was valid when it was written.
+    retentionDays: integer("retentionDays").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    // One override per (project, table). The composite PK is what makes
+    // an upsert idempotent; without it a second write would silently add
+    // a row and the sweep would have two windows to choose between.
+    pk: primaryKey({ columns: [t.projectId, t.tableName] }),
+    // Zero or negative would mean "delete everything". The registry's
+    // floor already clamps that at read time, but the constraint states
+    // the intent at the one layer no caller can bypass.
+    positiveWindow: check(
+      "project_retention_overrides_days_positive",
+      sql`${t.retentionDays} > 0`,
+    ),
+  }),
+);
+
+export type ProjectRetentionOverride =
+  typeof projectRetentionOverrides.$inferSelect;
+export type NewProjectRetentionOverride =
+  typeof projectRetentionOverrides.$inferInsert;
+
+// =============================================================
 // audiences (sift-style targeting rules)
 // =============================================================
 
