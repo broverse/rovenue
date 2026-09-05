@@ -2,11 +2,13 @@ import { createHttpClient, RovenueApiError, type HttpClient } from "./client";
 import { createIdentity, type Identity } from "./identity";
 import { createMemoryStorage, type SdkStorage } from "./storage";
 import { createEntitlementCache, type CachedEntitlements } from "./cache";
+import { createEventQueue, type TrackInput } from "./events";
 
 export { RovenueApiError } from "./client";
 export { createStorage, createMemoryStorage } from "./storage";
 export type { SdkStorage } from "./storage";
 export type { CachedEntitlements } from "./cache";
+export type { TrackInput, QueuedEvent } from "./events";
 
 // =============================================================
 // @rovenue/web-sdk
@@ -55,6 +57,15 @@ export interface Rovenue {
   getCachedEntitlements(): Record<string, unknown> | null;
   /** The cache entry with its timestamp, for callers that need staleness. */
   getCachedEntitlementsEntry(): CachedEntitlements | null;
+  /**
+   * Queues an event for at-least-once delivery.
+   *
+   * Returns immediately: the event is persisted and sent by the queue, which
+   * retries across page loads and flushes when the tab is hidden or closing.
+   */
+  track(input: TrackInput): void;
+  /** Attempts every queued event once. Called automatically on unload. */
+  flushEvents(): Promise<void>;
   getOfferings(): Promise<unknown>;
   getPlacement(identifier: string): Promise<unknown>;
   /**
@@ -89,6 +100,22 @@ export function configure(options: RovenueOptions): Rovenue {
     identity,
     fetchImpl: options.fetchImpl,
   });
+  const events = createEventQueue({
+    storage,
+    post: async (event) => {
+      try {
+        await http.post("/events", event, { keepalive: true });
+        return true;
+      } catch (err) {
+        // A 4xx means this event will never be accepted — a malformed
+        // envelope, or a key that no longer exists. Retrying it forever
+        // would block the queue behind it, so it is acknowledged (dropped)
+        // rather than retained. Anything else is worth another attempt.
+        return err instanceof RovenueApiError && err.status < 500;
+      }
+    },
+  });
+
 
   return {
     http,
@@ -126,6 +153,8 @@ export function configure(options: RovenueOptions): Rovenue {
         throw err;
       }
     },
+    track: (input) => events.track(input),
+    flushEvents: () => events.flush(),
     getCachedEntitlements: () => cache.read()?.entitlements ?? null,
     getCachedEntitlementsEntry: () => cache.read(),
     getOfferings: () => http.get("/offerings"),

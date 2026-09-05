@@ -40,7 +40,11 @@ export class RovenueApiError extends Error {
 
 export interface HttpClient {
   get<T>(path: string): Promise<T>;
-  post<T>(path: string, body: unknown, init?: { idempotencyKey?: string }): Promise<T>;
+  post<T>(
+    path: string,
+    body: unknown,
+    init?: { idempotencyKey?: string; keepalive?: boolean },
+  ): Promise<T>;
   /** Absolute base, e.g. `https://api.example/v1/web/pk_live_x`. */
   readonly baseUrl: string;
 }
@@ -102,7 +106,7 @@ export function createHttpClient(opts: CreateHttpClientOptions): HttpClient {
     async post<T>(
       path: string,
       body: unknown,
-      init?: { idempotencyKey?: string },
+      init?: { idempotencyKey?: string; keepalive?: boolean },
     ): Promise<T> {
       const res = await doFetch(`${baseUrl}${path}`, {
         method: "POST",
@@ -112,6 +116,11 @@ export function createHttpClient(opts: CreateHttpClientOptions): HttpClient {
             : undefined,
         ),
         body: JSON.stringify(body),
+        // Survives the page being unloaded, which is the whole reason the
+        // event queue can flush on pagehide at all. sendBeacon cannot be
+        // used here: it sets no headers, and this API authenticates from
+        // Authorization.
+        ...(init?.keepalive ? { keepalive: true } : {}),
       });
       return unwrap<T>(res);
     },
