@@ -166,6 +166,25 @@ interface DispatchOutcome {
    * existed.
    */
   eventContext?: StoreEventContext;
+  /**
+   * Set only by `applyRenewal` (Apple `DID_RENEW`): this dispatch is an
+   * auto-renewal charge, not a customer-initiated purchase. Threaded
+   * through `postProcess` -> `runPostProcessing` (webhook-processor.ts)
+   * so the PURCHASE-trigger consumable/product-currency grant is skipped
+   * for it — renewals are granted exclusively through the RENEWAL
+   * trigger, driven off the revenue event by the Kafka renewal-grants
+   * consumer (services/renewal-grants/consumer.ts).
+   *
+   * Apple mints a NEW transactionId for every renewal (see
+   * `applyOfferRedeemed`'s comment below on `originalTransactionId` vs.
+   * `transactionId`), so each DID_RENEW creates a brand-new purchase row
+   * — `addCredits`' (referenceType, referenceId) dedupe can never catch
+   * a repeat PURCHASE-trigger grant fired against it. Google doesn't
+   * need this: its storeTransactionId is the stable purchaseToken, so
+   * the SAME purchase row is reused across renewals and dedupe catches
+   * it there.
+   */
+  isRenewalCharge?: boolean;
 }
 
 interface DispatchContext {
@@ -275,6 +294,7 @@ export async function handleAppleNotification(
         subscriberId: outcome.subscriberId,
         purchaseId: outcome.purchaseId,
         eventContext: outcome.eventContext,
+        isRenewalCharge: outcome.isRenewalCharge,
       });
     }
 
@@ -430,6 +450,11 @@ async function applySubscribed(ctx: DispatchContext): Promise<void> {
 }
 
 async function applyRenewal(ctx: DispatchContext): Promise<void> {
+  // Every DID_RENEW is an auto-renewal charge, never a customer-initiated
+  // purchase — see DispatchOutcome.isRenewalCharge. Set unconditionally,
+  // including the guard-rejected exit below, so a late/replayed renewal
+  // can never fall through to the PURCHASE-trigger grant either.
+  ctx.outcome.isRenewalCharge = true;
   const subscriber = await resolveSubscriber(ctx);
   const { product, purchase, statusApplied } = await upsertPurchase({
     ctx,
