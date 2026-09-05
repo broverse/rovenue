@@ -45,6 +45,9 @@ flutter build apk --debug                     # compiles the Android plugin
 `runApp`, so it needs neither a backend nor a device — `flutter-tester` is
 enough. These three commands are exactly what `.github/workflows/sdk.yml` runs.
 
-An **iOS** build of this app does not work yet: `packages/sdk-swift` vendors a
-stale, simulator-architecture `librovenue_ffi.a`, so the device link fails. That
-is tracked outside this package, and is why CI has no iOS example build step.
+CI does not build this app for iOS. That is an open decision rather than a
+blocked one: `packages/sdk-swift` now ships `RovenueFFI.xcframework` with real
+iOS-device, iOS-simulator and macOS slices, so an iOS build has no
+architecture-level obstacle — building one in CI just costs a full xcframework
+build plus an `xcodebuild` run on a macOS runner. Locally, `flutter build ios`
+needs `packages/sdk-swift/scripts/build-xcframework.sh` to have run first.
