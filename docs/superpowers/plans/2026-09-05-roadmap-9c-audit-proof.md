@@ -457,7 +457,10 @@ id) since createdAt alone is not a total order."
 
 **Interfaces:**
 - Consumes: `listAuditProofRows` (Task 2), `AUDIT_CHAIN_FORMAT_V1` (Task 1).
-- Produces: `GET /dashboard/projects/:projectId/audit-logs/proof` returning
+- Produces: `GET /dashboard/audit-logs/proof?projectId=<id>` returning
+  (the router is mounted at `/audit-logs` in `routes/dashboard/index.ts:71`, and
+  its sibling list route takes `projectId` as a required query param — this route
+  matches it; there is no `/projects/:projectId` router to hang it off)
   `{ data: AuditProofBundle }` where
   `AuditProofBundle = { formatVersion: string; projectId: string; exportedAt: string; origin: { rowHash: string } | null; tip: { rowHash: string | null; createdAt: string } | null; entries: AuditProofRow[] }`.
   `origin` is derived purely from `entries[0].prevHash` — no second read, no

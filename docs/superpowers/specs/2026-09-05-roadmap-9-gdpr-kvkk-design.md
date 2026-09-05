@@ -102,7 +102,7 @@ lives in the *bundle*, not the row: a bundle declares which format version its
 hashes were computed under, and the verifier refuses a version it does not
 implement rather than guessing.
 
-**Export endpoint.** `GET /dashboard/projects/:projectId/audit-logs/proof`,
+**Export endpoint.** `GET /dashboard/audit-logs/proof?projectId=<id>`,
 gated the same way the existing audit-log list route is — `assertProjectAccess`,
 not a named capability (verified at `routes/dashboard/audit-logs.ts:28`) — streaming
 a bundle:
