@@ -717,11 +717,11 @@ describe("verifyAuditBundle", () => {
     const segment = all.slice(2);
     const b = {
       ...bundle(segment),
-      origin: { rowHash: all[1]!.rowHash, createdAt: all[1]!.createdAt },
+      origin: { rowHash: all[1]!.rowHash },
     };
     expect(verifyAuditBundle(b).ok).toBe(true);
 
-    const wrongOrigin = { ...b, origin: { rowHash: "0".repeat(64), createdAt: all[1]!.createdAt } };
+    const wrongOrigin = { ...b, origin: { rowHash: "0".repeat(64) } };
     expect(verifyAuditBundle(wrongOrigin).ok).toBe(false);
   });
 
@@ -764,20 +764,41 @@ nice -n 19 npx tsc --noEmit -p scripts
 
 Expected: PASS, clean.
 
-- [ ] **Step 5: Prove the two halves agree end to end**
+- [ ] **Step 5: Prove the two halves agree end to end, through a fixture**
 
 The unit tests above build bundles from `hashAuditRow` directly, so they prove the
 verifier is self-consistent — not that it accepts what the ENDPOINT actually
-emits. Add one test that takes a bundle produced by Task 3's endpoint (reuse that
-test's fixture construction) and runs `verifyAuditBundle` over it. Put it in
-`apps/api/src/routes/dashboard/audit-logs.proof.test.ts`, importing the verifier.
-Without this, the export and the verifier could drift apart while both suites stay
-green — the exact failure mode §12 hit three times.
+emits. Without an end-to-end tie, the export and the verifier drift apart while
+both suites stay green — the exact failure mode §12 hit three times.
+
+`apps/api` does not depend on `@rovenue/scripts`, so the endpoint test CANNOT
+import the verifier. Use this repo's existing cross-boundary contract convention
+instead — the one `packages/shared/src/experiments/bucketing-vectors.json` and
+`packages/shared/src/paywall/render-fixtures.json` already use: a committed JSON
+fixture that both sides read via `new URL("./<name>.json", import.meta.url)` (see
+`packages/shared/src/experiments/bucketing-vectors.test.ts:24`).
+
+Create `packages/shared/src/audit-proof-bundle-fixture.json` holding ONE real
+bundle. Its entry hashes must be computed by `hashAuditRow`, never typed by hand.
+
+Then wire both ends to it:
+
+- In `apps/api/src/routes/dashboard/audit-logs.proof.test.ts`, add a test that
+  mocks the repository read to return exactly the fixture's `entries`, calls the
+  endpoint, and asserts the assembled bundle deep-equals the fixture (modulo
+  `exportedAt`, which is a wall clock). If the endpoint's assembly drifts, this
+  goes red.
+- In `scripts/verify-audit-bundle.test.ts`, add a test that reads the same
+  fixture and asserts `verifyAuditBundle(fixture).ok === true`.
+
+Together these two prove the verifier accepts what the endpoint emits, with no
+package-boundary violation in either direction.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add scripts/verify-audit-bundle.ts scripts/verify-audit-bundle.test.ts \
+        packages/shared/src/audit-proof-bundle-fixture.json \
         apps/api/src/routes/dashboard/audit-logs.proof.test.ts
 git commit -m "feat(audit): standalone offline bundle verifier
 
