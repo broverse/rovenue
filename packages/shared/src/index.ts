@@ -160,17 +160,16 @@ export const BEARER_SCHEME = "Bearer";
 // =============================================================
 // Subscription lifecycle
 // =============================================================
-
-export const SUBSCRIPTION_STATE = {
-  TRIAL: "TRIAL",
-  ACTIVE: "ACTIVE",
-  GRACE_PERIOD: "GRACE_PERIOD",
-  EXPIRED: "EXPIRED",
-  PAUSED: "PAUSED",
-  REFUNDED: "REFUNDED",
-} as const;
-export type SubscriptionState =
-  (typeof SUBSCRIPTION_STATE)[keyof typeof SUBSCRIPTION_STATE];
+//
+// A `SUBSCRIPTION_STATE` constant used to sit here. Nothing imported it —
+// not the API, not the dashboard, not an SDK façade — and it had already
+// drifted twice: it never gained REVOKED, and it did not gain
+// BILLING_ISSUE either. The single source of truth is
+// `./subscription-status` (SUBSCRIPTION_STATUSES and
+// SUBSCRIPTION_STATUS_SEMANTICS), which the DB enum, the transition graph
+// and the access engine all derive from. Deleted 2026-09-05 (Task 15):
+// a stale vocabulary that compiles is worse than none, because the next
+// author to reach for it gets a list that silently omits two statuses.
 
 // =============================================================
 // Logger factory
@@ -207,6 +206,10 @@ export * from "./placements";
 // Dashboard API request/response types
 // =============================================================
 
+// Browser origin allow-list parsing, shared by the dashboard form and the
+// API route that persists it — a rule enforced in only one of the two is a
+// suggestion.
+export * from "./allowed-origins";
 export * from "./dashboard";
 
 // =============================================================

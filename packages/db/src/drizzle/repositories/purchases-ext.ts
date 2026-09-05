@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
   RECONCILABLE_STATUSES,
   TERMINAL_STATUSES,
@@ -244,6 +244,19 @@ export async function findPurchasesForSubscriberWithAccess(
  * `limit` — processed rows leave the sweepable statuses, so each run
  * naturally consumes the next slice.
  * Served by the partial index purchases_status_expiresDate_idx.
+ *
+ * One status does NOT drain that way, and so is excluded here rather
+ * than in the caller: a GRACE_PERIOD row's `expiresDate` is in the past
+ * by definition (grace begins when the paid term lapses), so it sorts
+ * FIRST under `ORDER BY expiresDate ASC` and stays a candidate for the
+ * entire grace window — up to 30 days. The worker skips such a row, but
+ * a skip still consumes a slot in the `limit` batch: once the
+ * concurrently-open grace population exceeds the cap, every run fills
+ * its batch with rows it will skip and nothing else is ever expired.
+ * Excluding an open grace window in the QUERY keeps the batch full of
+ * rows the sweeper can actually act on. A NULL `gracePeriodExpires` is
+ * NOT an open window — it means no known window — so those rows are
+ * still selected and still swept, exactly as before.
  */
 export interface ExpiryCandidate {
   id: string;
@@ -257,6 +270,14 @@ export interface ExpiryCandidate {
   priceAmount: string | null;
   priceCurrency: string | null;
 }
+
+/**
+ * The one sweepable status whose `expiresDate` is not the date that
+ * governs its retirement — see the exclusion in `findOverduePurchases`.
+ * Typed against the column so a rename of the enum label fails to
+ * compile here rather than silently matching nothing at runtime.
+ */
+const GRACE_PERIOD_STATUS: Purchase["status"] = "GRACE_PERIOD";
 
 export async function findOverduePurchases(
   db: Db,
@@ -286,6 +307,15 @@ export async function findOverduePurchases(
         // NULL expiresDate (lifetime) never satisfies <=, so those rows
         // are excluded without an explicit IS NOT NULL.
         lte(purchases.expiresDate, args.now),
+        // NOT (status = GRACE_PERIOD AND gracePeriodExpires > now),
+        // written as the equivalent OR so NULL never swallows the row:
+        // a NULL gracePeriodExpires fails `lte` in three-valued logic,
+        // hence the explicit IS NULL arm that keeps it sweepable.
+        or(
+          ne(purchases.status, GRACE_PERIOD_STATUS),
+          isNull(purchases.gracePeriodExpires),
+          lte(purchases.gracePeriodExpires, args.now),
+        ),
       ),
     )
     .orderBy(asc(purchases.expiresDate))
@@ -568,6 +598,65 @@ export async function findSupersedableApplePurchases(
         subscriberId: string;
         productId: string;
         status: Purchase["status"];
+      }>;
+    }).rows ?? [];
+  return rows;
+}
+
+/**
+ * Rows in the same Apple subscription chain that are still parked in
+ * BILLING_ISSUE, excluding the incoming transaction's own row.
+ *
+ * `applyFailedRenewal` writes BILLING_ISSUE chain-wide, but Apple mints a
+ * NEW transactionId for the renewal that RECOVERS that failure. The
+ * recovering delivery therefore lands on a key with no row, the guard's
+ * before-image is null, and the BILLING_ISSUE row it resolved is left
+ * behind — invisible to the recovery emit, and eventually retired by
+ * `runBillingIssueAgeing` 60 days later as a false `subscription.expired`
+ * for a subscriber who is actively paying. This query is how the
+ * recovering delivery finds those rows.
+ *
+ * Deliberately NOT bounded by `expiresDate > now` the way
+ * `findSupersedableApplePurchases` is: a row lands in BILLING_ISSUE
+ * precisely because its period already lapsed, so that bound would match
+ * nothing. The narrowing here is `status = 'BILLING_ISSUE'` instead, which
+ * is just as tight — an ordinary past renewal row is ACTIVE or EXPIRED and
+ * never matches.
+ */
+export async function findChainBillingIssuePurchases(
+  db: Db,
+  args: {
+    projectId: string;
+    originalTransactionId: string;
+    excludeStoreTransactionId: string;
+  },
+): Promise<
+  Array<{
+    id: string;
+    storeTransactionId: string;
+    subscriberId: string;
+    productId: string;
+  }>
+> {
+  const result = await db.execute(sql`
+    SELECT p.id,
+           p."storeTransactionId" AS "storeTransactionId",
+           p."subscriberId"       AS "subscriberId",
+           p."productId"          AS "productId"
+    FROM ${purchases} p
+    WHERE p."projectId" = ${args.projectId}
+      AND p.store = 'APP_STORE'
+      AND p."originalTransactionId" = ${args.originalTransactionId}
+      AND p."storeTransactionId" <> ${args.excludeStoreTransactionId}
+      AND p.status = 'BILLING_ISSUE'
+  `);
+  const rows =
+    (result as unknown as {
+      rows: Array<{
+        id: string;
+        storeTransactionId: string;
+        subscriberId: string;
+        productId: string;
       }>;
     }).rows ?? [];
   return rows;

@@ -11,6 +11,7 @@ import {
   drizzle,
   revenueDedupeKind,
 } from "@rovenue/db";
+import { ACCESS_GRANTING_STATUSES as SHARED_ACCESS_GRANTING_STATUSES } from "@rovenue/shared/subscription-status";
 import { logger } from "../../lib/logger";
 import { audit, type AuditTx } from "../../lib/audit";
 import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
@@ -21,6 +22,7 @@ import { completeFunnelPurchase } from "../funnel/complete-purchase";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
   FUNNEL_METADATA_KEY,
+  SUBSCRIBER_METADATA_KEY,
   STRIPE_EVENT_TYPE,
   STRIPE_INVOICE_BILLING_REASON,
   STRIPE_SUBSCRIPTION_STATUS,
@@ -33,6 +35,7 @@ import {
   pendingPlanChangeFields,
 } from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
+import { entitlementExpiry } from "../access-engine";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -760,7 +763,12 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
         projectId: ctx.projectId,
         subscriberId: subscriber.id,
         purchaseId: result.purchase.id,
-        guard,
+        // Stripe keys a subscription by a STABLE id across the whole
+        // dunning cycle, so the recovering delivery lands on the very row
+        // that held BILLING_ISSUE and the guard's own before-image is the
+        // right answer. (Apple does not — see `retireChainBillingIssue`.)
+        apply: guard.apply,
+        previousStatus: guard.previous?.status ?? null,
         status,
         now: stripeEventTime(ctx) ?? new Date(),
       });
@@ -813,7 +821,13 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
       subscriberId: subscriber.id,
       purchaseId: purchase.id,
       accessIds: product.accessIds,
-      expiresDate: purchase.expiresDate,
+      // The entitlement date, not the purchase's raw expiresDate: a
+      // GRACE_PERIOD purchase's expiresDate is the PRE-grace date, which
+      // the read path (`findActiveAccess`, `expiresDate > now`) will not
+      // serve. syncAccess overwrites this row moments later with the same
+      // rule, but relying on that made the invariant hold by ordering --
+      // a crash in between left a grant that served nothing.
+      expiresDate: entitlementExpiry(purchase),
     });
   } else {
     await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
@@ -1189,12 +1203,14 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
 // Helpers
 // =============================================================
 
+/**
+ * Derived from the shared semantics table, never hand-listed. The
+ * entitlement engine reads `grantsAccess` off that table, so a hand-kept
+ * copy here would honour a future granting status in one place and
+ * silently ignore it in the other.
+ */
 const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> =
-  new Set<PurchaseStatus>([
-    PurchaseStatus.ACTIVE,
-    PurchaseStatus.TRIAL,
-    PurchaseStatus.GRACE_PERIOD,
-  ]);
+  new Set<PurchaseStatus>(SHARED_ACCESS_GRANTING_STATUSES);
 
 // Exported for Task 9 (services/import/verify.ts): Phase B re-verifying an
 // imported Stripe anchor needs the SAME live-status mapping the webhook
@@ -1257,8 +1273,14 @@ async function resolveSubscriber(
       ? subscription.customer
       : subscription.customer.id;
 
+  // SUBSCRIBER_METADATA_KEY is `app_user_id`, the key /v1/checkout stamps
+  // onto the subscriptions it creates. Read through the shared constant
+  // rather than a literal so a rename cannot leave the writer and the reader
+  // disagreeing silently — the failure mode is not an error but a fallback to
+  // the `stripe:<customer>` anchor, which grants access to a synthetic
+  // subscriber while the buyer's real one never receives it.
   const appUserId =
-    subscription.metadata?.app_user_id ??
+    subscription.metadata?.[SUBSCRIBER_METADATA_KEY] ??
     subscription.metadata?.appUserId ??
     `stripe:${customerId}`;
 

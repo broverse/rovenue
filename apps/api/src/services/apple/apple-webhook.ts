@@ -46,10 +46,15 @@ import {
   pendingPlanChangeFields,
 } from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
+import { entitlementExpiry } from "../access-engine";
 import { audit } from "../../lib/audit";
 import { expireSupersededApplePurchases } from "./apple-supersede";
+import { retireChainBillingIssue } from "./apple-recovery";
 import type { StoreEventContext } from "@rovenue/shared";
-import { TERMINAL_STATUSES } from "@rovenue/shared/subscription-status";
+import {
+  SUBSCRIPTION_STATUS_SEMANTICS,
+  TERMINAL_STATUSES,
+} from "@rovenue/shared/subscription-status";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -160,10 +165,12 @@ interface DispatchOutcome {
   purchaseId?: string;
   /**
    * Disambiguating fact for `postProcess`'s bridge to the outbox (see
-   * `WebhookPostProcess.eventContext`, webhook-processor.ts). Set only by
-   * `applyRenewalStatusChange` today — every other handler leaves this
-   * undefined and the bridge behaves exactly as before this field
-   * existed.
+   * `WebhookPostProcess.eventContext`, webhook-processor.ts). Set by the
+   * two handlers whose Apple event type means two different real-world
+   * facts: `applyRenewalStatusChange` (auto-renew direction) and
+   * `applyFailedRenewal` (whether the retry keeps access). Every other
+   * handler leaves this undefined and the bridge behaves exactly as
+   * before this field existed.
    */
   eventContext?: StoreEventContext;
   /**
@@ -509,6 +516,15 @@ async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
     return;
   }
 
+  // Apple has already charged and applied this upgrade, so the bridge's
+  // ANNOUNCEMENT phase of `subscription.product_changed` ("the store says
+  // a change is coming") is simply false here — and the effective-phase
+  // row emitted below via `onSuperseded` is the true one. Suppress the
+  // announcement so one instant does not produce two contradictory
+  // deliveries of the same key. See the two-phase contract beside
+  // `PRODUCT_CHANGE_PHASE_EFFECTIVE` in packages/shared/src/integrations.ts.
+  ctx.outcome.eventContext = { applePrefChangeAlreadyApplied: true };
+
   const subscriber = await resolveSubscriber(ctx);
   const { product, purchase, statusApplied } = await upsertPurchase({
     ctx,
@@ -637,6 +653,15 @@ async function applyOfferRedeemed(ctx: DispatchContext): Promise<void> {
     return;
   }
 
+  // Apple has already charged and applied this upgrade, so the bridge's
+  // ANNOUNCEMENT phase of `subscription.product_changed` ("the store says
+  // a change is coming") is simply false here — and the effective-phase
+  // row emitted below via `onSuperseded` is the true one. Suppress the
+  // announcement so one instant does not produce two contradictory
+  // deliveries of the same key. See the two-phase contract beside
+  // `PRODUCT_CHANGE_PHASE_EFFECTIVE` in packages/shared/src/integrations.ts.
+  ctx.outcome.eventContext = { applePrefChangeAlreadyApplied: true };
+
   const subscriber = await resolveSubscriber(ctx);
   const { product, purchase, statusApplied } = await upsertPurchase({
     ctx,
@@ -747,10 +772,20 @@ async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
   // DID_FAIL_TO_RENEW to GRACE_PERIOD regardless of subtype) granted
   // entitlement Apple itself had withdrawn. Mirrors
   // normalizeAppleStatus(DID_FAIL_TO_RENEW).
-  const status =
-    ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD
-      ? PurchaseStatus.GRACE_PERIOD
-      : PurchaseStatus.BILLING_ISSUE;
+  const isGracePeriodSubtype =
+    ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD;
+  const status = isGracePeriodSubtype
+    ? PurchaseStatus.GRACE_PERIOD
+    : PurchaseStatus.BILLING_ISSUE;
+
+  // The same split has to reach the outbox bridge, or the two halves
+  // disagree: the purchase would say GRACE_PERIOD (access retained) while
+  // every integration was told `subscription.billing_issue`. The bridge
+  // keys on the bare event-type string, and `DID_FAIL_TO_RENEW` covers
+  // both cases — so thread the subtype through the same
+  // `StoreEventContext` channel `applyRenewalStatusChange` uses for
+  // auto-renew direction. See `resolveStorePublicKey`.
+  ctx.outcome.eventContext = { appleGracePeriodSubtype: isGracePeriodSubtype };
 
   const gracePeriodExpires = ctx.renewalInfo?.gracePeriodExpiresDate
     ? new Date(ctx.renewalInfo.gracePeriodExpiresDate)
@@ -1408,12 +1443,48 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
       // store resolved the payment failure. Unlike inferring it from an
       // invoice, this cannot fire on an unrelated renewal, because the
       // before-image says where the row actually was.
+      //
+      // On Apple that before-image is usually null even for a real
+      // recovery: `applyFailedRenewal` stamps BILLING_ISSUE chain-wide onto
+      // the transaction that failed, and Apple mints a NEW transactionId
+      // for the renewal that recovers it — so THIS key has no row and
+      // `guard.previous` says nothing. The chain is the honest scope. When
+      // this delivery grants access and its own key was not the one
+      // holding the failure, resolve the chain's stale BILLING_ISSUE rows;
+      // if any actually moved, the chain WAS in billing trouble and this
+      // delivery is what ended it.
+      //
+      // Exactly-once: the two arms are mutually exclusive. A recovery
+      // visible on this key uses `guard.previous`; one visible only on a
+      // sibling uses the chain. A replay retires nothing (the rows are
+      // already EXPIRED) and emits nothing.
+      const recoveredOnThisKey =
+        guard.previous?.status === PurchaseStatus.BILLING_ISSUE;
+      const recoveredOnChain =
+        !recoveredOnThisKey &&
+        guard.apply &&
+        SUBSCRIPTION_STATUS_SEMANTICS[status].grantsAccess &&
+        (
+          await retireChainBillingIssue({
+            db: dbTx,
+            projectId: ctx.projectId,
+            originalTransactionId: tx.originalTransactionId,
+            excludeStoreTransactionId: tx.transactionId,
+            now: eventTime,
+            source: `apple:${ctx.notification.notificationType}`,
+          })
+        ).retired > 0;
+
       await emitSubscriptionRecovered({
         db: dbTx,
         projectId: ctx.projectId,
         subscriberId,
         purchaseId: persisted.id,
-        guard,
+        apply: guard.apply,
+        previousStatus:
+          recoveredOnThisKey || recoveredOnChain
+            ? PurchaseStatus.BILLING_ISSUE
+            : (guard.previous?.status ?? null),
         status,
         now: eventTime,
       });
@@ -1538,15 +1609,25 @@ async function resolveAutoRenewProduct(
 interface GrantAccessArgs {
   ctx: DispatchContext;
   subscriber: { id: string };
-  purchase: { id: string };
+  purchase: { id: string; status: PurchaseStatus; gracePeriodExpires: Date | null };
   product: { id: string; accessIds: string[] };
 }
 
 async function grantAccess(args: GrantAccessArgs): Promise<void> {
   const { ctx, subscriber, purchase, product } = args;
-  const expiresDate = ctx.transaction.expiresDate
-    ? new Date(ctx.transaction.expiresDate)
-    : null;
+  // The entitlement date, not the transaction's raw expiresDate: a
+  // GRACE_PERIOD purchase's expiresDate is the PRE-grace date, which the
+  // read path (`findActiveAccess`, `expiresDate > now`) will not serve.
+  // syncAccess overwrites this row moments later with the same rule, but
+  // relying on that made the invariant hold by ordering -- a crash in
+  // between left a grant that served nothing.
+  const expiresDate = entitlementExpiry({
+    status: purchase.status,
+    expiresDate: ctx.transaction.expiresDate
+      ? new Date(ctx.transaction.expiresDate)
+      : null,
+    gracePeriodExpires: purchase.gracePeriodExpires,
+  });
 
   for (const accessId of product.accessIds) {
     const existing = await drizzle.accessRepo.findAccessByPurchaseAndAccessId(

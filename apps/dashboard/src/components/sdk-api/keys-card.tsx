@@ -7,6 +7,8 @@ import { Button } from "../../ui/button";
 import { ConfirmDialog } from "../../ui/confirm-dialog";
 import { SecretRow } from "./secret-row";
 import { useRevokeApiKey } from "../../lib/hooks/useRevokeApiKey";
+import { useUpdateAllowedOrigins } from "../../lib/hooks/useUpdateAllowedOrigins";
+import { AllowedOriginsEditor } from "./allowed-origins-editor";
 
 interface Props {
   projectId: string;
@@ -46,6 +48,7 @@ export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const revoke = useRevokeApiKey(projectId);
+  const updateOrigins = useUpdateAllowedOrigins(projectId);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
@@ -72,7 +75,8 @@ export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
           </div>
         )}
         {apiKeys.map((key) => (
-          <div key={key.id} className="flex items-stretch gap-2">
+          <div key={key.id} className="flex flex-col">
+            <div className="flex items-stretch gap-2">
             <div className="min-w-0 flex-1">
               <SecretRow
                 label={key.label}
@@ -95,6 +99,21 @@ export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
             >
               <Trash2 size={13} />
             </Button>
+            </div>
+            {/* Browser use is opt-in per key. Shown inline rather than behind
+                a dialog because its EMPTY state is the information that
+                matters: a developer whose Web SDK calls are refused sees only
+                an opaque CORS error, which never mentions Rovenue. */}
+            <AllowedOriginsEditor
+              origins={key.allowedOrigins}
+              disabled={updateOrigins.isPending}
+              onChange={async (allowedOrigins) => {
+                await updateOrigins.mutateAsync({
+                  keyId: key.id,
+                  allowedOrigins,
+                });
+              }}
+            />
           </div>
         ))}
       </div>

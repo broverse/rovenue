@@ -3,6 +3,18 @@ export const ROVENUE_EVENT_KEYS = [
   "revenue.TRIAL_CONVERSION",
   "revenue.RENEWAL",
   "revenue.CREDIT_PURCHASE",
+  // 2026-09-04 — a purchase that does not renew (non-consumable IAP, or a
+  // one-time Stripe funnel package). Distinct from revenue.INITIAL
+  // because the ad platforms map INITIAL to "Subscribe", which is wrong
+  // for a purchase that never becomes a subscription.
+  "revenue.NON_RENEWING_PURCHASE",
+  // 2026-09-04 — REACTIVATION has been PRODUCED since Apple's RESUBSCRIBE
+  // handler shipped, but had no key, so every provider skipped it with
+  // `filtered_by_event_scope` and nothing logged. It carries two
+  // meanings — a lapsed subscriber returning, and a refund being undone —
+  // and the payload's `metadata.reason: "refund_reversed"` is what tells
+  // them apart. See apple-webhook.ts's applyRefundReversed.
+  "revenue.REACTIVATION",
   "revenue.REFUND",
   "revenue.CANCELLATION",
   "subscription.trial.started",

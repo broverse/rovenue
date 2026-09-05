@@ -6,7 +6,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 | # | Area | Now | Target |
 |---|------|-----|--------|
 | 1 | Store integrations & receipt validation | 85% | 95% |
-| 2 | Subscription state & entitlements | 85% | 95% |
+| 2 | Subscription state & entitlements | 95% | 95% ✅ |
 | 3 | Paywall builder & native rendering | 94% | 95% |
 | 4 | A/B testing & experiments | 88% | 90%+ |
 | 5 | Analytics (MRR / LTV / cohorts) | 95% | 95% ✅ |
@@ -113,12 +113,118 @@ rather than closing the section.
       scheduled job itself always runs live (`backfill: false`) once the
       one-time drain is done.
 
-## 2. Subscription state & entitlements (85 → 95)
+## 2. Subscription state & entitlements (85 → 95) — CLOSED 2026-09-05
 
-- [ ] Upgrade/downgrade proration, cross-grade, entitlement transition rules on plan change
-- [ ] Google billing issue / account hold as a first-class state (separate from GRACE_PERIOD)
-- [ ] Apple Family Sharing + win-back offer states in the state machine
-- [ ] Continuous `subscriber_access` consistency checker (reconciliation job that detects drift)
+All four items shipped 2026-09-03…05
+(`.superpowers/sdd/2026-09-03-subscription-state-entitlements/`). The whole
+section turned out to hang off one missing state: `BILLING_ISSUE`, the
+INVOLUNTARY suspension that is neither `GRACE_PERIOD` (retry *with* access)
+nor `PAUSED` (the subscriber's own choice). Before it, an account hold and a
+voluntary pause landed on the same row value, so every rollup that reads
+`involuntary` mislabelled dunning as churn-by-choice.
+
+**Two tasks were needed that the plan never contained.** A review found that
+`GRACE_PERIOD` was declared `grantsAccess: true` in
+`packages/shared/src/subscription-status.ts` and yet granted nothing: the
+access engine compared against `purchases.expiresDate`, which is by
+definition already past for a row in grace, so the entitlement was computed
+as expired the moment grace began. That made the entire
+GRACE_PERIOD-versus-BILLING_ISSUE distinction meaningless *in entitlement
+terms* — the two states were different labels for the same denial. Task 12b
+made the access window run to `gracePeriodExpires`; Task 12c stopped the
+expiry sweeper retiring a grace period that was still open. Neither was
+foreseen, and without both the headline item would have shipped as a
+reporting change dressed up as an entitlement one.
+
+Residual, recorded rather than fixed (see `deferred-and-open.md` in the plan
+directory): `receipt-verify.ts` supersedes a Google purchase without emitting
+`product_changed` for the identical-replacement flow; the DOWNGRADE
+redemption path bypasses the upsert and so writes none of the offer columns
+that exist to make a win-back cohort queryable; and CSV-migrated projects
+keep a residual revenue double-count because the importer's dedupe namespace
+(`import:<store>:<txn>:<n>`) does not meet the live one (`apple:<txn>:<kind>`).
+
+- [x] Upgrade/downgrade proration, cross-grade, entitlement transition rules
+      on plan change — plan-change detection and a `subscription.product_changed`
+      event across all three stores, plus `pendingProductId` /
+      `pendingChangeType` / `pendingChangeEffectiveAt` on `purchases` (0117) for
+      the deferred case where the store announces a switch that takes effect at
+      the next renewal. **`changeType` is store-reported or `null`, never
+      derived from price.** The tempting heuristic — compare the new price to
+      the old — is wrong precisely where it matters: the amount on a plan-change
+      transaction is what the store *charged*, and a prorated upgrade charges
+      *less* than list price because the unused remainder of the old term is
+      credited against it. A price comparison would therefore label upgrades as
+      downgrades on exactly the flow this item exists for. Apple reports the
+      direction in its notification subtype and is read straight off it; Google
+      and Stripe report nothing usable, so they emit `changeType: null` and the
+      consumer is told "the product changed" without a fabricated direction.
+      No proration-specific `RevenueEventType` was added: Apple sends the
+      prorated refund as its own REFUND notification, Stripe puts proration
+      lines on the invoice the existing path already reads, and Google's
+      replacement token carries the real `priceAmountMicros` — net revenue is
+      already correct, and a new enum value would reach the ClickHouse schema
+      for nothing. That ruling is pinned by a test asserting the exact
+      `RevenueEventType` membership, so a future proration type has to be a
+      deliberate act. Alongside it, Apple upgrade **supersession**: the row the
+      upgrade cut short is retired instead of being left live beside its
+      replacement. **Deliberately narrow.** Apple mints a new transaction id for
+      every renewal, so a chain under one `originalTransactionId` holds one row
+      per *billing period*, not one row per subscription; matching on the
+      original id alone would sweep the entire renewal history into EXPIRED. Only
+      a row whose period has not yet ended can be the one an upgrade replaced.
+- [x] Google billing issue / account hold as a first-class state (separate
+      from GRACE_PERIOD) — `BILLING_ISSUE` added to `PurchaseStatus` (0115) with
+      a `billingIssueDetectedAt` stamp written on ENTRY only (a repeated hold
+      signal must not reset a dunning campaign's clock) and cleared only on
+      recovery into an access-granting status; a lapse to EXPIRED keeps the
+      stamp, because it is the evidence the churn was involuntary. All three
+      stores route to it: Google `ON_HOLD`, Stripe `unpaid` / `incomplete`, and
+      Apple `DID_FAIL_TO_RENEW` **without** the `GRACE_PERIOD` subtype.
+      **That last mapping is a deliberate reversal of the earlier behaviour
+      (OD-1) and it takes access away.** Apple sends the `GRACE_PERIOD` subtype
+      only when the app actually has a billing grace period configured; without
+      it, Apple has already stopped the subscription on its own side, so the
+      previous mapping to `GRACE_PERIOD` was granting entitlement Apple itself
+      had withdrawn. Because that flips live rows out of an access-granting
+      status on deploy, it ships with a read-only pre-deploy blast-radius
+      script (`apps/api/scripts/billing-issue-blast-radius.ts`) that counts them
+      first. **The enum had to be added by recreating the type, not with
+      `ALTER TYPE … ADD VALUE`.** Postgres forbids using a value added that way
+      inside the transaction that added it, and the drizzle migrator wraps all
+      pending migrations in one transaction — so splitting the ADD and the USING
+      across two files does not help: on a fresh install both land in the same
+      transaction and the run fails with `unsafe use of new value`, while
+      passing on the developer machine where the two files happened to run
+      separately. 0115 therefore renames the old type, creates the new one, and
+      recasts the column, dropping and rebuilding the two partial indexes whose
+      predicates embed Const nodes of the type being dropped. Completing the
+      loop: the status-write guard now returns a **before-image** (previous
+      status, product and auto-renew flag) so a transition can be judged against
+      what was actually there rather than re-read; a bounded ageing pass retires
+      a hold nobody is still retrying, so a `BILLING_ISSUE` row cannot sit
+      forever waiting for a store event that will never come; and
+      `subscription.recovered` is emitted for Apple and Stripe when the store
+      finally collects, which is the event a win-back campaign has to suppress
+      on.
+- [x] Apple Family Sharing + win-back offer states in the state machine —
+      family-shared revenue suppression moved **into the repository**:
+      `createRevenueEvent` returns `null` for a purchase whose ownership type is
+      family-shared, so the suppression cannot be forgotten by a new caller the
+      way a check at each call site can. A family member's entitlement is real;
+      the revenue is the payer's and must not be counted twice. Win-back and
+      promotional offers get a real `OFFER_REDEEMED` handler with the offer
+      identity persisted on the purchase (0118) so a redeemed cohort is
+      queryable rather than inferred.
+- [x] Continuous `subscriber_access` consistency checker — a scheduled
+      reconciler (0119, index fixed in 0120) that recomputes desired access for
+      the least-recently-checked subscribers, heals the drift it finds, and
+      records the sweep. It runs behind a **circuit breaker with a minimum batch
+      size**: a sweep that wants to change an implausible share of a
+      sufficiently large batch stops instead of healing, because at that point
+      the likelier explanation is that the *computation* is wrong, not the
+      stored rows — and a reconciler that trusts itself unconditionally is a
+      single bug away from revoking every entitlement in a project.
 
 ## 3. Paywall builder & native rendering (85 → 94) — five of six items closed 2026-09-04
 
@@ -524,11 +630,87 @@ else in the framework/provider-breadth dimension is done.
         silently drops the event. The guard names the provider and key,
         declares deliberate omissions with reasons, and fails when an
         exemption goes stale.
-- [ ] Stripe one-time (non-subscription) purchases reach no integration
-      provider — funnel completion emits only `funnel.session.paid` on a
-      separate `FUNNEL` aggregate, never `revenue.event.recorded`. Found by
-      the 2026-09-03 enumeration; genuinely separate scope (the funnel/
-      revenue bridge, not store lifecycle normalization).
+- [x] One-time purchase revenue typing — shipped 2026-09-04
+      (`docs/superpowers/specs/2026-09-04-one-time-revenue-typing-design.md`).
+      **The item as written named the Stripe symptom; the real defect was
+      one level deeper and affected all three stores, not just Stripe.**
+      Verifying the Stripe gap turned up the same defect, one step milder,
+      already live on Apple and Google: every one-time (non-subscription)
+      purchase — consumable or non-consumable — was recorded as
+      `revenue.INITIAL`, the same type as a new subscription. Stripe's
+      funnel path had it worse: `grantOneTimePurchase` wrote a `purchases`
+      row and an entitlement and recorded no revenue at all, so a funnel
+      sale was invisible to every integration provider, to
+      gross/net revenue, MRR, LTV, country revenue, and the transactions
+      list alike — the "top credit packages" and "credit revenue" metrics
+      were permanently zero because nothing had ever written
+      `CREDIT_PURCHASE`, and the ad platforms received `Subscribe` for a
+      coin pack.
+      Delivered:
+      - **One rule, one place.** `oneTimeRevenueTypeFor`
+        (`services/revenue/one-time-type.ts`) is a total
+        `Record<ProductType, RevenueEventType | null>` — `CONSUMABLE` →
+        `CREDIT_PURCHASE`, `NON_CONSUMABLE` → `NON_RENEWING_PURCHASE`
+        (new enum value, migration 0121), `SUBSCRIPTION` →
+        `null` so the caller's own INITIAL/RENEWAL/TRIAL_CONVERSION
+        classification stands untouched. A fourth `ProductType` is a
+        compile error, not a silent fallthrough. All four producers —
+        Apple and Google receipt verification, the Stripe funnel's
+        one-time purchase completion, and the CSV importer — call it.
+      - **Stripe funnel purchases now record revenue**, inside the same
+        transaction that grants access, with USD conversion hoisted
+        outside the transaction and a dedupe key that converges the
+        `/confirm` and webhook-backstop racers.
+      - **`revenue.REACTIVATION` became a public key**, closing a gap
+        that predates this plan: it had been produced since Apple's
+        RESUBSCRIBE handler shipped but had no catalog key, so every
+        provider silently filtered it with `filtered_by_event_scope`.
+        It carries two economic meanings under one key — a win-back and
+        a reversed-refund accounting correction — disambiguated by a
+        `metadata.reason` tag only `applyRefundReversed` sets.
+      - **A compile-time bijection guard**
+        (`services/integrations/revenue-key-bijection.ts`) makes "a
+        `RevenueEventType` has no public key" a `tsc` error instead of a
+        silent skip — the exact failure shape `REACTIVATION` had been
+        shipping under. It does not cover SQL allow-lists, which a string
+        literal hides from the type system.
+      - **Named revenue-type groupings** replace fourteen hand-copied
+        `IN (...)` allow-lists across metrics/analytics/dashboard code
+        (`ALL_REVENUE_TYPES`, `REVENUE_TYPES_MONEY_OUT`,
+        `REVENUE_TYPES_PURCHASE_COUNT`, `REVENUE_TYPES_NEW_RECURRING`,
+        `REVENUE_TYPES_LIFETIME_PURCHASED`) — one decision point instead
+        of fourteen. That these lists had already drifted from the enum
+        was not a hypothesis: `CHARGEBACK` appears in eight predicates
+        and has never been a `RevenueEventType` value, so no row could
+        ever have carried it.
+      - **A ClickHouse contract test** runs `v_revenue_lifetime_subscriber`
+        against a real testcontainer with one row of every
+        `RevenueEventType` and fails by name on any type the view drops —
+        the only thing holding a SQL view and the TypeScript enum in step,
+        since the view can't import the constant.
+      - **A migration (0123) widens existing integration connections**:
+        any connection with `revenue.INITIAL` already enabled gains
+        `revenue.CREDIT_PURCHASE` and `revenue.NON_RENEWING_PURCHASE` too,
+        so splitting one key into three doesn't silently stop deliveries
+        a customer integration already receives. `revenue.REACTIVATION`
+        is deliberately **not** added by that migration — a genuinely new
+        signal nobody has ever received ships opt-in, not retroactively
+        enabled.
+      - **History is not rewritten.** Rows recorded before this release
+        keep `revenue.INITIAL` for what was, in fact, a one-time purchase.
+      Two rulings, recorded: `CREDIT_PURCHASE` means "a consumable IAP was
+      bought," not "a credit grant was recorded" — a misconfigured
+      `CONSUMABLE` product with no currency-grant rows is still filed
+      here, deliberately, because keying on the grants table instead
+      would make the type a function of mutable configuration. And
+      `ltv-prediction`'s cohort anchor stays subscription-only, on
+      purpose — a one-time buyer is not a subscription-cohort member, and
+      anchoring them there would project recurring revenue for someone
+      who bought once.
+      Stripe `customer.subscription.updated`'s prior
+      `cancel_at_period_end` — §6's other named exclusion from the
+      2026-09-03 entry above — is untouched and stays open; this plan did
+      not touch it.
 - Architecture note (now implemented, not just planned): the outbox → Kafka
   fanout consumer + deliver worker is the "integration dispatcher"; each
   integration = registry entry (mapping + credential schema) + credential

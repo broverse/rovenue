@@ -25,9 +25,12 @@ describe("subscription status semantics", () => {
   // BILLING_ISSUE is live: a held or retrying subscription is still a
   // subscription the dashboard must count (and show as at-risk), not a
   // churned one. Only an actual lapse retires it.
+  //
+  // PAUSED is NOT live, corrected from a measurement of the sweeper — see
+  // the rationale on the PAUSED row of SUBSCRIPTION_STATUS_SEMANTICS.
   it("derives the live set", () => {
     expect([...LIVE_STATUSES].sort()).toEqual(
-      ["ACTIVE", "BILLING_ISSUE", "GRACE_PERIOD", "PAUSED", "TRIAL"],
+      ["ACTIVE", "BILLING_ISSUE", "GRACE_PERIOD", "TRIAL"],
     );
   });
 

@@ -3,8 +3,10 @@ import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { ERROR_CODE } from "@rovenue/shared";
+import { drizzle } from "@rovenue/db";
 import { env } from "./lib/env";
 import { fail } from "./lib/response";
+import { browserCors } from "./middleware/browser-cors";
 import { errorHandler } from "./middleware/error";
 import { globalIpRateLimit } from "./middleware/rate-limit";
 import { metricsMiddleware } from "./middleware/metrics";
@@ -115,6 +117,28 @@ const scopedGlobalBodyLimit: MiddlewareHandler = (c, next) =>
 // cutover converts them to the same chained form so request/response
 // inference extends past the top-level path prefix.
 
+// =============================================================
+// Browser-surface origin lookup
+// =============================================================
+//
+// Resolves the origins a public key permits, for the CORS preflight that
+// cannot authenticate. An unknown key yields an empty list, which refuses
+// every origin — the same outcome as a key that exists but was never enabled
+// for browser use, so a probe cannot distinguish the two.
+//
+// This is an unauthenticated read: a flood of preflights with random keys
+// reaches the database. The global IP rate limit sits in front of it, and the
+// query is a single row by unique index, but if that ever becomes a hot path
+// it wants the same caching the authenticated key lookup gets.
+async function lookupAllowedOrigins(publicKey: string): Promise<string[]> {
+  const record = await drizzle.apiKeyRepo.findApiKeyByPublic(
+    drizzle.db,
+    publicKey,
+  );
+  if (!record || record.revokedAt !== null) return [];
+  return record.allowedOrigins;
+}
+
 export function createApp() {
   // Allow the local Vite dev server only outside production so a
   // production deploy never echoes `Access-Control-Allow-Origin:
@@ -147,6 +171,12 @@ export function createApp() {
     .use("*", requestIdMiddleware)
     .use("*", requestLoggerMiddleware)
     .use("*", scopedGlobalBodyLimit)
+    // The browser surface's per-key CORS must be registered BEFORE the
+    // global cors() below. hono's cors terminates an OPTIONS request itself,
+    // so the global one — whose origin list is the dashboard, not a
+    // customer's app — would answer every preflight for /v1/web/* and this
+    // middleware would never run.
+    .use("/v1/web/:publicKey/*", browserCors(lookupAllowedOrigins))
     .use(
       "*",
       cors({
@@ -192,6 +222,17 @@ export function createApp() {
     // reached. This does not affect any other /v1/* path: only this
     // route's own exact path is registered ahead of the wildcard.
     .route("/", paywallPreviewRoute)
+    // The browser surface. Same v1 router, reached under a prefix that
+    // carries the public key, because a CORS preflight is an OPTIONS request
+    // with NO Authorization header — the project cannot be resolved from the
+    // Bearer key at the moment the origin must be decided.
+    //
+    // Registered BEFORE `/v1` for the same reason paywallPreviewRoute is:
+    // v1Route's `.use("*", apiKeyAuth("any"))` becomes a `/v1/*` wildcard in
+    // this parent router, and Hono composes by registration order rather
+    // than mount-path specificity. Registered after, that wildcard would run
+    // auth on `/v1/web/...` and 401 the preflight before CORS ever answered.
+    .route("/v1/web/:publicKey", v1Route)
     .route("/v1", v1Route)
     .route("/", configStreamRoute)
     .route("/invitations", publicInvitationsRoute)

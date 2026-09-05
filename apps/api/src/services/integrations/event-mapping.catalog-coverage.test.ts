@@ -116,6 +116,17 @@ describe("provider event-catalog coverage", () => {
     // licence nobody needs, and it would hide a future regression on that
     // exact pair.
     for (const o of DECLARED_OMISSIONS) {
+      // Task 9 (2026-09-04): an omission for a key the provider does not
+      // even ADVERTISE is a stale exemption too — the whole reason to
+      // declare one is that the provider claims the key in its
+      // eventCatalog and has no name for it. revenue.REACTIVATION is a
+      // declared omission for neither META_CAPI nor TIKTOK_EVENTS
+      // precisely because this check would fail it: both hand-pick a
+      // narrow eventCatalog that never claims that key.
+      expect(
+        PROVIDERS[o.provider].eventCatalog,
+        `${o.provider} does not advertise ${o.key} — remove the stale declared omission`,
+      ).toContain(o.key);
       expect(
         DEFAULT_EVENT_MAPPING[o.provider][o.key],
         `${o.provider}/${o.key} is now mapped — remove the declared omission`,

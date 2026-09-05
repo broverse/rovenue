@@ -3,6 +3,7 @@ import { drizzle, type PurchaseStatus } from "@rovenue/db";
 import {
   INVOLUNTARY_STATUSES,
   LIVE_STATUSES as SHARED_LIVE_STATUSES,
+  SUBSCRIPTION_STATUSES,
   SUBSCRIPTION_STATUS_SEMANTICS,
 } from "@rovenue/shared/subscription-status";
 import type {
@@ -79,17 +80,29 @@ const CHURNED_STATUSES: ReadonlyArray<"EXPIRED" | "REFUNDED" | "REVOKED"> = [
 ];
 
 /**
- * "At risk" = live, but either failing payment (involuntary — e.g. a
- * billing-retry grace period) or not currently granting access (e.g. a
- * voluntary pause). Derived from the shared semantics table rather than
- * listed by name so a future status matching this rule (e.g. a live,
- * involuntary, non-granting BILLING_ISSUE) joins the dashboard's at-risk
- * count automatically instead of being silently left out.
+ * "At risk" = a subscription the state machine has NOT yet retired, that
+ * is either failing payment (involuntary — e.g. a billing-retry grace
+ * period) or not currently granting access (e.g. a voluntary pause).
+ * Derived from the shared semantics table rather than listed by name so a
+ * future status matching this rule (e.g. a live, involuntary,
+ * non-granting BILLING_ISSUE) joins the dashboard's at-risk count
+ * automatically instead of being silently left out.
+ *
+ * "Not yet retired" is `isLive || sweepable`, not `isLive` alone. PAUSED
+ * is the reason: the expiry sweeper retires a lapsed pause within one
+ * five-minute run, so PAUSED is `isLive: false` (measured — see the
+ * rationale on its row in subscription-status.ts), but it is very much a
+ * subscription still in flight and belongs on the at-risk tab. Keying
+ * only on `isLive` would have dropped it from the "grace" SQL filter AND
+ * made `mapStatus` fall through to label it "active", which is worse than
+ * either. EXPIRED / REFUNDED / REVOKED are neither live nor sweepable and
+ * stay out.
  */
 const AT_RISK_STATUSES: ReadonlyArray<PurchaseStatus> =
-  SHARED_LIVE_STATUSES.filter((status) => {
+  SUBSCRIPTION_STATUSES.filter((status) => {
     const semantics = SUBSCRIPTION_STATUS_SEMANTICS[status];
-    return semantics.involuntary || !semantics.grantsAccess;
+    const notYetRetired = semantics.isLive || semantics.sweepable;
+    return notYetRetired && (semantics.involuntary || !semantics.grantsAccess);
   });
 
 function mapStatus(row: {

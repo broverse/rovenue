@@ -16,6 +16,7 @@ import {
   type ProjectSummary,
   type RotateWebhookSecretResponse,
   type WebhookEventCategory,
+  parseAllowedOrigins,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -96,6 +97,7 @@ type ApiKeyRow = {
   keyPublic: string;
   environment: "PRODUCTION" | "SANDBOX";
   createdAt: Date;
+  allowedOrigins: string[];
 };
 
 type ProjectDetailCounts = {
@@ -146,6 +148,7 @@ function toProjectDetail(
     publicKey: k.keyPublic,
     environment: k.environment,
     createdAt: k.createdAt.toISOString(),
+    allowedOrigins: k.allowedOrigins,
   }));
   return {
     id: project.id,
@@ -224,6 +227,13 @@ export const updateProjectBodySchema = z
   .refine((v) => Object.keys(v).length > 0, {
     message: "At least one field required",
   });
+
+// An explicit array, not a partial patch: replacing the whole list is what
+// the UI does, and a merge semantics here would make removing an origin
+// impossible to express.
+const updateAllowedOriginsBodySchema = z
+  .object({ allowedOrigins: z.array(z.string()).max(50) })
+  .strict();
 
 const createApiKeyBodySchema = z.object({
   label: z.string().trim().min(1).max(60),
@@ -511,11 +521,67 @@ export const projectsRoute = new Hono()
         publicKey: apiKey.keyPublic,
         environment: apiKey.environment,
         createdAt: apiKey.createdAt.toISOString(),
+        allowedOrigins: apiKey.allowedOrigins,
       },
       secretKey,
     };
     return c.json(ok(payload));
   })
+  // PATCH /:id/api-keys/:keyId/allowed-origins — ADMIN+. Replaces the
+  // browser origin allow-list for one key.
+  //
+  // Validated here with the SAME parser the dashboard form uses
+  // (parseAllowedOrigins, @rovenue/shared). A rule enforced only in the form
+  // is a suggestion — this endpoint is what a script calls. The stored value
+  // must already be in the shape a browser's Origin header arrives in,
+  // because the request-time check is an exact string match; an
+  // un-normalised entry looks saved and silently never matches.
+  .patch(
+    "/:id/api-keys/:keyId/allowed-origins",
+    validate("json", updateAllowedOriginsBodySchema),
+    async (c) => {
+      const id = c.req.param("id");
+      const keyId = c.req.param("keyId");
+      const user = c.get("user");
+      await assertProjectAccess(id, user.id, MemberRole.ADMIN);
+      const { allowedOrigins } = c.req.valid("json");
+
+      const parsed = parseAllowedOrigins(allowedOrigins);
+      if ("invalid" in parsed) {
+        throw new HTTPException(400, {
+          message: `Not a usable browser origin: ${parsed.invalid}. Use scheme, host and optional port only — no wildcards, no path.`,
+        });
+      }
+
+      await drizzle.db.transaction(async (tx) => {
+        const before = await drizzle.apiKeyRepo.findApiKeyById(tx, keyId);
+        const updated = await drizzle.apiKeyRepo.updateApiKeyAllowedOrigins(
+          tx,
+          id,
+          keyId,
+          parsed.origins,
+        );
+        if (!updated) {
+          throw new HTTPException(404, { message: "API key not found" });
+        }
+        await audit(
+          {
+            projectId: id,
+            userId: user.id,
+            action: "api_key.allowed_origins_updated",
+            resource: "api_key",
+            resourceId: keyId,
+            before: { allowedOrigins: before?.allowedOrigins ?? [] },
+            after: { allowedOrigins: parsed.origins },
+            ...extractRequestContext(c),
+          },
+          tx,
+        );
+      });
+
+      return c.json(ok({ allowedOrigins: parsed.origins }));
+    },
+  )
   // DELETE /:id/api-keys/:keyId — ADMIN+. Revokes a single key
   // (sets revokedAt). Scoped to the project in the repo so a foreign
   // key id 404s. 404 when nothing active matched.

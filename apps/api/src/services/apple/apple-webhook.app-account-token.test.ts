@@ -45,6 +45,10 @@ const { drizzleMock } = vi.hoisted(() => {
         async (): Promise<Record<string, unknown> | null> => null,
       ),
       findPurchaseByStoreTransaction: vi.fn(async () => null),
+      // No stale BILLING_ISSUE sibling on the chain — these tests exercise
+      // subscriber resolution, not billing-issue recovery (which has its
+      // own coverage in subscription-recovered.integration.test.ts).
+      findChainBillingIssuePurchases: vi.fn(async () => []),
     },
     offeringRepo: {
       findProductByStoreId: vi.fn(),

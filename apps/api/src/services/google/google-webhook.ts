@@ -40,6 +40,7 @@ import {
   pendingPlanChangeFields,
 } from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
+import { entitlementExpiry } from "../access-engine";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -458,7 +459,17 @@ async function processSubscriptionNotification(
       subscriberId: subscriber.id,
       purchaseId: persisted.id,
       accessIds: product.accessIds,
-      expiresDate,
+      // The entitlement date, not the raw expiryTime: a GRACE_PERIOD
+      // purchase's expiresDate is the PRE-grace date, which the read path
+      // (`findActiveAccess`, `expiresDate > now`) will not serve.
+      // syncAccess overwrites this row moments later with the same rule,
+      // but relying on that made the invariant hold by ordering -- a crash
+      // in between left a grant that served nothing.
+      expiresDate: entitlementExpiry({
+        status,
+        expiresDate,
+        gracePeriodExpires: persisted.gracePeriodExpires,
+      }),
     });
   } else {
     await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, persisted.id);

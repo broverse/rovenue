@@ -95,6 +95,11 @@ import type { RovenueEventKey } from "./integrations";
 //   misclassifies half its deliveries is worse than no row.
 export const STORE_EVENT_TO_PUBLIC_KEY: Record<string, RovenueEventKey> = {
   // Apple App Store Server Notifications v2 (notificationType)
+  // The no-grace-period case. Subtype GRACE_PERIOD means the subscriber
+  // KEEPS access during the retry and is split off in
+  // `resolveStorePublicKey` below — the same mechanism that splits
+  // DID_CHANGE_RENEWAL_STATUS by direction, since a flat
+  // `Record<string, RovenueEventKey>` has nowhere to hang the condition.
   DID_FAIL_TO_RENEW: "subscription.billing_issue",
   GRACE_PERIOD_EXPIRED: "subscription.billing_issue",
   DID_CHANGE_RENEWAL_PREF: "subscription.product_changed",
@@ -197,6 +202,8 @@ export const STORE_EVENT_TO_PUBLIC_KEY: Record<string, RovenueEventKey> = {
 // `STORE_EVENT_TO_PUBLIC_KEY[eventType]`, unchanged.
 
 const APPLE_RENEWAL_STATUS_CHANGED = "DID_CHANGE_RENEWAL_STATUS";
+const APPLE_FAILED_TO_RENEW = "DID_FAIL_TO_RENEW";
+const APPLE_RENEWAL_PREF_CHANGED = "DID_CHANGE_RENEWAL_PREF";
 
 /**
  * Optional disambiguating fact a caller can thread alongside a bare
@@ -213,6 +220,25 @@ export interface StoreEventContext {
    * auto-renew was turned back ON for this delivery.
    */
   autoRenewEnabled?: boolean;
+  /**
+   * Apple `DID_FAIL_TO_RENEW` only — whether this delivery carried subtype
+   * `GRACE_PERIOD`, read inside `apple-webhook.ts`'s `applyFailedRenewal`.
+   * `true` means the app has a billing grace period configured and the
+   * subscriber KEEPS access while the payment is retried, which is why the
+   * same handler writes `PurchaseStatus.GRACE_PERIOD` rather than
+   * `BILLING_ISSUE` for it.
+   */
+  appleGracePeriodSubtype?: boolean;
+  /**
+   * Apple `DID_CHANGE_RENEWAL_PREF` only — `true` when this delivery
+   * carried subtype `UPGRADE`, i.e. Apple has ALREADY charged the user and
+   * applied the new tier (`apple-webhook.ts`'s `applyRenewalPrefChange`).
+   * The announcement phase of `subscription.product_changed` means "the
+   * store says a change is COMING"; for an upgrade nothing is coming, so
+   * the announcement would be false and is suppressed. The
+   * `phase: "effective"` row that path emits is the true one.
+   */
+  applePrefChangeAlreadyApplied?: boolean;
 }
 
 /**
@@ -237,6 +263,40 @@ export function resolveStorePublicKey(
     return context?.autoRenewEnabled === true
       ? "subscription.uncancelled"
       : undefined;
+  }
+  if (eventType === APPLE_FAILED_TO_RENEW) {
+    // Second event type whose one string means two different real-world
+    // facts. Apple sends `DID_FAIL_TO_RENEW` for BOTH the retry that keeps
+    // access (subtype GRACE_PERIOD, only when the app has a billing grace
+    // period configured) and the retry that does not (every other
+    // subtype) — and `applyFailedRenewal` already splits them, writing
+    // GRACE_PERIOD for the first and BILLING_ISSUE for the second.
+    //
+    // Announcing both as `subscription.billing_issue` contradicted that:
+    // a subscriber who still HAS entitlement was reported to every
+    // integration as a billing failure, while the identical Google moment
+    // (SUBSCRIPTION_IN_GRACE_PERIOD, in the table above) was reported as
+    // `subscription.grace_period`. A dunning consumer suspends someone who
+    // has access; a cross-store funnel double-counts.
+    //
+    // Absent context keeps the table's answer, so a caller that cannot
+    // tell the subtypes apart is no worse off than before.
+    return context?.appleGracePeriodSubtype === true
+      ? "subscription.grace_period"
+      : STORE_EVENT_TO_PUBLIC_KEY[eventType];
+  }
+  if (eventType === APPLE_RENEWAL_PREF_CHANGED) {
+    // Third split of a one-string-two-facts event type. DOWNGRADE and the
+    // "reverted the pending change" case take effect at the NEXT renewal,
+    // so the announcement is exactly right for them. UPGRADE is not
+    // announced at all: Apple has already charged and applied it, and
+    // `applyRenewalPrefChange` emits the same key with
+    // `phase: "effective"` off the retired sibling row. Emitting both for
+    // one instant told consumers a change was coming that had in fact
+    // already happened.
+    return context?.applePrefChangeAlreadyApplied === true
+      ? undefined
+      : STORE_EVENT_TO_PUBLIC_KEY[eventType];
   }
   return STORE_EVENT_TO_PUBLIC_KEY[eventType];
 }

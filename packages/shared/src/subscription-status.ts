@@ -85,12 +85,33 @@ export const SUBSCRIPTION_STATUS_SEMANTICS: Record<
     reconcilable: true,
     involuntary: true,
   },
-  // Voluntary pause (Google's PAUSED, Stripe's paused). No access, but
-  // the subscription is expected back, so it stays live for rollups and
-  // sweepable so a lapsed pause still reaches EXPIRED.
+  // Voluntary pause (Google's PAUSED, Stripe's paused). No access.
+  //
+  // `isLive: false`, corrected 2026-09-05 from a MEASUREMENT, not from
+  // reasoning. The previous `isLive: true` was declared on the rationale
+  // that the subscription is expected back — but the expiry sweeper
+  // excludes PAUSED from grace promotion and falls it straight through to
+  // EXPIRED, so a pause that outlives its paid term is retired on the next
+  // five-minute run. Seeding a PAUSED purchase with a lapsed expiresDate
+  // and running the sweeper produced EXPIRED (see "PAUSED — what the
+  // sweeper actually does to a lapsed pause" in
+  // apps/api/src/workers/expiry-checker.integration.test.ts). A status
+  // that cannot be observed live for longer than one sweep is not a live
+  // status, and Google's pause routinely outlives the paid term it was
+  // taken in.
+  //
+  // FOLLOW-UP: making a pause GENUINELY live requires storing the store's
+  // auto-resume time (Google `autoResumeTimeMillis`, Stripe
+  // `pause_collection.resumes_at`) and teaching the sweeper to hold a
+  // PAUSED row until then, the way `gracePeriodExpires` holds a
+  // GRACE_PERIOD row. That is a schema change plus a sweeper rule, not a
+  // declaration edit, so it is not done here.
+  //
+  // Stays `sweepable: true`: retiring a lapsed pause is the behavior that
+  // was measured, and it is correct as long as no resume time is stored.
   PAUSED: {
     grantsAccess: false,
-    isLive: true,
+    isLive: false,
     isTerminal: false,
     sweepable: true,
     reconcilable: true,

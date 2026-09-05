@@ -388,7 +388,25 @@ vi.mock("@rovenue/db", () => ({
     REFUND: "REFUND",
     REACTIVATION: "REACTIVATION",
     CREDIT_PURCHASE: "CREDIT_PURCHASE",
+    NON_RENEWING_PURCHASE: "NON_RENEWING_PURCHASE",
   },
+  // `apple-webhook.ts` computes its first-charge dedupe kind at MODULE
+  // scope, so a missing export here is an import-time crash for every test
+  // in this file, not a failure in the one case that would have called it.
+  // The classes mirror `packages/db`'s DEDUPE_KIND, which is the source of
+  // truth: nothing in this file exercises deduping, but a stub that quietly
+  // disagreed with production would be worse than no stub at all.
+  revenueDedupeKind: (type: string) =>
+    ({
+      INITIAL: "purchase",
+      RENEWAL: "purchase",
+      TRIAL_CONVERSION: "purchase",
+      CREDIT_PURCHASE: "purchase",
+      NON_RENEWING_PURCHASE: "purchase",
+      REACTIVATION: "reactivation",
+      REFUND: "refund",
+      CANCELLATION: "cancel",
+    })[type],
   FeatureFlagType: {
     BOOLEAN: "BOOLEAN",
     STRING: "STRING",

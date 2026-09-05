@@ -40,6 +40,7 @@ export type AuditAction =
   // --- api key ---
   | "api_key.created"
   | "api_key.revoked"
+  | "api_key.allowed_origins_updated"
   // --- credentials ---
   | "credential.updated"
   | "credential.cleared"

@@ -44,6 +44,11 @@ describe("status list agreement", () => {
   // involuntary, non-granting) — which is the intended behaviour the
   // derivation was written for, and exactly what a by-name list would
   // have missed.
+  //
+  // The derivation's first conjunct is `isLive || sweepable`, widened
+  // 2026-09-05 when PAUSED was measured NOT to be live. Membership below
+  // is unchanged, which is the point of asserting it: a correction to one
+  // status's semantics must not silently move the dashboard's at-risk tab.
   it("the metrics module's at-risk derivation matches GRACE_PERIOD, PAUSED and BILLING_ISSUE", () => {
     expect([...__subscriptionsConstants.AT_RISK_STATUSES].sort()).toEqual(
       ["BILLING_ISSUE", "GRACE_PERIOD", "PAUSED"].sort(),

@@ -45,6 +45,10 @@ const { drizzleMock } = vi.hoisted(() => {
       // upgrade-supersession path (apple-supersede.ts) is covered by
       // its own integration test.
       findSupersedableApplePurchases: vi.fn(async () => []),
+      // Likewise no stale BILLING_ISSUE sibling to resolve — the
+      // recovery-across-a-chain path (apple-recovery.ts) has its own
+      // integration coverage in subscription-recovered.integration.test.ts.
+      findChainBillingIssuePurchases: vi.fn(async () => []),
     },
     purchaseRepo: {
       upsertPurchase: vi.fn(),
