@@ -3,19 +3,26 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { eq, and, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import type { CanonicalField } from "@rovenue/shared";
-import { drizzle } from "@rovenue/db";
-import { db } from "../../../../packages/db/src/drizzle/client";
 import {
+  drizzle,
+  db,
   access,
   auditLogs,
   products,
   projects,
   purchases,
-  revenueEventDedupe,
   revenueEvents,
   subscribers,
-} from "../../../../packages/db/src/drizzle/schema";
-import * as importJobRepo from "../../../../packages/db/src/drizzle/repositories/import-jobs";
+} from "@rovenue/db";
+
+// revenueEventDedupe and importJobRepo aren't re-exported at @rovenue/db's
+// top level (only individual schema tables and repos with their own
+// top-level convenience export are) — reach them off the `drizzle`
+// namespace instead of the relative path into packages/db/src this file
+// previously used, which pulled those files outside this package's
+// tsconfig rootDir under static typecheck (TS6059).
+const revenueEventDedupe = drizzle.revenueEventDedupe;
+const importJobRepo = drizzle.importJobRepo;
 
 // =============================================================
 // import-runner (Task 8) — worker, batching, checkpointed resume,

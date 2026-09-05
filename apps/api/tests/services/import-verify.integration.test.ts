@@ -3,18 +3,25 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { and, eq } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { parseCsvStream, type CanonicalField } from "@rovenue/shared";
-import { PurchaseStatus } from "@rovenue/db";
-import { db } from "../../../../packages/db/src/drizzle/client";
 import {
+  PurchaseStatus,
+  db,
+  drizzle,
   access,
   products,
   projects,
   purchases,
   subscriberAccess,
   subscribers,
-} from "../../../../packages/db/src/drizzle/schema";
-import * as importJobRepo from "../../../../packages/db/src/drizzle/repositories/import-jobs";
+} from "@rovenue/db";
 import { buildCanonicalRow } from "../../src/services/import/plan";
+
+// Reaching into packages/db/src by relative path (as this file previously
+// did) resolves fine at runtime via vitest, but pulls those files outside
+// this package's tsconfig rootDir under static typecheck (TS6059) — go
+// through the published @rovenue/db barrel instead, same as the rest of
+// this suite.
+const importJobRepo = drizzle.importJobRepo;
 import { writeImportBatch, type ImportWriteRow } from "../../src/services/import/write";
 
 // =============================================================
