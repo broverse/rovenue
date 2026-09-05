@@ -1006,6 +1006,10 @@ export const purchases = pgTable(
     }),
     ownershipType: text("ownershipType"),
     verifiedAt: timestamp("verifiedAt", { withTimezone: true }),
+    // Google Play's purchaseToken for this subscription chain. Null on
+    // Apple/Stripe rows and on Play rows imported before the enrichment
+    // pass ran. See migration 0125.
+    googlePurchaseToken: text("googlePurchaseToken"),
     // Store-side timestamp of the last event whose STATUS write applied to
     // this row (Stripe event.created, Apple signedDate, Google RTDN
     // eventTimeMillis; receipt fetches stamp fetch time). The transition
@@ -1116,6 +1120,13 @@ export const purchases = pgTable(
       .where(
         sql`${t.status} IN (${sql.raw(statusSqlList(BILLING_ISSUE_AGEING_STATUSES))}) AND ${t.billingIssueDetectedAt} IS NOT NULL`,
       ),
+    // Google purchase-token second pass (ROADMAP §11): candidate scan for
+    // the enrichment pass that back-fills `googlePurchaseToken` on
+    // history-only Play rows. Partial on PLAY_STORE rows still missing a
+    // token — a small and shrinking slice of the table. Migration 0125.
+    googleTokenEnrichmentIdx: index("purchases_google_token_enrichment_idx")
+      .on(t.subscriberId, t.productId)
+      .where(sql`${t.store} = 'PLAY_STORE' AND ${t.googlePurchaseToken} IS NULL`),
   }),
 );
 

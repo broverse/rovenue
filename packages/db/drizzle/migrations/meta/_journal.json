@@ -876,6 +876,13 @@
       "when": 1788907200000,
       "tag": "0124_purchases_billing_issue_ageing_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1788648257490,
+      "tag": "0125_purchases_google_purchase_token",
+      "breakpoints": true
     }
   ]
 }
