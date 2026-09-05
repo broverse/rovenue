@@ -66,6 +66,15 @@ export interface Rovenue {
   track(input: TrackInput): void;
   /** Attempts every queued event once. Called automatically on unload. */
   flushEvents(): Promise<void>;
+  /**
+   * Registers the unload listeners that flush queued events.
+   *
+   * Not called by configure(): configure() also runs during server
+   * rendering, where there is nothing to listen to. The React provider calls
+   * this in an effect; a non-React host calls it once after construction.
+   */
+  startEventQueue(): void;
+  stopEventQueue(): void;
   getOfferings(): Promise<unknown>;
   getPlacement(identifier: string): Promise<unknown>;
   /**
@@ -155,6 +164,8 @@ export function configure(options: RovenueOptions): Rovenue {
     },
     track: (input) => events.track(input),
     flushEvents: () => events.flush(),
+    startEventQueue: () => events.start(),
+    stopEventQueue: () => events.stop(),
     getCachedEntitlements: () => cache.read()?.entitlements ?? null,
     getCachedEntitlementsEntry: () => cache.read(),
     getOfferings: () => http.get("/offerings"),
