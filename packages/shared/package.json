@@ -14,6 +14,10 @@
       "types": "./src/crypto.ts",
       "default": "./src/crypto.ts"
     },
+    "./audit-chain": {
+      "types": "./src/audit-chain.ts",
+      "default": "./src/audit-chain.ts"
+    },
     "./subscription-status": {
       "types": "./src/subscription-status.ts",
       "default": "./src/subscription-status.ts"

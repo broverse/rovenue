@@ -1,7 +1,11 @@
-import { createHash } from "node:crypto";
 import type { Context } from "hono";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
+import {
+  canonicalJSON,
+  hashAuditRow,
+  type AuditChainPayload,
+} from "@rovenue/shared/audit-chain";
 import { logger } from "./logger";
 
 // =============================================================
@@ -257,48 +261,17 @@ export type AuditTx = {
 // Canonical JSON for the hash
 // =============================================================
 //
-// `JSON.stringify` does not guarantee key order across engines. A
-// compliance-grade chain must be byte-identical on re-hash, so we
-// emit keys in sorted order and recurse through arrays/objects
-// ourselves.
-
-function canonicalJSON(value: unknown): string {
-  if (value === null || value === undefined) return "null";
-  if (typeof value === "number" && !Number.isFinite(value)) return "null";
-  if (typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJSON).join(",")}]`;
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  return `{${keys
-    .map((k) => `${JSON.stringify(k)}:${canonicalJSON(obj[k])}`)
-    .join(",")}}`;
-}
-
-function hashRow(canonical: string): string {
-  return createHash("sha256").update(canonical).digest("hex");
-}
-
-interface CanonicalPayload {
-  projectId: string;
-  userId: string | null;
-  action: string;
-  resource: string;
-  resourceId: string;
-  before: Record<string, unknown> | null;
-  after: Record<string, unknown> | null;
-  ipAddress: string | null;
-  userAgent: string | null;
-  createdAt: string;
-  prevHash: string | null;
-}
+// The canonical encoder and the row hash function themselves live in
+// `@rovenue/shared/audit-chain` — moved there so an external verifier
+// can recompute a hash without importing anything from this server.
+// `buildCanonicalPayload` stays here: it's API-side glue mapping an
+// `AuditEntry` onto the shared `AuditChainPayload` shape.
 
 function buildCanonicalPayload(
   entry: AuditEntry,
   createdAt: Date,
   prevHash: string | null,
-): CanonicalPayload {
+): AuditChainPayload {
   return {
     projectId: entry.projectId,
     userId: entry.userId,
@@ -384,10 +357,9 @@ async function writeChained(
   const createdAt = new Date(
     tip ? Math.max(now, tip.createdAt.getTime() + 1) : now,
   );
-  const canonical = canonicalJSON(
+  const rowHash = hashAuditRow(
     buildCanonicalPayload(entry, createdAt, prevHash),
   );
-  const rowHash = hashRow(canonical);
 
   try {
     await tx.insert(auditLogs).values({
@@ -475,7 +447,7 @@ export async function verifyAuditChain(
     // with a rowHash, filtered above) is written by writeChained which
     // requires both to be non-null. Coerce here so the canonical type
     // stays narrow.
-    const canonical = canonicalJSON(
+    const recomputed = hashAuditRow(
       buildCanonicalPayload(
         {
           projectId: row.projectId ?? "",
@@ -492,7 +464,6 @@ export async function verifyAuditChain(
         row.prevHash,
       ),
     );
-    const recomputed = hashRow(canonical);
 
     if (recomputed !== row.rowHash) {
       errors.push({
@@ -546,6 +517,6 @@ export function redactCredentials(
 
 export const __testing = {
   canonicalJSON,
-  hashRow,
+  hashAuditRow,
   buildCanonicalPayload,
 };

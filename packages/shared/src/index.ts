@@ -186,6 +186,16 @@ export * from "./logger";
 // callers import it explicitly via `@rovenue/shared/crypto`.
 
 // =============================================================
+// Audit chain — canonical encoder (ROADMAP §9)
+// =============================================================
+//
+// `./audit-chain` is intentionally NOT re-exported here either, for the
+// same reason as `./crypto` immediately above: it imports `node:crypto`
+// (for the SHA-256 digest) and would crash the dashboard Vite bundle.
+// apps/api's audit writer and a future standalone verifier both import
+// it explicitly via `@rovenue/shared/audit-chain`.
+
+// =============================================================
 // Experiments — types (Flag / ProductGroup / Paywall / Element),
 // bucketing primitives, and audience targeting
 // =============================================================
