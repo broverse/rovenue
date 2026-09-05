@@ -237,6 +237,25 @@ export async function listSeasons(
     .orderBy(desc(leaderboardSeasons.seasonNumber));
 }
 
+/**
+ * Fetch a single season by its own id, independent of its leaderboard.
+ * Used by the dashboard's `/seasons/:seasonId/standings` route, which is
+ * keyed by season id: the caller resolves this row first, then the
+ * leaderboard it belongs to, so authorization runs against that
+ * leaderboard's own `projectId` rather than a caller-supplied one.
+ */
+export async function findSeasonById(
+  db: Db,
+  id: string,
+): Promise<LeaderboardSeason | null> {
+  const rows = await db
+    .select()
+    .from(leaderboardSeasons)
+    .where(eq(leaderboardSeasons.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function findActiveSeason(
   db: Db,
   leaderboardId: string,
