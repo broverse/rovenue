@@ -227,9 +227,13 @@ describe("mapStatus", () => {
 });
 
 describe("mapRevenueEventType", () => {
+  // mapRevenueEventType takes a GoogleSubscriptionNotificationType (the
+  // GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE literal-numeric union), not a
+  // bare `number` — widening it here just to build this table discarded
+  // the literal type before it reached the call below.
   const cases: ReadonlyArray<
     readonly [
-      type: number,
+      type: GoogleSubscriptionNotificationType,
       expected: string | null,
       label: string,
     ]
@@ -300,22 +304,20 @@ describe("mapRevenueEventType", () => {
 
 describe("isAccessGranting", () => {
   it("grants entitlement for ACTIVE / TRIAL / GRACE_PERIOD", () => {
-    // @ts-expect-error — testing runtime values that match the pgEnum
+    // These literals are valid PurchaseStatus (= SubscriptionStatus)
+    // members (packages/shared/src/subscription-status.ts) — the
+    // `@ts-expect-error` directives these lines used to need are stale
+    // and now flagged as unused (TS2578), not needed to make the calls
+    // compile.
     expect(isAccessGranting("ACTIVE")).toBe(true);
-    // @ts-expect-error
     expect(isAccessGranting("TRIAL")).toBe(true);
-    // @ts-expect-error
     expect(isAccessGranting("GRACE_PERIOD")).toBe(true);
   });
 
   it("denies entitlement for non-active statuses", () => {
-    // @ts-expect-error
     expect(isAccessGranting("EXPIRED")).toBe(false);
-    // @ts-expect-error
     expect(isAccessGranting("REFUNDED")).toBe(false);
-    // @ts-expect-error
     expect(isAccessGranting("REVOKED")).toBe(false);
-    // @ts-expect-error
     expect(isAccessGranting("PAUSED")).toBe(false);
   });
 });
