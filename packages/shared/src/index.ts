@@ -326,3 +326,14 @@ export * from "./import";
 // =============================================================
 
 export * from "./revenue-types";
+
+// =============================================================
+// Retention policy registry (ROADMAP §9.2)
+// =============================================================
+//
+// Pure data + one resolution function, no `node:crypto` and nothing
+// else that would break the dashboard's Vite bundle — matches the
+// re-exported shape of the other pure registries above (billing,
+// revenue-types, etc.) rather than the crypto-dependent exclusions.
+
+export * from "./retention/policies";

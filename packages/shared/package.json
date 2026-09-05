@@ -50,6 +50,10 @@
     "./import/keys": {
       "types": "./src/import/keys.ts",
       "default": "./src/import/keys.ts"
+    },
+    "./retention": {
+      "types": "./src/retention/policies.ts",
+      "default": "./src/retention/policies.ts"
     }
   },
   "scripts": {
