@@ -53,6 +53,11 @@ const { dbMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
           return Array.isArray(rows) ? rows : [];
         },
       ),
+      // The chain-supersede guard resolves this once per run. These unit
+      // tests seed single-row chains, so nothing is superseded; the
+      // chain behaviour itself is measured against real Postgres in
+      // src/workers/expiry-checker.integration.test.ts.
+      findSupersededPurchaseIds: vi.fn(async () => []),
     },
     purchaseRepo: {
       // updatePurchaseStatusIf is a compare-and-swap: updates the
@@ -267,6 +272,7 @@ describe("runExpiryCheck — query scope", () => {
     expect(result).toEqual({
       checked: 0,
       expired: 0,
+      retiredSuperseded: 0,
       movedToGracePeriod: 0,
       errors: 0,
     });

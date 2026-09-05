@@ -380,6 +380,64 @@ export async function findAgedBillingIssuePurchases(
 }
 
 /**
+ * Of the given purchase ids, the ones a LATER period in the same store
+ * chain already covers.
+ *
+ * A store chain is `(projectId, store, originalTransactionId)`. Apple
+ * mints a new `transactionId` for every renewal and `upsertPurchase`
+ * keys on it, so an Apple subscription holds one purchase row per
+ * billing period: the row for the period that just ended lapses while
+ * the row the renewal created is live. Such a lapse is bookkeeping, not
+ * churn — the subscriber renewed — and the expiry sweeper uses this to
+ * retire the old row without announcing an expiry or writing a
+ * cancellation revenue event for someone who is still subscribed.
+ *
+ * "Covers" is deliberately narrow: BOTH rows must carry an
+ * `expiresDate`, and the sibling's must be strictly greater. Strictly,
+ * so two rows sharing an expiry can never suppress each other and leave
+ * a real churn unannounced. Both non-NULL, because a NULL expiry means
+ * "does not expire", and a chain mixing a non-expiring row with a
+ * subscription period is a shape we cannot reason about — those rows
+ * keep announcing exactly as they do today rather than being silently
+ * retired on a guess.
+ *
+ * The sibling's STATUS is not considered, and should not be: if the
+ * chain has genuinely ended, the last period's own row is the one that
+ * lapses last and announces it. Exactly one announcement per chain
+ * either way.
+ *
+ * Served by purchases_originalTransactionId_idx.
+ */
+export async function findSupersededPurchaseIds(
+  db: Db,
+  ids: string[],
+): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const result = await db.execute(sql`
+    SELECT lapsed."id" AS "id"
+    FROM ${purchases} lapsed
+    WHERE lapsed."id" IN (${sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+      AND lapsed."expiresDate" IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM ${purchases} later
+        WHERE later."projectId" = lapsed."projectId"
+          AND later."store" = lapsed."store"
+          AND later."originalTransactionId" = lapsed."originalTransactionId"
+          AND later."id" <> lapsed."id"
+          AND later."expiresDate" IS NOT NULL
+          AND later."expiresDate" > lapsed."expiresDate"
+      )
+  `);
+  const rows =
+    (result as unknown as { rows: Array<{ id: string }> }).rows ?? [];
+  return rows.map((row) => row.id);
+}
+
+/**
  * Batch lookup by ids — used by the webhook processor after it
  * claims a batch from the queue and needs the full row.
  */
