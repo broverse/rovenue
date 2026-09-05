@@ -49,6 +49,7 @@ export const checkoutRoute = new Hono()
         db: drizzle.db,
         projectId: project.id,
         subscriberId: subscriber.id,
+        subscriberRovenueId: subscriber.rovenueId,
         offeringId,
         packageIdentifier,
         successUrl,

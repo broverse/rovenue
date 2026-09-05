@@ -4,6 +4,7 @@ import type { Db } from "@rovenue/db";
 import { requireConnectedStripe } from "../../lib/stripe-platform";
 import { packagesSchema, parseStoreIds } from "../../lib/offering-hydration";
 import { assertRedirectUrlAllowed } from "./verified-return-url";
+import { SUBSCRIBER_METADATA_KEY } from "./stripe-types";
 
 // =============================================================
 // SDK-facing Stripe Checkout Session
@@ -21,18 +22,24 @@ import { assertRedirectUrlAllowed } from "./verified-return-url";
 //   - the success and cancel URLs are checked against the project's verified
 //     domains before Stripe ever sees them.
 //
-// The metadata key below is what lets the existing subscription webhooks
-// resolve the resulting Stripe subscription back to this subscriber — the SDK
-// analogue of the funnel's own metadata binding. Without it a completed
-// checkout arrives as an event about a customer we cannot attribute.
-
-/** Metadata key carrying the Rovenue subscriber id into Stripe and back. */
-export const ROVENUE_SUBSCRIBER_METADATA_KEY = "rovenue_subscriber_id";
+// The subscription metadata below is what lets the EXISTING webhook resolve
+// the resulting Stripe subscription back to this buyer. `resolveSubscriber`
+// in ./stripe-webhook already reads `app_user_id` and then walks the merge
+// chain, so the value is the subscriber's rovenueId — its database id would
+// skip that walk. Stamped with a shared constant rather than a literal
+// because the writer and the reader are different files.
+//
+// Without a match the subscription falls back to the `stripe:<customerId>`
+// anchor, which creates a SYNTHETIC subscriber and grants the entitlement
+// there — the buyer's real subscriber never receives it, and nothing fails
+// loudly.
 
 export interface CreateCheckoutSessionInput {
   db: Db;
   projectId: string;
   subscriberId: string;
+  /** The buyer's rovenueId, stamped into Stripe metadata for the webhook. */
+  subscriberRovenueId: string;
   /** Offering the package must belong to. Scoped to the project on read. */
   offeringId: string;
   packageIdentifier: string;
@@ -118,6 +125,7 @@ export async function createCheckoutSession(
     db,
     projectId,
     subscriberId,
+    subscriberRovenueId,
     offeringId,
     packageIdentifier,
     successUrl,
@@ -167,14 +175,14 @@ export async function createCheckoutSession(
       cancel_url: safeCancelUrl,
       ...(existingCustomerId ? { customer: existingCustomerId } : {}),
       metadata: {
-        [ROVENUE_SUBSCRIBER_METADATA_KEY]: subscriberId,
+        [SUBSCRIBER_METADATA_KEY]: subscriberRovenueId,
         package_identifier: packageIdentifier,
       },
       // Carried onto the subscription as well as the session: the webhooks
       // that matter (customer.subscription.*) see the subscription's
       // metadata, not the session's.
       subscription_data: {
-        metadata: { [ROVENUE_SUBSCRIBER_METADATA_KEY]: subscriberId },
+        metadata: { [SUBSCRIBER_METADATA_KEY]: subscriberRovenueId },
       },
     },
     idempotencyKey ? { idempotencyKey } : undefined,

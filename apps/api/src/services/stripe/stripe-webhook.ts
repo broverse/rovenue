@@ -21,6 +21,7 @@ import { completeFunnelPurchase } from "../funnel/complete-purchase";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
   FUNNEL_METADATA_KEY,
+  SUBSCRIBER_METADATA_KEY,
   STRIPE_EVENT_TYPE,
   STRIPE_INVOICE_BILLING_REASON,
   STRIPE_SUBSCRIPTION_STATUS,
@@ -1257,8 +1258,14 @@ async function resolveSubscriber(
       ? subscription.customer
       : subscription.customer.id;
 
+  // SUBSCRIBER_METADATA_KEY is `app_user_id`, the key /v1/checkout stamps
+  // onto the subscriptions it creates. Read through the shared constant
+  // rather than a literal so a rename cannot leave the writer and the reader
+  // disagreeing silently — the failure mode is not an error but a fallback to
+  // the `stripe:<customer>` anchor, which grants access to a synthetic
+  // subscriber while the buyer's real one never receives it.
   const appUserId =
-    subscription.metadata?.app_user_id ??
+    subscription.metadata?.[SUBSCRIBER_METADATA_KEY] ??
     subscription.metadata?.appUserId ??
     `stripe:${customerId}`;
 

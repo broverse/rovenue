@@ -79,8 +79,8 @@ vi.mock("../../lib/stripe-platform", async (importOriginal) => ({
 }));
 
 const { checkoutRoute } = await import("./checkout");
-const { ROVENUE_SUBSCRIBER_METADATA_KEY } = await import(
-  "../../services/stripe/checkout-session"
+const { SUBSCRIBER_METADATA_KEY } = await import(
+  "../../services/stripe/stripe-types"
 );
 const { apiKeyAuth } = await import("../../middleware/api-key-auth");
 
@@ -197,14 +197,15 @@ describe("POST /v1/checkout", () => {
       metadata: Record<string, string>;
       subscription_data: { metadata: Record<string, string> };
     };
-    expect(session.metadata[ROVENUE_SUBSCRIBER_METADATA_KEY]).toBe(
-      SUBSCRIBER_ID,
-    );
+    // The rovenueId, not the database id: the webhook's resolveSubscriber
+    // walks the merge chain by rovenueId, and a database id would skip that
+    // walk and land access on a retired row.
+    expect(session.metadata[SUBSCRIBER_METADATA_KEY]).toBe(APP_USER_ID);
     // On the subscription too: customer.subscription.* webhooks see the
     // subscription's metadata, not the session's.
     expect(
-      session.subscription_data.metadata[ROVENUE_SUBSCRIBER_METADATA_KEY],
-    ).toBe(SUBSCRIBER_ID);
+      session.subscription_data.metadata[SUBSCRIBER_METADATA_KEY],
+    ).toBe(APP_USER_ID);
   });
 
   it.each([

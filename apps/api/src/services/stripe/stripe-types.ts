@@ -89,6 +89,24 @@ export const FUNNEL_METADATA_KEY = {
   SUBSCRIPTION_ID: "rovenue_funnel_subscription_id",
 } as const;
 
+/**
+ * Metadata key naming the Rovenue subscriber a Stripe subscription belongs
+ * to, carrying the subscriber's **rovenueId** — not its database id.
+ *
+ * `resolveSubscriber` in ./stripe-webhook already reads this key and then
+ * walks the merge chain with `resolveSubscriberByRovenueId`, which is what
+ * makes a merged or GDPR-erased subscriber resolve correctly. A database id
+ * would skip that walk and land access on a retired row.
+ *
+ * It lives here, beside FUNNEL_METADATA_KEY, for the same reason that one
+ * does: the SDK checkout endpoint writes it and the webhook reads it, and a
+ * literal at each end is one rename away from a webhook that silently stops
+ * recognising its own objects. Without a match, a checkout-created
+ * subscription falls back to the `stripe:<customerId>` anchor and grants
+ * access to a synthetic subscriber instead of the buyer's real one.
+ */
+export const SUBSCRIBER_METADATA_KEY = "app_user_id";
+
 // =============================================================
 // Subscription statuses (mirror of Stripe.Subscription.Status)
 // =============================================================
