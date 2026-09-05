@@ -25,6 +25,7 @@ import {
 import { syncAccess } from "../services/access-engine";
 import {
   BILLING_ISSUE_MAX_AGE_DAYS,
+  MAX_CANDIDATES_PER_RUN,
   runBillingIssueAgeing,
   runExpiryCheck,
 } from "./expiry-checker";
@@ -232,9 +233,79 @@ async function statusOf(id: string): Promise<string | undefined> {
   return row?.status;
 }
 
+// Livelock seeder (Task 12c follow-up). Seeds ONE project/subscriber/
+// product and `count` GRACE_PERIOD purchases beneath it in a single
+// insert, plus one lapsed ACTIVE purchase. Every grace row gets an
+// expiresDate far older than the ACTIVE row's, which is exactly the real
+// shape — a grace row's expiresDate is the renewal date it already
+// missed — and which puts all of them ahead of the ACTIVE row under the
+// sweep's `ORDER BY expiresDate ASC`.
+const LIVELOCK_GRACE_EXPIRES_AGO_MS = 365 * 24 * 60 * 60 * 1000;
+const LIVELOCK_ACTIVE_EXPIRES_AGO_MS = 10 * 60 * 1000;
+const LIVELOCK_GRACE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function seedLivelockFixture({
+  suffix,
+  graceRowCount,
+  now,
+}: {
+  suffix: string;
+  graceRowCount: number;
+  now: Date;
+}): Promise<{ activePurchaseId: string; graceProjectId: string }> {
+  const db = getDb();
+  const project = await seedProject(suffix);
+  const subscriber = await seedSubscriber(project.id, suffix);
+  const product = await seedProduct(project.id, suffix);
+
+  const common = {
+    projectId: project.id,
+    subscriberId: subscriber.id,
+    productId: product.id,
+    store: "APP_STORE" as const,
+    isTrial: false,
+    isIntroOffer: false,
+    isSandbox: false,
+    environment: "PRODUCTION" as const,
+    purchaseDate: now,
+    originalPurchaseDate: now,
+    priceAmount: "9.99",
+    priceCurrency: "USD",
+    autoRenewStatus: false,
+  };
+
+  const graceRows = Array.from({ length: graceRowCount }, (_unused, index) => {
+    const synth = `comp_exp_${RUN_ID}_${suffix}_g${index}`;
+    return {
+      ...common,
+      storeTransactionId: synth,
+      originalTransactionId: synth,
+      status: "GRACE_PERIOD" as const,
+      expiresDate: new Date(now.getTime() - LIVELOCK_GRACE_EXPIRES_AGO_MS),
+      gracePeriodExpires: new Date(now.getTime() + LIVELOCK_GRACE_WINDOW_MS),
+    };
+  });
+  await db.insert(purchases).values(graceRows);
+
+  const activeSynth = `comp_exp_${RUN_ID}_${suffix}_active`;
+  const [activePurchase] = await db
+    .insert(purchases)
+    .values({
+      ...common,
+      storeTransactionId: activeSynth,
+      originalTransactionId: activeSynth,
+      status: "ACTIVE" as const,
+      expiresDate: new Date(now.getTime() - LIVELOCK_ACTIVE_EXPIRES_AGO_MS),
+    })
+    .returning();
+  if (!activePurchase) throw new Error("seedLivelockFixture: no row returned");
+
+  return { activePurchaseId: activePurchase.id, graceProjectId: project.id };
+}
+
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["E1", "E2", "AF", "AS", "AN", "GO", "GC", "GN"]) {
+  for (const suffix of ["E1", "E2", "AF", "AS", "AN", "GO", "GC", "GN", "LL"]) {
     const projectId = `prj_exp_${RUN_ID}${suffix}`;
     await db.delete(outboxEvents).where(
       inArray(
@@ -420,5 +491,41 @@ describe("runExpiryCheck — Task 12c: an open GRACE_PERIOD window survives the 
     await runExpiryCheck(now);
 
     await expect(statusOf(purchase.id)).resolves.toBe("EXPIRED");
+  });
+
+  it("more open grace windows than the per-run batch cap does NOT starve the sweep: a lapsed ACTIVE purchase still expires in the same run", async () => {
+    // The livelock this pins: a grace row is skipped, not transitioned,
+    // so it stays a candidate for its whole window (up to 30 days) — and
+    // its past expiresDate sorts it first. With the skip implemented only
+    // in the worker, `MAX_CANDIDATES_PER_RUN + 1` open grace rows fill
+    // every batch with rows the sweep will skip, and nothing else is ever
+    // expired: lapsed subscribers keep entitlement indefinitely and
+    // `subscription.expired` stops firing system-wide. Excluding an open
+    // window in the query is what keeps the batch actionable.
+    const now = new Date();
+    const { activePurchaseId, graceProjectId } = await seedLivelockFixture({
+      suffix: "LL",
+      graceRowCount: MAX_CANDIDATES_PER_RUN + 1,
+      now,
+    });
+
+    const result = await runExpiryCheck(now);
+
+    await expect(statusOf(activePurchaseId)).resolves.toBe("EXPIRED");
+    expect(result.expired).toBeGreaterThanOrEqual(1);
+
+    // ...and the fix did not get there by wrongly retiring the grace
+    // population instead: every open window is still open.
+    const db = getDb();
+    const stillInGrace = await db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.projectId, graceProjectId),
+          eq(purchases.status, "GRACE_PERIOD"),
+        ),
+      );
+    expect(stillInGrace.length).toBe(MAX_CANDIDATES_PER_RUN + 1);
   });
 });

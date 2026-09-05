@@ -40,7 +40,15 @@ const REPEAT_EVERY_MS = 5 * 60 * 1000;
 // Per-run batch cap: keeps one 5-minute run from grabbing an unbounded
 // backlog. Processed rows leave the sweepable statuses, so successive
 // runs naturally drain whatever remains, oldest expiries first.
-const MAX_CANDIDATES_PER_RUN = 500;
+//
+// That drain argument only holds because `findOverduePurchases` excludes
+// an open GRACE_PERIOD window at the QUERY level: a grace row does NOT
+// leave its status when swept (the skip below leaves it in place), and
+// its expiresDate is in the past by definition, so it sorts first and
+// would otherwise hold a slot in every batch for the whole grace window.
+// Exported so the integration test can seed past the cap and prove the
+// batch is not filled with rows the sweep cannot act on.
+export const MAX_CANDIDATES_PER_RUN = 500;
 // Every non-terminal status that can lapse, derived from the shared
 // semantics table. Kept in sync with the partial index
 // purchases_status_expiresDate_idx by the pg_indexes contract test in
@@ -168,6 +176,12 @@ async function processCandidate(
   // not retiring one already there. A NULL gracePeriodExpires means no
   // known window, so it must NOT be treated as open-ended — such a row
   // falls through to EXPIRED below, same as today.
+  //
+  // `findOverduePurchases` now excludes these rows from the candidate set
+  // outright, so in normal operation this branch is unreachable. It is
+  // kept as defence in depth: a caller that builds its own candidate list,
+  // or a row whose grace window closes between the query and this check,
+  // must still be handled correctly here rather than silently retired.
   const graceWindowStillOpen =
     candidate.status === PurchaseStatus.GRACE_PERIOD &&
     candidate.gracePeriodExpires !== null &&

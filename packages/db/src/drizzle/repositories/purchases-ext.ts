@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
   RECONCILABLE_STATUSES,
   TERMINAL_STATUSES,
@@ -244,6 +244,19 @@ export async function findPurchasesForSubscriberWithAccess(
  * `limit` — processed rows leave the sweepable statuses, so each run
  * naturally consumes the next slice.
  * Served by the partial index purchases_status_expiresDate_idx.
+ *
+ * One status does NOT drain that way, and so is excluded here rather
+ * than in the caller: a GRACE_PERIOD row's `expiresDate` is in the past
+ * by definition (grace begins when the paid term lapses), so it sorts
+ * FIRST under `ORDER BY expiresDate ASC` and stays a candidate for the
+ * entire grace window — up to 30 days. The worker skips such a row, but
+ * a skip still consumes a slot in the `limit` batch: once the
+ * concurrently-open grace population exceeds the cap, every run fills
+ * its batch with rows it will skip and nothing else is ever expired.
+ * Excluding an open grace window in the QUERY keeps the batch full of
+ * rows the sweeper can actually act on. A NULL `gracePeriodExpires` is
+ * NOT an open window — it means no known window — so those rows are
+ * still selected and still swept, exactly as before.
  */
 export interface ExpiryCandidate {
   id: string;
@@ -257,6 +270,14 @@ export interface ExpiryCandidate {
   priceAmount: string | null;
   priceCurrency: string | null;
 }
+
+/**
+ * The one sweepable status whose `expiresDate` is not the date that
+ * governs its retirement — see the exclusion in `findOverduePurchases`.
+ * Typed against the column so a rename of the enum label fails to
+ * compile here rather than silently matching nothing at runtime.
+ */
+const GRACE_PERIOD_STATUS: Purchase["status"] = "GRACE_PERIOD";
 
 export async function findOverduePurchases(
   db: Db,
@@ -286,6 +307,15 @@ export async function findOverduePurchases(
         // NULL expiresDate (lifetime) never satisfies <=, so those rows
         // are excluded without an explicit IS NOT NULL.
         lte(purchases.expiresDate, args.now),
+        // NOT (status = GRACE_PERIOD AND gracePeriodExpires > now),
+        // written as the equivalent OR so NULL never swallows the row:
+        // a NULL gracePeriodExpires fails `lte` in three-valued logic,
+        // hence the explicit IS NULL arm that keeps it sweepable.
+        or(
+          ne(purchases.status, GRACE_PERIOD_STATUS),
+          isNull(purchases.gracePeriodExpires),
+          lte(purchases.gracePeriodExpires, args.now),
+        ),
       ),
     )
     .orderBy(asc(purchases.expiresDate))
