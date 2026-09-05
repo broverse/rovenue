@@ -65,7 +65,20 @@ vi.mock("../src/services/stripe/price-resolver", () => ({
 const chargesEnabled = vi.hoisted(() => vi.fn());
 const customersCreate = vi.hoisted(() => vi.fn());
 const subscriptionsCreate = vi.hoisted(() =>
-  vi.fn(async (params: { trial_period_days?: number }) => {
+  // The real call (routes/public/funnel-payment.ts) passes Stripe's full
+  // SubscriptionCreateParams — customer, items, payment_behavior,
+  // payment_settings, metadata, etc. This mock only needs to type what
+  // tests below actually read off the call args: trial_period_days (the
+  // trial-vs-no-trial branch here) and metadata (the funnel session
+  // stamp assertions).
+  vi.fn(async (params: {
+    trial_period_days?: number;
+    metadata: Record<string, string>;
+  }): Promise<{
+    id: string;
+    pending_setup_intent: { id: string; client_secret: string | null } | null;
+    latest_invoice: { payment_intent: { id: string; client_secret: string | null } } | null;
+  }> => {
     if (params.trial_period_days) {
       return {
         id: "sub_trial_1",
@@ -89,8 +102,14 @@ const subscriptionsCreate = vi.hoisted(() =>
     };
   }),
 );
+// Same reasoning as subscriptionsCreate above: the real call
+// (routes/public/funnel-payment.ts) always passes `metadata`, and a test
+// below reads `.mock.calls[0][0].metadata`.
 const paymentIntentsCreate = vi.hoisted(() =>
-  vi.fn(async () => ({ id: "pi_2", client_secret: "pi_secret_2" })),
+  vi.fn(async (_params: { metadata: Record<string, string> }) => ({
+    id: "pi_2",
+    client_secret: "pi_secret_2",
+  })),
 );
 const customersUpdate = vi.hoisted(() => vi.fn(async () => ({ id: "cus_existing" })));
 const setupIntentsUpdate = vi.hoisted(() =>
@@ -101,8 +120,16 @@ const paymentIntentsCancel = vi.hoisted(() => vi.fn(async () => ({ id: "pi_old" 
 // Nothing is cancelled unmeasured any more: the route retrieves first and
 // cancels only what is still unpaid. Default both to the status a
 // never-confirmed object has, so the existing cleanup cases still cancel.
+// `latest_invoice` is typed as a union up front — tests below reassign
+// this via .mockResolvedValue with every shape Stripe can hand back for
+// an `expand: ["latest_invoice"]` retrieve: absent (the default here),
+// null, an unexpanded id string, or the expanded invoice object.
 const subscriptionsRetrieve = vi.hoisted(() =>
-  vi.fn(async () => ({ id: "sub_old", status: "incomplete" })),
+  vi.fn(async (): Promise<{
+    id: string;
+    status: string;
+    latest_invoice?: string | { id: string; amount_paid: number } | null;
+  }> => ({ id: "sub_old", status: "incomplete" })),
 );
 const paymentIntentsRetrieve = vi.hoisted(() =>
   vi.fn(async () => ({ id: "pi_old", status: "requires_payment_method" })),
@@ -1623,7 +1650,12 @@ describe("POST payment-intent — the per-session lock", () => {
       lockStore.set("funnel:payment:sess_1", "a-later-holders-token");
       return {
         id: "sub_trial_1",
-        pending_setup_intent: { client_secret: "seti_secret" },
+        // `pending_setup_intent.id` completes the same trial shape the
+        // default implementation above returns (line ~74) — this test
+        // doesn't assert on it, but the mock's inferred return type is a
+        // union across every implementation, and this object was missing
+        // the field the trial branch of that union declares.
+        pending_setup_intent: { id: "seti_trial_1", client_secret: "seti_secret" },
         latest_invoice: null,
       };
     });
