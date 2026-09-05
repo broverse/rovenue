@@ -9,24 +9,83 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    services:
+      # apps/api/tests/setup.ts defaults REDIS_URL to this port. Several
+      # BullMQ suites talk to a real Redis; none of them start their own.
+      redis:
+        image: redis:7-alpine
+        ports: ["6380:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
-        with:
-          version: 9
+        # No `version:` input on purpose. It used to say `9` while
+        # package.json said `pnpm@9.15.9`, which is two places to change and
+        # one to forget. With the input omitted the action reads
+        # `packageManager` from package.json, so the pin has one home.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Must satisfy the root package.json `engines.node` (>=22.7).
+          # This said 20, so `pnpm install` refused on every run — CI had been
+          # failing in under 20 seconds, before a single test executed.
+          node-version: 24
           cache: pnpm
+
+      # The integration suites need a Postgres with pg_partman, which no
+      # stock image has — `services:` can only pull images, so the repo's own
+      # image is built here and run by hand. tests/global-setup.ts builds its
+      # template database from migrations alone, so an empty server is all
+      # this has to be.
+      - name: Start Postgres (repo image, pg_partman)
+        run: |
+          docker build -t rovenue-postgres:ci deploy/postgres
+          docker run -d --name rovenue-pg -p 5433:5432 \
+            -e POSTGRES_USER=rovenue \
+            -e POSTGRES_PASSWORD=rovenue \
+            -e POSTGRES_DB=rovenue \
+            --health-cmd "pg_isready -U rovenue" \
+            --health-interval 5s --health-timeout 5s --health-retries 20 \
+            rovenue-postgres:ci
+          for i in $(seq 1 40); do
+            if docker exec rovenue-pg pg_isready -U rovenue >/dev/null 2>&1; then
+              echo "postgres ready after ${i} attempts"; exit 0
+            fi
+            sleep 3
+          done
+          echo "postgres never became ready"; docker logs rovenue-pg; exit 1
+
       - run: pnpm install --frozen-lockfile
+
+      # Suppressions and the reason each one exists are documented in
+      # docs/security/dependency-audit-suppressions.md. An advisory that
+      # reaches a shipped image is fixed, never suppressed.
       - name: Dependency audit
         run: pnpm audit --prod --audit-level=high
+
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - run: pnpm build
-      - run: pnpm test
+
+      # apps/api's `test` script is two passes: `vitest run` excludes the
+      # testcontainer suites, then `VITEST_CONTAINER_PASS=1 vitest run` runs
+      # them. The second pass starts its own Redpanda and ClickHouse; what it
+      # cannot start is the Postgres above, which it clones a template
+      # database from, one per vitest worker.
+      - name: Test
+        run: pnpm test
+        env:
+          DATABASE_URL: postgresql://rovenue:rovenue@localhost:5433/rovenue
+          REDIS_URL: redis://localhost:6380
+
       # Enforces only the VITE_* no-restricted-syntax rule from
       # eslint.config.mjs (spec §10's mechanism for keeping deployment-config
       # reads inside lib/runtime-config.ts). Deliberately narrow: the full
