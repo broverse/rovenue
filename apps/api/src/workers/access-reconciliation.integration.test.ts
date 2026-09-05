@@ -337,13 +337,12 @@ describe("runAccessReconciliationSweep", () => {
     expect(after.source).toBe("access:reconciliation-sweep");
     expect(after.backfill).toBe(false);
 
-    // The row must also VERIFY. `writeChained` hashes `entry.userId` as
-    // given while `verifyAuditChain` re-hashes it as `row.userId ?? ""`,
-    // so a `userId: null` here would write "userId":null and verify as
-    // "userId":"" — every row this worker produces would report
-    // `bad_hash`, the chain's tamper signal, in a DB-enforced
-    // append-only table that can never be repaired. Asserting the row
-    // EXISTS does not catch that; only re-verifying the chain does.
+    // The row must also VERIFY. Asserting it EXISTS would not catch a
+    // writer and a checker that disagree about how a field is encoded —
+    // only re-verifying the chain does. `audit_logs` is DB-enforced
+    // append-only, so a row that hashes one way and verifies another can
+    // never be repaired, which is why this assertion is here and not a
+    // cheaper existence check.
     const chain = await verifyAuditChain(projectId);
     expect(chain.errors).toEqual([]);
     expect(chain.rowCount).toBe(1);
