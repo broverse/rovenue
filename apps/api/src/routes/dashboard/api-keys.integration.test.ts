@@ -187,3 +187,120 @@ describe.sequential("dashboard api-keys — revoke", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// =============================================================
+// PATCH /:id/api-keys/:keyId/allowed-origins
+// =============================================================
+//
+// The allow-list decides whose JavaScript may use a public key inside a
+// visitor's browser, so the API validates it with the same parser the form
+// uses. A rule enforced only in the form is a suggestion: these tests call
+// the API directly, which is what a script would do.
+
+describe.sequential("dashboard api-keys — allowed origins", () => {
+  async function setup(suffix: string) {
+    const { userId, cookie } = await createUserAndSession(suffix);
+    const projectId = await seedProject(suffix);
+    await addMember(projectId, userId, "ADMIN");
+    const app = buildApp();
+    const created = await app.request(`/projects/${projectId}/api-keys`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ label: "web" }),
+    });
+    const { data } = (await created.json()) as {
+      data: { apiKey: { id: string } };
+    };
+    return { app, cookie, projectId, keyId: data.apiKey.id };
+  }
+
+  function patch(
+    app: Hono,
+    projectId: string,
+    keyId: string,
+    cookie: string,
+    allowedOrigins: string[],
+  ) {
+    return app.request(
+      `/projects/${projectId}/api-keys/${keyId}/allowed-origins`,
+      {
+        method: "PATCH",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ allowedOrigins }),
+      },
+    );
+  }
+
+  it("stores a normalised list", async () => {
+    const { app, cookie, projectId, keyId } = await setup("origins_ok");
+    const res = await patch(app, projectId, keyId, cookie, [
+      "https://app.example.com/",
+      "http://localhost:3000",
+    ]);
+    expect(res.status).toBe(200);
+
+    const rows = await db
+      .select({ origins: schema.apiKeys.allowedOrigins })
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, keyId));
+    // The trailing slash is gone: the stored value must be in the shape a
+    // browser's Origin header arrives in, or the exact match never fires.
+    expect(rows[0]?.origins).toEqual([
+      "https://app.example.com",
+      "http://localhost:3000",
+    ]);
+  });
+
+  it.each([
+    ["https://*.example.com", "wildcard"],
+    ["https://app.example.com/admin", "path"],
+    ["app.example.com", "no scheme"],
+    ["javascript:alert(1)", "javascript scheme"],
+  ])("rejects %s (%s) at the API, not just in the form", async (origin) => {
+    const { app, cookie, projectId, keyId } = await setup(
+      `origins_bad_${origin.replace(/\W/g, "")}`.slice(0, 40),
+    );
+    const res = await patch(app, projectId, keyId, cookie, [origin]);
+    expect(res.status).toBe(400);
+
+    const rows = await db
+      .select({ origins: schema.apiKeys.allowedOrigins })
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, keyId));
+    expect(rows[0]?.origins).toEqual([]);
+  });
+
+  it("clears the list, which disables browser use", async () => {
+    const { app, cookie, projectId, keyId } = await setup("origins_clear");
+    await patch(app, projectId, keyId, cookie, ["https://app.example.com"]);
+    const res = await patch(app, projectId, keyId, cookie, []);
+    expect(res.status).toBe(200);
+
+    const rows = await db
+      .select({ origins: schema.apiKeys.allowedOrigins })
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, keyId));
+    expect(rows[0]?.origins).toEqual([]);
+  });
+
+  it("404s for a key belonging to another project", async () => {
+    const { app, cookie, projectId } = await setup("origins_foreign");
+    const other = await setup("origins_foreign_other");
+    const res = await patch(app, projectId, other.keyId, cookie, [
+      "https://app.example.com",
+    ]);
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses a member below ADMIN", async () => {
+    const { cookie: adminCookie, projectId, keyId } = await setup("origins_role");
+    const viewer = await createUserAndSession("origins_role_viewer");
+    await addMember(projectId, viewer.userId, "DEVELOPER");
+    const app = buildApp();
+    const res = await patch(app, projectId, keyId, viewer.cookie, [
+      "https://app.example.com",
+    ]);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(adminCookie).toBeTruthy();
+  });
+});

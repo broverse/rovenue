@@ -217,3 +217,41 @@ export async function revokeApiKey(
     });
   return rows[0] ?? null;
 }
+
+/**
+ * Replace a key's browser origin allow-list. Scoped to BOTH the key id and
+ * its owning project so a guessed id from another project cannot be
+ * repointed, and only affects keys that are still active. Returns the
+ * updated row, or null when nothing matched (revoked, or wrong project) —
+ * callers map null to 404.
+ *
+ * Callers pass values already normalised by `parseAllowedOrigins` from
+ * @rovenue/shared: the request-time comparison is an exact string match
+ * against the browser's Origin header, so an un-normalised entry is stored
+ * looking correct and silently never matches.
+ */
+export async function updateApiKeyAllowedOrigins(
+  db: Db,
+  projectId: string,
+  keyId: string,
+  allowedOrigins: string[],
+): Promise<ActiveApiKeyRow | null> {
+  const rows = await db
+    .update(apiKeys)
+    .set({ allowedOrigins, updatedAt: new Date() })
+    .where(
+      and(
+        eq(apiKeys.id, keyId),
+        eq(apiKeys.projectId, projectId),
+        isNull(apiKeys.revokedAt),
+      ),
+    )
+    .returning({
+      id: apiKeys.id,
+      label: apiKeys.label,
+      keyPublic: apiKeys.keyPublic,
+      environment: apiKeys.environment,
+      createdAt: apiKeys.createdAt,
+    });
+  return rows[0] ?? null;
+}

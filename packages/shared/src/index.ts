@@ -207,6 +207,10 @@ export * from "./placements";
 // Dashboard API request/response types
 // =============================================================
 
+// Browser origin allow-list parsing, shared by the dashboard form and the
+// API route that persists it — a rule enforced in only one of the two is a
+// suggestion.
+export * from "./allowed-origins";
 export * from "./dashboard";
 
 // =============================================================
