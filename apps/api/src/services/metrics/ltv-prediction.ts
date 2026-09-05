@@ -7,6 +7,7 @@ import {
   type LtvRawRow,
   type LtvSizeRow,
 } from "./ltv-extrapolation";
+import { REVENUE_TYPES_MONEY_OUT, sqlTypeList } from "@rovenue/shared";
 import type { LtvSegment } from "@rovenue/shared";
 
 export interface GetLtvPredictionInput {
@@ -73,8 +74,8 @@ export async function getLtvPrediction(input: GetLtvPredictionInput) {
           j.join_product                                                     AS product_id,
           toInt32(dateDiff('month', j.cohort_month, toStartOfMonth(e.eventDate))) AS age_month,
           toString(
-            sumIf(e.amountUsd, e.type NOT IN ('REFUND','CHARGEBACK'))
-              - sumIf(abs(e.amountUsd), e.type IN ('REFUND','CHARGEBACK'))
+            sumIf(e.amountUsd, e.type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}))
+              - sumIf(abs(e.amountUsd), e.type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}))
           )                                                                  AS net_usd
         FROM rovenue.raw_revenue_events AS e FINAL
         INNER JOIN joins AS j ON e.subscriberId = j.subscriberId

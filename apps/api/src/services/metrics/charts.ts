@@ -13,7 +13,7 @@ import type {
   ChartSeriesPoint,
   ChartSeriesResponse,
 } from "@rovenue/shared";
-import { sqlTypeList } from "@rovenue/shared";
+import { REVENUE_TYPES_MONEY_OUT, sqlTypeList } from "@rovenue/shared";
 import { drizzle, type Store } from "@rovenue/db";
 import {
   ClickHouseUnavailableError,
@@ -109,7 +109,7 @@ export async function readChannels(
       WHERE projectId = {projectId:String}
         AND toDate(eventDate) >= {from:Date}
         AND toDate(eventDate) <= {to:Date}
-        AND type NOT IN ('REFUND','CHARGEBACK')
+        AND type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})
       GROUP BY store
       ORDER BY sum(amountUsd) DESC
     `,
@@ -175,8 +175,8 @@ export async function readProceeds(
     `
       SELECT
         store,
-        toString(sumIf(amountUsd, type NOT IN ('REFUND','CHARGEBACK')))  AS gross_usd,
-        toString(sumIf(amountUsd, type IN ('REFUND','CHARGEBACK')))      AS refunds_usd
+        toString(sumIf(amountUsd, type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})))  AS gross_usd,
+        toString(sumIf(amountUsd, type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})))      AS refunds_usd
       FROM rovenue.raw_revenue_events FINAL
       WHERE projectId = {projectId:String}
         AND toDate(eventDate) >= {from:Date}
