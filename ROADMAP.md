@@ -667,7 +667,13 @@ else in the framework/provider-breadth dimension is done.
         provider silently filtered it with `filtered_by_event_scope`.
         It carries two economic meanings under one key — a win-back and
         a reversed-refund accounting correction — disambiguated by a
-        `metadata.reason` tag only `applyRefundReversed` sets.
+        `metadata.reason` tag only `applyRefundReversed` sets. The tag
+        reaches the delivered CUSTOM_WEBHOOK payload as `data.reason`
+        (`revenueEventReason` on `RovenueEventEnvelope`, lifted from the
+        outbox payload's `metadata.reason`, never the whole `metadata`
+        object) — a fix from the whole-branch review, since the first
+        cut lifted the tag into the outbox row and stopped there,
+        leaving a consumer unable to tell the two cases apart.
       - **A compile-time bijection guard**
         (`services/integrations/revenue-key-bijection.ts`) makes "a
         `RevenueEventType` has no public key" a `tsc` error instead of a

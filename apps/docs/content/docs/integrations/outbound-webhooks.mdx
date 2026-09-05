@@ -61,6 +61,7 @@ For revenue events (`revenue.*`), `data` is a fixed shape:
 - `amount` is a decimal string in the major currency unit (e.g. `"9.99"`, not cents).
 - `currency` is the ISO 4217 code.
 - `externalId` is the `externalId` you passed to the SDK's identify call, if any — no other PII (email, phone, IP, etc.) is ever included in a webhook payload.
+- `reason` is present only on some `revenue.REACTIVATION` events — see [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. Every other revenue event omits the key entirely rather than sending it as `null`.
 
 For every other event type (`subscription.*`, `subscriber.identified`, `paywall.*`, `credit.ledger.appended`), `data` is that event's domain payload passed through as-is.
 
@@ -156,12 +157,12 @@ applied. Only Apple produces the reversal case; every Google
 revenue event is tagged `metadata.reason: "refund_reversed"` (the exported
 `REACTIVATION_REVERSAL_REASON` constant in
 `apps/api/src/services/apple/apple-webhook.ts`) for the reversal case only;
-an unmarked one is the win-back case. **This tag is not currently included
-in the delivered Custom Webhook payload** — `data` for a revenue event is
-the fixed shape described [above](#data-shape) (`kind` / `amount` /
-`currency` / `subscriberId` / `productId` / `externalId`), so a Custom
-Webhook receiver cannot yet distinguish the two `revenue.REACTIVATION`
-cases from the delivered payload alone.
+an unmarked one is the win-back case. **This tag reaches the delivered
+Custom Webhook payload as `data.reason`** — a reversal's `data` carries
+`"reason": "refund_reversed"` in addition to the fixed shape described
+[above](#data-shape); a win-back's `data` omits the `reason` key entirely
+(never `reason: null`), so a Custom Webhook receiver can tell the two
+`revenue.REACTIVATION` cases apart from the delivered payload alone.
 
 **Delivery change for existing connections.** Connections that already
 receive `revenue.INITIAL` were widened by migration `0123` to also receive
