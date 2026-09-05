@@ -39,9 +39,7 @@ async function setup() {
     .onConflictDoNothing();
   await db.insert(projects).values({
     id: PID,
-    slug: `test-wqr-${RUN_ID}`,
     name: `WQR Test ${RUN_ID}`,
-    ownerId: UID,
   });
 }
 

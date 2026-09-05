@@ -27,9 +27,7 @@ async function setup() {
     .onConflictDoNothing();
   await db.insert(projects).values({
     id: PID,
-    slug: "test-inv",
     name: "Test Inv",
-    ownerId: "usr_demo",
   });
 }
 

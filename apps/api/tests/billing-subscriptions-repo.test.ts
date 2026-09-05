@@ -29,9 +29,7 @@ async function seedProject() {
     .insert(projects)
     .values({
       id: TEST_PROJECT_ID,
-      slug: "test-billing-repo",
       name: "Test Billing Repo",
-      ownerId: OWNER_ID,
     })
     .onConflictDoNothing();
 }

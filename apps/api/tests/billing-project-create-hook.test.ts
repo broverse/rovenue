@@ -20,9 +20,7 @@ describe("createFreeSubscription service", () => {
     await db.transaction(async (tx) => {
       await tx.insert(projects).values({
         id: PID,
-        slug: "test-hook",
         name: "Test Hook",
-        ownerId: "usr_demo",
       });
       await createFreeSubscription(tx, PID);
     });
@@ -40,9 +38,7 @@ describe("createFreeSubscription service", () => {
       db.transaction(async (tx) => {
         await tx.insert(projects).values({
           id: PID,
-          slug: "test-hook-rollback",
           name: "Test Hook Rollback",
-          ownerId: "usr_demo",
         });
         await createFreeSubscription(tx, PID);
         throw new Error("simulated downstream failure");

@@ -30,9 +30,7 @@ async function setup() {
     .onConflictDoNothing();
   await db.insert(projects).values({
     id: TEST_PROJECT_ID,
-    slug: "test-pm-repo",
     name: "Test PM",
-    ownerId: OWNER_ID,
   });
 }
 
