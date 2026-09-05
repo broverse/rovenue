@@ -4,6 +4,7 @@ export * from "./csv";
 export * from "./presets";
 export * from "./mapping";
 export * from "./normalize";
+export * from "./normalize-enrichment";
 
 // `./keys` is intentionally NOT re-exported here — it depends on
 // `node:crypto` and would crash the dashboard Vite bundle (this barrel
