@@ -172,7 +172,9 @@ export type AuditAction =
   // rewrote. `resource` is "subscriber"; before/after carry the access
   // row summaries and the drift classes that were detected, so an
   // operator can tell an automated repair apart from a webhook write.
-  | "access.drift_repaired";
+  | "access.drift_repaired"
+  // --- leaderboard seasons (workers/leaderboard-scheduler.ts) ---
+  | "leaderboard_season.closed";
 
 export type AuditResource =
   | "audience"
@@ -201,6 +203,7 @@ export type AuditResource =
   | "font_family"
   | "paywall_asset"
   | "import_job"
+  | "leaderboard_season"
   // Scoped by projectId; `resourceId` is the store the rate applies to.
   | "commission_rate";
 

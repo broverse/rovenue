@@ -95,6 +95,7 @@ import {
   createExperimentSchedulerWorker,
   scheduleExperimentScheduler,
 } from "./workers/experiment-scheduler";
+import { ensureLeaderboardScheduler } from "./workers/leaderboard-scheduler";
 import { bootIntegrations } from "./integrations-boot";
 import { bootRenewalGrants } from "./renewal-grants-boot";
 import { checkConnectWebhookEvents } from "./services/stripe/connect-endpoint-check";
@@ -323,6 +324,14 @@ scheduleExperimentScheduler().catch((err: unknown) => {
     err: err instanceof Error ? err.message : String(err),
   });
 });
+
+// Leaderboard season scheduler (ROADMAP §12 item 3) — 5-minute repeatable
+// BullMQ job. Opens a first season for enabled leaderboards that have
+// none, and closes ACTIVE seasons past endsAt + the ClickHouse settle
+// delay: ClickHouse is queried before anything is claimed, so an outage
+// leaves the season untouched instead of closed-but-empty. See
+// workers/leaderboard-scheduler.ts.
+ensureLeaderboardScheduler();
 
 // Integrations fanout + delivery pipeline (Kafka → BullMQ → worker).
 // bootIntegrations() no-ops gracefully when KAFKA_BROKERS is unset.

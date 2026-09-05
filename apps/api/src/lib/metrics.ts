@@ -106,3 +106,33 @@ export const renewalGrantsFailedTotal = new Counter({
   labelNames: ["reason"] as const,
   registers: [registry],
 });
+
+// =============================================================
+// Leaderboard season scheduler (workers/leaderboard-scheduler.ts)
+// =============================================================
+
+// Incremented once per season opened — either a leaderboard's first
+// season, or the next season opened as part of closing the previous one.
+export const leaderboardSeasonsOpenedTotal = new Counter({
+  name: "rovenue_leaderboard_seasons_opened_total",
+  help: "Leaderboard seasons opened by the scheduler",
+  registers: [registry],
+});
+
+// Incremented once per season closed and snapshotted into
+// leaderboard_standings.
+export const leaderboardSeasonsClosedTotal = new Counter({
+  name: "rovenue_leaderboard_seasons_closed_total",
+  help: "Leaderboard seasons closed and snapshotted",
+  registers: [registry],
+});
+
+// A lost claim is normal with multiple replicas. A sustained "clickhouse"
+// rate means seasons are drifting past their boundary unclosed, which is
+// otherwise invisible until someone notices stale standings.
+export const leaderboardSeasonCloseSkippedTotal = new Counter({
+  name: "rovenue_leaderboard_season_close_skipped_total",
+  help: "Season closes abandoned, by reason",
+  labelNames: ["reason"] as const,
+  registers: [registry],
+});
