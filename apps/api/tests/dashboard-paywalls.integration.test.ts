@@ -120,7 +120,16 @@ function validBuilderConfig() {
   return {
     formatVersion: 2,
     defaultLocale: "en",
-    localizations: { en: { title: "Go Pro", buy: "Buy Now" } },
+    // Typed as the real builder-config shape (@rovenue/shared/paywall's
+    // schema.ts: `localizations: Record<string, Record<string, string>>`)
+    // rather than left to infer the `{ en: {...} }` literal — tests below
+    // add further locale keys (e.g. `tr`) to exercise LOCALE_KEY_GAP
+    // warnings, which a narrower inferred type would reject as an unknown
+    // property.
+    localizations: { en: { title: "Go Pro", buy: "Buy Now" } } as Record<
+      string,
+      Record<string, string>
+    >,
     root: {
       type: "stack",
       id: "root",
