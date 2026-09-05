@@ -42,12 +42,20 @@ export interface AuditProofBundle {
   exportedAt: string;
   origin: { rowHash: string } | null;
   tip: { rowHash: string | null; createdAt: string } | null;
+  // True when the read hit AUDIT_PROOF_MAX_ENTRIES: at exactly the cap,
+  // a bundle is otherwise byte-indistinguishable from a complete export,
+  // and a verifier would wrongly declare a partial segment the whole
+  // history. Derived, never trusted from the caller.
+  truncated: boolean;
   entries: AuditProofRow[];
 }
 
 const auditProofQuerySchema = z.object({
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
+  // `{ offset: true }` so `+03:00`-style offsets validate — the sibling
+  // list route's manual `new Date(from)` already accepts them, and this
+  // schema must not be stricter than that for the same query shape.
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
 });
 
 export const auditLogsRoute = new Hono()
@@ -130,9 +138,12 @@ export const auditLogsRoute = new Hono()
     const firstEntry = entries[0];
     const lastEntry = entries[entries.length - 1];
 
-    const origin: AuditProofBundle["origin"] = firstEntry?.prevHash
-      ? { rowHash: firstEntry.prevHash }
-      : null;
+    // `!= null` (not truthiness) states the actual intent: an absent
+    // prevHash is what makes origin null, not a falsy string. Hashes are
+    // 64 hex chars so an empty string can't occur in practice, but the
+    // check should say what it means.
+    const origin: AuditProofBundle["origin"] =
+      firstEntry?.prevHash != null ? { rowHash: firstEntry.prevHash } : null;
     const tip: AuditProofBundle["tip"] = lastEntry
       ? { rowHash: lastEntry.rowHash, createdAt: lastEntry.createdAt }
       : null;
@@ -144,6 +155,7 @@ export const auditLogsRoute = new Hono()
         exportedAt: new Date().toISOString(),
         origin,
         tip,
+        truncated: entries.length === AUDIT_PROOF_MAX_ENTRIES,
         entries,
       }),
     );

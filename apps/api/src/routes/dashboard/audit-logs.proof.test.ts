@@ -203,7 +203,12 @@ describe("GET /audit-logs/proof", () => {
     expect(res.status).toBe(200);
   });
 
-  test("caps the entry count", async () => {
+  test("queries the repository for the AUTHORISED project, capped", async () => {
+    // Asserts the full call shape, not just `limit` in isolation: a route
+    // that authorised the caller against "p1" but then asked the
+    // repository for a different project's rows (a cross-tenant leak of
+    // the most sensitive table in the system) must fail this test even
+    // though the response envelope still looks fine.
     addMembership("p1", "u1", "OWNER");
     listAuditProofRows.mockResolvedValueOnce([]);
 
@@ -211,8 +216,99 @@ describe("GET /audit-logs/proof", () => {
 
     expect(listAuditProofRows).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ limit: AUDIT_PROOF_MAX_ENTRIES }),
+      expect.objectContaining({ projectId: "p1", limit: AUDIT_PROOF_MAX_ENTRIES }),
     );
+  });
+
+  test("passes the requested date range to the repository as Date objects", async () => {
+    // listAuditProofRows's args are `{ projectId, from?: Date, to?: Date,
+    // limit }` (packages/db/src/drizzle/repositories/audit-logs.ts) -- the
+    // route must convert the validated ISO strings, not drop them.
+    addMembership("p1", "u1", "OWNER");
+    listAuditProofRows.mockResolvedValueOnce([]);
+
+    await getProof(
+      "?projectId=p1&from=2026-09-01T00:00:00.000Z&to=2026-09-03T00:00:00.000Z",
+      { user: "u1" },
+    );
+
+    expect(listAuditProofRows).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        from: new Date("2026-09-01T00:00:00.000Z"),
+        to: new Date("2026-09-03T00:00:00.000Z"),
+      }),
+    );
+  });
+
+  test("the bundle is labelled with the requested (authorised) project", async () => {
+    // A bundle mislabelled with the wrong projectId would ship to a third
+    // party unnoticed -- assert the response body's own field, not just
+    // the repository call.
+    addMembership("p1", "u1", "OWNER");
+    listAuditProofRows.mockResolvedValueOnce([]);
+
+    const res = await getProof("?projectId=p1", { user: "u1" });
+    const body = await res.json();
+
+    expect(body.data.projectId).toBe("p1");
+  });
+
+  test("rejects a malformed from/to with the standard validation envelope", async () => {
+    addMembership("p1", "u1", "OWNER");
+
+    const res = await getProof("?projectId=p1&from=not-a-date", { user: "u1" });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: { code: "VALIDATION_ERROR", message: "Request validation failed" },
+    });
+    expect(listAuditProofRows).not.toHaveBeenCalled();
+  });
+
+  test("accepts an offset ISO timestamp, matching the sibling list route's grammar", async () => {
+    addMembership("p1", "u1", "OWNER");
+    listAuditProofRows.mockResolvedValueOnce([]);
+
+    const res = await getProof("?projectId=p1&from=2026-09-01T00:00:00%2B03:00", {
+      user: "u1",
+    });
+
+    expect(res.status).toBe(200);
+    expect(listAuditProofRows).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ from: new Date("2026-09-01T00:00:00+03:00") }),
+    );
+  });
+
+  test("reports truncated: true when the read hits the cap", async () => {
+    const rows = Array.from({ length: AUDIT_PROOF_MAX_ENTRIES }, (_, i) =>
+      makeRow({
+        id: `capped-${i}`,
+        prevHash: null,
+        createdAt: "2026-09-01T00:00:00.000Z",
+        rowHash: null,
+      }),
+    );
+    addMembership("p1", "u1", "OWNER");
+    listAuditProofRows.mockResolvedValueOnce(rows);
+
+    const res = await getProof("?projectId=p1", { user: "u1" });
+    const body = await res.json();
+
+    expect(body.data.entries).toHaveLength(AUDIT_PROOF_MAX_ENTRIES);
+    expect(body.data.truncated).toBe(true);
+  });
+
+  test("reports truncated: false for a short export", async () => {
+    addMembership("p1", "u1", "OWNER");
+    const row1 = hashedRow("a1", null, "2026-09-01T00:00:00.000Z");
+    listAuditProofRows.mockResolvedValueOnce([row1]);
+
+    const res = await getProof("?projectId=p1", { user: "u1" });
+    const body = await res.json();
+
+    expect(body.data.truncated).toBe(false);
   });
 
   test("carries a null rowHash through for a pre-chain legacy row", async () => {
