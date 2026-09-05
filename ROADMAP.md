@@ -832,8 +832,26 @@ else in the framework/provider-breadth dimension is done.
 
 - [ ] Load-test suite: k6/vegeta with realistic traffic profiles (receipt spikes,
       webhook storms) + published benchmark page
-- [ ] ClickHouse lag under a Kafka-fed materialized view (the third chaos
-      scenario; the two above are done)
+- [x] ClickHouse lag under a Kafka-fed materialized view — the third chaos
+      scenario (2026-09-05, `apps/api/tests/ch-kafka-engine.integration.test.ts`).
+      ClickHouse sits downstream of Kafka, so its absence must be invisible to
+      the write path: the dispatcher publishes and marks the row published
+      while nothing is consuming, the row is genuinely absent from CH during
+      that window, and it arrives on its own afterwards — no replay, no
+      backfill, no operator step.
+
+      Producing the outage took three attempts and the two rejected ones are
+      recorded in the test, because each made it a decoration.
+      `clickhouse.restart()` takes the schema with it (the migrations run once,
+      in `beforeAll`), so it tests the container's storage rather than the
+      pipeline. Repointing `CLICKHOUSE_URL` proves nothing: the dispatcher
+      never reads it, so the "outage" is a no-op and the test passes against a
+      dispatcher that queries ClickHouse on every batch. Detaching the
+      MATERIALIZED VIEW does not stop the consumer promptly — CH keeps polling
+      after its last reader goes away, and the row landed inside ten seconds.
+      Detaching the Kafka Engine queue table is the real thing; the group
+      offset lives in Kafka, so it survives. Verified falsifiable by removing
+      the DETACH, which turns the zero-rows assertion red.
 - [ ] SLOs + status page
 - [x] Chaos tests: dispatcher death + Kafka outage/recovery (2026-09-05,
       `apps/api/tests/outbox-dispatcher.integration.test.ts`). The
@@ -859,7 +877,7 @@ else in the framework/provider-breadth dimension is done.
       kept draining the table and holding connections. That test now passes in
       ~2.8s where it previously timed out.
 
-      ClickHouse lag is NOT covered — left open below.
+      ClickHouse lag is covered by the item above.
 - [ ] 3–5 pilot apps in production; millions of live events as reference
 - [ ] All CI green and required (including pre-existing red tests); testcontainers
       suite running in CI
