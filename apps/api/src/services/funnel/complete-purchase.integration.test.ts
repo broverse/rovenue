@@ -48,6 +48,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@rovenue/db";
+import { toFanoutEnvelope } from "../integrations-fanout/consumer";
 
 /** Two-party rendezvous: the first arrival parks until the second
  *  arrives, then both proceed together. Hoisted so the `vi.mock`
@@ -96,7 +97,7 @@ vi.mock("@rovenue/db", async (importOriginal) => {
 // Schema objects come off the `drizzle` namespace rather than the
 // package root: not every funnel table is re-exported at top level, and
 // the namespace is the copy the mock above passes through untouched.
-const { drizzle } = await import("@rovenue/db");
+const { drizzle, ProductType } = await import("@rovenue/db");
 const {
   getDb,
   funnels,
@@ -107,6 +108,8 @@ const {
   outboxEvents,
   projects,
   subscribers,
+  revenueEvents,
+  products,
 } = drizzle;
 const { completeFunnelPurchase } = await import("./complete-purchase");
 const { hashToken } = await import("./token");
@@ -284,5 +287,274 @@ describe("completeFunnelPurchase — concurrent confirm/webhook race", () => {
       );
     expect(survivor).toBeDefined();
     expect(purchase!.subscriberId).toBe(survivor!.id);
+  });
+});
+
+// =============================================================
+// completeFunnelPurchase — recording revenue for a one-time
+// Stripe purchase (Task 7)
+// =============================================================
+//
+// Before this, a one-time funnel purchase wrote a purchases row and an
+// entitlement and NOTHING ELSE: no revenue_events row, no REVENUE_EVENT
+// outbox row, no rovenue.revenue topic, no ClickHouse, no integration
+// provider. The sale was invisible everywhere but the funnel tables.
+//
+// Every test here uses its own project (via `seedPendingOneTimeSession`)
+// rather than sharing the race describe block's fixtures above, so
+// cleanup here can never race the mocked-barrier suite above it.
+
+describe("completeFunnelPurchase — one-time Stripe revenue", () => {
+  const ONE_TIME_RUN = `${RUN}_1t`;
+  let seedIndex = 0;
+  const createdProjectIds: string[] = [];
+  const createdSessionIds: string[] = [];
+
+  async function seedPendingOneTimeSession(opts: {
+    amountCents: number | null;
+    currency: string | null;
+    productType?: (typeof ProductType)[keyof typeof ProductType];
+  }): Promise<{
+    sessionId: string;
+    purchaseId: string;
+    paymentIntentId: string;
+    projectId: string;
+  }> {
+    seedIndex += 1;
+    const n = seedIndex;
+    const db = getDb();
+    const projectId = `prj_1t_${ONE_TIME_RUN}_${n}`;
+    const funnelId = `fnl_1t_${ONE_TIME_RUN}_${n}`;
+    const versionId = `fnv_1t_${ONE_TIME_RUN}_${n}`;
+    const sessionId = `fss_1t_${ONE_TIME_RUN}_${n}`;
+    const purchaseId = `fpu_1t_${ONE_TIME_RUN}_${n}`;
+    const productId = `prd_1t_${ONE_TIME_RUN}_${n}`;
+    const paymentIntentId = `pi_1t_${ONE_TIME_RUN}_${n}`;
+
+    await db.insert(projects).values({ id: projectId, name: `OneTime ${ONE_TIME_RUN}-${n}` });
+    await db.insert(funnels).values({
+      id: funnelId,
+      projectId,
+      slug: `onetime-${ONE_TIME_RUN}-${n}`,
+      name: "One-time",
+    });
+    await db.insert(funnelVersions).values({
+      id: versionId,
+      funnelId,
+      versionNo: 1,
+      pagesJson: [],
+      themeJson: {},
+      settingsJson: {},
+    });
+    await db.insert(funnelSessions).values({
+      id: sessionId,
+      funnelId,
+      funnelVersionId: versionId,
+      projectId,
+      anonId: `anon_1t_${ONE_TIME_RUN}_${n}`,
+      state: "in_progress",
+    });
+    // A real product row: grantOneTimePurchase looks this up by id to
+    // classify the revenue type (oneTimeRevenueTypeFor(product.type)) and
+    // to walk product.accessIds — empty here, so the access-grant loop is
+    // a no-op and the test stays focused on the revenue write.
+    await db.insert(products).values({
+      id: productId,
+      projectId,
+      identifier: `onetime-product-${ONE_TIME_RUN}-${n}`,
+      type: opts.productType ?? ProductType.NON_CONSUMABLE,
+      storeIds: {},
+      displayName: "One-time product",
+      accessIds: [],
+    });
+    await db.insert(funnelPurchases).values({
+      id: purchaseId,
+      sessionId,
+      projectId,
+      productId,
+      status: "pending",
+      amountCents: opts.amountCents,
+      currency: opts.currency,
+    });
+
+    createdProjectIds.push(projectId);
+    createdSessionIds.push(sessionId);
+
+    return { sessionId, purchaseId, paymentIntentId, projectId };
+  }
+
+  afterAll(async () => {
+    const db = getDb();
+    // revenue_events cascades away with its project (FK onDelete:
+    // cascade), but its co-located outbox row does NOT — outbox_events
+    // has no FK at all, so the row must be found and deleted explicitly
+    // before the project (and the revenue_events row it points at) is
+    // gone.
+    for (const projectId of createdProjectIds) {
+      const revenueRows = await db
+        .select({ id: revenueEvents.id })
+        .from(revenueEvents)
+        .where(eq(revenueEvents.projectId, projectId));
+      for (const row of revenueRows) {
+        await db.delete(outboxEvents).where(eq(outboxEvents.aggregateId, row.id));
+      }
+    }
+    // funnel.session.paid / funnel.claim_token.issued outbox rows key on
+    // the session id (see emitFunnelEvent), also unreachable by cascade.
+    for (const sessionId of createdSessionIds) {
+      await db.delete(outboxEvents).where(eq(outboxEvents.aggregateId, sessionId));
+      await db.delete(funnelClaimTokens).where(eq(funnelClaimTokens.sessionId, sessionId));
+      await db.delete(funnelPurchases).where(eq(funnelPurchases.sessionId, sessionId));
+    }
+    for (const projectId of createdProjectIds) {
+      // Cascades products, funnels/funnelVersions/funnelSessions,
+      // subscribers, purchases, subscriber_access, revenue_events.
+      await db.delete(projects).where(eq(projects.id, projectId));
+    }
+  });
+
+  it("records revenue for a one-time funnel purchase", async () => {
+    const { sessionId, paymentIntentId, projectId } = await seedPendingOneTimeSession({
+      amountCents: 4999,
+      currency: "usd",
+    });
+
+    const result = await completeFunnelPurchase({
+      sessionId,
+      stripeCustomerId: `cus_1t_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    });
+    expect(result.alreadyIssued).toBe(false);
+
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, projectId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe("NON_RENEWING_PURCHASE");
+    expect(rows[0]!.amount).toBe("49.9900");
+
+    const outbox = await db
+      .select()
+      .from(outboxEvents)
+      .where(eq(outboxEvents.aggregateId, rows[0]!.id));
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]!.eventType).toBe("revenue.event.recorded");
+    expect(outbox[0]!.aggregateType).toBe("REVENUE_EVENT");
+  });
+
+  it("does not record a second revenue row when /confirm is replayed", async () => {
+    // Both /confirm and the webhook backstop can arrive. The second
+    // caller must not double-count the charge. In practice this second
+    // call short-circuits on the pre-existing `status === "paid"` guard
+    // before it ever reaches grantOneTimePurchase again — the dedupeKey
+    // on the revenue write is defense for the genuine concurrent race
+    // (proven separately above), not what this sequential replay
+    // exercises. Recorded here so a regression in either guard is caught.
+    const { sessionId, paymentIntentId, projectId } = await seedPendingOneTimeSession({
+      amountCents: 2500,
+      currency: "usd",
+    });
+    const args = {
+      sessionId,
+      stripeCustomerId: `cus_1t_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    };
+
+    const first = await completeFunnelPurchase(args);
+    const second = await completeFunnelPurchase(args);
+    expect(first.alreadyIssued).toBe(false);
+    expect(second.alreadyIssued).toBe(true);
+
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, projectId));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("still mints a claim token when the funnel row has no price", async () => {
+    // The file's existing contract: nothing here may throw, because a
+    // throw rolls back the paid transition and strands a buyer who
+    // really paid.
+    const { sessionId, paymentIntentId, projectId } = await seedPendingOneTimeSession({
+      amountCents: null,
+      currency: null,
+    });
+
+    const result = await completeFunnelPurchase({
+      sessionId,
+      stripeCustomerId: `cus_1t_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    });
+
+    expect(result.alreadyIssued).toBe(false);
+    if (result.alreadyIssued) throw new Error("unreachable");
+    expect(result.token).toBeTruthy();
+
+    // No price to convert means grantOneTimePurchase logs and skips the
+    // revenue write (ruling 3) — it must not have written one anyway.
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, projectId));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("puts the revenue row on the integrations fan-out envelope", async () => {
+    // A recorded row is not a delivered event. This asserts the envelope
+    // the consumer would build from the outbox row, using the REAL
+    // `toFanoutEnvelope` (services/integrations-fanout/consumer.ts) — not
+    // a hand-rolled shape that would prove nothing about delivery.
+    //
+    // There is no exported `publishedMessageFor` helper in this codebase;
+    // the wrapper object below is the exact wire shape
+    // workers/outbox-dispatcher.ts's `runOnce` JSON.stringifies onto
+    // Kafka for every non-PAYWALL_EVENT topic (eventId/eventType/
+    // aggregateId/createdAt/payload), reproduced here rather than
+    // invented, so this is still a real production shape assertion.
+    const { sessionId, paymentIntentId, projectId } = await seedPendingOneTimeSession({
+      amountCents: 999,
+      currency: "usd",
+    });
+
+    await completeFunnelPurchase({
+      sessionId,
+      stripeCustomerId: `cus_1t_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    });
+
+    const db = getDb();
+    const [revenueRow] = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, projectId));
+    expect(revenueRow).toBeDefined();
+
+    const [outboxRow] = await db
+      .select()
+      .from(outboxEvents)
+      .where(eq(outboxEvents.aggregateId, revenueRow!.id));
+    expect(outboxRow).toBeDefined();
+
+    const wireMessage = {
+      eventId: outboxRow!.id,
+      eventType: outboxRow!.eventType,
+      aggregateId: outboxRow!.aggregateId,
+      createdAt: outboxRow!.createdAt.toISOString(),
+      payload: outboxRow!.payload,
+    };
+
+    const envelope = toFanoutEnvelope(wireMessage, "rovenue.revenue");
+    expect(envelope?.eventType).toBe("revenue.event.recorded");
+    expect(envelope?.revenueEventKind).toBe("NON_RENEWING_PURCHASE");
+    expect(envelope?.projectId).toBe(projectId);
   });
 });

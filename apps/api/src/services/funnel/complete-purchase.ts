@@ -4,9 +4,12 @@ import {
   PurchaseStatus,
   Store,
   drizzle,
+  revenueDedupeKind,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { isUniqueViolationOf } from "../../lib/pg-errors";
+import { convertToUsd } from "../fx";
+import { oneTimeRevenueTypeFor } from "../revenue/one-time-type";
 import { emitFunnelEvent } from "./outbox";
 import { generateClaimToken, hashToken } from "./token";
 
@@ -100,6 +103,11 @@ async function grantOneTimePurchase(
     currency: string | null;
     subscriberId: string;
     stripePaymentIntentId: string | null;
+    // Precomputed by the caller BEFORE the transaction opened — see the
+    // FX comment on completeFunnelPurchase. `null` means either the
+    // funnel row had no price to convert, or conversion itself is moot
+    // (recurring callers never reach this function).
+    amountUsd: string | null;
   },
 ): Promise<void> {
   if (!args.stripePaymentIntentId) {
@@ -193,6 +201,51 @@ async function grantOneTimePurchase(
     }
   }
 
+  // The money finally counts. Before this, a one-time funnel purchase
+  // wrote a purchases row and an entitlement and nothing else: no
+  // revenue_events row means no REVENUE_EVENT outbox row, which means no
+  // rovenue.revenue topic, which means no ClickHouse and no integration
+  // provider. The sale was invisible everywhere but the funnel tables.
+  //
+  // INSIDE the transaction, not after it: both /confirm and the webhook
+  // backstop short-circuit on `status === "paid"`, so a post-commit emit
+  // that failed would never be retried by anything.
+  //
+  // Skips rather than throws on missing data, matching this function's
+  // documented contract — a throw would roll back the paid transition and
+  // leave a buyer who really paid with no claim token.
+  const revenueType = oneTimeRevenueTypeFor(product.type);
+  if (revenueType == null) {
+    log.error("one-time funnel purchase names a subscription product", {
+      sessionId: args.sessionId,
+      productId: args.productId,
+    });
+  } else if (priceAmount == null || priceCurrency == null || args.amountUsd == null) {
+    log.error("one-time funnel purchase has no price to record as revenue", {
+      sessionId: args.sessionId,
+      purchaseId: purchase.id,
+    });
+  } else {
+    await drizzle.revenueEventRepo.createRevenueEvent(tx, {
+      projectId: args.projectId,
+      subscriberId: args.subscriberId,
+      purchaseId: purchase.id,
+      productId: args.productId,
+      type: revenueType,
+      amount: priceAmount,
+      currency: priceCurrency,
+      amountUsd: args.amountUsd,
+      store: Store.STRIPE,
+      eventDate: purchasedAt,
+      // Both racers converge on one key; the loser's transaction rolls
+      // back anyway, and a redelivered webhook is a no-op.
+      dedupeKey: `stripe:${args.stripePaymentIntentId}:${revenueDedupeKind(revenueType)}`,
+      // No country: a PaymentIntent carries no per-transaction country, and
+      // reading the Charge would put a Stripe call inside an open
+      // transaction. Same documented gap, same reason, as applyInvoicePaid.
+    });
+  }
+
   log.info("granted a one-time funnel purchase", {
     sessionId: args.sessionId,
     projectId: args.projectId,
@@ -209,6 +262,35 @@ export async function completeFunnelPurchase(input: {
   stripePaymentIntentId: string | null;
 }): Promise<CompleteResult> {
   const plaintext = generateClaimToken();
+
+  // FX BEFORE the transaction, deliberately. convertToUsd's ladder is
+  // Redis -> fx_rates -> a static table (services/fx.ts): no HTTP, but
+  // two Redis round trips. This transaction sits on the paid-conversion
+  // critical path and holds the funnel_claim_tokens.session_id unique-
+  // index race; a cache round trip does not belong inside it.
+  //
+  // The row is read again inside the transaction below — that read is
+  // what decides the paid/already-paid race — so this extra read changes
+  // no semantics.
+  //
+  // Skipped entirely for the recurring path (stripeSubscriptionId set): a
+  // Stripe Subscription's revenue is recorded by the Connect webhook's
+  // invoice.paid handler, not here, and grantOneTimePurchase itself never
+  // runs when a subscription id is present (see below) — converting an
+  // amount nothing would use would just spend two Redis round trips on
+  // every recurring confirm.
+  const preRead = input.stripeSubscriptionId
+    ? null
+    : await drizzle.funnelPurchaseRepo.findBySession(
+        drizzle.db,
+        input.sessionId,
+      );
+  const amountUsd =
+    preRead?.amountCents != null && preRead.currency
+      ? (
+          await convertToUsd(preRead.amountCents / 100, preRead.currency)
+        ).toString()
+      : null;
 
   return drizzle.db.transaction(async (tx) => {
     const session = await drizzle.funnelSessionRepo.findById(tx, input.sessionId);
@@ -305,6 +387,7 @@ export async function completeFunnelPurchase(input: {
         currency: purchase.currency,
         subscriberId: subscriber.id,
         stripePaymentIntentId: input.stripePaymentIntentId,
+        amountUsd,
       });
     }
 
