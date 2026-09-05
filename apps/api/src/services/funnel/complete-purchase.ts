@@ -1,6 +1,7 @@
 import {
   type Db,
   Environment,
+  ProductType,
   PurchaseStatus,
   RevenueEventType,
   Store,
@@ -10,9 +11,22 @@ import {
 import { logger } from "../../lib/logger";
 import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { convertToUsd } from "../fx";
+import { grantPurchaseCurrencies } from "../purchase-credits";
 import { oneTimeRevenueTypeFor } from "../revenue/one-time-type";
 import { emitFunnelEvent } from "./outbox";
 import { generateClaimToken, hashToken } from "./token";
+
+/**
+ * What `grantOneTimePurchase` hands back to `completeFunnelPurchase` so it
+ * can grant virtual currencies for a CONSUMABLE product AFTER the paid
+ * transition commits — never inside it. See the comment at the call site.
+ */
+interface ConsumableGrantInfo {
+  subscriberId: string;
+  productId: string;
+  purchaseId: string;
+  productIdentifier: string;
+}
 
 // =============================================================
 // Completing a paid funnel session
@@ -92,6 +106,19 @@ export type CompleteResult =
  * really paid with no claim token and a `/confirm` that 500s on every
  * retry. Loud logs and a minted token beat a silent 500 loop; the buyer
  * keeps a path to their purchase and an operator has the ids to fix it.
+ *
+ * Returns a `ConsumableGrantInfo` when (and only when) the product just
+ * purchased is a CONSUMABLE — the caller grants virtual currencies for it
+ * AFTER this transaction commits. That has to happen outside: `addCredits`
+ * (services/credit-engine.ts) always opens its OWN
+ * `drizzle.db.transaction`, never accepts a `tx` to join, so it cannot be
+ * folded into this one atomically — nesting it here would either graft an
+ * independent, separately-committing transaction onto this one (credits
+ * could survive a later rollback of the paid transition, or vice versa) or,
+ * if it throws, violate the very "nothing here throws" contract this
+ * function documents. Returning `null` for every early-exit branch below is
+ * what tells the caller no purchase was actually created, so it must not
+ * grant anything.
  */
 async function grantOneTimePurchase(
   tx: Db,
@@ -110,7 +137,7 @@ async function grantOneTimePurchase(
     // (recurring callers never reach this function).
     amountUsd: string | null;
   },
-): Promise<void> {
+): Promise<ConsumableGrantInfo | null> {
   if (!args.stripePaymentIntentId) {
     // No subscription AND no PaymentIntent: the row records nothing that
     // could have been charged, so there is no natural key to anchor a
@@ -120,7 +147,7 @@ async function grantOneTimePurchase(
       sessionId: args.sessionId,
       funnelPurchaseId: args.funnelPurchaseId,
     });
-    return;
+    return null;
   }
   if (!args.productId) {
     log.error("one-time funnel purchase has no product to grant", {
@@ -128,7 +155,7 @@ async function grantOneTimePurchase(
       funnelPurchaseId: args.funnelPurchaseId,
       paymentIntentId: args.stripePaymentIntentId,
     });
-    return;
+    return null;
   }
 
   const [product] = await drizzle.offeringRepo.findProductsByIds(
@@ -142,7 +169,7 @@ async function grantOneTimePurchase(
       projectId: args.projectId,
       productId: args.productId,
     });
-    return;
+    return null;
   }
 
   const purchasedAt = new Date();
@@ -275,6 +302,18 @@ async function grantOneTimePurchase(
     subscriberId: args.subscriberId,
     accessCount: product.accessIds.length,
   });
+
+  // Gated on CONSUMABLE, mirroring routes/v1/receipts.ts's call site — a
+  // NON_CONSUMABLE or SUBSCRIPTION product grants access rows above and
+  // nothing further. The grant itself does not happen here; see the
+  // ConsumableGrantInfo doc comment above for why.
+  if (product.type !== ProductType.CONSUMABLE) return null;
+  return {
+    subscriberId: args.subscriberId,
+    productId: args.productId,
+    purchaseId: purchase.id,
+    productIdentifier: product.identifier,
+  };
 }
 
 export async function completeFunnelPurchase(input: {
@@ -314,7 +353,12 @@ export async function completeFunnelPurchase(input: {
         ).toString()
       : null;
 
-  return drizzle.db.transaction(async (tx) => {
+  // Set inside the transaction below, read after it commits — see the
+  // ConsumableGrantInfo doc comment on grantOneTimePurchase for why the
+  // credit grant itself cannot happen inside that transaction.
+  let consumableGrant: ConsumableGrantInfo | null = null;
+
+  const result = await drizzle.db.transaction(async (tx): Promise<CompleteResult> => {
     const session = await drizzle.funnelSessionRepo.findById(tx, input.sessionId);
     if (!session) throw new Error(`funnel session ${input.sessionId} not found`);
 
@@ -400,7 +444,7 @@ export async function completeFunnelPurchase(input: {
     // transaction is the one that will commit, and the loser has already
     // returned without touching purchases or subscriber_access.
     if (!input.stripeSubscriptionId) {
-      await grantOneTimePurchase(tx as Db, {
+      consumableGrant = await grantOneTimePurchase(tx as Db, {
         projectId: session.projectId,
         sessionId: input.sessionId,
         funnelPurchaseId: purchase.id,
@@ -430,4 +474,42 @@ export async function completeFunnelPurchase(input: {
 
     return { alreadyIssued: false, token: plaintext };
   });
+
+  // Consumable credits, AFTER the paid transition has committed.
+  //
+  // `addCredits` (services/credit-engine.ts) always opens its own
+  // `drizzle.db.transaction` — it has no parameter to join an existing one
+  // — so it cannot be folded into the transaction above atomically no
+  // matter how it is called: nesting it there would graft an
+  // independently-committing transaction onto this one (credits could
+  // survive a later rollback of the paid transition, or the reverse), and
+  // letting it throw inside that transaction would violate
+  // grantOneTimePurchase's "nothing here throws" contract, rolling back a
+  // buyer's paid transition over a credit-grant hiccup.
+  //
+  // `addCredits` dedupes on (subscriberId, referenceType: "purchase",
+  // referenceId: purchaseId, currencyId), so re-granting for the same
+  // purchase is always safe. Nothing currently re-invokes this call
+  // automatically on failure, though — a second `completeFunnelPurchase`
+  // for the same session short-circuits on `purchase.status === "paid"`
+  // before it would ever reach here again — so a failure is logged loudly
+  // rather than silently dropped, for an operator to re-run by hand.
+  if (consumableGrant) {
+    const grant: ConsumableGrantInfo = consumableGrant;
+    try {
+      await grantPurchaseCurrencies(grant);
+    } catch (err) {
+      log.error(
+        "failed to grant consumable currencies for a one-time funnel purchase",
+        {
+          sessionId: input.sessionId,
+          purchaseId: grant.purchaseId,
+          productId: grant.productId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+      );
+    }
+  }
+
+  return result;
 }

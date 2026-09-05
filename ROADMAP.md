@@ -719,15 +719,32 @@ else in the framework/provider-breadth dimension is done.
       not touch it.
       Open residuals from the whole-branch review's final fix wave
       (2026-09-05), recorded rather than fixed:
-      - **A `CONSUMABLE` sold through a Stripe funnel books
-        `CREDIT_PURCHASE` revenue while granting zero credits.**
-        `grantPurchaseCurrencies` has exactly two call sites
-        (`routes/v1/receipts.ts`, `services/webhook-processor.ts`); the
-        funnel path grants `subscriber_access` only. Before this plan the
-        divergence was invisible because no revenue row existed at all;
-        now the credit-revenue panels report money for packages that
-        granted nothing. Fixing it means changing what the funnel grants,
-        which needs its own design.
+      - ~~A `CONSUMABLE` sold through a Stripe funnel books `CREDIT_PURCHASE`
+        revenue while granting zero credits.~~ **Closed 2026-09-05.**
+        `grantOneTimePurchase` (`services/funnel/complete-purchase.ts`) now
+        returns which product/purchase/subscriber to grant for when the
+        product is CONSUMABLE, and `completeFunnelPurchase` calls
+        `grantPurchaseCurrencies` for it AFTER its transaction commits — not
+        inside. It has to be outside: `addCredits`
+        (`services/credit-engine.ts`) always opens its own
+        `drizzle.db.transaction` (no `tx` parameter to join), so nesting it
+        in the paid-transition transaction would either graft an
+        independently-committing transaction onto it (credits could survive
+        a rollback of the paid transition, or the reverse) or, if it threw,
+        violate `grantOneTimePurchase`'s "nothing here throws" contract and
+        strand a buyer who really paid. `addCredits` dedupes on
+        (subscriberId, referenceType: "purchase", referenceId: purchaseId,
+        currencyId), so a failure here is safe to re-run — but nothing
+        currently retries it automatically, since a second
+        `completeFunnelPurchase` call for the same session short-circuits
+        before reaching this code again; a failure is logged loudly for an
+        operator to re-run by hand rather than silently dropped. Verified
+        against a real Postgres
+        (`services/funnel/complete-purchase.integration.test.ts`): a
+        CONSUMABLE with currency grants ends with both the `CREDIT_PURCHASE`
+        revenue row and the credits granted; a NON_CONSUMABLE with grants
+        configured anyway gets neither; a replayed `/confirm` does not
+        double-grant.
       - `apps/api`'s test typecheck (`tsconfig.tests.json`) is red on
         `main` with ~358 pre-existing errors from a repo-wide `vi.fn()`
         typing idiom. Nothing gates on it — `typecheck:tests` is not in
