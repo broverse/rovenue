@@ -2,14 +2,14 @@
 // purchases — status partial-index contract
 // =============================================================
 //
-// The two partial indexes on `purchases` encode a status list in their
+// The three partial indexes on `purchases` encode a status list in their
 // WHERE predicate, and that list has to agree with the shared semantics
-// table (`sweepable` / `reconcilable`) that the sweep queries derive
-// from. Nothing at compile time links the two: schema.ts derives the
-// predicate, but the LIVE index is whatever the hand-written migration
-// created, and those can silently diverge (0115 recreates both indexes
-// by hand because a partial-index predicate embeds Const nodes of the
-// enum type it is dropping).
+// table (`sweepable` / `reconcilable` / involuntary-but-not-sweepable)
+// that the sweep queries derive from. Nothing at compile time links the
+// two: schema.ts derives the predicate, but the LIVE index is whatever
+// the migration created, and those can silently diverge (0115 recreates
+// two of them by hand because a partial-index predicate embeds Const
+// nodes of the enum type it is dropping).
 //
 // So this reads the predicate back out of pg_indexes rather than
 // comparing a hand-built string against itself: the only thing that can
@@ -25,6 +25,7 @@ process.env.DATABASE_URL ??=
 import { describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import {
+  BILLING_ISSUE_AGEING_STATUSES,
   EXPIRY_SWEEP_STATUSES,
   RECONCILABLE_STATUSES,
   SUBSCRIPTION_STATUSES,
@@ -33,6 +34,7 @@ import { getDb } from "./client";
 
 const EXPIRY_SWEEP_INDEX = "purchases_status_expiresDate_idx";
 const RECONCILIATION_INDEX = "purchases_google_reconciliation_idx";
+const BILLING_ISSUE_AGEING_INDEX = "purchases_billing_issue_ageing_idx";
 
 // Postgres does NOT echo back the `IN (...)` the migration was written
 // with — pg_get_indexdef normalises it to
@@ -94,6 +96,43 @@ describe("purchases status partial indexes", () => {
     expect(
       statusesInPredicate(await indexDefinition(EXPIRY_SWEEP_INDEX)),
     ).not.toContain("BILLING_ISSUE");
+  });
+
+  // The ageing scan (`findAgedBillingIssuePurchases`) is the third query
+  // whose WHERE clause is a status list, and the only one Postgres can
+  // answer without a sort — so the index is ordered on
+  // `billingIssueDetectedAt` and the status list lives entirely in the
+  // predicate. If the two drift, the scan silently reverts to a
+  // sequential scan of `purchases` every five minutes and nothing fails.
+  it("the billing-issue ageing index lists exactly the ageing statuses", async () => {
+    const def = await indexDefinition(BILLING_ISSUE_AGEING_INDEX);
+    expect(statusesInPredicate(def).sort()).toEqual(
+      [...BILLING_ISSUE_AGEING_STATUSES].sort(),
+    );
+  });
+
+  // The predicate's other half. `findAgedBillingIssuePurchases` filters
+  // `billingIssueDetectedAt IS NOT NULL` and orders by that column, and
+  // both facts have to be true of the index or the query stops using it:
+  // drop the IS NOT NULL and rows with no detection stamp enter the
+  // index; index a different column and the LIMIT needs a sort again.
+  it("the billing-issue ageing index is ordered on billingIssueDetectedAt and excludes unstamped rows", async () => {
+    const def = await indexDefinition(BILLING_ISSUE_AGEING_INDEX);
+    expect(def).toMatch(/USING btree \("billingIssueDetectedAt"\)/);
+    expect(def).toMatch(/"billingIssueDetectedAt" IS NOT NULL/);
+  });
+
+  // The ageing pass and the expiry sweep must not both claim a status:
+  // one retires a row on lapse, the other on age, and a status in both
+  // would be raced between two workers on different rules.
+  it("the ageing statuses and the sweepable statuses are disjoint", async () => {
+    const sweep = statusesInPredicate(
+      await indexDefinition(EXPIRY_SWEEP_INDEX),
+    );
+    const ageing = statusesInPredicate(
+      await indexDefinition(BILLING_ISSUE_AGEING_INDEX),
+    );
+    expect(ageing.filter((status) => sweep.includes(status))).toEqual([]);
   });
 
   // The enum swap in 0115 drops and recreates the type. If the label set

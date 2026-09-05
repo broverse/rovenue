@@ -200,6 +200,29 @@ export const TERMINAL_STATUSES = statusesWhere((s) => s.isTerminal);
 export const INVOLUNTARY_STATUSES = statusesWhere((s) => s.involuntary);
 
 /**
+ * Statuses retired by the billing-issue ageing pass
+ * (`runBillingIssueAgeing`, apps/api/src/workers/expiry-checker.ts)
+ * rather than by the expiry sweeper.
+ *
+ * The two are disjoint by construction: a status is swept on lapse when
+ * it HAS a lapse moment the sweeper can act on, and an involuntary
+ * payment failure that is not sweepable has none — its `expiresDate` is
+ * already in the past the instant the store reports the failure, so
+ * sweeping it would retire the row and erase the dunning signal at the
+ * same moment it appeared. Those rows are retired on AGE instead, off
+ * `billingIssueDetectedAt`.
+ *
+ * Today exactly {BILLING_ISSUE}. Derived rather than hand-listed for the
+ * same reason as the lists above, and specifically so the partial index
+ * that serves the ageing scan
+ * (`purchases_billing_issue_ageing_idx`) and the pass itself cannot
+ * describe different sets of rows.
+ */
+export const BILLING_ISSUE_AGEING_STATUSES = statusesWhere(
+  (s) => s.involuntary && !s.sweepable,
+);
+
+/**
  * A single-quoted, comma-separated list for embedding in a raw SQL
  * `IN (...)`. Status names are compile-time constants from this module —
  * never user input — so interpolation is safe here and nowhere else.
