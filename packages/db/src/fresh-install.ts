@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 
@@ -113,6 +113,29 @@ type JournalEntry = {
   when: number;
   breakpoints?: boolean;
 };
+
+/**
+ * Migration files present on disk that the journal does not list.
+ *
+ * A hand-written migration is invisible to every runner until it is added to
+ * `_journal.json` — both the fresh runner (which iterates the journal) and
+ * drizzle's own migrator (which reads the same file). The file sits in the
+ * directory looking applied-by-inspection, the schema change never lands, and
+ * the first symptom is a column that does not exist in production.
+ *
+ * This happened during the Web SDK work: 0122 was written, committed, and
+ * silently never applied. It only surfaced when a test harness built a
+ * database from the journal and the seed failed on the missing column.
+ */
+export async function findUnjournaledMigrations(): Promise<string[]> {
+  const journalTags = new Set((await loadJournal()).map((e) => e.tag));
+  const files = await readdir(new URL(".", MIGRATIONS_DIR));
+  return files
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => f.replace(/\.sql$/, ""))
+    .filter((tag) => !journalTags.has(tag))
+    .sort();
+}
 
 async function loadJournal(): Promise<JournalEntry[]> {
   const journalUrl = new URL("meta/_journal.json", MIGRATIONS_DIR);
@@ -277,6 +300,10 @@ export async function runFreshInstall(client: MigrationClient): Promise<void> {
   await client.query(`SET rovenue.plan3_legacy_drop_verified = '1'`);
 
   const entries = await loadJournal();
+  let alreadyPresent = 0;
+  let executed = 0;
+  let markedWithoutRunning = 0;
+
   for (const entry of entries) {
     const sql = await readMigrationSql(entry.tag);
     // drizzle hashes the raw, un-split SQL with SHA-256 (see
@@ -284,6 +311,7 @@ export async function runFreshInstall(client: MigrationClient): Promise<void> {
     const hash = createHash("sha256").update(sql).digest("hex");
 
     if (await alreadyApplied(client, hash)) {
+      alreadyPresent += 1;
       continue;
     }
 
@@ -294,6 +322,7 @@ export async function runFreshInstall(client: MigrationClient): Promise<void> {
       await recordApplied(client, hash, entry.when);
       // eslint-disable-next-line no-console
       console.log(`  ${entry.tag}: marked applied (legacy, not executed)`);
+      markedWithoutRunning += 1;
       continue;
     }
 
@@ -312,11 +341,24 @@ export async function runFreshInstall(client: MigrationClient): Promise<void> {
       await applyMigration(client, entry, rewritten, hash);
       // eslint-disable-next-line no-console
       console.log(`  ${entry.tag}: applied (fresh-install partition path)`);
+      executed += 1;
       continue;
     }
 
     await applyMigration(client, entry, sql, hash);
     // eslint-disable-next-line no-console
     console.log(`  ${entry.tag}: applied`);
+    executed += 1;
   }
+
+  // Say what actually happened. The routing line alone ("fresh install
+  // detected") on a database with a hundred applied migrations reads as
+  // "about to reapply everything", which is how two separate people
+  // concluded the detection had misfired — one of them resetting a dev
+  // Postgres volume over it. The counts make the no-op case obviously a
+  // no-op.
+  console.log(
+    `journal: ${entries.length} entries — ${alreadyPresent} already applied, ` +
+      `${executed} executed, ${markedWithoutRunning} marked without running`,
+  );
 }

@@ -7,6 +7,7 @@ import {
   hasMigrationHistory,
   isFreshInstallDatabase,
   runFreshInstall,
+  findUnjournaledMigrations,
 } from "./fresh-install";
 
 // =============================================================
@@ -107,11 +108,41 @@ async function runDrizzleMigrator(): Promise<void> {
 }
 
 async function run(): Promise<void> {
+  // A migration file the journal does not list is invisible to BOTH runners:
+  // the fresh one iterates the journal, and drizzle's migrator reads the same
+  // file. The file sits in the directory looking applied-by-inspection while
+  // the schema change never lands. Checked before either runner so the
+  // warning is the first thing an operator sees, not something buried under
+  // a hundred lines of migration output.
+  const unjournaled = await findUnjournaledMigrations();
+  if (unjournaled.length > 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `WARNING: ${unjournaled.length} migration file(s) are not in ` +
+        `meta/_journal.json and will NOT be applied by any runner:\n` +
+        unjournaled.map((t) => `  ${t}`).join("\n") +
+        `\nAdd them to the journal (pnpm db:migrate:generate, or by hand) ` +
+        `before deploying.`,
+    );
+  }
+
   const fresh = await needsFreshInstall();
 
   if (fresh) {
     // eslint-disable-next-line no-console
-    console.log("fresh install detected — applying the full journal");
+    console.log(
+      // Not "fresh install detected". This database may have a hundred
+      // migrations already applied — the fresh RUNNER is chosen because the
+      // database is stamped fresh-install mode, which is permanent by design:
+      // it must keep marking the TimescaleDB-era migrations applied without
+      // executing them, since the shipped image has no timescaledb.control.
+      //
+      // The old wording read as "about to reapply everything", which is how
+      // two separate people concluded the detection had misfired; one reset a
+      // dev Postgres volume over it. The runner prints a summary at the end.
+      "fresh-install runner (database is stamped fresh-install mode) — " +
+        "already-applied migrations are skipped by content hash",
+    );
     const pool = getPool();
     const client = await pool.connect();
     try {

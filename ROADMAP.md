@@ -838,13 +838,29 @@ else in the framework/provider-breadth dimension is done.
 - [ ] 3–5 pilot apps in production; millions of live events as reference
 - [ ] All CI green and required (including pre-existing red tests); testcontainers
       suite running in CI
-- [ ] `pnpm db:migrate`'s fresh-vs-upgrade detection misfired on a healthy
-      dev database (114 migrations, 291 tables applied) with "fresh install
-      detected," found 2026-09-03 while working §1's items and reproduced
-      with that batch's schema changes stashed, so it predates this plan.
-      Worked around by resetting the dev Postgres volume (dev only,
-      user-authorised); the detection heuristic itself needs investigation
-      before it fires against a database that isn't disposable.
+- [x] `pnpm db:migrate`'s "misfire" diagnosed and the real defect fixed
+      (2026-09-05). The routing was never wrong: a database created by the
+      fresh-install runner is stamped `__rovenue_install.mode = 'fresh'`
+      permanently, and that is by design — it must keep marking the
+      TimescaleDB-era migrations applied without executing them, because the
+      shipped image has no `timescaledb.control`. The runner already skips
+      already-applied migrations by content hash.
+
+      What was actually broken was what the runner SAID. "fresh install
+      detected — applying the full journal", printed against a database with
+      a hundred applied migrations and then followed by silence, reads as
+      "about to reapply everything" — which is how two separate people
+      concluded it had misfired, one of them resetting a dev Postgres volume
+      over it. It now names the reason for the routing and prints a summary:
+      `journal: 125 entries — 125 already applied, 0 executed, 0 marked
+      without running`, so a no-op is visibly a no-op.
+
+      Found while fixing it, and worse: a migration FILE not listed in
+      `meta/_journal.json` is invisible to both runners, so the schema change
+      silently never lands. That happened to 0122 during the Web SDK work and
+      surfaced only when a test harness rebuilt a database from the journal.
+      `db:migrate` now refuses to be quiet about it — it warns, by filename,
+      before either runner starts.
 
 ## 11. Docs & developer experience (65 → 95)
 
