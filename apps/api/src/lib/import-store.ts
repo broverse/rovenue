@@ -7,6 +7,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { IMPORT_STORAGE_PREFIX } from "@rovenue/shared";
+import { AUDIT_CHECKPOINT_STORAGE_PREFIX } from "@rovenue/shared/audit-chain";
 import { env } from "./env";
 
 // =============================================================
@@ -89,6 +90,25 @@ export function buildReportPartStorageKey(
 ): string {
   const padded = String(partNumber).padStart(4, "0");
   return `${IMPORT_STORAGE_PREFIX}/${projectId}/${jobId}/report.part-${padded}.ndjson`;
+}
+
+/**
+ * `{AUDIT_CHECKPOINT_STORAGE_PREFIX}/{projectId}/{checkpointId}.json` —
+ * a §9.2 Task 5 CHECKPOINT_TRUNCATE proof bundle, one object per
+ * checkpoint audit row. Lives in this SAME private bucket as the
+ * import uploads (ROADMAP §9.2 Task 5 ruling: a third bucket would add
+ * env vars and a MinIO policy for no isolation property this bucket
+ * doesn't already have), under a prefix distinct from
+ * `IMPORT_STORAGE_PREFIX` so the two namespaces never collide and
+ * `workers/import-retention.ts`'s job-row-driven sweep — which only
+ * ever deletes keys it read off an `import_jobs` row, never scans the
+ * bucket — can never reach into this one even by accident.
+ */
+export function buildAuditCheckpointStorageKey(
+  projectId: string,
+  checkpointId: string,
+): string {
+  return `${AUDIT_CHECKPOINT_STORAGE_PREFIX}/${projectId}/${checkpointId}.json`;
 }
 
 export function isStorageConfigured(): boolean {

@@ -5,7 +5,6 @@ import {
   RETENTION_MAX_BATCHES,
   RETENTION_SKIP_REASON_ERROR,
   RETENTION_SKIP_REASON_NO_WINDOW,
-  RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED,
   RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
   isPartitionDroppable,
   parsePartitionBoundExpr,
@@ -13,6 +12,10 @@ import {
   runRetentionSweep,
   type RetentionDeps,
 } from "./retention-sweep";
+import {
+  AUDIT_CHECKPOINT_SKIP_REASON_STORAGE_NOT_CONFIGURED,
+  type CheckpointTruncateOutcome,
+} from "../services/audit-retention/checkpoint";
 import {
   retentionRowsReclaimedTotal,
   retentionSweepBatchCapReachedTotal,
@@ -74,6 +77,17 @@ beforeEach(() => {
       partitionsDropped: [],
       rowsDropped: 0,
     })),
+    checkpointAndTruncate: vi.fn(
+      async (): Promise<CheckpointTruncateOutcome> => ({
+        kind: "checkpointed",
+        deleted: 0,
+        checkpointId: "cp_1",
+        bundleKey: "audit-checkpoints/prj_1/cp_1.json",
+        lastDeletedRowId: "al_1",
+        lastDeletedRowHash: null,
+        truncated: false,
+      }),
+    ),
   };
   vi.spyOn(retentionSweepSkippedTotal, "inc");
   vi.spyOn(retentionRowsReclaimedTotal, "inc");
@@ -109,28 +123,34 @@ describe("runRetentionSweep", () => {
     );
   });
 
-  it("still skips CHECKPOINT_TRUNCATE as not-implemented, but drives DROP_PARTITION through dropTablePartitionsOlderThan instead of deleteRetentionRows", async () => {
-    // audit_logs is CHECKPOINT_TRUNCATE (Task 5, not this task) and
-    // must still be a loud, counted skip. credit_ledger is
-    // DROP_PARTITION: its window resolves fine (tierDays=180 floored
-    // at 365 -> 365) and the lone project's requirement is fully
-    // resolved, so the drop goes ahead via the dedicated helper — a
-    // silent no-op OR a stray DELETE_ROWS call are both failure modes
-    // this test exists to catch.
+  it("drives CHECKPOINT_TRUNCATE through checkpointAndTruncate and DROP_PARTITION through dropTablePartitionsOlderThan, never deleteRetentionRows for either", async () => {
+    // audit_logs is CHECKPOINT_TRUNCATE (Task 5, this task): its
+    // window resolves fine (tierDays=30 from tier limits) so it must
+    // be dispatched to the dedicated checkpointAndTruncate dependency
+    // — a stray deleteRetentionRows call here would be silently
+    // truncating the hash chain with no proof bundle ever exported.
+    // credit_ledger is DROP_PARTITION: its window resolves fine
+    // (tierDays=180 floored at 365 -> 365) and the lone project's
+    // requirement is fully resolved, so the drop goes ahead via the
+    // dedicated helper — a silent no-op OR a stray DELETE_ROWS call
+    // are both failure modes this test exists to catch.
     await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
 
     const creditLedgerDeleteCalls = deps.deleteRetentionRows.mock.calls.filter(
       (call) => call[1] === "credit_ledger",
     );
     expect(creditLedgerDeleteCalls).toHaveLength(0);
-    expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
-      reason: RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED,
-      table: "audit_logs",
-    });
-    expect(retentionSweepSkippedTotal.inc).not.toHaveBeenCalledWith({
-      reason: RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED,
-      table: "credit_ledger",
-    });
+    const auditLogsDeleteCalls = deps.deleteRetentionRows.mock.calls.filter(
+      (call) => call[1] === "audit_logs",
+    );
+    expect(auditLogsDeleteCalls).toHaveLength(0);
+
+    const expectedAuditCutoff = new Date(NOW.getTime() - 30 * MS_PER_DAY);
+    expect(deps.checkpointAndTruncate).toHaveBeenCalledWith(
+      deps.db,
+      "prj_1",
+      expectedAuditCutoff,
+    );
 
     const expectedCutoff = new Date(NOW.getTime() - 365 * MS_PER_DAY);
     expect(deps.dropTablePartitionsOlderThan).toHaveBeenCalledWith(
@@ -141,6 +161,55 @@ describe("runRetentionSweep", () => {
       expect.any(Function),
       expect.any(Function),
     );
+  });
+
+  it("forwards a checkpointAndTruncate skip reason to the skipped metric and reclaims nothing", async () => {
+    // storage-not-configured is CHECKPOINT_TRUNCATE's own fail-closed
+    // skip reason (services/audit-retention/checkpoint.ts) — the sweep
+    // must forward it verbatim, never collapse it into a generic
+    // reason or (worse) treat it as rows reclaimed.
+    deps.checkpointAndTruncate.mockResolvedValue({
+      kind: "skipped",
+      reason: AUDIT_CHECKPOINT_SKIP_REASON_STORAGE_NOT_CONFIGURED,
+    });
+
+    const result = await runRetentionSweep(
+      NOW,
+      deps as unknown as RetentionDeps,
+    );
+
+    expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
+      reason: AUDIT_CHECKPOINT_SKIP_REASON_STORAGE_NOT_CONFIGURED,
+      table: "audit_logs",
+    });
+    expect(retentionRowsReclaimedTotal.inc).not.toHaveBeenCalledWith(
+      { table: "audit_logs" },
+      expect.anything(),
+    );
+    expect(result.rowsReclaimed).toBe(0);
+  });
+
+  it("counts a checkpointAndTruncate deletion as rows reclaimed", async () => {
+    deps.checkpointAndTruncate.mockResolvedValue({
+      kind: "checkpointed",
+      deleted: 42,
+      checkpointId: "cp_1",
+      bundleKey: "audit-checkpoints/prj_1/cp_1.json",
+      lastDeletedRowId: "al_1",
+      lastDeletedRowHash: "deadbeef",
+      truncated: false,
+    });
+
+    const result = await runRetentionSweep(
+      NOW,
+      deps as unknown as RetentionDeps,
+    );
+
+    expect(retentionRowsReclaimedTotal.inc).toHaveBeenCalledWith(
+      { table: "audit_logs" },
+      42,
+    );
+    expect(result.rowsReclaimed).toBeGreaterThanOrEqual(42);
   });
 
   it("blocks a DROP_PARTITION drop when even one project's window is unresolved", async () => {
@@ -451,9 +520,9 @@ describe("runRetentionSweep", () => {
   it("never lets a no-tier override fall below the policy floor", () => {
     // An override of 1 day on audit_logs still resolves to the 30-day
     // floor. Without a tier there is nothing else holding the line.
-    // audit_logs is CHECKPOINT_TRUNCATE (Task 6, not this task), so the
-    // window resolution itself — not a delete call — is what this test
-    // pins.
+    // Window resolution is independent of strategy dispatch (see
+    // resolveProjectPolicyWindowDays), so the window resolution itself
+    // — not a checkpointAndTruncate call — is what this test pins.
     const resolution = resolveProjectPolicyWindowDays(
       auditLogsPolicy,
       false,

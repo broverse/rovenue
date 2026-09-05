@@ -6,6 +6,10 @@ import {
   type RetentionPolicy,
 } from "@rovenue/shared/retention";
 import { audit, AUDIT_ACTION_RETENTION_PARTITION_DROPPED } from "../lib/audit";
+import {
+  checkpointAndTruncate,
+  type CheckpointTruncateOutcome,
+} from "../services/audit-retention/checkpoint";
 import { logger } from "../lib/logger";
 import {
   retentionRowsReclaimedTotal,
@@ -28,11 +32,12 @@ import {
 // a global, unscoped delete would mean one project's resolved window,
 // however short, destroys every project's rows in that table).
 //
-// Task 3 implemented ONLY the `DELETE_ROWS` strategy. Task 4 (this
-// one) fills in `DROP_PARTITION` for `credit_ledger` and
-// `revenue_events`. `CHECKPOINT_TRUNCATE` (`audit_logs`) is still
-// skipped loudly (a counted skip, not a silent no-op) — Task 5 fills
-// that in.
+// Task 3 implemented ONLY the `DELETE_ROWS` strategy. Task 4 filled in
+// `DROP_PARTITION` for `credit_ledger` and `revenue_events`. Task 5
+// (this one) fills in `CHECKPOINT_TRUNCATE` for `audit_logs` — see
+// `services/audit-retention/checkpoint.ts` for why an append-only hash
+// chain can't just be age-deleted like the other two strategies, and
+// for the export-store-delete-checkpoint ordering that protects it.
 //
 // --- DROP_PARTITION: why it cannot reuse the per-project loop below ---
 //
@@ -685,6 +690,11 @@ export interface RetentionDeps {
     writeAuditRow: WriteRetentionPartitionAuditRow,
     countProjectRows: CountProjectPartitionRows,
   ) => Promise<DropTablePartitionsResult>;
+  checkpointAndTruncate: (
+    db: Db,
+    projectId: string,
+    cutoff: Date,
+  ) => Promise<CheckpointTruncateOutcome>;
 }
 
 export const defaultDeps: RetentionDeps = {
@@ -694,6 +704,7 @@ export const defaultDeps: RetentionDeps = {
   listRetentionOverrides: drizzle.retentionOverrideRepo.listRetentionOverrides,
   deleteRetentionRows: drizzle.retentionRowsRepo.deleteRetentionRowsOlderThan,
   dropTablePartitionsOlderThan,
+  checkpointAndTruncate,
 };
 
 type WindowSkipReason =
@@ -756,8 +767,9 @@ export function resolveProjectPolicyWindowDays(
  * the same way, but the drop itself is deferred until every project
  * has been considered — see the module doc comment above for why a
  * per-project window cannot, alone, authorise dropping a partition
- * every project shares. `CHECKPOINT_TRUNCATE` policies are still
- * counted as skipped until Task 5 lands.
+ * every project shares. `CHECKPOINT_TRUNCATE` policies (`audit_logs`)
+ * act immediately per project, like `DELETE_ROWS` — see
+ * `services/audit-retention/checkpoint.ts`.
  */
 export async function runRetentionSweep(
   now: Date,
@@ -882,10 +894,40 @@ export async function runRetentionSweep(
           continue;
         }
 
+        if (policy.strategy === "CHECKPOINT_TRUNCATE") {
+          // Scoped entirely to THIS project's own audit_logs rows — a
+          // hash chain has no shared-partition problem (every row
+          // already belongs to exactly one project), so this acts
+          // immediately per project exactly like DELETE_ROWS does,
+          // rather than deferring like DROP_PARTITION. See
+          // services/audit-retention/checkpoint.ts for the
+          // export-store-delete-checkpoint ordering.
+          const cutoff = new Date(now.getTime() - resolution.days * MS_PER_DAY);
+          const outcome = await deps.checkpointAndTruncate(
+            deps.db,
+            project.projectId,
+            cutoff,
+          );
+          if (outcome.kind === "skipped") {
+            skipped += 1;
+            retentionSweepSkippedTotal.inc({
+              reason: outcome.reason,
+              table: policy.table,
+            });
+          } else {
+            rowsReclaimed += outcome.deleted;
+            retentionRowsReclaimedTotal.inc(
+              { table: policy.table },
+              outcome.deleted,
+            );
+          }
+          continue;
+        }
+
         if (policy.strategy !== "DELETE_ROWS") {
-          // Not silently ignored: CHECKPOINT_TRUNCATE is real,
-          // actionable work this task deliberately does not implement.
-          // Task 5 fills it in.
+          // Not silently ignored: a future strategy added to the
+          // registry without corresponding sweep logic still counts
+          // as a skip, never a silent no-op.
           skipped += 1;
           retentionSweepSkippedTotal.inc({
             reason: RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED,

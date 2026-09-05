@@ -190,7 +190,19 @@ export type AuditAction =
   // own chain — not one global row — which is also why this action
   // needed no `projectId`-nullability change here at all. See
   // AUDIT_ACTION_RETENTION_PARTITION_DROPPED.
-  | typeof AUDIT_ACTION_RETENTION_PARTITION_DROPPED;
+  | typeof AUDIT_ACTION_RETENTION_PARTITION_DROPPED
+  // --- retention sweep CHECKPOINT_TRUNCATE strategy (workers/retention-sweep.ts,
+  // services/audit-retention/checkpoint.ts) ---
+  // Written AFTER the deleted segment's proof bundle has been stored
+  // and its rows deleted, never before: this row's `after` is the only
+  // durable record of WHERE the bundle went and WHICH row's hash the
+  // surviving chain now chains from. Unlike
+  // AUDIT_ACTION_RETENTION_PARTITION_DROPPED, this action is scoped to
+  // exactly one project's own audit_logs rows (a hash chain has no
+  // shared-partition problem — every row already belongs to exactly
+  // one project), so one of these is written per (project, sweep run),
+  // never fanned out across projects.
+  | typeof AUDIT_ACTION_RETENTION_CHECKPOINT;
 
 // Exported (not just inlined like this file's other action literals)
 // because retention-sweep.ts lives in a different subsystem and needs
@@ -198,6 +210,12 @@ export type AuditAction =
 // retyping the literal at its own call site.
 export const AUDIT_ACTION_RETENTION_PARTITION_DROPPED =
   "retention.partition_dropped" as const;
+
+// Exported for the same reason as AUDIT_ACTION_RETENTION_PARTITION_DROPPED
+// above — services/audit-retention/checkpoint.ts needs a type-checked
+// reference rather than retyping the literal at its call site.
+export const AUDIT_ACTION_RETENTION_CHECKPOINT =
+  "retention.audit_checkpointed" as const;
 
 export type AuditResource =
   | "audience"
@@ -233,7 +251,13 @@ export type AuditResource =
   // project sharing it, so the sweep writes one of these into EACH
   // affected project's own chain (see workers/retention-sweep.ts).
   // `resourceId` is the partition's table name.
-  | "retention_partition";
+  | "retention_partition"
+  // One CHECKPOINT_TRUNCATE checkpoint row per (project, sweep run).
+  // `resourceId` is the checkpoint's own id — the same id the exported
+  // proof bundle's storage key is built from (see
+  // services/audit-retention/checkpoint.ts) — so an operator can go
+  // straight from the audit row to the bundle it describes.
+  | "retention_checkpoint";
 
 export interface AuditEntry {
   projectId: string;

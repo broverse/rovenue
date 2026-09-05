@@ -2,7 +2,11 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
-import { AUDIT_CHAIN_FORMAT_V1 } from "@rovenue/shared/audit-chain";
+import {
+  AUDIT_PROOF_MAX_ENTRIES,
+  assembleAuditProofBundle,
+  type AuditProofBundle,
+} from "@rovenue/shared/audit-chain";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
@@ -30,34 +34,16 @@ const MAX_LIMIT = 200;
 // `rowHash` offline with no Rovenue code. Capped so an export
 // over a busy project's whole history can't be used as a
 // denial-of-service vector.
-export const AUDIT_PROOF_MAX_ENTRIES = 5000;
-
-type AuditProofRow = Awaited<
-  ReturnType<typeof drizzle.auditLogRepo.listAuditProofRows>
->[number];
-
-export interface AuditProofBundle {
-  formatVersion: string;
-  projectId: string;
-  exportedAt: string;
-  // Echoes the validated `from`/`to` query values (ISO strings, `null`
-  // when the caller passed none). `origin` alone cannot distinguish a
-  // legitimate ranged export from one whose head rows were deleted -- the
-  // server derives `origin` from `entries[0].prevHash`, so it is
-  // tautologically consistent with `entries` no matter which case
-  // produced them. `range` at least tells a reader THIS bundle was
-  // requested as a slice, which is why the check on the other side isn't
-  // "is `origin` present" in isolation.
-  range: { from: string | null; to: string | null };
-  origin: { rowHash: string } | null;
-  tip: { rowHash: string | null; createdAt: string } | null;
-  // True when the read hit AUDIT_PROOF_MAX_ENTRIES: at exactly the cap,
-  // a bundle is otherwise byte-indistinguishable from a complete export,
-  // and a verifier would wrongly declare a partial segment the whole
-  // history. Derived, never trusted from the caller.
-  truncated: boolean;
-  entries: AuditProofRow[];
-}
+//
+// `AUDIT_PROOF_MAX_ENTRIES` and the bundle shape/assembly
+// (`assembleAuditProofBundle`) both now live in
+// `@rovenue/shared/audit-chain` — re-exported here (the cap; not the
+// assembler) so this route's own module keeps its historical public
+// surface — because the CHECKPOINT_TRUNCATE retention strategy
+// (`apps/api/src/services/audit-retention/checkpoint.ts`, ROADMAP §9.2
+// Task 5) is a SECOND producer of this exact bundle shape and must
+// never drift from what this endpoint hands out.
+export { AUDIT_PROOF_MAX_ENTRIES };
 
 const auditProofQuerySchema = z.object({
   // `{ offset: true }` so `+03:00`-style offsets validate — the sibling
@@ -144,31 +130,15 @@ export const auditLogsRoute = new Hono()
       limit: AUDIT_PROOF_MAX_ENTRIES,
     });
 
-    const firstEntry = entries[0];
-    const lastEntry = entries[entries.length - 1];
+    const bundle: AuditProofBundle = assembleAuditProofBundle({
+      projectId,
+      entries,
+      from: from ?? null,
+      to: to ?? null,
+      maxEntries: AUDIT_PROOF_MAX_ENTRIES,
+    });
 
-    // `!= null` (not truthiness) states the actual intent: an absent
-    // prevHash is what makes origin null, not a falsy string. Hashes are
-    // 64 hex chars so an empty string can't occur in practice, but the
-    // check should say what it means.
-    const origin: AuditProofBundle["origin"] =
-      firstEntry?.prevHash != null ? { rowHash: firstEntry.prevHash } : null;
-    const tip: AuditProofBundle["tip"] = lastEntry
-      ? { rowHash: lastEntry.rowHash, createdAt: lastEntry.createdAt }
-      : null;
-
-    return c.json(
-      ok<AuditProofBundle>({
-        formatVersion: AUDIT_CHAIN_FORMAT_V1,
-        projectId,
-        exportedAt: new Date().toISOString(),
-        range: { from: from ?? null, to: to ?? null },
-        origin,
-        tip,
-        truncated: entries.length === AUDIT_PROOF_MAX_ENTRIES,
-        entries,
-      }),
-    );
+    return c.json(ok<AuditProofBundle>(bundle));
   })
   .get("/:id", async (c) => {
     const id = c.req.param("id");
