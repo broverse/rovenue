@@ -869,6 +869,13 @@
       "when": 1788820800000,
       "tag": "0123_integration_connections_purchase_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1788820860000,
+      "tag": "0124_heavy_rictor",
+      "breakpoints": true
     }
   ]
 }
