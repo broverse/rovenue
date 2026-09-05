@@ -582,7 +582,10 @@ existing list route is."
 **Interfaces:**
 - Consumes: `canonicalJSON`, `hashAuditRow`, `AUDIT_CHAIN_FORMAT_V1`,
   `AuditChainPayload` from `@rovenue/shared/audit-chain` (Task 1).
-- Produces: `export interface VerifyResult { ok: boolean; entriesChecked: number; truncated: boolean; failure?: { index: number; entryId: string; reason: "ROW_HASH_MISMATCH" | "PREV_HASH_MISMATCH" | "UNHASHED_ROW" } }`.
+- Produces: `export interface VerifyResult { ok: boolean; entriesChecked: number; truncated: boolean; failure?: { index: number | null; entryId: string | null; reason: "ROW_HASH_MISMATCH" | "PREV_HASH_MISMATCH" | "UNHASHED_ROW" | "TIP_MISMATCH" | "MALFORMED_BUNDLE" | "UNSUPPORTED_FORMAT_VERSION" } }`.
+  EVERY `ok: false` carries a `failure` with a reason. A verifier whose whole job
+  is to say what is wrong must never answer "not ok" and nothing else. `index` and
+  `entryId` are null for the failures that are not about a particular entry.
   `truncated` mirrors the bundle's own flag. A truncated bundle whose entries are
   intact is still `ok: true` — truncation is a legitimate export state, not
   tampering — but a programmatic consumer must not be able to read `ok` without
@@ -605,6 +608,28 @@ bundle declares an `origin`, the first entry's `prevHash` must equal
 `origin.rowHash`; if `origin` is null, the first entry's `prevHash` must be null.
 Any entry with a null or missing `rowHash` inside the range is `UNHASHED_ROW` — a
 hard error, never a skip.
+
+**Shape rules, equally load-bearing.** The verifier takes `unknown` from a file an
+auditor may have edited, so a malformed bundle is a VERDICT, never a thrown
+TypeError and never a pass:
+
+- `entries` absent, null, or not an array is `MALFORMED_BUNDLE`. It must NOT
+  default to `[]`. Substituting an empty array turns the single easiest tamper on
+  an audit bundle — delete the rows — into a clean attestation reading
+  "0 entries verified", which is the worst possible output this tool can produce.
+- `origin` present but without a string `rowHash` is `MALFORMED_BUNDLE`, not a
+  mismatch. Never coerce with `String(...)`: that turns `origin: {}` into the
+  literal `"undefined"` and compares it as if it were a hash.
+- An unknown `formatVersion` is `UNSUPPORTED_FORMAT_VERSION`.
+
+**Tip rule.** The tail must be anchored: if `tip` is non-null, the LAST entry's
+`rowHash` must equal `tip.rowHash`; `tip` must be null exactly when `entries` is
+empty. Otherwise deleting rows from the END of a bundle passes — the mid-chain
+`prevHash` walk cannot see a missing tail, and closing that hole is the entire
+reason `tip` is in the format. Mismatch is `TIP_MISMATCH`.
+
+Each of these needs its own test, and each test must be red-checked against the
+mutation it exists to catch.
 
 - [ ] **Step 1: Write the failing test**
 
