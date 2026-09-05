@@ -47,7 +47,13 @@ Measured against the running database and the shipped code on 2026-09-05. Do not
 - Produces:
   - `export type RetentionStrategy = "DELETE_ROWS" | "DROP_PARTITION" | "CHECKPOINT_TRUNCATE";`
   - `export type RetentionTierField = "retentionDays" | "auditLogDays";`
-  - `export interface RetentionPolicy { table: string; timestampColumn: string; strategy: RetentionStrategy; tierLimitField: RetentionTierField; minimumDays: number; }`
+  - `export interface RetentionPolicy { table: string; timestampColumn: string; strategy: RetentionStrategy; tierLimitField: RetentionTierField; minimumDays: number; terminalStatuses?: readonly string[]; }`
+  - `terminalStatuses`, when present, names a `status` column's terminal values, and
+    a `DELETE_ROWS` sweep may only expire rows whose status is one of them. A table
+    whose rows have a lifecycle must not lose a row that is still deliverable merely
+    because it is old. `import-retention` already models this with
+    `TERMINAL_IMPORT_JOB_STATUSES` — read it and match the idea rather than
+    inventing a second one.
   - `export const RETENTION_POLICIES: readonly RetentionPolicy[]`
   - `export function findRetentionPolicy(table: string): RetentionPolicy | undefined`
   - `export function resolveRetentionWindowDays(args: { policy: RetentionPolicy; tierDays: number; projectOverrideDays: number | null }): number`
@@ -144,6 +150,14 @@ describe("RETENTION_POLICIES", () => {
     }
   });
 
+  it("restricts the lifecycle tables to terminal statuses", () => {
+    // outgoing_webhooks rows are still owed until they reach a terminal
+    // state. A policy that expires them by age alone would delete
+    // undelivered webhooks, so the registry must carry the restriction.
+    const outgoing = findRetentionPolicy("outgoing_webhooks");
+    expect(outgoing?.terminalStatuses?.length).toBeGreaterThan(0);
+  });
+
   it("finds a policy by table and returns undefined for an unknown one", () => {
     expect(findRetentionPolicy("audit_logs")?.strategy).toBe(
       "CHECKPOINT_TRUNCATE",
@@ -211,6 +225,12 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     strategy: "DELETE_ROWS",
     tierLimitField: "retentionDays",
     minimumDays: 7,
+    // Read the status enum off the schema and list only the terminal
+    // values here. Nothing deletes this table's rows today and its
+    // partitions are never dropped, so it grows without bound — but a
+    // PENDING delivery that is merely old is still owed, and age alone
+    // must not expire it.
+    terminalStatuses: [/* fill from the schema */],
   },
   {
     table: "webhook_events",
@@ -410,6 +430,12 @@ describe("runRetentionSweep", () => {
   });
 
   it("stops at the batch cap rather than looping forever", async () => {});
+
+  it("only expires terminal rows for a policy with terminalStatuses", async () => {
+    // Assert the delete is asked to restrict on status. Red-check it by
+    // dropping the status restriction and watching this fail — without
+    // that, an old-but-undelivered webhook is destroyed silently.
+  });
 
   it("does nothing for a project whose tier row is missing", async () => {
     // Assert it skips with a reason rather than falling back to a
