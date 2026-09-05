@@ -68,7 +68,9 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
       findSubscriberById: vi.fn(async (_db: unknown, id: string) =>
         dbMock.subscriber.findUnique({ where: { id } }),
       ),
-      listSubscribers: vi.fn(async () => []),
+      listSubscribers: vi.fn(
+        async (_db: unknown, _args: Record<string, unknown>) => [],
+      ),
       countActiveSubscribers: vi.fn(async () => 0),
     },
     projectRepo: {

@@ -20,7 +20,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Route-level mocks mirror charts-series.test.ts: mount the inner route
 // with a `user` shim, mock the auth/capability gates and the repository.
 
-const auditMock = vi.hoisted(() => vi.fn(async () => undefined));
+const auditMock = vi.hoisted(() =>
+  vi.fn(async (_entry: Record<string, unknown>, _tx?: unknown) => undefined),
+);
 
 vi.mock("../src/lib/audit", () => ({
   audit: auditMock,
@@ -41,7 +43,9 @@ vi.mock("../src/lib/capabilities", () => ({
 
 const getCommissionRateMock = vi.hoisted(() => vi.fn());
 const upsertCommissionRateMock = vi.hoisted(() => vi.fn());
-const deleteCommissionRateMock = vi.hoisted(() => vi.fn(async () => undefined));
+const deleteCommissionRateMock = vi.hoisted(() =>
+  vi.fn(async (_db: unknown, _projectId: string, _store: string) => undefined),
+);
 const listCommissionRatesMock = vi.hoisted(() => vi.fn(async () => []));
 
 // The tx handed to the callback — the route passes it to BOTH the repo

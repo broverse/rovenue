@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 const auditMock = vi.hoisted(() => ({
-  audit: vi.fn(async () => undefined),
+  audit: vi.fn(async (_entry: Record<string, unknown>, _tx?: unknown) => undefined),
   extractRequestContext: vi.fn(() => ({ ipAddress: null, userAgent: null })),
   redactCredentials: vi.fn((obj: Record<string, unknown> | null | undefined) => {
     if (!obj) return null;

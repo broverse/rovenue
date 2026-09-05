@@ -43,7 +43,11 @@ const {
     },
     experimentAssignment: {
       findMany: vi.fn(async () => []),
-      createMany: vi.fn(async () => ({ count: 0 })),
+      createMany: vi.fn(
+        async (_args: { data: Array<Record<string, unknown>>; skipDuplicates?: boolean }) => ({
+          count: 0,
+        }),
+      ),
       update: vi.fn(async (args: any) => args.data),
     },
     productGroup: {

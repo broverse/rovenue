@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 const auditMock = vi.hoisted(() => ({
-  audit: vi.fn(async () => undefined),
+  audit: vi.fn(async (_entry: Record<string, unknown>, _tx?: unknown) => undefined),
   extractRequestContext: vi.fn(() => ({ ipAddress: null, userAgent: null })),
   redactCredentials: vi.fn((obj: Record<string, unknown> | null | undefined) => {
     if (!obj) return null;
@@ -66,7 +66,14 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
       // Write paths — the route hands these the tx handle from
       // drizzle.db.transaction. Test assertions pin the call args
       // directly on these spies.
-      writeProjectCredential: vi.fn(async () => undefined),
+      writeProjectCredential: vi.fn(
+        async (
+          _db: unknown,
+          _projectId: string,
+          _store: "apple" | "google",
+          _encrypted: unknown,
+        ) => undefined,
+      ),
       clearProjectCredential: vi.fn(async () => undefined),
     },
     shadowRead: vi.fn(

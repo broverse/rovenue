@@ -68,8 +68,12 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
       findPlacementByIdentifier: vi.fn(async () => null),
     },
     paywallRepo: {
-      findPaywallById: vi.fn(async () => null),
-      findPaywallsByIds: vi.fn(async () => []),
+      findPaywallById: vi.fn(
+        async (_db: unknown, _projectId: string, _id: string) => null,
+      ),
+      findPaywallsByIds: vi.fn(
+        async (_db: unknown, _projectId: string, _ids: string[]) => [],
+      ),
     },
     audienceRepo: {
       findByIds: vi.fn(async () => []),
