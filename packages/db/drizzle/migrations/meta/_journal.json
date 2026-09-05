@@ -855,6 +855,13 @@
       "when": 1788648000000,
       "tag": "0121_revenue_non_renewing_purchase",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1788590009154,
+      "tag": "0123_leaderboard_seasons",
+      "breakpoints": true
     }
   ]
 }
