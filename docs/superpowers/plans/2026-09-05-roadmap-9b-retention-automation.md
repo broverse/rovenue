@@ -402,6 +402,31 @@ Batch size and cap come from `deleteWebhookEventsOlderThan` (`packages/db/src/dr
 
 **Per-item isolation is mandatory.** The sweep iterates projects × policies. One project's failure must not abort the rest: wrap each unit in its own `try/catch`, increment `retentionSweepSkippedTotal` with a `reason` label, log with `projectId` and `table`. `closeDueSeasons` in `leaderboard-scheduler.ts` is the reference, and it exists because a sibling function lacking it aborted every remaining item on one bad row.
 
+**A project's tier is optional, and that decides the shape of this task.**
+`tier` and `cycle` live on `billing_subscriptions`, not on `projects`, and billing
+is cloud-only — `HOST_MODE` defaults to `self`. On the development database that
+is 34 billing rows against 407 projects, so a tier-driven-only sweep would be
+inert for roughly nine projects in ten, and for every self-hosted deployment by
+construction. Three rules follow:
+
+1. A project WITH a billing subscription resolves normally: tier window, override
+   clamped down, floor applied.
+2. A project WITHOUT one, but WITH an explicit override for that table, uses the
+   override clamped by the FLOOR ONLY. There is no tier to clamp down to, and an
+   operator who wrote the override is the authority. This is how a self-hosted
+   deployment opts in.
+3. A project with neither is skipped with `reason: "no-window"`. It is NOT
+   defaulted to the free tier — free is the most aggressive rung on the ladder
+   (30 days, 7 for audit logs), so defaulting to it would silently delete a
+   self-hoster's audit history a week after they installed. Retaining too much is
+   recoverable; deleting what nobody asked to delete is not.
+
+`resolveRetentionWindowDays` takes a required `tierDays: number`, so case 2 cannot
+call it as-is. Do NOT widen that signature to accept null — its clamping rule is
+the one thing the whole feature rests on and it is now pinned by fifteen tests.
+Resolve the no-tier case in the sweep, applying the policy floor with
+`Math.max(policy.minimumDays, overrideDays)`, and unit-test all three rules.
+
 **This task implements ONLY `DELETE_ROWS`.** A `DROP_PARTITION` or `CHECKPOINT_TRUNCATE` policy must be skipped with `reason: "strategy-not-implemented"` and a counter increment — not silently ignored, and not half-implemented. Tasks 4 and 5 fill them in.
 
 - [ ] **Step 1: Write the failing test**
@@ -437,10 +462,21 @@ describe("runRetentionSweep", () => {
     // that, an old-but-undelivered webhook is destroyed silently.
   });
 
-  it("does nothing for a project whose tier row is missing", async () => {
-    // Assert it skips with a reason rather than falling back to a
-    // default window. Guessing a window for a project whose tier cannot
-    // be read is how data gets deleted that should not be.
+  it("uses the override alone when a project has no billing tier", async () => {
+    // The self-hosted case, and the majority case on real data. Assert
+    // the delete runs with the override clamped by the FLOOR, not
+    // skipped and not clamped against a tier that does not exist.
+  });
+
+  it("skips a project with neither a tier nor an override", async () => {
+    // Assert reason "no-window", and assert NO delete was attempted.
+    // Falling back to the free tier here would delete a self-hoster's
+    // audit history seven days after they installed.
+  });
+
+  it("never lets a no-tier override fall below the policy floor", async () => {
+    // An override of 1 day on audit_logs still resolves to the 30-day
+    // floor. Without a tier there is nothing else holding the line.
   });
 });
 ```
