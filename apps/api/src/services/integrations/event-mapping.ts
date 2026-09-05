@@ -38,6 +38,12 @@ const ANALYTICS_DEFAULT_EVENT_NAMES: Partial<Record<RovenueEventKey, string>> = 
   "revenue.TRIAL_CONVERSION": "trial_conversion",
   "revenue.RENEWAL": "renewal",
   "revenue.CREDIT_PURCHASE": "credit_purchase",
+  // Task 9 (2026-09-04): AMPLITUDE/MIXPANEL/ONESIGNAL have no reserved
+  // vocabulary at all (same as every other key in this table), so these
+  // are free-form snake_case names in the same style as their neighbours —
+  // not a vendor citation, since there is no vendor vocabulary to cite.
+  "revenue.NON_RENEWING_PURCHASE": "non_renewing_purchase",
+  "revenue.REACTIVATION": "reactivation",
   "revenue.REFUND": "refund",
   "revenue.CANCELLATION": "cancellation",
   "subscription.trial.started": "trial_started",
@@ -208,6 +214,15 @@ const GA4_CANCELLATION_EVENT = `${ROVENUE_CUSTOM_EVENT_PREFIX}cancellation`;
 // "subscription" word) instead, verified to stay under the limit by a
 // dedicated static-config test in singular.test.ts.
 const SINGULAR_CANCELLATION_EVENT = "rovenue_cancellation";
+// revenue.REACTIVATION (Task 9, 2026-09-04) — Singular's FULL standard-event
+// list (see the SINGULAR header comment above) has no reactivation/win-back
+// event, so this follows SINGULAR_CANCELLATION_EVENT's precedent: a
+// Rovenue-namespaced custom name rather than `rovenueCustomEventName`'s
+// output ("rovenue_revenue_REACTIVATION", 28 chars — actually under the cap
+// here too, but the double "revenue" reads oddly and this stays consistent
+// with the hand-picked table's shorter, "subscription"-word-dropping
+// style). 20 chars, comfortably inside the 32-ASCII `n` cap.
+const SINGULAR_REACTIVATION_EVENT = "rovenue_reactivation";
 const SINGULAR_LIFECYCLE_EVENT_NAMES: Readonly<
   Record<(typeof SUBSCRIPTION_BRIDGE_EVENT_KEYS)[number], string>
 > = {
@@ -225,6 +240,109 @@ const SINGULAR_LIFECYCLE_EVENT_NAMES: Readonly<
   "subscription.offer_redeemed": "rovenue_offer_redeemed",
 };
 
+// ---------------------------------------------------------------------------
+// Task 9 (2026-09-04) — publishing revenue.NON_RENEWING_PURCHASE and
+// revenue.REACTIVATION as public event keys. Every (provider, key) pair
+// below got a real decision; this block is the citation trail for the ones
+// not already covered by an inline comment at the table entry itself.
+// ---------------------------------------------------------------------------
+//
+// META_CAPI / TIKTOK_EVENTS — revenue.NON_RENEWING_PURCHASE maps to their
+// purchase-shaped event, NOT "Subscribe": Meta's own Standard Events
+// reference (developers.facebook.com/docs/meta-pixel/reference, fetched
+// 2026-09-05) describes `Purchase` as "When a purchase is made or checkout
+// flow is completed" — genuinely purchase-shaped, distinct from `Subscribe`
+// ("applies to start a paid subscription"). TikTok's own Events API uses a
+// separate app-events vocabulary from its web-pixel Standard Events page
+// (ads.tiktok.com/help/article/standard-events-parameters, fetched
+// 2026-09-05, lists only the web-pixel set and does not include
+// `CompletePayment`/`Subscribe`/`StartTrial` at all); `CompletePayment` is
+// TikTok's own documented (now-legacy, aliased to `Purchase`, but still
+// live through 2027) app purchase event and is reused here for consistency
+// with the CREDIT_PURCHASE entry already in this same table, rather than
+// introducing a second one-time-purchase name. revenue.REACTIVATION is
+// NOT added to either provider: both hand-pick a narrow `eventCatalog`
+// (meta-capi.ts / tiktok-events.ts) that never advertises subscription-
+// lifecycle-shaped signals, and a lifecycle event masquerading as a
+// conversion would corrupt ad-platform optimization — so this is not a
+// declared omission (an omission is for a key the provider DOES advertise;
+// see event-mapping.catalog-coverage.test.ts), it is simply not offered.
+//
+// APPSFLYER — verified against AppsFlyer's own iOS SDK reference
+// (dev.appsflyer.com/hc/docs/in-app-events-ios, fetched 2026-09-05; the
+// Zendesk-hosted support.appsflyer.com overview 403'd every direct fetch
+// from this environment, the same bot-wall shape AIRBRIDGE's/SINGULAR's
+// sourcing notes describe, so the dev-portal SDK reference — a first-party
+// AppsFlyer property — was used instead). Its full predefined-event-name
+// table has no distinct "non-renewing purchase" event: `af_purchase` is
+// the vendor's own sole standard Purchase event (its own docs note
+// `validateReceipt` auto-generates `af_purchase` for a validated IAP), so
+// it is reused rather than left unmapped — this is safe against the same
+// invariant the ad platforms are held to, because `af_purchase` is
+// AppsFlyer's Purchase-shaped event, not its `af_subscribe`. For
+// revenue.REACTIVATION, the one name that LOOKS close — `af_re_engage`
+// — is documented purely as a re-engagement-CAMPAIGN-attribution event
+// (fired when a user returns via a retargeting ad click), a different
+// concept from a subscriber's billing state resuming; reusing it would
+// misattribute reactivation revenue as ad-driven re-engagement and could
+// corrupt AppsFlyer's own re-engagement campaign reporting. No genuine
+// vendor event exists for this meaning, so — breaking from this table's
+// own af_-prefixed convention on purpose, to avoid presenting a
+// Rovenue-invented name as if AppsFlyer defined it — it gets the same
+// Rovenue-namespaced custom-event convention FIREBASE_GA4/BRAZE/ITERABLE/
+// AIRBRIDGE use below via `rovenueCustomEventName`.
+//
+// FIREBASE_GA4 — revenue.NON_RENEWING_PURCHASE reuses GA4_PURCHASE_EVENT
+// ("purchase", Google's own recommended ecommerce event, already the
+// vendor name for every other revenue.* key in this table): a one-time IAP
+// or Stripe package is exactly the transaction GA4's `purchase` event
+// models. revenue.REACTIVATION has no GA4 recommended-event equivalent, so
+// it takes the same `rovenueCustomEventName` namespaced-custom-event path
+// every subscription-lifecycle key already does here.
+//
+// BRAZE / ITERABLE — both revenue keys ride the SAME generic revenue-key
+// path their existing revenue.* entries do (see each provider's mapEvent:
+// BRAZE's `isRevenue` branch onto `purchases`, ITERABLE's `isRevenue`
+// branch onto `commerce/trackPurchase`), so no new vendor lookup applies —
+// this is a structural, not a vendor-name, decision. BRAZE maps both new
+// keys to themselves (identity — the value is only ever read back as a
+// tag, never sent as a Braze event name, per the existing BRAZE header
+// comment). ITERABLE reuses ANALYTICS_DEFAULT_EVENT_NAMES's free-form
+// names for both, the same choice already made for its other revenue.*
+// entries (INITIAL/RENEWAL/CREDIT_PURCHASE/CANCELLATION).
+//
+// AIRBRIDGE — revenue.NON_RENEWING_PURCHASE joins RENEWAL/CREDIT_PURCHASE
+// on "airbridge.ecommerce.order.completed": the AIRBRIDGE header comment's
+// own rationale for that event ("a repeat charge or one-time IAP is a
+// completed order, not a new subscribe action") already describes a
+// non-renewing one-time purchase, verbatim, so this is the same decision,
+// not a new one. revenue.REACTIVATION has no standard Airbridge event
+// (its full standard-events table, cited above, covers only the 7 keys
+// enumerated in that comment) — since AIRBRIDGE's `eventCatalog` is
+// STANDARD_PROVIDER_EVENT_KEYS wholesale, it WILL advertise this key, so
+// leaving it unmapped is not an option; it takes the `rovenueCustomEventName`
+// path.
+//
+// SINGULAR — revenue.NON_RENEWING_PURCHASE joins RENEWAL/CREDIT_PURCHASE on
+// "sng_ecommerce_purchase" for the identical reason (Singular's own doc
+// note: "User makes a purchase/order... other names... order success,
+// order confirmed, or payment success" — a one-time IAP fits this
+// unchanged). revenue.REACTIVATION gets SINGULAR_REACTIVATION_EVENT (see
+// its definition above) rather than `rovenueCustomEventName`'s output,
+// verified against the 32-ASCII cap by the same static-config test in
+// singular.test.ts that already pins every other entry here.
+//
+// SLACK / DISCORD — NOT hand-edited: both tables are
+// `Object.fromEntries(ROVENUE_EVENT_KEYS.map(...))` below, so adding a key
+// to ROVENUE_EVENT_KEYS (@rovenue/shared) is the only change either needs;
+// confirmed by event-mapping.catalog-coverage.test.ts and
+// integrations.test.ts rather than asserted here.
+//
+// ADJUST / CUSTOM_WEBHOOK — no table entry for either key, by the same
+// standing rule as every other key: ADJUST has no vendor-wide token
+// vocabulary to default to (IDENTITY_MAPPED_PROVIDERS in the coverage
+// test), and CUSTOM_WEBHOOK passes the Rovenue key through verbatim.
+
 export const DEFAULT_EVENT_MAPPING: Readonly<
   Record<IntegrationProviderId, Readonly<Partial<Record<RovenueEventKey, string>>>>
 > = {
@@ -233,6 +351,13 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.TRIAL_CONVERSION": "Subscribe",
     "revenue.RENEWAL": "Purchase",
     "revenue.CREDIT_PURCHASE": "Purchase",
+    // Task 9 (2026-09-04): purchase-shaped, NOT "Subscribe" — see the
+    // Task 9 citation block above. Also added to meta-capi.ts's
+    // eventCatalog (and step-events.tsx's mirror), since this provider's
+    // catalog is hand-picked rather than derived from
+    // STANDARD_PROVIDER_EVENT_KEYS. revenue.REACTIVATION is deliberately
+    // NOT added anywhere for this provider — see the citation block.
+    "revenue.NON_RENEWING_PURCHASE": "Purchase",
     "subscription.trial.started": "StartTrial",
     "subscriber.identified": "CompleteRegistration",
     // revenue.REFUND / revenue.CANCELLATION: intentionally unmapped (see above).
@@ -243,6 +368,12 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.TRIAL_CONVERSION": "Subscribe",
     "revenue.RENEWAL": "Subscribe",
     "revenue.CREDIT_PURCHASE": "CompletePayment",
+    // Task 9 (2026-09-04): reuses CREDIT_PURCHASE's own "CompletePayment"
+    // (purchase-shaped, not "Subscribe") — see the Task 9 citation block
+    // above. Also added to tiktok-events.ts's eventCatalog (and
+    // step-events.tsx's mirror). revenue.REACTIVATION deliberately NOT
+    // added anywhere for this provider — see the citation block.
+    "revenue.NON_RENEWING_PURCHASE": "CompletePayment",
     "subscription.trial.started": "StartTrial",
     "subscriber.identified": "CompleteRegistration",
     // revenue.REFUND / revenue.CANCELLATION: intentionally unmapped (see above).
@@ -260,6 +391,13 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.TRIAL_CONVERSION": "af_subscribe",
     "revenue.RENEWAL": "af_subscription_renewal",
     "revenue.CREDIT_PURCHASE": "af_credit_purchase",
+    // Task 9 (2026-09-04): reuses AppsFlyer's own sole standard Purchase
+    // event (already INITIAL's name here) — no distinct non-renewing
+    // event is documented; see the Task 9 citation block above.
+    "revenue.NON_RENEWING_PURCHASE": "af_purchase",
+    // Task 9 (2026-09-04): NOT af_-prefixed — see the Task 9 citation
+    // block above for why `af_re_engage` is the wrong vendor event here.
+    "revenue.REACTIVATION": rovenueCustomEventName("revenue.REACTIVATION"),
     "revenue.REFUND": "af_refund",
     "revenue.CANCELLATION": "af_cancel",
     "subscription.trial.started": "af_start_trial",
@@ -293,6 +431,12 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.RENEWAL": GA4_PURCHASE_EVENT,
     "revenue.TRIAL_CONVERSION": GA4_PURCHASE_EVENT,
     "revenue.CREDIT_PURCHASE": GA4_PURCHASE_EVENT,
+    // Task 9 (2026-09-04): reuses GA4's own recommended `purchase` event —
+    // see the Task 9 citation block above.
+    "revenue.NON_RENEWING_PURCHASE": GA4_PURCHASE_EVENT,
+    // Task 9 (2026-09-04): no GA4 recommended-event equivalent, so this
+    // takes the same namespaced-custom-event path the lifecycle keys use.
+    "revenue.REACTIVATION": rovenueCustomEventName("revenue.REACTIVATION"),
     "revenue.REFUND": GA4_REFUND_EVENT,
     "revenue.CANCELLATION": GA4_CANCELLATION_EVENT,
     ...Object.fromEntries(
@@ -304,6 +448,11 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.TRIAL_CONVERSION": "revenue.TRIAL_CONVERSION",
     "revenue.RENEWAL": "revenue.RENEWAL",
     "revenue.CREDIT_PURCHASE": "revenue.CREDIT_PURCHASE",
+    // Task 9 (2026-09-04): identity, same as every other revenue.* key —
+    // both ride the generic `isRevenue` branch in providers/braze.ts (see
+    // the Task 9 citation block above).
+    "revenue.NON_RENEWING_PURCHASE": "revenue.NON_RENEWING_PURCHASE",
+    "revenue.REACTIVATION": "revenue.REACTIVATION",
     // revenue.REFUND: intentionally unmapped — see comment above.
     "revenue.CANCELLATION": "revenue.CANCELLATION",
     ...Object.fromEntries(
@@ -348,6 +497,12 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.TRIAL_CONVERSION": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.TRIAL_CONVERSION"],
     "revenue.RENEWAL": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.RENEWAL"],
     "revenue.CREDIT_PURCHASE": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.CREDIT_PURCHASE"],
+    // Task 9 (2026-09-04): reuses ANALYTICS_DEFAULT_EVENT_NAMES's free-form
+    // names, the same choice already made for every other revenue.* key
+    // here (see the Task 9 citation block above).
+    "revenue.NON_RENEWING_PURCHASE":
+      ANALYTICS_DEFAULT_EVENT_NAMES["revenue.NON_RENEWING_PURCHASE"],
+    "revenue.REACTIVATION": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.REACTIVATION"],
     // revenue.REFUND: intentionally unmapped — see comment above.
     "revenue.CANCELLATION": ANALYTICS_DEFAULT_EVENT_NAMES["revenue.CANCELLATION"],
     ...Object.fromEntries(
@@ -359,6 +514,13 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.TRIAL_CONVERSION": "airbridge.subscribe",
     "revenue.RENEWAL": "airbridge.ecommerce.order.completed",
     "revenue.CREDIT_PURCHASE": "airbridge.ecommerce.order.completed",
+    // Task 9 (2026-09-04): joins RENEWAL/CREDIT_PURCHASE — see the Task 9
+    // citation block above.
+    "revenue.NON_RENEWING_PURCHASE": "airbridge.ecommerce.order.completed",
+    // Task 9 (2026-09-04): no standard Airbridge event; namespaced custom
+    // event, same as the lifecycle keys below — see the Task 9 citation
+    // block above.
+    "revenue.REACTIVATION": rovenueCustomEventName("revenue.REACTIVATION"),
     // revenue.REFUND: MAPPED (unlike BRAZE/ITERABLE) — see the AIRBRIDGE
     // header comment above for the full citation/rationale.
     "revenue.REFUND": "airbridge.ecommerce.order.canceled",
@@ -373,6 +535,12 @@ export const DEFAULT_EVENT_MAPPING: Readonly<
     "revenue.TRIAL_CONVERSION": "sng_subscribe",
     "revenue.RENEWAL": "sng_ecommerce_purchase",
     "revenue.CREDIT_PURCHASE": "sng_ecommerce_purchase",
+    // Task 9 (2026-09-04): joins RENEWAL/CREDIT_PURCHASE — see the Task 9
+    // citation block above.
+    "revenue.NON_RENEWING_PURCHASE": "sng_ecommerce_purchase",
+    // Task 9 (2026-09-04): see SINGULAR_REACTIVATION_EVENT's definition
+    // above (32-ASCII cap, pinned by singular.test.ts's static-config test).
+    "revenue.REACTIVATION": SINGULAR_REACTIVATION_EVENT,
     // revenue.REFUND: intentionally unmapped — see the SINGULAR header
     // comment above for the full citation/rationale.
     "revenue.CANCELLATION": SINGULAR_CANCELLATION_EVENT,

@@ -85,6 +85,12 @@ const eventCatalog: readonly RovenueEventKey[] = [
   "revenue.TRIAL_CONVERSION",
   "revenue.RENEWAL",
   "revenue.CREDIT_PURCHASE",
+  // Task 9 (2026-09-04): maps to "CompletePayment", not "Subscribe" — see
+  // event-mapping.ts's Task 9 citation block. revenue.REACTIVATION is
+  // deliberately NOT added here: it is a lifecycle signal, and this
+  // catalog stays narrow so a lifecycle event can never masquerade as a
+  // conversion.
+  "revenue.NON_RENEWING_PURCHASE",
   "subscription.trial.started",
   "subscriber.identified",
 ];

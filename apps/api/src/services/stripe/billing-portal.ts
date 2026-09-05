@@ -1,5 +1,9 @@
 import { drizzle, type Db } from "@rovenue/db";
 import { requireConnectedStripe, StripeNotConnectedError } from "../../lib/stripe-platform";
+import {
+  RedirectUrlNotAllowedError,
+  assertRedirectUrlAllowed,
+} from "./verified-return-url";
 
 // =============================================================
 // createBillingPortalSession
@@ -52,50 +56,23 @@ export interface BillingPortalSession {
   url: string;
 }
 
-/**
- * The project's own domain allow-list, expressed via `custom_domains` —
- * the only place a project has an admin-verified domain on record (host
- * ownership is proven there via CNAME + TXT challenge for funnel serving).
- * There is no separate "allowed return domains" setting to reuse instead,
- * so this reuses that verified-ownership record rather than inventing a
- * second, unverified one.
- */
-async function assertReturnUrlAllowed(
-  db: Db,
-  projectId: string,
-  rawUrl: string,
-): Promise<string> {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new ReturnUrlNotAllowedError(rawUrl);
-  }
-  // https-only: a portal return is a browser redirect back into the
-  // developer's own app/site, and the developer's own domain record
-  // (custom_domains) exists specifically to serve funnels over https.
-  if (parsed.protocol !== "https:") {
-    throw new ReturnUrlNotAllowedError(rawUrl);
-  }
-
-  const domains = await drizzle.customDomainRepo.listByProject(db, projectId);
-  const verifiedHosts = new Set(
-    domains
-      .filter((d) => d.verifiedAt !== null)
-      .map((d) => d.hostname.toLowerCase()),
-  );
-  if (!verifiedHosts.has(parsed.hostname.toLowerCase())) {
-    throw new ReturnUrlNotAllowedError(rawUrl);
-  }
-  return parsed.toString();
-}
-
 export async function createBillingPortalSession(
   input: CreateBillingPortalSessionInput,
 ): Promise<BillingPortalSession> {
   const { db, projectId, subscriberId, returnUrl } = input;
 
-  const safeReturnUrl = await assertReturnUrlAllowed(db, projectId, returnUrl);
+  // Delegated to the shared checker: SDK checkout validates its success and
+  // cancel URLs against the same verified-domain list, and two copies of that
+  // rule would drift.
+  let safeReturnUrl: string;
+  try {
+    safeReturnUrl = await assertRedirectUrlAllowed(db, projectId, returnUrl);
+  } catch (err) {
+    if (err instanceof RedirectUrlNotAllowedError) {
+      throw new ReturnUrlNotAllowedError(returnUrl);
+    }
+    throw err;
+  }
 
   const stripeCustomerId =
     await drizzle.funnelPurchaseRepo.findLatestStripeCustomerIdForSubscriber(

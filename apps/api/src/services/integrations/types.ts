@@ -60,6 +60,8 @@ export type RevenueEventKind =
   | "TRIAL_CONVERSION"
   | "RENEWAL"
   | "CREDIT_PURCHASE"
+  | "NON_RENEWING_PURCHASE"
+  | "REACTIVATION"
   | "REFUND"
   | "CANCELLATION";
 

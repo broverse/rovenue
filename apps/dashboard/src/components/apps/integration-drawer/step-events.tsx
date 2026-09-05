@@ -36,6 +36,14 @@ export const ALL_EVENT_KEYS = [
   "revenue.TRIAL_CONVERSION",
   "revenue.RENEWAL",
   "revenue.CREDIT_PURCHASE",
+  // Task 9 (2026-09-04): mirrors meta-capi.ts's / tiktok-events.ts's
+  // eventCatalog addition — a purchase that never becomes a subscription,
+  // mapped to their Purchase/CompletePayment events, not Subscribe.
+  // revenue.REACTIVATION is deliberately NOT added here: both ad
+  // platforms keep a narrow catalog so a lifecycle signal can never
+  // masquerade as a conversion (see event-mapping.ts's Task 9 citation
+  // block).
+  "revenue.NON_RENEWING_PURCHASE",
   "revenue.REFUND",
   "revenue.CANCELLATION",
   "subscription.trial.started",

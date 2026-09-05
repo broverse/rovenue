@@ -10,12 +10,14 @@ import {
 } from "./integrations";
 
 describe("RovenueEventKey", () => {
-  it("includes all 21 canonical keys (v2, Wave-1 + 2026-09-03 paused/recovered/revoked/offer_redeemed)", () => {
+  it("includes all 23 canonical keys (v2, Wave-1 + 2026-09-03 paused/recovered/revoked/offer_redeemed + 2026-09-04 non_renewing_purchase/reactivation)", () => {
     expect(ROVENUE_EVENT_KEYS).toEqual([
       "revenue.INITIAL",
       "revenue.TRIAL_CONVERSION",
       "revenue.RENEWAL",
       "revenue.CREDIT_PURCHASE",
+      "revenue.NON_RENEWING_PURCHASE",
+      "revenue.REACTIVATION",
       "revenue.REFUND",
       "revenue.CANCELLATION",
       "subscription.trial.started",

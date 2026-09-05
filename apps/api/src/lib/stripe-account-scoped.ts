@@ -146,6 +146,22 @@ export interface AccountScopedStripe {
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.ApiList<Stripe.PaymentMethodDomain>>>;
   };
+  readonly checkout: {
+    sessions: {
+      /**
+       * SDK-facing checkout (v1/checkout) creates this on the CONNECTED
+       * account: the price it names lives there, and the resulting
+       * subscription must be the merchant's, not Rovenue's. Unscoped, this
+       * would charge against Rovenue's own account with a price id that
+       * does not exist on it — the exact failure this facade exists to make
+       * unreachable.
+       */
+      create(
+        params: Stripe.Checkout.SessionCreateParams,
+        options?: ScopedRequestOptions,
+      ): Promise<Stripe.Response<Stripe.Checkout.Session>>;
+    };
+  };
   readonly billingPortal: {
     sessions: {
       /**
@@ -232,6 +248,12 @@ export function withAccount(
         stripe.paymentMethodDomains.create(params, { ...options, ...bound }),
       list: (params, options) =>
         stripe.paymentMethodDomains.list(params, { ...options, ...bound }),
+    },
+    checkout: {
+      sessions: {
+        create: (params, options) =>
+          stripe.checkout.sessions.create(params, { ...options, ...bound }),
+      },
     },
     billingPortal: {
       sessions: {
