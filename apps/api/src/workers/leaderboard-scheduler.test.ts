@@ -3,6 +3,7 @@ import {
   LEADERBOARD_SNAPSHOT_SETTLE_MS,
   sweepLeaderboardSeasons,
 } from "./leaderboard-scheduler";
+import { leaderboardSeasonCloseSkippedTotal } from "../lib/metrics";
 
 const NOW = new Date("2026-09-07T00:10:00.000Z");
 
@@ -39,6 +40,7 @@ let deps: Record<string, ReturnType<typeof vi.fn>>;
 beforeEach(() => {
   deps = {
     findEnabledLeaderboardsWithoutActiveSeason: vi.fn(async () => []),
+    findNextSeasonNumber: vi.fn(async () => 1),
     findDueSeasons: vi.fn(async () => []),
     findLeaderboardById: vi.fn(async () => leaderboard()),
     queryStandings: vi.fn(async () => [
@@ -150,5 +152,64 @@ describe("sweepLeaderboardSeasons", () => {
 
     expect(result.opened).toBe(0);
     expect(result.skipped).toBeGreaterThanOrEqual(1);
+  });
+
+  test("opens a recovery season using the leaderboard's real next number, not always 1", async () => {
+    // A leaderboard with prior season history (e.g. seasons 1-3 already
+    // exist, none ACTIVE) must resume at 4, not collide against season 1
+    // forever.
+    deps.findEnabledLeaderboardsWithoutActiveSeason.mockResolvedValue([leaderboard()]);
+    deps.findNextSeasonNumber.mockResolvedValue(4);
+
+    await sweepLeaderboardSeasons(NOW, deps as never);
+
+    expect(deps.openSeason).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        leaderboardId: "lb_1",
+        seasonNumber: 4,
+      }),
+    );
+  });
+
+  test("closing a season audits the close inside the transaction", async () => {
+    deps.findDueSeasons.mockResolvedValue([season()]);
+
+    await sweepLeaderboardSeasons(NOW, deps as never);
+
+    expect(deps.audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "prj_1",
+        action: "leaderboard_season.closed",
+        resource: "leaderboard_season",
+        resourceId: "sea_1",
+      }),
+      expect.anything(),
+    );
+  });
+
+  test("a successor season that fails to open inside the close transaction is a distinct signal, not a plain close", async () => {
+    // The claim succeeds (season DOES close) but the "open next" insert
+    // inside the SAME transaction loses — e.g. another writer already
+    // holds that (leaderboardId, seasonNumber). That must never look like
+    // an ordinary successful close with nothing to report: it must be
+    // counted under its own reason, not folded into "race" (which means
+    // "the close itself was lost") or dropped silently.
+    deps.findDueSeasons.mockResolvedValue([season()]);
+    deps.openSeason.mockResolvedValue(null);
+
+    const incSpy = vi.spyOn(leaderboardSeasonCloseSkippedTotal, "inc");
+
+    const result = await sweepLeaderboardSeasons(NOW, deps as never);
+
+    expect(result.closed).toBe(1);
+
+    const reasons = incSpy.mock.calls.map(
+      (call) => (call[0] as { reason?: string } | undefined)?.reason,
+    );
+    expect(reasons).not.toContain("race");
+    expect(reasons.some((r) => r !== undefined && r !== "race")).toBe(true);
+
+    incSpy.mockRestore();
   });
 });

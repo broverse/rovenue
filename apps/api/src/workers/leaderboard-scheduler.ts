@@ -75,13 +75,17 @@ export const LEADERBOARD_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 // belt-and-suspenders guard, not the normal path).
 export const LEADERBOARD_DEFAULT_ENTRY_LIMIT = 100;
 
-const FIRST_SEASON_NUMBER = 1;
-
 // leaderboardSeasonCloseSkippedTotal reason labels.
 const SKIP_REASON_CLICKHOUSE = "clickhouse";
 const SKIP_REASON_RACE = "race";
 const SKIP_REASON_MISSING_LEADERBOARD = "missing-leaderboard";
 const SKIP_REASON_ERROR = "error";
+// The close's own claim succeeded (the season DID close), but the
+// "open next" insert in the SAME transaction lost — under the partial
+// unique index this is not a normal multi-replica race, so it gets its
+// own reason rather than being folded into SKIP_REASON_RACE (which means
+// "the close itself was lost, nothing changed").
+const SKIP_REASON_SUCCESSOR_CONFLICT = "successor-conflict";
 
 export interface SchedulerSweepResult {
   opened: number;
@@ -98,6 +102,11 @@ export interface SchedulerDeps {
   findEnabledLeaderboardsWithoutActiveSeason: (
     db: Db,
   ) => Promise<LeaderboardRow[]>;
+  // Derived from history (COALESCE(MAX(seasonNumber), 0) + 1), never
+  // assumed to be 1 — a leaderboard reaching this path can already have
+  // season rows (its previous close's own "open next" lost a race; see
+  // SKIP_REASON_SUCCESSOR_CONFLICT below).
+  findNextSeasonNumber: (db: Db, leaderboardId: string) => Promise<number>;
   findDueSeasons: (db: Db, closeBefore: Date) => Promise<LeaderboardSeasonRow[]>;
   findLeaderboardById: (db: Db, id: string) => Promise<LeaderboardRow | null>;
   queryStandings: typeof queryStandingsFromClickhouse;
@@ -122,6 +131,7 @@ export interface SchedulerDeps {
 const defaultDeps: SchedulerDeps = {
   findEnabledLeaderboardsWithoutActiveSeason:
     drizzle.leaderboardRepo.findEnabledLeaderboardsWithoutActiveSeason,
+  findNextSeasonNumber: drizzle.leaderboardRepo.findNextSeasonNumber,
   findDueSeasons: drizzle.leaderboardRepo.findDueSeasons,
   findLeaderboardById: drizzle.leaderboardRepo.findLeaderboardById,
   queryStandings: queryStandingsFromClickhouse,
@@ -162,9 +172,17 @@ async function openFirstSeasons(
         leaderboard.anchorAt,
       );
 
+      // Derived from history, not assumed to be 1 — this branch also
+      // fires as a recovery path for a leaderboard whose previous close
+      // already produced season rows.
+      const seasonNumber = await deps.findNextSeasonNumber(
+        drizzle.db,
+        leaderboard.id,
+      );
+
       const openedSeason = await deps.openSeason(drizzle.db, {
         leaderboardId: leaderboard.id,
-        seasonNumber: FIRST_SEASON_NUMBER,
+        seasonNumber,
         startsAt: window.startsAt,
         endsAt: window.endsAt,
       });
@@ -172,6 +190,10 @@ async function openFirstSeasons(
       if (!openedSeason) {
         skipped += 1;
         leaderboardSeasonCloseSkippedTotal.inc({ reason: SKIP_REASON_RACE });
+        log.warn("leaderboard stuck without an active season: open lost a race", {
+          leaderboardId: leaderboard.id,
+          seasonNumber,
+        });
         continue;
       }
 
@@ -255,7 +277,11 @@ async function closeDueSeasons(
     );
 
     // 2. Claim + snapshot + close + open-next, all in ONE transaction.
-    const claimedSeason = await deps.transaction(async (tx) => {
+    // `successorOpened` is tracked distinctly from `claimed`: the season
+    // can close successfully (the claim won) while the next season's
+    // insert still loses inside the same transaction, and that must
+    // never be reported as an ordinary, fully-successful close.
+    const outcome = await deps.transaction(async (tx) => {
       const claimed = await deps.claimSeasonForClose(tx, season.id, now);
       if (!claimed) return null; // another replica won the claim
 
@@ -281,23 +307,20 @@ async function closeDueSeasons(
       );
 
       // Open the next season starting exactly at the old endsAt, so no
-      // event can ever fall between two seasons. A lost race here is not
-      // fatal — openFirstSeasons' next-sweep read heals the gap.
+      // event can ever fall between two seasons. A lost race here does
+      // NOT undo the close above — the transaction still commits it —
+      // but it is reported distinctly below, never as a plain success.
       const openedNext = await deps.openSeason(tx, {
         leaderboardId: season.leaderboardId,
         seasonNumber: season.seasonNumber + 1,
         startsAt: next.startsAt,
         endsAt: next.endsAt,
       });
-      if (openedNext) {
-        opened += 1;
-        leaderboardSeasonsOpenedTotal.inc();
-      }
 
-      return claimed;
+      return { claimed, successorOpened: openedNext !== null };
     });
 
-    if (!claimedSeason) {
+    if (!outcome) {
       skipped += 1;
       leaderboardSeasonCloseSkippedTotal.inc({ reason: SKIP_REASON_RACE });
       continue;
@@ -305,6 +328,25 @@ async function closeDueSeasons(
 
     closed += 1;
     leaderboardSeasonsClosedTotal.inc();
+
+    if (outcome.successorOpened) {
+      opened += 1;
+      leaderboardSeasonsOpenedTotal.inc();
+    } else {
+      // The partial unique index guarantees at most one ACTIVE season per
+      // leaderboard, so this insert losing here is not a normal race the
+      // way claimSeasonForClose's is — it means the season just closed
+      // has no successor yet. Silent about this would be worse than the
+      // race itself: every visible counter would say the close was a
+      // complete success.
+      leaderboardSeasonCloseSkippedTotal.inc({
+        reason: SKIP_REASON_SUCCESSOR_CONFLICT,
+      });
+      log.warn("season closed but its successor could not be opened", {
+        leaderboardId: season.leaderboardId,
+        collidedSeasonNumber: season.seasonNumber + 1,
+      });
+    }
   }
 
   return { opened, closed, skipped };

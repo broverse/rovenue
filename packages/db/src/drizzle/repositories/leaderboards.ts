@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lte, max, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   leaderboards,
@@ -158,6 +158,24 @@ export async function findDueSeasons(
         lte(leaderboardSeasons.endsAt, closeBefore),
       ),
     );
+}
+
+/**
+ * Next season number for a leaderboard, derived from its history rather
+ * than assumed. Used by the scheduler's "open a first/recovery season"
+ * path so a leaderboard that already has season rows (e.g. its previous
+ * close's own "open next" lost a race and needs retrying next sweep)
+ * doesn't collide forever against a hardcoded `1`.
+ */
+export async function findNextSeasonNumber(
+  db: Db,
+  leaderboardId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ v: max(leaderboardSeasons.seasonNumber) })
+    .from(leaderboardSeasons)
+    .where(eq(leaderboardSeasons.leaderboardId, leaderboardId));
+  return (row?.v ?? 0) + 1;
 }
 
 /**
