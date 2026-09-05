@@ -767,7 +767,11 @@ else in the framework/provider-breadth dimension is done.
 
 - [ ] Self-service DSAR API (exposed by customers to their end users)
 - [ ] Per-table data-retention policy automation
-- [ ] Externally verifiable proof format for the audit hash chain
+- [x] Externally verifiable proof format for the audit hash chain — `GET
+      /dashboard/audit-logs/proof` exports a bundle over the canonical
+      encoder in `@rovenue/shared/audit-chain`; verify offline with
+      `scripts/verify-audit-bundle.ts` (no Rovenue code, no server trust).
+      Documented at `apps/docs/content/docs/guides/audit-proof.mdx`.
 
 ## 10. Production maturity & scale proof (45 → 95) — earned over time
 
