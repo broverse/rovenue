@@ -1,33 +1,15 @@
+// The OD-1 reversal (a DID_FAIL_TO_RENEW without the GRACE_PERIOD subtype
+// maps to BILLING_ISSUE, not GRACE_PERIOD) used to be asserted here against
+// `normalizeAppleStatus`, which no production path called. It is asserted
+// against the live Apple ingestion path in
+// `src/services/apple/apple-webhook.failed-renewal.test.ts`; the dead
+// helper and this duplicate went on 2026-09-05 (Task 15).
+
 import { describe, it, expect } from "vitest";
 import {
   decideTransition,
-  normalizeAppleStatus,
   validateTransition,
 } from "../src/services/subscription-state";
-import {
-  APPLE_NOTIFICATION_TYPE,
-  APPLE_NOTIFICATION_SUBTYPE,
-} from "../src/services/apple/apple-types";
-
-describe("normalizeAppleStatus DID_FAIL_TO_RENEW (OD-1)", () => {
-  // Task 4 (2026-09-04): without the GRACE_PERIOD subtype, Apple has
-  // already withdrawn access on its side — reporting GRACE_PERIOD here
-  // (the prior expectation) granted entitlement Apple itself had revoked.
-  // It now maps to BILLING_ISSUE.
-  it("maps a non-grace failed renewal to BILLING_ISSUE, not ACTIVE or GRACE_PERIOD", () => {
-    expect(
-      normalizeAppleStatus(APPLE_NOTIFICATION_TYPE.DID_FAIL_TO_RENEW, undefined),
-    ).toBe("BILLING_ISSUE");
-  });
-  it("still maps the grace subtype to GRACE_PERIOD", () => {
-    expect(
-      normalizeAppleStatus(
-        APPLE_NOTIFICATION_TYPE.DID_FAIL_TO_RENEW,
-        APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD,
-      ),
-    ).toBe("GRACE_PERIOD");
-  });
-});
 
 describe("validateTransition terminal states", () => {
   it("rejects REFUNDED -> ACTIVE", () => {

@@ -16,13 +16,18 @@
 //     voluntary in every rollup that reads `involuntary`;
 //   - no edge INTO it from a terminal status, which stays absorbing.
 
+// The per-store mapping assertions that used to live here were deleted
+// with the dead `normalize*Status` helpers they exercised (2026-09-05,
+// Task 15). They proved nothing about ingestion: no production path ever
+// called those functions. The same rulings are pinned against the LIVE
+// mappers instead —
+//   Apple grace vs. billing retry: apple/apple-webhook.failed-renewal.test.ts
+//   Google hold vs. pause:         ../../tests/google-webhook.test.ts
+//   Stripe past_due vs. unpaid:    stripe/stripe-status-fallback.test.ts
+
 import { describe, expect, it } from "vitest";
-import { GOOGLE_SUBSCRIPTION_STATE } from "./google/google-types";
 import {
   billingIssueStamp,
-  normalizeAppleStatus,
-  normalizeGoogleStatus,
-  normalizeStripeStatus,
   validateTransition,
 } from "./subscription-state";
 
@@ -51,38 +56,6 @@ describe("BILLING_ISSUE transitions", () => {
   // an idempotent replay of the notification that created the row.
   it("permits an idempotent BILLING_ISSUE re-write", () => {
     expect(validateTransition("BILLING_ISSUE", "BILLING_ISSUE")).toBe(true);
-  });
-});
-
-describe("billing issue mapping", () => {
-  it("keeps Apple's configured grace period access-granting", () => {
-    expect(normalizeAppleStatus("DID_FAIL_TO_RENEW", "GRACE_PERIOD")).toBe(
-      "GRACE_PERIOD",
-    );
-  });
-
-  it("routes Apple billing retry without grace to BILLING_ISSUE", () => {
-    expect(normalizeAppleStatus("DID_FAIL_TO_RENEW", "BILLING_RETRY")).toBe(
-      "BILLING_ISSUE",
-    );
-    expect(normalizeAppleStatus("DID_FAIL_TO_RENEW", undefined)).toBe(
-      "BILLING_ISSUE",
-    );
-  });
-
-  it("separates Google account hold from a voluntary pause", () => {
-    expect(normalizeGoogleStatus(GOOGLE_SUBSCRIPTION_STATE.ON_HOLD)).toBe(
-      "BILLING_ISSUE",
-    );
-    expect(normalizeGoogleStatus(GOOGLE_SUBSCRIPTION_STATE.PAUSED)).toBe(
-      "PAUSED",
-    );
-  });
-
-  it("separates Stripe's retrying and non-paying statuses", () => {
-    expect(normalizeStripeStatus("past_due")).toBe("GRACE_PERIOD");
-    expect(normalizeStripeStatus("unpaid")).toBe("BILLING_ISSUE");
-    expect(normalizeStripeStatus("incomplete")).toBe("BILLING_ISSUE");
   });
 });
 
