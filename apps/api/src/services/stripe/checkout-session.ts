@@ -202,7 +202,17 @@ export async function createCheckoutSession(
         metadata: { [SUBSCRIBER_METADATA_KEY]: subscriberRovenueId },
       },
     },
-    idempotencyKey ? { idempotencyKey } : undefined,
+    // Namespaced, never forwarded verbatim. Stripe scopes idempotency to the
+    // connected ACCOUNT, so a raw client-supplied key shares one space across
+    // every subscriber of the project — and the value arrives from browser
+    // JavaScript. Two buyers submitting the same key (a hardcoded one, a
+    // low-entropy generator, or a deliberate collision) would get the SAME
+    // session back: the second pays into the first's customer, and the
+    // subscription metadata names the first subscriber, so the entitlement
+    // lands on the wrong person.
+    idempotencyKey
+      ? { idempotencyKey: `${projectId}:${subscriberId}:${idempotencyKey}` }
+      : undefined,
   );
 
   if (!session.url) {

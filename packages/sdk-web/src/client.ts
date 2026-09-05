@@ -68,6 +68,14 @@ export function createHttpClient(opts: CreateHttpClientOptions): HttpClient {
       // is client-local, and putting it here routes the request to an
       // orphaned subscriber.
       "x-rovenue-app-user-id": identity.rovenueId(),
+      // BOTH headers, as the Rust core sends. /v1/placements, /v1/config and
+      // /v1/experiments read the subscriber from `x-rovenue-user-id`, not
+      // from the app-user one. Sending only the latter left every web request
+      // anonymous: audience-targeted placement rows could never match (only
+      // an `audienceId: null` row can with no attributes), and a null
+      // subscriber forces the project holdout to 0 — so web traffic was
+      // silently excluded from the holdout and polluted the baseline.
+      "x-rovenue-user-id": identity.rovenueId(),
       "x-rovenue-platform": PLATFORM,
       "Content-Type": "application/json",
       ...extra,
@@ -90,7 +98,14 @@ export function createHttpClient(opts: CreateHttpClientOptions): HttpClient {
       }
       throw new RovenueApiError(res.status, code, message);
     }
-    const body = (await res.json()) as RovenueResponse<T>;
+    // /v1/events answers `202` with NO body, and several endpoints answer
+    // 204. Calling res.json() on those throws a SyntaxError, which the event
+    // queue would read as "not acknowledged" — replaying an event the server
+    // had already ingested, on every flush and every page load, forever.
+    if (res.status === 204 || res.status === 202) return undefined as T;
+    const text = await res.text();
+    if (text === "") return undefined as T;
+    const body = JSON.parse(text) as RovenueResponse<T>;
     return body.data;
   }
 

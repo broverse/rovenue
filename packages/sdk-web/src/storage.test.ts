@@ -102,3 +102,38 @@ describe("createStorage", () => {
     await expect(import("./storage")).resolves.toBeTruthy();
   });
 });
+
+describe("a full localStorage", () => {
+  it("reads back what the write fell back to memory with", () => {
+    // A FULL store refuses writes while getItem returns null WITHOUT
+    // throwing. A try/catch alone therefore makes the memory copy
+    // unreachable, and the event queue silently drops what it thought it had
+    // persisted — in the module that documents at-least-once delivery.
+    const backing = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        if (k.startsWith("rovenue.__probe")) {
+          backing.set(k, v);
+          return;
+        }
+        throw new Error("QuotaExceededError");
+      },
+      removeItem: (k: string) => backing.delete(k),
+    });
+
+    const store = createStorage();
+    store.set("rovenue.events", "[1]");
+    expect(store.get("rovenue.events")).toBe("[1]");
+  });
+
+  it("prefers the real store when it has the value", () => {
+    const backing = new Map<string, string>([["k", "from-store"]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => backing.set(k, v),
+      removeItem: (k: string) => backing.delete(k),
+    });
+    expect(createStorage().get("k")).toBe("from-store");
+  });
+});

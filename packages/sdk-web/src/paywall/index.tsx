@@ -104,6 +104,15 @@ export function RovenuePaywall({
         if (cancelled) return;
         setVariantId(variant.variantId);
         setChosen(variant.paywall);
+        // Immediately after the draw, as the native path does. A visitor
+        // bucketed into an arm but missing from exposure_events still
+        // contributes revenue while being absent from the denominator, which
+        // biases every conversion rate and breaks the sample-ratio check.
+        void rovenue.recordExposure({
+          experimentId: data.experiment.id,
+          variantId: variant.variantId,
+          placementId: data.placement?.identifier,
+        });
         return;
       }
       if (cancelled) return;
@@ -175,6 +184,27 @@ export function RovenuePaywall({
     [chosen, onPurchase, rovenue, successUrl, cancelUrl],
   );
 
+  // The native SDKs enqueue a paywall_close alongside the view. Without it
+  // the ClickHouse paywall funnel sees web views with no matching close, so
+  // dismissal rate is structurally wrong for any project with web traffic.
+  const handleClose = useCallback(() => {
+    if (chosen && data?.placement) {
+      rovenue.track({
+        eventType: "paywall_close",
+        subscriberId: rovenue.rovenueId(),
+        paywallContext: {
+          paywallId: chosen.id,
+          placementId: data.placement.identifier,
+          placementRevision: data.placement.revision,
+          ...(variantId
+            ? { variantId, experimentKey: data.experiment?.key }
+            : {}),
+        },
+      });
+    }
+    onClose?.();
+  }, [chosen, data, variantId, rovenue, onClose]);
+
   const firstShownAt = useMemo(() => {
     if (!chosen) return undefined;
     // Same key the native SDKs use, so a countdown a buyer started on one
@@ -199,7 +229,7 @@ export function RovenuePaywall({
       locale={locale}
       firstShownAt={firstShownAt}
       onPurchase={handlePurchase}
-      onClose={onClose}
+      onClose={handleClose}
     />
   );
 }

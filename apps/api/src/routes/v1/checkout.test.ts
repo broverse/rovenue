@@ -334,11 +334,35 @@ describe("POST /v1/checkout", () => {
 
     expect(res.status).toBe(200);
     // Stripe's own idempotency is authoritative and survives our process
-    // restarting; a second scheme here would only be a worse copy of it.
+    // restarting; a second scheme here would only be a worse copy of it. The
+    // client's key is CARRIED, not forwarded verbatim — see the namespacing
+    // test below for why the raw value must never reach Stripe.
     const options = sessionsCreateMock.mock.calls[0]?.[1] as
       | { idempotencyKey?: string }
       | undefined;
-    expect(options?.idempotencyKey).toBe(key);
+    expect(options?.idempotencyKey).toContain(key);
+  });
+
+  it("namespaces the client's idempotency key per subscriber", async () => {
+    const res = await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: { ...authedHeaders(), "Idempotency-Key": "shared" },
+      body: validBody(),
+    });
+
+    expect(res.status).toBe(200);
+    const options = sessionsCreateMock.mock.calls[0]?.[1] as {
+      idempotencyKey?: string;
+    };
+    // Stripe scopes idempotency to the connected ACCOUNT, so a raw
+    // client-supplied key shares one space across every subscriber of the
+    // project — and it arrives from browser JavaScript. Two buyers sending
+    // the same key would otherwise get the SAME session: the second pays into
+    // the first's customer and the entitlement lands on the wrong person.
+    expect(options?.idempotencyKey).toBe(
+      `${PROJECT_ID}:${SUBSCRIBER_ID}:shared`,
+    );
+    expect(options?.idempotencyKey).not.toBe("shared");
   });
 
   it("omits the idempotency option when the client sends no key", async () => {

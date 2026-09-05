@@ -84,6 +84,20 @@ export interface Rovenue {
    */
   startEventQueue(): void;
   stopEventQueue(): void;
+  /**
+   * Records that a subscriber was shown an experiment variant.
+   *
+   * Assignment alone is invisible to the analytics: a visitor bucketed into
+   * an arm but missing from `exposure_events` still contributes revenue while
+   * being absent from the denominator, which biases conversion rates and
+   * breaks the sample-ratio check. The native path fires this immediately
+   * after the draw; so does the web one.
+   */
+  recordExposure(input: {
+    experimentId: string;
+    variantId: string;
+    placementId?: string;
+  }): Promise<void>;
   getOfferings(): Promise<unknown>;
   getPlacement(identifier: string): Promise<unknown>;
   /**
@@ -195,10 +209,30 @@ export function configure(options: RovenueOptions): Rovenue {
     stopEventQueue: () => events.stop(),
     getCachedEntitlements: () => cache.read()?.entitlements ?? null,
     getCachedEntitlementsEntry: () => cache.read(),
+    async recordExposure({ experimentId, variantId, placementId }) {
+      await http
+        .post(`/experiments/${encodeURIComponent(experimentId)}/expose`, {
+          variantId,
+          subscriberId: identity.rovenueId(),
+          ...(placementId ? { placementId } : {}),
+          platform: "web",
+          exposedAt: new Date().toISOString(),
+        })
+        .catch(() => {
+          // Fire-and-forget, like the native path: a failed exposure must not
+          // stop the paywall rendering. It is lost rather than queued because
+          // an exposure replayed later would be timestamped wrong, and a
+          // wrong timestamp is worse for an experiment than a missing row.
+        });
+    },
     getOfferings: () => http.get("/offerings"),
     // An unknown placement returns an empty envelope rather than a 404, so
     // this resolves rather than throwing — the caller renders nothing.
-    getPlacement: (identifier) => http.get(`/placements/${identifier}`),
+      // Encoded: an identifier carrying `/`, `?` or `#` would otherwise change
+    // the path or truncate itself into a query string, and the server would
+    // answer for a different (or no) placement.
+    getPlacement: (identifier) =>
+      http.get(`/placements/${encodeURIComponent(identifier)}`),
     checkout: ({ idempotencyKey, ...body }) =>
       http.post<CheckoutResult>("/checkout", body, { idempotencyKey }),
   };

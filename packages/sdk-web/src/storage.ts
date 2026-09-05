@@ -81,7 +81,12 @@ export function createStorage(): SdkStorage {
   return {
     get(key) {
       try {
-        return store.getItem(key);
+        // `?? memory.get` and not just the try/catch: a FULL localStorage
+        // refuses writes while `getItem` returns null without throwing, so a
+        // value that fell back to memory on write was unreachable on read.
+        // That silently dropped queued events in the module that documents
+        // at-least-once delivery.
+        return store.getItem(key) ?? memory.get(key);
       } catch {
         return memory.get(key);
       }

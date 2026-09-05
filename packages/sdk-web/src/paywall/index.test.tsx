@@ -16,11 +16,15 @@ vi.mock("@rovenue/paywall-renderer", () => ({
   PaywallRenderer: (props: {
     config: { marker?: string };
     onPurchase: (pkg: string) => void;
+    onClose?: () => void;
   }) => (
     <div>
       <div data-testid="rendered">{props.config?.marker ?? "no-marker"}</div>
       <button type="button" onClick={() => props.onPurchase("monthly")}>
         buy
+      </button>
+      <button type="button" onClick={() => props.onClose?.()}>
+        close
       </button>
     </div>
   ),
@@ -240,8 +244,8 @@ describe("purchase", () => {
     });
 
     renderWith(client);
-    await waitFor(() => expect(screen.getByRole("button")).toBeTruthy());
-    screen.getByRole("button").click();
+    await waitFor(() => expect(screen.getByRole("button", { name: /buy/i })).toBeTruthy());
+    screen.getByRole("button", { name: /buy/i }).click();
 
     await waitFor(() => expect(checkout).toHaveBeenCalled());
     const arg = checkout.mock.calls[0]![0];
@@ -270,8 +274,8 @@ describe("purchase", () => {
         />
       </RovenueProvider>,
     );
-    await waitFor(() => expect(screen.getByRole("button")).toBeTruthy());
-    screen.getByRole("button").click();
+    await waitFor(() => expect(screen.getByRole("button", { name: /buy/i })).toBeTruthy());
+    screen.getByRole("button", { name: /buy/i }).click();
 
     await waitFor(() => expect(onPurchase).toHaveBeenCalledWith("monthly"));
     expect(checkout).not.toHaveBeenCalled();
@@ -281,10 +285,81 @@ describe("purchase", () => {
     const client = sdk(PLAIN);
     const checkout = vi.spyOn(client, "checkout");
     renderWith(client);
-    await waitFor(() => expect(screen.getByRole("button")).toBeTruthy());
-    screen.getByRole("button").click();
+    await waitFor(() => expect(screen.getByRole("button", { name: /buy/i })).toBeTruthy());
+    screen.getByRole("button", { name: /buy/i }).click();
     // A configuration gap must not throw inside a tap handler.
     await new Promise((r) => setTimeout(r, 10));
     expect(checkout).not.toHaveBeenCalled();
+  });
+});
+
+describe("experiment exposure and close", () => {
+  const WITH_EXPERIMENT = {
+    placement: { identifier: "onboarding", revision: 4 },
+    paywall: null,
+    experiment: {
+      id: "exp_1",
+      key: "pricing_test",
+      variants: [
+        {
+          variantId: "only",
+          weight: 1,
+          paywall: {
+            id: "pw_only",
+            identifier: "only",
+            builderConfig: { marker: "only" },
+            offering: null,
+          },
+        },
+      ],
+    },
+  };
+
+  it("records the exposure right after the draw", async () => {
+    const client = sdk(WITH_EXPERIMENT);
+    const exposure = vi.spyOn(client, "recordExposure").mockResolvedValue();
+    renderWith(client);
+
+    // A visitor bucketed into an arm but absent from exposure_events still
+    // contributes revenue while missing from the denominator, which biases
+    // every conversion rate and breaks the sample-ratio check.
+    await waitFor(() => expect(exposure).toHaveBeenCalledTimes(1));
+    expect(exposure.mock.calls[0]![0]).toMatchObject({
+      experimentId: "exp_1",
+      variantId: "only",
+      placementId: "onboarding",
+    });
+  });
+
+  it("does not record an exposure when there is no experiment", async () => {
+    const client = sdk(PLAIN);
+    const exposure = vi.spyOn(client, "recordExposure").mockResolvedValue();
+    renderWith(client);
+    await waitFor(() => expect(screen.getByTestId("rendered")).toBeTruthy());
+    expect(exposure).not.toHaveBeenCalled();
+  });
+
+  it("emits paywall_close, which the funnel needs to compute dismissal", async () => {
+    const client = sdk(PLAIN);
+    const track = vi.spyOn(client, "track");
+    render(
+      <RovenueProvider client={client}>
+        <RovenuePaywall
+          placement="onboarding"
+          successUrl="https://app.example.com/ok"
+          cancelUrl="https://app.example.com/no"
+        />
+      </RovenueProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("rendered")).toBeTruthy());
+
+    track.mockClear();
+    screen.getByRole("button", { name: /close/i }).click();
+
+    await waitFor(() => expect(track).toHaveBeenCalled());
+    expect(track.mock.calls[0]![0]).toMatchObject({
+      eventType: "paywall_close",
+      paywallContext: { paywallId: "pw_1", placementId: "onboarding" },
+    });
   });
 });

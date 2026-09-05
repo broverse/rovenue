@@ -34,7 +34,4 @@ export function selectVariant<T extends { weight: number }>(
   return variants[variants.length - 1]!;
 }
 
-/**
- * True if a subscriber is inside the given rollout fraction.
- * `percentage` is `0..1` (e.g. `0.1` = 10%).
- */
+

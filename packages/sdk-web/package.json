@@ -28,9 +28,7 @@
     "test": "vitest run --minWorkers=1 --maxWorkers=2"
   },
   "dependencies": {
-    "@paralleldrive/cuid2": "^2.2.2",
-    "@rovenue/shared": "workspace:*",
-    "@rovenue/paywall-renderer": "workspace:*"
+    "@paralleldrive/cuid2": "^2.2.2"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
@@ -40,7 +38,9 @@
     "jsdom": "^25.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tsup": "^8.0.0"
+    "tsup": "^8.0.0",
+    "@rovenue/shared": "workspace:*",
+    "@rovenue/paywall-renderer": "workspace:*"
   },
   "peerDependencies": {
     "react": ">=18"
