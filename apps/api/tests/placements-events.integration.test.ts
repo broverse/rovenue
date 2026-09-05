@@ -622,8 +622,17 @@ describe("processStripeEvent — rovenue_presented_context attribution", () => {
     const result = await processStripeEvent({
       projectId: PROJECT_ID,
       event,
-      stripe: {} as Stripe,
-      accountId: "acct_test",
+      // ProcessStripeEventOptions has no `stripe`/`accountId` fields — it
+      // takes `account: AccountScopedStripe`. Both event types this
+      // describe block sends (customer.subscription.created, invoice.paid)
+      // no-op the funnel backstop before `ctx.account` is ever
+      // dereferenced (no funnel session metadata / no funnel purchase row
+      // for either fixture) and route to syncSubscription/applyInvoicePaid,
+      // neither of which reads `ctx.account` — so an empty stand-in is
+      // safe here, matching the `account: {} as never` idiom
+      // stripe-webhook.product-changed.integration.test.ts already uses
+      // for the same "unused for this path" case.
+      account: {} as never,
     });
 
     expect(result.status).toBe("processed");
@@ -660,8 +669,9 @@ describe("processStripeEvent — rovenue_presented_context attribution", () => {
     await processStripeEvent({
       projectId: PROJECT_ID,
       event: subEvent,
-      stripe: {} as Stripe,
-      accountId: "acct_test",
+      // See the comment on the first processStripeEvent call above:
+      // ctx.account is never dereferenced for this event type/fixture.
+      account: {} as never,
     });
 
     const [purchase] = await testDb
@@ -683,8 +693,9 @@ describe("processStripeEvent — rovenue_presented_context attribution", () => {
     await processStripeEvent({
       projectId: PROJECT_ID,
       event: invoiceEvent,
-      stripe: {} as Stripe,
-      accountId: "acct_test",
+      // See the comment on the first processStripeEvent call above:
+      // ctx.account is never dereferenced for this event type/fixture.
+      account: {} as never,
     });
 
     const outboxRows = await testDb
