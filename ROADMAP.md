@@ -630,11 +630,87 @@ else in the framework/provider-breadth dimension is done.
         silently drops the event. The guard names the provider and key,
         declares deliberate omissions with reasons, and fails when an
         exemption goes stale.
-- [ ] Stripe one-time (non-subscription) purchases reach no integration
-      provider — funnel completion emits only `funnel.session.paid` on a
-      separate `FUNNEL` aggregate, never `revenue.event.recorded`. Found by
-      the 2026-09-03 enumeration; genuinely separate scope (the funnel/
-      revenue bridge, not store lifecycle normalization).
+- [x] One-time purchase revenue typing — shipped 2026-09-04
+      (`docs/superpowers/specs/2026-09-04-one-time-revenue-typing-design.md`).
+      **The item as written named the Stripe symptom; the real defect was
+      one level deeper and affected all three stores, not just Stripe.**
+      Verifying the Stripe gap turned up the same defect, one step milder,
+      already live on Apple and Google: every one-time (non-subscription)
+      purchase — consumable or non-consumable — was recorded as
+      `revenue.INITIAL`, the same type as a new subscription. Stripe's
+      funnel path had it worse: `grantOneTimePurchase` wrote a `purchases`
+      row and an entitlement and recorded no revenue at all, so a funnel
+      sale was invisible to every integration provider, to
+      gross/net revenue, MRR, LTV, country revenue, and the transactions
+      list alike — the "top credit packages" and "credit revenue" metrics
+      were permanently zero because nothing had ever written
+      `CREDIT_PURCHASE`, and the ad platforms received `Subscribe` for a
+      coin pack.
+      Delivered:
+      - **One rule, one place.** `oneTimeRevenueTypeFor`
+        (`services/revenue/one-time-type.ts`) is a total
+        `Record<ProductType, RevenueEventType | null>` — `CONSUMABLE` →
+        `CREDIT_PURCHASE`, `NON_CONSUMABLE` → `NON_RENEWING_PURCHASE`
+        (new enum value, migration 0121), `SUBSCRIPTION` →
+        `null` so the caller's own INITIAL/RENEWAL/TRIAL_CONVERSION
+        classification stands untouched. A fourth `ProductType` is a
+        compile error, not a silent fallthrough. All four producers —
+        Apple and Google receipt verification, the Stripe funnel's
+        one-time purchase completion, and the CSV importer — call it.
+      - **Stripe funnel purchases now record revenue**, inside the same
+        transaction that grants access, with USD conversion hoisted
+        outside the transaction and a dedupe key that converges the
+        `/confirm` and webhook-backstop racers.
+      - **`revenue.REACTIVATION` became a public key**, closing a gap
+        that predates this plan: it had been produced since Apple's
+        RESUBSCRIBE handler shipped but had no catalog key, so every
+        provider silently filtered it with `filtered_by_event_scope`.
+        It carries two economic meanings under one key — a win-back and
+        a reversed-refund accounting correction — disambiguated by a
+        `metadata.reason` tag only `applyRefundReversed` sets.
+      - **A compile-time bijection guard**
+        (`services/integrations/revenue-key-bijection.ts`) makes "a
+        `RevenueEventType` has no public key" a `tsc` error instead of a
+        silent skip — the exact failure shape `REACTIVATION` had been
+        shipping under. It does not cover SQL allow-lists, which a string
+        literal hides from the type system.
+      - **Named revenue-type groupings** replace fourteen hand-copied
+        `IN (...)` allow-lists across metrics/analytics/dashboard code
+        (`ALL_REVENUE_TYPES`, `REVENUE_TYPES_MONEY_OUT`,
+        `REVENUE_TYPES_PURCHASE_COUNT`, `REVENUE_TYPES_NEW_RECURRING`,
+        `REVENUE_TYPES_LIFETIME_PURCHASED`) — one decision point instead
+        of fourteen. That these lists had already drifted from the enum
+        was not a hypothesis: `CHARGEBACK` appears in eight predicates
+        and has never been a `RevenueEventType` value, so no row could
+        ever have carried it.
+      - **A ClickHouse contract test** runs `v_revenue_lifetime_subscriber`
+        against a real testcontainer with one row of every
+        `RevenueEventType` and fails by name on any type the view drops —
+        the only thing holding a SQL view and the TypeScript enum in step,
+        since the view can't import the constant.
+      - **A migration (0123) widens existing integration connections**:
+        any connection with `revenue.INITIAL` already enabled gains
+        `revenue.CREDIT_PURCHASE` and `revenue.NON_RENEWING_PURCHASE` too,
+        so splitting one key into three doesn't silently stop deliveries
+        a customer integration already receives. `revenue.REACTIVATION`
+        is deliberately **not** added by that migration — a genuinely new
+        signal nobody has ever received ships opt-in, not retroactively
+        enabled.
+      - **History is not rewritten.** Rows recorded before this release
+        keep `revenue.INITIAL` for what was, in fact, a one-time purchase.
+      Two rulings, recorded: `CREDIT_PURCHASE` means "a consumable IAP was
+      bought," not "a credit grant was recorded" — a misconfigured
+      `CONSUMABLE` product with no currency-grant rows is still filed
+      here, deliberately, because keying on the grants table instead
+      would make the type a function of mutable configuration. And
+      `ltv-prediction`'s cohort anchor stays subscription-only, on
+      purpose — a one-time buyer is not a subscription-cohort member, and
+      anchoring them there would project recurring revenue for someone
+      who bought once.
+      Stripe `customer.subscription.updated`'s prior
+      `cancel_at_period_end` — §6's other named exclusion from the
+      2026-09-03 entry above — is untouched and stays open; this plan did
+      not touch it.
 - Architecture note (now implemented, not just planned): the outbox → Kafka
   fanout consumer + deliver worker is the "integration dispatcher"; each
   integration = registry entry (mapping + credential schema) + credential

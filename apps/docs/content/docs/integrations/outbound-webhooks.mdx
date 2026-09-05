@@ -72,10 +72,12 @@ For every other event type (`subscription.*`, `subscriber.identified`, `paywall.
 
 | Event key | Fires when |
 |---|---|
-| `revenue.INITIAL` | The first paid transaction for a subscriber (new subscription or one-time purchase). |
+| `revenue.INITIAL` | The first paid transaction for a subscriber (new subscription). Also the type recorded for any one-time purchase made before 2026-09-04 — see [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. |
 | `revenue.TRIAL_CONVERSION` | A trial converts to a paid subscription. |
 | `revenue.RENEWAL` | A recurring subscription renews for another billing period. |
-| `revenue.CREDIT_PURCHASE` | A virtual-currency / credit pack is purchased. |
+| `revenue.CREDIT_PURCHASE` | A consumable in-app product is purchased — Apple, Google, or a one-time Stripe funnel purchase of a consumable product. See [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. |
+| `revenue.NON_RENEWING_PURCHASE` | A non-consumable one-time purchase — Apple, Google, or a one-time Stripe funnel purchase of a non-consumable product. See [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. |
+| `revenue.REACTIVATION` | A lapsed subscriber returns (a win-back offer redemption or a resubscribe), or an accounting reversal of a previously-applied refund. **Apple only** — see [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below for how the two cases are told apart internally. |
 | `revenue.REFUND` | A refund is recorded (`data.amount` is always a positive value). |
 | `revenue.CANCELLATION` | A cancellation is recorded as a revenue-affecting event. |
 | `subscription.trial.started` [^not-yet-emitted] | A new trial period begins. |
@@ -97,6 +99,66 @@ For every other event type (`subscription.*`, `subscriber.identified`, `paywall.
 You choose which of these keys are delivered to a given endpoint when you configure the connection.
 
 [^not-yet-emitted]: Defined in the catalog and selectable on a connection, but not yet emitted by the backend — coming with SDK identify/trial instrumentation.
+
+---
+
+### One-time purchase revenue keys
+
+Before 2026-09-04, every one-time (non-subscription) purchase — a consumable
+or non-consumable in-app purchase on Apple or Google — was recorded with the
+same type as a new subscription, `revenue.INITIAL`. Stripe funnel purchases
+of a one-time package recorded no revenue event at all. Both are fixed: a
+one-time purchase is now typed by what it actually is, and it reaches the
+Stripe funnel path too.
+
+The type is decided by one rule, in one place
+(`services/revenue/one-time-type.ts`), keyed only on the product's
+`ProductType`:
+
+| `ProductType` | Revenue type |
+|---|---|
+| `CONSUMABLE` | `revenue.CREDIT_PURCHASE` |
+| `NON_CONSUMABLE` | `revenue.NON_RENEWING_PURCHASE` |
+| `SUBSCRIPTION` | unchanged — the caller's own `INITIAL` / `RENEWAL` / `TRIAL_CONVERSION` classification stands |
+
+**Producer table** — which store, and which code path, writes each of
+these two keys:
+
+| Revenue key | Apple | Google | Stripe (funnel) | CSV import |
+|---|---|---|---|---|
+| `revenue.CREDIT_PURCHASE` | Consumable IAP, receipt verification | Consumable one-time product, receipt verification | One-time purchase of a consumable package | A historical consumable purchase, on import |
+| `revenue.NON_RENEWING_PURCHASE` | Non-consumable IAP, receipt verification | Non-consumable one-time product, receipt verification | One-time purchase of a non-consumable package | A historical non-consumable purchase, on import |
+
+All four producers — Apple and Google receipt verification, the Stripe
+funnel's one-time purchase completion, and the RevenueCat/Adapty CSV
+importer — call the same rule above, so a purchase is typed identically
+regardless of which path recorded it.
+
+**`revenue.CREDIT_PURCHASE` means "a consumable IAP was bought," not "a
+credit grant was recorded."** A `CONSUMABLE` product configured with no
+currency-grant rows behind it grants nothing at all — a project
+misconfiguration — and is still filed as a credit purchase. The type is a
+property of the product, not of what the purchase happened to grant.
+
+**History is not rewritten.** A one-time purchase recorded before
+2026-09-04 keeps `revenue.INITIAL` — it is not retyped to
+`revenue.CREDIT_PURCHASE` or `revenue.NON_RENEWING_PURCHASE`. If you're
+reconciling historical numbers against numbers recorded after this date,
+older one-time purchases will only ever appear under `revenue.INITIAL`.
+
+**`revenue.REACTIVATION` is Apple-only** and carries two different
+economic meanings under one key: a lapsed subscriber returning (a win-back
+offer redemption, or a plain resubscribe), and an accounting reversal —
+Apple un-does a refund that had already been applied. Internally, the
+underlying revenue event is tagged `metadata.reason: "refund_reversed"`
+(the exported `REACTIVATION_REVERSAL_REASON` constant in
+`apps/api/src/services/apple/apple-webhook.ts`) for the reversal case only;
+an unmarked one is the win-back case. **This tag is not currently included
+in the delivered Custom Webhook payload** — `data` for a revenue event is
+the fixed shape described [above](#data-shape) (`kind` / `amount` /
+`currency` / `subscriberId` / `productId` / `externalId`), so a Custom
+Webhook receiver cannot yet distinguish the two `revenue.REACTIVATION`
+cases from the delivered payload alone.
 
 ---
 
