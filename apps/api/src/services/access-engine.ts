@@ -57,8 +57,27 @@ export interface DesiredAccess {
  * as "longest-lived", which is right for `expiresDate` (a lifetime
  * purchase never lapses) and wrong for `gracePeriodExpires` (an unstated
  * window is unknown, not eternal).
+ *
+ * EXPORTED, and structurally typed rather than taking a whole purchase
+ * row, because the three store webhook handlers write access rows of
+ * their own on the ingestion path. They used to write `purchase
+ * .expiresDate` directly, which for a GRACE_PERIOD purchase is the
+ * PRE-grace date the read path will not serve. That was masked only by
+ * `syncAccess` running afterwards and overwriting the row — the invariant
+ * held by ORDERING rather than by construction, and a crash between the
+ * two left a grant that served nothing. One rule, one function, every
+ * writer.
  */
-function entitlementExpiry(purchase: PurchaseWithAccessIds): Date | null {
+export function entitlementExpiry(purchase: {
+  // `string`, not `PurchaseStatus`: `findPurchasesWithAccessIds` returns
+  // the column as a bare string, and the same widening lets a caller pass
+  // a row straight from any repository without a cast. The one comparison
+  // below is against a PurchaseStatus member, so a value outside the enum
+  // simply is not GRACE_PERIOD.
+  status: PurchaseStatus | string;
+  expiresDate: Date | null;
+  gracePeriodExpires: Date | null;
+}): Date | null {
   if (purchase.status !== PurchaseStatus.GRACE_PERIOD) {
     return purchase.expiresDate;
   }

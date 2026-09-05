@@ -1,4 +1,5 @@
 import type { PurchaseStatus, RevenueEventType } from "@rovenue/db";
+import { ACCESS_GRANTING_STATUSES as SHARED_ACCESS_GRANTING_STATUSES } from "@rovenue/shared/subscription-status";
 import { logger } from "../../lib/logger";
 import {
   GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE,
@@ -184,11 +185,14 @@ export function mapRevenueEventType(
   }
 }
 
-const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> = new Set<PurchaseStatus>([
-  PURCHASE_STATUS.ACTIVE,
-  PURCHASE_STATUS.TRIAL,
-  PURCHASE_STATUS.GRACE_PERIOD,
-]);
+/**
+ * Derived from the shared semantics table, never hand-listed. The
+ * entitlement engine reads `grantsAccess` off that table, so a hand-kept
+ * copy here would honour a future granting status in one place and
+ * silently ignore it in the other.
+ */
+const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> =
+  new Set<PurchaseStatus>(SHARED_ACCESS_GRANTING_STATUSES);
 
 export function isAccessGranting(status: PurchaseStatus): boolean {
   return ACCESS_GRANTING_STATUSES.has(status);

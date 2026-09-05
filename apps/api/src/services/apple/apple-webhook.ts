@@ -46,6 +46,7 @@ import {
   pendingPlanChangeFields,
 } from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
+import { entitlementExpiry } from "../access-engine";
 import { audit } from "../../lib/audit";
 import { expireSupersededApplePurchases } from "./apple-supersede";
 import { retireChainBillingIssue } from "./apple-recovery";
@@ -1583,15 +1584,25 @@ async function resolveAutoRenewProduct(
 interface GrantAccessArgs {
   ctx: DispatchContext;
   subscriber: { id: string };
-  purchase: { id: string };
+  purchase: { id: string; status: PurchaseStatus; gracePeriodExpires: Date | null };
   product: { id: string; accessIds: string[] };
 }
 
 async function grantAccess(args: GrantAccessArgs): Promise<void> {
   const { ctx, subscriber, purchase, product } = args;
-  const expiresDate = ctx.transaction.expiresDate
-    ? new Date(ctx.transaction.expiresDate)
-    : null;
+  // The entitlement date, not the transaction's raw expiresDate: a
+  // GRACE_PERIOD purchase's expiresDate is the PRE-grace date, which the
+  // read path (`findActiveAccess`, `expiresDate > now`) will not serve.
+  // syncAccess overwrites this row moments later with the same rule, but
+  // relying on that made the invariant hold by ordering -- a crash in
+  // between left a grant that served nothing.
+  const expiresDate = entitlementExpiry({
+    status: purchase.status,
+    expiresDate: ctx.transaction.expiresDate
+      ? new Date(ctx.transaction.expiresDate)
+      : null,
+    gracePeriodExpires: purchase.gracePeriodExpires,
+  });
 
   for (const accessId of product.accessIds) {
     const existing = await drizzle.accessRepo.findAccessByPurchaseAndAccessId(

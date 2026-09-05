@@ -11,6 +11,7 @@ import {
   drizzle,
   revenueDedupeKind,
 } from "@rovenue/db";
+import { ACCESS_GRANTING_STATUSES as SHARED_ACCESS_GRANTING_STATUSES } from "@rovenue/shared/subscription-status";
 import { logger } from "../../lib/logger";
 import { audit, type AuditTx } from "../../lib/audit";
 import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
@@ -34,6 +35,7 @@ import {
   pendingPlanChangeFields,
 } from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
+import { entitlementExpiry } from "../access-engine";
 // Type-only: no runtime cycle with webhook-processor (which imports us).
 import type { WebhookPostProcess } from "../webhook-processor";
 
@@ -819,7 +821,13 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
       subscriberId: subscriber.id,
       purchaseId: purchase.id,
       accessIds: product.accessIds,
-      expiresDate: purchase.expiresDate,
+      // The entitlement date, not the purchase's raw expiresDate: a
+      // GRACE_PERIOD purchase's expiresDate is the PRE-grace date, which
+      // the read path (`findActiveAccess`, `expiresDate > now`) will not
+      // serve. syncAccess overwrites this row moments later with the same
+      // rule, but relying on that made the invariant hold by ordering --
+      // a crash in between left a grant that served nothing.
+      expiresDate: entitlementExpiry(purchase),
     });
   } else {
     await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
@@ -1195,12 +1203,14 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
 // Helpers
 // =============================================================
 
+/**
+ * Derived from the shared semantics table, never hand-listed. The
+ * entitlement engine reads `grantsAccess` off that table, so a hand-kept
+ * copy here would honour a future granting status in one place and
+ * silently ignore it in the other.
+ */
 const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> =
-  new Set<PurchaseStatus>([
-    PurchaseStatus.ACTIVE,
-    PurchaseStatus.TRIAL,
-    PurchaseStatus.GRACE_PERIOD,
-  ]);
+  new Set<PurchaseStatus>(SHARED_ACCESS_GRANTING_STATUSES);
 
 // Exported for Task 9 (services/import/verify.ts): Phase B re-verifying an
 // imported Stripe anchor needs the SAME live-status mapping the webhook
