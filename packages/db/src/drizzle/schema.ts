@@ -3260,6 +3260,48 @@ export type NewIntegrationDelivery = typeof integrationDeliveries.$inferInsert;
 // `presetId` is the machine-readable preset key and is nullable
 // (a mapping-only import has no preset).
 
+/**
+ * Every operator opt-in an import job carries, in ONE place.
+ *
+ * This shape used to be re-typed inline wherever it was touched (the
+ * `options` column, `updateImportJobOptions`'s patch, the mapping-PATCH
+ * route's zod schema and its cast, the dashboard's job type). A
+ * hand-maintained link like that drops a newly added key silently: the
+ * option persists but nothing can set it, and the feature it gates looks
+ * broken rather than unwired. Declaring it once means adding a key here
+ * is enough for every DB-side consumer, and the route/dashboard copies
+ * that cannot import this type are at least all named after it.
+ *
+ * Each key is an "I accept a weaker guarantee" switch, all defaulting
+ * OFF-side in the safe direction (see write.ts's DEFAULT_* constants and
+ * enrich.ts's DEFAULT_ENRICH_UNGROUPED_CHAINS).
+ */
+export type ImportJobOptions = {
+  /** Skip `isSandbox` rows rather than importing them. Default true. */
+  skipSandbox?: boolean;
+  /** Import anchorless (promotional / manually granted) rows, which have
+   *  no store transaction to re-verify against. Default true. */
+  importAnchorless?: boolean;
+  /**
+   * GOOGLE_TOKEN_ENRICHMENT only. Treat a (subscriber, product) pair
+   * whose purchase rows carry NO real chain id — every row's
+   * `originalTransactionId` equal to its own `storeTransactionId`,
+   * i.e. write.ts's NOT NULL fallback fired because the source export
+   * had no original-transaction column — as ONE enrichable group,
+   * provided the enrichment file supplies exactly one token for that
+   * pair.
+   *
+   * Default false: the strict rule is that more than one chain is
+   * ambiguous and fails closed. This is the operator's explicit
+   * acceptance that a RevenueCat-shaped export cannot express chains at
+   * all, so refusing every multi-renewal Android subscriber would make
+   * the enrichment pass a no-op on the exact file it exists to serve.
+   * It never overrides an ambiguity the source file itself asserts (two
+   * different tokens for one pair).
+   */
+  enrichUngroupedChains?: boolean;
+};
+
 export const importJobs = pgTable(
   "import_jobs",
   {
@@ -3287,7 +3329,7 @@ export const importJobs = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
     options: jsonb("options")
-      .$type<{ skipSandbox?: boolean; importAnchorless?: boolean }>()
+      .$type<ImportJobOptions>()
       .notNull()
       .default(sql`'{}'::jsonb`),
     status: importJobStatus("status").notNull().default("PENDING_MAPPING"),

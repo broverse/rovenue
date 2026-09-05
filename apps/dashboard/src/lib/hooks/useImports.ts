@@ -63,6 +63,25 @@ export interface ImportDryRunSummary {
   requiredPartitionSpan: { fromMonth: string; toMonth: string; monthCount: number } | null;
 }
 
+/**
+ * Client-side mirror of `ImportJobOptions` in packages/db's schema.
+ *
+ * Declared here rather than imported: @rovenue/db pulls in drizzle and
+ * `pg`, which have no place in a browser bundle. Named identically to
+ * the server type so a `grep ImportJobOptions` finds both copies —
+ * this is the one link in the chain that stays hand-maintained.
+ *
+ * `enrichUngroupedChains` has no UI control yet: it applies only to
+ * GOOGLE_TOKEN_ENRICHMENT jobs, and the mapping editor below is the
+ * HISTORY flow. It is typed here so the enrichment screen can send it
+ * without re-widening this type.
+ */
+export interface ImportJobOptions {
+  skipSandbox?: boolean;
+  importAnchorless?: boolean;
+  enrichUngroupedChains?: boolean;
+}
+
 export interface ImportJob {
   id: string;
   projectId: string;
@@ -73,7 +92,7 @@ export interface ImportJob {
   fileBytes: number;
   fileSha256: string;
   mapping: Record<string, CanonicalField>;
-  options: { skipSandbox?: boolean; importAnchorless?: boolean };
+  options: ImportJobOptions;
   status: ImportJobStatus;
   checkpointLine: number;
   counters: Partial<Record<ImportOutcome, number>> & Record<string, number>;
@@ -284,7 +303,7 @@ export function useUpdateImportMapping(projectId: string, jobId: string) {
   return useMutation({
     mutationFn: (input: {
       mapping: Record<string, CanonicalField>;
-      options?: { skipSandbox?: boolean; importAnchorless?: boolean };
+      options?: ImportJobOptions;
     }) =>
       api<JobEnvelope>(`${base(projectId)}/${jobId}/mapping`, {
         method: "PATCH",

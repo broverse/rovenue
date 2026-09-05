@@ -5,7 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
-import { drizzle } from "@rovenue/db";
+import { drizzle, type ImportJobOptions } from "@rovenue/db";
 import {
   ERROR_CODE,
   IMPORT_MAX_UPLOAD_BYTES,
@@ -235,6 +235,13 @@ const CANONICAL_FIELD_KEYS: ReadonlySet<string> = new Set(
 const importJobOptionsPatchSchema = z.object({
   skipSandbox: z.boolean().optional(),
   importAnchorless: z.boolean().optional(),
+  // GOOGLE_TOKEN_ENRICHMENT only — see `ImportJobOptions` in
+  // packages/db's schema for what it relaxes and why it is off by
+  // default. It has to be listed HERE or a client could never set it:
+  // `z.object` strips keys it does not declare, so a missing entry makes
+  // the option persist-able in the column but unreachable through the
+  // only route that writes it.
+  enrichUngroupedChains: z.boolean().optional(),
 });
 
 const mappingBodySchema = z.object({
@@ -672,7 +679,7 @@ importsRoute.patch(
     // columns aimed at the same one.
     const { mapping, options } = c.req.valid("json") as {
       mapping: Record<string, CanonicalField>;
-      options?: { skipSandbox?: boolean; importAnchorless?: boolean };
+      options?: ImportJobOptions;
     };
     const validation = validateMapping(mapping);
     if (!validation.ok) {

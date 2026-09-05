@@ -209,6 +209,13 @@ export type {
   NewIntegrationConnection,
   IntegrationDelivery,
   NewIntegrationDelivery,
+  // Not a row type: the shape of `import_jobs.options`. Exported
+  // alongside them because every server-side consumer of an import job's
+  // opt-ins (the mapping-PATCH route, the enrichment resolver) reaches it
+  // through this barrel, and an inline re-declaration at each of those
+  // sites is exactly the hand-maintained link that dropped a new key
+  // silently before.
+  ImportJobOptions,
 } from "./drizzle/schema";
 
 // =============================================================

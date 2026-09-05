@@ -1,6 +1,11 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
-import { importJobs, type ImportJob, type NewImportJob } from "../schema";
+import {
+  importJobs,
+  type ImportJob,
+  type ImportJobOptions,
+  type NewImportJob,
+} from "../schema";
 import { importJobStatus } from "../enums";
 
 // =============================================================
@@ -118,14 +123,16 @@ export async function updateImportJobMapping(
 // / DEFAULT_IMPORT_ANCHORLESS) were only ever READ from `import_jobs.options`
 // — nothing wrote it, so the sandbox/anchorless opt-in acceptance criteria
 // could never actually be exercised by an operator. A jsonb MERGE (`||`),
-// not a wholesale overwrite: the caller may patch just one of the two keys
-// without having to first re-read and resend the other.
+// not a wholesale overwrite: the caller may patch a single key without
+// having to first re-read and resend the others. That merge is also what
+// lets a key added to `ImportJobOptions` later (`enrichUngroupedChains`)
+// survive a mapping save from a UI that only sends the two it knows about.
 
 export async function updateImportJobOptions(
   db: Db,
   projectId: string,
   id: string,
-  patch: { skipSandbox?: boolean; importAnchorless?: boolean },
+  patch: ImportJobOptions,
 ): Promise<ImportJob> {
   const [row] = await db
     .update(importJobs)

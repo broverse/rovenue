@@ -86,9 +86,6 @@ const FIXTURE_PRICE_USD = "9.99";
 
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 
-/** The one column no import writer sets. See `withToken` below. */
-const ENRICHMENT_TOKEN_PREFIX = "tok_seed";
-
 // -------------------------------------------------------------
 // CSV construction + the real write path
 // -------------------------------------------------------------
@@ -259,16 +256,32 @@ function dateAfter(base: string, days: number): string {
 // Public fixture surface
 // -------------------------------------------------------------
 
+/** The three writer-minted values a test may need to assert on, read
+ *  back off the row the writer actually wrote. */
+export type SeededPurchase = {
+  id: string;
+  storeTransactionId: string;
+  originalTransactionId: string;
+};
+
 export type SeededChain = {
   projectId: string;
   subscriberExternalId: string;
   /** The value an enrichment row would carry to name this product. */
   productIdentifier: string;
   productId: string;
-  /** The chain key the writer actually landed on. */
-  originalTransactionId: string;
+  /** Every row the writer created, oldest first. Exposed as the full
+   *  triple rather than just the chain key so a test can assert the
+   *  SHAPE the writer produced — in particular whether
+   *  `originalTransactionId` is a real chain id or the NOT NULL fallback
+   *  onto the row's own `storeTransactionId`. Asserting that from the
+   *  fixture's own inputs instead would prove nothing. */
+  rows: SeededPurchase[];
   /** Purchase ids the writer created, oldest first. */
   purchaseIds: string[];
+  /** Distinct `originalTransactionId` values across those rows — i.e.
+   *  the number of chains the resolver will see. */
+  chainKeys: string[];
 };
 
 async function playStorePurchasesFor(
@@ -299,27 +312,40 @@ export const seedHistoryImport = {
   },
 
   /**
-   * One PLAY_STORE subscription chain of `renewals` rows.
+   * `renewals` PLAY_STORE purchase rows for one (subscriber, product)
+   * pair.
    *
-   * Every row names the same `original_txn_id` — that is what a Play
-   * export's renewals share, and it is the only way the writer produces
-   * a multi-row chain: a Play row with no original-transaction column
-   * falls back to its own storeTransactionId and becomes a chain of one.
+   * `shareChainId` picks which of the two real-world file shapes the
+   * writer is fed, and the difference is the whole feature:
    *
-   * `withToken` stamps `purchases.googlePurchaseToken` on the rows the
-   * writer created. It is a direct UPDATE, and it is the ONE thing in
-   * this helper that the history writer cannot do: write.ts does not set
-   * that column at all (grep confirms no producer exists yet — patching
-   * it is precisely what Task 6 will add). The row itself — its ids, its
-   * chain key, its dates — is still entirely writer-produced; only the
-   * column under test is stamped afterwards.
+   *   true  (default) — every row names the same `original_txn_id`, the
+   *     way a Play export with an original-transaction column does. The
+   *     writer carries it forward and the rows form ONE chain.
+   *   false — the file has no `original_txn_id` at all, the shape a
+   *     RevenueCat Transactions export actually has. write.ts's NOT NULL
+   *     fallback then sets each row's `originalTransactionId` to its OWN
+   *     `storeTransactionId`, so N renewals become N chains of one. This
+   *     is produced by the real writer's real rule, not simulated.
+   *
+   * `existingToken`, when given, is stamped onto every row the writer
+   * created. It is a direct UPDATE, and it is the ONE thing in this
+   * helper the history writer cannot do: write.ts does not set
+   * `purchases.googlePurchaseToken` at all (there is no producer for that
+   * column anywhere yet — writing it is precisely what Task 6 adds). The
+   * rows themselves — ids, chain keys, dates, status — are still entirely
+   * writer-produced; only the column under test is stamped afterwards.
+   * It takes the token VALUE rather than a boolean so a test can seed
+   * either a matching token (`alreadyEnriched`) or a disagreeing one
+   * (`conflictingToken`).
    */
   async playChain(args: {
     projectId: string;
     renewals: number;
-    withToken: boolean;
+    existingToken?: string;
+    shareChainId?: boolean;
   }): Promise<SeededChain> {
-    const { projectId, renewals, withToken } = args;
+    const { projectId, renewals, existingToken } = args;
+    const shareChainId = args.shareChainId ?? true;
     const suffix = createId();
     const subscriberExternalId = `rc_sub_play_${suffix}`;
     const { productId, productIdentifier } = await createPlayProduct(projectId);
@@ -330,7 +356,7 @@ export const seedHistoryImport = {
       store: SOURCE_STORE_PLAY,
       productId: productIdentifier,
       storeTxnId: `gp_txn_${suffix}_${index}`,
-      originalTxnId,
+      ...(shareChainId ? { originalTxnId } : {}),
       purchaseDate: dateAfter(FIRST_PURCHASE_DATE, index * RENEWAL_INTERVAL_DAYS),
     }));
     await writeFile(projectId, rows);
@@ -341,24 +367,32 @@ export const seedHistoryImport = {
         `seed-history-import: expected ${renewals} Play purchase row(s), found ${written.length}`,
       );
     }
-    if (withToken) {
+    if (existingToken !== undefined) {
       for (const purchase of written) {
         await drizzle.purchaseRepo.updatePurchase(db, purchase.id, {
-          googlePurchaseToken: `${ENRICHMENT_TOKEN_PREFIX}_${purchase.id}`,
+          googlePurchaseToken: existingToken,
         });
       }
     }
+
+    // Read back from the writer's own output rather than asserted from
+    // the file: if write.ts ever stops carrying `original_txn_id`
+    // forward, this fixture reports the value it really landed on and the
+    // tests' shape assertions fail loudly instead of drifting.
+    const seededRows: SeededPurchase[] = written.map((p) => ({
+      id: p.id,
+      storeTransactionId: p.storeTransactionId,
+      originalTransactionId: p.originalTransactionId,
+    }));
 
     return {
       projectId,
       subscriberExternalId,
       productIdentifier,
       productId,
-      // Read back from the writer's own output rather than asserted from
-      // the file: if write.ts ever stops carrying the column forward,
-      // this fixture reports the value it really landed on.
-      originalTransactionId: written[0]!.originalTransactionId,
-      purchaseIds: written.map((p) => p.id),
+      rows: seededRows,
+      purchaseIds: seededRows.map((r) => r.id),
+      chainKeys: [...new Set(seededRows.map((r) => r.originalTransactionId))],
     };
   },
 
@@ -418,12 +452,18 @@ export const seedHistoryImport = {
     if (!row) {
       throw new Error("seed-history-import: writer created no APP_STORE purchase row");
     }
+    const seededRow: SeededPurchase = {
+      id: row.id,
+      storeTransactionId: row.storeTransactionId,
+      originalTransactionId: row.originalTransactionId,
+    };
     return {
       projectId,
       subscriberExternalId,
       productIdentifier,
       productId,
-      originalTransactionId: row.originalTransactionId,
+      rows: [seededRow],
+      chainKeys: [seededRow.originalTransactionId],
       purchaseIds: [row.id],
     };
   },
