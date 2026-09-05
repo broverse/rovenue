@@ -9,7 +9,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // and a real API key row). The expose handler receives a
 // pre-populated `project` context via a light middleware shim.
 
-const publishExposureMock = vi.hoisted(() => vi.fn(async () => undefined));
+// Real signature is (tx, input) => Promise<void> (src/services/event-bus.ts).
+// A test below reads `.mock.calls[0]!` destructured as `[, input]` — a
+// zero-arg mock makes that an empty tuple with no element at index 1.
+const publishExposureMock = vi.hoisted(() =>
+  vi.fn(async (_tx: unknown, _input: Record<string, unknown>) => undefined),
+);
 
 vi.mock("../src/services/event-bus", () => ({
   eventBus: { publishExposure: publishExposureMock },

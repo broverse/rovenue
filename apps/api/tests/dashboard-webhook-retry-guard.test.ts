@@ -50,10 +50,21 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
           }),
       ),
     },
+    // findOutgoingWebhookById/resetWebhookForRetry/markWebhookDismissed all
+    // real-return `OutgoingWebhook | null` (packages/db/src/drizzle/
+    // repositories/outgoing-webhooks.ts). Left as `vi.fn(async () => null)`,
+    // TS infers a `null`-only return, which rejects every
+    // `.mockResolvedValue({...})` fixture below.
     outgoingWebhookRepo: {
-      findOutgoingWebhookById: vi.fn(async () => null),
-      resetWebhookForRetry: vi.fn(async () => null),
-      markWebhookDismissed: vi.fn(async () => null),
+      findOutgoingWebhookById: vi.fn<
+        () => Promise<Record<string, unknown> | null>
+      >(async () => null),
+      resetWebhookForRetry: vi.fn<
+        () => Promise<Record<string, unknown> | null>
+      >(async () => null),
+      markWebhookDismissed: vi.fn<
+        () => Promise<Record<string, unknown> | null>
+      >(async () => null),
       listDeadWebhooks: vi.fn(async () => []),
       countDeadWebhooks: vi.fn(async () => 0),
       countRecentDeadWebhooks: vi.fn(async () => 0),

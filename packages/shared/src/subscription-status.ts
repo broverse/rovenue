@@ -125,8 +125,12 @@ export const SUBSCRIPTION_STATUS_SEMANTICS: Record<
   // ALREADY past when the hold arrives, so the expiry sweeper would move
   // it straight to EXPIRED and erase the dunning signal the moment it
   // appeared. Retiring a stale hold is therefore a separate ageing pass
-  // in expiry-checker.ts, landing with the store routing that first
-  // writes this status; until then nothing produces a BILLING_ISSUE row.
+  // in expiry-checker.ts (`runBillingIssueAgeing`, bounded by
+  // BILLING_ISSUE_MAX_AGE_DAYS).
+  //
+  // All three stores route to this status: Google's account hold
+  // (SUBSCRIPTION_ON_HOLD), Apple's DID_FAIL_TO_RENEW on every subtype
+  // but GRACE_PERIOD, and Stripe's `unpaid` / `incomplete`.
   BILLING_ISSUE: {
     grantsAccess: false,
     isLive: true,
@@ -194,6 +198,29 @@ export const TERMINAL_STATUSES = statusesWhere((s) => s.isTerminal);
  * against above.
  */
 export const INVOLUNTARY_STATUSES = statusesWhere((s) => s.involuntary);
+
+/**
+ * Statuses retired by the billing-issue ageing pass
+ * (`runBillingIssueAgeing`, apps/api/src/workers/expiry-checker.ts)
+ * rather than by the expiry sweeper.
+ *
+ * The two are disjoint by construction: a status is swept on lapse when
+ * it HAS a lapse moment the sweeper can act on, and an involuntary
+ * payment failure that is not sweepable has none — its `expiresDate` is
+ * already in the past the instant the store reports the failure, so
+ * sweeping it would retire the row and erase the dunning signal at the
+ * same moment it appeared. Those rows are retired on AGE instead, off
+ * `billingIssueDetectedAt`.
+ *
+ * Today exactly {BILLING_ISSUE}. Derived rather than hand-listed for the
+ * same reason as the lists above, and specifically so the partial index
+ * that serves the ageing scan
+ * (`purchases_billing_issue_ageing_idx`) and the pass itself cannot
+ * describe different sets of rows.
+ */
+export const BILLING_ISSUE_AGEING_STATUSES = statusesWhere(
+  (s) => s.involuntary && !s.sweepable,
+);
 
 /**
  * A single-quoted, comma-separated list for embedding in a raw SQL

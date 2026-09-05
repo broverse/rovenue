@@ -18,6 +18,14 @@ export interface AuthenticatedProject {
   name: string;
   keyKind: ApiKeyKind;
   apiKeyId: string;
+  /**
+   * The publishable identifier of the key this request authenticated with.
+   *
+   * Carried so the browser surface can assert that the key in the URL is the
+   * same key that authenticated — without that, the two are independent and
+   * the origin allow-list stops meaning anything.
+   */
+  keyPublic: string;
 }
 
 declare module "hono" {
@@ -110,6 +118,7 @@ export function apiKeyAuth(
       name: record.project.name,
       keyKind: detected,
       apiKeyId: record.id,
+      keyPublic: record.keyPublic,
     });
 
     // Fire-and-forget last-used touch.

@@ -657,6 +657,10 @@ services:
       - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}"
     volumes:
       - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # SLO recording rules + alerts. Mounted as a directory because
+      # prometheus.yml globs it — dropping another *.yml in here is all it
+      # takes to add a rule group.
+      - ./deploy/prometheus/rules:/etc/prometheus/rules:ro
       - rovenue-prometheus-data:/prometheus
     expose:
       - "9090"

@@ -10,16 +10,12 @@
 
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { db } from "../../packages/db/src/drizzle/client";
-import {
-  warehouseQueryRuns,
-  projects,
-  user,
-} from "../../packages/db/src/drizzle/schema";
+import { db, projects } from "@rovenue/db";
+import { warehouseQueryRuns, user } from "@rovenue/db/src/drizzle/schema";
 import {
   recordQueryRun,
   countQueryRunsInPeriod,
-} from "../../packages/db/src/drizzle/repositories/warehouse-query-runs";
+} from "@rovenue/db/src/drizzle/repositories/warehouse-query-runs";
 
 const RUN_ID = Date.now();
 const PID = `proj_wqr_${RUN_ID}`;
@@ -43,9 +39,7 @@ async function setup() {
     .onConflictDoNothing();
   await db.insert(projects).values({
     id: PID,
-    slug: `test-wqr-${RUN_ID}`,
     name: `WQR Test ${RUN_ID}`,
-    ownerId: UID,
   });
 }
 

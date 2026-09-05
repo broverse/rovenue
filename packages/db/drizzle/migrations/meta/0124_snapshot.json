@@ -1,5 +1,5 @@
 {
-  "id": "4ac898d9-c8cd-49a3-9edc-252a79fae5e7",
+  "id": "2cef5602-bc1a-4623-b751-8532c2317fe7",
   "prevId": "cf2222df-6e44-41ff-a09d-bb50441b9180",
   "version": "7",
   "dialect": "postgresql",
@@ -5297,380 +5297,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.leaderboard_seasons": {
-      "name": "leaderboard_seasons",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "leaderboardId": {
-          "name": "leaderboardId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "seasonNumber": {
-          "name": "seasonNumber",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "startsAt": {
-          "name": "startsAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "endsAt": {
-          "name": "endsAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "LeaderboardSeasonStatus",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'ACTIVE'"
-        },
-        "closedAt": {
-          "name": "closedAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "leaderboard_seasons_leaderboardId_seasonNumber_key": {
-          "name": "leaderboard_seasons_leaderboardId_seasonNumber_key",
-          "columns": [
-            {
-              "expression": "leaderboardId",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "seasonNumber",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "leaderboard_seasons_status_endsAt_idx": {
-          "name": "leaderboard_seasons_status_endsAt_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "endsAt",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "leaderboard_seasons_leaderboardId_leaderboards_id_fk": {
-          "name": "leaderboard_seasons_leaderboardId_leaderboards_id_fk",
-          "tableFrom": "leaderboard_seasons",
-          "tableTo": "leaderboards",
-          "columnsFrom": [
-            "leaderboardId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.leaderboard_standings": {
-      "name": "leaderboard_standings",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "seasonId": {
-          "name": "seasonId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "rank": {
-          "name": "rank",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subscriberId": {
-          "name": "subscriberId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "score": {
-          "name": "score",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "eventCount": {
-          "name": "eventCount",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "leaderboard_standings_seasonId_rank_key": {
-          "name": "leaderboard_standings_seasonId_rank_key",
-          "columns": [
-            {
-              "expression": "seasonId",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "rank",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "leaderboard_standings_seasonId_leaderboard_seasons_id_fk": {
-          "name": "leaderboard_standings_seasonId_leaderboard_seasons_id_fk",
-          "tableFrom": "leaderboard_standings",
-          "tableTo": "leaderboard_seasons",
-          "columnsFrom": [
-            "seasonId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.leaderboards": {
-      "name": "leaderboards",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "projectId": {
-          "name": "projectId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "identifier": {
-          "name": "identifier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "metric": {
-          "name": "metric",
-          "type": "LeaderboardMetric",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currencyId": {
-          "name": "currencyId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cadence": {
-          "name": "cadence",
-          "type": "LeaderboardCadence",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "customPeriodDays": {
-          "name": "customPeriodDays",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "timezone": {
-          "name": "timezone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'UTC'"
-        },
-        "entryLimit": {
-          "name": "entryLimit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 100
-        },
-        "anchorAt": {
-          "name": "anchorAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "isEnabled": {
-          "name": "isEnabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "leaderboards_projectId_identifier_key": {
-          "name": "leaderboards_projectId_identifier_key",
-          "columns": [
-            {
-              "expression": "projectId",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "identifier",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "leaderboards_projectId_idx": {
-          "name": "leaderboards_projectId_idx",
-          "columns": [
-            {
-              "expression": "projectId",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "leaderboards_projectId_projects_id_fk": {
-          "name": "leaderboards_projectId_projects_id_fk",
-          "tableFrom": "leaderboards",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "projectId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "leaderboards_currencyId_virtual_currencies_id_fk": {
-          "name": "leaderboards_currencyId_virtual_currencies_id_fk",
-          "tableFrom": "leaderboards",
-          "tableTo": "virtual_currencies",
-          "columnsFrom": [
-            "currencyId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.notification_deliveries": {
       "name": "notification_deliveries",
       "schema": "",
@@ -7373,14 +6999,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "grantOn": {
-          "name": "grantOn",
-          "type": "CurrencyGrantTrigger",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'PURCHASE'"
         }
       },
       "indexes": {
@@ -8716,6 +8334,22 @@
           ],
           "isUnique": false,
           "where": "\"purchases\".\"store\" = 'PLAY_STORE' AND \"purchases\".\"status\" IN ('TRIAL', 'ACTIVE', 'PAUSED', 'GRACE_PERIOD', 'BILLING_ISSUE')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "purchases_billing_issue_ageing_idx": {
+          "name": "purchases_billing_issue_ageing_idx",
+          "columns": [
+            {
+              "expression": "billingIssueDetectedAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"purchases\".\"status\" IN ('BILLING_ISSUE') AND \"purchases\".\"billingIssueDetectedAt\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -11438,15 +11072,6 @@
         "TRANSFER_OUT"
       ]
     },
-    "public.CurrencyGrantTrigger": {
-      "name": "CurrencyGrantTrigger",
-      "schema": "public",
-      "values": [
-        "PURCHASE",
-        "RENEWAL",
-        "BOTH"
-      ]
-    },
     "public.CustomDomainCertStatus": {
       "name": "CustomDomainCertStatus",
       "schema": "public",
@@ -11592,31 +11217,6 @@
         "BOUNCED",
         "COMPLAINED",
         "SUPPRESSED"
-      ]
-    },
-    "public.LeaderboardCadence": {
-      "name": "LeaderboardCadence",
-      "schema": "public",
-      "values": [
-        "WEEKLY",
-        "MONTHLY",
-        "CUSTOM"
-      ]
-    },
-    "public.LeaderboardMetric": {
-      "name": "LeaderboardMetric",
-      "schema": "public",
-      "values": [
-        "TOP_SPENDERS",
-        "TOP_CONSUMERS"
-      ]
-    },
-    "public.LeaderboardSeasonStatus": {
-      "name": "LeaderboardSeasonStatus",
-      "schema": "public",
-      "values": [
-        "ACTIVE",
-        "CLOSED"
       ]
     },
     "public.MemberRole": {

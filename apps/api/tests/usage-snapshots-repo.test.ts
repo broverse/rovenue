@@ -1,17 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { db } from "../../packages/db/src/drizzle/client";
-import {
-  usageSnapshots,
-  projects,
-  user,
-} from "../../packages/db/src/drizzle/schema";
+import { db, projects } from "@rovenue/db";
+import { usageSnapshots, user } from "@rovenue/db/src/drizzle/schema";
 import {
   upsertUsageSnapshot,
   findUsageSnapshotsForProject,
   markSoftCapWarned,
   markHardCapWarned,
-} from "../../packages/db/src/drizzle/repositories/usage-snapshots";
+} from "@rovenue/db/src/drizzle/repositories/usage-snapshots";
 
 const PID = "proj_test_usage";
 const PSTART = new Date("2026-05-01T00:00:00Z");
@@ -33,9 +29,7 @@ async function setup() {
     .onConflictDoNothing();
   await db.insert(projects).values({
     id: PID,
-    slug: "test-usage",
     name: "Test Usage",
-    ownerId: "usr_demo",
   });
 }
 

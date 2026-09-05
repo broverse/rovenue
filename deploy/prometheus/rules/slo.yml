@@ -1,0 +1,323 @@
+# =============================================================
+# Rovenue SLOs and alerts
+# =============================================================
+#
+# Two service-level objectives, both measured on the API's own RED metrics
+# (apps/api/src/middleware/metrics.ts), which label every request with the
+# MATCHED route pattern — never the raw path — so the series count stays
+# bounded no matter how many subscriber ids exist.
+#
+#   Availability — 99.9% of requests are not 5xx, over 30 days.
+#                  Error budget: 0.1% of requests.
+#   Latency      — 99% of requests complete in under 500ms, over 30 days.
+#                  Error budget: 1% of requests.
+#
+# 4xx does not burn either budget. A rejected key or a malformed body is the
+# caller's outcome, not an outage, and folding them in makes the SLO move
+# whenever someone integrates badly.
+#
+# 500ms is a real histogram bucket boundary (see the `buckets` array in
+# apps/api/src/lib/metrics.ts). Picking a threshold that is NOT a boundary
+# would silently interpolate, and the SLI would stop meaning what it says.
+#
+# ALERTING SHAPE — multi-window, multi-burn-rate (Google SRE workbook ch.5).
+# A single "error rate above X" alert has to choose between catching a fast
+# outage and not paging on a blip; two windows per alert remove the choice.
+# The long window decides whether the budget is genuinely burning, the short
+# window (1/12th of it) decides whether it is STILL burning right now, so an
+# incident that has already recovered stops paging on its own.
+#
+# Burn rate is how many times faster than the budget allows. 14.4x for an
+# hour spends 2% of a 30-day budget; 1x for three days spends 10%.
+#
+# ROUTING: there is no Alertmanager in docker-compose.yml. These rules
+# evaluate and are visible in Prometheus and Grafana either way, and Grafana
+# can alert on them through its own contact points. Operators who want
+# paging should add an Alertmanager and point `alerting.alertmanagers` at it.
+
+groups:
+  # -----------------------------------------------------------
+  # Recording rules — the SLIs, at every window the alerts need
+  # -----------------------------------------------------------
+  #
+  # Recorded rather than inlined so that every alert below divides the SAME
+  # two numbers. When an SLI is written out longhand in eight places, the
+  # eighth eventually disagrees with the first.
+  #
+  # With no traffic these evaluate to NaN (0/0). That is deliberate and safe:
+  # every alert is a `>` comparison, and any comparison against NaN is false,
+  # so an idle deployment cannot page. Substituting 0 would be worse — it
+  # would assert perfect health for a service that is not serving.
+  - name: rovenue-slo-recording
+    interval: 30s
+    rules:
+      - record: slo:http_error:ratio_rate5m
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m]))
+      - record: slo:http_error:ratio_rate30m
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[30m]))
+            / sum(rate(http_requests_total[30m]))
+      - record: slo:http_error:ratio_rate1h
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[1h]))
+            / sum(rate(http_requests_total[1h]))
+      - record: slo:http_error:ratio_rate2h
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[2h]))
+            / sum(rate(http_requests_total[2h]))
+      - record: slo:http_error:ratio_rate6h
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[6h]))
+            / sum(rate(http_requests_total[6h]))
+      - record: slo:http_error:ratio_rate1d
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[1d]))
+            / sum(rate(http_requests_total[1d]))
+      - record: slo:http_error:ratio_rate3d
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[3d]))
+            / sum(rate(http_requests_total[3d]))
+
+      # Numerator and denominator both come from the histogram, never from
+      # http_requests_total: the two metrics are incremented in the same
+      # `finally` block but a ratio across metrics drifts the moment one of
+      # them gains a label the other does not have.
+      - record: slo:http_slow:ratio_rate5m
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="0.5"}[5m]))
+              / sum(rate(http_request_duration_seconds_count[5m]))
+          )
+      - record: slo:http_slow:ratio_rate30m
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="0.5"}[30m]))
+              / sum(rate(http_request_duration_seconds_count[30m]))
+          )
+      - record: slo:http_slow:ratio_rate1h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="0.5"}[1h]))
+              / sum(rate(http_request_duration_seconds_count[1h]))
+          )
+      - record: slo:http_slow:ratio_rate2h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="0.5"}[2h]))
+              / sum(rate(http_request_duration_seconds_count[2h]))
+          )
+      - record: slo:http_slow:ratio_rate6h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="0.5"}[6h]))
+              / sum(rate(http_request_duration_seconds_count[6h]))
+          )
+      - record: slo:http_slow:ratio_rate1d
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="0.5"}[1d]))
+              / sum(rate(http_request_duration_seconds_count[1d]))
+          )
+      - record: slo:http_slow:ratio_rate3d
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="0.5"}[3d]))
+              / sum(rate(http_request_duration_seconds_count[3d]))
+          )
+
+  # -----------------------------------------------------------
+  # Availability SLO — 99.9%, budget 0.001
+  # -----------------------------------------------------------
+  - name: rovenue-slo-availability
+    rules:
+      - alert: RovenueApiErrorBudgetBurningFast
+        # 14.4 x 0.001 = 0.0144. Two percent of the 30-day budget in one hour.
+        expr: |
+          slo:http_error:ratio_rate1h > 0.0144
+            and slo:http_error:ratio_rate5m > 0.0144
+        for: 2m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: "API 5xx rate is burning the error budget 14.4x too fast"
+          description: >-
+            {{ $value | humanizePercentage }} of requests are failing over the
+            last hour, and still failing over the last five minutes. At this
+            rate the 30-day availability budget is gone in about two days.
+
+      - alert: RovenueApiErrorBudgetBurning
+        # 6 x 0.001 = 0.006. Five percent of the budget in six hours.
+        expr: |
+          slo:http_error:ratio_rate6h > 0.006
+            and slo:http_error:ratio_rate30m > 0.006
+        for: 15m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: "API 5xx rate is burning the error budget 6x too fast"
+          description: >-
+            {{ $value | humanizePercentage }} of requests failing over six
+            hours and still failing now.
+
+      - alert: RovenueApiErrorBudgetDepleting
+        # 3 x 0.001 = 0.003. Ten percent of the budget in a day. Not a page:
+        # a slow burn wants an owner during working hours, not at 3am.
+        expr: |
+          slo:http_error:ratio_rate1d > 0.003
+            and slo:http_error:ratio_rate2h > 0.003
+        for: 1h
+        labels:
+          severity: ticket
+          slo: availability
+        annotations:
+          summary: "API error budget is depleting over the day"
+          description: >-
+            {{ $value | humanizePercentage }} of requests failing over 24
+            hours.
+
+      - alert: RovenueApiErrorBudgetSlowBurn
+        # 1 x 0.001. At exactly this rate the budget lasts precisely 30 days,
+        # which means there is none left for anything else.
+        expr: |
+          slo:http_error:ratio_rate3d > 0.001
+            and slo:http_error:ratio_rate6h > 0.001
+        for: 3h
+        labels:
+          severity: ticket
+          slo: availability
+        annotations:
+          summary: "API is spending its entire error budget on background failures"
+          description: >-
+            A steady {{ $value | humanizePercentage }} failure rate over three
+            days leaves no budget for a real incident.
+
+  # -----------------------------------------------------------
+  # Latency SLO — 99% under 500ms, budget 0.01
+  # -----------------------------------------------------------
+  - name: rovenue-slo-latency
+    rules:
+      - alert: RovenueApiLatencyBudgetBurningFast
+        # 14.4 x 0.01 = 0.144.
+        expr: |
+          slo:http_slow:ratio_rate1h > 0.144
+            and slo:http_slow:ratio_rate5m > 0.144
+        for: 2m
+        labels:
+          severity: page
+          slo: latency
+        annotations:
+          summary: "API latency is burning the 500ms budget 14.4x too fast"
+          description: >-
+            {{ $value | humanizePercentage }} of requests took longer than
+            500ms over the last hour, and still are.
+
+      - alert: RovenueApiLatencyBudgetBurning
+        # 6 x 0.01 = 0.06.
+        expr: |
+          slo:http_slow:ratio_rate6h > 0.06
+            and slo:http_slow:ratio_rate30m > 0.06
+        for: 15m
+        labels:
+          severity: page
+          slo: latency
+        annotations:
+          summary: "API latency is burning the 500ms budget 6x too fast"
+          description: >-
+            {{ $value | humanizePercentage }} of requests over 500ms across
+            six hours.
+
+      - alert: RovenueApiLatencyBudgetDepleting
+        # 3 x 0.01 = 0.03.
+        expr: |
+          slo:http_slow:ratio_rate1d > 0.03
+            and slo:http_slow:ratio_rate2h > 0.03
+        for: 1h
+        labels:
+          severity: ticket
+          slo: latency
+        annotations:
+          summary: "API latency budget is depleting over the day"
+          description: >-
+            {{ $value | humanizePercentage }} of requests over 500ms across 24
+            hours.
+
+  # -----------------------------------------------------------
+  # Correctness alerts the metrics themselves ask for
+  # -----------------------------------------------------------
+  #
+  # Each of these exists because a comment beside the counter in
+  # apps/api/src/lib/metrics.ts states the alerting intent in words. Until
+  # now none of them was honoured anywhere — the intent lived in a comment
+  # and nothing acted on it.
+  - name: rovenue-correctness
+    rules:
+      - alert: RovenueAccessDriftCircuitBreakerTripped
+        # "ALERT ON ANY NON-ZERO VALUE" — the counter's own comment. The
+        # reconciler refused to auto-heal because too much of the batch was
+        # drifting, which is either mass corruption or a bug in
+        # computeDesiredAccess. Entitlement data is untrustworthy either way,
+        # so this pages on the first occurrence with no `for:` delay.
+        expr: increase(rovenue_access_drift_circuit_breaker_total[15m]) > 0
+        labels:
+          severity: page
+          area: entitlements
+        annotations:
+          summary: "Entitlement reconciler refused to heal — drift ratio above threshold"
+          description: >-
+            A sweep found more drift than MAX_DRIFT_HEAL_RATIO allows and
+            stopped. Automated repair is halted on purpose; entitlement data
+            needs a human before anything rewrites it.
+
+      - alert: RovenueAccessDriftStepChange
+        # A low steady rate is expected — a sweep can race a live webhook.
+        # A step change is not: it means an ingestion path stopped calling
+        # syncAccess, and entitlements are silently going stale.
+        expr: |
+          sum(rate(rovenue_access_drift_detected_total[1h]))
+            > 5 * sum(rate(rovenue_access_drift_detected_total[1d] offset 1d))
+        for: 30m
+        labels:
+          severity: ticket
+          area: entitlements
+        annotations:
+          summary: "Entitlement drift jumped five-fold against yesterday"
+          description: >-
+            Drift detections are running far above the previous day's
+            baseline. Suspect an ingestion path that stopped calling
+            syncAccess.
+
+      - alert: RovenueWebhookReplayGuardFailingOpen
+        # The guard trades dedup for availability when Redis errors. That is
+        # the right call in the moment and the wrong state to sit in: while
+        # it lasts, a replayed store webhook is processed twice.
+        expr: increase(rovenue_webhook_replay_guard_failopen_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          area: webhooks
+        annotations:
+          summary: "Webhook replay dedup is failing open ({{ $labels.source }})"
+          description: >-
+            The replay guard cannot reach Redis and is admitting events
+            without a dedup check. Replays are being processed twice for as
+            long as this lasts.
+
+      - alert: RovenueApiPodsDyingMidWebhook
+        # The reaper reclaims webhook_events rows left in PROCESSING by a
+        # process that died holding them. Non-zero means pods are being
+        # killed mid-work — OOM, a rollout with too short a grace period, or
+        # a crash loop.
+        expr: increase(rovenue_webhook_events_reclaimed_total[30m]) > 0
+        for: 30m
+        labels:
+          severity: ticket
+          area: webhooks
+        annotations:
+          summary: "Webhook rows are being reclaimed from dead processes"
+          description: >-
+            The reaper is finding stale PROCESSING rows, which means API
+            processes are dying while holding webhook work.

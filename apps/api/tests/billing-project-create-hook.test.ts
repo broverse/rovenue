@@ -1,10 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { db } from "../../packages/db/src/drizzle/client";
-import {
-  billingSubscriptions,
-  projects,
-} from "../../packages/db/src/drizzle/schema";
+import { db, projects, billingSubscriptions } from "@rovenue/db";
 import { createFreeSubscription } from "../src/services/billing/create-free-subscription";
 
 const PID = "proj_test_hook";
@@ -24,9 +20,7 @@ describe("createFreeSubscription service", () => {
     await db.transaction(async (tx) => {
       await tx.insert(projects).values({
         id: PID,
-        slug: "test-hook",
         name: "Test Hook",
-        ownerId: "usr_demo",
       });
       await createFreeSubscription(tx, PID);
     });
@@ -44,9 +38,7 @@ describe("createFreeSubscription service", () => {
       db.transaction(async (tx) => {
         await tx.insert(projects).values({
           id: PID,
-          slug: "test-hook-rollback",
           name: "Test Hook Rollback",
-          ownerId: "usr_demo",
         });
         await createFreeSubscription(tx, PID);
         throw new Error("simulated downstream failure");

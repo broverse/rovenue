@@ -134,6 +134,7 @@ function buildWebhookData(envelope: RovenueEventEnvelope): Record<string, unknow
       subscriberId: envelope.subscriberId,
       productId: envelope.productId,
       externalId: envelope.identityContext?.externalId,
+      ...(envelope.revenueEventReason ? { reason: envelope.revenueEventReason } : {}),
     };
   }
   return envelope.payload ?? {};

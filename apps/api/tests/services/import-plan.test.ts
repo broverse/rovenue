@@ -2,16 +2,23 @@ import { Readable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
-import { db } from "../../../../packages/db/src/drizzle/client";
 import {
+  db,
+  drizzle,
   projects,
   products,
   purchases,
   subscribers,
   revenueEvents,
-} from "../../../../packages/db/src/drizzle/schema";
-import * as importJobRepo from "../../../../packages/db/src/drizzle/repositories/import-jobs";
-import { monthStartsUtc } from "../../../../packages/db/src/drizzle/repositories/revenue-event-partitions";
+  monthStartsUtc,
+} from "@rovenue/db";
+
+// Reaching into packages/db/src by relative path (as this file previously
+// did) resolves fine at runtime via vitest, but pulls those files outside
+// this package's tsconfig rootDir under static typecheck (TS6059) — go
+// through the published @rovenue/db barrel instead, same as the rest of
+// this suite.
+const importJobRepo = drizzle.importJobRepo;
 
 // =============================================================
 // planImport — dry-run planner (Task 6)
@@ -113,7 +120,15 @@ async function seedJob(args: {
  *  its NDJSON lines, for tests that need to check the actual `reason`
  *  text a row was reported with (fix round 1: "product not found" and
  *  "product ambiguous" must stay distinguishable). */
-function readReportRows(storageKey: string): Array<Record<string, unknown>> {
+function readReportRows(storageKey: string | null): Array<Record<string, unknown>> {
+  // planImport's real return type carries `reportStorageKey: string | null`
+  // (null on the early-exit paths that never open a report writer) — every
+  // caller here passes a summary from a run expected to have written one,
+  // so a null is itself the failure worth surfacing, same as the missing-
+  // object guard just below.
+  if (storageKey === null) {
+    throw new Error("summary.reportStorageKey is null; no report was written");
+  }
   const buf = fakeObjects.get(storageKey);
   if (!buf) throw new Error(`no report object stored for key ${storageKey}`);
   return buf

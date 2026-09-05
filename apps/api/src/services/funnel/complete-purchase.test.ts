@@ -369,6 +369,26 @@ describe("completeFunnelPurchase", () => {
     };
   }
 
+  it("Fix 5 (final review): a createRevenueEvent throw does not abort grantOneTimePurchase", async () => {
+    // This fixture's product mock carries no `type` field (see
+    // beforeEach's findProductsByIds), so oneTimeRevenueTypeFor(undefined)
+    // falls back to NON_RENEWING_PURCHASE (Fix 2) and the code reaches the
+    // real (unmocked) drizzle.revenueEventRepo.createRevenueEvent against
+    // this suite's fake transaction handle `{ marker: "tx" }` — which has
+    // no `.select`, so it genuinely throws `TypeError: db.select is not a
+    // function`. Before Fix 5's try/catch this propagated out of the
+    // transaction and completeFunnelPurchase rejected entirely, which is
+    // exactly the contract grantOneTimePurchase's header forbids: a throw
+    // here rolls back the paid transition and strands a buyer who really
+    // paid. The purchase/access writes below must still land.
+    findPurchaseBySession.mockResolvedValue(oneTimePurchaseRow());
+
+    const result = await completeFunnelPurchase(ONE_TIME_INPUT);
+
+    expect(result.alreadyIssued).toBe(false);
+    expect(upsertPurchase).toHaveBeenCalledTimes(1);
+  });
+
   it("writes a purchases row for a one-time funnel purchase", async () => {
     findPurchaseBySession.mockResolvedValue(oneTimePurchaseRow());
 

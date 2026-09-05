@@ -47,8 +47,12 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
   };
 
   const drizzleDb = {
-    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(drizzleDb),
+    // Explicit param + return types on the arrow itself let TS type this
+    // property from its declared signature, without needing to evaluate
+    // `fn(drizzleDb)` (which would require `drizzleDb`'s type before its
+    // own initializer finishes — TS7022/TS7024).
+    transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(drizzleDb),
     ),
   };
 
@@ -70,7 +74,13 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
       ),
       findSubscriberByAppUserId: vi.fn(async () => null),
       findSubscriberByRovenueId: vi.fn(async () => null),
-      resolveSubscriberByRovenueId: vi.fn(async () => null),
+      // Real return is `Subscriber | null` (packages/db/src/drizzle/
+      // repositories/subscribers.ts) — reassigned below via
+      // .mockResolvedValue with a real fixture, which a null-only
+      // inferred return can't accept.
+      resolveSubscriberByRovenueId: vi.fn<
+        () => Promise<Record<string, unknown> | null>
+      >(async () => null),
       upsertSubscriber: vi.fn(
         async (
           _db: unknown,
@@ -86,7 +96,13 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
           attributes: input.updateAttributes,
         }),
       ),
-      updateSubscriberAttributesById: vi.fn(async () => undefined),
+      // Real signature is (db, id, attributes) => Promise<void>
+      // (packages/db/src/drizzle/repositories/subscribers.ts). The test
+      // below reads `.mock.calls[0]![1]`/`[2]` — a zero-arg mock makes
+      // that an empty tuple with no elements at those indices.
+      updateSubscriberAttributesById: vi.fn(
+        async (_db: unknown, _id: string, _attributes: unknown) => undefined,
+      ),
     },
     lockRepo: {
       advisoryXactLock: vi.fn(async () => undefined),

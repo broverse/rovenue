@@ -3,7 +3,9 @@ import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { FeatureFlagEnv } from "@rovenue/db";
-import { attributesBodySchema } from "@rovenue/shared";
+import { attributesBodySchema,
+  HEADER,
+} from "@rovenue/shared";
 import { evaluateSubscriberConfig } from "../../services/subscriber-config";
 import { ok } from "../../lib/response";
 
@@ -30,7 +32,7 @@ import { ok } from "../../lib/response";
 //   await client.v1.config.$post({ json: { attributes: {…} } })
 //     // body is typechecked against configBodySchema
 
-export const SUBSCRIBER_HEADER = "x-rovenue-user-id";
+export const SUBSCRIBER_HEADER = HEADER.X_ROVENUE_USER_ID;
 const ENV_HEADER = "x-rovenue-env";
 
 const ENV_LOOKUP: Record<string, FeatureFlagEnv> = {

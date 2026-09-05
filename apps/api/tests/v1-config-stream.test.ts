@@ -88,9 +88,13 @@ describe("GET /v1/config/stream", () => {
   });
 
   it("subscribes to the invalidation channel", async () => {
-    await app
-      .request("/v1/config/stream?subscriberId=user1", { method: "GET" })
-      .catch(() => undefined);
+    // Hono's `.request()` overload set resolves to `Response |
+    // Promise<Response>` at this call site, and only the Promise variant
+    // has `.catch` — `Promise.resolve(...)` normalizes either into a real
+    // Promise without changing what's awaited.
+    await Promise.resolve(
+      app.request("/v1/config/stream?subscriberId=user1", { method: "GET" }),
+    ).catch(() => undefined);
     expect(mockSubscriber.subscribe).toHaveBeenCalledWith(
       "rovenue:experiments:invalidate",
     );

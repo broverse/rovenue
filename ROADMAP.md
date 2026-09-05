@@ -667,7 +667,13 @@ else in the framework/provider-breadth dimension is done.
         provider silently filtered it with `filtered_by_event_scope`.
         It carries two economic meanings under one key — a win-back and
         a reversed-refund accounting correction — disambiguated by a
-        `metadata.reason` tag only `applyRefundReversed` sets.
+        `metadata.reason` tag only `applyRefundReversed` sets. The tag
+        reaches the delivered CUSTOM_WEBHOOK payload as `data.reason`
+        (`revenueEventReason` on `RovenueEventEnvelope`, lifted from the
+        outbox payload's `metadata.reason`, never the whole `metadata`
+        object) — a fix from the whole-branch review, since the first
+        cut lifted the tag into the outbox row and stopped there,
+        leaving a consumer unable to tell the two cases apart.
       - **A compile-time bijection guard**
         (`services/integrations/revenue-key-bijection.ts`) makes "a
         `RevenueEventType` has no public key" a `tsc` error instead of a
@@ -711,6 +717,38 @@ else in the framework/provider-breadth dimension is done.
       `cancel_at_period_end` — §6's other named exclusion from the
       2026-09-03 entry above — is untouched and stays open; this plan did
       not touch it.
+      Open residuals from the whole-branch review's final fix wave
+      (2026-09-05), recorded rather than fixed:
+      - ~~A `CONSUMABLE` sold through a Stripe funnel books `CREDIT_PURCHASE`
+        revenue while granting zero credits.~~ **Closed 2026-09-05.**
+        `grantOneTimePurchase` (`services/funnel/complete-purchase.ts`) now
+        returns which product/purchase/subscriber to grant for when the
+        product is CONSUMABLE, and `completeFunnelPurchase` calls
+        `grantPurchaseCurrencies` for it AFTER its transaction commits — not
+        inside. It has to be outside: `addCredits`
+        (`services/credit-engine.ts`) always opens its own
+        `drizzle.db.transaction` (no `tx` parameter to join), so nesting it
+        in the paid-transition transaction would either graft an
+        independently-committing transaction onto it (credits could survive
+        a rollback of the paid transition, or the reverse) or, if it threw,
+        violate `grantOneTimePurchase`'s "nothing here throws" contract and
+        strand a buyer who really paid. `addCredits` dedupes on
+        (subscriberId, referenceType: "purchase", referenceId: purchaseId,
+        currencyId), so a failure here is safe to re-run — but nothing
+        currently retries it automatically, since a second
+        `completeFunnelPurchase` call for the same session short-circuits
+        before reaching this code again; a failure is logged loudly for an
+        operator to re-run by hand rather than silently dropped. Verified
+        against a real Postgres
+        (`services/funnel/complete-purchase.integration.test.ts`): a
+        CONSUMABLE with currency grants ends with both the `CREDIT_PURCHASE`
+        revenue row and the credits granted; a NON_CONSUMABLE with grants
+        configured anyway gets neither; a replayed `/confirm` does not
+        double-grant.
+      - `apps/api`'s test typecheck (`tsconfig.tests.json`) is red on
+        `main` with ~358 pre-existing errors from a repo-wide `vi.fn()`
+        typing idiom. Nothing gates on it — `typecheck:tests` is not in
+        `build` or the turbo pipeline.
 - Architecture note (now implemented, not just planned): the outbox → Kafka
   fanout consumer + deliver worker is the "integration dispatcher"; each
   integration = registry entry (mapping + credential schema) + credential
@@ -723,7 +761,28 @@ else in the framework/provider-breadth dimension is done.
       bindings over the same Swift/Kotlin façades (and Rust core) the native SDKs already wrap; 5-way
       CI parity wired; docs at `/docs/platforms/flutter`. Known gap: RN's `resolveFunnelClaim`
       retry/fallback chain was not ported (single-shot claim only) — see the docs page's parity table.
-- [ ] Web SDK (TS: Stripe checkout + entitlement reads; funnel/web payment backend exists)
+- [x] Web SDK (shipped 2026-09-05) — `packages/sdk-web/` (`@rovenue/web-sdk`):
+      framework-agnostic core, a React layer, and a paywall binding that feeds the
+      renderer the dashboard already uses. Docs at `/docs/platforms/web`.
+
+      The item's parenthetical was half wrong, and the correction is the useful
+      part. The "web payment backend" that existed is the funnel's ANONYMOUS
+      on-page flow — session identity in the URL, `origin: "*"`, no credentials —
+      which an SDK-authenticated app cannot use; and `checkout.sessions` appeared
+      nowhere in the API. More importantly the first blocker was not checkout at
+      all: `/v1` was unreachable from a browser, and since a CORS preflight
+      carries no `Authorization` header, per-project CORS is impossible unless
+      the project is resolvable from the URL. Hence `api_keys.allowedOrigins`
+      plus a `/v1/web/:publicKey` mount.
+
+      Also shipped as prerequisites: `POST /v1/checkout` (security shape copied
+      from `/v1/billing-portal` — identity only from the app-user header, a
+      `.strict()` body with no price/amount/customer field, redirect URLs
+      allow-listed against verified custom domains), and a WebCrypto bucketing
+      implementation, because `assignBucket` hashed with `node:crypto` and would
+      not run in a browser at all. It is verified against the same
+      `bucketing-vectors.json` the Node and Rust implementations are, so a user's
+      experiment variant does not change between web and native.
 - [ ] Unity SDK (games market; natural fit with credits/leaderboards)
 - [ ] Capacitor / Cordova façades
 - [x] Fix release blockers (shipped 2026-09-05) — the Rust half was stale: fmt,
@@ -775,21 +834,162 @@ else in the framework/provider-breadth dimension is done.
 
 ## 10. Production maturity & scale proof (45 → 95) — earned over time
 
-- [ ] Load-test suite: k6/vegeta with realistic traffic profiles (receipt spikes,
-      webhook storms) + published benchmark page
-- [ ] SLOs + status page
-- [ ] Chaos tests: dispatcher death, Kafka outage, ClickHouse lag (outbox architecture
-      is built to prove exactly this)
-- [ ] 3–5 pilot apps in production; millions of live events as reference
-- [ ] All CI green and required (including pre-existing red tests); testcontainers
-      suite running in CI
-- [ ] `pnpm db:migrate`'s fresh-vs-upgrade detection misfired on a healthy
-      dev database (114 migrations, 291 tables applied) with "fresh install
-      detected," found 2026-09-03 while working §1's items and reproduced
-      with that batch's schema changes stashed, so it predates this plan.
-      Worked around by resetting the dev Postgres volume (dev only,
-      user-authorised); the detection heuristic itself needs investigation
-      before it fires against a database that isn't disposable.
+- [x] Load-test suite (2026-09-05, `load/k6/`) — **benchmark page WON'T DO**.
+      Three profiles: steady SDK reads (`/v1/me/entitlements` +
+      `/v1/placements/:identifier`), an event storm ramping into `/v1/events`
+      (the OLTP write path that backpressures clients on a release day), and a
+      receipt spike.
+
+      All three use an OPEN model — arrival rate, never a fixed VU pool. With
+      fixed VUs each one waits for its response before sending the next, so a
+      server that gets slower receives less traffic and the throughput number
+      stays flat: the suite cannot see the regression it exists to find.
+
+      Pass criteria are imported from `deploy/prometheus/rules/slo.yml` rather
+      than chosen locally, so a passing run and a paging service cannot
+      disagree about what "fast enough" means.
+
+      The receipt profile aborts unless `LOAD_ALLOW_OUTBOUND=1`: `verifyReceipt`
+      calls Apple's App Store Server API, so that endpoint points a load
+      generator at a third party with your credentials. Its docs also refuse to
+      conflate two numbers — with synthetic payloads it measures the REJECTION
+      path, not a successful purchase.
+
+      The **published benchmark page is won't-do**: a throughput figure means
+      nothing without the hardware and dataset that produced it, and there is no
+      reference deployment here. A laptop number presented as characterising the
+      software is worse than no number.
+
+- [x] ClickHouse lag under a Kafka-fed materialized view — the third chaos
+      scenario (2026-09-05, `apps/api/tests/ch-kafka-engine.integration.test.ts`).
+      ClickHouse sits downstream of Kafka, so its absence must be invisible to
+      the write path: the dispatcher publishes and marks the row published
+      while nothing is consuming, the row is genuinely absent from CH during
+      that window, and it arrives on its own afterwards — no replay, no
+      backfill, no operator step.
+
+      Producing the outage took three attempts and the two rejected ones are
+      recorded in the test, because each made it a decoration.
+      `clickhouse.restart()` takes the schema with it (the migrations run once,
+      in `beforeAll`), so it tests the container's storage rather than the
+      pipeline. Repointing `CLICKHOUSE_URL` proves nothing: the dispatcher
+      never reads it, so the "outage" is a no-op and the test passes against a
+      dispatcher that queries ClickHouse on every batch. Detaching the
+      MATERIALIZED VIEW does not stop the consumer promptly — CH keeps polling
+      after its last reader goes away, and the row landed inside ten seconds.
+      Detaching the Kafka Engine queue table is the real thing; the group
+      offset lives in Kafka, so it survives. Verified falsifiable by removing
+      the DETACH, which turns the zero-rows assertion red.
+- [x] SLOs (2026-09-05, `deploy/prometheus/rules/slo.yml`) — **status page
+      WON'T DO**. `deploy/prometheus/` had a config with no rules in it. Two
+      objectives now exist on the API's own RED metrics: 99.9% non-5xx and 99%
+      under 500ms, both over 30 days. 4xx burns neither budget — a rejected key
+      is the caller's outcome, not an outage — and there is a test that floods
+      the service with 401s and asserts perfect availability. 500ms is an actual
+      histogram bucket boundary, not a tidy-looking number; a threshold between
+      boundaries would interpolate and the SLI would stop meaning what it says.
+
+      Alerts are multi-window multi-burn-rate. A single "error rate above X"
+      must choose between catching a fast outage and not paging on a blip;
+      pairing a long window with a short one removes the choice, so an incident
+      that has already recovered stops paging on its own. That behaviour has its
+      own test.
+
+      Four more alerts come from sentences already written beside the counters
+      in `lib/metrics.ts` that nothing had ever acted on — the circuit-breaker
+      comment literally says "ALERT ON ANY NON-ZERO VALUE".
+
+      Verified with compose's own Prometheus (v2.54.1): `promtool check config`
+      and `check rules` pass, `promtool test rules` passes 6 scenarios, and the
+      tests were proven falsifiable by raising the burn threshold.
+
+      The **status page is won't-do here**: it needs hosting and a domain, which
+      is an operator decision, not a repository one. Nothing in the repo can
+      close it.
+- [x] Chaos tests: dispatcher death + Kafka outage/recovery (2026-09-05,
+      `apps/api/tests/outbox-dispatcher.integration.test.ts`). The
+      dispatcher's crash window is between `producer.send` and
+      `markPublished`: `claimBatch` releases its lock when its own tx commits,
+      so a process that dies after the ack has published an event the database
+      still considers unpublished. `outbox-replay-idempotency.test.ts` already
+      proved the downstream half — ClickHouse collapses the duplicate — but
+      says in its own header that it BYPASSES the outbox → dispatcher path, so
+      the OLTP half, the part that decides between duplicated and LOST, had no
+      test. It does now: the post-crash state is constructed directly and the
+      next tick recovers it with no operator step.
+
+      Kafka outage asserts the one-directional invariant — a failed send must
+      never advance `publishedAt` — plus the topic backoff that makes recovery
+      deliberately not instant. Writing it surfaced that: a naive retry test
+      would have failed and read as data loss. Verified by inverting the rule
+      (mark everything claimed as published regardless of send outcome), which
+      turns two of the four red.
+
+      Also fixed a pre-existing flake in that file while there: its first test
+      starts `runOutboxDispatcher()` and never stops it, so a background loop
+      kept draining the table and holding connections. That test now passes in
+      ~2.8s where it previously timed out.
+
+      ClickHouse lag is covered by the item above.
+- [ ] 3–5 pilot apps in production; millions of live events as reference —
+      **CANNOT BE DONE FROM THE REPOSITORY.** This is earned by shipping to real
+      customers over real time. No commit closes it.
+- [~] CI unblocked and the testcontainer pass given a database (2026-09-05).
+      **"Required" remains the repository owner's** — it is a branch-protection
+      setting, not a file.
+
+      CI had been red since July, failing in under twenty seconds, before a
+      single test ran: the workflow pinned `node-version: 20` while the root
+      package.json requires `>=22.7`, so `pnpm install` refused outright. Every
+      red run since was that. Fixed, along with the pnpm version pin, which lived
+      in two places (workflow `version: 9`, package.json `pnpm@9.15.9`) and now
+      lives in one.
+
+      Behind it was a second wall: `pnpm audit --prod --audit-level=high` gates
+      the pipeline and was failing with 56 high and 2 critical across 15
+      packages. It now exits 0 with zero unignored high-or-critical advisories —
+      twelve pinned through per-major pnpm overrides, three bumped (better-auth,
+      react-router, a sharp override), three suppressed because they enter
+      through an example app's Expo CLI or a Prisma peer that is not installed
+      at all. The better-auth bump was not version-only: `twoFactor.enable()`
+      became a discriminated union and the account-security dialog read
+      `totpURI` off it unconditionally.
+
+      The suppression list had its own problem — seventeen opaque GHSA ids in
+      JSON whose rationale lived in a git-ignored scratch directory. A
+      suppression nobody can audit is one nobody can retire, so it is now
+      `docs/security/dependency-audit-suppressions.md`.
+
+      The workflow also now runs Postgres (built from `deploy/postgres`, since
+      the suites need pg_partman and `services:` can only pull) and Redis.
+      apps/api's `test` script has always been two passes, so CI was already
+      invoking the testcontainer suites — they just had nothing to connect to.
+
+      UNVERIFIED until pushed: none of this can be confirmed green from a
+      workstation, and the container pass has never executed on a runner.
+- [x] `pnpm db:migrate`'s "misfire" diagnosed and the real defect fixed
+      (2026-09-05). The routing was never wrong: a database created by the
+      fresh-install runner is stamped `__rovenue_install.mode = 'fresh'`
+      permanently, and that is by design — it must keep marking the
+      TimescaleDB-era migrations applied without executing them, because the
+      shipped image has no `timescaledb.control`. The runner already skips
+      already-applied migrations by content hash.
+
+      What was actually broken was what the runner SAID. "fresh install
+      detected — applying the full journal", printed against a database with
+      a hundred applied migrations and then followed by silence, reads as
+      "about to reapply everything" — which is how two separate people
+      concluded it had misfired, one of them resetting a dev Postgres volume
+      over it. It now names the reason for the routing and prints a summary:
+      `journal: 125 entries — 125 already applied, 0 executed, 0 marked
+      without running`, so a no-op is visibly a no-op.
+
+      Found while fixing it, and worse: a migration FILE not listed in
+      `meta/_journal.json` is invisible to both runners, so the schema change
+      silently never lands. That happened to 0122 during the Web SDK work and
+      surfaced only when a test harness rebuilt a database from the journal.
+      `db:migrate` now refuses to be quiet about it — it warns, by filename,
+      before either runner starts.
 
 ## 11. Docs & developer experience (65 → 95)
 

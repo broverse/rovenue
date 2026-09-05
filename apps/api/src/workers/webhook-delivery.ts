@@ -34,7 +34,16 @@ const BATCH_SIZE = 50;
 const REPEAT_EVERY_MS = 30_000;
 const DELIVERY_TIMEOUT_MS = 10_000;
 
-type FetchFn = typeof globalThis.fetch;
+// Narrowed to what attemptDelivery actually reads off the response
+// (status/ok/text()) rather than borrowing the full `typeof
+// globalThis.fetch` signature — the real fetch (the default below)
+// still satisfies this narrower contract, and it's what lets tests
+// substitute a lightweight fetch double instead of constructing a full
+// Response.
+type FetchFn = (
+  input: string,
+  init?: RequestInit,
+) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
 
 // =============================================================
 // Core delivery loop — pure function for testability

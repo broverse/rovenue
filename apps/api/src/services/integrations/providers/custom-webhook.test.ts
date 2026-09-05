@@ -165,6 +165,31 @@ describe("customWebhookProvider.mapEvent", () => {
     expect(JSON.stringify(body)).not.toContain("u@x.com");
   });
 
+  it("Fix 1 (final review): REACTIVATION reversal envelope carries `reason` in the delivered body", () => {
+    // metadata.reason is how applyRefundReversed's accounting reversal is
+    // told apart from a win-back — both produce revenue.REACTIVATION.
+    const reversalEnvelope = makeEnvelope({
+      revenueEventKind: "REACTIVATION",
+      revenueEventReason: "refund_reversed",
+    });
+    const result = customWebhookProvider.mapEvent(reversalEnvelope, makeConfig(), {});
+    const payload = result as ProviderPayload;
+    const body = JSON.parse(payload.body as string);
+    expect(body.data.reason).toBe("refund_reversed");
+  });
+
+  it("Fix 1 (final review): win-back REACTIVATION envelope (no metadata.reason) omits the `reason` key entirely", () => {
+    const winBackEnvelope = makeEnvelope({
+      revenueEventKind: "REACTIVATION",
+      revenueEventReason: undefined,
+    });
+    const result = customWebhookProvider.mapEvent(winBackEnvelope, makeConfig(), {});
+    const payload = result as ProviderPayload;
+    const body = JSON.parse(payload.body as string);
+    // Absence is the documented default — not `reason: null`.
+    expect(body.data).not.toHaveProperty("reason");
+  });
+
   it("regression (Task 2): buildWebhookData never surfaces enriched identityContext/subscriberAttributes", () => {
     // A worker that ran delivery-time enrichment (enrichEnvelope) before
     // calling mapEvent hands this provider an envelope carrying

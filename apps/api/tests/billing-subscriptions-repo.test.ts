@@ -1,15 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { db } from "../../packages/db/src/drizzle/client";
-import {
-  billingSubscriptions,
-  projects,
-  user,
-} from "../../packages/db/src/drizzle/schema";
+import { db, projects, billingSubscriptions } from "@rovenue/db";
+import { user } from "@rovenue/db/src/drizzle/schema";
 import {
   createFreeBillingSubscription,
   findBillingSubscriptionByProject,
-} from "../../packages/db/src/drizzle/repositories/billing-subscriptions";
+} from "@rovenue/db/src/drizzle/repositories/billing-subscriptions";
 
 const TEST_PROJECT_ID = "proj_test_billing_repo";
 const OWNER_ID = "usr_demo";
@@ -33,9 +29,7 @@ async function seedProject() {
     .insert(projects)
     .values({
       id: TEST_PROJECT_ID,
-      slug: "test-billing-repo",
       name: "Test Billing Repo",
-      ownerId: OWNER_ID,
     })
     .onConflictDoNothing();
 }

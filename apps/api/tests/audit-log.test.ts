@@ -23,41 +23,51 @@ vi.mock("../src/lib/audit", () => auditMock);
 // =============================================================
 
 const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
+  // Prisma-shaped row mocks: every model method here is one of these
+  // four shapes, typed explicitly (instead of a blanket
+  // `Record<string, unknown>`) so property access on `dbMock.<model>`
+  // resolves to a real method type rather than `unknown`.
+  type MockRow = Record<string, unknown>;
+  type FindOne = (args?: MockRow) => Promise<MockRow | null>;
+  type FindMany = (args?: MockRow) => Promise<MockRow[]>;
+  type Write = (args?: MockRow) => Promise<MockRow>;
+  type Count = (args?: MockRow) => Promise<number>;
+
   // Audit chain writer needs $transaction + $executeRaw +
   // auditLog.findFirst on the tx client. We wire them onto the
   // same dbMock object and reuse it as both the db and the tx
   // parameter — enough for the dashboard routes under test here.
-  const dbMock: Record<string, unknown> = {
-    projectMember: { findUnique: vi.fn() },
+  const dbMock = {
+    projectMember: { findUnique: vi.fn<FindOne>() },
     auditLog: {
-      findMany: vi.fn(async () => []),
-      findUnique: vi.fn(),
-      findFirst: vi.fn(async () => null),
-      count: vi.fn(async () => 0),
-      create: vi.fn(async () => ({ id: "al_1" })),
+      findMany: vi.fn<FindMany>(async () => []),
+      findUnique: vi.fn<FindOne>(),
+      findFirst: vi.fn<FindOne>(async () => null),
+      count: vi.fn<Count>(async () => 0),
+      create: vi.fn<Write>(async () => ({ id: "al_1" })),
     },
     audience: {
-      findMany: vi.fn(async () => []),
-      findFirst: vi.fn(async () => null),
-      findUnique: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
+      findMany: vi.fn<FindMany>(async () => []),
+      findFirst: vi.fn<FindOne>(async () => null),
+      findUnique: vi.fn<FindOne>(),
+      create: vi.fn<Write>(),
+      update: vi.fn<Write>(),
+      delete: vi.fn<Write>(),
     },
     experiment: {
-      findMany: vi.fn(async () => []),
-      findFirst: vi.fn(async () => null),
-      findUnique: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
+      findMany: vi.fn<FindMany>(async () => []),
+      findFirst: vi.fn<FindOne>(async () => null),
+      findUnique: vi.fn<FindOne>(),
+      create: vi.fn<Write>(),
+      update: vi.fn<Write>(),
     },
-    experimentAssignment: { count: vi.fn(async () => 0) },
+    experimentAssignment: { count: vi.fn<Count>(async () => 0) },
     featureFlag: {
-      findMany: vi.fn(async () => []),
-      findUnique: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
+      findMany: vi.fn<FindMany>(async () => []),
+      findUnique: vi.fn<FindOne>(),
+      create: vi.fn<Write>(),
+      update: vi.fn<Write>(),
+      delete: vi.fn<Write>(),
     },
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
@@ -78,9 +88,11 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   const drizzleMock = {
     db: {} as unknown,
     auditLogRepo: {
-      listAuditLogs: vi.fn(async () => []),
-      countAuditLogs: vi.fn(async () => 0),
-      findAuditLogById: vi.fn(async () => null),
+      listAuditLogs: vi.fn(
+        async (_db: unknown, _args: MockRow) => [] as MockRow[],
+      ),
+      countAuditLogs: vi.fn(async (_db: unknown, _filters: MockRow) => 0),
+      findAuditLogById: vi.fn(async (_db: unknown, _id: string) => null),
     },
     featureFlagRepo: {
       findFeatureFlagsByProject: vi.fn(async () => []),

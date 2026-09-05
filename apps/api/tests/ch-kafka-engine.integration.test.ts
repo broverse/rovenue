@@ -66,10 +66,11 @@ import { Kafka } from "kafkajs";
 import { sql } from "drizzle-orm";
 import { drizzle, getDb } from "@rovenue/db";
 import {
+  runOnce,
   runOutboxDispatcher,
   stopOutboxDispatcher,
 } from "../src/workers/outbox-dispatcher";
-import { getResolvedBrokers } from "../src/lib/kafka";
+import { getProducer, getResolvedBrokers } from "../src/lib/kafka";
 import { createId } from "@paralleldrive/cuid2";
 
 const execFileP = promisify(execFile);
@@ -86,6 +87,12 @@ let chUrl: string;
 // the advertised address at container start.
 const BROKER_EXTERNAL_PORT = 19094;
 const CH_HOST_PORT = 8223;
+
+// How long to wait before asserting that a DETACHed pipeline ingested
+// nothing. The tests above land their rows in two to four seconds on a warm
+// pipeline, so this is well past it — long enough that "still zero" means
+// stopped, not merely slow.
+const CH_INGEST_SETTLE_MS = 10_000;
 
 beforeAll(async () => {
   network = await new Network().start();
@@ -591,6 +598,128 @@ describe("CH Kafka Engine parity", () => {
 
     await ch.close();
   }, 180_000);
+
+  // =============================================================
+  // Chaos: ClickHouse lag
+  // =============================================================
+  //
+  // The third scenario the roadmap names, and the one the outbox architecture
+  // is supposed to make boring. ClickHouse sits DOWNSTREAM of Kafka, so the
+  // claim under test is that its absence is invisible to the write path:
+  //
+  //   - the dispatcher publishes and marks rows published while nothing is
+  //     consuming, because it has no ClickHouse dependency at all. If it did,
+  //     an analytics outage would become an ingestion outage.
+  //   - nothing is lost. Kafka retains the messages and the Kafka Engine
+  //     resumes from its consumer-group offset, so the rows land once CH is
+  //     reading again — with no replay, no backfill, no operator step.
+  //
+  // The outage is produced by DETACHing the Kafka Engine queue table. Three
+  // rejected alternatives, all of which made this test a decoration:
+  //
+  //   - `clickhouse.restart()` takes the schema with it (the migrations run
+  //     once, in beforeAll), so it tests the container's storage rather than
+  //     the pipeline.
+  //   - repointing CLICKHOUSE_URL proves nothing, because the dispatcher
+  //     never reads it. A test whose "outage" is a no-op passes against a
+  //     dispatcher that queries ClickHouse on every batch.
+  //
+  //   - detaching the MATERIALIZED VIEW instead does not stop the consumer
+  //     promptly: CH's streaming thread keeps polling for a while after its
+  //     last reader goes away, and the row landed inside ten seconds. Tried,
+  //     observed, rejected.
+  //
+  // Detaching the queue table itself is the real thing: the consumer stops,
+  // while the group offset — which lives in Kafka, not in CH — survives. That
+  // is what makes the no-rows assertion below falsifiable; it fails if
+  // ingestion continued. DROP + CREATE would NOT do: it loses in-flight
+  // events.
+  it("keeps ingesting while ClickHouse is not consuming, and drains the backlog after", async () => {
+    const db = getDb();
+    await db.execute(sql`DELETE FROM outbox_events WHERE id LIKE 'evt_chlag_%'`);
+
+    const id = `evt_chlag_${Date.now()}`;
+    const projectId = `prj_chlag_${Date.now()}`;
+    const experimentId = `exp_chlag_${Date.now()}`;
+
+    const ch = createClient({
+      url: chUrl,
+      username: "rovenue",
+      password: "rovenue_test",
+      database: "rovenue",
+    });
+
+    const countRows = async (): Promise<number> => {
+      const res = await ch.query({
+        query: `SELECT count() AS c FROM rovenue.raw_exposures FINAL WHERE experimentId = '${experimentId}'`,
+        format: "JSONEachRow",
+      });
+      const rows = (await res.json()) as Array<{ c: string }>;
+      return Number(rows[0]?.c ?? "0");
+    };
+
+    try {
+      await ch.command({
+        query: "DETACH TABLE rovenue.exposures_queue",
+      });
+
+      await drizzle.outboxRepo.insert(db, {
+        id,
+        aggregateType: "EXPOSURE",
+        aggregateId: experimentId,
+        eventType: "experiment.exposure.recorded",
+        payload: {
+          experimentId,
+          variantId: "var_a",
+          projectId,
+          subscriberId: "sub_chlag",
+          platform: "ios",
+          country: "US",
+          // The MV parses this column; a real exposure always carries it.
+          exposedAt: "2026-04-24T10:00:00.000Z",
+        },
+      });
+
+      // The write path completes with the warehouse blind. `publishedAt`
+      // advancing here is the architectural claim: analytics being
+      // unavailable must not stop events being accepted.
+      const producer = await getProducer();
+      await runOnce(producer!);
+
+      const published = await db.execute(
+        sql`SELECT "publishedAt" FROM outbox_events WHERE id = ${id}`,
+      );
+      const row = (published as unknown as {
+        rows: Array<{ publishedAt: Date | null }>;
+      }).rows[0];
+      expect(row?.publishedAt).not.toBeNull();
+
+      // And the row is genuinely NOT in ClickHouse. The tests above land
+      // theirs in two to four seconds, so ten is comfortably past the
+      // pipeline's warm latency: if ingestion were still running, this fails.
+      await new Promise((r) => setTimeout(r, CH_INGEST_SETTLE_MS));
+      expect(await countRows()).toBe(0);
+    } finally {
+      // Swallowed deliberately: if the body threw BEFORE the DETACH, this
+      // ATTACH fails with "already exists" and — being the last throw out of
+      // the finally — replaces the real failure with a confusing one. That
+      // happened while probing this test by removing the DETACH.
+      await ch
+        .command({ query: "ATTACH TABLE rovenue.exposures_queue" })
+        .catch(() => undefined);
+    }
+
+    try {
+      // Now it arrives on its own. Nothing replayed it and no operator step
+      // happened: Kafka retained the message and the Kafka Engine picked up
+      // from its own offset, which is the entire point of putting a log
+      // between the write path and the warehouse.
+      await waitFor(async () => (await countRows()) === 1, 60_000);
+    } finally {
+      await ch.close();
+    }
+  }, 180_000);
+
 });
 
 async function waitFor(

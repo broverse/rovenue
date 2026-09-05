@@ -1,0 +1,154 @@
+# =============================================================
+# Unit tests for the SLO rules
+# =============================================================
+#
+# `promtool check rules` only proves the YAML parses and the PromQL is
+# well-formed. It says nothing about whether an alert fires when the service
+# is broken, or — the part that actually matters — stays quiet when it is
+# not. These tests feed synthetic series through the real rule file and
+# assert both directions.
+#
+# Run:
+#   docker run --rm --entrypoint promtool \
+#     -v "$PWD/deploy/prometheus:/p:ro" prom/prometheus:v2.54.1 \
+#     test rules /p/tests/slo_test.yml
+#
+# The tests live outside deploy/prometheus/rules/ on purpose: prometheus.yml
+# globs that directory for `*.yml`, and a test file loaded as a rule file
+# fails the config.
+
+rule_files:
+  - ../rules/slo.yml
+
+evaluation_interval: 1m
+
+tests:
+  # -----------------------------------------------------------
+  # A healthy service pages nobody
+  # -----------------------------------------------------------
+  - interval: 1m
+    name: healthy service, no alerts
+    input_series:
+      - series: 'http_requests_total{status="200", route="/v1/me/entitlements", method="GET"}'
+        values: "0+600x180"
+      - series: 'http_request_duration_seconds_count'
+        values: "0+600x180"
+      - series: 'http_request_duration_seconds_bucket{le="0.5"}'
+        values: "0+600x180"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RovenueApiErrorBudgetBurningFast
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RovenueApiErrorBudgetSlowBurn
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RovenueApiLatencyBudgetBurningFast
+        exp_alerts: []
+
+  # -----------------------------------------------------------
+  # 4xx is the caller's outcome, not an outage
+  # -----------------------------------------------------------
+  # Every request 401s. If the SLI counted 4xx, this would be a total
+  # outage; it must be perfect availability instead.
+  - interval: 1m
+    name: a flood of 4xx burns no budget
+    input_series:
+      - series: 'http_requests_total{status="401", route="/v1/me/entitlements", method="GET"}'
+        values: "0+600x180"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RovenueApiErrorBudgetBurningFast
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RovenueApiErrorBudgetSlowBurn
+        exp_alerts: []
+
+  # -----------------------------------------------------------
+  # A real 5xx burn pages
+  # -----------------------------------------------------------
+  # 2% of requests fail — above the 1.44% fast-burn threshold.
+  - interval: 1m
+    name: sustained 5xx pages on the fast burn
+    input_series:
+      - series: 'http_requests_total{status="200", route="/v1/me/entitlements", method="GET"}'
+        values: "0+588x180"
+      - series: 'http_requests_total{status="500", route="/v1/me/entitlements", method="GET"}'
+        values: "0+12x180"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RovenueApiErrorBudgetBurningFast
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              slo: availability
+            exp_annotations:
+              summary: "API 5xx rate is burning the error budget 14.4x too fast"
+              description: "2% of requests are failing over the last hour, and still failing over the last five minutes. At this rate the 30-day availability budget is gone in about two days."
+
+  # -----------------------------------------------------------
+  # A recovered outage stops paging on its own
+  # -----------------------------------------------------------
+  # This is the whole reason each alert has two windows. Errors for the
+  # first hour, clean for the next: the 1h window is still elevated, so a
+  # single-window alert would keep paging long after the incident ended.
+  # The 5m window is clean, so this one must not fire.
+  - interval: 1m
+    name: recovered outage does not keep paging
+    input_series:
+      - series: 'http_requests_total{status="200", route="/v1/me/entitlements", method="GET"}'
+        values: "0+588x60 35280+600x60"
+      - series: 'http_requests_total{status="500", route="/v1/me/entitlements", method="GET"}'
+        values: "0+12x60 720+0x60"
+    alert_rule_test:
+      - eval_time: 1h50m
+        alertname: RovenueApiErrorBudgetBurningFast
+        exp_alerts: []
+
+  # -----------------------------------------------------------
+  # Latency
+  # -----------------------------------------------------------
+  # Every request takes longer than 500ms: the le="0.5" bucket never
+  # advances while the total count does.
+  - interval: 1m
+    name: everything slower than 500ms pages
+    input_series:
+      - series: 'http_request_duration_seconds_count'
+        values: "0+600x180"
+      - series: 'http_request_duration_seconds_bucket{le="0.5"}'
+        values: "0+0x180"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RovenueApiLatencyBudgetBurningFast
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              slo: latency
+            exp_annotations:
+              summary: "API latency is burning the 500ms budget 14.4x too fast"
+              description: "100% of requests took longer than 500ms over the last hour, and still are."
+
+  # -----------------------------------------------------------
+  # The correctness alerts the counters ask for
+  # -----------------------------------------------------------
+  # The circuit breaker has no `for:` — one trip is one page. Asserted
+  # because the counter's own comment says "ALERT ON ANY NON-ZERO VALUE",
+  # and until now nothing acted on that sentence.
+  - interval: 1m
+    name: one circuit-breaker trip pages immediately
+    input_series:
+      - series: "rovenue_access_drift_circuit_breaker_total"
+        values: "0+0x30 1+0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: RovenueAccessDriftCircuitBreakerTripped
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: RovenueAccessDriftCircuitBreakerTripped
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              area: entitlements
+            exp_annotations:
+              summary: "Entitlement reconciler refused to heal — drift ratio above threshold"
+              description: "A sweep found more drift than MAX_DRIFT_HEAL_RATIO allows and stopped. Automated repair is halted on purpose; entitlement data needs a human before anything rewrites it."

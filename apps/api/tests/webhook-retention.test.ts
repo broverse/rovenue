@@ -51,7 +51,11 @@ beforeEach(() => {
 function makeDb(rowCounts: number[]) {
   let call = 0;
   return {
-    execute: vi.fn(async () => {
+    // `db as any` at the call site means deleteWebhookEventsOlderThan's
+    // real arg count isn't checked there, but a test below reads
+    // `db.execute.mock.calls[0]![0]` — a zero-arg mock makes that an
+    // empty tuple with no element at index 0.
+    execute: vi.fn(async (_query?: unknown) => {
       const n = rowCounts[call++] ?? 0;
       return { rowCount: n };
     }),

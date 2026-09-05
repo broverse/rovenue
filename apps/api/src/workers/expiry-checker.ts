@@ -29,7 +29,15 @@ import { syncAccess } from "../services/access-engine";
 //
 // On EXPIRED we also reconcile the subscriber's access rows, emit
 // an outgoing EXPIRATION webhook, and log a zero-amount CANCELLATION
-// revenue event so downstream reporting stays complete.
+// revenue event so downstream reporting stays complete — UNLESS the
+// lapsed row has been superseded by a later period in the same store
+// chain, in which case the row is retired silently. See
+// `findSupersededPurchaseIds` (packages/db) and `retireCandidate` below:
+// Apple mints a new transactionId per renewal, so a chain holds one row
+// per billing period and the previous period's row lapses on every
+// single renewal. Announcing that as churn would have fired
+// `subscription.expired` and a zero-amount CANCELLATION at every
+// renewal, for every Apple subscriber.
 
 const log = logger.child("expiry-checker");
 
@@ -91,10 +99,61 @@ export interface ExpiryCheckResult {
   checked: number;
   expired: number;
   movedToGracePeriod: number;
+  /**
+   * Of `expired`, how many were retired silently because a later period
+   * in the same chain covers them. Counted separately rather than left
+   * out of `expired`: the row DID move to EXPIRED, and a run whose
+   * expiries are all supersessions is a healthy run, not an idle one.
+   */
+  retiredSuperseded: number;
   errors: number;
 }
 
-type Outcome = "EXPIRED" | "GRACE_PERIOD" | "SKIPPED";
+type Outcome = "EXPIRED" | "EXPIRED_SUPERSEDED" | "GRACE_PERIOD" | "SKIPPED";
+
+/**
+ * The ids, among `candidates`, that a later period in the same store
+ * chain already covers. Resolved ONCE per run rather than per candidate:
+ * one query for the batch, and the relation cannot change mid-run
+ * because retiring a row touches `status`, never `expiresDate`.
+ */
+async function resolveSuperseded(
+  candidates: Candidate[],
+): Promise<ReadonlySet<string>> {
+  const ids = await drizzle.purchaseExtRepo.findSupersededPurchaseIds(
+    drizzle.db,
+    candidates.map((candidate) => candidate.id),
+  );
+  return new Set(ids);
+}
+
+/**
+ * The shared tail of both passes: reconcile access, then announce the
+ * churn — but only for a row that is its chain's last word.
+ *
+ * A superseded row still syncs access (the subscriber's entitlement is
+ * re-derived from the whole purchase set, and the live sibling is what
+ * keeps them entitled) and still leaves the sweepable statuses. What it
+ * does not do is tell consumers the subscriber churned, or write a
+ * CANCELLATION revenue row against a subscriber who just paid.
+ */
+async function retireCandidate(
+  candidate: Candidate,
+  now: Date,
+  superseded: ReadonlySet<string>,
+): Promise<Outcome> {
+  await safeSyncAccess(candidate.subscriberId);
+  if (superseded.has(candidate.id)) {
+    log.debug("retired a superseded chain row without announcing churn", {
+      purchaseId: candidate.id,
+      subscriberId: candidate.subscriberId,
+    });
+    return "EXPIRED_SUPERSEDED";
+  }
+  await enqueueExpirationWebhook(candidate);
+  await recordCancellationRevenue(candidate, now);
+  return "EXPIRED";
+}
 
 export async function runExpiryCheck(
   now: Date = new Date(),
@@ -108,15 +167,21 @@ export async function runExpiryCheck(
     },
   )) as unknown as Candidate[];
 
+  const superseded = await resolveSuperseded(candidates);
+
   let expired = 0;
+  let retiredSuperseded = 0;
   let movedToGracePeriod = 0;
   let errors = 0;
 
   for (const candidate of candidates) {
     try {
-      const outcome = await processCandidate(candidate, now);
+      const outcome = await processCandidate(candidate, now, superseded);
       if (outcome === "EXPIRED") expired += 1;
-      else if (outcome === "GRACE_PERIOD") movedToGracePeriod += 1;
+      else if (outcome === "EXPIRED_SUPERSEDED") {
+        expired += 1;
+        retiredSuperseded += 1;
+      } else if (outcome === "GRACE_PERIOD") movedToGracePeriod += 1;
     } catch (err) {
       errors += 1;
       log.error("purchase expiry processing failed", {
@@ -130,6 +195,7 @@ export async function runExpiryCheck(
   log.info("expiry check complete", {
     checked: candidates.length,
     expired,
+    retiredSuperseded,
     movedToGracePeriod,
     errors,
   });
@@ -137,6 +203,7 @@ export async function runExpiryCheck(
   return {
     checked: candidates.length,
     expired,
+    retiredSuperseded,
     movedToGracePeriod,
     errors,
   };
@@ -145,6 +212,7 @@ export async function runExpiryCheck(
 async function processCandidate(
   candidate: Candidate,
   now: Date,
+  superseded: ReadonlySet<string>,
 ): Promise<Outcome> {
   const hasActiveGrace =
     candidate.status !== PurchaseStatus.GRACE_PERIOD &&
@@ -196,11 +264,7 @@ async function processCandidate(
   );
   if (updated === 0) return "SKIPPED";
 
-  await safeSyncAccess(candidate.subscriberId);
-  await enqueueExpirationWebhook(candidate);
-  await recordCancellationRevenue(candidate, now);
-
-  return "EXPIRED";
+  return retireCandidate(candidate, now, superseded);
 }
 
 async function safeSyncAccess(subscriberId: string): Promise<void> {
@@ -312,11 +376,18 @@ async function recordCancellationRevenue(
 // instead of the sweep's status-only bound, because a held row's
 // expiresDate is already in the past the moment it's stamped — bounding
 // by status alone would retire it immediately and erase the dunning
-// signal (whether the churn was involuntary). Reuses the same
-// candidate-processing helpers as the sweep (safeSyncAccess,
-// enqueueExpirationWebhook, recordCancellationRevenue) so a
-// BILLING_ISSUE → EXPIRED transition produces the same access sync,
-// webhook, and revenue bookkeeping as any other expiry.
+// signal (whether the churn was involuntary). Reuses the sweep's own
+// `retireCandidate` tail so a BILLING_ISSUE → EXPIRED transition
+// produces the same access sync, webhook, and revenue bookkeeping as
+// any other expiry.
+//
+// That tail carries the chain-supersede guard with it, and this pass
+// needs it for the same reason the sweep does: a held Apple row sits on
+// the period that failed, and if the subscriber fixes their card 40 days
+// later Apple renews onto a NEW transaction row. If the recovery path
+// missed the held sibling (`retireChainBillingIssue`), this pass would
+// reach it at day 60 and announce churn for a subscriber who has been
+// paying for three weeks.
 //
 // updatePurchaseStatusIf only writes `status`, so billingIssueDetectedAt
 // is left untouched on this transition — it must survive the lapse as
@@ -327,6 +398,8 @@ async function recordCancellationRevenue(
 export interface BillingIssueAgeingResult {
   checked: number;
   expired: number;
+  /** Same meaning as `ExpiryCheckResult.retiredSuperseded`. */
+  retiredSuperseded: number;
 }
 
 export async function runBillingIssueAgeing(
@@ -340,7 +413,10 @@ export async function runBillingIssueAgeing(
     { cutoff, limit: MAX_CANDIDATES_PER_RUN },
   )) as unknown as Candidate[];
 
+  const superseded = await resolveSuperseded(candidates);
+
   let expired = 0;
+  let retiredSuperseded = 0;
 
   for (const candidate of candidates) {
     try {
@@ -353,9 +429,8 @@ export async function runBillingIssueAgeing(
       if (updated === 0) continue;
 
       expired += 1;
-      await safeSyncAccess(candidate.subscriberId);
-      await enqueueExpirationWebhook(candidate);
-      await recordCancellationRevenue(candidate, now);
+      const outcome = await retireCandidate(candidate, now, superseded);
+      if (outcome === "EXPIRED_SUPERSEDED") retiredSuperseded += 1;
     } catch (err) {
       log.error("billing-issue ageing processing failed", {
         purchaseId: candidate.id,
@@ -368,9 +443,10 @@ export async function runBillingIssueAgeing(
   log.info("billing-issue ageing complete", {
     checked: candidates.length,
     expired,
+    retiredSuperseded,
   });
 
-  return { checked: candidates.length, expired };
+  return { checked: candidates.length, expired, retiredSuperseded };
 }
 
 // =============================================================

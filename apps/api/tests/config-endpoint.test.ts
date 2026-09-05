@@ -23,6 +23,14 @@ vi.mock("../src/lib/audit", () => auditMock);
 // =============================================================
 
 const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
+  // Every findUnique/findFirst/findMany below is called with a `where`
+  // args object (resolveSubscriberByRovenueIdOrLegacy / offeringRepo below)
+  // and reassigned in tests via .mockResolvedValue with real fixtures — a
+  // zero-arg `vi.fn(async () => null)`/`vi.fn(async () => [])` both rejects
+  // the where-arg calls (TS2554) and infers a null-only/never[]-only
+  // return type no fixture satisfies (TS2345).
+  type FindOne = (args?: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+  type FindMany = (args?: Record<string, unknown>) => Promise<Record<string, unknown>[]>;
   const dbMock = {
     apiKey: {
       findUnique: vi.fn(),
@@ -30,7 +38,7 @@ const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
     },
     subscriber: {
       upsert: vi.fn(),
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn<FindOne>(async () => null),
     },
     // Named `offering` because that is what the repo stubs below and the
     // test bodies both reach for. It was still `productGroup` here after the
@@ -38,11 +46,11 @@ const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
     // against `undefined` and failed with "Cannot read properties of
     // undefined (reading 'findUnique')".
     offering: {
-      findUnique: vi.fn(async () => null),
-      findFirst: vi.fn(async () => null),
+      findUnique: vi.fn<FindOne>(async () => null),
+      findFirst: vi.fn<FindOne>(async () => null),
     },
     product: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn<FindMany>(async () => []),
     },
   };
 

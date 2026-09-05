@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
-import { ALL_REVENUE_TYPES } from "@rovenue/shared";
+import { ALL_REVENUE_TYPES, REVENUE_TYPES_MONEY_OUT, sqlTypeList } from "@rovenue/shared";
 import type {
   OverviewActivityEvent,
   OverviewSystemHealth,
@@ -99,8 +99,8 @@ async function readDailyRollup(
     `
       SELECT
         toString(toDate(eventDate))                                       AS day,
-        toString(sumIf(amountUsd, type NOT IN ('REFUND','CHARGEBACK')))   AS gross_usd,
-        toString(sumIf(abs(amountUsd), type IN ('REFUND','CHARGEBACK')))  AS refunds_usd,
+        toString(sumIf(amountUsd, type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})))   AS gross_usd,
+        toString(sumIf(abs(amountUsd), type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})))  AS refunds_usd,
         toString(uniqExact(subscriberId))                                  AS active_subs,
         toString(countIf(type = 'TRIAL_CONVERSION'))                       AS trial_conversions,
         toString(countIf(type = 'CANCELLATION'))                           AS cancellations
@@ -143,7 +143,7 @@ async function readTopProducts(
       WHERE projectId = {projectId:String}
         AND toDate(eventDate) >= {from:Date}
         AND toDate(eventDate) <= {to:Date}
-        AND type NOT IN ('REFUND','CHARGEBACK')
+        AND type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})
       GROUP BY productId
       HAVING sum(amountUsd) > 0
       ORDER BY sum(amountUsd) DESC, productId ASC

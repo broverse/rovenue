@@ -1,18 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { db } from "../../packages/db/src/drizzle/client";
-import {
-  billingPaymentMethods,
-  projects,
-  user,
-} from "../../packages/db/src/drizzle/schema";
+import { db, projects } from "@rovenue/db";
+import { billingPaymentMethods, user } from "@rovenue/db/src/drizzle/schema";
 import {
   insertPaymentMethod,
   listPaymentMethodsForProject,
   findDefaultPaymentMethod,
   setDefaultPaymentMethod,
   deletePaymentMethod,
-} from "../../packages/db/src/drizzle/repositories/billing-payment-methods";
+} from "@rovenue/db/src/drizzle/repositories/billing-payment-methods";
 
 const TEST_PROJECT_ID = "proj_test_pm_repo";
 const OWNER_ID = "usr_demo";
@@ -34,9 +30,7 @@ async function setup() {
     .onConflictDoNothing();
   await db.insert(projects).values({
     id: TEST_PROJECT_ID,
-    slug: "test-pm-repo",
     name: "Test PM",
-    ownerId: OWNER_ID,
   });
 }
 

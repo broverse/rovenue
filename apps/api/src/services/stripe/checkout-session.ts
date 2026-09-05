@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { HTTPException } from "hono/http-exception";
 import { drizzle } from "@rovenue/db";
 import type { Db } from "@rovenue/db";
@@ -46,7 +47,13 @@ export interface CreateCheckoutSessionInput {
   successUrl: string;
   cancelUrl: string;
   /**
-   * The client's `Idempotency-Key`, passed straight to Stripe when present.
+   * The client's `Idempotency-Key`, if it sent one.
+   *
+   * NOT passed to Stripe verbatim. Stripe scopes idempotency to the connected
+   * ACCOUNT, so a raw browser-supplied value shares one key space with every
+   * subscriber of the project: two buyers sending the same key would receive
+   * the same Checkout Session, the second paying into the first's customer.
+   * It is hashed together with the project and subscriber before use.
    *
    * Stripe's own idempotency is used rather than a scheme of our own: it is
    * authoritative for the charge, and it survives this process restarting
@@ -75,7 +82,7 @@ async function resolvePackagePriceId(
   projectId: string,
   offeringId: string,
   packageIdentifier: string,
-): Promise<string> {
+): Promise<{ priceId: string; productType: string | null }> {
   const offering = await drizzle.offeringRepo.findOfferingById(
     db,
     projectId,
@@ -115,7 +122,7 @@ async function resolvePackagePriceId(
       message: "Package has no Stripe price configured",
     });
   }
-  return stripePriceId;
+  return { priceId: stripePriceId, productType: product?.type ?? null };
 }
 
 export async function createCheckoutSession(
@@ -142,12 +149,29 @@ export async function createCheckoutSession(
   );
   const safeCancelUrl = await assertRedirectUrlAllowed(db, projectId, cancelUrl);
 
-  const priceId = await resolvePackagePriceId(
+  const { priceId, productType } = await resolvePackagePriceId(
     db,
     projectId,
     offeringId,
     packageIdentifier,
   );
+
+  // Stripe rejects a one-time price in subscription mode with an
+  // InvalidRequestError, which would surface to the SDK caller as a 500 —
+  // an unhandled server fault for what is really a mismatched request. Say
+  // so as a 400 instead, and name the actual limitation rather than letting
+  // it look like a bug.
+  //
+  // One-time web purchases are genuinely not supported yet: they need a
+  // `mode: "payment"` path and a different completion story, since a
+  // PaymentIntent produces no subscription for the webhook to bind.
+  if (productType && productType !== "SUBSCRIPTION") {
+    throw new HTTPException(400, {
+      message:
+        "Web checkout currently supports subscription packages only. This " +
+        "package is a one-time product.",
+    });
+  }
 
   const { account } = await requireConnectedStripe(projectId);
 
@@ -185,7 +209,27 @@ export async function createCheckoutSession(
         metadata: { [SUBSCRIBER_METADATA_KEY]: subscriberRovenueId },
       },
     },
-    idempotencyKey ? { idempotencyKey } : undefined,
+    // Namespaced, never forwarded verbatim. Stripe scopes idempotency to the
+    // connected ACCOUNT, so a raw client-supplied key shares one space across
+    // every subscriber of the project — and the value arrives from browser
+    // JavaScript. Two buyers submitting the same key (a hardcoded one, a
+    // low-entropy generator, or a deliberate collision) would get the SAME
+    // session back: the second pays into the first's customer, and the
+    // subscription metadata names the first subscriber, so the entitlement
+    // lands on the wrong person.
+    // Hashed, not concatenated: Stripe caps an idempotency key at 255
+    // characters and this route reads the client's header raw, so a prefix of
+    // two cuid2 ids would push a previously-working 220-character key over
+    // the limit and turn it into an invalid_request the caller sees as a 500.
+    // A digest is fixed-width and preserves the one property that matters —
+    // same inputs, same key.
+    idempotencyKey
+      ? {
+          idempotencyKey: createHash("sha256")
+            .update(`${projectId}:${subscriberId}:${idempotencyKey}`)
+            .digest("hex"),
+        }
+      : undefined,
   );
 
   if (!session.url) {

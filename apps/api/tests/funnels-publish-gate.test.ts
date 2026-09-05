@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const chargesEnabled = vi.hoisted(() => vi.fn());
 const findFunnelById = vi.hoisted(() => vi.fn());
-const findPaywallsByIds = vi.hoisted(() => vi.fn(async () => []));
+const findPaywallsByIds = vi.hoisted(() =>
+  vi.fn(async (): Promise<Record<string, unknown>[]> => []),
+);
 const nextVersionNo = vi.hoisted(() => vi.fn(async () => 1));
 const insertVersion = vi.hoisted(() => vi.fn(async () => ({ id: "ver_1", versionNo: 1 })));
 const setCurrentVersion = vi.hoisted(() => vi.fn());

@@ -1,6 +1,7 @@
 import { createId } from "@paralleldrive/cuid2";
 import { DEFAULT_MINIMUM_DETECTABLE_EFFECT } from "@rovenue/shared/experiments";
 import {
+  BILLING_ISSUE_AGEING_STATUSES,
   EXPIRY_SWEEP_STATUSES,
   RECONCILABLE_STATUSES,
   type PlanChangeType,
@@ -1103,6 +1104,26 @@ export const purchases = pgTable(
       .where(
         sql`${t.store} = 'PLAY_STORE' AND ${t.status} IN (${sql.raw(statusSqlList(RECONCILABLE_STATUSES))})`,
       ),
+    // Billing-issue ageing scan (`findAgedBillingIssuePurchases`, run by
+    // expiry-checker.ts's `runBillingIssueAgeing` every five minutes).
+    // Neither index above serves it: the expiry-sweep one EXCLUDES
+    // BILLING_ISSUE by predicate, and the reconciliation one is
+    // PLAY_STORE-only while a held Apple or Stripe row ages the same way.
+    // Without this the scan is a sequential scan of `purchases` on every
+    // run, forever, growing with the table.
+    //
+    // Ordered on `billingIssueDetectedAt` alone, which is both the range
+    // bound and the ORDER BY of that query, so the LIMIT is answered by
+    // walking the index instead of sorting the matches. The status list
+    // is DERIVED (`BILLING_ISSUE_AGEING_STATUSES`) rather than written
+    // out, so the index and the pass can never describe different rows.
+    // The `IS NOT NULL` arm mirrors the query's own and keeps rows that
+    // never carried a detection stamp out of the index entirely.
+    billingIssueAgeingIdx: index("purchases_billing_issue_ageing_idx")
+      .on(t.billingIssueDetectedAt)
+      .where(
+        sql`${t.status} IN (${sql.raw(statusSqlList(BILLING_ISSUE_AGEING_STATUSES))}) AND ${t.billingIssueDetectedAt} IS NOT NULL`,
+      ),
   }),
 );
 
@@ -1491,6 +1512,7 @@ export type ProjectRetentionOverride =
   typeof projectRetentionOverrides.$inferSelect;
 export type NewProjectRetentionOverride =
   typeof projectRetentionOverrides.$inferInsert;
+
 
 // =============================================================
 // audiences (sift-style targeting rules)

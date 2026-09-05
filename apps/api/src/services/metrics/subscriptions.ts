@@ -928,6 +928,18 @@ export async function readBillingIssues(
       // the store has already stopped covering the failure — there is no
       // gracePeriodExpires, so the row is no longer "in grace period" at
       // all, and the old unconditional label was actively wrong for it.
+      //
+      // These two English strings are OPERATOR-facing, deliberately, and
+      // are not routed through i18n. The only reader is the dashboard's
+      // billing-issues panel, served by
+      // GET /dashboard/projects/:projectId/subscriptions/billing-issues,
+      // which is gated by `assertProjectAccess(..., CUSTOMER_SUPPORT)` —
+      // every viewer is a project team member. No subscriber, SDK client
+      // or store webhook consumer ever sees them, so the rule that a
+      // subscriber-visible string must come from the locale bundles does
+      // not apply. (If this list is ever surfaced to end users, the label
+      // has to move to the dashboard's `t()` keyed on `status`, not be
+      // translated here — the API has no locale.)
       issue:
         row.status === "BILLING_ISSUE"
           ? "Payment failed — access suspended"

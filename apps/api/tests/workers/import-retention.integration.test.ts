@@ -1,9 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
-import { db } from "../../../../packages/db/src/drizzle/client";
-import { projects } from "../../../../packages/db/src/drizzle/schema";
-import * as importJobRepo from "../../../../packages/db/src/drizzle/repositories/import-jobs";
+import { db, drizzle, projects } from "@rovenue/db";
+
+// Reaching into packages/db/src by relative path (as this file previously
+// did) resolves fine at runtime via vitest, but pulls those files outside
+// this package's tsconfig rootDir under static typecheck (TS6059) — go
+// through the published @rovenue/db barrel instead, same as the rest of
+// this suite.
+const importJobRepo = drizzle.importJobRepo;
 import * as importStore from "../../src/lib/import-store";
 import { runImportRetention } from "../../src/workers/import-retention";
 import { IMPORT_FILE_RETENTION_DAYS } from "@rovenue/shared";

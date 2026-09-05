@@ -84,7 +84,9 @@ describe("wire identity", () => {
   it("mints a new rovenueId on logOut", async () => {
     const r = sdk();
     const before = r.rovenueId();
-    r.logOut();
+    // Awaited: logOut flushes queued events under the OLD identity first, so
+    // they are not delivered attributed to whoever comes next.
+    await r.logOut();
     expect(r.rovenueId()).not.toBe(before);
   });
 });
@@ -189,5 +191,94 @@ describe("configure", () => {
     const opts: Record<string, unknown> = { apiKey: PK, apiUrl: API };
     delete opts[missing];
     expect(() => configure(opts as never)).toThrow(new RegExp(missing));
+  });
+});
+
+// =============================================================
+// Findings from the second review
+// =============================================================
+//
+// These are all parity failures: the Web SDK was written from the API's
+// shapes rather than from what the native SDKs already send, and every one of
+// them is invisible to a test whose mock returns whatever the client expects.
+
+describe("responses without a JSON body", () => {
+  it.each([202, 204])("does not throw on %d", async (status) => {
+    fetchImpl.mockResolvedValue(new Response(null, { status }));
+    // /v1/events answers 202 with no body. Calling res.json() on it throws,
+    // which the event queue reads as "not acknowledged" — replaying an event
+    // the server already ingested, on every flush, forever.
+    await expect(
+      sdk().http.post("/events", { eventType: "x" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still parses a normal JSON envelope", async () => {
+    fetchImpl.mockResolvedValue(jsonResponse({ entitlements: { pro: true } }));
+    await expect(sdk().getEntitlements()).resolves.toEqual({ pro: true });
+  });
+});
+
+describe("subscriber headers", () => {
+  it("sends BOTH identity headers, as the native core does", async () => {
+    const r = sdk();
+    await r.getEntitlements();
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<
+      string,
+      string
+    >;
+    // /v1/placements, /v1/config and /v1/experiments read the subscriber from
+    // x-rovenue-user-id. Sending only the app-user header left every web
+    // request anonymous: audience rows could never match, and a null
+    // subscriber forces the project holdout to zero.
+    expect(headers["x-rovenue-app-user-id"]).toBe(r.rovenueId());
+    expect(headers["x-rovenue-user-id"]).toBe(r.rovenueId());
+  });
+});
+
+describe("placement identifiers", () => {
+  it("encodes an identifier that would otherwise change the path", async () => {
+    fetchImpl.mockResolvedValue(jsonResponse({}));
+    await sdk().getPlacement("a/b?c");
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      `${API}/v1/web/${PK}/placements/a%2Fb%3Fc`,
+    );
+  });
+});
+
+describe("experiment exposure", () => {
+  it("posts the assignment for the authenticated subscriber", async () => {
+    fetchImpl.mockResolvedValue(new Response(null, { status: 202 }));
+    const r = sdk();
+    await r.recordExposure({
+      experimentId: "exp_1",
+      variantId: "b",
+      placementId: "onboarding",
+    });
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      `${API}/v1/web/${PK}/experiments/exp_1/expose`,
+    );
+    const body = JSON.parse(fetchImpl.mock.calls[0]?.[1]?.body as string);
+    expect(body).toMatchObject({
+      variantId: "b",
+      subscriberId: r.rovenueId(),
+      placementId: "onboarding",
+      platform: "web",
+    });
+    // No exposedAt: the server stamps it. ClickHouse partitions and TTLs
+    // raw_exposures on that column and revenue attribution compares
+    // eventDate >= min(exposedAt), so a skewed device clock would make a
+    // visitor a permanent non-converter or TTL their exposure away entirely.
+    expect(body).not.toHaveProperty("exposedAt");
+  });
+
+  it("does not reject when the exposure call fails", async () => {
+    fetchImpl.mockRejectedValue(new Error("offline"));
+    // Fire-and-forget, like the native path: a failed exposure must not stop
+    // a paywall from rendering.
+    await expect(
+      sdk().recordExposure({ experimentId: "e", variantId: "v" }),
+    ).resolves.toBeUndefined();
   });
 });

@@ -54,6 +54,10 @@
     "./retention": {
       "types": "./src/retention/policies.ts",
       "default": "./src/retention/policies.ts"
+    },
+    "./experiments/bucketing-web": {
+      "types": "./src/experiments/bucketing-web.ts",
+      "default": "./src/experiments/bucketing-web.ts"
     }
   },
   "scripts": {

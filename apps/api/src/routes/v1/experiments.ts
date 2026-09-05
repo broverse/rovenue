@@ -1,3 +1,4 @@
+import { HEADER } from "@rovenue/shared";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
@@ -45,7 +46,7 @@ export const trackBodySchema = z.object({
 
 export type TrackBody = z.infer<typeof trackBodySchema>;
 
-const SUBSCRIBER_HEADER = "x-rovenue-user-id";
+const SUBSCRIBER_HEADER = HEADER.X_ROVENUE_USER_ID;
 
 // =============================================================
 // POST /v1/experiments/:id/expose

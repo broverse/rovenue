@@ -36,9 +36,10 @@ const { dbMock, drizzleMock, fetchMock } = vi.hoisted(() => {
     },
   };
 
+  // vi.fn's generic takes a single function-type parameter (vitest 3.x),
+  // not the old (args-tuple, return) pair.
   const fetchMock = vi.fn<
-    [string, RequestInit?],
-    Promise<{ ok: boolean; status: number; text: () => Promise<string> }>
+    (input: string, init?: RequestInit) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>
   >();
 
   return { dbMock, drizzleMock, fetchMock };

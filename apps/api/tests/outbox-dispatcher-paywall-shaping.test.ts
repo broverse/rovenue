@@ -43,24 +43,24 @@ function buildRow(overrides: Partial<OutboxEvent> = {}): OutboxEvent {
 
 describe("paywallEventId", () => {
   it("is deterministic for the same inputs", () => {
-    const a = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1");
-    const b = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1");
+    const a = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1", "view");
+    const b = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1", "view");
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("changes when the client eventId changes (distinct client retries stay collapsible per logical view)", () => {
-    const a = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1");
-    const b = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_2");
+    const a = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1", "view");
+    const b = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_2", "view");
     expect(a).not.toBe(b);
   });
 
   it("changes when any identity field changes", () => {
-    const base = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1");
-    expect(paywallEventId("prj_2", "sub_1", "pw_1", "plc_1", "evt_1")).not.toBe(base);
-    expect(paywallEventId("prj_1", "sub_2", "pw_1", "plc_1", "evt_1")).not.toBe(base);
-    expect(paywallEventId("prj_1", "sub_1", "pw_2", "plc_1", "evt_1")).not.toBe(base);
-    expect(paywallEventId("prj_1", "sub_1", "pw_1", "plc_2", "evt_1")).not.toBe(base);
+    const base = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1", "view");
+    expect(paywallEventId("prj_2", "sub_1", "pw_1", "plc_1", "evt_1", "view")).not.toBe(base);
+    expect(paywallEventId("prj_1", "sub_2", "pw_1", "plc_1", "evt_1", "view")).not.toBe(base);
+    expect(paywallEventId("prj_1", "sub_1", "pw_2", "plc_1", "evt_1", "view")).not.toBe(base);
+    expect(paywallEventId("prj_1", "sub_1", "pw_1", "plc_2", "evt_1", "view")).not.toBe(base);
   });
 });
 

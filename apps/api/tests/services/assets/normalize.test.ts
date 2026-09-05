@@ -43,7 +43,12 @@ async function png(width: number, height: number): Promise<Buffer> {
 function solid(
   width: number,
   height: number,
-  save: (s: sharp.Sharp) => sharp.Sharp,
+  // `sharp.Sharp` as a type reference needs `sharp` bound as a namespace,
+  // which the default `import sharp from "sharp"` above doesn't give under
+  // this program's module settings (TS2503, "cannot find namespace
+  // 'sharp'") — `ReturnType<typeof sharp>` names the same instance type
+  // sharp(...) actually returns, without a namespace reference.
+  save: (s: ReturnType<typeof sharp>) => ReturnType<typeof sharp>,
 ): Promise<Buffer> {
   const s = sharp({
     create: { width, height, channels: 3, background: { r: 200, g: 50, b: 90 } },
@@ -195,8 +200,14 @@ describe("normalizeImage", () => {
   });
 
   it("strips metadata, including EXIF GPS", async () => {
+    // `GPS` isn't a key sharp's Exif type (or libvips underneath it)
+    // recognizes — GPS tags live under the GPS IFD, which this API
+    // addresses as `IFD3` (confirmed empirically: a `GPS` key here writes
+    // byte-identical output to an IFD0-only exif — the tag is silently
+    // dropped, never reaching the file at all, so this test previously
+    // asserted nothing about GPS stripping specifically).
     const withExif = await sharp(await png(200, 200))
-      .withExif({ IFD0: { Copyright: "someone" }, GPS: { GPSLatitudeRef: "N" } })
+      .withExif({ IFD0: { Copyright: "someone" }, IFD3: { GPSLatitudeRef: "N" } })
       .jpeg()
       .toBuffer();
     const out = await normalizeImage(withExif);

@@ -134,6 +134,18 @@ export const HEADER = {
   X_RATE_LIMIT_LIMIT: "X-RateLimit-Limit",
   X_RATE_LIMIT_REMAINING: "X-RateLimit-Remaining",
   X_ROVENUE_APP_USER_ID: "x-rovenue-app-user-id",
+  /**
+   * The resolved subscriber. Read by /v1/placements, /v1/offerings,
+   * /v1/config and /v1/experiments; sent alongside the app-user header by
+   * every SDK.
+   *
+   * Named here because it was spelled out as a literal in five independent
+   * places, and the Web SDK shipped without sending it at all — every web
+   * placement request was anonymous, so audience rows could not match and
+   * the project holdout was never applied. A route renaming a literal while
+   * a preflight allow-list keeps permitting the old one is the same drift.
+   */
+  X_ROVENUE_USER_ID: "x-rovenue-user-id",
   // First-install platform reported by the SDK on the create-triggering
   // request. Persisted once (create-only) as the `platform` attribute.
   X_ROVENUE_PLATFORM: "x-rovenue-platform",

@@ -4,6 +4,11 @@ import { computeDesiredAccess } from "./access-engine";
 const now = new Date("2026-09-03T00:00:00Z");
 const future = new Date("2026-10-01T00:00:00Z");
 const past = new Date("2026-08-01T00:00:00Z");
+// A grace window that has itself already closed — later than `past` (so
+// it genuinely extended the purchase for a while) but still before `now`.
+// The whole point of the assertion it appears in is that this ordering
+// holds, which an inline literal does not say.
+const closedGraceWindow = new Date("2026-08-15T00:00:00Z");
 
 describe("computeDesiredAccess", () => {
   it("grants nothing for a non-granting status", () => {
@@ -78,7 +83,7 @@ describe("computeDesiredAccess", () => {
 
   it("grants nothing once gracePeriodExpires has passed", () => {
     const desired = computeDesiredAccess(
-      [{ id: "p1", status: "GRACE_PERIOD", expiresDate: past, gracePeriodExpires: new Date("2026-08-15T00:00:00Z"), store: "APP_STORE", accessIds: ["pro"] }],
+      [{ id: "p1", status: "GRACE_PERIOD", expiresDate: past, gracePeriodExpires: closedGraceWindow, store: "APP_STORE", accessIds: ["pro"] }],
       now,
     );
     expect(desired.size).toBe(0);

@@ -1,0 +1,167 @@
+---
+title: Web
+description: Read entitlements, serve placements, render paywalls and start Stripe checkouts from a browser.
+---
+
+## Before you install: allow your origin
+
+A Rovenue API key is not usable from a browser until you list the origins your
+app is served from. This is the first thing to do, because the failure mode
+gives you nothing to go on: the browser reports an opaque CORS error that never
+mentions Rovenue, and the request never reaches us to be logged.
+
+In the dashboard, open **SDK & API → API keys**, and add each origin to the key
+you will ship — for example `https://app.example.com` and, for local work,
+`http://localhost:3000`. Origins are matched exactly: scheme, host and port.
+There are no wildcards, because a `https://*.example.com` entry would turn a
+subdomain takeover into a working API key.
+
+## Install
+
+```bash
+npm install @rovenue/web-sdk
+```
+
+## Configure
+
+```ts
+import { configure, createStorage } from "@rovenue/web-sdk";
+
+export const rovenue = configure({
+  apiKey: "rov_pub_...",          // your PUBLIC key — visible in the browser by design
+  apiUrl: "https://api.rovenue.app",
+  storage: createStorage(),        // localStorage where available, memory where not
+});
+```
+
+Create the client **once** and share it. Constructing it per render rebuilds the
+identity, the entitlement cache and the event queue each time.
+
+### Choosing an app user id
+
+The SDK generates its own identifier and uses it on every request. If you call
+`identify()` with an id of your own, that id becomes guessable to anyone holding
+your public key — which is visible in your page source.
+
+So: never use an email address, a sequential number, or anything else a stranger
+could construct. Use an opaque id your backend maps to the user. The SDK warns
+in the console when it sees an email-shaped id.
+
+```ts
+rovenue.identify("u_9f3a1c7e");   // opaque
+// rovenue.identify("ada@example.com");  // warns — guessable
+```
+
+`identify()` is client-local. Merging two subscribers is a server-side operation
+with your **secret** key, never something a browser can do.
+
+## Entitlements
+
+```ts
+const entitlements = await rovenue.getEntitlements();
+```
+
+The SDK caches the last answer, so a returning subscriber does not see a flash of
+the paywall they already paid to remove:
+
+```ts
+const cached = rovenue.getCachedEntitlements();  // synchronous, no network
+```
+
+`null` and `{}` mean different things and the SDK keeps them apart: `{}` is a
+real answer meaning this person has no entitlements, `null` means we have not
+found out. When the network is unreachable or the API returns a 5xx,
+`getEntitlements()` answers from cache. When it returns a 4xx — a revoked key, a
+rejected origin — it throws instead, so a misconfiguration surfaces rather than
+hiding behind stale data.
+
+## React
+
+```tsx
+import { RovenueProvider, useEntitlements } from "@rovenue/web-sdk/react";
+
+function App() {
+  return (
+    <RovenueProvider client={rovenue}>
+      <Content />
+    </RovenueProvider>
+  );
+}
+
+function Content() {
+  const { entitlements, isLoading, error } = useEntitlements();
+  if (entitlements?.pro) return <Pro />;
+  return <Upsell loading={isLoading} error={error} />;
+}
+```
+
+## Paywalls
+
+```tsx
+import { RovenuePaywall } from "@rovenue/web-sdk/paywall";
+
+<RovenuePaywall
+  placement="onboarding"
+  successUrl="https://app.example.com/welcome"
+  cancelUrl="https://app.example.com/pricing"
+/>;
+```
+
+This renders the paywall your placement serves, including any A/B experiment
+variant — the draw is deterministic and seeded on the subscriber, so someone
+sees the same variant on the web as on their phone.
+
+A retired or unknown placement renders nothing rather than throwing. A shipped
+app must not break because a placement was turned off.
+
+`successUrl` and `cancelUrl` are validated server-side against your project's
+**verified** custom domains, so a URL you have not verified is refused rather
+than followed.
+
+## Checkout
+
+```ts
+const session = await rovenue.checkout({
+  offeringId: "off_...",
+  packageIdentifier: "monthly",
+  successUrl: "https://app.example.com/welcome",
+  cancelUrl: "https://app.example.com/pricing",
+});
+window.location.assign(session.url);
+```
+
+You name a **package**, never a price. The amount is resolved on the server from
+the offering that package belongs to, so a tampered page cannot change what is
+charged. Pass an `idempotencyKey` if a double-submit is possible; it is handed
+straight to Stripe.
+
+## Events
+
+```ts
+rovenue.track({ eventType: "paywall_view" });
+```
+
+Queued and delivered at least once: an event is dropped only after the server
+acknowledges it, unsent events survive a page reload, and the queue flushes when
+the tab is hidden or closing. Each event carries a stable id so a replay is
+deduplicated rather than double-counted.
+
+Under React the provider starts and stops the queue for you. Elsewhere, call
+`rovenue.startEventQueue()` once after configuring.
+
+## Server-side rendering
+
+The SDK is safe to import and construct on a server — Next.js, Remix and similar
+frameworks run this code where there is no `window` and no `localStorage`.
+Nothing touches the DOM at import time, and storage falls back to memory when it
+is unavailable or blocked.
+
+Network calls still belong on the client. Construct on the server if it suits
+your app's shape; fetch when you have a viewer.
+
+## Supported browsers
+
+Any browser with `fetch`, `localStorage` and WebCrypto. WebCrypto is only exposed
+on secure origins, so experiment assignment needs `https` (or
+`http://localhost`); the SDK says so explicitly rather than silently bucketing
+everyone into one variant.

@@ -44,8 +44,11 @@ beforeAll(async () => {
   testDb = drizzleClient(pool, { schema });
 
   PROJECT_ID = createId();
-  WEB_KEY = `pk_web_${RUN_ID}`;
-  NATIVE_KEY = `pk_native_${RUN_ID}`;
+  // Real `rov_pub_` prefixes: apiKeyAuth detects the kind from the prefix and
+  // 401s on anything else, so a made-up prefix would make the two auth tests
+  // below pass for the wrong reason.
+  WEB_KEY = `rov_pub_web_${RUN_ID}`;
+  NATIVE_KEY = `rov_pub_native_${RUN_ID}`;
 
   await testDb
     .insert(schema.projects)
@@ -127,7 +130,7 @@ describe("browserCors", () => {
   });
 
   it("refuses an unknown public key", async () => {
-    const res = await preflight(`pk_does_not_exist_${RUN_ID}`, LISTED_ORIGIN);
+    const res = await preflight(`rov_pub_missing_${RUN_ID}`, LISTED_ORIGIN);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 
@@ -140,7 +143,7 @@ describe("browserCors", () => {
     const res = await preflight(
       WEB_KEY,
       LISTED_ORIGIN,
-      `${HEADER.X_ROVENUE_APP_USER_ID},${HEADER.X_ROVENUE_PLATFORM}`,
+      `${HEADER.X_ROVENUE_APP_USER_ID},${HEADER.X_ROVENUE_USER_ID},${HEADER.X_ROVENUE_PLATFORM}`,
     );
     // Assert the origin too. Hono echoes requested headers even when the
     // origin is refused, so a headers-only assertion passes against a
@@ -152,6 +155,11 @@ describe("browserCors", () => {
       res.headers.get("Access-Control-Allow-Headers") ?? ""
     ).toLowerCase();
     expect(allowed).toContain(HEADER.X_ROVENUE_APP_USER_ID);
+    // The subscriber header the placement, config, offering and experiment
+    // routes actually read. Its absence made every web placement request
+    // anonymous, and a host could not add it back because preflight refused
+    // it — so it needs a regression test, not just a fix.
+    expect(allowed).toContain(HEADER.X_ROVENUE_USER_ID);
     expect(allowed).toContain(HEADER.X_ROVENUE_PLATFORM);
   });
 });
@@ -213,5 +221,99 @@ describe("browserCors in the composed app", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(
       env.DASHBOARD_URL,
     );
+  });
+});
+
+// =============================================================
+// Findings from the first outside review
+// =============================================================
+//
+// Three defects that self-review missed, each of which made a comment in this
+// codebase false. They are tested against the composed app because all three
+// are about how middleware compose — a minimal Hono app shows none of them.
+
+describe("browser surface hardening", () => {
+  it("does not pair a reflected origin with allow-credentials", async () => {
+    const { createApp } = await import("../app");
+    const res = await createApp().request(
+      `/v1/web/${WEB_KEY}/me/entitlements`,
+      { method: "GET", headers: { Origin: LISTED_ORIGIN } },
+    );
+    // The global dashboard CORS sets Access-Control-Allow-Credentials
+    // unconditionally, and hono emits that header whether or not the origin
+    // matched. On top of a reflected customer origin that is the pairing this
+    // surface sets credentials:false to avoid, so the dashboard handler must
+    // not run here at all.
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("leaves the dashboard's credentials behaviour intact elsewhere", async () => {
+    const { createApp } = await import("../app");
+    const { env } = await import("../lib/env");
+    const res = await createApp().request("/v1/config", {
+      method: "OPTIONS",
+      headers: {
+        Origin: env.DASHBOARD_URL,
+        "Access-Control-Request-Method": "GET",
+      },
+    });
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("throttles unauthenticated preflights", async () => {
+    const { createApp } = await import("../app");
+    const res = await createApp().request(
+      `/v1/web/rov_pub_unknown_${RUN_ID}/me/entitlements`,
+      {
+        method: "OPTIONS",
+        headers: {
+          Origin: LISTED_ORIGIN,
+          "Access-Control-Request-Method": "GET",
+        },
+      },
+    );
+    // A preflight costs one unauthenticated key lookup. hono's cors answers
+    // OPTIONS without calling next(), so a limiter registered after it would
+    // never run — the rate-limit headers are the evidence that it ran before.
+    expect(res.headers.get("X-RateLimit-Limit")).not.toBeNull();
+  });
+
+  it("refuses a path key that is not the authenticated key", async () => {
+    const { createApp } = await import("../app");
+    const res = await createApp().request(
+      `/v1/web/${WEB_KEY}/me/entitlements`,
+      {
+        method: "GET",
+        headers: {
+          Origin: LISTED_ORIGIN,
+          // The origin is allow-listed for WEB_KEY, but the request
+          // authenticates as a different key. Allowing this would let any
+          // site pair its own allow-listed path key with a key scraped from
+          // another project's page source.
+          Authorization: `Bearer ${NATIVE_KEY}`,
+          "x-rovenue-app-user-id": "device-1",
+        },
+      },
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("allows the matching key", async () => {
+    const { createApp } = await import("../app");
+    const res = await createApp().request(
+      `/v1/web/${WEB_KEY}/me/entitlements`,
+      {
+        method: "GET",
+        headers: {
+          Origin: LISTED_ORIGIN,
+          Authorization: `Bearer ${WEB_KEY}`,
+          "x-rovenue-app-user-id": "device-1",
+        },
+      },
+    );
+    // Not 403 AND not 401: a wrong-prefix key would 401, which would make
+    // this pass while proving nothing about the path-key check.
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(401);
   });
 });

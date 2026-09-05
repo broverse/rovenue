@@ -26,7 +26,11 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
-      count: vi.fn(async () => 0),
+      // Called with a `where` args object below (countProjectOwners) — a
+      // zero-arg vi.fn now surfaces as "expected 0 arguments" now that
+      // fixing $transaction's self-reference gives dbMock a concrete
+      // (non-`any`) type.
+      count: vi.fn(async (_args?: Record<string, unknown>) => 0),
     },
     user: { findUnique: vi.fn() },
     auditLog: {
@@ -34,8 +38,12 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
       findFirst: vi.fn(async () => null),
     },
     $executeRaw: vi.fn(async () => 0),
-    $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(dbMock),
+    // Explicit param + return types on the arrow itself let TS type this
+    // property from its declared signature, without needing to evaluate
+    // `fn(dbMock)` (which would require `dbMock`'s type before its own
+    // initializer finishes — TS7022/TS7024).
+    $transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(dbMock),
     ),
   };
 
@@ -55,8 +63,8 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   emptyChain.limit = async () => [];
 
   const drizzleDb = {
-    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(drizzleDb),
+    transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(drizzleDb),
     ),
     select: vi.fn(() => emptyChain),
   };

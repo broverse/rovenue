@@ -137,6 +137,70 @@ describe("guardStatusWrite event-time ordering", () => {
     expect(result.apply).toBe(false);
   });
 
+  // The two branches below are EARLY RETURNS: each builds its own result
+  // object rather than falling through to the one at the end of the
+  // function. `apply` was asserted for both, but the rest of the shape --
+  // `from`, `to`, and above all `previous` -- was not, and `previous` is
+  // what emitProductChanged and emitSubscriptionRecovered key on. An early
+  // return that dropped or mis-set it would silently stop announcing plan
+  // changes and recoveries with nothing failing.
+  test("the stale-event withhold returns the full before-image, not just apply:false", async () => {
+    lockMock.mockResolvedValue({
+      id: "pur_1",
+      status: PurchaseStatus.BILLING_ISSUE,
+      productId: "prod_old",
+      autoRenewStatus: true,
+      lastStoreEventAt: T2,
+    });
+
+    const result = await guardStatusWrite(baseArgs(PurchaseStatus.ACTIVE, T1));
+
+    expect(result).toEqual({
+      apply: false,
+      purchaseId: "pur_1",
+      from: PurchaseStatus.BILLING_ISSUE,
+      to: PurchaseStatus.ACTIVE,
+      previous: {
+        status: PurchaseStatus.BILLING_ISSUE,
+        productId: "prod_old",
+        autoRenewStatus: true,
+      },
+    });
+  });
+
+  test("the allowFrom exception returns apply:true WITH the terminal before-image", async () => {
+    // Apple REFUND_REVERSED: the one sanctioned exit from an absorbing
+    // status. It takes its own early return, so nothing else in this
+    // suite covers the shape it produces.
+    lockMock.mockResolvedValue({
+      id: "pur_1",
+      status: PurchaseStatus.REFUNDED,
+      productId: "prod_old",
+      autoRenewStatus: false,
+      lastStoreEventAt: T1,
+    });
+
+    const result = await guardStatusWrite({
+      ...baseArgs(PurchaseStatus.ACTIVE, T2),
+      allowFrom: [PurchaseStatus.REFUNDED],
+    });
+
+    expect(result).toEqual({
+      apply: true,
+      purchaseId: "pur_1",
+      from: PurchaseStatus.REFUNDED,
+      to: PurchaseStatus.ACTIVE,
+      previous: {
+        status: PurchaseStatus.REFUNDED,
+        productId: "prod_old",
+        autoRenewStatus: false,
+      },
+    });
+    // The sanctioned exit is explicitly NOT audited as a rejection --
+    // that is the difference between it and the branch below.
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
   test("state-machine rejection still works with a fresh eventTime", async () => {
     lockMock.mockResolvedValue({
       id: "pur_1",

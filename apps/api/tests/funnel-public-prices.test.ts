@@ -36,9 +36,18 @@ const funnelRow = vi.hoisted(() => ({
 }));
 const findFunnelById = vi.hoisted(() => vi.fn());
 const findVersionById = vi.hoisted(() => vi.fn());
-const findPaywallsByIds = vi.hoisted(() => vi.fn(async () => []));
-const findOfferingById = vi.hoisted(() => vi.fn(async () => null));
-const findProductsByIds = vi.hoisted(() => vi.fn(async () => []));
+// Every test below reassigns these via .mockResolvedValue with real
+// fixture arrays/objects — a bare `async () => []`/`async () => null`
+// infers a never[]-only/null-only return type no fixture satisfies.
+const findPaywallsByIds = vi.hoisted(() =>
+  vi.fn(async (): Promise<Record<string, unknown>[]> => []),
+);
+const findOfferingById = vi.hoisted(() =>
+  vi.fn(async (): Promise<Record<string, unknown> | null> => null),
+);
+const findProductsByIds = vi.hoisted(() =>
+  vi.fn(async (): Promise<Record<string, unknown>[]> => []),
+);
 
 vi.mock("@rovenue/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rovenue/db")>();

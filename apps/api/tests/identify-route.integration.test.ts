@@ -47,8 +47,12 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
   };
 
   const drizzleDb = {
-    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(drizzleDb),
+    // Explicit param + return types on the arrow itself let TS type this
+    // property from its declared signature, without needing to evaluate
+    // `fn(drizzleDb)` (which would require `drizzleDb`'s type before its
+    // own initializer finishes — TS7022/TS7024).
+    transaction: vi.fn(
+      async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(drizzleDb),
     ),
   };
 
@@ -91,10 +95,18 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
 });
 
 // bindAppUserId is mocked so the route test doesn't need a real DB.
+// vi.fn's generic takes a single function-type parameter (vitest 3.x), not
+// the old (args-tuple, return) pair. Param order matches the real
+// bindAppUserId(projectId, rovenueId, appUserId, userId?) in
+// src/services/identify.ts.
 const bindMock = vi.hoisted(() => ({
   bindAppUserId: vi.fn<
-    [string, string, string, string?],
-    Promise<{ subscriberId: string; appUserId: string; transferred: boolean }>
+    (
+      projectId: string,
+      rovenueId: string,
+      appUserId: string,
+      userId?: string,
+    ) => Promise<{ subscriberId: string; appUserId: string; transferred: boolean }>
   >(),
 }));
 vi.mock("../src/services/identify", () => bindMock);

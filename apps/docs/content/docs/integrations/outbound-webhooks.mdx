@@ -61,6 +61,7 @@ For revenue events (`revenue.*`), `data` is a fixed shape:
 - `amount` is a decimal string in the major currency unit (e.g. `"9.99"`, not cents).
 - `currency` is the ISO 4217 code.
 - `externalId` is the `externalId` you passed to the SDK's identify call, if any — no other PII (email, phone, IP, etc.) is ever included in a webhook payload.
+- `reason` is present only on some `revenue.REACTIVATION` events — see [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. Every other revenue event omits the key entirely rather than sending it as `null`.
 
 For every other event type (`subscription.*`, `subscriber.identified`, `paywall.*`, `credit.ledger.appended`), `data` is that event's domain payload passed through as-is.
 
@@ -77,19 +78,19 @@ For every other event type (`subscription.*`, `subscriber.identified`, `paywall.
 | `revenue.RENEWAL` | A recurring subscription renews for another billing period. |
 | `revenue.CREDIT_PURCHASE` | A consumable in-app product is purchased — Apple, Google, or a one-time Stripe funnel purchase of a consumable product. See [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. |
 | `revenue.NON_RENEWING_PURCHASE` | A non-consumable one-time purchase — Apple, Google, or a one-time Stripe funnel purchase of a non-consumable product. See [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below. |
-| `revenue.REACTIVATION` | A lapsed subscriber returns (a win-back offer redemption or a resubscribe), or an accounting reversal of a previously-applied refund. **Apple only** — see [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below for how the two cases are told apart internally. |
+| `revenue.REACTIVATION` | A lapsed subscriber returns (a win-back offer redemption, a resubscribe, or a Google billing-issue recovery), or an accounting reversal of a previously-applied refund. **Apple and Google** — see [one-time purchase revenue keys](#one-time-purchase-revenue-keys) below for how the two cases are told apart internally. |
 | `revenue.REFUND` | A refund is recorded (`data.amount` is always a positive value). |
 | `revenue.CANCELLATION` | A cancellation is recorded as a revenue-affecting event. |
 | `subscription.trial.started` [^not-yet-emitted] | A new trial period begins. |
 | `subscriber.identified` [^not-yet-emitted] | An SDK `identify()` call binds a Rovenue subscriber to your app-user id. |
 | `subscription.cancel_requested` | A subscriber requests cancellation (the subscription may still be active until period end). |
 | `subscription.expired` | A subscription reaches the `EXPIRED` state. |
-| `subscription.billing_issue` | A renewal payment fails and enters retry/grace limbo (Apple `DID_FAIL_TO_RENEW` / `GRACE_PERIOD_EXPIRED`, Google `SUBSCRIPTION_ON_HOLD`, Stripe `invoice.payment_failed`). |
-| `subscription.grace_period` | A subscription enters Google Play's grace period after a failed renewal (Google `SUBSCRIPTION_IN_GRACE_PERIOD`). |
-| `subscription.uncancelled` | A subscriber re-enables auto-renew after previously cancelling (Google `SUBSCRIPTION_RESTARTED`). |
-| `subscription.product_changed` | A subscription's product/price changes outside a cancellation (Apple `DID_CHANGE_RENEWAL_PREF`, Google `SUBSCRIPTION_PRICE_CHANGE_CONFIRMED` / `SUBSCRIPTION_DEFERRED`). |
+| `subscription.billing_issue` | A renewal payment fails and the subscriber does **not** keep access while the store retries (Apple `DID_FAIL_TO_RENEW` *without* the `GRACE_PERIOD` subtype, Apple `GRACE_PERIOD_EXPIRED`, Google `SUBSCRIPTION_ON_HOLD`, Stripe `invoice.payment_failed`). The grace-period half of Apple's `DID_FAIL_TO_RENEW` announces `subscription.grace_period` instead — see the row below. |
+| `subscription.grace_period` | A renewal payment fails but the subscriber keeps access while the store retries (Google `SUBSCRIPTION_IN_GRACE_PERIOD`, Apple `DID_FAIL_TO_RENEW` with subtype `GRACE_PERIOD` — Apple sends that subtype only when the app has a billing grace period configured). |
+| `subscription.uncancelled` | A subscriber re-enables auto-renew after previously cancelling (Google `SUBSCRIPTION_RESTARTED`, Apple `DID_CHANGE_RENEWAL_STATUS` in the "switched back on" direction). |
+| `subscription.product_changed` | A subscription's product or price changes outside a cancellation. Delivered in two phases: an *announcement* that a change is coming (Apple `DID_CHANGE_RENEWAL_PREF` other than its `UPGRADE` subtype, Google `SUBSCRIPTION_PRICE_CHANGE_CONFIRMED` / `SUBSCRIPTION_DEFERRED`), and an *effective* delivery carrying `data.phase` = `"effective"` on Apple, Google and Stripe alike, when the product on the purchase actually moved. See [plan-change phases](#plan-change-phases) below. |
 | `subscription.paused` | A subscriber pauses their subscription (Google `SUBSCRIPTION_PAUSED`). **Google only** — Apple has no pause notification. |
-| `subscription.recovered` | A billing failure resolves and the subscription is healthy again (Google `SUBSCRIPTION_RECOVERED`). **Google only** — see the coverage note below. |
+| `subscription.recovered` | A billing failure resolves and the subscription grants access again (Google `SUBSCRIPTION_RECOVERED`; on Apple and Stripe, any store write that moves a purchase out of `BILLING_ISSUE` into an access-granting state). All three stores — see the coverage note below. |
 | `subscription.revoked` | Access is revoked immediately rather than lapsing at end of term — a refund, a family-sharing removal, or a store-initiated revocation (Apple `REVOKE`, Google `SUBSCRIPTION_REVOKED`). Distinct from `subscription.expired`, which is an end-of-term expiry. |
 | `subscription.offer_redeemed` | A subscriber redeems a promotional offer, an offer code, or a win-back offer (Apple `OFFER_REDEEMED`). **Apple only** — see the coverage note below. Distinct from `subscription.uncancelled` (the subscription may have fully lapsed) and from `subscription.product_changed` (the redeemed offer is often for the same product). |
 | `paywall.view` | A paywall is shown to a user. |
@@ -146,19 +147,46 @@ property of the product, not of what the purchase happened to grant.
 reconciling historical numbers against numbers recorded after this date,
 older one-time purchases will only ever appear under `revenue.INITIAL`.
 
-**`revenue.REACTIVATION` is Apple-only** and carries two different
-economic meanings under one key: a lapsed subscriber returning (a win-back
-offer redemption, or a plain resubscribe), and an accounting reversal —
-Apple un-does a refund that had already been applied. Internally, the
-underlying revenue event is tagged `metadata.reason: "refund_reversed"`
-(the exported `REACTIVATION_REVERSAL_REASON` constant in
+**`revenue.REACTIVATION` fires on both Apple and Google** and carries two
+different economic meanings under one key: a lapsed subscriber returning
+(a win-back offer redemption, a plain resubscribe, or Google's
+`SUBSCRIPTION_RECOVERED` / `SUBSCRIPTION_RESTARTED` notifications), and an
+accounting reversal — Apple un-does a refund that had already been
+applied. Only Apple produces the reversal case; every Google
+`revenue.REACTIVATION` is the win-back case. Internally, the underlying
+revenue event is tagged `metadata.reason: "refund_reversed"` (the exported
+`REACTIVATION_REVERSAL_REASON` constant in
 `apps/api/src/services/apple/apple-webhook.ts`) for the reversal case only;
-an unmarked one is the win-back case. **This tag is not currently included
-in the delivered Custom Webhook payload** — `data` for a revenue event is
-the fixed shape described [above](#data-shape) (`kind` / `amount` /
-`currency` / `subscriberId` / `productId` / `externalId`), so a Custom
-Webhook receiver cannot yet distinguish the two `revenue.REACTIVATION`
-cases from the delivered payload alone.
+an unmarked one is the win-back case. **This tag reaches the delivered
+Custom Webhook payload as `data.reason`** — a reversal's `data` carries
+`"reason": "refund_reversed"` in addition to the fixed shape described
+[above](#data-shape); a win-back's `data` omits the `reason` key entirely
+(never `reason: null`), so a Custom Webhook receiver can tell the two
+`revenue.REACTIVATION` cases apart from the delivered payload alone.
+
+**Delivery change for existing connections.** Connections that already
+receive `revenue.INITIAL` were widened by migration `0123` to also receive
+`revenue.CREDIT_PURCHASE` and `revenue.NON_RENEWING_PURCHASE` — no action
+is needed to keep receiving purchases you were already being told about.
+`revenue.REACTIVATION` is opt-in: it is a genuinely new signal, so it is
+not added to any existing connection automatically.
+
+This also changes the vendor event name an existing connection sends for a
+one-time purchase, because the vendor mapping is keyed on the revenue type,
+not on "a purchase happened." On **META_CAPI**, a consumable IAP that used
+to deliver as `Subscribe` (via `revenue.INITIAL`) now delivers as
+`Purchase` (via `revenue.CREDIT_PURCHASE`); on **TIKTOK_EVENTS**,
+`Subscribe` becomes `CompletePayment`. Non-consumable one-time purchases
+move the same way, from `Subscribe`/`Subscribe` to `Purchase`/
+`CompletePayment` respectively.
+
+Why: a purchase that never becomes a subscription must not be reported to
+an ad platform as a subscription — doing so corrupts the platform's
+optimisation, which learns from what it's told converts. The consequence
+an advertiser will actually notice: conversion volume on a campaign
+optimised for `Subscribe` events drops on the day this ships, because
+one-time purchases that used to count toward it now report as `Purchase`/
+`CompletePayment` instead.
 
 ---
 
@@ -170,17 +198,28 @@ Rovenue does not infer one:
 | Event | Apple | Google | Stripe |
 | --- | --- | --- | --- |
 | `subscription.paused` | — | ✅ | — |
-| `subscription.recovered` | — | ✅ | — |
+| `subscription.grace_period` | ✅ | ✅ | — |
+| `subscription.recovered` | ✅ | ✅ | ✅ |
 | `subscription.revoked` | ✅ | ✅ | — |
 | `subscription.offer_redeemed` | ✅ | — | — |
 
-`subscription.recovered` in particular is Google-only, and deliberately so. Apple
-and Stripe send no recovery notification, so the only way to produce one would be to
-guess — treating a renewal that follows a grace period, or an `invoice.paid` that
-follows a `payment_failed`, as a recovery. That guess fires on unrelated renewals,
-and a false recovery would stop a dunning campaign for a subscriber who has not
-actually recovered. **If you rely on `subscription.recovered` to end a dunning flow,
-that flow is Android-only today.**
+`subscription.recovered` reaches all three stores, but by two different routes.
+Google sends a native `SUBSCRIPTION_RECOVERED` notification. Apple and Stripe send no
+recovery notification at all, so theirs is not read off an event type — it is read off
+the purchase's own prior state: the handler captures the status under the same row lock
+it writes with, and emits the key only when that prior status was `BILLING_ISSUE` and
+the incoming one grants access. This is not the guess it replaced. An ordinary renewal
+of an already-active subscription has no `BILLING_ISSUE` prior state, so it cannot
+produce a false recovery. **A dunning flow that ends on `subscription.recovered` now
+works on iOS and web as well as Android.**
+
+`subscription.grace_period` likewise is no longer Google-only. Apple sends
+`DID_FAIL_TO_RENEW` with subtype `GRACE_PERIOD` when the app has a billing grace
+period configured, and that half announces `grace_period` rather than
+`billing_issue` — because the subscriber still has entitlement, exactly as in the
+Google case. Apple deliveries without that subtype, and `GRACE_PERIOD_EXPIRED`, stay
+`billing_issue`. Stripe has no grace state of its own: a failed Stripe invoice is
+always `billing_issue`.
 
 `subscription.offer_redeemed` is the mirror case and Apple-only for the same
 reason. Apple has a dedicated `OFFER_REDEEMED` notification type; Google
@@ -189,6 +228,30 @@ the offer named inside the purchase resource rather than as its own event type,
 and Stripe has no equivalent event at all. **If you rely on
 `subscription.offer_redeemed` to stop a win-back campaign, that campaign is
 iOS-only today.**
+
+### Plan-change phases
+
+One real plan change can deliver `subscription.product_changed` twice, and the
+`phase` field inside `data` is how you tell the two deliveries apart:
+
+- **No `phase` field — the announcement.** The store says a change is coming. The
+  product may not have moved at all (a price change on the same product is one of
+  these), and for a scheduled downgrade it will not move for weeks. Carries
+  `storeEventType` and `webhookEventId`. A missing `phase` means "announcement", not
+  "unknown" — the field is never retrofitted onto this producer.
+- **`phase` = `"effective"` — the change has taken effect.** Emitted from inside the
+  purchase write itself, only when the product on the purchase actually moved.
+  Carries `previousProductId`, `productId` and `changeType`. Apple, Google and Stripe
+  all produce it.
+
+Google's deferred-change flow is the case that genuinely produces both: an
+announcement at deferral, then an effective delivery at the renewal that applies it.
+They are separate events with distinct ids, so `webhook-id` dedup does not collapse
+them. Apple's `UPGRADE` subtype is the opposite case: Apple has already charged the
+subscriber and applied the new tier, so announcing a change as *coming* would be
+false — no announcement is sent for it and you receive only the effective delivery.
+Billing-state consumers should act on `phase` = `"effective"`; "your plan changes on
+the 14th" notifications want the announcement.
 
 ## 4. Verifying signatures
 

@@ -25,6 +25,12 @@ import { createHash } from "node:crypto";
 
 const BUCKET_COUNT = 10_000;
 
+// selectVariant lives in its own module because it needs no crypto at all,
+// and this file imports `node:crypto`. The Web SDK needs the selection rule
+// without dragging a Node built-in into a browser bundle; re-exported here
+// so every existing importer is unaffected.
+export { selectVariant } from "./bucketing-select";
+
 /**
  * Hash `(subscriberId, seed)` to a bucket in `[0, 9999]`.
  * Same inputs always produce the same bucket — this is the
@@ -42,32 +48,6 @@ export function assignBucket(subscriberId: string, seed: string): number {
   return hash % BUCKET_COUNT;
 }
 
-/**
- * Pick a variant from a weighted list given a pre-computed bucket
- * in `[0, 9999]`. Weights are treated as fractions (summing to 1)
- * and mapped onto the bucket space in order. Assumes weights are
- * pre-validated upstream (see @rovenue/shared experimentSchema).
- */
-export function selectVariant<T extends { weight: number }>(
-  bucket: number,
-  variants: readonly T[],
-): T {
-  let cumulative = 0;
-  for (const variant of variants) {
-    cumulative += variant.weight * BUCKET_COUNT;
-    // Round the boundary because JS FP makes `0.34 * 10000` equal
-    // `3400.0000000000005`, which would push bucket 3400 into the
-    // previous slot. Boundaries must be discrete integers.
-    if (bucket < Math.round(cumulative)) return variant;
-  }
-  // Fall through — floating-point round-off on the final variant.
-  return variants[variants.length - 1]!;
-}
-
-/**
- * True if a subscriber is inside the given rollout fraction.
- * `percentage` is `0..1` (e.g. `0.1` = 10%).
- */
 export function isInRollout(
   subscriberId: string,
   seed: string,

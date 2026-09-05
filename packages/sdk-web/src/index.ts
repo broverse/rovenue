@@ -1,6 +1,6 @@
 import { createHttpClient, RovenueApiError, type HttpClient } from "./client";
 import { createIdentity, type Identity } from "./identity";
-import { createMemoryStorage, type SdkStorage } from "./storage";
+import { createMemoryStorage, createStorage, type SdkStorage } from "./storage";
 import { createEntitlementCache, type CachedEntitlements } from "./cache";
 import { createEventQueue, type TrackInput } from "./events";
 
@@ -26,7 +26,15 @@ export interface RovenueOptions {
   apiUrl: string;
   /** Injected for tests and for hosts that wrap fetch. */
   fetchImpl?: typeof fetch;
-  /** Injected by the browser build; defaults to memory. */
+  /**
+   * Where the rovenueId, the entitlement cache and the event queue persist.
+   *
+   * Defaults to {@link createStorage}, which uses `localStorage` where it
+   * works and falls back to memory where it does not — including during
+   * server rendering. Defaulting to memory instead would silently mint a new
+   * subscriber on every page load, orphaning the cache and the queue with it,
+   * and would only be correct for developers who read the docs.
+   */
   storage?: SdkStorage;
 }
 
@@ -44,7 +52,8 @@ export interface Rovenue {
   rovenueId(): string;
   /** Client-local. Merging subscribers is a server-side, secret-key operation. */
   identify(appUserId: string): void;
-  logOut(): void;
+  /** Flushes queued events under the current identity, then rotates it. */
+  logOut(): Promise<void>;
   getEntitlements(): Promise<Record<string, unknown>>;
   /**
    * Last-known entitlements, or null if nothing has been fetched yet.
@@ -75,6 +84,20 @@ export interface Rovenue {
    */
   startEventQueue(): void;
   stopEventQueue(): void;
+  /**
+   * Records that a subscriber was shown an experiment variant.
+   *
+   * Assignment alone is invisible to the analytics: a visitor bucketed into
+   * an arm but missing from `exposure_events` still contributes revenue while
+   * being absent from the denominator, which biases conversion rates and
+   * breaks the sample-ratio check. The native path fires this immediately
+   * after the draw; so does the web one.
+   */
+  recordExposure(input: {
+    experimentId: string;
+    variantId: string;
+    placementId?: string;
+  }): Promise<void>;
   getOfferings(): Promise<unknown>;
   getPlacement(identifier: string): Promise<unknown>;
   /**
@@ -100,7 +123,7 @@ export function configure(options: RovenueOptions): Rovenue {
   if (!options.apiKey) throw new Error("[rovenue] configure() needs an apiKey");
   if (!options.apiUrl) throw new Error("[rovenue] configure() needs an apiUrl");
 
-  const storage = options.storage ?? createMemoryStorage();
+  const storage = options.storage ?? createStorage();
   const identity = createIdentity(storage);
   const cache = createEntitlementCache(storage);
   const http = createHttpClient({
@@ -119,8 +142,14 @@ export function configure(options: RovenueOptions): Rovenue {
         // A 4xx means this event will never be accepted — a malformed
         // envelope, or a key that no longer exists. Retrying it forever
         // would block the queue behind it, so it is acknowledged (dropped)
-        // rather than retained. Anything else is worth another attempt.
-        return err instanceof RovenueApiError && err.status < 500;
+        // rather than retained.
+        //
+        // 429 is the exception, and the one that matters most: a rate-limited
+        // event is not rejected, it is deferred. Dropping it would lose
+        // telemetry precisely when volume is highest, which is when the
+        // numbers are most worth having. Same carve-out getEntitlements makes.
+        if (!(err instanceof RovenueApiError)) return false;
+        return err.status < 500 && err.status !== 429;
       }
     },
   });
@@ -131,9 +160,21 @@ export function configure(options: RovenueOptions): Rovenue {
     identity,
     rovenueId: () => identity.rovenueId(),
     identify: (appUserId) => identity.identify(appUserId),
-    logOut: () => {
-      // The cache belongs to the previous identity. Leaving it would show the
-      // next person the last one's entitlements.
+    logOut: async () => {
+      // Flush BEFORE the identity changes. Request headers are built at post
+      // time, so an event still queued when the rovenueId rotates would be
+      // delivered attributed to the new anonymous subscriber — the previous
+      // person's paywall views landing on whoever logs in next.
+      //
+      // Awaited rather than fired and forgotten: the whole point is that it
+      // completes while the old identity is still the current one. What the
+      // server refuses is dropped rather than carried across, which is the
+      // right trade — an event that cannot be attributed to the right
+      // subscriber is worse than a missing one.
+      await events.flush().catch(() => undefined);
+      events.clear();
+      // The cache belongs to the previous identity too. Leaving it would show
+      // the next person the last one's entitlements.
       cache.clear();
       identity.logOut();
     },
@@ -168,10 +209,37 @@ export function configure(options: RovenueOptions): Rovenue {
     stopEventQueue: () => events.stop(),
     getCachedEntitlements: () => cache.read()?.entitlements ?? null,
     getCachedEntitlementsEntry: () => cache.read(),
+    async recordExposure({ experimentId, variantId, placementId }) {
+      await http
+        .post(`/experiments/${encodeURIComponent(experimentId)}/expose`, {
+          variantId,
+          subscriberId: identity.rovenueId(),
+          ...(placementId ? { placementId } : {}),
+          platform: "web",
+          // No exposedAt. The native path omits it too, and the server
+          // stamps its own clock — deliberately, because ClickHouse
+          // partitions and TTLs `raw_exposures` on this column and revenue
+          // attribution compares `eventDate >= min(exposedAt)`. A device
+          // clock a day fast makes that visitor a permanent non-converter
+          // (their purchases predate their own exposure); one set in the past
+          // over-attributes pre-experiment revenue; one two years slow has
+          // the row TTL-deleted out of the denominator entirely.
+        })
+        .catch(() => {
+          // Fire-and-forget, like the native path: a failed exposure must not
+          // stop the paywall rendering. It is lost rather than queued because
+          // an exposure replayed later would be timestamped wrong, and a
+          // wrong timestamp is worse for an experiment than a missing row.
+        });
+    },
     getOfferings: () => http.get("/offerings"),
     // An unknown placement returns an empty envelope rather than a 404, so
     // this resolves rather than throwing — the caller renders nothing.
-    getPlacement: (identifier) => http.get(`/placements/${identifier}`),
+      // Encoded: an identifier carrying `/`, `?` or `#` would otherwise change
+    // the path or truncate itself into a query string, and the server would
+    // answer for a different (or no) placement.
+    getPlacement: (identifier) =>
+      http.get(`/placements/${encodeURIComponent(identifier)}`),
     checkout: ({ idempotencyKey, ...body }) =>
       http.post<CheckoutResult>("/checkout", body, { idempotencyKey }),
   };

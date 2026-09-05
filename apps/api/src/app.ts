@@ -126,10 +126,13 @@ const scopedGlobalBodyLimit: MiddlewareHandler = (c, next) =>
 // every origin — the same outcome as a key that exists but was never enabled
 // for browser use, so a probe cannot distinguish the two.
 //
-// This is an unauthenticated read: a flood of preflights with random keys
-// reaches the database. The global IP rate limit sits in front of it, and the
-// query is a single row by unique index, but if that ever becomes a hot path
-// it wants the same caching the authenticated key lookup gets.
+// This is an unauthenticated read: a preflight costs one
+// `findApiKeyByPublic`. The global IP rate limit is registered BEFORE the
+// middleware that calls this, which is load-bearing rather than incidental —
+// hono's cors answers OPTIONS without calling next(), so a limiter registered
+// after it would never run for a preflight at all. The query is a single row
+// by unique index; if it ever becomes a hot path it wants the same caching the
+// authenticated key lookup gets.
 async function lookupAllowedOrigins(publicKey: string): Promise<string[]> {
   const record = await drizzle.apiKeyRepo.findApiKeyByPublic(
     drizzle.db,
@@ -138,6 +141,16 @@ async function lookupAllowedOrigins(publicKey: string): Promise<string[]> {
   if (!record || record.revokedAt !== null) return [];
   return record.allowedOrigins;
 }
+
+/**
+ * Mount prefix for the browser surface.
+ *
+ * The public key sits in the path because a CORS preflight carries no
+ * `Authorization` header — it is the only project reference a preflight can
+ * carry. Declared once: the dashboard CORS skips this prefix and the per-key
+ * CORS attaches to it, and those two must not be able to disagree.
+ */
+const BROWSER_SURFACE_PREFIX = "/v1/web/";
 
 export function createApp() {
   // Allow the local Vite dev server only outside production so a
@@ -167,44 +180,59 @@ export function createApp() {
   // Error handler is attached after the chain — `onError` returns
   // Hono but doesn't contribute route types, so we apply it last to
   // keep the chain's inferred AppType focused on actual endpoints.
+  // The dashboard's CORS. Applied to everything EXCEPT the browser surface,
+  // for two reasons, the second of which is a security one:
+  //
+  //   - hono's cors answers an OPTIONS request itself without calling
+  //     `next()`, so a global handler would reply to every /v1/web preflight
+  //     with the dashboard's origin list and the per-key middleware would
+  //     never run at all;
+  //   - it sets `Access-Control-Allow-Credentials: true` unconditionally, and
+  //     hono sets that header regardless of whether the origin matched. On the
+  //     browser surface that lands on top of a reflected customer origin —
+  //     precisely the reflected-origin-plus-credentials pairing browserCors
+  //     sets `credentials: false` to avoid.
+  const dashboardCors = cors({
+    origin: origins,
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Request-Id",
+      "X-Rovenue-User-Id",
+      "Idempotency-Key",
+      "Stripe-Signature",
+    ],
+    exposeHeaders: [
+      "X-Request-Id",
+      "X-RateLimit-Limit",
+      "X-RateLimit-Remaining",
+      "X-RateLimit-Reset",
+      "X-Rovenue-Experiment",
+      "Retry-After",
+      "Idempotent-Replay",
+    ],
+    credentials: true,
+    maxAge: 86400,
+  });
+
   const app = new Hono()
     .use("*", requestIdMiddleware)
     .use("*", requestLoggerMiddleware)
     .use("*", scopedGlobalBodyLimit)
-    // The browser surface's per-key CORS must be registered BEFORE the
-    // global cors() below. hono's cors terminates an OPTIONS request itself,
-    // so the global one — whose origin list is the dashboard, not a
-    // customer's app — would answer every preflight for /v1/web/* and this
-    // middleware would never run.
-    .use("/v1/web/:publicKey/*", browserCors(lookupAllowedOrigins))
-    .use(
-      "*",
-      cors({
-        origin: origins,
-        allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allowHeaders: [
-          "Content-Type",
-          "Authorization",
-          "X-Request-Id",
-          "X-Rovenue-User-Id",
-          "Idempotency-Key",
-          "Stripe-Signature",
-        ],
-        exposeHeaders: [
-          "X-Request-Id",
-          "X-RateLimit-Limit",
-          "X-RateLimit-Remaining",
-          "X-RateLimit-Reset",
-          "X-Rovenue-Experiment",
-          "Retry-After",
-          "Idempotent-Replay",
-        ],
-        credentials: true,
-        maxAge: 86400,
-      }),
+    .use("*", (c, next) =>
+      c.req.path.startsWith(BROWSER_SURFACE_PREFIX)
+        ? next()
+        : dashboardCors(c, next),
     )
     .route("/health", healthRoute)
     .use("*", globalIpRateLimit())
+    // Registered AFTER the rate limiter, deliberately. A preflight costs one
+    // unauthenticated `findApiKeyByPublic`, and hono's cors answers OPTIONS
+    // without calling next() — so anything registered later never runs for a
+    // preflight at all. Behind the limiter, a flood of preflights carrying
+    // random keys is throttled like any other traffic.
+    .use(`${BROWSER_SURFACE_PREFIX}:publicKey/*`, browserCors(lookupAllowedOrigins))
     .use("*", metricsMiddleware)
     .route("/api/auth", authRoute)
     .route("/billing", billingRoute)

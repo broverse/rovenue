@@ -89,8 +89,20 @@ const world = vi.hoisted(() => ({
     if (handle === txHandle) {
       // The transaction sees its own uncommitted writes on top of the
       // committed state.
+      // An explicit tuple return type (not `as const`) keeps the copied
+      // array mutable — `as const` on `[k, [...v]]` also freezes the
+      // nested array into `readonly {...}[]`, which doesn't match
+      // `world.committed`/`applyMove`'s `Array<{...}>` element type.
       const snapshot = new Map(
-        [...world.committed].map(([k, v]) => [k, [...v]] as const),
+        [...world.committed].map(
+          ([
+            k,
+            v,
+          ]): [
+            string,
+            Array<{ accessId: string; isActive: boolean; expiresDate: Date | null }>,
+          ] => [k, [...v]],
+        ),
       );
       for (const move of world.pending) world.applyMove(snapshot, move);
       return snapshot.get(subscriberId) ?? [];

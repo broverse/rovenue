@@ -110,9 +110,14 @@ const {
   subscribers,
   revenueEvents,
   products,
+  virtualCurrencies,
+  virtualCurrencyRepo,
+  productCurrencyGrantRepo,
+  creditLedgerRepo,
 } = drizzle;
 const { completeFunnelPurchase } = await import("./complete-purchase");
 const { hashToken } = await import("./token");
+const { getBalance } = await import("../credit-engine");
 
 const RUN = Date.now();
 const PROJECT_ID = `prj_fnlrace_${RUN}`;
@@ -445,6 +450,37 @@ describe("completeFunnelPurchase — one-time Stripe revenue", () => {
     expect(outbox[0]!.aggregateType).toBe("REVENUE_EVENT");
   });
 
+  it("Fix 2 (final review): a SUBSCRIPTION-typed product sold through the one-time funnel path still records revenue, as NON_RENEWING_PURCHASE", async () => {
+    // The funnel decides one-time-vs-recurring from the Stripe price
+    // (stripeSubscriptionId == null), not from the Rovenue product's
+    // declared type — and the dashboard defaults new products to
+    // type: "SUBSCRIPTION". An operator who leaves that default, attaches
+    // a one-time price, and sells it through a funnel must still get a
+    // revenue row, not silence.
+    const { sessionId, paymentIntentId, projectId } = await seedPendingOneTimeSession({
+      amountCents: 1999,
+      currency: "usd",
+      productType: ProductType.SUBSCRIPTION,
+    });
+
+    const result = await completeFunnelPurchase({
+      sessionId,
+      stripeCustomerId: `cus_1t_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    });
+    expect(result.alreadyIssued).toBe(false);
+
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, projectId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe("NON_RENEWING_PURCHASE");
+    expect(rows[0]!.amount).toBe("19.9900");
+  });
+
   it("does not record a second revenue row when /confirm is replayed", async () => {
     // Both /confirm and the webhook backstop can arrive. The second
     // caller must not double-count the charge. In practice this second
@@ -556,5 +592,262 @@ describe("completeFunnelPurchase — one-time Stripe revenue", () => {
     expect(envelope?.eventType).toBe("revenue.event.recorded");
     expect(envelope?.revenueEventKind).toBe("NON_RENEWING_PURCHASE");
     expect(envelope?.projectId).toBe(projectId);
+  });
+});
+
+// =============================================================
+// completeFunnelPurchase — CONSUMABLE credit grant (residual B)
+// =============================================================
+//
+// Before this, a CONSUMABLE sold through the funnel wrote a CREDIT_PURCHASE
+// revenue row (Task 7, above) but granted no virtual currency at all: the
+// funnel path only ever called grantAccess-equivalent logic, never
+// grantPurchaseCurrencies. The dashboard's "credit revenue" panels would
+// report money for packages that granted the buyer nothing.
+//
+// Credits are granted AFTER completeFunnelPurchase's transaction commits —
+// see the ConsumableGrantInfo doc comment in complete-purchase.ts for why
+// that has to be outside the paid-transition transaction. This describe
+// block proves the whole path end to end against a real Postgres: a
+// CONSUMABLE with currency grants ends with both the revenue row and the
+// credit_ledger entries, a NON_CONSUMABLE gets neither, and a replay does
+// not double-grant.
+
+describe("completeFunnelPurchase — CONSUMABLE credit grant", () => {
+  const CREDIT_RUN = `${RUN}_credit`;
+  let seedIndex = 0;
+  const createdProjectIds: string[] = [];
+  const createdSessionIds: string[] = [];
+
+  async function seedPendingSessionWithGrants(opts: {
+    productType: (typeof ProductType)[keyof typeof ProductType];
+    amountCents: number;
+    currency: string;
+    grants: Array<{ code: string; amount: number }>;
+  }): Promise<{
+    sessionId: string;
+    purchaseId: string;
+    paymentIntentId: string;
+    projectId: string;
+    currencyIds: Record<string, string>;
+  }> {
+    seedIndex += 1;
+    const n = seedIndex;
+    const db = getDb();
+    const projectId = `prj_cr_${CREDIT_RUN}_${n}`;
+    const funnelId = `fnl_cr_${CREDIT_RUN}_${n}`;
+    const versionId = `fnv_cr_${CREDIT_RUN}_${n}`;
+    const sessionId = `fss_cr_${CREDIT_RUN}_${n}`;
+    const purchaseId = `fpu_cr_${CREDIT_RUN}_${n}`;
+    const productId = `prd_cr_${CREDIT_RUN}_${n}`;
+    const paymentIntentId = `pi_cr_${CREDIT_RUN}_${n}`;
+
+    await db.insert(projects).values({ id: projectId, name: `Credit ${CREDIT_RUN}-${n}` });
+    await db.insert(funnels).values({
+      id: funnelId,
+      projectId,
+      slug: `credit-${CREDIT_RUN}-${n}`,
+      name: "Credit",
+    });
+    await db.insert(funnelVersions).values({
+      id: versionId,
+      funnelId,
+      versionNo: 1,
+      pagesJson: [],
+      themeJson: {},
+      settingsJson: {},
+    });
+    await db.insert(funnelSessions).values({
+      id: sessionId,
+      funnelId,
+      funnelVersionId: versionId,
+      projectId,
+      anonId: `anon_cr_${CREDIT_RUN}_${n}`,
+      state: "in_progress",
+    });
+    await db.insert(products).values({
+      id: productId,
+      projectId,
+      identifier: `credit-product-${CREDIT_RUN}-${n}`,
+      type: opts.productType,
+      storeIds: {},
+      displayName: "Credit product",
+      accessIds: [],
+    });
+
+    const currencyIds: Record<string, string> = {};
+    for (const grant of opts.grants) {
+      const currency = await virtualCurrencyRepo.createVirtualCurrency(db, {
+        projectId,
+        code: grant.code,
+        name: grant.code,
+      });
+      currencyIds[grant.code] = currency.id;
+    }
+    if (opts.grants.length > 0) {
+      await productCurrencyGrantRepo.setProductGrants(
+        db,
+        productId,
+        opts.grants.map((grant) => ({
+          currencyId: currencyIds[grant.code]!,
+          amount: grant.amount,
+        })),
+      );
+    }
+
+    await db.insert(funnelPurchases).values({
+      id: purchaseId,
+      sessionId,
+      projectId,
+      productId,
+      status: "pending",
+      amountCents: opts.amountCents,
+      currency: opts.currency,
+    });
+
+    createdProjectIds.push(projectId);
+    createdSessionIds.push(sessionId);
+
+    return { sessionId, purchaseId, paymentIntentId, projectId, currencyIds };
+  }
+
+  afterAll(async () => {
+    const db = getDb();
+    for (const projectId of createdProjectIds) {
+      const revenueRows = await db
+        .select({ id: revenueEvents.id })
+        .from(revenueEvents)
+        .where(eq(revenueEvents.projectId, projectId));
+      for (const row of revenueRows) {
+        await db.delete(outboxEvents).where(eq(outboxEvents.aggregateId, row.id));
+      }
+    }
+    for (const sessionId of createdSessionIds) {
+      await db.delete(outboxEvents).where(eq(outboxEvents.aggregateId, sessionId));
+      await db.delete(funnelClaimTokens).where(eq(funnelClaimTokens.sessionId, sessionId));
+      await db.delete(funnelPurchases).where(eq(funnelPurchases.sessionId, sessionId));
+    }
+    // credit_ledger is DB-enforced append-only; the project cascade's
+    // implicit DELETE into it is rejected unless explicitly authorized for
+    // this transaction (see packages/db 0081_credit_ledger_invariants.sql).
+    await creditLedgerRepo.withLedgerDeleteAuthorized(db, async (tx) => {
+      for (const projectId of createdProjectIds) {
+        // Cascades products (and product_currency_grants with it),
+        // virtual_currencies, funnels/funnelVersions/funnelSessions,
+        // subscribers, purchases, subscriber_access, revenue_events,
+        // and now credit_ledger too.
+        await tx.delete(projects).where(eq(projects.id, projectId));
+      }
+    });
+  });
+
+  it("grants credits and records CREDIT_PURCHASE revenue for a CONSUMABLE sold through the funnel", async () => {
+    const { sessionId, paymentIntentId, projectId, currencyIds } =
+      await seedPendingSessionWithGrants({
+        productType: ProductType.CONSUMABLE,
+        amountCents: 999,
+        currency: "usd",
+        grants: [
+          { code: "GLD", amount: 1000 },
+          { code: "GEM", amount: 5 },
+        ],
+      });
+
+    const result = await completeFunnelPurchase({
+      sessionId,
+      stripeCustomerId: `cus_cr_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    });
+    expect(result.alreadyIssued).toBe(false);
+
+    const db = getDb();
+
+    // The revenue row is CREDIT_PURCHASE, not NON_RENEWING_PURCHASE.
+    const rows = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, projectId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe("CREDIT_PURCHASE");
+
+    // The credits actually landed for the subscriber the purchase was
+    // anchored on.
+    const [funnelPurchaseRow] = await db
+      .select()
+      .from(funnelPurchases)
+      .where(eq(funnelPurchases.sessionId, sessionId));
+    const subscriberId = funnelPurchaseRow!.subscriberId!;
+    expect(subscriberId).toBeTruthy();
+
+    expect(await getBalance(subscriberId, currencyIds.GLD!)).toBe(1000);
+    expect(await getBalance(subscriberId, currencyIds.GEM!)).toBe(5);
+  });
+
+  it("grants no credits for a NON_CONSUMABLE product even when currency grants are configured", async () => {
+    // A NON_CONSUMABLE would not normally carry product_currency_grants
+    // rows, but configuring one anyway and confirming nothing is granted
+    // exercises the actual `product.type !== CONSUMABLE` gate rather than
+    // trivially passing because there was nothing to grant.
+    const { sessionId, paymentIntentId, projectId, currencyIds } =
+      await seedPendingSessionWithGrants({
+        productType: ProductType.NON_CONSUMABLE,
+        amountCents: 1999,
+        currency: "usd",
+        grants: [{ code: "GLD", amount: 1000 }],
+      });
+
+    const result = await completeFunnelPurchase({
+      sessionId,
+      stripeCustomerId: `cus_cr_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    });
+    expect(result.alreadyIssued).toBe(false);
+
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(revenueEvents)
+      .where(eq(revenueEvents.projectId, projectId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe("NON_RENEWING_PURCHASE");
+
+    const [funnelPurchaseRow] = await db
+      .select()
+      .from(funnelPurchases)
+      .where(eq(funnelPurchases.sessionId, sessionId));
+    const subscriberId = funnelPurchaseRow!.subscriberId!;
+    expect(await getBalance(subscriberId, currencyIds.GLD!)).toBe(0);
+  });
+
+  it("does not double-grant credits when /confirm is replayed", async () => {
+    const { sessionId, paymentIntentId, currencyIds } =
+      await seedPendingSessionWithGrants({
+        productType: ProductType.CONSUMABLE,
+        amountCents: 500,
+        currency: "usd",
+        grants: [{ code: "GLD", amount: 250 }],
+      });
+
+    const args = {
+      sessionId,
+      stripeCustomerId: `cus_cr_${sessionId}`,
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: paymentIntentId,
+    };
+    const first = await completeFunnelPurchase(args);
+    const second = await completeFunnelPurchase(args);
+    expect(first.alreadyIssued).toBe(false);
+    expect(second.alreadyIssued).toBe(true);
+
+    const db = getDb();
+    const [funnelPurchaseRow] = await db
+      .select()
+      .from(funnelPurchases)
+      .where(eq(funnelPurchases.sessionId, sessionId));
+    const subscriberId = funnelPurchaseRow!.subscriberId!;
+    // Still exactly one grant's worth, not two.
+    expect(await getBalance(subscriberId, currencyIds.GLD!)).toBe(250);
   });
 });

@@ -23,11 +23,17 @@ vi.mock("../src/lib/audit", () => auditMock);
 // =============================================================
 
 const { dbMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted(() => {
+  // findFirst below is called with a `where` args object
+  // (findAudienceInProject/findFirstExperimentByAudience) and reassigned
+  // in tests via .mockResolvedValue with real fixtures — a zero-arg
+  // `vi.fn(async () => null)` both rejects the where-arg calls and infers
+  // a null-only return type no fixture satisfies.
+  type FindOne = (args?: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
   const dbMock = {
     projectMember: { findUnique: vi.fn() },
     audience: {
       findMany: vi.fn(async () => []),
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn<FindOne>(async () => null),
       findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
@@ -35,7 +41,7 @@ const { dbMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted(() =>
     },
     experiment: {
       findMany: vi.fn(async () => []),
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn<FindOne>(async () => null),
       findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),

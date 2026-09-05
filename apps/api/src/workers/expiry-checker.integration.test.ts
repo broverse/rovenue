@@ -21,6 +21,7 @@ import {
   subscribers,
   products,
   purchases,
+  revenueEvents,
 } from "@rovenue/db";
 import { syncAccess } from "../services/access-engine";
 import {
@@ -29,6 +30,8 @@ import {
   runBillingIssueAgeing,
   runExpiryCheck,
 } from "./expiry-checker";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const RUN_ID = Date.now();
 
@@ -305,7 +308,21 @@ async function seedLivelockFixture({
 
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["E1", "E2", "AF", "AS", "AN", "GO", "GC", "GN", "LL", "PZ"]) {
+  for (const suffix of [
+    "E1",
+    "E2",
+    "AF",
+    "AS",
+    "AN",
+    "GO",
+    "GC",
+    "GN",
+    "LL",
+    "PZ",
+    "CH",
+    "CF",
+    "CB",
+  ]) {
     const projectId = `prj_exp_${RUN_ID}${suffix}`;
     await db.delete(outboxEvents).where(
       inArray(
@@ -580,5 +597,198 @@ describe("PAUSED — what the sweeper actually does to a lapsed pause", () => {
     // retired within one sweep, so PAUSED is not observably live and the
     // `isLive: true` declaration was false.
     await expect(statusOf(purchase.id)).resolves.toBe("EXPIRED");
+  });
+});
+
+
+// =============================================================
+// Apple renewal chain — a lapsed previous period
+// =============================================================
+//
+// Apple mints a NEW transactionId for every renewal, and
+// `upsertPurchase` (apple-webhook.ts) keys on `storeTransactionId`, so a
+// subscription chain holds ONE PURCHASE ROW PER BILLING PERIOD, all
+// sharing an `originalTransactionId`. Nothing in the DID_RENEW path
+// touches the row for the period that just ended: it keeps status ACTIVE
+// and an `expiresDate` that is now in the past —
+// `expireSupersededApplePurchases` runs only on the UPGRADE arm of
+// DID_CHANGE_RENEWAL_PREF, never on an ordinary renewal.
+//
+// These tests seed that exact shape and report what the sweeper does to
+// it. The distinction that must hold: a lapsed row with a LATER row in
+// the same chain has not churned — the subscriber renewed — while a
+// lapsed row that is the chain's last word has.
+
+const CHAIN_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Seed an Apple chain the way the live handler builds one: a
+ * previous-period row whose term has just lapsed, plus (optionally) the
+ * current-period row the renewal created, both under one
+ * `originalTransactionId`.
+ */
+async function seedAppleChain({
+  suffix,
+  now,
+  withRenewal,
+}: {
+  suffix: string;
+  now: Date;
+  withRenewal: boolean;
+}): Promise<{
+  projectId: string;
+  subscriberId: string;
+  previousPurchaseId: string;
+  currentPurchaseId: string | null;
+}> {
+  const db = getDb();
+  const project = await seedProject(suffix);
+  const subscriber = await seedSubscriber(project.id, suffix);
+  const product = await seedProduct(project.id, suffix);
+  const originalTransactionId = `otx_exp_${RUN_ID}_${suffix}`;
+
+  const common = {
+    projectId: project.id,
+    subscriberId: subscriber.id,
+    productId: product.id,
+    store: "APP_STORE" as const,
+    originalTransactionId,
+    status: "ACTIVE" as const,
+    isTrial: false,
+    isIntroOffer: false,
+    isSandbox: false,
+    environment: "PRODUCTION" as const,
+    originalPurchaseDate: new Date(now.getTime() - CHAIN_PERIOD_MS),
+    priceAmount: "9.99",
+    priceCurrency: "USD",
+    autoRenewStatus: true,
+  };
+
+  // The period that just ended. Ten minutes past its expiry, exactly as a
+  // real row looks between Apple's DID_RENEW and the next sweep.
+  const [previous] = await db
+    .insert(purchases)
+    .values({
+      ...common,
+      storeTransactionId: `${originalTransactionId}_p1`,
+      purchaseDate: new Date(now.getTime() - CHAIN_PERIOD_MS),
+      expiresDate: new Date(now.getTime() - 10 * 60 * 1000),
+    })
+    .returning();
+  if (!previous) throw new Error("seedAppleChain: no previous row returned");
+
+  let currentPurchaseId: string | null = null;
+  if (withRenewal) {
+    const [current] = await db
+      .insert(purchases)
+      .values({
+        ...common,
+        storeTransactionId: `${originalTransactionId}_p2`,
+        purchaseDate: new Date(now.getTime() - 10 * 60 * 1000),
+        expiresDate: new Date(now.getTime() + CHAIN_PERIOD_MS),
+      })
+      .returning();
+    if (!current) throw new Error("seedAppleChain: no current row returned");
+    currentPurchaseId = current.id;
+  }
+
+  return {
+    projectId: project.id,
+    subscriberId: subscriber.id,
+    previousPurchaseId: previous.id,
+    currentPurchaseId,
+  };
+}
+
+async function expiredEventCount(subscriberId: string): Promise<number> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: outboxEvents.id })
+    .from(outboxEvents)
+    .where(
+      and(
+        eq(outboxEvents.aggregateId, subscriberId),
+        eq(outboxEvents.eventType, "subscription.expired"),
+      ),
+    );
+  return rows.length;
+}
+
+async function cancellationEventCount(subscriberId: string): Promise<number> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: revenueEvents.id })
+    .from(revenueEvents)
+    .where(
+      and(
+        eq(revenueEvents.subscriberId, subscriberId),
+        eq(revenueEvents.type, "CANCELLATION"),
+      ),
+    );
+  return rows.length;
+}
+
+describe("Apple renewal chain — a superseded previous period", () => {
+  it("retires the lapsed previous-period row WITHOUT announcing churn, because a later row covers the chain", async () => {
+    const now = new Date();
+    const chain = await seedAppleChain({ suffix: "CH", now, withRenewal: true });
+
+    await runExpiryCheck(now);
+
+    expect(await statusOf(chain.previousPurchaseId)).toBe("EXPIRED");
+    expect(await statusOf(chain.currentPurchaseId!)).toBe("ACTIVE");
+    // Both counts in one assertion so a failure reports what the sweeper
+    // actually emitted for BOTH signals, not just the first one to trip.
+    expect({
+      expired: await expiredEventCount(chain.subscriberId),
+      cancellations: await cancellationEventCount(chain.subscriberId),
+    }).toEqual({ expired: 0, cancellations: 0 });
+  });
+
+  // `runBillingIssueAgeing` reuses the same retirement tail, so the guard
+  // reaches it too — and it needs to. A held Apple row sits on the period
+  // that failed; if the subscriber fixes their card and Apple renews onto
+  // a new transaction, the recovery path is supposed to clear the held
+  // sibling (`retireChainBillingIssue`). If it ever misses one, the
+  // ageing pass reaches it at day 60 and would otherwise announce churn
+  // for someone who has been paying for weeks.
+  it("the ageing pass also retires a superseded held row without announcing churn", async () => {
+    const db = getDb();
+    const now = new Date();
+    const chain = await seedAppleChain({ suffix: "CB", now, withRenewal: true });
+    await db
+      .update(purchases)
+      .set({
+        status: "BILLING_ISSUE",
+        billingIssueDetectedAt: new Date(
+          now.getTime() - (BILLING_ISSUE_MAX_AGE_DAYS + 1) * DAY_MS,
+        ),
+      })
+      .where(eq(purchases.id, chain.previousPurchaseId));
+
+    await runBillingIssueAgeing(now);
+
+    expect(await statusOf(chain.previousPurchaseId)).toBe("EXPIRED");
+    expect({
+      expired: await expiredEventCount(chain.subscriberId),
+      cancellations: await cancellationEventCount(chain.subscriberId),
+    }).toEqual({ expired: 0, cancellations: 0 });
+  });
+
+  it("a lapsed row that is the chain's last word still announces churn", async () => {
+    const now = new Date();
+    const chain = await seedAppleChain({
+      suffix: "CF",
+      now,
+      withRenewal: false,
+    });
+
+    await runExpiryCheck(now);
+
+    expect(await statusOf(chain.previousPurchaseId)).toBe("EXPIRED");
+    expect({
+      expired: await expiredEventCount(chain.subscriberId),
+      cancellations: await cancellationEventCount(chain.subscriberId),
+    }).toEqual({ expired: 1, cancellations: 1 });
   });
 });

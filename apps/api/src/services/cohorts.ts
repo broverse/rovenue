@@ -4,6 +4,7 @@ import type {
   CohortRetentionResponse,
   CohortRule,
 } from "@rovenue/shared";
+import { REVENUE_TYPES_MONEY_OUT, sqlTypeList } from "@rovenue/shared";
 import {
   ClickHouseUnavailableError,
   isClickHouseConfigured,
@@ -430,8 +431,8 @@ export async function computeCohortLtvCurve(
       SELECT
         toString(${intervalFn}, m.join_bucket, ${bucketFn}(e.eventDate))) AS period,
         toString(
-          sumIf(e.amountUsd, e.type NOT IN ('REFUND','CHARGEBACK'))
-          - sumIf(e.amountUsd, e.type IN ('REFUND','CHARGEBACK'))
+          sumIf(e.amountUsd, e.type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}))
+          - sumIf(e.amountUsd, e.type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}))
         ) AS net_usd
       FROM rovenue.raw_revenue_events AS e FINAL
       JOIN members AS m ON e.subscriberId = m.subscriberId

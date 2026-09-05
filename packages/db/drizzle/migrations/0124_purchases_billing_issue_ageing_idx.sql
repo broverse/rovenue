@@ -1,0 +1,1 @@
+CREATE INDEX "purchases_billing_issue_ageing_idx" ON "purchases" USING btree ("billingIssueDetectedAt") WHERE "purchases"."status" IN ('BILLING_ISSUE') AND "purchases"."billingIssueDetectedAt" IS NOT NULL;

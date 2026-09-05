@@ -3,6 +3,7 @@ import { apiKeyAuth } from "../../middleware/api-key-auth";
 import { apiKeyRateLimit } from "../../middleware/rate-limit";
 import { billingPortalRoute } from "./billing-portal";
 import { checkoutRoute } from "./checkout";
+import { requireMatchingPathKey } from "../../middleware/browser-cors";
 import { configRoute } from "./config";
 import { eventsRoute } from "./events";
 import { experimentsRoute } from "./experiments";
@@ -39,6 +40,11 @@ export const v1Route = new Hono()
   // endpoints decide whether they require PUBLIC or SECRET via
   // `requireSecretKey`.
   .use("*", apiKeyAuth("any"))
+  // Browser surface only (a no-op when there is no :publicKey in the path):
+  // the key in the URL must be the key that authenticated. Otherwise a site
+  // could pair its OWN allow-listed path key with another project's Bearer
+  // key and use it from an origin that project never permitted.
+  .use("*", requireMatchingPathKey)
   // Per-project envelope: 500 req/min per authenticated API key.
   // Sits after apiKeyAuth so the bucket key is the apiKeyId, not
   // the IP.
