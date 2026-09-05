@@ -12,9 +12,13 @@ import { Kafka } from "kafkajs";
 import { sql } from "drizzle-orm";
 import { drizzle, getDb } from "@rovenue/db";
 import {
+  getBackoffState,
+  runOnce,
   runOutboxDispatcher,
   stopOutboxDispatcher,
+  topicBackoff,
 } from "../src/workers/outbox-dispatcher";
+import { getProducer } from "../src/lib/kafka";
 import { getResolvedBrokers } from "../src/lib/kafka";
 
 let redpanda: StartedTestContainer;
@@ -111,5 +115,138 @@ describe("outbox-dispatcher integration", () => {
     });
 
     await consumer.disconnect();
+  }, 30_000);
+});
+
+// =============================================================
+// Chaos: the crash window between Kafka ack and markPublished
+// =============================================================
+//
+// `runOnce` does three things in order, and only the first and last are
+// transactional:
+//
+//   1. claimBatch (tx1) — FOR UPDATE SKIP LOCKED; the lock is RELEASED when
+//      this tx commits, before anything is published.
+//   2. producer.send(...) — the row is now in Kafka.
+//   3. markPublished (tx2) — `publishedAt` is set.
+//
+// A process that dies between 2 and 3 has published an event the database
+// still considers unpublished. That is the at-least-once contract, and the
+// outbox exists to make it survivable: on restart the row is re-claimed and
+// re-published, downstream dedupes on eventId.
+//
+// `outbox-replay-idempotency.test.ts` proves the downstream half — ClickHouse
+// collapses the duplicate — but says in its own header that it BYPASSES the
+// outbox → dispatcher path. So the OLTP half, the part that decides whether
+// the event is lost or merely duplicated, had no test. These are it.
+//
+// The crash is simulated by making markPublished throw rather than by killing
+// a process: the invariant under test is what the DATABASE looks like when
+// step 3 does not happen, and a thrown error leaves exactly that state.
+
+async function seedExposure(suffix: string): Promise<string> {
+  const db = getDb();
+  const id = `evt_test_chaos_${suffix}`;
+  await drizzle.outboxRepo.insert(db, {
+    id,
+    aggregateType: "EXPOSURE",
+    aggregateId: `exp_chaos_${suffix}`,
+    eventType: "experiment.exposure.recorded",
+    payload: { experimentId: `exp_chaos_${suffix}`, variantId: "var_a" },
+  });
+  return id;
+}
+
+async function publishedAtFor(id: string): Promise<Date | null> {
+  const rows = await getDb().execute(
+    sql`SELECT "publishedAt" FROM outbox_events WHERE id = ${id}`,
+  );
+  const row = (rows as unknown as { rows: Array<{ publishedAt: Date | null }> })
+    .rows[0];
+  return row?.publishedAt ?? null;
+}
+
+describe("outbox-dispatcher chaos", () => {
+  beforeAll(() => {
+    // The first test in this file starts runOutboxDispatcher() and never
+    // stops it — it loops until afterAll. These tests drive runOnce()
+    // directly, and a background loop draining the same table would race
+    // every assertion below about what is and is not published.
+    stopOutboxDispatcher();
+  });
+
+  it("re-publishes a row whose ack landed but whose markPublished did not", async () => {
+    const db = getDb();
+    await db.execute(sql`DELETE FROM outbox_events WHERE id LIKE 'evt_test_chaos_%'`);
+    const id = await seedExposure(`death_${Date.now()}`);
+
+    // The post-crash state, constructed directly rather than by killing a
+    // process: the event is in Kafka and the row is still unpublished. That
+    // is exactly what the database looks like when the dispatcher dies
+    // between `producer.send` and `markPublished`, and it is the state the
+    // outbox is designed to be recoverable from.
+    const producer = await getProducer();
+    expect(producer).not.toBeNull();
+    await producer!.send({
+      topic: "rovenue.exposures",
+      messages: [{ key: `exp_chaos_death`, value: JSON.stringify({ eventId: id }) }],
+    });
+    expect(await publishedAtFor(id)).toBeNull();
+
+    // A restarted dispatcher recovers it with no special handling: the claim
+    // lock died with the process and publishedAt is still null, so the row is
+    // simply claimable again. The duplicate this produces in Kafka is the
+    // at-least-once contract, and ClickHouse collapses it on eventId — see
+    // outbox-replay-idempotency.test.ts for that half.
+    await runOnce(producer!);
+    expect(await publishedAtFor(id)).not.toBeNull();
+  }, 30_000);
+
+  it("marks nothing published when the broker rejects the send", async () => {
+    const db = getDb();
+    await db.execute(sql`DELETE FROM outbox_events WHERE id LIKE 'evt_test_chaos_%'`);
+    topicBackoff.clear();
+    const id = await seedExposure(`outage_${Date.now()}`);
+
+    // A broker outage from the dispatcher's point of view. The invariant is
+    // one-directional: a failed send must never advance publishedAt. Marking
+    // it would drop the event permanently — no downstream dedupe can recover
+    // something that was never delivered.
+    const brokenProducer = {
+      send: () => Promise.reject(new Error("Broker not available")),
+    } as unknown as NonNullable<Awaited<ReturnType<typeof getProducer>>>;
+
+    await runOnce(brokenProducer);
+    expect(await publishedAtFor(id)).toBeNull();
+
+    // And the topic enters backoff rather than spinning on a dead broker.
+    // This is why recovery is not instant, which the next test relies on
+    // knowing — a test that simply retried would have failed and looked like
+    // data loss.
+    const state = getBackoffState("rovenue.exposures");
+    expect(state?.consecutiveFailures).toBeGreaterThan(0);
+    expect(state?.nextAttemptAt).toBeGreaterThan(Date.now());
+  }, 30_000);
+
+  it("drains the backlog once the broker is back and the backoff has passed", async () => {
+    const db = getDb();
+    await db.execute(sql`DELETE FROM outbox_events WHERE id LIKE 'evt_test_chaos_%'`);
+    topicBackoff.clear();
+    const id = await seedExposure(`recover_${Date.now()}`);
+
+    const brokenProducer = {
+      send: () => Promise.reject(new Error("Broker not available")),
+    } as unknown as NonNullable<Awaited<ReturnType<typeof getProducer>>>;
+    await runOnce(brokenProducer);
+    expect(await publishedAtFor(id)).toBeNull();
+
+    // Clearing the backoff stands in for waiting it out — the window is real
+    // and deliberate, and sleeping through it would only make this test slow.
+    // What matters is that nothing else had to happen: no manual replay, no
+    // operator step, no lost row.
+    topicBackoff.clear();
+    const producer = await getProducer();
+    await runOnce(producer!);
+    expect(await publishedAtFor(id)).not.toBeNull();
   }, 30_000);
 });

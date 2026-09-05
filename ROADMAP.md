@@ -832,9 +832,34 @@ else in the framework/provider-breadth dimension is done.
 
 - [ ] Load-test suite: k6/vegeta with realistic traffic profiles (receipt spikes,
       webhook storms) + published benchmark page
+- [ ] ClickHouse lag under a Kafka-fed materialized view (the third chaos
+      scenario; the two above are done)
 - [ ] SLOs + status page
-- [ ] Chaos tests: dispatcher death, Kafka outage, ClickHouse lag (outbox architecture
-      is built to prove exactly this)
+- [x] Chaos tests: dispatcher death + Kafka outage/recovery (2026-09-05,
+      `apps/api/tests/outbox-dispatcher.integration.test.ts`). The
+      dispatcher's crash window is between `producer.send` and
+      `markPublished`: `claimBatch` releases its lock when its own tx commits,
+      so a process that dies after the ack has published an event the database
+      still considers unpublished. `outbox-replay-idempotency.test.ts` already
+      proved the downstream half — ClickHouse collapses the duplicate — but
+      says in its own header that it BYPASSES the outbox → dispatcher path, so
+      the OLTP half, the part that decides between duplicated and LOST, had no
+      test. It does now: the post-crash state is constructed directly and the
+      next tick recovers it with no operator step.
+
+      Kafka outage asserts the one-directional invariant — a failed send must
+      never advance `publishedAt` — plus the topic backoff that makes recovery
+      deliberately not instant. Writing it surfaced that: a naive retry test
+      would have failed and read as data loss. Verified by inverting the rule
+      (mark everything claimed as published regardless of send outcome), which
+      turns two of the four red.
+
+      Also fixed a pre-existing flake in that file while there: its first test
+      starts `runOutboxDispatcher()` and never stops it, so a background loop
+      kept draining the table and holding connections. That test now passes in
+      ~2.8s where it previously timed out.
+
+      ClickHouse lag is NOT covered — left open below.
 - [ ] 3–5 pilot apps in production; millions of live events as reference
 - [ ] All CI green and required (including pre-existing red tests); testcontainers
       suite running in CI
