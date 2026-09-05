@@ -326,10 +326,13 @@ describe("runRetentionSweep", () => {
 
   it("continues to the next project when one project throws", async () => {
     // Three projects, none with a billing tier, each with an override
-    // ONLY for webhook_events (so exactly one DELETE_ROWS call happens
-    // per project — the other DELETE_ROWS tables have no window and
-    // are skipped, keeping the call sequence one-per-project). The
-    // middle project's delete rejects.
+    // ONLY for webhook_events. Fix round 1, Finding 1: copilot_messages
+    // now ALSO resolves for these tier-less projects via its
+    // `defaultDays` (90) — so each project produces TWO DELETE_ROWS
+    // calls (webhook_events, copilot_messages), not one. The throw
+    // below is keyed on (table, projectId) rather than a raw call
+    // index specifically so copilot_messages' now-resolved calls can't
+    // shift which call is "the middle project's" by accident.
     deps.listProjectsWithTier.mockResolvedValue([
       project({ projectId: "prj_1", tier: null, cycle: null }),
       project({ projectId: "prj_2", tier: null, cycle: null }),
@@ -339,12 +342,14 @@ describe("runRetentionSweep", () => {
       new Map([["webhook_events", 14]]),
     );
 
-    let call = 0;
-    deps.deleteRetentionRows.mockImplementation(async () => {
-      call += 1;
-      if (call === 2) throw new Error("boom");
-      return { deleted: 1, hitBatchCap: false };
-    });
+    deps.deleteRetentionRows.mockImplementation(
+      async (_db: unknown, table: string, _col: string, projectId: string) => {
+        if (table === "webhook_events" && projectId === "prj_2") {
+          throw new Error("boom");
+        }
+        return { deleted: 1, hitBatchCap: false };
+      },
+    );
 
     await expect(
       runRetentionSweep(NOW, deps as unknown as RetentionDeps),
@@ -352,8 +357,20 @@ describe("runRetentionSweep", () => {
 
     // The assertion that actually proves isolation: a sweep that
     // stopped after project 2's failure would never reach project 3,
-    // and this call count would be 2, not 3.
-    expect(deps.deleteRetentionRows).toHaveBeenCalledTimes(3);
+    // and prj_3's webhook_events call would be missing.
+    const webhookEventsCalls = deps.deleteRetentionRows.mock.calls.filter(
+      (call: unknown[]) => call[1] === "webhook_events",
+    );
+    expect(webhookEventsCalls).toHaveLength(3);
+    expect(webhookEventsCalls.map((call: unknown[]) => call[3])).toEqual([
+      "prj_1",
+      "prj_2",
+      "prj_3",
+    ]);
+    const copilotMessagesCalls = deps.deleteRetentionRows.mock.calls.filter(
+      (call: unknown[]) => call[1] === "copilot_messages",
+    );
+    expect(copilotMessagesCalls).toHaveLength(3);
     expect(deps.findByTierAndCycle).not.toHaveBeenCalled();
     expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
       reason: RETENTION_SKIP_REASON_ERROR,
@@ -455,9 +472,18 @@ describe("runRetentionSweep", () => {
     );
   });
 
-  it("skips a project with neither a tier nor an override", async () => {
+  it("skips a project with neither a tier nor an override, EXCEPT the tables with a defaultDays", async () => {
     // Falling back to the free tier here would delete a self-hoster's
-    // audit history seven days after they installed.
+    // audit history seven days after they installed — audit_logs (and
+    // every other policy with no `defaultDays`) must still be skipped
+    // outright.
+    //
+    // Fix round 1, Finding 1: webhook_events and copilot_messages are
+    // the deliberate exception — both carry a `defaultDays` of 90
+    // (the exact window their now-retired bespoke workers used
+    // unconditionally, tier or no tier), so a tier-less, override-less
+    // project still gets THOSE two tables swept rather than silently
+    // never having them cleaned up again.
     deps.listProjectsWithTier.mockResolvedValue([
       project({ tier: null, cycle: null }),
     ]);
@@ -468,23 +494,58 @@ describe("runRetentionSweep", () => {
       deps as unknown as RetentionDeps,
     );
 
-    expect(deps.deleteRetentionRows).not.toHaveBeenCalled();
+    const policiesWithDefault = RETENTION_POLICIES.filter(
+      (p) => p.defaultDays !== undefined,
+    );
+    const policiesWithoutDefault = RETENTION_POLICIES.filter(
+      (p) => p.defaultDays === undefined,
+    );
+    // Sanity: this test's whole premise rests on exactly these two
+    // tables carrying a default. If a future policy edit adds or
+    // removes one, this assertion fails loudly rather than the
+    // call-count math below silently proving the wrong thing.
+    expect(policiesWithDefault.map((p) => p.table).sort()).toEqual(
+      ["copilot_messages", "webhook_events"],
+    );
+
+    // webhook_events and copilot_messages DID get a DELETE_ROWS call,
+    // each floored/resolved at their defaultDays (90) — not skipped.
+    expect(deps.deleteRetentionRows).toHaveBeenCalledTimes(
+      policiesWithDefault.length,
+    );
+    for (const policy of policiesWithDefault) {
+      expect(deps.deleteRetentionRows).toHaveBeenCalledWith(
+        deps.db,
+        policy.table,
+        policy.timestampColumn,
+        "prj_1",
+        new Date(NOW.getTime() - 90 * MS_PER_DAY),
+        policy.terminalStatuses,
+        RETENTION_DELETE_BATCH_SIZE,
+        RETENTION_MAX_BATCHES,
+      );
+    }
+
     expect(deps.dropTablePartitionsOlderThan).not.toHaveBeenCalled();
     expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
+      reason: RETENTION_SKIP_REASON_NO_WINDOW,
+      table: "outgoing_webhooks",
+    });
+    expect(retentionSweepSkippedTotal.inc).not.toHaveBeenCalledWith({
       reason: RETENTION_SKIP_REASON_NO_WINDOW,
       table: "webhook_events",
     });
     expect(result.rowsReclaimed).toBe(0);
-    // One skip per (project, policy) unit, PLUS one more per
-    // DROP_PARTITION policy (credit_ledger, revenue_events): this
-    // project's unresolved window blocks their fleet-wide drop
-    // decision too, which is a second, distinct skip event on top of
-    // its own per-project "no-window" skip.
+    // One skip per (project, policy) unit that has NO defaultDays,
+    // PLUS one more per DROP_PARTITION policy (credit_ledger,
+    // revenue_events): this project's unresolved window blocks their
+    // fleet-wide drop decision too, a second, distinct skip event on
+    // top of its own per-project "no-window" skip.
     const dropPartitionPolicyCount = RETENTION_POLICIES.filter(
       (p) => p.strategy === "DROP_PARTITION",
     ).length;
     expect(result.skipped).toBe(
-      RETENTION_POLICIES.length + dropPartitionPolicyCount,
+      policiesWithoutDefault.length + dropPartitionPolicyCount,
     );
   });
 

@@ -829,17 +829,25 @@ else in the framework/provider-breadth dimension is done.
       (`packages/shared/src/retention/policies.ts`) is the single registry: a
       window per project resolves from its billing tier (optional — self-host
       has none) clamped by an override that may only shorten it, floored at a
-      per-policy minimum. A nightly sweep (`workers/retention-sweep.ts`)
-      reclaims `audit_logs` (checkpoint-then-truncate, preserving a verifiable
-      proof bundle), `credit_ledger` / `revenue_events` (fleet-wide partition
-      drops, gated on every project having resolved a window), and
-      `outgoing_webhooks` / `webhook_events` / `copilot_messages` (per-project
-      DELETE). Replaces the three bespoke workers (`rovi-retention`,
-      `webhook-retention`, plus `import-retention`'s hardcoded window) this
-      task retired or converted. `import_jobs` keeps its own worker — it also
-      deletes object-storage files, which the generic sweep deliberately does
-      not model — but now resolves its window the same way. ClickHouse's fixed
-      `INTERVAL 2 YEAR` TTL is explicitly out of scope. Documented at
+      per-policy minimum. A tier-less, override-less project is skipped (keeps
+      everything) for every table EXCEPT `webhook_events` and
+      `copilot_messages`, which carry a `defaultDays` of 90 — the exact window
+      each was deleted at unconditionally by the bespoke worker it replaces,
+      carried forward so removing that worker did not silently stop retention
+      for the ~90% of projects with no billing tier (fix round 1, Finding 1).
+      A nightly sweep (`workers/retention-sweep.ts`) reclaims `audit_logs`
+      (checkpoint-then-truncate, preserving a verifiable proof bundle),
+      `credit_ledger` / `revenue_events` (fleet-wide partition drops, gated on
+      every project having resolved a window), and `outgoing_webhooks` /
+      `webhook_events` / `copilot_messages` (per-project DELETE). Replaces the
+      three bespoke workers (`rovi-retention`, `webhook-retention`, plus
+      `import-retention`'s hardcoded window) this task retired or converted.
+      `import_jobs` keeps its own worker — it also deletes object-storage
+      files, which the generic sweep deliberately does not model — but now
+      resolves its window the same way, with NO default: a tier-less project
+      keeps its import files forever until it sets an override, unlike
+      `webhook_events`/`copilot_messages`. ClickHouse's fixed `INTERVAL 2
+      YEAR` TTL is explicitly out of scope. Documented at
       `apps/docs/content/docs/guides/retention-policies.mdx`.
 - [x] Externally verifiable proof format for the audit hash chain — `GET
       /dashboard/audit-logs/proof` exports a bundle over the canonical

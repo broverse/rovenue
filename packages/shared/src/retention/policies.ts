@@ -83,6 +83,25 @@ export interface RetentionPolicy {
   // `TERMINAL_IMPORT_JOB_STATUSES`
   // (packages/db/src/drizzle/repositories/import-jobs.ts).
   terminalStatuses?: readonly string[];
+  // The window a project with NEITHER a billing tier NOR an override
+  // resolves to, instead of being skipped ("no-window", rule 3 below).
+  //
+  // Deliberately absent on every policy except `copilot_messages` and
+  // `webhook_events`: those two tables were deleted UNCONDITIONALLY,
+  // for every project, by the bespoke workers this registry replaced
+  // (`rovi-retention.ts` at `ROVI_MESSAGE_RETENTION_DAYS`/90,
+  // `webhook-retention.ts` at a hardcoded 90) — neither ever consulted
+  // a tier. `defaultDays: 90` on each carries that EXISTING,
+  // already-applied-to-everyone behaviour forward unchanged.
+  //
+  // This does not contradict rule 3's refusal to default a tierless
+  // project to the free tier's window: that refusal is about NEVER
+  // inventing a window a table never had (inventing one for, say,
+  // `audit_logs` would delete a self-hoster's history a week after
+  // install). `defaultDays` only ever preserves a window that already
+  // existed and already ran for every project — it must never be added
+  // to a policy that had no unconditional predecessor.
+  defaultDays?: number;
 }
 
 // =============================================================
@@ -174,6 +193,11 @@ export type WindowResolution =
 /**
  * Resolve how many days of history one project keeps for one policy.
  *
+ * Precedence: an override wins if present; else the tier window if the
+ * project has one; else the policy's `defaultDays` if it has one; else
+ * skip ("no-window"). The policy's `minimumDays` floor is applied in
+ * every branch that resolves a number.
+ *
  *   1. A project WITH a billing subscription AND a matching
  *      `billing_tier_limits` row resolves normally: tier window,
  *      override clamped down, policy floor applied
@@ -182,14 +206,20 @@ export type WindowResolution =
  *      override for that table, uses the override clamped by the FLOOR
  *      ONLY — there is no tier to clamp down to, and the operator who
  *      wrote the override is the authority.
- *   3. A project with neither is skipped. It is NOT defaulted to the
- *      free tier: retaining too much is recoverable, deleting what
- *      nobody asked to delete is not.
+ *   3. A project with neither a tier nor an override falls back to the
+ *      policy's `defaultDays`, floored, when the policy has one —
+ *      carrying forward a window that already applied to every project
+ *      unconditionally before this registry existed (see `defaultDays`
+ *      on `RetentionPolicy`). A policy with NO `defaultDays` is
+ *      skipped instead: it is NOT defaulted to the free tier's window,
+ *      because that would invent a window a table never had — retaining
+ *      too much is recoverable, deleting what nobody asked to delete is
+ *      not.
  *   4. A project WITH a subscription whose (tier, cycle) has no row at
  *      all in `billing_tier_limits` (a reference-ladder integrity gap)
  *      is NOT the same as "no tier" — falling through to rule 2/3 would
  *      silently drop a PAYING project's tier clamp — so it gets its own
- *      skip reason.
+ *      skip reason, never `defaultDays` either.
  *
  * See `apps/api/src/workers/retention-sweep.ts`'s module doc comment
  * for the full "why a project's tier is optional" rationale.
@@ -224,7 +254,16 @@ export function resolveProjectPolicyWindowDays(
     return { kind: "resolved", days: Math.max(policy.minimumDays, overrideDays) };
   }
 
-  // Rule 3.
+  if (policy.defaultDays !== undefined) {
+    // Rule 3 (default branch): no tier, no override, but this policy
+    // carries forward a window that used to apply unconditionally.
+    return {
+      kind: "resolved",
+      days: Math.max(policy.minimumDays, policy.defaultDays),
+    };
+  }
+
+  // Rule 3 (skip branch): no tier, no override, no default.
   return { kind: "skip", reason: RETENTION_SKIP_REASON_NO_WINDOW };
 }
 
@@ -257,6 +296,20 @@ const REVENUE_EVENTS_MINIMUM_DAYS = 365;
 // compliance role — a week is enough floor to keep a same-week
 // operator investigation from racing a sweep.
 const OPERATIONAL_TABLE_MINIMUM_DAYS = 7;
+
+// Fix round 1, Finding 1: `webhook_events` and `copilot_messages` were
+// each deleted unconditionally, for EVERY project, by the bespoke
+// worker this registry replaced — `webhook-retention.ts` at a
+// hardcoded 90 days, `rovi-retention.ts` at `env.ROVI_MESSAGE_RETENTION_DAYS`,
+// which itself defaulted to 90. Set as each policy's `defaultDays` so a
+// project with neither a billing tier nor an override (most self-hosted
+// deployments, by construction) keeps resolving a window instead of
+// silently retaining these two tables forever — the exact regression a
+// naive registry migration would otherwise ship. Deliberately not used
+// as a fallback for any OTHER table: those never had an unconditional
+// window to carry forward, and inventing one now would be the mirror-
+// image mistake.
+const RETIRED_WORKER_DEFAULT_DAYS = 90;
 
 // outgoing_webhooks status lifecycle (packages/db/src/drizzle/enums.ts,
 // `outgoingWebhookStatus`): PENDING, DELIVERING and FAILED are all
@@ -354,6 +407,10 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     strategy: "DELETE_ROWS",
     tierLimitField: "retentionDays",
     minimumDays: OPERATIONAL_TABLE_MINIMUM_DAYS,
+    // See RETIRED_WORKER_DEFAULT_DAYS: webhook-retention.ts deleted
+    // this table's rows at a hardcoded 90 days for every project,
+    // tier or no tier. Carried forward, not invented.
+    defaultDays: RETIRED_WORKER_DEFAULT_DAYS,
   },
   {
     // Chat transcript log with no delivery lifecycle — every row is
@@ -364,6 +421,10 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     strategy: "DELETE_ROWS",
     tierLimitField: "retentionDays",
     minimumDays: OPERATIONAL_TABLE_MINIMUM_DAYS,
+    // See RETIRED_WORKER_DEFAULT_DAYS: rovi-retention.ts deleted this
+    // table's rows at env.ROVI_MESSAGE_RETENTION_DAYS (default 90) for
+    // every project, tier or no tier. Carried forward, not invented.
+    defaultDays: RETIRED_WORKER_DEFAULT_DAYS,
   },
   {
     // ROADMAP §9.2 Task 6. EXTERNAL_WORKER, not DELETE_ROWS — see the

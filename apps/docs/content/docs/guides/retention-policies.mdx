@@ -8,24 +8,28 @@ import { Callout } from 'fumadocs-ui/components/callout';
 Rovenue used to retire old rows with three unrelated, hand-rolled workers — one hardcoded window, one environment variable, one constant, none of them aware of a project's billing tier. This guide describes the registry-driven replacement: a single source of truth for which tables age out, how long a given project keeps each one, and the nightly sweep that reclaims what has expired.
 
 <Callout type="warn">
-Retention is **tier-driven, and a project's tier is optional.** Billing is cloud-only and `HOST_MODE` defaults to `self`, so most self-hosted projects have no billing tier at all. A project with no tier and no override for a given table is **skipped** for that table — it keeps everything. A self-hosted deployment opts in per table by setting an override; it is never defaulted into having its history deleted.
+Retention is **tier-driven, and a project's tier is optional.** Billing is cloud-only and `HOST_MODE` defaults to `self`, so most self-hosted projects have no billing tier at all. A project with no tier and no override for a given table is, with two named exceptions below, **skipped** for that table — it keeps everything. A self-hosted deployment opts in per table by setting an override; nothing is defaulted into having its history deleted just because a tier is absent.
 </Callout>
 
-## Which tables have a policy
+## Which tables have a policy, and which retain by default
 
-The registry lives at `packages/shared/src/retention/policies.ts` (`RETENTION_POLICIES`). Each entry names a physical table, the column that ages it, a reclaim strategy, which billing-tier column supplies the default window, and a floor no tier or override may go below:
+The registry lives at `packages/shared/src/retention/policies.ts` (`RETENTION_POLICIES`). Each entry names a physical table, the column that ages it, a reclaim strategy, a floor no tier, override or default may go below, and — for exactly two tables — a **default window** used when a project has neither a tier nor an override:
 
-| Table | Ages on | Strategy | Floor |
-|---|---|---|---|
-| `audit_logs` | `createdAt` | `CHECKPOINT_TRUNCATE` | 30 days |
-| `credit_ledger` | `createdAt` | `DROP_PARTITION` | 365 days |
-| `revenue_events` | `eventDate` | `DROP_PARTITION` | 365 days |
-| `outgoing_webhooks` | `createdAt`, terminal rows only | `DELETE_ROWS` | 7 days |
-| `webhook_events` | `createdAt` | `DELETE_ROWS` | 7 days |
-| `copilot_messages` | `createdAt` | `DELETE_ROWS` | 7 days |
-| `import_jobs` | `finishedAt`, terminal jobs only | `EXTERNAL_WORKER` | 7 days |
+| Table | Ages on | Strategy | Floor | No-tier, no-override default |
+|---|---|---|---|---|
+| `audit_logs` | `createdAt` | `CHECKPOINT_TRUNCATE` | 30 days | none — kept forever until configured |
+| `credit_ledger` | `createdAt` | `DROP_PARTITION` | 365 days | none — kept forever until configured |
+| `revenue_events` | `eventDate` | `DROP_PARTITION` | 365 days | none — kept forever until configured |
+| `outgoing_webhooks` | `createdAt`, terminal rows only | `DELETE_ROWS` | 7 days | none — kept forever until configured |
+| `webhook_events` | `createdAt` | `DELETE_ROWS` | 7 days | **90 days** |
+| `copilot_messages` | `createdAt` | `DELETE_ROWS` | 7 days | **90 days** |
+| `import_jobs` | `finishedAt`, terminal jobs only | `EXTERNAL_WORKER` | 7 days | none — kept forever until configured |
 
 `outgoing_webhooks` only ever expires rows in a terminal state (`SENT`, `DEAD`, `DISMISSED`) — a row still owed a delivery attempt is never destroyed merely because it is old, regardless of how long its window has been open.
+
+<Callout type="warn">
+**`webhook_events` and `copilot_messages` are the only two tables this system retains automatically with zero configuration** — a self-hosted project with no billing tier and no override still has both swept at 90 days. This is not the general rule; it exists only because both tables were already deleted unconditionally, for every project, by the bespoke workers this registry replaced (a hardcoded 90-day window and an env var defaulting to 90, respectively) — the default carries that existing behaviour forward rather than silently dropping it. Every other table — including `audit_logs` — has **no** default: a self-hosted operator's audit log, credit ledger, revenue events, outgoing webhooks and import files are all kept **forever** until an override is explicitly set for that table.
+</Callout>
 
 <Callout type="warn">
 The `credit_ledger` and `revenue_events` floors are 365 days each — a financial ledger and the revenue rollups derived from it. At that floor, a tier's `retentionDays` is **inert** for the free (30 days) and indie (180 days) tiers: both retain a full year of this data no matter what their tier advertises for everything else. This is deliberate, not a bug to report.
@@ -33,18 +37,19 @@ The `credit_ledger` and `revenue_events` floors are 365 days each — a financia
 
 ## How a project's window is resolved
 
-For every (project, table) pair, the sweep applies one of four rules, in order:
+For every (project, table) pair, the sweep applies these rules, in order:
 
 1. **A project with a billing subscription and a matching tier-limits row** resolves normally: the tier's window (`retentionDays` or `auditLogDays` on `billing_tier_limits`, depending on the table), clamped down by any override, floored at the table's own minimum.
-2. **A project with no billing subscription but an explicit override** for that table uses the override, floored only — there is no tier to clamp against, and the operator who wrote the override is the authority. This is how a self-hosted deployment opts in.
-3. **A project with neither a tier nor an override is skipped** for that table. It is **not** defaulted to the free tier's window: free is the most aggressive rung on the ladder, and defaulting to it would silently delete a self-hoster's history a week after they installed. Retaining too much is recoverable; deleting what nobody asked to delete is not.
-4. **A project that names a (tier, cycle) pair with no matching row in `billing_tier_limits`** — a reference-ladder integrity gap — is not treated as "no tier." Falling through to rule 2 or 3 would silently drop a paying project's tier clamp, so this gets its own outcome and a warning log instead.
+2. **A project with no billing subscription but an explicit override** for that table uses the override, floored only — there is no tier to clamp against, and the operator who wrote the override is the authority. This is how a self-hosted deployment opts in, and how it can shorten `webhook_events`/`copilot_messages` below their 90-day default.
+3. **A project with neither a tier nor an override falls back to the table's `defaultDays`, if it has one** — today, only `webhook_events` and `copilot_messages` (see the callout above). The floor still applies.
+4. **A project with neither a tier nor an override, on a table with no `defaultDays`, is skipped** for that table. It is **not** defaulted to the free tier's window: free is the most aggressive rung on the ladder, and defaulting to it would silently delete a self-hoster's history a week after they installed. Retaining too much is recoverable; deleting what nobody asked to delete is not. This is the outcome for every table except the two named above.
+5. **A project that names a (tier, cycle) pair with no matching row in `billing_tier_limits`** — a reference-ladder integrity gap — is not treated as "no tier." Falling through to rule 2, 3 or 4 would silently drop a paying project's tier clamp (or hand it a plain default meant for tier-less projects), so this gets its own outcome and a warning log instead.
 
 <Callout type="warn">
-An override can only ever **shorten** the window a project's tier would otherwise get (rule 1) — never lengthen it. A longer window is a storage-cost and compliance decision the tier already made. When a project has no tier at all (rule 2), there is nothing to clamp against, so the floor is the only remaining limit.
+An override can only ever **shorten** the window a project's tier (rule 1) or default (rule 3) would otherwise give it — never lengthen it. A longer window is a storage-cost and compliance decision the tier already made. When a project has no tier at all (rule 2), there is nothing to clamp against, so the floor is the only remaining limit.
 </Callout>
 
-There is currently no dashboard or API surface for setting an override — it is a row in `project_retention_overrides` (`projectId`, `tableName`, `retentionDays`), written directly today. A self-hosted operator who wants, say, `webhook_events` cleaned up after 14 days instead of being retained indefinitely (no billing tier means rule 3 applies by default) inserts one row naming that table.
+There is currently no dashboard or API surface for setting an override — it is a row in `project_retention_overrides` (`projectId`, `tableName`, `retentionDays`), written directly today. A self-hosted operator who wants `webhook_events` cleaned up after 14 days instead of the 90-day default inserts one row naming that table; an operator who wants `outgoing_webhooks` cleaned up at all (it has no default — rule 4 applies until an override exists) does the same.
 
 ## Partition drops are fleet-wide
 

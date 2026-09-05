@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { IMPORT_FILE_RETENTION_DAYS } from "../import/constants";
 import {
   RETENTION_POLICIES,
+  RETENTION_SKIP_REASON_NO_WINDOW,
   findRetentionPolicy,
+  resolveProjectPolicyWindowDays,
   resolveRetentionWindowDays,
   type RetentionPolicy,
 } from "./policies";
@@ -13,6 +15,29 @@ const auditPolicy: RetentionPolicy = {
   strategy: "CHECKPOINT_TRUNCATE",
   tierLimitField: "auditLogDays",
   minimumDays: 30,
+};
+
+// A policy shaped like the real `webhook_events` / `copilot_messages`
+// entries, WITH a defaultDays — used to test the fallback in isolation
+// from the real registry (whose exact defaultDays value is separately
+// pinned below).
+const policyWithDefault: RetentionPolicy = {
+  table: "test_table_with_default",
+  timestampColumn: "createdAt",
+  strategy: "DELETE_ROWS",
+  tierLimitField: "retentionDays",
+  minimumDays: 7,
+  defaultDays: 90,
+};
+
+// The same shape, but with no defaultDays — the ordinary (pre-fix-round-1)
+// case every other policy still has.
+const policyWithoutDefault: RetentionPolicy = {
+  table: "test_table_without_default",
+  timestampColumn: "createdAt",
+  strategy: "DELETE_ROWS",
+  tierLimitField: "retentionDays",
+  minimumDays: 7,
 };
 
 describe("resolveRetentionWindowDays", () => {
@@ -217,5 +242,83 @@ describe("RETENTION_POLICIES", () => {
       "CHECKPOINT_TRUNCATE",
     );
     expect(findRetentionPolicy("no_such_table")).toBeUndefined();
+  });
+
+  it("gives webhook_events and copilot_messages the 90-day defaultDays those tables retained unconditionally before this registry existed, and nothing else one", () => {
+    // Fix round 1, Finding 1: these two tables were deleted at a fixed
+    // 90 days for EVERY project by the bespoke workers this registry
+    // replaced, tier or no tier. Every other policy must have NO
+    // defaultDays — inventing one for a table that never had an
+    // unconditional window (audit_logs, credit_ledger, revenue_events,
+    // outgoing_webhooks, import_jobs) is the exact mistake this fix
+    // exists to avoid making in the other direction.
+    expect(findRetentionPolicy("webhook_events")?.defaultDays).toBe(90);
+    expect(findRetentionPolicy("copilot_messages")?.defaultDays).toBe(90);
+
+    const tablesWithNoDefault = RETENTION_POLICIES.filter(
+      (p) => p.table !== "webhook_events" && p.table !== "copilot_messages",
+    );
+    for (const policy of tablesWithNoDefault) {
+      expect(policy.defaultDays).toBeUndefined();
+    }
+  });
+});
+
+describe("resolveProjectPolicyWindowDays — defaultDays fallback (fix round 1, Finding 1)", () => {
+  it("resolves a no-tier, no-override project to defaultDays when the policy has one", () => {
+    const resolution = resolveProjectPolicyWindowDays(
+      policyWithDefault,
+      false,
+      null,
+      undefined,
+    );
+    expect(resolution).toEqual({ kind: "resolved", days: 90 });
+  });
+
+  it("still skips a no-tier, no-override project by name when the policy has NO defaultDays", () => {
+    // Red-checked: removing `defaultDays` from copilot_messages's real
+    // registry entry and re-running this suite fails the test above
+    // (90 !== undefined) rather than this one — this one asserts the
+    // OTHER branch stays intact for every policy that never had an
+    // unconditional predecessor.
+    const resolution = resolveProjectPolicyWindowDays(
+      policyWithoutDefault,
+      false,
+      null,
+      undefined,
+    );
+    expect(resolution).toEqual({
+      kind: "skip",
+      reason: RETENTION_SKIP_REASON_NO_WINDOW,
+    });
+  });
+
+  it("lets an explicit override beat defaultDays, not just a tier", () => {
+    // Rule 2 (no tier, override present) is checked before the
+    // defaultDays fallback, so a project that bothered to override
+    // still gets what it asked for, floored — never silently
+    // overridden by the table's carried-forward default.
+    const resolution = resolveProjectPolicyWindowDays(
+      policyWithDefault,
+      false,
+      null,
+      30,
+    );
+    expect(resolution).toEqual({ kind: "resolved", days: 30 });
+  });
+
+  it("floors defaultDays exactly like every other resolved branch", () => {
+    const lowFloorPolicy: RetentionPolicy = {
+      ...policyWithDefault,
+      minimumDays: 120,
+      defaultDays: 90,
+    };
+    const resolution = resolveProjectPolicyWindowDays(
+      lowFloorPolicy,
+      false,
+      null,
+      undefined,
+    );
+    expect(resolution).toEqual({ kind: "resolved", days: 120 });
   });
 });
