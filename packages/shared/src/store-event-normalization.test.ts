@@ -77,4 +77,57 @@ describe("resolveStorePublicKey", () => {
       resolveStorePublicKey("DID_FAIL_TO_RENEW", { autoRenewEnabled: true }),
     ).toBe("subscription.billing_issue");
   });
+
+  // Apple sends DID_FAIL_TO_RENEW for BOTH the retry that keeps access
+  // (subtype GRACE_PERIOD) and the retry that does not. Announcing both as
+  // a billing issue told every integration that a subscriber who still HAS
+  // entitlement was in payment trouble, while Google's identical moment
+  // (SUBSCRIPTION_IN_GRACE_PERIOD) was announced as grace_period.
+  it("maps DID_FAIL_TO_RENEW to subscription.grace_period only for the GRACE_PERIOD subtype", () => {
+    expect(
+      resolveStorePublicKey("DID_FAIL_TO_RENEW", {
+        appleGracePeriodSubtype: true,
+      }),
+    ).toBe("subscription.grace_period");
+  });
+
+  it("keeps DID_FAIL_TO_RENEW on subscription.billing_issue for every other subtype, and when the subtype is unknown", () => {
+    expect(
+      resolveStorePublicKey("DID_FAIL_TO_RENEW", {
+        appleGracePeriodSubtype: false,
+      }),
+    ).toBe("subscription.billing_issue");
+    expect(resolveStorePublicKey("DID_FAIL_TO_RENEW", {})).toBe(
+      "subscription.billing_issue",
+    );
+    expect(resolveStorePublicKey("DID_FAIL_TO_RENEW")).toBe(
+      "subscription.billing_issue",
+    );
+  });
+
+  // The announcement phase means "the store says a change is COMING". An
+  // Apple UPGRADE has already been charged and applied, and
+  // applyRenewalPrefChange emits the same key with phase "effective" — so
+  // announcing it too delivered two contradictory rows for one instant.
+  it("suppresses the DID_CHANGE_RENEWAL_PREF announcement when the change has already been applied", () => {
+    expect(
+      resolveStorePublicKey("DID_CHANGE_RENEWAL_PREF", {
+        applePrefChangeAlreadyApplied: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("still announces DID_CHANGE_RENEWAL_PREF for a change that takes effect later", () => {
+    expect(
+      resolveStorePublicKey("DID_CHANGE_RENEWAL_PREF", {
+        applePrefChangeAlreadyApplied: false,
+      }),
+    ).toBe("subscription.product_changed");
+    expect(resolveStorePublicKey("DID_CHANGE_RENEWAL_PREF", {})).toBe(
+      "subscription.product_changed",
+    );
+    expect(resolveStorePublicKey("DID_CHANGE_RENEWAL_PREF")).toBe(
+      "subscription.product_changed",
+    );
+  });
 });

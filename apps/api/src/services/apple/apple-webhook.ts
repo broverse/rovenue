@@ -164,10 +164,12 @@ interface DispatchOutcome {
   purchaseId?: string;
   /**
    * Disambiguating fact for `postProcess`'s bridge to the outbox (see
-   * `WebhookPostProcess.eventContext`, webhook-processor.ts). Set only by
-   * `applyRenewalStatusChange` today — every other handler leaves this
-   * undefined and the bridge behaves exactly as before this field
-   * existed.
+   * `WebhookPostProcess.eventContext`, webhook-processor.ts). Set by the
+   * two handlers whose Apple event type means two different real-world
+   * facts: `applyRenewalStatusChange` (auto-renew direction) and
+   * `applyFailedRenewal` (whether the retry keeps access). Every other
+   * handler leaves this undefined and the bridge behaves exactly as
+   * before this field existed.
    */
   eventContext?: StoreEventContext;
 }
@@ -488,6 +490,15 @@ async function applyRenewalPrefChange(ctx: DispatchContext): Promise<void> {
     return;
   }
 
+  // Apple has already charged and applied this upgrade, so the bridge's
+  // ANNOUNCEMENT phase of `subscription.product_changed` ("the store says
+  // a change is coming") is simply false here — and the effective-phase
+  // row emitted below via `onSuperseded` is the true one. Suppress the
+  // announcement so one instant does not produce two contradictory
+  // deliveries of the same key. See the two-phase contract beside
+  // `PRODUCT_CHANGE_PHASE_EFFECTIVE` in packages/shared/src/integrations.ts.
+  ctx.outcome.eventContext = { applePrefChangeAlreadyApplied: true };
+
   const subscriber = await resolveSubscriber(ctx);
   const { product, purchase, statusApplied } = await upsertPurchase({
     ctx,
@@ -616,6 +627,15 @@ async function applyOfferRedeemed(ctx: DispatchContext): Promise<void> {
     return;
   }
 
+  // Apple has already charged and applied this upgrade, so the bridge's
+  // ANNOUNCEMENT phase of `subscription.product_changed` ("the store says
+  // a change is coming") is simply false here — and the effective-phase
+  // row emitted below via `onSuperseded` is the true one. Suppress the
+  // announcement so one instant does not produce two contradictory
+  // deliveries of the same key. See the two-phase contract beside
+  // `PRODUCT_CHANGE_PHASE_EFFECTIVE` in packages/shared/src/integrations.ts.
+  ctx.outcome.eventContext = { applePrefChangeAlreadyApplied: true };
+
   const subscriber = await resolveSubscriber(ctx);
   const { product, purchase, statusApplied } = await upsertPurchase({
     ctx,
@@ -726,10 +746,20 @@ async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
   // DID_FAIL_TO_RENEW to GRACE_PERIOD regardless of subtype) granted
   // entitlement Apple itself had withdrawn. Mirrors
   // normalizeAppleStatus(DID_FAIL_TO_RENEW).
-  const status =
-    ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD
-      ? PurchaseStatus.GRACE_PERIOD
-      : PurchaseStatus.BILLING_ISSUE;
+  const isGracePeriodSubtype =
+    ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD;
+  const status = isGracePeriodSubtype
+    ? PurchaseStatus.GRACE_PERIOD
+    : PurchaseStatus.BILLING_ISSUE;
+
+  // The same split has to reach the outbox bridge, or the two halves
+  // disagree: the purchase would say GRACE_PERIOD (access retained) while
+  // every integration was told `subscription.billing_issue`. The bridge
+  // keys on the bare event-type string, and `DID_FAIL_TO_RENEW` covers
+  // both cases — so thread the subtype through the same
+  // `StoreEventContext` channel `applyRenewalStatusChange` uses for
+  // auto-renew direction. See `resolveStorePublicKey`.
+  ctx.outcome.eventContext = { appleGracePeriodSubtype: isGracePeriodSubtype };
 
   const gracePeriodExpires = ctx.renewalInfo?.gracePeriodExpiresDate
     ? new Date(ctx.renewalInfo.gracePeriodExpiresDate)
