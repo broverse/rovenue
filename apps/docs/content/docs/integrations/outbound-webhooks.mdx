@@ -163,6 +163,30 @@ the fixed shape described [above](#data-shape) (`kind` / `amount` /
 Webhook receiver cannot yet distinguish the two `revenue.REACTIVATION`
 cases from the delivered payload alone.
 
+**Delivery change for existing connections.** Connections that already
+receive `revenue.INITIAL` were widened by migration `0123` to also receive
+`revenue.CREDIT_PURCHASE` and `revenue.NON_RENEWING_PURCHASE` — no action
+is needed to keep receiving purchases you were already being told about.
+`revenue.REACTIVATION` is opt-in: it is a genuinely new signal, so it is
+not added to any existing connection automatically.
+
+This also changes the vendor event name an existing connection sends for a
+one-time purchase, because the vendor mapping is keyed on the revenue type,
+not on "a purchase happened." On **META_CAPI**, a consumable IAP that used
+to deliver as `Subscribe` (via `revenue.INITIAL`) now delivers as
+`Purchase` (via `revenue.CREDIT_PURCHASE`); on **TIKTOK_EVENTS**,
+`Subscribe` becomes `CompletePayment`. Non-consumable one-time purchases
+move the same way, from `Subscribe`/`Subscribe` to `Purchase`/
+`CompletePayment` respectively.
+
+Why: a purchase that never becomes a subscription must not be reported to
+an ad platform as a subscription — doing so corrupts the platform's
+optimisation, which learns from what it's told converts. The consequence
+an advertiser will actually notice: conversion volume on a campaign
+optimised for `Subscribe` events drops on the day this ships, because
+one-time purchases that used to count toward it now report as `Purchase`/
+`CompletePayment` instead.
+
 ---
 
 ### Per-store coverage
