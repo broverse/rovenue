@@ -1,9 +1,13 @@
 import { sql } from "drizzle-orm";
+import { Queue, Worker, type Job } from "bullmq";
 import { drizzle, type Db } from "@rovenue/db";
 import {
   RETENTION_POLICIES,
-  resolveRetentionWindowDays,
+  RETENTION_SKIP_REASON_NO_WINDOW,
+  RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
+  resolveProjectPolicyWindowDays,
   type RetentionPolicy,
+  type WindowResolution,
 } from "@rovenue/shared/retention";
 import { audit, AUDIT_ACTION_RETENTION_PARTITION_DROPPED } from "../lib/audit";
 import {
@@ -11,11 +15,26 @@ import {
   type CheckpointTruncateOutcome,
 } from "../services/audit-retention/checkpoint";
 import { logger } from "../lib/logger";
+import { createBullConnection } from "../lib/redis";
 import {
   retentionRowsReclaimedTotal,
   retentionSweepBatchCapReachedTotal,
   retentionSweepSkippedTotal,
 } from "../lib/metrics";
+
+// Re-exported for backward compatibility: these used to be DEFINED in
+// this module (before ROADMAP §9.2 Task 6 moved the pure window
+// resolution logic to @rovenue/shared/retention so
+// workers/import-retention.ts could use it without importing this
+// file's own heavier dependencies — see that module's doc comment).
+// Existing imports of `./retention-sweep` (this file's own test suite
+// included) keep working unchanged.
+export {
+  RETENTION_SKIP_REASON_NO_WINDOW,
+  RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
+  resolveProjectPolicyWindowDays,
+  type WindowResolution,
+};
 
 // =============================================================
 // Retention sweep (ROADMAP §9.2 Task 3)
@@ -138,10 +157,10 @@ export const RETENTION_SWEEP_QUEUE_NAME = "rovenue-retention-sweep";
 export const RETENTION_DELETE_BATCH_SIZE = 10_000;
 export const RETENTION_MAX_BATCHES = 1_000;
 
-// retentionSweepSkippedTotal reason labels.
-export const RETENTION_SKIP_REASON_NO_WINDOW = "no-window";
-export const RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND =
-  "tier-limits-not-found";
+// retentionSweepSkippedTotal reason labels. NO_WINDOW and
+// TIER_LIMITS_NOT_FOUND are imported (and re-exported) above — they
+// come from @rovenue/shared/retention now, alongside
+// resolveProjectPolicyWindowDays which produces them.
 export const RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED =
   "strategy-not-implemented";
 export const RETENTION_SKIP_REASON_ERROR = "error";
@@ -609,6 +628,10 @@ export async function writeRetentionPartitionAuditRow(
 // broken" — so the fleet-level skip below reuses whichever specific
 // reason actually caused the block instead of collapsing every case
 // into `no-window`.
+// Derived from the imported WindowResolution's own skip variant, rather
+// than redeclaring the union of skip reasons a second time — see
+// @rovenue/shared/retention for the source of truth.
+type WindowSkipReason = Extract<WindowResolution, { kind: "skip" }>["reason"];
 type PartitionBlockReason = WindowSkipReason | typeof RETENTION_SKIP_REASON_ERROR;
 
 interface PartitionDropAggregate {
@@ -707,57 +730,10 @@ export const defaultDeps: RetentionDeps = {
   checkpointAndTruncate,
 };
 
-type WindowSkipReason =
-  | typeof RETENTION_SKIP_REASON_NO_WINDOW
-  | typeof RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND;
-
-export type WindowResolution =
-  | { kind: "resolved"; days: number }
-  | { kind: "skip"; reason: WindowSkipReason };
-
-/**
- * Resolve how many days of history one project keeps for one policy,
- * applying the rules documented in the module doc comment above.
- */
-export function resolveProjectPolicyWindowDays(
-  policy: RetentionPolicy,
-  hasTier: boolean,
-  tierLimits: BillingTierLimitsRow | null,
-  overrideDays: number | undefined,
-): WindowResolution {
-  if (hasTier && !tierLimits) {
-    // The project names a (tier, cycle) pair but the reference ladder
-    // has no matching row — a billing_tier_limits integrity gap, not
-    // an ordinary no-tier project. Skip loudly rather than silently
-    // treating a paying project's tier clamp as absent.
-    return {
-      kind: "skip",
-      reason: RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
-    };
-  }
-
-  if (tierLimits) {
-    // Rule 1: normal path. `resolveRetentionWindowDays` clamps the
-    // override down against the tier and floors at the policy minimum.
-    const tierDays = tierLimits[policy.tierLimitField];
-    const days = resolveRetentionWindowDays({
-      policy,
-      tierDays,
-      projectOverrideDays: overrideDays ?? null,
-    });
-    return { kind: "resolved", days };
-  }
-
-  if (overrideDays !== undefined) {
-    // Rule 2: no tier to clamp down to. The operator who wrote the
-    // override is the authority; only the policy's own floor still
-    // applies.
-    return { kind: "resolved", days: Math.max(policy.minimumDays, overrideDays) };
-  }
-
-  // Rule 3: neither a tier nor an override.
-  return { kind: "skip", reason: RETENTION_SKIP_REASON_NO_WINDOW };
-}
+// resolveProjectPolicyWindowDays, WindowResolution, RETENTION_SKIP_REASON_NO_WINDOW
+// and RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND now live in
+// @rovenue/shared/retention (imported and re-exported above) — see that
+// module's "Per-project window resolution" section for the four rules.
 
 /**
  * Sweep every project against every retention policy, reclaiming
@@ -1059,4 +1035,91 @@ export async function runRetentionSweep(
     log.info("retention sweep", { ...result });
   }
   return result;
+}
+
+// =============================================================
+// BullMQ queue + worker + scheduling (ROADMAP §9.2 Task 6)
+// =============================================================
+//
+// Nightly, off-peak, matching the cadence the three retired workers
+// (rovi-retention, webhook-retention) used — this sweep does real
+// DELETE/DROP TABLE work across every project, not something to run on
+// a short interval like leaderboard-scheduler's 5-minute one.
+const REPEATABLE_JOB_NAME = "retention-sweep:sweep";
+const REPEATABLE_JOB_ID = "retention-sweep-repeatable";
+const REPEATABLE_JOB_CRON = "0 3 * * *"; // 03:00 UTC daily
+
+let cachedQueue: Queue | undefined;
+
+export function getRetentionSweepQueue(): Queue {
+  if (cachedQueue) return cachedQueue;
+  cachedQueue = new Queue(RETENTION_SWEEP_QUEUE_NAME, {
+    connection: createBullConnection("retention-sweep"),
+    defaultJobOptions: {
+      removeOnComplete: { count: 30, age: 30 * 24 * 60 * 60 },
+      removeOnFail: { count: 100, age: 30 * 24 * 60 * 60 },
+    },
+  });
+  return cachedQueue;
+}
+
+/**
+ * Registers the nightly repeatable job. Safe to call multiple times on
+ * boot — BullMQ upserts on {name, jobId, pattern}.
+ */
+export async function scheduleRetentionSweep(): Promise<void> {
+  const queue = getRetentionSweepQueue();
+  await queue.add(
+    REPEATABLE_JOB_NAME,
+    {},
+    {
+      jobId: REPEATABLE_JOB_ID,
+      repeat: { pattern: REPEATABLE_JOB_CRON },
+    },
+  );
+  log.info("scheduled retention sweep", { cron: REPEATABLE_JOB_CRON });
+}
+
+let cachedWorker: Worker | undefined;
+
+export function createRetentionSweepWorker(): Worker {
+  if (cachedWorker) return cachedWorker;
+
+  cachedWorker = new Worker(
+    RETENTION_SWEEP_QUEUE_NAME,
+    async (_job: Job) => {
+      return runRetentionSweep(new Date());
+    },
+    {
+      connection: createBullConnection("retention-sweep"),
+      concurrency: 1,
+    },
+  );
+
+  cachedWorker.on("failed", (job, err) => {
+    log.error("retention sweep job failed", {
+      jobId: job?.id,
+      attemptsMade: job?.attemptsMade,
+      err: err.message,
+    });
+  });
+
+  log.info("retention sweep worker started", { queue: RETENTION_SWEEP_QUEUE_NAME });
+  return cachedWorker;
+}
+
+/**
+ * Single entry point for boot wiring: creates the worker and, unless
+ * `autoStart` is explicitly false, registers the repeatable job. Mirrors
+ * `ensureLeaderboardScheduler` (workers/leaderboard-scheduler.ts).
+ */
+export function ensureRetentionSweep(opts: { autoStart?: boolean } = {}): void {
+  createRetentionSweepWorker();
+  if (opts.autoStart === false) return;
+
+  scheduleRetentionSweep().catch((err: unknown) => {
+    log.error("failed to schedule retention sweep", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
 }

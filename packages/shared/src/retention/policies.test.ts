@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { IMPORT_FILE_RETENTION_DAYS } from "../import/constants";
 import {
   RETENTION_POLICIES,
   findRetentionPolicy,
@@ -154,6 +155,31 @@ describe("RETENTION_POLICIES", () => {
     expect(findRetentionPolicy("outgoing_webhooks")?.minimumDays).toBe(7);
     expect(findRetentionPolicy("webhook_events")?.minimumDays).toBe(7);
     expect(findRetentionPolicy("copilot_messages")?.minimumDays).toBe(7);
+    expect(findRetentionPolicy("import_jobs")?.minimumDays).toBe(7);
+  });
+
+  it("keeps import_jobs' floor equal to IMPORT_FILE_RETENTION_DAYS, not a re-typed copy of it", () => {
+    // Task 6: this table's floor is the exact number
+    // `workers/import-retention.ts` used as an unconditional constant
+    // before the registry existed. Importing the same constant (rather
+    // than writing `7` a second time) is what makes that continuity a
+    // compile-time fact instead of two numbers a future edit can drift
+    // apart.
+    expect(findRetentionPolicy("import_jobs")?.minimumDays).toBe(
+      IMPORT_FILE_RETENTION_DAYS,
+    );
+  });
+
+  it("marks import_jobs EXTERNAL_WORKER, never a strategy runRetentionSweep dispatches", () => {
+    // import_jobs deletes object-storage files alongside its row and
+    // tracks that with `filesDeletedAt` — a plain DELETE_ROWS pass over
+    // it from the generic sweep would delete the ROW and silently
+    // orphan its files in the bucket. EXTERNAL_WORKER exists so this
+    // table's WINDOW still comes from the registry without the generic
+    // sweep ever touching its rows.
+    expect(findRetentionPolicy("import_jobs")?.strategy).toBe(
+      "EXTERNAL_WORKER",
+    );
   });
 
   it("pins every policy's timestampColumn", () => {
@@ -178,6 +204,11 @@ describe("RETENTION_POLICIES", () => {
     );
     expect(findRetentionPolicy("copilot_messages")?.timestampColumn).toBe(
       "createdAt",
+    );
+    // import_jobs ages on when the job FINISHED, not when it was
+    // created — a long-running job must never be swept mid-flight.
+    expect(findRetentionPolicy("import_jobs")?.timestampColumn).toBe(
+      "finishedAt",
     );
   });
 

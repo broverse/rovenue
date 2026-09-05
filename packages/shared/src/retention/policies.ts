@@ -13,6 +13,8 @@
 // describing a table that no longer exists is a silent no-op; a
 // constant referencing one fails to compile.
 
+import { IMPORT_FILE_RETENTION_DAYS } from "../import/constants";
+
 // =============================================================
 // Strategy
 // =============================================================
@@ -28,10 +30,24 @@
 //     (see audit_logs); expiring history requires checkpointing the
 //     chain at the new boundary before truncating, or the chain
 //     verification breaks.
+//   - EXTERNAL_WORKER (ROADMAP §9.2 Task 6): the row exists here so the
+//     WINDOW is resolved by the same tier+override+floor rules as every
+//     other policy, but the actual reclamation is owned entirely by a
+//     dedicated worker OUTSIDE `workers/retention-sweep.ts` — today only
+//     `import_jobs` (`workers/import-retention.ts`), which deletes
+//     object-storage FILES alongside the row and tracks that with a
+//     `filesDeletedAt` column so a re-run cannot re-select the same job.
+//     Folding that into the generic sweep would either lose that
+//     idempotency guard or push storage semantics into every policy, so
+//     `runRetentionSweep` deliberately never dispatches this strategy —
+//     it falls through to the existing "strategy not implemented" skip
+//     branch, which is the CORRECT signal (this sweep must never touch
+//     an EXTERNAL_WORKER table directly), not a gap to fill in later.
 export type RetentionStrategy =
   | "DELETE_ROWS"
   | "DROP_PARTITION"
-  | "CHECKPOINT_TRUNCATE";
+  | "CHECKPOINT_TRUNCATE"
+  | "EXTERNAL_WORKER";
 
 // Which column on `billing_tier_limits` (packages/db/src/drizzle/schema.ts)
 // supplies this policy's default window for a project's tier.
@@ -110,6 +126,106 @@ export function resolveRetentionWindowDays(args: {
   const requested = args.projectOverrideDays ?? args.tierDays;
   const clampedToTier = Math.min(requested, args.tierDays);
   return Math.max(args.policy.minimumDays, clampedToTier);
+}
+
+// =============================================================
+// Per-project window resolution
+// =============================================================
+//
+// Lives here, not in `workers/retention-sweep.ts`, even though that is
+// the only consumer for most policies: `import_jobs`'s worker
+// (`workers/import-retention.ts`, ROADMAP §9.2 Task 6) resolves ITS OWN
+// window through this exact function too, and neither worker should
+// have to import the OTHER worker's module (retention-sweep.ts pulls in
+// `../lib/audit`, ClickHouse-adjacent metrics, and BullMQ Queue/Worker
+// wiring — dependencies import-retention.ts has no reason to carry, and
+// which make it far harder to unit-test in isolation). A pure function
+// with no DB dependency of its own belongs next to the registry it
+// resolves against, not inside one particular caller.
+//
+// `workers/retention-sweep.ts` re-exports these names for backward
+// compatibility with its own existing imports/tests.
+
+/** The subset of a `billing_tier_limits` row this resolution needs —
+ *  deliberately NOT the full Drizzle-inferred row type, which lives in
+ *  `@rovenue/db` and would make this package (a dependency OF db, per
+ *  packages/db/package.json) depend on it instead. Any object with
+ *  these two fields — including the real DB row — satisfies this
+ *  structurally. */
+export interface TierRetentionLimits {
+  retentionDays: number;
+  auditLogDays: number;
+}
+
+// retentionSweepSkippedTotal / resolveProjectPolicyWindowDays reason
+// labels for "this project's window could not be resolved."
+export const RETENTION_SKIP_REASON_NO_WINDOW = "no-window";
+export const RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND =
+  "tier-limits-not-found";
+
+type WindowSkipReason =
+  | typeof RETENTION_SKIP_REASON_NO_WINDOW
+  | typeof RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND;
+
+export type WindowResolution =
+  | { kind: "resolved"; days: number }
+  | { kind: "skip"; reason: WindowSkipReason };
+
+/**
+ * Resolve how many days of history one project keeps for one policy.
+ *
+ *   1. A project WITH a billing subscription AND a matching
+ *      `billing_tier_limits` row resolves normally: tier window,
+ *      override clamped down, policy floor applied
+ *      (`resolveRetentionWindowDays`).
+ *   2. A project WITHOUT a billing subscription, but WITH an explicit
+ *      override for that table, uses the override clamped by the FLOOR
+ *      ONLY — there is no tier to clamp down to, and the operator who
+ *      wrote the override is the authority.
+ *   3. A project with neither is skipped. It is NOT defaulted to the
+ *      free tier: retaining too much is recoverable, deleting what
+ *      nobody asked to delete is not.
+ *   4. A project WITH a subscription whose (tier, cycle) has no row at
+ *      all in `billing_tier_limits` (a reference-ladder integrity gap)
+ *      is NOT the same as "no tier" — falling through to rule 2/3 would
+ *      silently drop a PAYING project's tier clamp — so it gets its own
+ *      skip reason.
+ *
+ * See `apps/api/src/workers/retention-sweep.ts`'s module doc comment
+ * for the full "why a project's tier is optional" rationale.
+ */
+export function resolveProjectPolicyWindowDays(
+  policy: RetentionPolicy,
+  hasTier: boolean,
+  tierLimits: TierRetentionLimits | null,
+  overrideDays: number | undefined,
+): WindowResolution {
+  if (hasTier && !tierLimits) {
+    // Rule 4.
+    return {
+      kind: "skip",
+      reason: RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
+    };
+  }
+
+  if (tierLimits) {
+    // Rule 1.
+    const tierDays = tierLimits[policy.tierLimitField];
+    const days = resolveRetentionWindowDays({
+      policy,
+      tierDays,
+      projectOverrideDays: overrideDays ?? null,
+    });
+    return { kind: "resolved", days };
+  }
+
+  if (overrideDays !== undefined) {
+    // Rule 2.
+    return { kind: "resolved", days: Math.max(policy.minimumDays, overrideDays) };
+  }
+
+  // Rule 3.
+  return { kind: "skip", reason: RETENTION_SKIP_REASON_NO_WINDOW };
 }
 
 // =============================================================
@@ -248,6 +364,44 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     strategy: "DELETE_ROWS",
     tierLimitField: "retentionDays",
     minimumDays: OPERATIONAL_TABLE_MINIMUM_DAYS,
+  },
+  {
+    // ROADMAP §9.2 Task 6. EXTERNAL_WORKER, not DELETE_ROWS — see the
+    // strategy's own doc comment above. `workers/import-retention.ts`
+    // owns this table end-to-end (it also deletes the job's
+    // object-storage files and marks `filesDeletedAt`, neither of which
+    // `runRetentionSweep` can do), but resolves its per-project window
+    // through this SAME entry via `resolveProjectPolicyWindowDays`, so
+    // "how many days" has one source of truth even though "what to do
+    // once expired" does not.
+    //
+    // Ages on `finishedAt` (when the job reached a terminal state), not
+    // `createdAt` — a long-running job must never be swept mid-flight
+    // just because it was CREATED long ago; see
+    // `listImportJobsEligibleForFileRetention`'s own doc comment for the
+    // full status-eligibility rules (VERIFICATION_INCOMPLETE/VERIFYING
+    // are never eligible regardless of age).
+    //
+    // `minimumDays` reuses `IMPORT_FILE_RETENTION_DAYS` — the exact
+    // number this table used as an unconditional constant before this
+    // task — as the FLOOR, not a fixed value: before Task 6, every
+    // project's import files were deleted after exactly 7 days
+    // regardless of tier or self-host status. Under the registry's
+    // general rule, a project with no billing tier and no override for
+    // "import_jobs" now resolves NO window at all and keeps its files
+    // indefinitely, same as every other table here — a self-hosted
+    // deployment opts in with an override, it is not defaulted into one.
+    // A tiered project's window can now run well past 7 days (up to the
+    // tier's `retentionDays` — 1825 for enterprise), trading the
+    // previous fixed privacy deadline for consistency with how long that
+    // project's tier already promises to keep its other data. Documented
+    // plainly on the guide page rather than left for an operator to
+    // discover by reading source.
+    table: "import_jobs",
+    timestampColumn: "finishedAt",
+    strategy: "EXTERNAL_WORKER",
+    tierLimitField: "retentionDays",
+    minimumDays: IMPORT_FILE_RETENTION_DAYS,
   },
 ] as const;
 

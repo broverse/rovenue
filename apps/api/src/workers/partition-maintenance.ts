@@ -19,10 +19,12 @@ import { logger } from "../lib/logger";
 //   2. Manually pre-create the next-month partition for
 //      `outgoing_webhooks`. That table is intentionally NOT
 //      pg_partman-managed because its retention predicate is
-//      composite (status + age) — the existing webhook-retention
-//      worker handles row-level deletion. Without this manual step
-//      the table would refuse rows for any month past 2028-12 (the
-//      end of the bulk-created window in migration 0017).
+//      composite (status + age) — the registry-driven retention sweep
+//      (ROADMAP §9.2, workers/retention-sweep.ts) handles row-level
+//      deletion via DELETE_ROWS, restricted to terminalStatuses.
+//      Without this manual step the table would refuse rows for any
+//      month past 2028-12 (the end of the bulk-created window in
+//      migration 0017).
 //
 // The 8-year-row test in partition-maintenance.integration.test.ts
 // is the load-bearing VUK 7-year retention proof.

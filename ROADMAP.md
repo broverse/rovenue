@@ -825,7 +825,22 @@ else in the framework/provider-breadth dimension is done.
 ## 9. GDPR / KVKK tooling (85 → 95)
 
 - [ ] Self-service DSAR API (exposed by customers to their end users)
-- [ ] Per-table data-retention policy automation
+- [x] Per-table data-retention policy automation — `RETENTION_POLICIES`
+      (`packages/shared/src/retention/policies.ts`) is the single registry: a
+      window per project resolves from its billing tier (optional — self-host
+      has none) clamped by an override that may only shorten it, floored at a
+      per-policy minimum. A nightly sweep (`workers/retention-sweep.ts`)
+      reclaims `audit_logs` (checkpoint-then-truncate, preserving a verifiable
+      proof bundle), `credit_ledger` / `revenue_events` (fleet-wide partition
+      drops, gated on every project having resolved a window), and
+      `outgoing_webhooks` / `webhook_events` / `copilot_messages` (per-project
+      DELETE). Replaces the three bespoke workers (`rovi-retention`,
+      `webhook-retention`, plus `import-retention`'s hardcoded window) this
+      task retired or converted. `import_jobs` keeps its own worker — it also
+      deletes object-storage files, which the generic sweep deliberately does
+      not model — but now resolves its window the same way. ClickHouse's fixed
+      `INTERVAL 2 YEAR` TTL is explicitly out of scope. Documented at
+      `apps/docs/content/docs/guides/retention-policies.mdx`.
 - [x] Externally verifiable proof format for the audit hash chain — `GET
       /dashboard/audit-logs/proof` exports a bundle over the canonical
       encoder in `@rovenue/shared/audit-chain`; verify offline with

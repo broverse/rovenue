@@ -31,7 +31,7 @@ import {
 //
 // `runImportJob` is the pure, directly-testable body (same split this
 // repo already uses for every other scheduled worker — see
-// `runWebhookRetention` / `runFunnelAbandonerSweep`): it does not touch
+// `runImportRetention` / `runFunnelAbandonerSweep`): it does not touch
 // BullMQ at all, so tests exercise it by calling it directly against a
 // real Postgres, the same way services/import/write.ts's own tests do.
 // `createImportRunnerWorker` is the thin BullMQ wrapper around it.
@@ -200,7 +200,7 @@ export interface RunImportJobOptions {
    *  IMPORT_BATCH_SIZE. Exists so a test can force several small batches
    *  (to observe checkpoint/cancel behaviour) without waiting on
    *  hundreds of real rows, the same "inject a smaller unit" seam
-   *  `runWebhookRetention(now)` uses for its cutoff. */
+   *  `runImportRetention(now)` uses for its cutoff. */
   batchSize?: number;
   /** Override for testing only — production callers always get
    *  `createProductionImportVerifyDeps()`. Exists so a test whose subject

@@ -406,6 +406,16 @@ export interface RetentionEligibleImportJob {
   storageKey: string;
   reportStorageKey: string | null;
   reportPartCount: number;
+  // Always non-null in practice — the WHERE clause below already requires
+  // `finishedAt IS NOT NULL` — but selected as the column's real (nullable)
+  // type rather than asserted, so a caller that skips a null value here is
+  // guarding an actual invariant rather than a decorative one. Added for
+  // ROADMAP §9.2 Task 6: `import_jobs`' window now comes from the retention
+  // registry and is resolved PER PROJECT (see workers/import-retention.ts),
+  // so this query is called with the loosest cutoff across the whole
+  // fleet and the caller re-checks each row against its own project's
+  // resolved window using this column.
+  finishedAt: Date | null;
 }
 
 // `filesDeletedAt IS NULL` (fix round 1, FIX 3) excludes a job the sweep
@@ -415,6 +425,14 @@ export interface RetentionEligibleImportJob {
 // against objects that no longer exist. Paired with
 // `import_jobs_status_finished_at_idx` (status, finishedAt) so this is an
 // index scan, not a full table scan, as the table grows.
+//
+// `cutoff` here is the LOOSEST (soonest-to-expire) window resolved across
+// every project this sweep run — never one project's own window applied
+// globally. Per-project windows can differ (tier + override), and a
+// single shared table has no per-row tier to filter by in SQL, so the
+// caller (workers/import-retention.ts) re-checks each returned row's
+// `finishedAt` against its OWN project's resolved cutoff before deleting
+// anything.
 export async function listImportJobsEligibleForFileRetention(
   db: Db,
   cutoff: Date,
@@ -426,6 +444,7 @@ export async function listImportJobsEligibleForFileRetention(
       storageKey: importJobs.storageKey,
       reportStorageKey: importJobs.reportStorageKey,
       reportPartCount: importJobs.reportPartCount,
+      finishedAt: importJobs.finishedAt,
     })
     .from(importJobs)
     .where(

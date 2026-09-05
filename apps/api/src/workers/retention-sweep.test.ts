@@ -509,8 +509,9 @@ describe("runRetentionSweep", () => {
   });
 
   it("fetches project-level facts (overrides, tier limits) once per project, not once per policy", async () => {
-    // RETENTION_POLICIES has 6 entries; a per-policy fetch would call
-    // each of these 6 times for this single project.
+    // RETENTION_POLICIES has more than one entry; a per-policy fetch
+    // would call each of these once per policy for this single project
+    // instead of once, total.
     await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
 
     expect(deps.listRetentionOverrides).toHaveBeenCalledTimes(1);
@@ -629,5 +630,20 @@ describe("isPartitionDroppable", () => {
 
   it("is never droppable with no fixed upper bound", () => {
     expect(isPartitionDroppable({ upperBound: null }, cutoff)).toBe(false);
+  });
+});
+
+describe("RETENTION_POLICIES coverage of the retired workers (ROADMAP §9.2 Task 6)", () => {
+  it("still names every table rovi-retention and webhook-retention used to own", () => {
+    // rovi-retention.ts covered copilot_messages; webhook-retention.ts
+    // covered webhook_events. Both workers were deleted once their
+    // tables became registry rows — this pins the LIST of table names,
+    // not a count, so adding an unrelated policy elsewhere in the
+    // registry can never make this pass by accident.
+    const tables = RETENTION_POLICIES.map((p) => p.table);
+    const retiredWorkerTables = ["copilot_messages", "webhook_events"];
+    for (const table of retiredWorkerTables) {
+      expect(tables).toContain(table);
+    }
   });
 });

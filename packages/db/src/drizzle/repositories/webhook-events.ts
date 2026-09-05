@@ -255,9 +255,18 @@ export async function updateWebhookEvent(
 }
 
 /**
- * Bulk-delete webhook_events rows older than the retention cutoff.
- * Used by the nightly webhook-retention BullMQ job. Returns the
- * total count of rows removed.
+ * Bulk-delete webhook_events rows older than a global cutoff, with no
+ * per-project scoping. Returns the total count of rows removed.
+ *
+ * ROADMAP §9.2 Task 6: the nightly `webhook-retention` BullMQ job this
+ * was originally written for is retired — webhook_events is a registry
+ * row now (`@rovenue/shared/retention`), swept per-project by
+ * `workers/retention-sweep.ts` via `retention-rows.ts`'s
+ * `deleteRetentionRowsOlderThan`, not by this function. Left in place
+ * (matching `webhook-events.batch-delete.test.ts`, which still exercises
+ * it directly) as a general-purpose global batched delete — a starting
+ * point for a future admin/ops tool, not currently called from any
+ * production code path.
  *
  * Batched: deletes at most `batchSize` rows per iteration (bounded
  * subselect), loops until a batch is partial, and caps at
@@ -270,7 +279,7 @@ export async function updateWebhookEvent(
  * Rationale: webhook_events is not a hypertable (the UNIQUE
  * (source, storeEventId) key is load-bearing for the upsert
  * dedup contract — see upsertWebhookEvent above). Retention is
- * handled at the application layer via this DELETE instead of a
+ * handled at the application layer via a DELETE instead of a
  * TimescaleDB drop_chunks policy.
  */
 export async function deleteWebhookEventsOlderThan(
