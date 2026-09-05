@@ -137,7 +137,7 @@ describe("runRetentionSweep", () => {
       deps.db,
       "credit_ledger",
       expectedCutoff,
-      365,
+      new Map([["prj_1", 365]]),
       expect.any(Function),
     );
   });
@@ -163,17 +163,20 @@ describe("runRetentionSweep", () => {
     });
   });
 
-  it("uses the longest resolved window across every project, not the shortest", async () => {
-    // Project 1 floors at 365. Project 2 has no tier (rule 2), so its
-    // override is unclamped by any tier ceiling — a legitimate,
-    // longer requirement the shared partitions must respect.
+  it("uses the longest resolved window across every project, not merely the last one considered", async () => {
+    // Project 1 (no tier, rule 2) has the LONGEST requirement — 900
+    // days, unclamped by any tier ceiling — and is listed FIRST, not
+    // last: a "last project wins" bug would pass this test if the
+    // longest window happened to be the one processed last, so the
+    // fixture deliberately puts it first. Project 2 floors at the
+    // ordinary 365.
     deps.listProjectsWithTier.mockResolvedValue([
-      project({ projectId: "prj_1" }),
-      project({ projectId: "prj_2", tier: null, cycle: null }),
+      project({ projectId: "prj_1", tier: null, cycle: null }),
+      project({ projectId: "prj_2" }),
     ]);
     deps.listRetentionOverrides.mockImplementation(
       async (_db: unknown, projectId: string) =>
-        projectId === "prj_2"
+        projectId === "prj_1"
           ? new Map([["credit_ledger", 900]])
           : new Map<string, number>(),
     );
@@ -185,9 +188,49 @@ describe("runRetentionSweep", () => {
       deps.db,
       "credit_ledger",
       expectedCutoff,
-      900,
+      new Map([
+        ["prj_1", 900],
+        ["prj_2", 365],
+      ]),
       expect.any(Function),
     );
+  });
+
+  it("blocks a DROP_PARTITION drop when one project's fact-fetch errors, not just an ordinary no-window skip", async () => {
+    // Three projects, all WITH a tier, so credit_ledger would otherwise
+    // resolve normally for every one of them (unlike the DELETE_ROWS
+    // "continues to the next project when one project throws" test,
+    // whose projects have no tier and no override at all — that
+    // fixture would leave the DROP_PARTITION aggregate blocked by the
+    // ordinary no-window skip regardless of the throw, proving nothing
+    // about the ERROR path specifically). The middle project's
+    // overrides lookup rejects — a transient failure, not "this
+    // project has no configured window" — and the fleet-level skip
+    // this produces must carry the ERROR reason, never fall back to
+    // NO_WINDOW just because that happens to be the more common cause.
+    deps.listProjectsWithTier.mockResolvedValue([
+      project({ projectId: "prj_1" }),
+      project({ projectId: "prj_2" }),
+      project({ projectId: "prj_3" }),
+    ]);
+    let call = 0;
+    deps.listRetentionOverrides.mockImplementation(async () => {
+      call += 1;
+      if (call === 2) throw new Error("boom");
+      return new Map<string, number>();
+    });
+
+    await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
+
+    expect(deps.dropTablePartitionsOlderThan).not.toHaveBeenCalled();
+    expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
+      reason: RETENTION_SKIP_REASON_ERROR,
+      table: "credit_ledger",
+    });
+    expect(retentionSweepSkippedTotal.inc).not.toHaveBeenCalledWith({
+      reason: RETENTION_SKIP_REASON_NO_WINDOW,
+      table: "credit_ledger",
+    });
   });
 
   it("does not drop a partition when no project in the fleet resolved any window for it", async () => {

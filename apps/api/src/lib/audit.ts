@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import {
   canonicalJSON,
@@ -27,13 +27,6 @@ import { logger } from "./logger";
 const log = logger.child("audit");
 
 const { auditLogs } = drizzle.schema;
-
-// Shared advisory-lock key for every audit() call whose `projectId` is
-// null (a global, cross-project action). Every project-scoped call
-// gets its own key (`audit:${projectId}`); global callers all share
-// this ONE key so they still serialise against each other the same
-// way same-project writers do.
-const GLOBAL_AUDIT_CHAIN_LOCK_KEY = "audit:__global__";
 
 // =============================================================
 // Action / resource enums
@@ -192,7 +185,11 @@ export type AuditAction =
   // partition, never after: a partition drop bypasses the ledger's
   // append-only trigger on every DDL path (row triggers fire on row
   // DML, not DDL), so this row is the only durable record the drop
-  // happened at all. See AUDIT_ACTION_RETENTION_PARTITION_DROPPED.
+  // happened at all. A partition holds rows for every project sharing
+  // it, so the sweep writes ONE of these into EACH affected project's
+  // own chain — not one global row — which is also why this action
+  // needed no `projectId`-nullability change here at all. See
+  // AUDIT_ACTION_RETENTION_PARTITION_DROPPED.
   | typeof AUDIT_ACTION_RETENTION_PARTITION_DROPPED;
 
 // Exported (not just inlined like this file's other action literals)
@@ -232,24 +229,14 @@ export type AuditResource =
   | "leaderboard_season"
   // Scoped by projectId; `resourceId` is the store the rate applies to.
   | "commission_rate"
-  // Not scoped by projectId (see AuditEntry.projectId) — a dropped
-  // credit_ledger/revenue_events partition holds rows for every
-  // project at once. `resourceId` is the partition's table name.
+  // A dropped credit_ledger/revenue_events partition affects every
+  // project sharing it, so the sweep writes one of these into EACH
+  // affected project's own chain (see workers/retention-sweep.ts).
+  // `resourceId` is the partition's table name.
   | "retention_partition";
 
 export interface AuditEntry {
-  // Null for an action that is not scoped to any single project — the
-  // retention sweep's DROP_PARTITION strategy is the first of these: it
-  // drops a whole `credit_ledger`/`revenue_events` partition, which
-  // holds rows for every project at once, so no single projectId could
-  // honestly describe it. `auditLogs.projectId` is already nullable at
-  // the DB level with `ON DELETE SET NULL` for exactly this shape of
-  // "no one project owns this row" case (see schema.ts) — this mirrors
-  // the same reasoning `userId` below already uses, one field down.
-  // A caller must NOT invent a placeholder id like "system": the column
-  // is a real FK to `projects.id`, so any string that isn't an actual
-  // project row's id fails the insert outright.
-  projectId: string | null;
+  projectId: string;
   // Null for actions not initiated from a dashboard session — e.g. a
   // Stripe-side webhook revoking a Connect authorization. The column is
   // nullable at the DB level for exactly this case.
@@ -309,15 +296,7 @@ function buildCanonicalPayload(
   prevHash: string | null,
 ): AuditChainPayload {
   return {
-    // `AuditChainPayload.projectId` is `string`, not `string | null`,
-    // because the shared hashing module has no concept of "no project"
-    // of its own. `verifyAuditChain` below already coerces a NULLED
-    // `row.projectId` (a project deleted after the row was written) to
-    // `""` when it recomputes a hash to compare against — reusing that
-    // exact coercion here, at write time, is what makes a genuinely
-    // global row (projectId null from the start, never nulled by a
-    // cascade) hash consistently between write and verify.
-    projectId: entry.projectId ?? "",
+    projectId: entry.projectId,
     userId: entry.userId,
     action: entry.action,
     resource: entry.resource,
@@ -367,29 +346,20 @@ async function writeChained(
   // the same project now serialise at this lock, so prevHash lookup
   // + rowHash compute + insert happen atomically. Writes for
   // different projects proceed in parallel (different lock keys).
-  // A null projectId (a global, cross-project action) shares ONE fixed
-  // lock key rather than falling through to the literal string
-  // "audit:null" — concurrent global writers must serialise against
-  // each other exactly like same-project writers do.
-  const lockKey = entry.projectId
-    ? `audit:${entry.projectId}`
-    : GLOBAL_AUDIT_CHAIN_LOCK_KEY;
+  const lockKey = `audit:${entry.projectId}`;
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${sql.param(lockKey)}, 0))`,
   );
 
-  // `eq(column, null)` renders `"projectId" = NULL`, which SQL always
-  // evaluates to unknown/false — it would never find the global
-  // chain's own tip, silently restarting it (prevHash: null) on every
-  // write. `isNull` is required for this branch to actually chain.
-  const projectIdFilter = entry.projectId
-    ? eq(auditLogs.projectId, entry.projectId)
-    : isNull(auditLogs.projectId);
-
   const latestRows = await tx
     .select({ rowHash: auditLogs.rowHash, createdAt: auditLogs.createdAt })
     .from(auditLogs)
-    .where(and(projectIdFilter, isNotNull(auditLogs.rowHash)))
+    .where(
+      and(
+        eq(auditLogs.projectId, entry.projectId),
+        isNotNull(auditLogs.rowHash),
+      ),
+    )
     // The id tiebreak keeps the tip lookup deterministic should legacy rows
     // tie on createdAt (ids are random cuid2s, so it is deterministic, not
     // chronological — the strictly-monotonic createdAt below is what makes

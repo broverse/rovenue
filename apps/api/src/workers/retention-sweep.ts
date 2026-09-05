@@ -62,8 +62,16 @@ import {
 // per-project loop below still resolves each project's window per
 // policy (exactly as it does for DELETE_ROWS); for a DROP_PARTITION
 // policy that resolution feeds `partitionDropAggregates` instead of an
-// immediate delete, and the actual drop happens once, after every
-// project has been considered, in the block that follows the loop.
+// immediate delete, and the actual DROP TABLE happens once per
+// partition, after every project has been considered, in the block
+// that follows the loop. The audit trail is NOT similarly collapsed to
+// one row, though: a partition drop affects every project sharing it,
+// so `dropTablePartitionsOlderThan` writes one audit row into EACH
+// affected project's own chain before that single drop — see
+// `PartitionDropAuditContext` for why a single global row was
+// rejected (it would sit outside every project's chain, invisible to
+// `verifyAuditChain` and the §9.3 proof export — the exact tamper-
+// evidence this row exists to provide).
 //
 // --- Window resolution: three rules, because a project's billing
 // tier is optional ---
@@ -146,6 +154,14 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // takes for its own catalog-sourced names.
 const PARTITION_IDENTIFIER_PATTERN = /^[a-z_][a-z0-9_]*$/;
 
+// Every partition this sweep touches lives in `public`, matching every
+// migration in this repo (see `revenue-event-partitions.ts`, which
+// hardcodes `public.revenue_events` for the same reason). Named rather
+// than inlined so `listTablePartitions`, `countPartitionRows` and
+// `dropPartitionTable` cannot silently drift apart on which schema
+// they mean.
+const PARTITION_SCHEMA = "public";
+
 function assertSafePartitionIdentifier(name: string): string {
   if (!PARTITION_IDENTIFIER_PATTERN.test(name)) {
     throw new Error(
@@ -155,13 +171,33 @@ function assertSafePartitionIdentifier(name: string): string {
   return name;
 }
 
+function qualifiedPartitionIdentifier(partitionName: string): string {
+  assertSafePartitionIdentifier(partitionName);
+  return `"${PARTITION_SCHEMA}"."${partitionName}"`;
+}
+
+// A RANGE bound literal as `pg_get_expr` renders a `timestamptz` value,
+// e.g. `2024-01-01 00:00:00+00` — verified directly against this
+// repo's Postgres. The trailing offset (`Z` or `[+-]HH[:MM]`) is
+// REQUIRED, not optional: `credit_ledger`/`revenue_events` are both
+// `timestamptz`-keyed today, so every literal this sweep has ever seen
+// carries one, but a future `timestamp` (no tz)-keyed table would
+// render one WITHOUT an offset — and `new Date(...)` parses an
+// offsetless string as LOCAL time, silently shifting the bound earlier
+// or later depending on the server's TZ. That shift is exactly toward
+// the failure mode this task exists to prevent (an in-window partition
+// misjudged as fully expired), so an offsetless literal is rejected
+// outright rather than parsed optimistically.
+const PARTITION_BOUND_LITERAL =
+  "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}(?::?\\d{2})?)";
+
 // Parses what `pg_get_expr(relpartbound, oid)` renders for a RANGE
 // partition, e.g. `FOR VALUES FROM ('2024-01-01 00:00:00+00') TO
-// ('2024-02-01 00:00:00+00')` — verified directly against this repo's
-// Postgres. A bound may also be the bare keyword MINVALUE/MAXVALUE
-// (no quotes) rather than a literal.
-const PARTITION_BOUND_EXPR_PATTERN =
-  /^FOR VALUES FROM \((?:'(?<lower>[^']+)'|(?<lowerKw>MINVALUE|MAXVALUE))\) TO \((?:'(?<upper>[^']+)'|(?<upperKw>MINVALUE|MAXVALUE))\)$/;
+// ('2024-02-01 00:00:00+00')`. A bound may also be the bare keyword
+// MINVALUE/MAXVALUE (no quotes) rather than a literal.
+const PARTITION_BOUND_EXPR_PATTERN = new RegExp(
+  `^FOR VALUES FROM \\((?:'(?<lower>${PARTITION_BOUND_LITERAL})'|(?<lowerKw>MINVALUE|MAXVALUE))\\) TO \\((?:'(?<upper>${PARTITION_BOUND_LITERAL})'|(?<upperKw>MINVALUE|MAXVALUE))\\)$`,
+);
 
 export interface PartitionBound {
   name: string;
@@ -238,27 +274,44 @@ export async function listTablePartitions(
     JOIN pg_class parent ON parent.oid = pg_inherits.inhparent
     JOIN pg_namespace pn ON pn.oid = parent.relnamespace
     JOIN pg_class child ON child.oid = pg_inherits.inhrelid
-    WHERE parent.relname = ${table} AND pn.nspname = 'public'
+    WHERE parent.relname = ${table} AND pn.nspname = ${PARTITION_SCHEMA}
     ORDER BY child.relname
   `);
   const bounds: PartitionBound[] = [];
   for (const row of result.rows) {
     const parsed = parsePartitionBoundExpr(row.name, row.bound_expr);
-    if (parsed) bounds.push(parsed);
+    if (parsed) {
+      bounds.push(parsed);
+      continue;
+    }
+    // DEFAULT is an expected, ordinary shape (never droppable, no
+    // warning needed). Anything else this pattern doesn't recognize —
+    // a LIST/HASH partition, an offsetless timestamp literal, a future
+    // Postgres rendering this sweep has never seen — is a partition
+    // this sweep genuinely does not understand. It's still safe (never
+    // droppable), but silence would hide a config/schema drift an
+    // operator should know about.
+    if (row.bound_expr.trim() !== "DEFAULT") {
+      log.warn("retention sweep could not parse a partition's bound; treating it as never droppable", {
+        table,
+        partition: row.name,
+        boundExpr: row.bound_expr,
+      });
+    }
   }
   return bounds;
 }
 
 async function countPartitionRows(db: Db, partitionName: string): Promise<number> {
-  assertSafePartitionIdentifier(partitionName);
+  const qualified = qualifiedPartitionIdentifier(partitionName);
   const result = await db.execute<{ count: string }>(
-    sql`SELECT count(*)::text AS count FROM ${sql.raw(`"${partitionName}"`)}`,
+    sql`SELECT count(*)::text AS count FROM ${sql.raw(qualified)}`,
   );
   return Number(result.rows[0]?.count ?? 0);
 }
 
 async function dropPartitionTable(db: Db, partitionName: string): Promise<void> {
-  assertSafePartitionIdentifier(partitionName);
+  const qualified = qualifiedPartitionIdentifier(partitionName);
   // Plain `DROP TABLE` on the attached partition — never `TRUNCATE`
   // anywhere in this codebase (probed directly: TRUNCATE on either the
   // partition or the parent removes rows across every partition/every
@@ -268,7 +321,7 @@ async function dropPartitionTable(db: Db, partitionName: string): Promise<void> 
   // That is exactly why `dropTablePartitionsOlderThan` below writes
   // the audit row first and only reaches this call if that write did
   // not throw.
-  await db.execute(sql`DROP TABLE ${sql.raw(`"${partitionName}"`)}`);
+  await db.execute(sql`DROP TABLE ${sql.raw(qualified)}`);
 }
 
 export interface PartitionDropAuditContext {
@@ -277,6 +330,20 @@ export interface PartitionDropAuditContext {
   lowerBound: Date | null;
   upperBound: Date;
   cutoff: Date;
+  // The project this ONE row is written into — a partition drop
+  // affects every project sharing the partition, so this function
+  // writes one row per project rather than a single global one (see
+  // the module doc comment for why: `auditLogs.projectId` is a real FK
+  // to `projects.id`, and recording the event in each affected
+  // project's own chain is what keeps it inside `verifyAuditChain`/the
+  // §9.3 proof export, which is the entire point of writing it).
+  projectId: string;
+  // THIS project's own resolved retention window for `table` — not the
+  // fleet-wide maximum the drop cutoff was actually computed from.
+  // Every project's own window is guaranteed to already have elapsed
+  // for a dropped partition (the cutoff used is the longest of all of
+  // them), so this is strictly more informative to that project's own
+  // audit trail than the shared maximum would be.
   windowDays: number;
   rowCount: number;
 }
@@ -292,20 +359,24 @@ export interface DropTablePartitionsResult {
 
 /**
  * Drops every partition of `table` whose entire range predates
- * `cutoff`, auditing each one FIRST and unconditionally: `writeAuditRow`
- * is awaited before `dropPartitionTable` is ever called, and if it
- * rejects, this function propagates that rejection immediately —
- * nothing is dropped, and any partition not yet reached is left for
- * the next sweep run rather than dropped without a record. `rowCount`
- * is read from the live partition immediately before the audit write
- * because it is the only surviving evidence of what was destroyed once
- * the partition is gone.
+ * `cutoff`, auditing each one FIRST and unconditionally: for every
+ * project in `projectWindows`, `writeAuditRow` is awaited — and must
+ * succeed — before `dropPartitionTable` is ever called for that
+ * partition. If any one of those writes rejects, this function
+ * propagates that rejection immediately: nothing is dropped, any
+ * partition not yet reached is left for the next sweep run, and any
+ * project not yet reached this partition gets no audit row for it
+ * either — never a partial record claiming an event that did not
+ * happen. `rowCount` is read from the live partition once (not once
+ * per project) immediately before the first audit write, because it is
+ * the only surviving evidence of what was destroyed once the partition
+ * is gone.
  */
 export async function dropTablePartitionsOlderThan(
   db: Db,
   table: string,
   cutoff: Date,
-  windowDays: number,
+  projectWindows: ReadonlyMap<string, number>,
   writeAuditRow: WriteRetentionPartitionAuditRow,
 ): Promise<DropTablePartitionsResult> {
   const partitions = await listTablePartitions(db, table);
@@ -318,21 +389,25 @@ export async function dropTablePartitionsOlderThan(
 
     const rowCount = await countPartitionRows(db, partition.name);
 
-    // Audit BEFORE the drop. If the process dies right here, the audit
-    // row survives and describes a drop that may or may not have
-    // happened yet — an operator can check the partition and re-run
-    // the sweep. Dropping first would leave no record at all.
-    await writeAuditRow({
-      table,
-      partition: partition.name,
-      lowerBound: partition.lowerBound,
-      upperBound,
-      cutoff,
-      windowDays,
-      rowCount,
-    });
+    // Audit BEFORE the drop — once per affected project. If the
+    // process dies partway through this loop, whichever project rows
+    // already committed survive and describe a drop that may or may
+    // not have happened yet; an operator can check the partition and
+    // re-run the sweep. Dropping first would leave no record at all.
+    for (const [projectId, windowDays] of projectWindows) {
+      await writeAuditRow({
+        table,
+        partition: partition.name,
+        lowerBound: partition.lowerBound,
+        upperBound,
+        cutoff,
+        projectId,
+        windowDays,
+        rowCount,
+      });
+    }
 
-    // Only reached if the audit write above did not throw.
+    // Only reached if every audit write above succeeded.
     await dropPartitionTable(db, partition.name);
     partitionsDropped.push(partition.name);
     rowsDropped += rowCount;
@@ -342,18 +417,15 @@ export async function dropTablePartitionsOlderThan(
 }
 
 /**
- * The real `writeAuditRow` for production use: a genuinely
- * cross-project system action, so `projectId` is null (see
- * `AuditEntry.projectId`'s doc comment in lib/audit.ts — a placeholder
- * id like `"system"` would fail the row's real FK to `projects.id`)
- * and `userId` is the same `"system"` sentinel every other
- * non-dashboard worker in this codebase uses.
+ * The real `writeAuditRow` for production use — a plain, project-scoped
+ * write like any other `audit()` call. `userId` is the `"system"`
+ * sentinel every other non-dashboard worker in this codebase uses.
  */
 export async function writeRetentionPartitionAuditRow(
   ctx: PartitionDropAuditContext,
 ): Promise<void> {
   await audit({
-    projectId: null,
+    projectId: ctx.projectId,
     userId: "system",
     action: AUDIT_ACTION_RETENTION_PARTITION_DROPPED,
     resource: "retention_partition",
@@ -373,21 +445,49 @@ export async function writeRetentionPartitionAuditRow(
   });
 }
 
+// A DROP_PARTITION policy's aggregate is blocked by whichever of these
+// reasons hit first: an ordinary per-project window-resolution skip
+// (no-window / tier-limits-not-found), or a transient error that kept
+// a project's window from being resolved at all. These are genuinely
+// different situations for an operator reading the metric — a
+// sustained NO_WINDOW rate means "most projects have no configured
+// retention," a sustained ERROR rate means "something is actually
+// broken" — so the fleet-level skip below reuses whichever specific
+// reason actually caused the block instead of collapsing every case
+// into `no-window`.
+type PartitionBlockReason = WindowSkipReason | typeof RETENTION_SKIP_REASON_ERROR;
+
 interface PartitionDropAggregate {
-  // True the moment ANY project's window for this table could not be
-  // resolved (no-window, or tier-limits-not-found). A partition is
-  // shared by every project, so one unresolved project must block the
-  // drop for ALL of them — the alternative (drop using only the
-  // projects this run DID resolve) would silently destroy an
-  // unconsulted project's rows the instant they share a physical
-  // partition with a resolved one.
-  blocked: boolean;
+  // Set the moment ANY project's window for this table could not be
+  // resolved. A partition is shared by every project, so one
+  // unresolved project must block the drop for ALL of them — the
+  // alternative (drop using only the projects this run DID resolve)
+  // would silently destroy an unconsulted project's rows the instant
+  // they share a physical partition with a resolved one. Once set, it
+  // is never overwritten — the first reason a run couldn't vouch for
+  // the whole fleet is the one that matters.
+  blockedReason: PartitionBlockReason | null;
   // The longest (most conservative) window any project resolved for
   // this table. `resolveRetentionWindowDays` only ever lets an
   // override SHORTEN a tier's window, never lengthen it, so the
   // project asking to keep the most history is the one whose
   // requirement legitimately bounds what the shared table may lose.
   maxDays: number | null;
+  // Every project's OWN resolved days for this table, keyed by
+  // projectId — carried through to `dropTablePartitionsOlderThan` so
+  // each project's audit row can show its own window rather than the
+  // fleet-wide maximum the actual cutoff was computed from.
+  projectWindows: Map<string, number>;
+}
+
+/** First reason wins; see `PartitionDropAggregate.blockedReason`. */
+function blockPartitionDrop(
+  aggregate: PartitionDropAggregate | undefined,
+  reason: PartitionBlockReason,
+): void {
+  if (aggregate && aggregate.blockedReason === null) {
+    aggregate.blockedReason = reason;
+  }
 }
 
 export interface RetentionSweepResult {
@@ -432,7 +532,7 @@ export interface RetentionDeps {
     db: Db,
     table: string,
     cutoff: Date,
-    windowDays: number,
+    projectWindows: ReadonlyMap<string, number>,
     writeAuditRow: WriteRetentionPartitionAuditRow,
   ) => Promise<DropTablePartitionsResult>;
 }
@@ -522,8 +622,9 @@ export async function runRetentionSweep(
   for (const policy of RETENTION_POLICIES) {
     if (policy.strategy === "DROP_PARTITION") {
       partitionDropAggregates.set(policy.table, {
-        blocked: false,
+        blockedReason: null,
         maxDays: null,
+        projectWindows: new Map(),
       });
     }
   }
@@ -560,9 +661,12 @@ export async function runRetentionSweep(
         // even be attempted — the fleet-wide aggregate can no longer
         // vouch that every project's window was considered, so it
         // must block the drop exactly like an ordinary unresolved
-        // window would.
-        const aggregate = partitionDropAggregates.get(policy.table);
-        if (aggregate) aggregate.blocked = true;
+        // window would, but under its OWN reason (this is a transient
+        // failure, not "nobody configured a window").
+        blockPartitionDrop(
+          partitionDropAggregates.get(policy.table),
+          RETENTION_SKIP_REASON_ERROR,
+        );
       }
       log.error("retention sweep failed to load project facts", {
         projectId: project.projectId,
@@ -602,9 +706,12 @@ export async function runRetentionSweep(
           // unresolved. Absence of configuration must never read as
           // permission to delete, so it blocks the drop for every
           // project sharing that table's partitions this run — not
-          // just this one.
-          const aggregate = partitionDropAggregates.get(policy.table);
-          if (aggregate) aggregate.blocked = true;
+          // just this one. Carries the SPECIFIC reason (no-window vs.
+          // tier-limits-not-found) through to the fleet-level skip.
+          blockPartitionDrop(
+            partitionDropAggregates.get(policy.table),
+            resolution.reason,
+          );
           continue;
         }
 
@@ -613,12 +720,15 @@ export async function runRetentionSweep(
           // into the fleet-wide aggregate rather than deleting
           // anything now. The actual drop happens once, after every
           // project has been considered, using the LONGEST window any
-          // project resolved (see the module doc comment).
+          // project resolved (see the module doc comment) — and this
+          // project's OWN resolved days is retained too, so its audit
+          // row can carry its own window rather than the fleet max.
           const aggregate = partitionDropAggregates.get(policy.table)!;
           aggregate.maxDays =
             aggregate.maxDays === null
               ? resolution.days
               : Math.max(aggregate.maxDays, resolution.days);
+          aggregate.projectWindows.set(project.projectId, resolution.days);
           continue;
         }
 
@@ -673,9 +783,12 @@ export async function runRetentionSweep(
         // Same reasoning as the two explicit skip branches above: this
         // project's requirement for a shared DROP_PARTITION table is
         // now unknown, which must block the drop for every project
-        // sharing it, not just this one.
-        const aggregate = partitionDropAggregates.get(policy.table);
-        if (aggregate) aggregate.blocked = true;
+        // sharing it, not just this one — under the ERROR reason, not
+        // "no-window".
+        blockPartitionDrop(
+          partitionDropAggregates.get(policy.table),
+          RETENTION_SKIP_REASON_ERROR,
+        );
         log.error("retention sweep unit failed", {
           projectId: project.projectId,
           table: policy.table,
@@ -692,32 +805,32 @@ export async function runRetentionSweep(
   for (const policy of RETENTION_POLICIES) {
     if (policy.strategy !== "DROP_PARTITION") continue;
     const aggregate = partitionDropAggregates.get(policy.table)!;
-    const windowDays = aggregate.maxDays;
+    const maxDays = aggregate.maxDays;
 
-    if (aggregate.blocked || windowDays === null) {
+    if (aggregate.blockedReason !== null || maxDays === null) {
       // Either some project's window for this table is unresolved (its
       // requirement is unknown, so the shared table cannot be touched
-      // on its behalf) or literally no project resolved a window at
-      // all (nothing to safely bound the drop by). Reused deliberately
-      // — see fact 5 in the task dispatch: this is the same underlying
-      // condition as the per-project "no-window" skip, just evaluated
-      // once for the whole fleet instead of per project.
+      // on its behalf — reported under whichever specific reason
+      // actually blocked it) or literally no project resolved a window
+      // at all (nothing to safely bound the drop by — falls back to
+      // "no-window", the same underlying condition as the per-project
+      // skip, just evaluated once for the whole fleet).
       skipped += 1;
       retentionSweepSkippedTotal.inc({
-        reason: RETENTION_SKIP_REASON_NO_WINDOW,
+        reason: aggregate.blockedReason ?? RETENTION_SKIP_REASON_NO_WINDOW,
         table: policy.table,
       });
       continue;
     }
 
     try {
-      const cutoff = new Date(now.getTime() - windowDays * MS_PER_DAY);
+      const cutoff = new Date(now.getTime() - maxDays * MS_PER_DAY);
       const { partitionsDropped, rowsDropped } =
         await deps.dropTablePartitionsOlderThan(
           deps.db,
           policy.table,
           cutoff,
-          windowDays,
+          aggregate.projectWindows,
           writeRetentionPartitionAuditRow,
         );
       rowsReclaimed += rowsDropped;
@@ -726,7 +839,8 @@ export async function runRetentionSweep(
         log.info("retention sweep dropped partitions", {
           table: policy.table,
           partitions: partitionsDropped,
-          windowDays,
+          maxWindowDays: maxDays,
+          projectCount: aggregate.projectWindows.size,
           cutoff: cutoff.toISOString(),
         });
       }
@@ -741,7 +855,7 @@ export async function runRetentionSweep(
       });
       log.error("retention sweep partition drop failed", {
         table: policy.table,
-        windowDays,
+        maxWindowDays: maxDays,
         err: err instanceof Error ? err.message : String(err),
       });
     }
