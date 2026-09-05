@@ -7,6 +7,8 @@ import {
   RETENTION_SKIP_REASON_NO_WINDOW,
   RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED,
   RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
+  isPartitionDroppable,
+  parsePartitionBoundExpr,
   resolveProjectPolicyWindowDays,
   runRetentionSweep,
   type RetentionDeps,
@@ -68,6 +70,10 @@ beforeEach(() => {
     findByTierAndCycle: vi.fn(async () => tierLimits()),
     listRetentionOverrides: vi.fn(async () => new Map<string, number>()),
     deleteRetentionRows: vi.fn(async () => ({ deleted: 0, hitBatchCap: false })),
+    dropTablePartitionsOlderThan: vi.fn(async () => ({
+      partitionsDropped: [],
+      rowsDropped: 0,
+    })),
   };
   vi.spyOn(retentionSweepSkippedTotal, "inc");
   vi.spyOn(retentionRowsReclaimedTotal, "inc");
@@ -103,20 +109,105 @@ describe("runRetentionSweep", () => {
     );
   });
 
-  it("skips a policy whose strategy is not implemented yet", async () => {
-    // credit_ledger is DROP_PARTITION. Its window still resolves fine
-    // (tierDays=180 floored at 365 -> 365), but no delete is attempted:
-    // a silent skip is the failure mode this test exists to prevent.
+  it("still skips CHECKPOINT_TRUNCATE as not-implemented, but drives DROP_PARTITION through dropTablePartitionsOlderThan instead of deleteRetentionRows", async () => {
+    // audit_logs is CHECKPOINT_TRUNCATE (Task 5, not this task) and
+    // must still be a loud, counted skip. credit_ledger is
+    // DROP_PARTITION: its window resolves fine (tierDays=180 floored
+    // at 365 -> 365) and the lone project's requirement is fully
+    // resolved, so the drop goes ahead via the dedicated helper — a
+    // silent no-op OR a stray DELETE_ROWS call are both failure modes
+    // this test exists to catch.
     await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
 
-    const creditLedgerCalls = deps.deleteRetentionRows.mock.calls.filter(
+    const creditLedgerDeleteCalls = deps.deleteRetentionRows.mock.calls.filter(
       (call) => call[1] === "credit_ledger",
     );
-    expect(creditLedgerCalls).toHaveLength(0);
+    expect(creditLedgerDeleteCalls).toHaveLength(0);
     expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
+      reason: RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED,
+      table: "audit_logs",
+    });
+    expect(retentionSweepSkippedTotal.inc).not.toHaveBeenCalledWith({
       reason: RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED,
       table: "credit_ledger",
     });
+
+    const expectedCutoff = new Date(NOW.getTime() - 365 * MS_PER_DAY);
+    expect(deps.dropTablePartitionsOlderThan).toHaveBeenCalledWith(
+      deps.db,
+      "credit_ledger",
+      expectedCutoff,
+      365,
+      expect.any(Function),
+    );
+  });
+
+  it("blocks a DROP_PARTITION drop when even one project's window is unresolved", async () => {
+    // A partition is shared by every project. Project 1 resolves a
+    // window via its tier; project 2 has neither a tier nor an
+    // override. Dropping using only project 1's window would destroy
+    // project 2's rows the instant they land in the same physical
+    // partition, so project 2's unresolved window must block the drop
+    // entirely rather than being silently ignored.
+    deps.listProjectsWithTier.mockResolvedValue([
+      project({ projectId: "prj_1" }),
+      project({ projectId: "prj_2", tier: null, cycle: null }),
+    ]);
+
+    await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
+
+    expect(deps.dropTablePartitionsOlderThan).not.toHaveBeenCalled();
+    expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
+      reason: RETENTION_SKIP_REASON_NO_WINDOW,
+      table: "credit_ledger",
+    });
+  });
+
+  it("uses the longest resolved window across every project, not the shortest", async () => {
+    // Project 1 floors at 365. Project 2 has no tier (rule 2), so its
+    // override is unclamped by any tier ceiling — a legitimate,
+    // longer requirement the shared partitions must respect.
+    deps.listProjectsWithTier.mockResolvedValue([
+      project({ projectId: "prj_1" }),
+      project({ projectId: "prj_2", tier: null, cycle: null }),
+    ]);
+    deps.listRetentionOverrides.mockImplementation(
+      async (_db: unknown, projectId: string) =>
+        projectId === "prj_2"
+          ? new Map([["credit_ledger", 900]])
+          : new Map<string, number>(),
+    );
+
+    await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
+
+    const expectedCutoff = new Date(NOW.getTime() - 900 * MS_PER_DAY);
+    expect(deps.dropTablePartitionsOlderThan).toHaveBeenCalledWith(
+      deps.db,
+      "credit_ledger",
+      expectedCutoff,
+      900,
+      expect.any(Function),
+    );
+  });
+
+  it("does not drop a partition when no project in the fleet resolved any window for it", async () => {
+    deps.listProjectsWithTier.mockResolvedValue([]);
+
+    const result = await runRetentionSweep(
+      NOW,
+      deps as unknown as RetentionDeps,
+    );
+
+    expect(deps.dropTablePartitionsOlderThan).not.toHaveBeenCalled();
+    expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
+      reason: RETENTION_SKIP_REASON_NO_WINDOW,
+      table: "credit_ledger",
+    });
+    expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
+      reason: RETENTION_SKIP_REASON_NO_WINDOW,
+      table: "revenue_events",
+    });
+    expect(result.skipped).toBeGreaterThan(0);
   });
 
   it("continues to the next project when one project throws", async () => {
@@ -264,12 +355,23 @@ describe("runRetentionSweep", () => {
     );
 
     expect(deps.deleteRetentionRows).not.toHaveBeenCalled();
+    expect(deps.dropTablePartitionsOlderThan).not.toHaveBeenCalled();
     expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
       reason: RETENTION_SKIP_REASON_NO_WINDOW,
       table: "webhook_events",
     });
     expect(result.rowsReclaimed).toBe(0);
-    expect(result.skipped).toBe(RETENTION_POLICIES.length);
+    // One skip per (project, policy) unit, PLUS one more per
+    // DROP_PARTITION policy (credit_ledger, revenue_events): this
+    // project's unresolved window blocks their fleet-wide drop
+    // decision too, which is a second, distinct skip event on top of
+    // its own per-project "no-window" skip.
+    const dropPartitionPolicyCount = RETENTION_POLICIES.filter(
+      (p) => p.strategy === "DROP_PARTITION",
+    ).length;
+    expect(result.skipped).toBe(
+      RETENTION_POLICIES.length + dropPartitionPolicyCount,
+    );
   });
 
   it("treats a missing billing_tier_limits row for a project WITH a tier as its own skip reason, never a silent fall-through to the override-only rule", async () => {
@@ -341,5 +443,77 @@ describe("runRetentionSweep", () => {
       kind: "skip",
       reason: RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
     });
+  });
+});
+
+describe("parsePartitionBoundExpr", () => {
+  it("parses a literal FROM/TO bound exactly as pg_get_expr renders it", () => {
+    // Format verified directly against this repo's Postgres.
+    const parsed = parsePartitionBoundExpr(
+      "credit_ledger_2024_03",
+      "FOR VALUES FROM ('2024-03-01 00:00:00+00') TO ('2024-04-01 00:00:00+00')",
+    );
+    expect(parsed).toEqual({
+      name: "credit_ledger_2024_03",
+      lowerBound: new Date("2024-03-01T00:00:00.000Z"),
+      upperBound: new Date("2024-04-01T00:00:00.000Z"),
+    });
+  });
+
+  it("returns null for a DEFAULT partition", () => {
+    // credit_ledger and revenue_events have no default partition today,
+    // but this must never be treated as droppable if one is ever added.
+    expect(
+      parsePartitionBoundExpr("credit_ledger_default", "DEFAULT"),
+    ).toBeNull();
+  });
+
+  it("treats an unbounded MAXVALUE upper bound as null, never a fixed Date", () => {
+    const parsed = parsePartitionBoundExpr(
+      "x",
+      "FOR VALUES FROM ('2024-01-01 00:00:00+00') TO (MAXVALUE)",
+    );
+    expect(parsed?.upperBound).toBeNull();
+  });
+
+  it("returns null for an unrecognized bound expression rather than guessing", () => {
+    expect(parsePartitionBoundExpr("x", "some unexpected text")).toBeNull();
+  });
+});
+
+describe("isPartitionDroppable", () => {
+  const cutoff = new Date("2024-06-01T00:00:00.000Z");
+
+  it("is droppable when the whole partition predates the cutoff", () => {
+    expect(
+      isPartitionDroppable(
+        { upperBound: new Date("2024-05-01T00:00:00.000Z") },
+        cutoff,
+      ),
+    ).toBe(true);
+  });
+
+  it("is droppable when the upper bound lands exactly on the cutoff", () => {
+    // Inclusive on purpose: the partition's range is [lower, upper), so
+    // an upper bound equal to the cutoff means every row in it is
+    // strictly before the cutoff.
+    expect(isPartitionDroppable({ upperBound: cutoff }, cutoff)).toBe(true);
+  });
+
+  it("is NOT droppable when the cutoff falls inside the partition's range", () => {
+    // The single most important assertion in this module: red-checked
+    // by inverting the comparison to `>=` (which would make an
+    // in-window partition report as droppable) and confirming this
+    // test fails.
+    expect(
+      isPartitionDroppable(
+        { upperBound: new Date("2024-07-01T00:00:00.000Z") },
+        cutoff,
+      ),
+    ).toBe(false);
+  });
+
+  it("is never droppable with no fixed upper bound", () => {
+    expect(isPartitionDroppable({ upperBound: null }, cutoff)).toBe(false);
   });
 });
