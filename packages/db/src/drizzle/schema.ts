@@ -612,6 +612,13 @@ export const apiKeys = pgTable(
     expiresAt: timestamp("expiresAt", { withTimezone: true }),
     revokedAt: timestamp("revokedAt", { withTimezone: true }),
     environment: environment("environment").notNull(),
+    // Browser origins permitted to use this key, matched exactly (scheme +
+    // host + port). Empty means the key is not enabled for browser use, so
+    // every key predating the Web SDK is unchanged for native callers.
+    allowedOrigins: text("allowedOrigins")
+      .array()
+      .notNull()
+      .default(sql`'{}'`),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
