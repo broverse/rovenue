@@ -63,7 +63,11 @@ import {
   sweepLeaderboardSeasons,
 } from "./leaderboard-scheduler";
 
-const db = getDb();
+// getDb() is called per use, never captured at module scope: tests/setup.ts
+// repoints DATABASE_URL at this worker's own cloned database, and a
+// module-scope handle can be built before that assignment lands, which
+// makes the file fail under parallel workers while passing alone.
+// access-reconciliation.integration.test.ts follows the same rule.
 const schema = drizzle.schema;
 
 const RUN_ID = Date.now();
@@ -163,7 +167,7 @@ async function insertRevenueRows(rows: RawRevenueRow[]): Promise<void> {
 }
 
 async function seedProject(): Promise<string> {
-  const [proj] = await db
+  const [proj] = await getDb()
     .insert(schema.projects)
     .values({ name: `Leaderboard Scheduler Test ${nextSuffix()}` })
     .returning();
@@ -187,7 +191,7 @@ async function seedLeaderboard(
   overrides: Partial<typeof schema.leaderboards.$inferInsert> = {},
 ): Promise<SeededLeaderboard> {
   const s = nextSuffix();
-  const [row] = await db
+  const [row] = await getDb()
     .insert(schema.leaderboards)
     .values({
       projectId,
@@ -219,7 +223,7 @@ async function seedActiveSeason(input: {
   startsAt: Date;
   endsAt: Date;
 }): Promise<string> {
-  const [row] = await db
+  const [row] = await getDb()
     .insert(schema.leaderboardSeasons)
     .values({
       leaderboardId: input.leaderboardId,
@@ -234,7 +238,7 @@ async function seedActiveSeason(input: {
 }
 
 async function seasonsFor(leaderboardId: string) {
-  return db
+  return getDb()
     .select()
     .from(schema.leaderboardSeasons)
     .where(eq(schema.leaderboardSeasons.leaderboardId, leaderboardId))
@@ -242,7 +246,7 @@ async function seasonsFor(leaderboardId: string) {
 }
 
 async function standingsFor(seasonId: string) {
-  return db
+  return getDb()
     .select()
     .from(schema.leaderboardStandings)
     .where(eq(schema.leaderboardStandings.seasonId, seasonId))
@@ -480,7 +484,7 @@ describe.sequential("leaderboard scheduler against a real database", () => {
     expect(failedResult.closed).toBe(0);
     expect(failedResult.skipped).toBeGreaterThanOrEqual(1);
 
-    const [seasonAfterFailure] = await db
+    const [seasonAfterFailure] = await getDb()
       .select()
       .from(schema.leaderboardSeasons)
       .where(eq(schema.leaderboardSeasons.id, seasonId));
