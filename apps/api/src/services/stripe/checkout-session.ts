@@ -38,6 +38,14 @@ export interface CreateCheckoutSessionInput {
   packageIdentifier: string;
   successUrl: string;
   cancelUrl: string;
+  /**
+   * The client's `Idempotency-Key`, passed straight to Stripe when present.
+   *
+   * Stripe's own idempotency is used rather than a scheme of our own: it is
+   * authoritative for the charge, and it survives this process restarting
+   * mid-request, which a local record would not.
+   */
+  idempotencyKey?: string;
 }
 
 export interface CheckoutSession {
@@ -114,6 +122,7 @@ export async function createCheckoutSession(
     packageIdentifier,
     successUrl,
     cancelUrl,
+    idempotencyKey,
   } = input;
 
   // Both URLs, not just the success one: a cancel URL is followed by a real
@@ -134,22 +143,42 @@ export async function createCheckoutSession(
 
   const { account } = await requireConnectedStripe(projectId);
 
-  const session = await account.checkout.sessions.create({
-    mode: "subscription",
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: safeSuccessUrl,
-    cancel_url: safeCancelUrl,
-    metadata: {
-      [ROVENUE_SUBSCRIBER_METADATA_KEY]: subscriberId,
-      package_identifier: packageIdentifier,
+  // Reuse the subscriber's existing Stripe customer when they have one.
+  //
+  // Stripe creates a Customer itself when a subscription-mode session
+  // completes, so a first-time buyer needs nothing here. A RETURNING one does:
+  // without this, a subscriber who already bought through a funnel gets a
+  // second customer on their first web checkout, and the billing portal —
+  // which resolves the latest — then shows them only one of the two.
+  //
+  // Passed only when present. Stripe rejects an explicit null for this field,
+  // so the property must be absent rather than nulled.
+  const existingCustomerId =
+    await drizzle.funnelPurchaseRepo.findLatestStripeCustomerIdForSubscriber(
+      db,
+      subscriberId,
+    );
+
+  const session = await account.checkout.sessions.create(
+    {
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: safeSuccessUrl,
+      cancel_url: safeCancelUrl,
+      ...(existingCustomerId ? { customer: existingCustomerId } : {}),
+      metadata: {
+        [ROVENUE_SUBSCRIBER_METADATA_KEY]: subscriberId,
+        package_identifier: packageIdentifier,
+      },
+      // Carried onto the subscription as well as the session: the webhooks
+      // that matter (customer.subscription.*) see the subscription's
+      // metadata, not the session's.
+      subscription_data: {
+        metadata: { [ROVENUE_SUBSCRIBER_METADATA_KEY]: subscriberId },
+      },
     },
-    // Carried onto the subscription as well as the session: the webhooks that
-    // matter (customer.subscription.*) see the subscription's metadata, not
-    // the session's.
-    subscription_data: {
-      metadata: { [ROVENUE_SUBSCRIBER_METADATA_KEY]: subscriberId },
-    },
-  });
+    idempotencyKey ? { idempotencyKey } : undefined,
+  );
 
   if (!session.url) {
     throw new HTTPException(502, {

@@ -53,6 +53,10 @@ export const checkoutRoute = new Hono()
         packageIdentifier,
         successUrl,
         cancelUrl,
+        // Forwarded verbatim to Stripe. A double-submitted checkout must not
+        // become two subscriptions, and Stripe's own idempotency is the
+        // authority for that — it outlives this process.
+        idempotencyKey: c.req.header("Idempotency-Key") ?? undefined,
       });
       return c.json(ok(session));
     } catch (err) {

@@ -39,6 +39,7 @@ const resolveSubscriberByRovenueIdMock = vi.fn();
 const listByProjectMock = vi.fn();
 const findOfferingByIdMock = vi.fn();
 const findProductsByIdsMock = vi.fn();
+const findLatestStripeCustomerIdMock = vi.fn();
 
 vi.mock("@rovenue/db", () => ({
   drizzle: {
@@ -61,6 +62,10 @@ vi.mock("@rovenue/db", () => ({
     offeringRepo: {
       findOfferingById: (...args: unknown[]) => findOfferingByIdMock(...args),
       findProductsByIds: (...args: unknown[]) => findProductsByIdsMock(...args),
+    },
+    funnelPurchaseRepo: {
+      findLatestStripeCustomerIdForSubscriber: (...args: unknown[]) =>
+        findLatestStripeCustomerIdMock(...args),
     },
   },
 }));
@@ -113,6 +118,7 @@ beforeEach(() => {
   listByProjectMock.mockReset();
   findOfferingByIdMock.mockReset();
   findProductsByIdsMock.mockReset();
+  findLatestStripeCustomerIdMock.mockReset();
   requireConnectedStripeMock.mockReset();
 
   findApiKeyByPublicMock.mockResolvedValue({
@@ -138,6 +144,7 @@ beforeEach(() => {
   findProductsByIdsMock.mockResolvedValue([
     { id: PRODUCT_ID, storeIds: { stripe: RESOLVED_PRICE_ID } },
   ]);
+  findLatestStripeCustomerIdMock.mockResolvedValue(null);
   sessionsCreateMock = vi.fn(async () => ({
     id: "cs_1",
     url: "https://checkout.stripe.com/c/pay/cs_1",
@@ -258,6 +265,91 @@ describe("POST /v1/checkout", () => {
     });
     expect(res.status).toBe(400);
     expect(sessionsCreateMock).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------
+  // Customer reuse and idempotency
+  // ---------------------------------------------------------------
+  //
+  // Stripe creates the Customer when a subscription-mode session COMPLETES,
+  // not when it is created, so two concurrent sessions cannot mint two
+  // customers on their own — serialising session creation would prevent
+  // nothing while looking like it did. The duplicate that IS reachable is a
+  // subscriber who already has a customer (from a funnel purchase, say)
+  // starting a web checkout: without reuse Stripe makes a second one, and the
+  // billing portal, which resolves the latest, then shows them only one.
+
+  it("reuses the subscriber's existing Stripe customer", async () => {
+    findLatestStripeCustomerIdMock.mockResolvedValue("cus_existing");
+    const res = await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: authedHeaders(),
+      body: validBody(),
+    });
+
+    expect(res.status).toBe(200);
+    const session = sessionsCreateMock.mock.calls[0]?.[0] as {
+      customer?: string;
+    };
+    expect(session.customer).toBe("cus_existing");
+  });
+
+  it("lets Stripe create the customer for a first-time buyer", async () => {
+    findLatestStripeCustomerIdMock.mockResolvedValue(null);
+    const res = await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: authedHeaders(),
+      body: validBody(),
+    });
+
+    expect(res.status).toBe(200);
+    const session = sessionsCreateMock.mock.calls[0]?.[0] as {
+      customer?: string;
+    };
+    // Absent, not null — Stripe rejects an explicit null for this field.
+    expect(session.customer).toBeUndefined();
+  });
+
+  it("looks the customer up for the AUTHENTICATED subscriber", async () => {
+    findLatestStripeCustomerIdMock.mockResolvedValue("cus_existing");
+    await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: authedHeaders(),
+      body: validBody(),
+    });
+    expect(findLatestStripeCustomerIdMock).toHaveBeenCalledWith(
+      expect.anything(),
+      SUBSCRIBER_ID,
+    );
+  });
+
+  it("passes an Idempotency-Key through to Stripe", async () => {
+    const key = "idem_abc_123";
+    const res = await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: { ...authedHeaders(), "Idempotency-Key": key },
+      body: validBody(),
+    });
+
+    expect(res.status).toBe(200);
+    // Stripe's own idempotency is authoritative and survives our process
+    // restarting; a second scheme here would only be a worse copy of it.
+    const options = sessionsCreateMock.mock.calls[0]?.[1] as
+      | { idempotencyKey?: string }
+      | undefined;
+    expect(options?.idempotencyKey).toBe(key);
+  });
+
+  it("omits the idempotency option when the client sends no key", async () => {
+    await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: authedHeaders(),
+      body: validBody(),
+    });
+    const options = sessionsCreateMock.mock.calls[0]?.[1] as
+      | { idempotencyKey?: string }
+      | undefined;
+    expect(options?.idempotencyKey).toBeUndefined();
   });
 
   it("401s without a Bearer key", async () => {
