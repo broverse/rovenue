@@ -17,6 +17,12 @@ vi.mock("@rovenue/db", () => ({
   Store: {},
   WebhookEventStatus: {},
   WebhookSource: {},
+  // `apple-webhook.ts` calls this at MODULE scope, so the stub has to be
+  // callable, not merely present: this file reaches it through
+  // `webhook-processor`'s side-effect import chain. Nothing here inspects
+  // the value — the suite only reads queue-name constants — so the
+  // identity stub is honest about testing nothing.
+  revenueDedupeKind: () => "purchase",
   // The webhook processors now transitively load the audit lib
   // (`drizzle.schema.auditLogs`) via the status-transition guard, so
   // the side-effect imports below need a `drizzle` namespace present.
