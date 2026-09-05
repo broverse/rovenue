@@ -857,6 +857,13 @@
       "breakpoints": true
     },
     {
+      "idx": 122,
+      "version": "7",
+      "when": 1788619004577,
+      "tag": "0122_api_key_allowed_origins",
+      "breakpoints": true
+    },
+    {
       "idx": 123,
       "version": "7",
       "when": 1788590009154,
