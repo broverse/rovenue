@@ -1,9 +1,12 @@
-import { createHttpClient, type HttpClient } from "./client";
+import { createHttpClient, RovenueApiError, type HttpClient } from "./client";
 import { createIdentity, type Identity } from "./identity";
 import { createMemoryStorage, type SdkStorage } from "./storage";
+import { createEntitlementCache, type CachedEntitlements } from "./cache";
 
 export { RovenueApiError } from "./client";
+export { createStorage, createMemoryStorage } from "./storage";
 export type { SdkStorage } from "./storage";
+export type { CachedEntitlements } from "./cache";
 
 // =============================================================
 // @rovenue/web-sdk
@@ -41,6 +44,17 @@ export interface Rovenue {
   identify(appUserId: string): void;
   logOut(): void;
   getEntitlements(): Promise<Record<string, unknown>>;
+  /**
+   * Last-known entitlements, or null if nothing has been fetched yet.
+   *
+   * Synchronous and network-free, so a first paint can render the truth the
+   * server gave last time instead of a flash of the paywall a subscriber has
+   * already paid to remove. It is a cache, never an authorization decision:
+   * the storage behind it is viewer-editable.
+   */
+  getCachedEntitlements(): Record<string, unknown> | null;
+  /** The cache entry with its timestamp, for callers that need staleness. */
+  getCachedEntitlementsEntry(): CachedEntitlements | null;
   getOfferings(): Promise<unknown>;
   getPlacement(identifier: string): Promise<unknown>;
   /**
@@ -68,6 +82,7 @@ export function configure(options: RovenueOptions): Rovenue {
 
   const storage = options.storage ?? createMemoryStorage();
   const identity = createIdentity(storage);
+  const cache = createEntitlementCache(storage);
   const http = createHttpClient({
     apiUrl: options.apiUrl,
     publicKey: options.apiKey,
@@ -80,11 +95,39 @@ export function configure(options: RovenueOptions): Rovenue {
     identity,
     rovenueId: () => identity.rovenueId(),
     identify: (appUserId) => identity.identify(appUserId),
-    logOut: () => identity.logOut(),
-    async getEntitlements() {
-      const data = await http.get<EntitlementsResponse>("/me/entitlements");
-      return data.entitlements;
+    logOut: () => {
+      // The cache belongs to the previous identity. Leaving it would show the
+      // next person the last one's entitlements.
+      cache.clear();
+      identity.logOut();
     },
+    async getEntitlements() {
+      try {
+        const data = await http.get<EntitlementsResponse>("/me/entitlements");
+        cache.write(data.entitlements);
+        return data.entitlements;
+      } catch (err) {
+        // Serving the cache is right for a failure the app cannot fix and the
+        // viewer will recover from — offline, DNS, a 5xx. It is WRONG for a
+        // 4xx: a revoked key, a wrong project or a rejected origin is a
+        // configuration error, and answering it from cache hides it for as
+        // long as the cache survives, which is exactly when a developer most
+        // needs to see it.
+        //
+        // The one 4xx that is not a misconfiguration is 429, where backing
+        // off and showing last-known is the correct behaviour.
+        const status = err instanceof RovenueApiError ? err.status : null;
+        const serveFromCache =
+          status === null || status >= 500 || status === 429;
+        if (!serveFromCache) throw err;
+
+        const cached = cache.read();
+        if (cached) return cached.entitlements;
+        throw err;
+      }
+    },
+    getCachedEntitlements: () => cache.read()?.entitlements ?? null,
+    getCachedEntitlementsEntry: () => cache.read(),
     getOfferings: () => http.get("/offerings"),
     // An unknown placement returns an empty envelope rather than a 404, so
     // this resolves rather than throwing — the caller renders nothing.
