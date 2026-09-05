@@ -87,6 +87,17 @@ function toRevenueEnvelope(
     // gives the platforms a stable match key. Email/phone enrichment is a
     // follow-up in the delivery worker.
     identityContext: subscriberId ? { externalId: subscriberId } : undefined,
+    // Lift ONLY the scalar `reason` discriminator (e.g. distinguishes a
+    // win-back revenue.REACTIVATION from applyRefundReversed's accounting
+    // reversal). Never spread `metadata` itself — it also carries
+    // presentedContext (placementId/paywallId/variantId/experimentKey),
+    // which must not widen every customer's webhook body.
+    revenueEventReason:
+      payload.metadata !== null &&
+      typeof payload.metadata === "object" &&
+      !Array.isArray(payload.metadata)
+        ? asStr((payload.metadata as Record<string, unknown>).reason)
+        : undefined,
   };
 }
 

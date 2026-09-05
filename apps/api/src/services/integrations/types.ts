@@ -83,6 +83,12 @@ export interface RovenueEventEnvelope {
   eventType: RovenueEventType;
   occurredAt: string;
   revenueEventKind?: RevenueEventKind;
+  /** Revenue discriminator lifted from the outbox payload's
+   *  `metadata.reason` (e.g. distinguishes a win-back REACTIVATION from
+   *  applyRefundReversed's accounting-reversal REACTIVATION). Scalar only —
+   *  never spread the whole `metadata` object, which also carries paywall
+   *  attribution internals (presentedContext). */
+  revenueEventReason?: string;
   amount?: string;
   currency?: string;
   subscriberId?: string;
