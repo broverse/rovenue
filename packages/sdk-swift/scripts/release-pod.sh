@@ -102,6 +102,7 @@ Artifacts built. Nothing was uploaded, patched, committed or tagged.
     checksum (binaryTarget checksum:)     $XCF_SHA
 
 To publish, run the release-sdk.yml workflow with swift: true.
-It uploads both, pins both checksums, then tags — in that order.
+It pins both checksums, commits, tags that commit, then uploads and
+publishes — checksums first, because they describe these local files.
 ──────────────────────────────────────────────────────────────
 REPORT

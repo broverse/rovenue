@@ -25,10 +25,11 @@
 # a platform channel, so it cannot function on a real iOS install until that
 # pod is live on Trunk. This is now enforced by the graph, not by caution:
 # publish-flutter declares `needs: [verify, publish-swift]`, and publish-swift
-# itself uploads the release artifacts, pins both checksums, lints and pushes
-# to Trunk, and tags — all before it reports success. So a green publish-flutter
-# run in this workflow does mean the Rovenue pod already shipped at this
-# version.
+# pins both checksums, commits, tags the pin commit, uploads the release
+# artifacts, lints, pushes to Trunk and finally publishes the SwiftPM
+# distribution repository — all before it reports success. So a green
+# publish-flutter run in this workflow does mean the Rovenue pod already
+# shipped at this version.
 name: release-sdk
 
 on:
@@ -180,22 +181,77 @@ jobs:
     # it, so it needs write access and an attached-branch checkout (default
     # actions/checkout leaves a detached HEAD, and `git push` with no
     # refspec fails from one).
+    #
+    # ── RECOVERY: this job fails partway. What now? ───────────────────────
+    # Steps in execution order, and what re-running the WHOLE job does at each:
+    #
+    #  1 preflight       read-only. Re-run freely.
+    #  2 build           writes only packages/sdk-swift/build/. Re-run freely.
+    #  3 checksums       reads the local zips. Re-run freely.
+    #  4 pin + push      re-runnable: the commit is skipped when the sha is
+    #                    already pinned. A failing PUSH is almost always branch
+    #                    protection — `contents: write` does NOT bypass
+    #                    protection rules. Nothing has escaped yet: land the pin
+    #                    commit by hand (or exempt the bot) and re-run.
+    #  5 tag + push tag  `git tag` fails if sdk-swift-v<v> already exists.
+    #                    Nothing is published yet, so deleting it is safe:
+    #                    `git push --delete origin sdk-swift-v<v>`, then re-run.
+    #  6 gh release      fails if the release already exists. Either
+    #                    `gh release delete sdk-swift-v<v> --yes` (keep the tag)
+    #                    and re-run, or `gh release upload <tag> <both zips>
+    #                    --clobber` and resume BY HAND from step 7.
+    #  7 pod spec lint   read-only. Re-run freely.
+    #  8 pod trunk push  IRREVERSIBLE. Trunk never deletes or replaces a
+    #                    published version. Once this succeeds, DO NOT re-run
+    #                    the job — it dies here on a duplicate version. If a
+    #                    later step fails, run step 9 by hand (one script plus
+    #                    a git push, both runnable from a workstation), or ship
+    #                    the fix as the next patch version.
+    #  9 swiftpm dist    regenerated from scratch and `swift package resolve`d
+    #                    against the live release BEFORE its tag is pushed, so
+    #                    a bad url/checksum fails while still recoverable. The
+    #                    branch push is --force; the TAG push is not, so an
+    #                    existing <v> tag in <repoSlug>-swift is refused rather
+    #                    than silently moved — delete it there and re-run.
+    #
+    # publish-flutter has `needs: publish-swift`, so a failure here skips the
+    # Flutter publish too; see that job's comment for the deliberate re-run.
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+
+      # 1. Everything that can be checked before an irreversible step is
+      #    checked before it. Creating <repoSlug>-swift is the operator's job,
+      #    not this workflow's, so its absence on a first release is realistic
+      #    — and discovering it in step 9, after `pod trunk push`, leaves a
+      #    published pod and no way to re-run.
+      - name: Preflight the distribution repository
+        run: |
+          test -n "$GH_TOKEN" || { echo "✗ SWIFT_DIST_REPO_TOKEN is unset"; exit 1; }
+          SLUG=$(ruby -rjson -e "print JSON.parse(File.read('packages/sdk-swift/release.config.json'))['repoSlug']")
+          git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${SLUG}-swift.git" >/dev/null \
+            || { echo "✗ cannot reach ${SLUG}-swift — create it and grant SWIFT_DIST_REPO_TOKEN push access before releasing"; exit 1; }
+        env:
+          GH_TOKEN: ${{ secrets.SWIFT_DIST_REPO_TOKEN }}
+
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
 
-      # 1. Build both artifacts. The script mutates nothing.
+      # 2. Build both artifacts. The script mutates nothing outside build/.
       - name: Build release artifacts
         working-directory: packages/sdk-swift
         run: ./scripts/release-pod.sh
 
-      # 2. Upload before pinning: a checksum must describe a file that exists.
-      - name: Create GitHub Release
+      # 3. Both checksums are computed over LOCAL files. Uploading does not
+      #    change their bytes, so there is no reason to publish anything first
+      #    — which is what let the tag land on the pre-pin commit. Every later
+      #    step reads these outputs instead of re-deriving names from the
+      #    config, so the two zip filenames exist in exactly one place here.
+      - name: Compute release checksums
+        id: artifacts
         working-directory: packages/sdk-swift
         run: |
           VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
@@ -203,52 +259,98 @@ jobs:
           XCF_NAME=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['xcframeworkName']")
           POD_ZIP="build/$POD_NAME-$VERSION.zip"
           XCF_ZIP="build/${XCF_NAME%.xcframework}-$VERSION.xcframework.zip"
-          gh release create "sdk-swift-v$VERSION" \
+          {
+            echo "version=$VERSION"
+            echo "tag=sdk-swift-v$VERSION"
+            echo "pod_zip=packages/sdk-swift/$POD_ZIP"
+            echo "xcf_zip=packages/sdk-swift/$XCF_ZIP"
+            echo "pod_sha256=$(shasum -a 256 "$POD_ZIP" | awk '{print $1}')"
+            echo "xcf_checksum=$(swift package compute-checksum "$XCF_ZIP")"
+          } >> "$GITHUB_OUTPUT"
+
+      # 4. Pin, commit and push BEFORE tagging, so the tag names a tree whose
+      #    podspec already carries the real sha256. Previously the tag was
+      #    created first and `git checkout <tag> && cat Rovenue.podspec` showed
+      #    the 000…0 placeholder.
+      - name: Pin podspec sha256 and commit
+        working-directory: packages/sdk-swift
+        run: |
+          sed -i'' -E "s/:sha256 => '[0-9a-fA-F]{64}'/:sha256 => '$POD_SHA256'/" Rovenue.podspec
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Rovenue.podspec
+          # On a re-run after a partial failure the sha is already pinned;
+          # "nothing to commit" is a success condition here, not a failure.
+          git diff --cached --quiet \
+            || git commit -m "chore(sdk-swift): pin Rovenue podspec sha256 for v$VERSION"
+          git push
+        env:
+          POD_SHA256: ${{ steps.artifacts.outputs.pod_sha256 }}
+          VERSION: ${{ steps.artifacts.outputs.version }}
+
+      # 5. Tag the pin commit explicitly. `gh release create` with no --target
+      #    creates its tag at the DEFAULT BRANCH head, not at the checked-out
+      #    ref — dispatch this workflow from any other branch and the tag would
+      #    describe different code from the artifacts it ships.
+      - name: Tag the pinned commit
+        run: |
+          git tag -a "$TAG" -m "sdk-swift $TAG"
+          git push origin "$TAG"
+        env:
+          TAG: ${{ steps.artifacts.outputs.tag }}
+
+      # 6. Create the release against the tag that now exists, uploading both
+      #    local zips. --target is belt-and-braces for the case where the tag
+      #    somehow does not exist: it must be HEAD (the pin commit), NOT
+      #    github.sha, which is the commit BEFORE the pin.
+      - name: Create GitHub Release
+        run: |
+          gh release create "$TAG" \
             "$POD_ZIP" \
             "$XCF_ZIP" \
+            --target "$(git rev-parse HEAD)" \
             --title "sdk-swift v$VERSION" \
             --notes "Rovenue Swift façade $VERSION."
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.artifacts.outputs.tag }}
+          VERSION: ${{ steps.artifacts.outputs.version }}
+          POD_ZIP: ${{ steps.artifacts.outputs.pod_zip }}
+          XCF_ZIP: ${{ steps.artifacts.outputs.xcf_zip }}
 
-      # 3. Pin both checksums against the uploaded files.
-      - name: Pin podspec sha256
-        working-directory: packages/sdk-swift
-        run: |
-          VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
-          POD_NAME=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['podName']")
-          POD_ZIP="build/$POD_NAME-$VERSION.zip"
-          SHA=$(shasum -a 256 "$POD_ZIP" | awk '{print $1}')
-          sed -i'' -E "s/:sha256 => '[0-9a-fA-F]{64}'/:sha256 => '$SHA'/" Rovenue.podspec
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Rovenue.podspec
-          git commit -m "chore(sdk-swift): pin Rovenue podspec sha256 for v$VERSION"
-          git push
-
-      # 4. Release lint runs against the now-live :http source — this is where
+      # 7. Release lint runs against the now-live :http source — this is where
       #    `pod spec lint` belongs, and the only place it can pass.
       - name: pod spec lint
         working-directory: packages/sdk-swift
         run: pod spec lint Rovenue.podspec --allow-warnings --skip-tests
 
+      # 8. IRREVERSIBLE — see the RECOVERY block at the top of this job.
       - name: pod trunk push
         working-directory: packages/sdk-swift
         run: pod trunk push Rovenue.podspec --allow-warnings
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
 
-      # 5. Generate and push the SwiftPM distribution repository, then tag it
-      #    LAST — a consumer resolving the tag must find the pinned checksum.
+      # 9. Generate the SwiftPM distribution repository, PROVE it resolves,
+      #    then push its tag last — a consumer resolving that tag must find a
+      #    binaryTarget whose url and checksum both work.
       - name: Publish SwiftPM distribution package
         working-directory: packages/sdk-swift
         run: |
-          VERSION=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['version']")
           SLUG=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['repoSlug']")
-          XCF_NAME=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['xcframeworkName']")
-          XCF_ZIP="build/${XCF_NAME%.xcframework}-$VERSION.xcframework.zip"
-          CHK=$(swift package compute-checksum "$XCF_ZIP")
-          ./scripts/generate-swift-dist.sh "$CHK"
+          ./scripts/generate-swift-dist.sh "$XCF_CHECKSUM"
+          # The release exists by now, so this downloads the pinned zip and
+          # verifies its checksum for real. A url that 404s or a checksum taken
+          # over a stale zip fails HERE, before the distribution tag exists,
+          # instead of becoming a permanently broken tag.
+          #
+          # Resolved in a COPY: `swift package resolve` writes a .build/
+          # directory into the package root, and `git add -A` below would
+          # commit it into the distribution repo.
+          PROBE="$RUNNER_TEMP/swift-dist-resolve"
+          rm -rf "$PROBE"
+          cp -R build/swift-dist "$PROBE"
+          ( cd "$PROBE" && swift package resolve )
           cd build/swift-dist
           git init -q .
           git config user.name "github-actions[bot]"
@@ -256,9 +358,16 @@ jobs:
           git add -A
           git commit -q -m "Rovenue Swift SDK $VERSION"
           git tag "$VERSION"
-          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${SLUG}-swift.git" HEAD:main --tags
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${SLUG}-swift.git"
+          # main is regenerated output, so force is correct there. The tag is
+          # not: a published SwiftPM tag must never move under a consumer, so
+          # push it separately and let a collision fail the step.
+          git push --force "$REMOTE" HEAD:main
+          git push "$REMOTE" "refs/tags/$VERSION"
         env:
           GH_TOKEN: ${{ secrets.SWIFT_DIST_REPO_TOKEN }}
+          VERSION: ${{ steps.artifacts.outputs.version }}
+          XCF_CHECKSUM: ${{ steps.artifacts.outputs.xcf_checksum }}
 
   publish-flutter:
     name: Publish Flutter (pub.dev)
