@@ -446,3 +446,38 @@ describe("GET /dashboard/projects/:projectId/leaderboards/seasons/:seasonId/stan
     expect(body.data.standings.map((s) => s.subscriberId)).toEqual(["sub1"]);
   });
 });
+
+describe("PATCH /dashboard/projects/:projectId/leaderboards/:id", () => {
+  it("rejects an empty patch with 400, not a 404 on a row that exists", async () => {
+    addMembership("p1", "owner1", "OWNER");
+    const lb = addLeaderboard({ projectId: "p1" });
+
+    const res = await req(
+      "PATCH",
+      `/dashboard/projects/p1/leaderboards/${lb.id}`,
+      { user: "owner1", body: {} },
+    );
+
+    // updateLeaderboard would return null for this (nothing to set) the
+    // same way it does for "no such row" -- the route itself must tell
+    // those apart rather than reporting an existing leaderboard as
+    // missing.
+    expect(res.status).toBe(400);
+    expect(updateLeaderboard).not.toHaveBeenCalled();
+  });
+
+  it("still applies a non-empty patch normally", async () => {
+    addMembership("p1", "owner1", "OWNER");
+    const lb = addLeaderboard({ projectId: "p1", name: "Old Name" });
+
+    const res = await req(
+      "PATCH",
+      `/dashboard/projects/p1/leaderboards/${lb.id}`,
+      { user: "owner1", body: { name: "New Name" } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { leaderboard: { name: string } } };
+    expect(body.data.leaderboard.name).toBe("New Name");
+  });
+});

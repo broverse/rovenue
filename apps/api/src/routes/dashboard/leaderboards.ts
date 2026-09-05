@@ -10,6 +10,7 @@ import { ok } from "../../lib/response";
 import { queryAnalytics } from "../../lib/clickhouse";
 import { validateCadence } from "../../services/leaderboards/cadence";
 import { queryStandings } from "../../services/leaderboards/standings-query";
+import { isUniqueViolationOf } from "../../lib/pg-errors";
 
 // =============================================================
 // Dashboard: Leaderboards (Plan 3 §B.2, ROADMAP §12 item 3)
@@ -66,6 +67,12 @@ const MAX_ENTRY_LIMIT = 1000;
 const MAX_IDENTIFIER_LENGTH = 100;
 const MAX_NAME_LENGTH = 200;
 const DEFAULT_TIMEZONE = "UTC";
+
+// Unique INDEX name from migration 0121 (packages/db/src/drizzle/schema.ts
+// `leaderboards.projectIdIdentifierKey`). Postgres reports the index name
+// in the unique_violation error's `constraint` field, same as the
+// `uniqueIndex(...)` pattern `custom-domains.ts` already matches on.
+const LEADERBOARD_IDENTIFIER_UNIQUE = "leaderboards_projectId_identifier_key";
 
 const leaderboardQuerySchema = z
   .object({
@@ -335,7 +342,15 @@ export const leaderboardsRoute = new Hono()
       );
       return c.json(ok({ leaderboard }));
     } catch (err) {
-      if (err instanceof Error && /unique/i.test(err.message)) {
+      // Drizzle wraps the driver error as DrizzleQueryError, whose
+      // `.message` is just "Failed query: <sql>\nparams: <params>" — it
+      // never contains the word "unique". Matching on message text is
+      // therefore dead code: the real Postgres error (code 23505 + the
+      // constraint name) sits one level down on `.cause`, which is what
+      // `isUniqueViolationOf` walks. See lib/pg-errors.ts and
+      // custom-domains.ts for the same trap having already been found
+      // once in this codebase.
+      if (isUniqueViolationOf(err, LEADERBOARD_IDENTIFIER_UNIQUE)) {
         throw new HTTPException(409, {
           message: `Leaderboard identifier already in use: ${body.identifier}`,
         });
@@ -347,8 +362,10 @@ export const leaderboardsRoute = new Hono()
   //
   // Keyed by season id, NOT project id: resolve the season, then its
   // leaderboard, then authorise against THAT leaderboard's own projectId.
-  // Registered ahead of "/:id" so the literal "seasons" segment is never
-  // captured by the ":id" param.
+  // (Placed here, ahead of "/:id", purely for reading order next to the
+  // other season-shaped routes -- Hono's router matches by segment count,
+  // so this 3-segment path can never collide with the 1- or 2-segment
+  // ":id" routes regardless of registration order.)
   .get("/seasons/:seasonId/standings", async (c) => {
     const seasonId = c.req.param("seasonId");
     if (!seasonId) {
@@ -471,6 +488,15 @@ export const leaderboardsRoute = new Hono()
     const user = c.get("user");
     await assertProjectCapability(projectId, user.id, "leaderboards:write");
     const body = c.req.valid("json");
+
+    // updateLeaderboard returns null both for "no such row" AND for an
+    // empty patch (nothing to set) -- the route is the only place that
+    // can tell those apart, so it must reject the empty-body case itself
+    // rather than let it fall through and misreport as a 404 on a row
+    // that actually exists.
+    if (Object.keys(body).length === 0) {
+      throw new HTTPException(400, { message: "No fields to update" });
+    }
 
     if (body.timezone !== undefined && !isValidTimezone(body.timezone)) {
       throw new HTTPException(400, {
