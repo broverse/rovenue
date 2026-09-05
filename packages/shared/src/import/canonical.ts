@@ -40,3 +40,34 @@ export const CANONICAL_FIELDS = [
 export type CanonicalField = (typeof CANONICAL_FIELDS)[number]["key"];
 
 export type CanonicalRow = Partial<Record<CanonicalField, string>>;
+
+/**
+ * An import job's kind decides which canonical fields it must have.
+ *
+ * A history import creates purchases, so it needs enough to describe
+ * one. An enrichment import creates nothing — it patches a token onto
+ * rows a previous import already wrote — so demanding `store` and
+ * `purchaseDate` of it is demanding data its source file cannot
+ * contain. That mismatch is the whole reason the
+ * `revenuecat_google_token` preset was detectable but never importable.
+ *
+ * Keyed by kind rather than derived from a `required` flag so that
+ * adding a kind without declaring its required fields is a compile
+ * error, not a silent inheritance of the wrong set.
+ */
+export type ImportJobKind = "HISTORY" | "GOOGLE_TOKEN_ENRICHMENT";
+
+export const HISTORY_REQUIRED_FIELDS = CANONICAL_FIELDS.filter((f) => f.required).map(
+  (f) => f.key,
+) as readonly CanonicalField[];
+
+export const GOOGLE_TOKEN_ENRICHMENT_REQUIRED_FIELDS = [
+  "subscriberExternalId",
+  "productIdentifier",
+  "googlePurchaseToken",
+] as const satisfies readonly CanonicalField[];
+
+export const REQUIRED_FIELDS_BY_KIND: Record<ImportJobKind, readonly CanonicalField[]> = {
+  HISTORY: HISTORY_REQUIRED_FIELDS,
+  GOOGLE_TOKEN_ENRICHMENT: GOOGLE_TOKEN_ENRICHMENT_REQUIRED_FIELDS,
+};
