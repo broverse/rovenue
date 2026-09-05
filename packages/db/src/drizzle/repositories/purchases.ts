@@ -433,3 +433,46 @@ export async function findActiveStripeSubscriptionIds(
     );
   return rows.map((r) => r.storeTransactionId);
 }
+
+// =============================================================
+// Google purchase-token enrichment lookup
+// =============================================================
+
+/**
+ * Every PLAY_STORE purchase row for one (subscriber, product) pair.
+ *
+ * NOT a unique key. `purchases` has exactly one unique index —
+ * (store, storeTransactionId) — and a subscriber legitimately holds one
+ * row per renewal plus, over time, several distinct subscription chains
+ * for the same product (a resubscribe after a lapse). So this returns
+ * ALL of them and deliberately does not pick one: the Google
+ * purchase-token enrichment pass groups them by `originalTransactionId`
+ * and fails closed when more than one chain comes back, rather than
+ * guessing which chain the token belongs to.
+ *
+ * Migration 0125's index on (subscriberId, productId) is partial —
+ * WHERE store = 'PLAY_STORE' AND "googlePurchaseToken" IS NULL — so it
+ * cannot serve this query on its own. That is intentional: the caller
+ * has to see the already-enriched rows too, or it cannot tell
+ * `alreadyEnriched` from `enriched`, and an enrichment that reported
+ * "enriched" on a re-run would not be idempotent.
+ *
+ * Ordered so a caller's reported purchase ids are stable across runs.
+ */
+export async function findPlayStorePurchasesBySubscriberAndProduct(
+  db: DbOrTx,
+  args: { projectId: string; subscriberId: string; productId: string },
+): Promise<Purchase[]> {
+  return db
+    .select()
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.projectId, args.projectId),
+        eq(purchases.subscriberId, args.subscriberId),
+        eq(purchases.productId, args.productId),
+        eq(purchases.store, "PLAY_STORE"),
+      ),
+    )
+    .orderBy(purchases.purchaseDate, purchases.id);
+}
