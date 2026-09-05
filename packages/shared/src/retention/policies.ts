@@ -71,12 +71,31 @@ export interface RetentionPolicy {
  * then floored at the policy's own `minimumDays`, which outranks both
  * the tier and any override: some data (a financial ledger, an audit
  * trail) has a retention floor no tier or project may go below.
+ *
+ * Both `tierDays` and `projectOverrideDays` must be finite. A NaN or
+ * Infinity input would otherwise flow silently into a caller's
+ * `now - days` cutoff arithmetic and produce an Invalid Date — a
+ * retention sweep computed against a meaningless cutoff is exactly
+ * the failure mode this function must not permit quietly.
  */
 export function resolveRetentionWindowDays(args: {
   policy: RetentionPolicy;
   tierDays: number;
   projectOverrideDays: number | null;
 }): number {
+  if (!Number.isFinite(args.tierDays)) {
+    throw new Error(
+      `resolveRetentionWindowDays: tierDays must be a finite number, got ${args.tierDays}`,
+    );
+  }
+  if (
+    args.projectOverrideDays !== null &&
+    !Number.isFinite(args.projectOverrideDays)
+  ) {
+    throw new Error(
+      `resolveRetentionWindowDays: projectOverrideDays must be a finite number or null, got ${args.projectOverrideDays}`,
+    );
+  }
   const requested = args.projectOverrideDays ?? args.tierDays;
   const clampedToTier = Math.min(requested, args.tierDays);
   return Math.max(args.policy.minimumDays, clampedToTier);
@@ -91,8 +110,20 @@ export function resolveRetentionWindowDays(args: {
 const AUDIT_LOG_MINIMUM_DAYS = 30;
 
 // A financial ledger. The floor is deliberately the longest here.
+//
+// Documentation note for Task 6: at 365 days, this floor makes
+// `retentionDays` inert for free (30) and indie (180) tiers — a
+// project on either tier retains a full year regardless of what its
+// tier advertises, because `resolveRetentionWindowDays` floors the
+// tier window at `minimumDays`. Defensible for a financial ledger;
+// worth calling out explicitly wherever the tier ladder's retention
+// numbers are documented, since the ladder alone would otherwise
+// overpromise how short a project can make this window.
 const CREDIT_LEDGER_MINIMUM_DAYS = 365;
 
+// Same inert-floor note as CREDIT_LEDGER_MINIMUM_DAYS above applies
+// here too — free and indie tiers both retain a full year of revenue
+// events regardless of their advertised `retentionDays`.
 const REVENUE_EVENTS_MINIMUM_DAYS = 365;
 
 // outgoing_webhooks, webhook_events, copilot_messages have no
@@ -152,6 +183,16 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     // (status AND age), so a whole monthly partition is never
     // uniformly expired — a partition can hold both a long-DEAD row
     // and a row still awaiting its next retry.
+    //
+    // Documentation note for Task 6: this ages on `createdAt`, not on
+    // `deadAt` (when the row actually reached a terminal state). A row
+    // that burns through the full backoff schedule before landing on
+    // DEAD (apps/api/src/workers/webhook-delivery.ts,
+    // BACKOFF_SCHEDULE_MS, ≈14.6h worst case: 1+5+30+120+720 min)
+    // loses that much of the operator's manual-retry window before
+    // the sweep's cutoff is reached. Negligible against a 7-day
+    // floor, but real, and worth a mention wherever this window is
+    // documented.
     table: "outgoing_webhooks",
     timestampColumn: "createdAt",
     strategy: "DELETE_ROWS",
@@ -160,10 +201,27 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     terminalStatuses: OUTGOING_WEBHOOK_TERMINAL_STATUSES,
   },
   {
-    // Dedup/log table (UNIQUE(source, storeEventId)) with no delivery
-    // lifecycle of its own — every row is a terminal record of an
-    // already-processed event, so age alone is a safe expiry
-    // predicate. No terminalStatuses.
+    // webhook_events DOES have a lifecycle (RECEIVED / PROCESSING /
+    // PROCESSED / FAILED — packages/db/src/drizzle/enums.ts,
+    // `webhookEventStatus`) with an atomic claim
+    // (claimWebhookEvent, packages/db/src/drizzle/repositories/webhook-events.ts)
+    // — this is NOT a plain dedup/log table. It still needs no
+    // terminalStatuses, for a different reason than outgoing_webhooks:
+    // this table records INBOUND deliveries from Stripe/Apple/Google,
+    // so we are the receiver, not the party that owes a delivery —
+    // nothing here is "still owed" to a third party the way an
+    // undelivered outgoing_webhooks row is. Retries are also bounded,
+    // unlike outgoing_webhooks' perpetual poller: the processor's
+    // BullMQ job (apps/api/src/services/webhook-processor.ts,
+    // WEBHOOK_JOB_ATTEMPTS, ≈635s total span) exhausts on its own,
+    // and the reaper (apps/api/src/workers/webhook-reaper.ts) leases
+    // only orphaned PROCESSING rows and caps requeues at
+    // MAX_REAPER_REQUEUES (5) before leaving a row FAILED for good.
+    // By the time a row is old enough to hit even this policy's
+    // 7-day floor, it has long since reached a stable end state
+    // (PROCESSED, or FAILED with retries exhausted) — there is no
+    // plausible "still in progress" row at that age, so age alone is
+    // a safe expiry predicate. No terminalStatuses.
     table: "webhook_events",
     timestampColumn: "createdAt",
     strategy: "DELETE_ROWS",
