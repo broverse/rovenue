@@ -759,11 +759,17 @@ Expected: FAIL — module not found.
 Lift the two SQL bodies verbatim from the existing `top-spenders` and
 `top-consumers` handlers in `apps/api/src/routes/dashboard/leaderboards.ts` —
 do not rewrite them — and parameterise the window on `startsAt`/`endsAt`
-timestamps rather than dates, adding the optional `currencyId` filter. Note
-the existing queries use `toDate(createdAt) >= {from:Date}`; seasons need
-instant precision, so use `createdAt >= {startsAt:DateTime64(3)}` and
-`createdAt < {endsAt:DateTime64(3)}` — half-open, matching `endsAt` being
-exclusive. Call through `queryAnalytics` exactly as the routes do.
+timestamps rather than dates, adding the optional `currencyId` filter. Note the two
+tables use DIFFERENT time columns, and this plan's earlier prose got it wrong:
+`raw_revenue_events` (TOP_SPENDERS) has NO `createdAt` column at all — its time
+column is `eventDate`, which is also its ORDER BY and PARTITION key. Only
+`raw_credit_ledger` (TOP_CONSUMERS) uses `createdAt`. Read both handlers and
+the ClickHouse migrations to confirm before writing SQL; do not take this
+paragraph's word for it either.
+
+Seasons need instant precision rather than the existing day range, and `endsAt`
+is exclusive, so filter half-open on whichever column that table actually uses:
+`<timeCol> >= {startsAt:DateTime64(3)} AND <timeCol> < {endsAt:DateTime64(3)}`. Call through `queryAnalytics` exactly as the routes do.
 
 - [ ] **Step 4: Run it to verify it passes**
 
