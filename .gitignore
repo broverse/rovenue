@@ -67,3 +67,6 @@ pubspec.lock
 # was the wrong platform slice for its entire life.
 **/RovenueFFI.xcframework
 packages/sdk-swift/build/
+
+# Built artifacts of the Web SDK — produced by tsup, never committed.
+packages/sdk-web/dist/

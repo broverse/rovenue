@@ -101,6 +101,26 @@ jobs:
         working-directory: packages/sdk-kotlin
         run: gradle test --no-daemon
 
+  web:
+    name: Web SDK (TS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @rovenue/web-sdk exec tsc --noEmit -p tsconfig.json
+      # Build BEFORE the tests: the bundle budget measures the published
+      # artifact, not the source, and a source-only run would silently skip
+      # the check that catches a careless dependency.
+      - run: pnpm --filter @rovenue/web-sdk build
+      - run: pnpm --filter @rovenue/web-sdk test
+
   rn:
     name: RN façade (TS)
     runs-on: ubuntu-latest

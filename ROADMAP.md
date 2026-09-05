@@ -723,7 +723,28 @@ else in the framework/provider-breadth dimension is done.
       bindings over the same Swift/Kotlin façades (and Rust core) the native SDKs already wrap; 5-way
       CI parity wired; docs at `/docs/platforms/flutter`. Known gap: RN's `resolveFunnelClaim`
       retry/fallback chain was not ported (single-shot claim only) — see the docs page's parity table.
-- [ ] Web SDK (TS: Stripe checkout + entitlement reads; funnel/web payment backend exists)
+- [x] Web SDK (shipped 2026-09-05) — `packages/sdk-web/` (`@rovenue/web-sdk`):
+      framework-agnostic core, a React layer, and a paywall binding that feeds the
+      renderer the dashboard already uses. Docs at `/docs/platforms/web`.
+
+      The item's parenthetical was half wrong, and the correction is the useful
+      part. The "web payment backend" that existed is the funnel's ANONYMOUS
+      on-page flow — session identity in the URL, `origin: "*"`, no credentials —
+      which an SDK-authenticated app cannot use; and `checkout.sessions` appeared
+      nowhere in the API. More importantly the first blocker was not checkout at
+      all: `/v1` was unreachable from a browser, and since a CORS preflight
+      carries no `Authorization` header, per-project CORS is impossible unless
+      the project is resolvable from the URL. Hence `api_keys.allowedOrigins`
+      plus a `/v1/web/:publicKey` mount.
+
+      Also shipped as prerequisites: `POST /v1/checkout` (security shape copied
+      from `/v1/billing-portal` — identity only from the app-user header, a
+      `.strict()` body with no price/amount/customer field, redirect URLs
+      allow-listed against verified custom domains), and a WebCrypto bucketing
+      implementation, because `assignBucket` hashed with `node:crypto` and would
+      not run in a browser at all. It is verified against the same
+      `bucketing-vectors.json` the Node and Rust implementations are, so a user's
+      experiment variant does not change between web and native.
 - [ ] Unity SDK (games market; natural fit with credits/leaderboards)
 - [ ] Capacitor / Cordova façades
 - [x] Fix release blockers (shipped 2026-09-05) — the Rust half was stale: fmt,
