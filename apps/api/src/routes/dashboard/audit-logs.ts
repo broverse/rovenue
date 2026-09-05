@@ -40,6 +40,15 @@ export interface AuditProofBundle {
   formatVersion: string;
   projectId: string;
   exportedAt: string;
+  // Echoes the validated `from`/`to` query values (ISO strings, `null`
+  // when the caller passed none). `origin` alone cannot distinguish a
+  // legitimate ranged export from one whose head rows were deleted -- the
+  // server derives `origin` from `entries[0].prevHash`, so it is
+  // tautologically consistent with `entries` no matter which case
+  // produced them. `range` at least tells a reader THIS bundle was
+  // requested as a slice, which is why the check on the other side isn't
+  // "is `origin` present" in isolation.
+  range: { from: string | null; to: string | null };
   origin: { rowHash: string } | null;
   tip: { rowHash: string | null; createdAt: string } | null;
   // True when the read hit AUDIT_PROOF_MAX_ENTRIES: at exactly the cap,
@@ -153,6 +162,7 @@ export const auditLogsRoute = new Hono()
         formatVersion: AUDIT_CHAIN_FORMAT_V1,
         projectId,
         exportedAt: new Date().toISOString(),
+        range: { from: from ?? null, to: to ?? null },
         origin,
         tip,
         truncated: entries.length === AUDIT_PROOF_MAX_ENTRIES,

@@ -2,6 +2,10 @@
   "formatVersion": "rovenue.audit-chain.v1",
   "projectId": "prj_demo1",
   "exportedAt": "2026-09-05T12:00:00.000Z",
+  "range": {
+    "from": null,
+    "to": null
+  },
   "origin": null,
   "tip": {
     "rowHash": "5b8baf33b9d5508ea35f85d6bfa9f67f9bbb595e1fc0a11bfda55551c98340a2",

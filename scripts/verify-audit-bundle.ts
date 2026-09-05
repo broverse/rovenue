@@ -48,6 +48,15 @@ export interface VerifyResult {
    *  state, not tampering -- but this field rides alongside `ok` so a
    *  programmatic consumer can't read one without the other. */
   truncated: boolean;
+  /** Echoes the bundle's own `range` field, whatever it is -- surfaced,
+   *  not validated. The verifier has no independent way to confirm the
+   *  server actually honoured this range (the same server supplied both
+   *  `range` and `entries`), so this is "the bundle claims this range"
+   *  information for a caller to weigh, never a pass/fail input.
+   *  `undefined` when the bundle has no `range` key at all (a bundle
+   *  produced before this field existed), which is distinct from a
+   *  bundle that explicitly declares `{ from: null, to: null }`. */
+  range?: unknown;
   /** Present whenever `ok` is `false` -- there is no failure mode this
    *  verifier reports without also naming a reason. */
   failure?: VerifyFailure;
@@ -83,11 +92,13 @@ function wholeBundleFailure(
   entriesChecked: number,
   truncated: boolean,
   reason: VerifyFailureReason,
+  range?: unknown,
 ): VerifyResult {
   return {
     ok: false,
     entriesChecked,
     truncated,
+    range,
     failure: { index: null, entryId: null, reason },
   };
 }
@@ -99,11 +110,13 @@ function entryFailure(
   index: number,
   entryId: string,
   reason: VerifyFailureReason,
+  range?: unknown,
 ): VerifyResult {
   return {
     ok: false,
     entriesChecked,
     truncated,
+    range,
     failure: { index, entryId, reason },
   };
 }
@@ -134,11 +147,11 @@ function entryFailure(
  *   `PREV_HASH_MISMATCH`.
  * - A `rowHash` that doesn't reproduce from its own payload is
  *   `ROW_HASH_MISMATCH`.
- * - A `tip` that disagrees with the last entry actually present --
- *   including a bundle that has entries but no `tip`, or a `tip` but
- *   no entries -- is `TIP_MISMATCH`. This is the only check that can
- *   catch a deleted TAIL: the `prevHash` walk only ever looks
- *   backward, so truncating a chain's newest rows leaves every
+ * - A `tip` that disagrees with the last entry actually present -- in
+ *   `rowHash` OR `createdAt`, including a bundle that has entries but no
+ *   `tip`, or a `tip` but no entries -- is `TIP_MISMATCH`. This is the
+ *   only check that can catch a deleted TAIL: the `prevHash` walk only
+ *   ever looks backward, so truncating a chain's newest rows leaves every
  *   remaining link internally consistent.
  */
 export function verifyAuditBundle(bundle: unknown): VerifyResult {
@@ -150,15 +163,20 @@ export function verifyAuditBundle(bundle: unknown): VerifyResult {
   // the doubt: treat it as truncated rather than assume completeness.
   const truncated = bundle.truncated === false ? false : true;
 
+  // `range` is surfaced, never validated (see `VerifyResult.range`): a
+  // bundle predating this field simply has no `range` key, which is
+  // `undefined` here, distinct from an explicit `{ from: null, to: null }`.
+  const range = "range" in bundle ? bundle.range : undefined;
+
   if (bundle.formatVersion !== AUDIT_CHAIN_FORMAT_V1) {
-    return wholeBundleFailure(0, truncated, "UNSUPPORTED_FORMAT_VERSION");
+    return wholeBundleFailure(0, truncated, "UNSUPPORTED_FORMAT_VERSION", range);
   }
 
   if (!Array.isArray(bundle.entries)) {
     // Missing, null, or non-array `entries` is the single easiest
     // tamper on a bundle (just delete the rows) -- it must never be
     // silently treated as "zero entries, nothing to check".
-    return wholeBundleFailure(0, truncated, "MALFORMED_BUNDLE");
+    return wholeBundleFailure(0, truncated, "MALFORMED_BUNDLE", range);
   }
   const entries = bundle.entries as BundleEntry[];
 
@@ -171,23 +189,31 @@ export function verifyAuditBundle(bundle: unknown): VerifyResult {
   } else if (isRecord(bundle.origin) && typeof bundle.origin.rowHash === "string") {
     origin = { rowHash: bundle.origin.rowHash };
   } else {
-    return wholeBundleFailure(0, truncated, "MALFORMED_BUNDLE");
+    return wholeBundleFailure(0, truncated, "MALFORMED_BUNDLE", range);
   }
 
   // `tip.rowHash` is legitimately nullable in the wire format (it
   // carries a pre-chain legacy row's null hash through), so unlike
   // `origin` a null value here is a shape the format allows -- whether
   // it's the CORRECT value is decided later, by the tip rule below.
-  let tip: { rowHash: string | null } | null;
+  // `tip.createdAt` is captured here too (a missing/non-string value
+  // becomes `null`, which the tip rule below then treats as a mismatch
+  // rather than as a separate malformed-bundle case) so that rule can
+  // check it alongside `rowHash`.
+  let tip: { rowHash: string | null; createdAt: string | null } | null;
   if (bundle.tip === null || bundle.tip === undefined) {
     tip = null;
   } else if (
     isRecord(bundle.tip) &&
     (typeof bundle.tip.rowHash === "string" || bundle.tip.rowHash === null)
   ) {
-    tip = { rowHash: bundle.tip.rowHash as string | null };
+    tip = {
+      rowHash: bundle.tip.rowHash as string | null,
+      createdAt:
+        typeof bundle.tip.createdAt === "string" ? bundle.tip.createdAt : null,
+    };
   } else {
-    return wholeBundleFailure(0, truncated, "MALFORMED_BUNDLE");
+    return wholeBundleFailure(0, truncated, "MALFORMED_BUNDLE", range);
   }
 
   let expectedPrevHash: string | null = origin ? origin.rowHash : null;
@@ -195,41 +221,49 @@ export function verifyAuditBundle(bundle: unknown): VerifyResult {
   for (let index = 0; index < entries.length; index += 1) {
     const raw = entries[index];
     if (!isRecord(raw)) {
-      return wholeBundleFailure(index, truncated, "MALFORMED_BUNDLE");
+      return wholeBundleFailure(index, truncated, "MALFORMED_BUNDLE", range);
     }
     const entry = raw as BundleEntry;
     const entryId = entryIdOf(entry, index);
 
     if (typeof entry.rowHash !== "string" || entry.rowHash.length === 0) {
-      return entryFailure(index, truncated, index, entryId, "UNHASHED_ROW");
+      return entryFailure(index, truncated, index, entryId, "UNHASHED_ROW", range);
     }
 
     if (entry.prevHash !== expectedPrevHash) {
-      return entryFailure(index, truncated, index, entryId, "PREV_HASH_MISMATCH");
+      return entryFailure(index, truncated, index, entryId, "PREV_HASH_MISMATCH", range);
     }
 
     const recomputed = hashAuditRow(payloadOf(entry));
     if (recomputed !== entry.rowHash) {
-      return entryFailure(index, truncated, index, entryId, "ROW_HASH_MISMATCH");
+      return entryFailure(index, truncated, index, entryId, "ROW_HASH_MISMATCH", range);
     }
 
     expectedPrevHash = entry.rowHash;
   }
 
   // Tip rule: `tip` must be null exactly when there are no entries, and
-  // otherwise must name the LAST entry actually present. Every entry
-  // that survived the loop above already has a verified string
-  // `rowHash`, so this is a plain equality check, not another parse.
+  // otherwise must name the LAST entry actually present -- both its
+  // `rowHash` AND its `createdAt`. Every entry that survived the loop
+  // above already has a verified string `rowHash`, so this is a plain
+  // equality check, not another parse. A bundle whose `tip.createdAt`
+  // disagrees with the last entry's is just as much a lie about "where
+  // this chain ends" as a disagreeing `rowHash` would be, so it reuses
+  // the same `TIP_MISMATCH` reason rather than getting a new one.
   const lastEntry = entries[entries.length - 1];
   if (!lastEntry) {
     if (tip !== null) {
-      return wholeBundleFailure(entries.length, truncated, "TIP_MISMATCH");
+      return wholeBundleFailure(entries.length, truncated, "TIP_MISMATCH", range);
     }
-  } else if (tip === null || tip.rowHash !== (lastEntry.rowHash as string)) {
-    return wholeBundleFailure(entries.length, truncated, "TIP_MISMATCH");
+  } else if (
+    tip === null ||
+    tip.rowHash !== (lastEntry.rowHash as string) ||
+    tip.createdAt !== lastEntry.createdAt
+  ) {
+    return wholeBundleFailure(entries.length, truncated, "TIP_MISMATCH", range);
   }
 
-  return { ok: true, entriesChecked: entries.length, truncated };
+  return { ok: true, entriesChecked: entries.length, truncated, range };
 }
 
 function printResult(result: VerifyResult, path: string): void {

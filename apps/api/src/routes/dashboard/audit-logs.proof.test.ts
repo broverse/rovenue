@@ -187,6 +187,50 @@ describe("GET /audit-logs/proof", () => {
     expect(body.data.origin).toBeNull();
   });
 
+  test("range is null/null when no from/to was requested", async () => {
+    // FIX 2 (final review): `origin` alone can't distinguish a legitimate
+    // ranged export from one whose head rows were deleted -- `range`
+    // echoes what was actually requested so a reader can tell.
+    addMembership("p1", "u1", "OWNER");
+    listAuditProofRows.mockResolvedValueOnce([]);
+
+    const res = await getProof("?projectId=p1", { user: "u1" });
+    const body = await res.json();
+
+    expect(body.data.range).toEqual({ from: null, to: null });
+  });
+
+  test("range echoes the requested from/to as ISO strings", async () => {
+    addMembership("p1", "u1", "OWNER");
+    listAuditProofRows.mockResolvedValueOnce([]);
+
+    const res = await getProof(
+      "?projectId=p1&from=2026-09-01T00:00:00.000Z&to=2026-09-03T00:00:00.000Z",
+      { user: "u1" },
+    );
+    const body = await res.json();
+
+    expect(body.data.range).toEqual({
+      from: "2026-09-01T00:00:00.000Z",
+      to: "2026-09-03T00:00:00.000Z",
+    });
+  });
+
+  test("range echoes only the side of the range that was requested", async () => {
+    addMembership("p1", "u1", "OWNER");
+    listAuditProofRows.mockResolvedValueOnce([]);
+
+    const res = await getProof("?projectId=p1&from=2026-09-01T00:00:00.000Z", {
+      user: "u1",
+    });
+    const body = await res.json();
+
+    expect(body.data.range).toEqual({
+      from: "2026-09-01T00:00:00.000Z",
+      to: null,
+    });
+  });
+
   test("a member of another project cannot export this project's bundle", async () => {
     // u2 belongs to p2, not p1.
     addMembership("p2", "u2", "OWNER");

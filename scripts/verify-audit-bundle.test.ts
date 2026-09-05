@@ -167,6 +167,31 @@ describe("verifyAuditBundle", () => {
     // that test goes red; if the verifier ever drifts, this one does.
     const r = verifyAuditBundle(fixture);
     expect(r.ok).toBe(true);
+    expect(r.range).toEqual(fixture.range);
+  });
+
+  // =============================================================
+  // FIX 2 (final review): `range` is surfaced but never validated -- a
+  // bundle carrying it must not be rejected, and the field must actually
+  // reach the caller rather than being silently dropped.
+  // =============================================================
+
+  test("a bundle carrying `range` verifies clean and surfaces it in the result", () => {
+    const b = {
+      ...bundle(chainOf(2)),
+      range: { from: "2026-09-01T00:00:00.000Z", to: null },
+    };
+    const r = verifyAuditBundle(b);
+    expect(r.ok).toBe(true);
+    expect(r.range).toEqual({ from: "2026-09-01T00:00:00.000Z", to: null });
+  });
+
+  test("a bundle without `range` at all surfaces it as undefined, not null", () => {
+    // Distinguishes "this bundle predates the field" from "this bundle
+    // explicitly declares an unranged export" ({ from: null, to: null }).
+    const r = verifyAuditBundle(bundle(chainOf(2)));
+    expect(r.ok).toBe(true);
+    expect(r.range).toBeUndefined();
   });
 
   // =============================================================
@@ -256,6 +281,24 @@ describe("verifyAuditBundle", () => {
       const r = verifyAuditBundle(b);
       expect(r.ok).toBe(false);
       expect(r.failure?.reason).toBe("TIP_MISMATCH");
+    });
+
+    test("a tip.createdAt that disagrees with the last entry's is TIP_MISMATCH", () => {
+      // rowHash matches the real last entry -- only createdAt is a lie.
+      // A verifier that checked rowHash alone would pass this.
+      const entries = chainOf(3);
+      const b = {
+        ...bundle(entries),
+        tip: {
+          rowHash: entries[2]!.rowHash,
+          createdAt: "2000-01-01T00:00:00.000Z",
+        },
+      };
+      const r = verifyAuditBundle(b);
+      expect(r.ok).toBe(false);
+      expect(r.failure?.reason).toBe("TIP_MISMATCH");
+      expect(r.failure?.index).toBeNull();
+      expect(r.failure?.entryId).toBeNull();
     });
   });
 

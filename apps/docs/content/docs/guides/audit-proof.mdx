@@ -60,6 +60,7 @@ The shape below — and the fixture excerpt after it — is the value of `data`,
   "formatVersion": "rovenue.audit-chain.v1",
   "projectId": "prj_demo1",
   "exportedAt": "2026-09-05T12:00:00.000Z",
+  "range": { "from": null, "to": null },
   "origin": null,
   "tip": {
     "rowHash": "5b8baf33b9d5508ea35f85d6bfa9f67f9bbb595e1fc0a11bfda55551c98340a2",
@@ -93,7 +94,8 @@ This is an excerpt of the real fixture committed at `packages/shared/src/audit-p
 | `formatVersion` | Names the canonical encoding used to produce every `rowHash` in this bundle. Currently always `"rovenue.audit-chain.v1"`. A verifier that does not implement a given version must refuse the bundle rather than guess at its encoding. |
 | `projectId` | The project this chain belongs to. Chains are per-project — there is no cross-project ordering. |
 | `exportedAt` | When the export ran. Not part of any hash; purely informational. |
-| `origin` | `{ rowHash }` naming the hash the first exported entry's `prevHash` points at, or `null` if the first exported entry is the true start of the project's chain (its own `prevHash` is `null`). Present only when a `from` filter excludes earlier rows that still exist — **not** caused by the 5000-row cap, which drops the newest rows instead (see [Truncation](#truncation)). |
+| `range` | `{ from, to }` — the `from`/`to` query parameters this export actually used, as ISO-8601 strings, or `null` for whichever side wasn't given. Purely informational, like `exportedAt`: it tells a reader what was **asked for**, so a non-null `origin` (below) with a non-null `range.from` reads as "this is a deliberately ranged export," while a non-null `origin` with `range.from: null` is unexplained. It does not make that distinction *trustworthy* — see [Adversary model](#adversary-model--what-a-single-bundle-actually-proves): the same server supplies `range`, `origin`, and `entries`, so a server willing to lie about one can lie about all three consistently. |
+| `origin` | `{ rowHash }` naming the hash the exported bundle's first entry's own `prevHash` field carries, or `null` if that first entry's `prevHash` is itself `null`. **This is not independent evidence that a predecessor row exists.** The server derives `origin` entirely from `entries[0].prevHash` — it never reads the row `origin.rowHash` supposedly names, so `origin` is consistent with `entries` by construction, whether the export is a legitimate `from`-filtered slice or a chain whose head rows were deleted outright. See [Adversary model](#adversary-model--what-a-single-bundle-actually-proves) for what that limitation means for verification, and `range` above for the one piece of context that at least distinguishes "a `from` filter was requested" from "no filter was requested." |
 | `tip` | `{ rowHash, createdAt }` of the last entry in `entries`, or `null` if `entries` is empty. `rowHash` here is nullable too — it carries a legacy, never-hashed row's `null` through unchanged if that row happens to be the last one exported. Lets a verifier confirm the bundle wasn't silently trimmed from the end (see [What a broken chain looks like](#what-a-broken-chain-looks-like)) — but only as far as the [adversary model](#adversary-model--what-a-single-bundle-actually-proves) above allows. |
 | `truncated` | `true` when the read hit the 5000-entry cap. See [Truncation](#truncation). |
 | `entries` | The rows themselves, oldest first, each carrying every field the row hash covers, plus `id`, `prevHash`, and `rowHash`. |
@@ -122,10 +124,14 @@ A verifier does not need to trust anything the server says about a row: given th
 
 The chain is a singly-linked list ordered by `createdAt`: each row's `prevHash` must equal the previous row's `rowHash`, and the very first row a project ever wrote has `prevHash: null`.
 
-A bundle's `origin` field bridges an exported slice to the rest of that history:
+A bundle's `origin` field tells a reader whether this exported slice begins at the chain's true start:
 
 - `origin: null` means the first entry in this bundle is the genuine start of the chain (its `prevHash` is `null`).
-- `origin: { rowHash }` means the first entry's `prevHash` points at a row that exists but isn't included in this export — in practice, a `from` filter excluding earlier history. (The 5000-row cap alone never produces this: entries are read oldest-first, so a truncated export still starts at the true beginning of the range — see [Truncation](#truncation).) `rowHash` is that excluded row's hash, so a verifier checks the first entry's `prevHash` against `origin.rowHash` instead of expecting `null`.
+- `origin: { rowHash }` means the first entry's own `prevHash` is non-null — this segment does **not** begin at the chain's start. In practice that's a `from` filter excluding earlier history. (The 5000-row cap alone never produces this: entries are read oldest-first, so a truncated export still starts at the true beginning of the range — see [Truncation](#truncation).)
+
+<Callout type="warn">
+`origin` is **not** independent evidence that a predecessor row exists. It is computed as `{ rowHash: entries[0].prevHash }` — read straight off the very entry it is supposed to anchor — and the server never reads the row `origin.rowHash` names to confirm it is actually there. `verifyAuditBundle` checks `entries[0].prevHash === origin.rowHash`, which is tautologically true for any bundle this server assembled; it is not a check against anything outside the bundle. A chain whose earliest rows were deleted outright produces a byte-identical `origin` to a genuine `from`-filtered export of the same remaining rows. This is the same limitation the [Adversary model](#adversary-model--what-a-single-bundle-actually-proves) section describes for `tip`, for the same reason: the entity supplying the evidence and the entity being checked are the same server. `range` (above) tells you whether a `from` filter was *requested*, which at least lets an honest server's bundle explain itself — but that, too, is something only the server attests to.
+</Callout>
 
 ## Running the verifier
 
