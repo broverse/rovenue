@@ -1,4 +1,5 @@
-import { and, count, desc, eq, gte, lte, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, lte, type SQL } from "drizzle-orm";
+import type { AuditChainPayload } from "@rovenue/shared/audit-chain";
 import type { Db } from "../client";
 import { auditLogs, user } from "../schema";
 
@@ -187,6 +188,85 @@ export async function findProjectChain(
   // WHERE filters to a specific projectId, so orphan rows with
   // null projectId (post-cascade SET NULL) cannot appear here.
   return rows.map((r) => ({ ...r, projectId: r.projectId! }));
+}
+
+/**
+ * A proof-bundle row: exactly the fields `hashAuditRow` covers
+ * (`AuditChainPayload`) plus the two identifiers a verifier needs
+ * to address and re-link a row (`id`, `rowHash`). Deliberately a
+ * sibling of `listAuditLogs`/`findProjectChain` rather than a
+ * variant of either — those return display fields (the joined
+ * `user`) or the raw Drizzle row shape (`createdAt` as a `Date`),
+ * and a proof row that carried either would silently fail to
+ * re-hash to its stored `rowHash`.
+ */
+export interface AuditProofRow extends AuditChainPayload {
+  id: string;
+  rowHash: string;
+}
+
+/**
+ * Chain-ordered proof read for an audit-proof export bundle.
+ * Selects only the columns `hashAuditRow` covers plus `id` and
+ * `rowHash`, and stringifies `createdAt` with `.toISOString()` —
+ * `AuditChainPayload.createdAt` is a string because the canonical
+ * encoder (`@rovenue/shared/audit-chain`) never sees a `Date`,
+ * matching how `apps/api/src/lib/audit.ts` builds the payload it
+ * hashes at write time.
+ *
+ * Ordered by (`createdAt`, `id`) ascending: `createdAt` alone is
+ * not a total order (multiple rows can share a timestamp), and an
+ * arbitrary tiebreak would make chain verification fail
+ * intermittently in a way that resembles tampering.
+ */
+export async function listAuditProofRows(
+  db: Db,
+  args: { projectId: string; from?: Date; to?: Date; limit: number },
+): Promise<AuditProofRow[]> {
+  const clauses: SQL[] = [eq(auditLogs.projectId, args.projectId)];
+  if (args.from) clauses.push(gte(auditLogs.createdAt, args.from));
+  if (args.to) clauses.push(lte(auditLogs.createdAt, args.to));
+
+  const rows = await db
+    .select({
+      id: auditLogs.id,
+      projectId: auditLogs.projectId,
+      userId: auditLogs.userId,
+      action: auditLogs.action,
+      resource: auditLogs.resource,
+      resourceId: auditLogs.resourceId,
+      before: auditLogs.before,
+      after: auditLogs.after,
+      ipAddress: auditLogs.ipAddress,
+      userAgent: auditLogs.userAgent,
+      createdAt: auditLogs.createdAt,
+      prevHash: auditLogs.prevHash,
+      rowHash: auditLogs.rowHash,
+    })
+    .from(auditLogs)
+    .where(and(...clauses))
+    .orderBy(asc(auditLogs.createdAt), asc(auditLogs.id))
+    .limit(args.limit);
+
+  // WHERE filters to a specific projectId, so orphan rows with a
+  // null projectId (post-cascade SET NULL) cannot appear here, and
+  // a chained row (one written by writeChained) always has a
+  // rowHash — the non-null assertion mirrors findProjectChain's.
+  return rows.map((r) => ({
+    id: r.id,
+    projectId: r.projectId!,
+    userId: r.userId,
+    action: r.action,
+    resource: r.resource,
+    resourceId: r.resourceId,
+    before: r.before as Record<string, unknown> | null,
+    after: r.after as Record<string, unknown> | null,
+    ipAddress: r.ipAddress,
+    userAgent: r.userAgent,
+    createdAt: r.createdAt.toISOString(),
+    prevHash: r.prevHash,
+    rowHash: r.rowHash!,
+  }));
 }
 
 /**
