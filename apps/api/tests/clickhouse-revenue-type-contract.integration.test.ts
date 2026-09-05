@@ -191,7 +191,11 @@ describe("v_revenue_lifetime_subscriber vs. REVENUE_TYPES_LIFETIME_PURCHASED", (
       .filter((r) => Number(r.c) > 0)
       .map((r) => r.subscriberId.replace(/^sub_/, ""))
       .sort();
-    const expectedTypes = [...REVENUE_TYPES_LIFETIME_PURCHASED].sort();
+    // Widened to string[]: actualTypes (from the CH row's subscriberId) is
+    // a plain string, and Array<RevenueEventType>.includes() only accepts
+    // the literal union, not an arbitrary string — this is a set-membership
+    // check across two string collections, not a type-level guarantee.
+    const expectedTypes: string[] = [...REVENUE_TYPES_LIFETIME_PURCHASED].sort();
 
     const missing = expectedTypes.filter((t) => !actualTypes.includes(t)); // view dropped
     const extra = actualTypes.filter((t) => !expectedTypes.includes(t)); // view over-counts
