@@ -234,6 +234,9 @@ jobs:
           SLUG=$(ruby -rjson -e "print JSON.parse(File.read('packages/sdk-swift/release.config.json'))['repoSlug']")
           git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${SLUG}-swift.git" >/dev/null \
             || { echo "✗ cannot reach ${SLUG}-swift — create it and grant SWIFT_DIST_REPO_TOKEN push access before releasing"; exit 1; }
+          # ls-remote proves the repo exists and the token can READ it. It
+          # cannot prove push access without pushing, so a token scoped
+          # read-only still fails in step 9 — see the RECOVERY block.
         env:
           GH_TOKEN: ${{ secrets.SWIFT_DIST_REPO_TOKEN }}
 
@@ -259,13 +262,22 @@ jobs:
           XCF_NAME=$(ruby -rjson -e "print JSON.parse(File.read('release.config.json'))['xcframeworkName']")
           POD_ZIP="build/$POD_NAME-$VERSION.zip"
           XCF_ZIP="build/${XCF_NAME%.xcframework}-$VERSION.xcframework.zip"
+          # Assigned, never inlined into `echo`: a failing command substitution
+          # inside an echo still exits 0 and would write an empty checksum
+          # through to the pin. Assignment aborts the step under `bash -e`.
+          POD_SHA256=$(shasum -a 256 "$POD_ZIP" | awk '{print $1}')
+          XCF_CHECKSUM=$(swift package compute-checksum "$XCF_ZIP")
+          for sum in "$POD_SHA256" "$XCF_CHECKSUM"; do
+            [[ "$sum" =~ ^[0-9a-f]{64}$ ]] \
+              || { echo "✗ not a 64-char hex checksum: '$sum'"; exit 1; }
+          done
           {
             echo "version=$VERSION"
             echo "tag=sdk-swift-v$VERSION"
             echo "pod_zip=packages/sdk-swift/$POD_ZIP"
             echo "xcf_zip=packages/sdk-swift/$XCF_ZIP"
-            echo "pod_sha256=$(shasum -a 256 "$POD_ZIP" | awk '{print $1}')"
-            echo "xcf_checksum=$(swift package compute-checksum "$XCF_ZIP")"
+            echo "pod_sha256=$POD_SHA256"
+            echo "xcf_checksum=$XCF_CHECKSUM"
           } >> "$GITHUB_OUTPUT"
 
       # 4. Pin, commit and push BEFORE tagging, so the tag names a tree whose
@@ -275,7 +287,18 @@ jobs:
       - name: Pin podspec sha256 and commit
         working-directory: packages/sdk-swift
         run: |
-          sed -i'' -E "s/:sha256 => '[0-9a-fA-F]{64}'/:sha256 => '$POD_SHA256'/" Rovenue.podspec
+          # perl, not `sed -i'' -E`: the shell collapses -i'' to -i, and BSD sed
+          # (this is a macOS runner) then takes -E as the backup SUFFIX. The
+          # substitution ran in basic-regex mode where {64} is literal, so it
+          # matched nothing, left a stray Rovenue.podspec-E behind, and pinned
+          # NOTHING — verified on this machine. perl -pi behaves identically on
+          # BSD and GNU.
+          perl -pi -e 's/:sha256 => \x27[0-9a-fA-F]{64}\x27/:sha256 => \x27$ENV{POD_SHA256}\x27/' Rovenue.podspec
+          # A substitution that matched nothing still exits 0. Without this the
+          # 000…0 placeholder would sail through to `pod trunk push`, which
+          # cannot be undone.
+          grep -q ":sha256 => '$POD_SHA256'" Rovenue.podspec \
+            || { echo "✗ podspec sha256 pin did not apply — Rovenue.podspec's :sha256 line does not match the expected shape"; exit 1; }
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Rovenue.podspec
