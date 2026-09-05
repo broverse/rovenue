@@ -443,15 +443,23 @@ export async function verifyAuditChain(
       });
     }
 
-    // Schema allows null projectId/userId, but every chained row (one
-    // with a rowHash, filtered above) is written by writeChained which
-    // requires both to be non-null. Coerce here so the canonical type
-    // stays narrow.
+    // Schema allows null projectId/userId. `writeChained` requires
+    // `projectId` to be a real project id (it's typed `string`, never
+    // `string | null`, on `AuditEntry`) -- every chained row (one with a
+    // rowHash, filtered above) was written with one, so the coercion below
+    // is just narrowing a type FK cascades can null out later. `userId`,
+    // by contrast, is genuinely nullable on `AuditEntry` -- a webhook-
+    // initiated action (e.g. Stripe revoking a Connect authorization) has
+    // no dashboard user to attribute it to, and such a row is written and
+    // hashed with `userId: null`. Coercing it to `""` here would recompute
+    // a DIFFERENT hash than the one actually stored, so it is passed
+    // through unchanged to match what `buildCanonicalPayload` hashed at
+    // write time.
     const recomputed = hashAuditRow(
       buildCanonicalPayload(
         {
           projectId: row.projectId ?? "",
-          userId: row.userId ?? "",
+          userId: row.userId,
           action: row.action as AuditAction,
           resource: row.resource as AuditResource,
           resourceId: row.resourceId,
