@@ -11,7 +11,7 @@ import {
 import { logger } from "../../lib/logger";
 import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { convertToUsd } from "../fx";
-import { grantPurchaseCurrencies } from "../purchase-credits";
+import { grantProductCurrencies } from "../purchase-credits";
 import { oneTimeRevenueTypeFor } from "../revenue/one-time-type";
 import { emitFunnelEvent } from "./outbox";
 import { generateClaimToken, hashToken } from "./token";
@@ -497,7 +497,19 @@ export async function completeFunnelPurchase(input: {
   if (consumableGrant) {
     const grant: ConsumableGrantInfo = consumableGrant;
     try {
-      await grantPurchaseCurrencies(grant);
+      // Renamed and reshaped by the grant-by-trigger work: the arg
+      // carries `referenceId` rather than `purchaseId`, and a trigger is
+      // now required because a product's grant rows decide what fires.
+      // A funnel one-time purchase is unambiguously a PURCHASE — the
+      // RENEWAL trigger reaches credits through the renewal-grants
+      // consumer, never through here.
+      await grantProductCurrencies({
+        subscriberId: grant.subscriberId,
+        productId: grant.productId,
+        referenceId: grant.purchaseId,
+        productIdentifier: grant.productIdentifier,
+        trigger: "PURCHASE",
+      });
     } catch (err) {
       log.error(
         "failed to grant consumable currencies for a one-time funnel purchase",
