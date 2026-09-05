@@ -75,7 +75,7 @@ async function resolvePackagePriceId(
   projectId: string,
   offeringId: string,
   packageIdentifier: string,
-): Promise<string> {
+): Promise<{ priceId: string; productType: string | null }> {
   const offering = await drizzle.offeringRepo.findOfferingById(
     db,
     projectId,
@@ -115,7 +115,7 @@ async function resolvePackagePriceId(
       message: "Package has no Stripe price configured",
     });
   }
-  return stripePriceId;
+  return { priceId: stripePriceId, productType: product?.type ?? null };
 }
 
 export async function createCheckoutSession(
@@ -142,12 +142,29 @@ export async function createCheckoutSession(
   );
   const safeCancelUrl = await assertRedirectUrlAllowed(db, projectId, cancelUrl);
 
-  const priceId = await resolvePackagePriceId(
+  const { priceId, productType } = await resolvePackagePriceId(
     db,
     projectId,
     offeringId,
     packageIdentifier,
   );
+
+  // Stripe rejects a one-time price in subscription mode with an
+  // InvalidRequestError, which would surface to the SDK caller as a 500 —
+  // an unhandled server fault for what is really a mismatched request. Say
+  // so as a 400 instead, and name the actual limitation rather than letting
+  // it look like a bug.
+  //
+  // One-time web purchases are genuinely not supported yet: they need a
+  // `mode: "payment"` path and a different completion story, since a
+  // PaymentIntent produces no subscription for the webhook to bind.
+  if (productType && productType !== "SUBSCRIPTION") {
+    throw new HTTPException(400, {
+      message:
+        "Web checkout currently supports subscription packages only. This " +
+        "package is a one-time product.",
+    });
+  }
 
   const { account } = await requireConnectedStripe(projectId);
 

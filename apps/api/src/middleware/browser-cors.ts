@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { cors } from "hono/cors";
 import { HEADER } from "@rovenue/shared";
 
@@ -65,3 +66,33 @@ export const browserCors =
       credentials: false,
       maxAge: 86400,
     })(c, next);
+
+/**
+ * Asserts that the public key in the URL is the key the request authenticated
+ * with.
+ *
+ * Without this the two are independent, and the origin restriction stops
+ * meaning anything. A site whose own key allow-lists its origin can serve
+ * JavaScript that calls `/v1/web/<its own key>/…` while sending
+ * `Authorization: Bearer <another project's public key>`, scraped from that
+ * project's page source. CORS passes, because it was checked against the key
+ * in the path; the request is then authenticated, served and billed as the
+ * other project — which is exactly the cross-site key use the allow-list
+ * exists to prevent.
+ *
+ * Runs AFTER `apiKeyAuth`, which is what puts the authenticated key on the
+ * context. A preflight never reaches here (hono's cors terminates it), so
+ * this checks the request that actually carries data.
+ */
+export const requireMatchingPathKey: MiddlewareHandler = async (c, next) => {
+  const pathKey = c.req.param("publicKey");
+  const project = c.get("project");
+  if (pathKey && project?.keyPublic && pathKey !== project.keyPublic) {
+    throw new HTTPException(403, {
+      message:
+        "The API key in the URL is not the key this request authenticated " +
+        "with. The browser surface requires both to be the same key.",
+    });
+  }
+  await next();
+};

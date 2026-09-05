@@ -142,7 +142,7 @@ beforeEach(() => {
     packages: [{ identifier: PACKAGE_IDENTIFIER, productId: PRODUCT_ID }],
   });
   findProductsByIdsMock.mockResolvedValue([
-    { id: PRODUCT_ID, storeIds: { stripe: RESOLVED_PRICE_ID } },
+    { id: PRODUCT_ID, type: "SUBSCRIPTION", storeIds: { stripe: RESOLVED_PRICE_ID } },
   ]);
   findLatestStripeCustomerIdMock.mockResolvedValue(null);
   sessionsCreateMock = vi.fn(async () => ({
@@ -257,7 +257,7 @@ describe("POST /v1/checkout", () => {
 
   it("400s when the package has no Stripe price configured", async () => {
     findProductsByIdsMock.mockResolvedValue([
-      { id: PRODUCT_ID, storeIds: {} },
+      { id: PRODUCT_ID, type: "SUBSCRIPTION", storeIds: {} },
     ]);
     const res = await buildApp().request("/v1/checkout", {
       method: "POST",
@@ -352,6 +352,25 @@ describe("POST /v1/checkout", () => {
       | undefined;
     expect(options?.idempotencyKey).toBeUndefined();
   });
+
+  it.each(["CONSUMABLE", "NON_CONSUMABLE"])(
+    "400s for a %s package rather than letting Stripe 500",
+    async (type) => {
+      findProductsByIdsMock.mockResolvedValue([
+        { id: PRODUCT_ID, type, storeIds: { stripe: RESOLVED_PRICE_ID } },
+      ]);
+      const res = await buildApp().request("/v1/checkout", {
+        method: "POST",
+        headers: authedHeaders(),
+        body: validBody(),
+      });
+      // Stripe rejects a one-time price in subscription mode with an
+      // InvalidRequestError, which would reach the caller as an unhandled
+      // 500 for what is really a mismatched request.
+      expect(res.status).toBe(400);
+      expect(sessionsCreateMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("401s without a Bearer key", async () => {
     const res = await buildApp().request("/v1/checkout", {

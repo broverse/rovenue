@@ -18,16 +18,44 @@ import { describe, expect, it } from "vitest";
 // consumer never pays for it. If these two ever converge, the entry split has
 // stopped working.
 
-// Measured on the first real build: 3179 / 163 / 38428 bytes gzipped. The
-// budgets sit ~40% above that — enough headroom that a few lines of code do
-// not fail the build, tight enough that any real dependency does. A dependency
-// is the thing this is guarding against; nothing else moves these numbers by
-// kilobytes.
+// Measured as entry + every chunk it reaches: 3589 / 1121 / 39692 bytes
+// gzipped. Budgets sit ~40% above — enough headroom that a few lines do not
+// fail the build, tight enough that any real dependency does, which is the
+// thing this guards against.
+//
+// The first version of this test measured the entry FILES, and with
+// `splitting: true` those are often re-export stubs: react.js was 208 bytes
+// pointing at a 3 KB chunk. Its 400-byte budget was therefore both unfailable
+// and below the real figure, and the workspace-import scan never looked at
+// the chunk where an offending import would actually live.
 const BUDGETS_GZIPPED_BYTES = {
-  "dist/index.js": 4_500,
-  "dist/react.js": 400,
-  "dist/paywall.js": 54_000,
+  "dist/index.js": 5_000,
+  "dist/react.js": 1_600,
+  "dist/paywall.js": 56_000,
 } as const;
+
+/**
+ * Every file an entry point actually pulls in, entry included.
+ *
+ * `splitting: true` means an entry file is often a re-export stub — the built
+ * `react.js` was 208 bytes pointing at a 3 KB chunk. Measuring the stub makes
+ * the budget unfailable and the workspace-import scan blind to the chunk that
+ * holds the real code, which is where an offending import would live.
+ */
+function entryFiles(entry: string): string[] {
+  const seen = new Set<string>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const source = readFileSync(new URL(`../${current}`, import.meta.url), "utf8");
+    for (const match of source.matchAll(/from\s*["'](\.\/[^"']+)["']/g)) {
+      queue.push(`dist/${match[1]!.replace(/^\.\//, "")}`);
+    }
+  }
+  return [...seen];
+}
 
 function gzippedSize(path: string): number {
   const url = new URL(`../${path}`, import.meta.url);
@@ -40,11 +68,16 @@ function gzippedSize(path: string): number {
   return gzipSync(readFileSync(url)).byteLength;
 }
 
+/** Gzipped size of an entry and every chunk it reaches. */
+function entrySize(entry: string): number {
+  return entryFiles(entry).reduce((total, f) => total + gzippedSize(f), 0);
+}
+
 describe("bundle budget", () => {
   it.each(Object.entries(BUDGETS_GZIPPED_BYTES))(
     "%s stays under budget",
     (path, budget) => {
-      const size = gzippedSize(path);
+      const size = entrySize(path);
       expect(
         size,
         `${path} is ${size} bytes gzipped, over the ${budget} budget. If the ` +
@@ -58,8 +91,8 @@ describe("bundle budget", () => {
     // The entry split only earns its complexity while this holds. If the core
     // ever approaches the paywall bundle, something has leaked across the
     // boundary and a core-only consumer is paying for the renderer.
-    expect(gzippedSize("dist/index.js") * 5).toBeLessThan(
-      gzippedSize("dist/paywall.js"),
+    expect(entrySize("dist/index.js") * 5).toBeLessThan(
+      entrySize("dist/paywall.js"),
     );
   });
 
@@ -67,11 +100,19 @@ describe("bundle budget", () => {
     // @rovenue/* packages are private and ship TypeScript sources, so
     // `workspace:*` is not resolvable from npm. They must be inlined — and
     // only the built artifact shows whether they were.
-    for (const path of Object.keys(BUDGETS_GZIPPED_BYTES)) {
-      const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
-      expect(source, `${path} imports a workspace package`).not.toMatch(
-        /from\s*["']@rovenue\//,
-      );
+    // Scans the chunks too, not just the three entry files. With splitting,
+    // an offending import lives in whichever chunk holds the code — an
+    // entry-only scan looks at re-export stubs and finds nothing.
+    for (const entry of Object.keys(BUDGETS_GZIPPED_BYTES)) {
+      for (const path of entryFiles(entry)) {
+        const source = readFileSync(
+          new URL(`../${path}`, import.meta.url),
+          "utf8",
+        );
+        expect(source, `${path} imports a workspace package`).not.toMatch(
+          /from\s*["']@rovenue\//,
+        );
+      }
     }
   });
 });

@@ -77,7 +77,101 @@ describe("entitlements when the request fails", () => {
 
   it("clears the cache on logOut so the next person sees nothing", async () => {
     const sdk = await primed(() => Promise.reject(new Error("offline")));
-    sdk.logOut();
+    await sdk.logOut();
     expect(sdk.getCachedEntitlements()).toBeNull();
+  });
+});
+
+// =============================================================
+// Findings from the first outside review
+// =============================================================
+
+describe("review findings", () => {
+  it("retries a rate-limited event instead of dropping it", async () => {
+    const storage = createMemoryStorage();
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: "RATE_LIMITED", message: "slow" } }),
+          { status: 429, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const sdk = configure({
+      apiKey: PK,
+      apiUrl: API,
+      storage,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    sdk.track({ eventType: "paywall_view" });
+    await sdk.flushEvents();
+
+    // Dropping it would lose telemetry exactly when volume is highest.
+    expect(
+      JSON.parse(storage.get("rovenue.events") ?? "[]"),
+    ).toHaveLength(1);
+  });
+
+  it("drops an event the server will never accept", async () => {
+    const storage = createMemoryStorage();
+    const sdk = configure({
+      apiKey: PK,
+      apiUrl: API,
+      storage,
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({ error: { code: "VALIDATION", message: "bad" } }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        )) as unknown as typeof fetch,
+    });
+    sdk.track({ eventType: "paywall_view" });
+    await sdk.flushEvents();
+    // Retaining it forever would block every later event behind it.
+    expect(JSON.parse(storage.get("rovenue.events") ?? "[]")).toHaveLength(0);
+  });
+
+  it("does not carry a previous identity's events past logOut", async () => {
+    const storage = createMemoryStorage();
+    const sdk = configure({
+      apiKey: PK,
+      apiUrl: API,
+      storage,
+      fetchImpl: (() =>
+        Promise.reject(new Error("offline"))) as unknown as typeof fetch,
+    });
+
+    sdk.track({ eventType: "paywall_view" });
+    await sdk.flushEvents();
+    expect(JSON.parse(storage.get("rovenue.events") ?? "[]")).toHaveLength(1);
+
+    await sdk.logOut();
+
+    // Headers are built at post time, so an event surviving the rotation
+    // would be delivered attributed to whoever logs in next.
+    expect(JSON.parse(storage.get("rovenue.events") ?? "[]")).toHaveLength(0);
+  });
+
+  it("persists the identity across constructions by default", async () => {
+    // The default storage must be the real one. Defaulting to memory mints a
+    // new subscriber on every page load and orphans the cache and queue with
+    // it — and it is only ever correct for a developer who read the docs and
+    // passed `storage` themselves.
+    //
+    // localStorage is stubbed because this suite runs under node, where
+    // createStorage correctly falls back to memory; the behaviour under test
+    // is what happens in a BROWSER.
+    const backing = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => backing.set(k, v),
+      removeItem: (k: string) => backing.delete(k),
+    });
+    try {
+      const first = configure({ apiKey: PK, apiUrl: API }).rovenueId();
+      const second = configure({ apiKey: PK, apiUrl: API }).rovenueId();
+      expect(second).toBe(first);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

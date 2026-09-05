@@ -173,3 +173,46 @@ describe("flush on the way out", () => {
     expect(() => makeQueue(async () => true).queue.start()).not.toThrow();
   });
 });
+
+// =============================================================
+// Findings from the first outside review
+// =============================================================
+
+describe("events tracked during a flush", () => {
+  it("survives a flush that was already in flight", async () => {
+    const storage = createMemoryStorage();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+
+    let queue!: ReturnType<typeof createEventQueue>;
+    const post = vi.fn<(e: QueuedEvent) => Promise<boolean>>(async () => {
+      // A track() landing mid-flight is the realistic case: a
+      // visibilitychange flush overlapping a paywall_view.
+      queue.track({ eventType: "arrived-during-flush" });
+      await gate;
+      return true;
+    });
+    queue = createEventQueue({ storage, post });
+
+    queue.track({ eventType: "first" });
+    const flushing = queue.flush();
+    release();
+    await flushing;
+
+    const remaining = JSON.parse(storage.get("rovenue.events") ?? "[]");
+    expect(remaining.map((e: QueuedEvent) => e.eventType)).toEqual([
+      "arrived-during-flush",
+    ]);
+  });
+
+  it("clear() empties the queue", async () => {
+    const storage = createMemoryStorage();
+    const { queue } = makeQueue(async () => false, storage);
+    queue.track(RETAINED);
+    await queue.flush();
+    queue.clear();
+    expect(JSON.parse(storage.get("rovenue.events") ?? "[]")).toHaveLength(0);
+  });
+});

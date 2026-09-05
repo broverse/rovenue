@@ -84,7 +84,9 @@ describe("wire identity", () => {
   it("mints a new rovenueId on logOut", async () => {
     const r = sdk();
     const before = r.rovenueId();
-    r.logOut();
+    // Awaited: logOut flushes queued events under the OLD identity first, so
+    // they are not delivered attributed to whoever comes next.
+    await r.logOut();
     expect(r.rovenueId()).not.toBe(before);
   });
 });

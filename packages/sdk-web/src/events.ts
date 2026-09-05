@@ -56,6 +56,8 @@ export interface EventQueue {
   track(input: TrackInput): void;
   /** Attempts every queued event once. Retains whatever is not acknowledged. */
   flush(): Promise<void>;
+  /** Drops every queued event. Used when the identity they belong to goes. */
+  clear(): void;
   /** Registers the unload listeners. No-op where there is no DOM. */
   start(): void;
   stop(): void;
@@ -132,10 +134,21 @@ export function createEventQueue(opts: CreateEventQueueOptions): EventQueue {
           // behind it.
           if (!accepted) retained.push(event);
         }
-        write(retained);
+        // Re-read rather than writing the snapshot back. `post` awaits, and
+        // anything track() persisted during those awaits is in storage now;
+        // writing `retained` alone would silently drop it — losing exactly
+        // the paywall_view that a visibilitychange flush overlapped, which is
+        // the at-least-once guarantee this module claims.
+        const seen = new Set(pending.map((e) => e.eventId));
+        const arrivedDuringFlush = read().filter((e) => !seen.has(e.eventId));
+        write([...retained, ...arrivedDuringFlush]);
       } finally {
         flushing = false;
       }
+    },
+
+    clear() {
+      write([]);
     },
 
     start() {
