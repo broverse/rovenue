@@ -6,12 +6,14 @@ import {
   RETENTION_SKIP_REASON_ERROR,
   RETENTION_SKIP_REASON_NO_WINDOW,
   RETENTION_SKIP_REASON_STRATEGY_NOT_IMPLEMENTED,
+  RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
   resolveProjectPolicyWindowDays,
   runRetentionSweep,
   type RetentionDeps,
 } from "./retention-sweep";
 import {
   retentionRowsReclaimedTotal,
+  retentionSweepBatchCapReachedTotal,
   retentionSweepSkippedTotal,
 } from "../lib/metrics";
 
@@ -65,10 +67,11 @@ beforeEach(() => {
     listProjectsWithTier: vi.fn(async () => [project()]),
     findByTierAndCycle: vi.fn(async () => tierLimits()),
     listRetentionOverrides: vi.fn(async () => new Map<string, number>()),
-    deleteRetentionRows: vi.fn(async () => 0),
+    deleteRetentionRows: vi.fn(async () => ({ deleted: 0, hitBatchCap: false })),
   };
   vi.spyOn(retentionSweepSkippedTotal, "inc");
   vi.spyOn(retentionRowsReclaimedTotal, "inc");
+  vi.spyOn(retentionSweepBatchCapReachedTotal, "inc");
 });
 
 afterEach(() => {
@@ -92,6 +95,7 @@ describe("runRetentionSweep", () => {
       deps.db,
       "webhook_events",
       webhookEventsPolicy.timestampColumn,
+      "prj_1",
       expectedCutoff,
       webhookEventsPolicy.terminalStatuses,
       RETENTION_DELETE_BATCH_SIZE,
@@ -126,7 +130,6 @@ describe("runRetentionSweep", () => {
       project({ projectId: "prj_2", tier: null, cycle: null }),
       project({ projectId: "prj_3", tier: null, cycle: null }),
     ]);
-    deps.findByTierAndCycle.mockResolvedValue(null);
     deps.listRetentionOverrides.mockResolvedValue(
       new Map([["webhook_events", 14]]),
     );
@@ -135,7 +138,7 @@ describe("runRetentionSweep", () => {
     deps.deleteRetentionRows.mockImplementation(async () => {
       call += 1;
       if (call === 2) throw new Error("boom");
-      return 1;
+      return { deleted: 1, hitBatchCap: false };
     });
 
     await expect(
@@ -146,6 +149,7 @@ describe("runRetentionSweep", () => {
     // stopped after project 2's failure would never reach project 3,
     // and this call count would be 2, not 3.
     expect(deps.deleteRetentionRows).toHaveBeenCalledTimes(3);
+    expect(deps.findByTierAndCycle).not.toHaveBeenCalled();
     expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
       reason: RETENTION_SKIP_REASON_ERROR,
       table: "webhook_events",
@@ -167,8 +171,36 @@ describe("runRetentionSweep", () => {
       (call) => call[1] === "webhook_events",
     );
     expect(webhookEventsCall).toBeDefined();
-    expect(webhookEventsCall![5]).toBe(RETENTION_DELETE_BATCH_SIZE);
-    expect(webhookEventsCall![6]).toBe(RETENTION_MAX_BATCHES);
+    expect(webhookEventsCall![6]).toBe(RETENTION_DELETE_BATCH_SIZE);
+    expect(webhookEventsCall![7]).toBe(RETENTION_MAX_BATCHES);
+  });
+
+  it("logs and counts when a DELETE_ROWS unit hits the batch cap", async () => {
+    // The batching loop lives in the repository function; the sweep's
+    // job is to surface `hitBatchCap` rather than swallow it. Only
+    // webhook_events reports the cap here — the assertion must fail if
+    // the sweep attributes it to the wrong table or fires it for every
+    // DELETE_ROWS call regardless of what the dependency returned.
+    deps.deleteRetentionRows.mockImplementation(
+      async (_db: unknown, table: string) => {
+        if (table === "webhook_events") {
+          return { deleted: RETENTION_DELETE_BATCH_SIZE, hitBatchCap: true };
+        }
+        return { deleted: 0, hitBatchCap: false };
+      },
+    );
+
+    await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
+
+    expect(retentionSweepBatchCapReachedTotal.inc).toHaveBeenCalledWith({
+      table: "webhook_events",
+    });
+    expect(retentionSweepBatchCapReachedTotal.inc).not.toHaveBeenCalledWith({
+      table: "outgoing_webhooks",
+    });
+    expect(retentionSweepBatchCapReachedTotal.inc).not.toHaveBeenCalledWith({
+      table: "copilot_messages",
+    });
   });
 
   it("only expires terminal rows for a policy with terminalStatuses", async () => {
@@ -186,8 +218,8 @@ describe("runRetentionSweep", () => {
       (call) => call[1] === "outgoing_webhooks",
     );
     expect(outgoingCall).toBeDefined();
-    expect(outgoingCall![4]).toBe(outgoingWebhooksPolicy.terminalStatuses);
-    expect(outgoingCall![4]).toEqual(["SENT", "DEAD", "DISMISSED"]);
+    expect(outgoingCall![5]).toBe(outgoingWebhooksPolicy.terminalStatuses);
+    expect(outgoingCall![5]).toEqual(["SENT", "DEAD", "DISMISSED"]);
   });
 
   it("uses the override alone when a project has no billing tier", async () => {
@@ -198,7 +230,6 @@ describe("runRetentionSweep", () => {
     deps.listProjectsWithTier.mockResolvedValue([
       project({ tier: null, cycle: null }),
     ]);
-    deps.findByTierAndCycle.mockResolvedValue(null);
     deps.listRetentionOverrides.mockResolvedValue(
       new Map([["webhook_events", 30]]),
     );
@@ -211,6 +242,7 @@ describe("runRetentionSweep", () => {
       deps.db,
       "webhook_events",
       webhookEventsPolicy.timestampColumn,
+      "prj_1",
       expectedCutoff,
       webhookEventsPolicy.terminalStatuses,
       RETENTION_DELETE_BATCH_SIZE,
@@ -224,7 +256,6 @@ describe("runRetentionSweep", () => {
     deps.listProjectsWithTier.mockResolvedValue([
       project({ tier: null, cycle: null }),
     ]);
-    deps.findByTierAndCycle.mockResolvedValue(null);
     deps.listRetentionOverrides.mockResolvedValue(new Map());
 
     const result = await runRetentionSweep(
@@ -241,14 +272,48 @@ describe("runRetentionSweep", () => {
     expect(result.skipped).toBe(RETENTION_POLICIES.length);
   });
 
+  it("treats a missing billing_tier_limits row for a project WITH a tier as its own skip reason, never a silent fall-through to the override-only rule", async () => {
+    // The project genuinely has a paid tier ("indie"/"monthly"), but the
+    // reference ladder has no matching row for it. An override is ALSO
+    // present here specifically to prove the sweep does not fall
+    // through to the override-only rule (which lacks the tier's upper
+    // clamp) — it must skip outright instead.
+    deps.findByTierAndCycle.mockResolvedValue(null);
+    deps.listRetentionOverrides.mockResolvedValue(
+      new Map([["webhook_events", 30]]),
+    );
+
+    await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
+
+    expect(deps.deleteRetentionRows).not.toHaveBeenCalled();
+    expect(retentionSweepSkippedTotal.inc).toHaveBeenCalledWith({
+      reason: RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
+      table: "webhook_events",
+    });
+  });
+
+  it("fetches project-level facts (overrides, tier limits) once per project, not once per policy", async () => {
+    // RETENTION_POLICIES has 6 entries; a per-policy fetch would call
+    // each of these 6 times for this single project.
+    await runRetentionSweep(NOW, deps as unknown as RetentionDeps);
+
+    expect(deps.listRetentionOverrides).toHaveBeenCalledTimes(1);
+    expect(deps.findByTierAndCycle).toHaveBeenCalledTimes(1);
+  });
+
   it("never lets a no-tier override fall below the policy floor", () => {
     // An override of 1 day on audit_logs still resolves to the 30-day
     // floor. Without a tier there is nothing else holding the line.
     // audit_logs is CHECKPOINT_TRUNCATE (Task 6, not this task), so the
     // window resolution itself — not a delete call — is what this test
     // pins.
-    const days = resolveProjectPolicyWindowDays(auditLogsPolicy, null, 1);
-    expect(days).toBe(30);
+    const resolution = resolveProjectPolicyWindowDays(
+      auditLogsPolicy,
+      false,
+      null,
+      1,
+    );
+    expect(resolution).toEqual({ kind: "resolved", days: 30 });
   });
 
   it("resolves a DROP_PARTITION policy's window normally before skipping on strategy", () => {
@@ -256,11 +321,25 @@ describe("runRetentionSweep", () => {
     // independent: a project WITH a tier resolves credit_ledger's
     // window via the normal tier+floor rule even though the strategy
     // is not implemented here.
-    const days = resolveProjectPolicyWindowDays(
+    const resolution = resolveProjectPolicyWindowDays(
       creditLedgerPolicy,
+      true,
       tierLimits({ retentionDays: 180 }) as never,
       undefined,
     );
-    expect(days).toBe(365); // floored at CREDIT_LEDGER_MINIMUM_DAYS
+    expect(resolution).toEqual({ kind: "resolved", days: 365 }); // floored at CREDIT_LEDGER_MINIMUM_DAYS
+  });
+
+  it("resolveProjectPolicyWindowDays: a tier with no matching ladder row skips even with an override present", () => {
+    const resolution = resolveProjectPolicyWindowDays(
+      webhookEventsPolicy,
+      true,
+      null,
+      30,
+    );
+    expect(resolution).toEqual({
+      kind: "skip",
+      reason: RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND,
+    });
   });
 });

@@ -154,16 +154,37 @@ export const retentionRowsReclaimedTotal = new Counter({
 
 // Incremented once per (project, policy) unit the sweep did not act
 // on, by reason: "no-window" (neither a billing tier nor an override —
-// expected and safe on a self-hosted install), "strategy-not-implemented"
-// (DROP_PARTITION/CHECKPOINT_TRUNCATE, until Tasks 4/5 ship), or "error"
-// (the unit's own lookup or delete threw). A sustained "error" rate
-// means the sweep is silently failing to reclaim space somewhere; a
-// sustained "strategy-not-implemented" rate outside audit_logs/
-// credit_ledger/revenue_events means a policy was added without its
-// strategy ever landing.
+// expected and safe on a self-hosted install), "tier-limits-not-found"
+// (the project HAS a tier/cycle but billing_tier_limits has no matching
+// row — a reference-ladder integrity gap, not an ordinary no-tier
+// project; the direction is still safe, retaining rather than deleting,
+// but a paying project's tier clamp silently not applying is worth its
+// own signal), "strategy-not-implemented" (DROP_PARTITION/
+// CHECKPOINT_TRUNCATE, until Tasks 4/5 ship), or "error" (the unit's
+// own lookup or delete threw). A sustained "error" rate means the sweep
+// is silently failing to reclaim space somewhere; a sustained
+// "strategy-not-implemented" rate outside audit_logs/credit_ledger/
+// revenue_events means a policy was added without its strategy ever
+// landing; ANY "tier-limits-not-found" means the billing ladder is
+// missing a (tier, cycle) row a real project needs.
 export const retentionSweepSkippedTotal = new Counter({
   name: "rovenue_retention_sweep_skipped_total",
   help: "Retention sweep units skipped, by reason and table",
   labelNames: ["reason", "table"] as const,
+  registers: [registry],
+});
+
+// Incremented once per (project, policy) DELETE_ROWS unit whose batched
+// delete stopped because it hit `RETENTION_MAX_BATCHES` rather than
+// because it ran out of rows to delete. Unlike a skip, work DID happen
+// (whatever `retentionRowsReclaimedTotal` recorded for the same call) —
+// this is "there is more to do than one night's cap allows," which is
+// otherwise invisible: the loop just stops with no counter and no log,
+// and a table that needs more than the cap every night stalls forever
+// with nobody the wiser.
+export const retentionSweepBatchCapReachedTotal = new Counter({
+  name: "rovenue_retention_sweep_batch_cap_reached_total",
+  help: "Retention sweep DELETE_ROWS units that hit RETENTION_MAX_BATCHES with rows still remaining, by table",
+  labelNames: ["table"] as const,
   registers: [registry],
 });

@@ -40,7 +40,18 @@ export type RetentionTierField = "retentionDays" | "auditLogDays";
 export interface RetentionPolicy {
   // The physical table name, exactly as it appears in the DB.
   table: string;
-  // The column a sweep filters/orders on to determine a row's age.
+  // The DRIZZLE SCHEMA PROPERTY NAME (packages/db/src/drizzle/schema.ts)
+  // of the column a sweep filters/orders on to determine a row's age —
+  // deliberately NOT guaranteed to be the physical DB column name.
+  // `copilot_messages` is the proof this distinction is load-bearing:
+  // its Drizzle field is `createdAt` but the physical column is
+  // `created_at`. A consumer must resolve this through the real Drizzle
+  // table object (e.g. `schemaTable[policy.timestampColumn]`), never by
+  // raw-interpolating the string as a quoted SQL identifier — that
+  // would silently target a nonexistent column for any table whose
+  // property name and physical name diverge. See
+  // packages/db/src/drizzle/repositories/retention-rows.ts for the
+  // DELETE_ROWS consumer that does this correctly.
   timestampColumn: string;
   strategy: RetentionStrategy;
   // Which billing-tier-limits column supplies the default window.
