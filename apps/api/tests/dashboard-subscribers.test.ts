@@ -38,26 +38,38 @@ const exportMock = vi.hoisted(() => ({
 vi.mock("../src/services/gdpr/export-subscriber", () => exportMock);
 
 const creditHistoryMock = vi.hoisted(() => ({
+  // `entries` must be typed as a real-row array up front — tests below
+  // reassign it via .mockResolvedValueOnce with actual ledger rows, and a
+  // bare `[]` here infers `never[]`, which no fixture object satisfies.
   listCreditHistory: vi.fn(async () => ({
-    entries: [],
+    entries: [] as Record<string, unknown>[],
     nextCursor: null as null | { createdAt: string; id: string },
   })),
 }));
 vi.mock("../src/services/credit-history", () => creditHistoryMock);
 
 const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
+  // Every findMany below is called with a `where`/`orderBy`/`include` args
+  // object (see loadSubscriberDetail below) and reassigned in tests via
+  // .mockResolvedValue with real fixture arrays — a bare `vi.fn(async () =>
+  // [])` both rejects the args (expected 0 arguments) and infers a
+  // never[]-only return type no fixture satisfies.
+  type FindMany = (args?: Record<string, unknown>) => Promise<Record<string, unknown>[]>;
   const dbMock = {
     projectMember: { findUnique: vi.fn() },
     subscriber: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn<FindMany>(async () => []),
       findUnique: vi.fn(),
       count: vi.fn(async () => 0),
     },
-    purchase: { findMany: vi.fn(async () => []), groupBy: vi.fn(async () => []) },
-    subscriberAccess: { findMany: vi.fn(async () => []) },
-    creditLedger: { findMany: vi.fn(async () => []), findFirst: vi.fn() },
-    experimentAssignment: { findMany: vi.fn(async () => []) },
-    outgoingWebhook: { findMany: vi.fn(async () => []) },
+    purchase: {
+      findMany: vi.fn<FindMany>(async () => []),
+      groupBy: vi.fn<FindMany>(async () => []),
+    },
+    subscriberAccess: { findMany: vi.fn<FindMany>(async () => []) },
+    creditLedger: { findMany: vi.fn<FindMany>(async () => []), findFirst: vi.fn() },
+    experimentAssignment: { findMany: vi.fn<FindMany>(async () => []) },
+    outgoingWebhook: { findMany: vi.fn<FindMany>(async () => []) },
   };
   // Shadow reader: yields the primary caller, ignores the shadow.
   const drizzleMock = {
@@ -69,7 +81,10 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
         dbMock.subscriber.findUnique({ where: { id } }),
       ),
       listSubscribers: vi.fn(
-        async (_db: unknown, _args: Record<string, unknown>) => [],
+        async (
+          _db: unknown,
+          _args: Record<string, unknown>,
+        ): Promise<Record<string, unknown>[]> => [],
       ),
       countActiveSubscribers: vi.fn(async () => 0),
     },

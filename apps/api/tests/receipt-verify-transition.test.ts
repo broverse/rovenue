@@ -11,7 +11,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { drizzleMock, auditMock, googleMocks, appleVerifyMocks, loggerSpies } =
   vi.hoisted(() => {
-    const auditMock = vi.fn(async () => undefined);
+    // Real `audit()` takes (entry, callerTx?) — see src/lib/audit.ts. Left
+    // as a zero-arg vi.fn, `.mock.calls[N]?.[0]` below infers an empty
+    // tuple (TS2493: no element at index 0).
+    const auditMock = vi.fn(
+      async (_entry: Record<string, unknown>, _tx?: unknown) => undefined,
+    );
     // Task 6: the Apple JWS verifier used to return one hardcoded fixture
     // for every test. Task 6's typing tests need to vary transactionId /
     // originalTransactionId / price / productId per call, so it is now a
@@ -64,7 +69,23 @@ const { drizzleMock, auditMock, googleMocks, appleVerifyMocks, loggerSpies } =
         upsertSubscriber: vi.fn(async () => ({ id: "sub_1" })),
       },
       offeringRepo: {
-        findProductByIdentifierOrStoreId: vi.fn(async () => ({
+        // Real signature is (db, projectId, identifier, store, storeId) =>
+        // Promise<Product | null> (packages/db/src/drizzle/repositories/
+        // offerings.ts). Tests below reassign this via .mockResolvedValue
+        // with both Apple-shaped and Google-shaped product fixtures, so the
+        // default's literal return type (inferred with `accessIds: never[]`
+        // and `storeIds: { apple: string }` only) must be widened —
+        // otherwise a Google-shaped fixture (`storeIds: { google }`) isn't
+        // assignable to the narrower inferred type.
+        findProductByIdentifierOrStoreId: vi.fn<
+          (
+            db?: unknown,
+            projectId?: string,
+            identifier?: string,
+            store?: string,
+            storeId?: string,
+          ) => Promise<Record<string, unknown> | null>
+        >(async () => ({
           id: "prod_1",
           accessIds: [],
           // verifyAppleReceipt refuses to grant a product that does not
@@ -97,11 +118,23 @@ const { drizzleMock, auditMock, googleMocks, appleVerifyMocks, loggerSpies } =
       },
       purchaseRepo: {
         lockPurchaseStatusByStoreTransaction: vi.fn(),
-        upsertPurchase: vi.fn(async () => ({ id: "pur_1" })),
+        // Real signature is (db, args: { store, storeTransactionId, create,
+        // update, guardTerminalStatus? }) => Promise<Purchase> (packages/db/
+        // src/drizzle/repositories/purchases.ts). Tests read
+        // `.mock.calls[N]?.[1]?.create`/`.update` below — a zero-arg stub
+        // makes that index out of range (TS2493) on an empty tuple.
+        upsertPurchase: vi.fn<
+          (db?: unknown, args?: Record<string, unknown>) => Promise<Record<string, unknown>>
+        >(async () => ({ id: "pur_1" })),
       },
       // R6: the receipt path now records revenue idempotently.
       revenueEventRepo: {
-        createRevenueEvent: vi.fn(async () => ({ id: "rev_1" })),
+        // Real signature is (db, input) => Promise<RevenueEvent | null>
+        // (packages/db/src/drizzle/repositories/revenue-events.ts). Tests
+        // read `.mock.calls[N]?.[1]` below — same zero-arg-stub gap.
+        createRevenueEvent: vi.fn<
+          (db?: unknown, input?: Record<string, unknown>) => Promise<Record<string, unknown> | null>
+        >(async () => ({ id: "rev_1" })),
       },
     };
     return { drizzleMock, auditMock, googleMocks, appleVerifyMocks, loggerSpies };
