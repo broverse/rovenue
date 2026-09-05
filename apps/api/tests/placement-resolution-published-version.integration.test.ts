@@ -53,7 +53,6 @@ beforeAll(async () => {
     .values({
       projectId,
       identifier: `off-${RUN_ID}`,
-      name: "Default",
       packages: [{ identifier: "monthly", productId: null }],
     })
     .returning();

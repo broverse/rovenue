@@ -10,6 +10,15 @@
       "persistent": true
     },
     "lint": {},
+    // `apps/api` is the only workspace with this script today; turbo skips
+    // any package that doesn't define it. Depends on `^build` the same way
+    // `build`'s own `tsc --noEmit` does — the test tree's typecheck resolves
+    // workspace deps (`@rovenue/db`, `@rovenue/shared`, ...) through their
+    // built output, so those must exist first. No `outputs`: `--noEmit`
+    // writes nothing to cache.
+    "typecheck:tests": {
+      "dependsOn": ["^build"]
+    },
     "test": {
       "dependsOn": ["^build"],
       // Turbo sanitises the environment by default, so a var not declared

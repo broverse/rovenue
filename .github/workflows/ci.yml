@@ -75,6 +75,15 @@ jobs:
 
       - run: pnpm build
 
+      # apps/api's own `build` script (`tsup && tsc --noEmit`) typechecks
+      # `src/**` but tsconfig.json's `include` never reaches `tests/**`, so
+      # that tree went unchecked for a long time (see the header comment in
+      # apps/api/tsconfig.tests.json). This runs it as its own step, through
+      # turbo so packages without the script are skipped and dependency
+      # types are already built by the `pnpm build` step above.
+      - name: Typecheck - test tree
+        run: pnpm exec turbo run typecheck:tests
+
       # apps/api's `test` script is two passes: `vitest run` excludes the
       # testcontainer suites, then `VITEST_CONTAINER_PASS=1 vitest run` runs
       # them. The second pass starts its own Redpanda and ClickHouse; what it

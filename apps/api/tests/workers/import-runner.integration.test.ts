@@ -420,7 +420,16 @@ describe("runImportJob — crash mid-batch and resume", () => {
     // The actual bug surface: the append-only, hash-chained audit row
     // itself must carry the full count.
     const auditPayload = await getImportCompletedAuditPayload(jobId);
-    const auditedTotal = Object.values(auditPayload).reduce(
+    // Explicit `<number>`: with a bare `0`, TS picks the non-generic
+    // `reduce(cb: (prev: T, cur: T) => T, initial: T): T` overload (T =
+    // the array's own `string | number` element type, since a literal
+    // `0` is assignable to it) instead of the generic `reduce<U>` overload
+    // this needs — which types the accumulator `a` as `string | number`
+    // and makes `a + ...` an error. Pinning U=number selects the right
+    // overload; it doesn't change what's summed (the `typeof b ===
+    // "number"` guard already filters out the payload's non-numeric
+    // `status` field, only totalling the outcome-count buckets).
+    const auditedTotal = Object.values(auditPayload).reduce<number>(
       (a, b) => a + (typeof b === "number" ? b : 0),
       0,
     );

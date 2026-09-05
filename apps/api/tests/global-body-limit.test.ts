@@ -64,7 +64,14 @@ async function errorCode(res: Response): Promise<string | undefined> {
   }
 }
 
-function body(bytes: number): Uint8Array {
+// Return type is the concrete `Uint8Array<ArrayBuffer>`, not the bare
+// `Uint8Array` (which defaults to `Uint8Array<ArrayBufferLike>`). Since TS
+// 5.7 made typed arrays generic over their backing buffer, lib.dom's
+// `BufferSource` (what `RequestInit.body` accepts) narrowed to
+// `ArrayBufferView<ArrayBuffer>` specifically — a bare `Uint8Array` no
+// longer satisfies it, even though `new Uint8Array(bytes)` always
+// allocates a real, non-shared `ArrayBuffer` at runtime.
+function body(bytes: number): Uint8Array<ArrayBuffer> {
   return new Uint8Array(bytes);
 }
 

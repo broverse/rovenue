@@ -1,5 +1,5 @@
 import { describe, expect, it, test, vi } from "vitest";
-import { CompactSign, generateKeyPair, type KeyLike } from "jose";
+import { CompactSign, generateKeyPair, type CryptoKey } from "jose";
 import {
   APPLE_ENVIRONMENT,
   APPLE_NOTIFICATION_SUBTYPE,
@@ -15,7 +15,7 @@ import {
 } from "../src/services/apple/apple-verify";
 
 async function signPayload(
-  privateKey: KeyLike,
+  privateKey: CryptoKey,
   payload: Record<string, unknown>,
 ): Promise<string> {
   return new CompactSign(new TextEncoder().encode(JSON.stringify(payload)))
