@@ -18,6 +18,7 @@
       "types": "./src/audit-chain.ts",
       "default": "./src/audit-chain.ts"
     },
+    "./audit-proof-bundle-fixture.json": "./src/audit-proof-bundle-fixture.json",
     "./subscription-status": {
       "types": "./src/subscription-status.ts",
       "default": "./src/subscription-status.ts"

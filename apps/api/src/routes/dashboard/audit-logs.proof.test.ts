@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AUDIT_CHAIN_FORMAT_V1, hashAuditRow } from "@rovenue/shared/audit-chain";
+import auditProofFixture from "@rovenue/shared/audit-proof-bundle-fixture.json";
 
 // =============================================================
 // GET /dashboard/audit-logs/proof (ROADMAP §9.3, Task 3)
@@ -332,5 +333,36 @@ describe("GET /audit-logs/proof", () => {
       rowHash: null,
       createdAt: "2026-01-01T00:00:00.000Z",
     });
+  });
+
+  // Ties this endpoint's assembly to
+  // packages/shared/src/audit-proof-bundle-fixture.json, the same fixture
+  // scripts/verify-audit-bundle.test.ts asserts verifies clean offline.
+  // `apps/api` cannot depend on `@rovenue/scripts` (the standalone
+  // verifier must stay isolated from the server it audits), so this
+  // fixture -- read by both sides via the `@rovenue/shared` subpath
+  // export, never typed by hand on either side -- is what keeps the
+  // endpoint's output and the verifier's acceptance criteria from
+  // drifting apart while both suites stay green (ROADMAP §12's recurring
+  // failure mode). If the endpoint's assembly ever changes shape, this
+  // goes red here; if the verifier's acceptance criteria change, the
+  // scripts-side test goes red there.
+  test("assembles a bundle that deep-equals the shared fixture (modulo exportedAt)", async () => {
+    addMembership(auditProofFixture.projectId, "u1", "OWNER");
+    listAuditProofRows.mockResolvedValueOnce(auditProofFixture.entries);
+
+    const res = await getProof(`?projectId=${auditProofFixture.projectId}`, {
+      user: "u1",
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    // `exportedAt` is a wall-clock timestamp the endpoint stamps at
+    // request time -- it can never match a static fixture -- so it is
+    // asserted separately and excluded from the deep-equal below.
+    expect(typeof body.data.exportedAt).toBe("string");
+    const { exportedAt: _actualExportedAt, ...restOfBody } = body.data;
+    const { exportedAt: _fixtureExportedAt, ...restOfFixture } = auditProofFixture;
+    expect(restOfBody).toEqual(restOfFixture);
   });
 });

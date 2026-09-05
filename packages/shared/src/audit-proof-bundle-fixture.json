@@ -1,0 +1,67 @@
+{
+  "formatVersion": "rovenue.audit-chain.v1",
+  "projectId": "prj_demo1",
+  "exportedAt": "2026-09-05T12:00:00.000Z",
+  "origin": null,
+  "tip": {
+    "rowHash": "5b8baf33b9d5508ea35f85d6bfa9f67f9bbb595e1fc0a11bfda55551c98340a2",
+    "createdAt": "2026-09-03T00:00:00.000Z"
+  },
+  "truncated": false,
+  "entries": [
+    {
+      "id": "aud_demo1",
+      "projectId": "prj_demo1",
+      "userId": "usr_demo1",
+      "action": "project.create",
+      "resource": "project",
+      "resourceId": "prj_demo1",
+      "before": null,
+      "after": {
+        "name": "Demo Project"
+      },
+      "ipAddress": "203.0.113.7",
+      "userAgent": "rovenue-dashboard/1.0",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "prevHash": null,
+      "rowHash": "cb6cba48a098b0209efb2a5bcd49d0b2246f3526ec10ce087f9822add8f63239"
+    },
+    {
+      "id": "aud_demo2",
+      "projectId": "prj_demo1",
+      "userId": "usr_demo1",
+      "action": "product.create",
+      "resource": "product",
+      "resourceId": "prd_demo1",
+      "before": null,
+      "after": {
+        "name": "Pro Plan",
+        "priceUsd": 999
+      },
+      "ipAddress": "203.0.113.7",
+      "userAgent": "rovenue-dashboard/1.0",
+      "createdAt": "2026-09-02T00:00:00.000Z",
+      "prevHash": "cb6cba48a098b0209efb2a5bcd49d0b2246f3526ec10ce087f9822add8f63239",
+      "rowHash": "a73eef3f4efeba2951e3289946d309e74cf1f6ffd368a25d335f586f96915d89"
+    },
+    {
+      "id": "aud_demo3",
+      "projectId": "prj_demo1",
+      "userId": "usr_demo1",
+      "action": "product.update",
+      "resource": "product",
+      "resourceId": "prd_demo1",
+      "before": {
+        "priceUsd": 999
+      },
+      "after": {
+        "priceUsd": 1299
+      },
+      "ipAddress": "203.0.113.7",
+      "userAgent": "rovenue-dashboard/1.0",
+      "createdAt": "2026-09-03T00:00:00.000Z",
+      "prevHash": "a73eef3f4efeba2951e3289946d309e74cf1f6ffd368a25d335f586f96915d89",
+      "rowHash": "5b8baf33b9d5508ea35f85d6bfa9f67f9bbb595e1fc0a11bfda55551c98340a2"
+    }
+  ]
+}
