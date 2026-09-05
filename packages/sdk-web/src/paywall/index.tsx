@@ -89,6 +89,8 @@ export function RovenuePaywall({
   const [variantId, setVariantId] = useState<string | null>(null);
   const [chosen, setChosen] = useState<ResolvedPaywall | null>(null);
   const viewRecordedFor = useRef<string | null>(null);
+  const closeRecordedFor = useRef<string | null>(null);
+  const exposureRecordedFor = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,11 +110,20 @@ export function RovenuePaywall({
         // bucketed into an arm but missing from exposure_events still
         // contributes revenue while being absent from the denominator, which
         // biases every conversion rate and breaks the sample-ratio check.
-        void rovenue.recordExposure({
-          experimentId: data.experiment.id,
-          variantId: variant.variantId,
-          placementId: data.placement?.identifier,
-        });
+        // Once per (experiment, variant) for this mount, mirroring the
+        // native ExposureTracker's ledger. Routing away and back, or opening
+        // the paywall twice, would otherwise POST again: `uniq(subscriberId)`
+        // keeps SRM honest but `uniqExact(eventId)` counts every row, so the
+        // exposures-per-user ratio would drift for web only.
+        const exposureKey = `${data.experiment.id}:${variant.variantId}`;
+        if (exposureRecordedFor.current !== exposureKey) {
+          exposureRecordedFor.current = exposureKey;
+          void rovenue.recordExposure({
+            experimentId: data.experiment.id,
+            variantId: variant.variantId,
+            placementId: data.placement?.identifier,
+          });
+        }
         return;
       }
       if (cancelled) return;
@@ -189,6 +200,17 @@ export function RovenuePaywall({
   // dismissal rate is structurally wrong for any project with web traffic.
   const handleClose = useCallback(() => {
     if (chosen && data?.placement) {
+      // Deduped on the same key as the view. The renderer calls onClose from
+      // a close-action node and nothing unmounts the paywall, so a host that
+      // does not itself dismiss gets one call per tap — three taps on X would
+      // otherwise produce three closes against one view and a dismissal rate
+      // above 100%.
+      const key = `${data.placement.identifier}:${chosen.id}:${variantId ?? ""}`;
+      if (closeRecordedFor.current === key) {
+        onClose?.();
+        return;
+      }
+      closeRecordedFor.current = key;
       rovenue.track({
         eventType: "paywall_close",
         subscriberId: rovenue.rovenueId(),

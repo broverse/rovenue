@@ -363,3 +363,68 @@ describe("experiment exposure and close", () => {
     });
   });
 });
+
+describe("event dedupe", () => {
+  const WITH_EXPERIMENT = {
+    placement: { identifier: "onboarding", revision: 4 },
+    paywall: null,
+    experiment: {
+      id: "exp_1",
+      key: "pricing_test",
+      variants: [
+        {
+          variantId: "only",
+          weight: 1,
+          paywall: {
+            id: "pw_only",
+            identifier: "only",
+            builderConfig: { marker: "only" },
+            offering: null,
+          },
+        },
+      ],
+    },
+  };
+
+  it("records one close however many times the node is tapped", async () => {
+    const client = sdk(PLAIN);
+    const track = vi.spyOn(client, "track");
+    renderWith(client);
+    await waitFor(() => expect(screen.getByTestId("rendered")).toBeTruthy());
+    track.mockClear();
+
+    const close = screen.getByRole("button", { name: /close/i });
+    close.click();
+    close.click();
+    close.click();
+
+    await waitFor(() => expect(track).toHaveBeenCalled());
+    // Nothing unmounts the paywall on close, so an undeduped handler would
+    // give three closes against one view — a dismissal rate above 100%.
+    expect(
+      track.mock.calls.filter((c) => c[0].eventType === "paywall_close"),
+    ).toHaveLength(1);
+  });
+
+  it("records one exposure across remounts", async () => {
+    const client = sdk(WITH_EXPERIMENT);
+    const exposure = vi.spyOn(client, "recordExposure").mockResolvedValue();
+    const { rerender } = renderWith(client);
+    await waitFor(() => expect(exposure).toHaveBeenCalledTimes(1));
+
+    for (let i = 0; i < 3; i++) {
+      rerender(
+        <RovenueProvider client={client}>
+          <RovenuePaywall
+            placement="onboarding"
+            successUrl="https://app.example.com/ok"
+            cancelUrl="https://app.example.com/no"
+          />
+        </RovenueProvider>,
+      );
+    }
+    // uniq(subscriberId) keeps SRM honest, but uniqExact(eventId) counts
+    // every row — repeated exposures drift the per-user ratio for web only.
+    expect(exposure).toHaveBeenCalledTimes(1);
+  });
+});

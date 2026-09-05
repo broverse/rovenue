@@ -96,7 +96,17 @@ export function createStorage(): SdkStorage {
         store.setItem(key, value);
       } catch {
         // Quota, or storage revoked mid-session. Keep it in memory so the
-        // value survives this page at least.
+        // value survives this page at least — and REMOVE the stale entry
+        // first. `get` reads the real store before memory, so leaving an old
+        // value there shadows the new one: the event queue would read the
+        // pre-quota `[A]`, post A, then write `[]`, silently dropping the B
+        // it thought it had persisted. The same shape resurrects a
+        // logged-out rovenueId on the next page load.
+        try {
+          store.removeItem(key);
+        } catch {
+          // Nothing more to try; memory is now the only copy either way.
+        }
         memory.set(key, value);
       }
     },

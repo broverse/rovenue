@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { drizzle } from "@rovenue/db";
-import { flattenAttributes } from "@rovenue/shared";
+import { flattenAttributes,
+  HEADER,
+} from "@rovenue/shared";
 import { resolvePlacement } from "../../lib/placement-resolution";
 import { ok } from "../../lib/response";
 
@@ -27,7 +29,7 @@ import { ok } from "../../lib/response";
 // dashboard fallback-file export, which resolves every ACTIVE placement
 // anonymously (see routes/dashboard/paywalls.ts).
 
-const SUBSCRIBER_HEADER = "x-rovenue-user-id";
+const SUBSCRIBER_HEADER = HEADER.X_ROVENUE_USER_ID;
 
 export const placementsRoute = new Hono().get("/:identifier", async (c) => {
   const project = c.get("project");

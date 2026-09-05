@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { HTTPException } from "hono/http-exception";
 import { drizzle } from "@rovenue/db";
 import type { Db } from "@rovenue/db";
@@ -46,7 +47,13 @@ export interface CreateCheckoutSessionInput {
   successUrl: string;
   cancelUrl: string;
   /**
-   * The client's `Idempotency-Key`, passed straight to Stripe when present.
+   * The client's `Idempotency-Key`, if it sent one.
+   *
+   * NOT passed to Stripe verbatim. Stripe scopes idempotency to the connected
+   * ACCOUNT, so a raw browser-supplied value shares one key space with every
+   * subscriber of the project: two buyers sending the same key would receive
+   * the same Checkout Session, the second paying into the first's customer.
+   * It is hashed together with the project and subscriber before use.
    *
    * Stripe's own idempotency is used rather than a scheme of our own: it is
    * authoritative for the charge, and it survives this process restarting
@@ -210,8 +217,18 @@ export async function createCheckoutSession(
     // session back: the second pays into the first's customer, and the
     // subscription metadata names the first subscriber, so the entitlement
     // lands on the wrong person.
+    // Hashed, not concatenated: Stripe caps an idempotency key at 255
+    // characters and this route reads the client's header raw, so a prefix of
+    // two cuid2 ids would push a previously-working 220-character key over
+    // the limit and turn it into an invalid_request the caller sees as a 500.
+    // A digest is fixed-width and preserves the one property that matters —
+    // same inputs, same key.
     idempotencyKey
-      ? { idempotencyKey: `${projectId}:${subscriberId}:${idempotencyKey}` }
+      ? {
+          idempotencyKey: createHash("sha256")
+            .update(`${projectId}:${subscriberId}:${idempotencyKey}`)
+            .digest("hex"),
+        }
       : undefined,
   );
 

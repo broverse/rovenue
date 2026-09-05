@@ -2,7 +2,9 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { drizzle } from "@rovenue/db";
-import { flattenAttributes } from "@rovenue/shared";
+import { flattenAttributes,
+  HEADER,
+} from "@rovenue/shared";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
 import {
@@ -28,7 +30,7 @@ import {
 // via `X-Rovenue-Experiment: <key>:<variantId>` so the SDK can log
 // the exposure back. The flag flip is response-only — never a DB write.
 
-const SUBSCRIBER_HEADER = "x-rovenue-user-id";
+const SUBSCRIBER_HEADER = HEADER.X_ROVENUE_USER_ID;
 const EXPERIMENT_HEADER = "x-rovenue-experiment";
 
 interface OfferingExperimentOverride {

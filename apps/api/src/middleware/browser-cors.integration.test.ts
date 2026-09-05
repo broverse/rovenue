@@ -143,7 +143,7 @@ describe("browserCors", () => {
     const res = await preflight(
       WEB_KEY,
       LISTED_ORIGIN,
-      `${HEADER.X_ROVENUE_APP_USER_ID},${HEADER.X_ROVENUE_PLATFORM}`,
+      `${HEADER.X_ROVENUE_APP_USER_ID},${HEADER.X_ROVENUE_USER_ID},${HEADER.X_ROVENUE_PLATFORM}`,
     );
     // Assert the origin too. Hono echoes requested headers even when the
     // origin is refused, so a headers-only assertion passes against a
@@ -155,6 +155,11 @@ describe("browserCors", () => {
       res.headers.get("Access-Control-Allow-Headers") ?? ""
     ).toLowerCase();
     expect(allowed).toContain(HEADER.X_ROVENUE_APP_USER_ID);
+    // The subscriber header the placement, config, offering and experiment
+    // routes actually read. Its absence made every web placement request
+    // anonymous, and a host could not add it back because preflight refused
+    // it — so it needs a regression test, not just a fix.
+    expect(allowed).toContain(HEADER.X_ROVENUE_USER_ID);
     expect(allowed).toContain(HEADER.X_ROVENUE_PLATFORM);
   });
 });

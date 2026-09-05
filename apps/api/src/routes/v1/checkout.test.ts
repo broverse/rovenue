@@ -340,7 +340,9 @@ describe("POST /v1/checkout", () => {
     const options = sessionsCreateMock.mock.calls[0]?.[1] as
       | { idempotencyKey?: string }
       | undefined;
-    expect(options?.idempotencyKey).toContain(key);
+    // Carried, not verbatim — the value is a digest of project, subscriber
+    // and client key, so assert it is present and stable rather than equal.
+    expect(options?.idempotencyKey).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("namespaces the client's idempotency key per subscriber", async () => {
@@ -359,10 +361,18 @@ describe("POST /v1/checkout", () => {
     // project — and it arrives from browser JavaScript. Two buyers sending
     // the same key would otherwise get the SAME session: the second pays into
     // the first's customer and the entitlement lands on the wrong person.
+    const { createHash } = await import("node:crypto");
+    // Hashed rather than concatenated: Stripe caps the key at 255 characters
+    // and this route reads the client's header raw, so a two-cuid2 prefix
+    // would push a previously-working long key over the limit and surface as
+    // a 500.
     expect(options?.idempotencyKey).toBe(
-      `${PROJECT_ID}:${SUBSCRIBER_ID}:shared`,
+      createHash("sha256")
+        .update(`${PROJECT_ID}:${SUBSCRIBER_ID}:shared`)
+        .digest("hex"),
     );
     expect(options?.idempotencyKey).not.toBe("shared");
+    expect(options?.idempotencyKey?.length).toBeLessThanOrEqual(255);
   });
 
   it("omits the idempotency option when the client sends no key", async () => {

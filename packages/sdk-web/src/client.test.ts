@@ -266,6 +266,11 @@ describe("experiment exposure", () => {
       placementId: "onboarding",
       platform: "web",
     });
+    // No exposedAt: the server stamps it. ClickHouse partitions and TTLs
+    // raw_exposures on that column and revenue attribution compares
+    // eventDate >= min(exposedAt), so a skewed device clock would make a
+    // visitor a permanent non-converter or TTL their exposure away entirely.
+    expect(body).not.toHaveProperty("exposedAt");
   });
 
   it("does not reject when the exposure call fails", async () => {

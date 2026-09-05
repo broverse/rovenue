@@ -54,9 +54,11 @@ export const checkoutRoute = new Hono()
         packageIdentifier,
         successUrl,
         cancelUrl,
-        // Forwarded verbatim to Stripe. A double-submitted checkout must not
+        // Namespaced per project and subscriber before it reaches Stripe —
+        // see createCheckoutSession. A double-submitted checkout must not
         // become two subscriptions, and Stripe's own idempotency is the
-        // authority for that — it outlives this process.
+        // authority for that; but its key space is per connected ACCOUNT, so
+        // a raw browser-supplied value would be shared across subscribers.
         idempotencyKey: c.req.header("Idempotency-Key") ?? undefined,
       });
       return c.json(ok(session));

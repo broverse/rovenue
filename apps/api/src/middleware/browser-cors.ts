@@ -52,11 +52,13 @@ export const browserCors =
         "Authorization",
         "Idempotency-Key",
         HEADER.X_ROVENUE_APP_USER_ID,
-        // The subscriber header /v1/placements, /v1/config and
-        // /v1/experiments actually read. Omitting it made every web
-        // placement request anonymous, and a host could not add it back
-        // because preflight would refuse it.
-        "x-rovenue-user-id",
+        // The subscriber header /v1/placements, /v1/config, /v1/offerings and
+        // /v1/experiments actually read. Omitting it made every web placement
+        // request anonymous, and a host could not add it back because
+        // preflight would refuse it. Read from the shared table rather than
+        // spelled out: a route renaming a literal while this allow-list keeps
+        // permitting the old one is the drift that caused the bug.
+        HEADER.X_ROVENUE_USER_ID,
         HEADER.X_ROVENUE_PLATFORM,
       ],
       exposeHeaders: [

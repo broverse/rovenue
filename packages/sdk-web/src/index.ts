@@ -216,7 +216,14 @@ export function configure(options: RovenueOptions): Rovenue {
           subscriberId: identity.rovenueId(),
           ...(placementId ? { placementId } : {}),
           platform: "web",
-          exposedAt: new Date().toISOString(),
+          // No exposedAt. The native path omits it too, and the server
+          // stamps its own clock — deliberately, because ClickHouse
+          // partitions and TTLs `raw_exposures` on this column and revenue
+          // attribution compares `eventDate >= min(exposedAt)`. A device
+          // clock a day fast makes that visitor a permanent non-converter
+          // (their purchases predate their own exposure); one set in the past
+          // over-attributes pre-experiment revenue; one two years slow has
+          // the row TTL-deleted out of the denominator entirely.
         })
         .catch(() => {
           // Fire-and-forget, like the native path: a failed exposure must not
