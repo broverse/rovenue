@@ -1,9 +1,12 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
 import { drizzle } from "@rovenue/db";
+import { AUDIT_CHAIN_FORMAT_V1 } from "@rovenue/shared/audit-chain";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
+import { validate } from "../../lib/validate";
 
 // =============================================================
 // Dashboard: Audit log viewer
@@ -16,6 +19,36 @@ import { ok } from "../../lib/response";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+
+// =============================================================
+// Proof export (§9.3)
+// =============================================================
+//
+// `/proof` hands out a self-verifying bundle: exactly the fields
+// `hashAuditRow` (@rovenue/shared/audit-chain) covers, plus the
+// hash columns, so an external verifier can re-derive every
+// `rowHash` offline with no Rovenue code. Capped so an export
+// over a busy project's whole history can't be used as a
+// denial-of-service vector.
+export const AUDIT_PROOF_MAX_ENTRIES = 5000;
+
+type AuditProofRow = Awaited<
+  ReturnType<typeof drizzle.auditLogRepo.listAuditProofRows>
+>[number];
+
+export interface AuditProofBundle {
+  formatVersion: string;
+  projectId: string;
+  exportedAt: string;
+  origin: { rowHash: string } | null;
+  tip: { rowHash: string | null; createdAt: string } | null;
+  entries: AuditProofRow[];
+}
+
+const auditProofQuerySchema = z.object({
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+});
 
 export const auditLogsRoute = new Hono()
   .use("*", requireDashboardAuth)
@@ -70,6 +103,48 @@ export const auditLogsRoute = new Hono()
           offset,
           hasMore: offset + limit < total,
         },
+      }),
+    );
+  })
+  // ----- GET /audit-logs/proof?projectId=... -----
+  //
+  // Registered before `/:id` so `proof` is never captured as the
+  // `:id` path param.
+  .get("/proof", validate("query", auditProofQuerySchema), async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "projectId query param required" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id);
+
+    const { from, to } = c.req.valid("query");
+
+    const entries = await drizzle.auditLogRepo.listAuditProofRows(drizzle.db, {
+      projectId,
+      ...(from && { from: new Date(from) }),
+      ...(to && { to: new Date(to) }),
+      limit: AUDIT_PROOF_MAX_ENTRIES,
+    });
+
+    const firstEntry = entries[0];
+    const lastEntry = entries[entries.length - 1];
+
+    const origin: AuditProofBundle["origin"] = firstEntry?.prevHash
+      ? { rowHash: firstEntry.prevHash }
+      : null;
+    const tip: AuditProofBundle["tip"] = lastEntry
+      ? { rowHash: lastEntry.rowHash, createdAt: lastEntry.createdAt }
+      : null;
+
+    return c.json(
+      ok<AuditProofBundle>({
+        formatVersion: AUDIT_CHAIN_FORMAT_V1,
+        projectId,
+        exportedAt: new Date().toISOString(),
+        origin,
+        tip,
+        entries,
       }),
     );
   })
