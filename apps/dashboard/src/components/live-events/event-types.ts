@@ -27,6 +27,7 @@ const TYPE_CATEGORY: Record<
   cancellation: "subscription",
   refund: "billing",
   credit_purchase: "billing",
+  non_renewing_purchase: "billing",
   invoice_paid: "billing",
   payment_method_added: "billing",
   plan_activated: "billing",

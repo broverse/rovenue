@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "email dev --dir ./src",
-    "test": "vitest run"
+    "test": "vitest run --minWorkers=1 --maxWorkers=2"
   },
   "dependencies": {
     "@react-email/components": "^1.0.12",

@@ -1,6 +1,11 @@
 import { queryAnalytics, isClickHouseConfigured } from "../lib/clickhouse";
 import { MATURATION_WINDOW_DAYS } from "../lib/experiment-constants";
 import { logger } from "../lib/logger";
+import {
+  REVENUE_TYPES_LIFETIME_PURCHASED,
+  REVENUE_TYPES_MONEY_OUT,
+  sqlTypeList,
+} from "@rovenue/shared";
 
 // =============================================================
 // Analytics router dispatcher
@@ -283,15 +288,19 @@ export async function runAnalyticsQuery(
                 e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY > now(), 'immature',
                 'mature'
               ) AS bucket,
+              -- Ruled IN 2026-09-04: this list excluded CREDIT_PURCHASE, so a paywall
+              -- experiment never counted the coin-pack revenue it caused, and would
+              -- have gone on to miss one-time purchases too. An experiment's revenue
+              -- counts every sale it caused.
               sumIf(
                 r.amountUsd,
-                r.type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
+                r.type IN (${sqlTypeList(REVENUE_TYPES_LIFETIME_PURCHASED)})
                   AND r.eventDate >= e.firstExposedAt
                   AND r.eventDate <  e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY
               ) AS gross,
               sumIf(
                 abs(r.amountUsd),
-                r.type IN ('REFUND', 'CHARGEBACK')
+                r.type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})
                   AND r.eventDate >= e.firstExposedAt
                   AND r.eventDate <  e.firstExposedAt + INTERVAL {windowDays:UInt16} DAY
               ) AS refunds
@@ -351,7 +360,7 @@ export async function runAnalyticsQuery(
             INNER JOIN rovenue.raw_revenue_events r
               ON r.subscriberId = e.subscriberId
             WHERE r.projectId = {projectId:String}
-              AND r.type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
+              AND r.type IN (${sqlTypeList(REVENUE_TYPES_LIFETIME_PURCHASED)})
               AND r.eventDate >= e.firstExposedAt
             GROUP BY e.variantId
           ) c ON exp.variantId = c.variantId
@@ -366,7 +375,7 @@ export async function runAnalyticsQuery(
             FROM rovenue.raw_revenue_events
             WHERE projectId = {projectId:String}
               AND experimentKey = {experimentKey:String}
-              AND type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
+              AND type IN (${sqlTypeList(REVENUE_TYPES_LIFETIME_PURCHASED)})
             GROUP BY variantId
           ) ac ON exp.variantId = ac.variantId
           LEFT JOIN (
@@ -439,8 +448,8 @@ export async function runAnalyticsQuery(
               e.variantId AS variantId,
               e.subscriberId AS subscriberId,
               r.store AS store,
-              sumIf(r.amountUsd, r.type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')) AS gross,
-              sumIf(abs(r.amountUsd), r.type IN ('REFUND', 'CHARGEBACK'))                              AS refunds
+              sumIf(r.amountUsd, r.type IN (${sqlTypeList(REVENUE_TYPES_LIFETIME_PURCHASED)})) AS gross,
+              sumIf(abs(r.amountUsd), r.type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}))                              AS refunds
             FROM exposure e
             INNER JOIN (
               SELECT subscriberId, store, type, amountUsd, eventDate
@@ -518,7 +527,7 @@ export async function runAnalyticsQuery(
             FROM rovenue.raw_revenue_events
             WHERE projectId = {projectId:String}
               AND placementId = {placementId:String}
-              AND type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
+              AND type IN (${sqlTypeList(REVENUE_TYPES_LIFETIME_PURCHASED)})
           ) c
         `,
         { projectId: q.projectId, placementId: q.placementId },

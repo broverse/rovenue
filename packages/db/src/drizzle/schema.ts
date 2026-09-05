@@ -476,8 +476,16 @@ export const subscribers = pgTable(
     // (`selectAccessReconciliationCandidates`): "oldest checked first,
     // never-checked first of all". NOT partial — the never-checked rows
     // this must find are exactly the NULLs a partial index would omit.
+    //
+    // NULLS FIRST is load-bearing, not cosmetic. Postgres's default is
+    // NULLS LAST for an ASC index, and it cannot satisfy an ORDER BY
+    // ... ASC NULLS FIRST from a NULLS LAST index in EITHER scan
+    // direction — so the first cut of this index (migration 0119) was
+    // never touched by the query it was created for, and the sweep
+    // seq-scanned `subscribers` every 30 minutes. Migration 0120
+    // recreates it with the matching ordering.
     accessReconciliationIdx: index("subscribers_access_reconciliation_idx").on(
-      t.lastAccessReconciledAt,
+      t.lastAccessReconciledAt.asc().nullsFirst(),
     ),
   }),
 );
@@ -608,6 +616,13 @@ export const apiKeys = pgTable(
     expiresAt: timestamp("expiresAt", { withTimezone: true }),
     revokedAt: timestamp("revokedAt", { withTimezone: true }),
     environment: environment("environment").notNull(),
+    // Browser origins permitted to use this key, matched exactly (scheme +
+    // host + port). Empty means the key is not enabled for browser use, so
+    // every key predating the Web SDK is unchanged for native callers.
+    allowedOrigins: text("allowedOrigins")
+      .array()
+      .notNull()
+      .default(sql`'{}'`),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),

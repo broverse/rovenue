@@ -544,15 +544,35 @@ else in the framework/provider-breadth dimension is done.
 - [ ] Web SDK (TS: Stripe checkout + entitlement reads; funnel/web payment backend exists)
 - [ ] Unity SDK (games market; natural fit with credits/leaderboards)
 - [ ] Capacitor / Cordova façades
-- [ ] Fix release blockers: Rust fmt/clippy CI reds, Swift podspec sha256 placeholder — this also
-      blocks publishing `rovenue_flutter_ios`'s CocoaPods dependency (`Rovenue`), so Flutter's iOS
-      distribution shares the same blocker
+- [x] Fix release blockers (shipped 2026-09-05) — the Rust half was stale: fmt,
+      clippy and the workspace tests were already green. The real blocker was
+      the vendored `librovenue_ffi.a`, which `otool` reports as an iOS
+      *simulator* slice despite the podspec documenting it as arm64 device — a
+      published pod would not have linked on device. Replaced by
+      `RovenueFFI.xcframework` (iOS device / iOS simulator / macOS). The
+      podspec sha256 stays a placeholder until the operator cuts the first
+      release; `release-sdk.yml` pins it.
 - [x] Align Swift/Kotlin versions with core (already true before this work) — core-rs, sdk-swift,
       sdk-kotlin, and sdk-rn were all at 0.16.0 prior to the Flutter SDK; sdk-flutter shipped at
       0.16.0 too, so all five packages are aligned as of 2026-08-31
-- [ ] Make the RN iOS pod externally consumable (persist the M7 fix-set); RN SDK distribution
-      (open item from 2026-08-23 batch)
-- [ ] Official macOS / tvOS / watchOS / visionOS targets in the Swift SDK
+- [x] Make the RN iOS pod externally consumable (shipped 2026-09-05) — both
+      `SWIFT_INCLUDE_PATHS` blocks are gone. They existed only to put
+      sdk-swift's module map on the import path; `${PODS_ROOT}/../../../..`
+      resolves to nothing in an npm install. The module map now ships inside
+      the xcframework. The same workaround in the Flutter example's Podfile,
+      whose comment called it unfixable from the podspec, is gone too.
+- [x] Official macOS target in the Swift SDK (shipped 2026-09-05) — a macOS
+      slice plus `:osx => '12.0'`; `pod lib lint --platforms=macos` and
+      `swift test` both pass. tvOS / watchOS / visionOS remain open: those
+      Rust targets are Tier 3 and need a nightly toolchain with `-Z build-std`,
+      a second build pipeline rather than a fourth slice.
+- [ ] tvOS / watchOS / visionOS targets in the Swift SDK (Tier 3 Rust targets)
+- Nothing is published yet: CocoaPods Trunk, pub.dev, npm, and GitHub
+  Releases were all empty as of 2026-09-05, so version `0.16.0` has no
+  consumers and the first release is still ahead. The distribution
+  repository `broverse/rovenue-swift` that the podspec and Swift docs now
+  point at does not exist yet either — it is created by the operator as
+  part of cutting that first release.
 
 ## 8. Self-hosting & data ownership (95 — keep)
 

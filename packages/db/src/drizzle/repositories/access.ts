@@ -116,6 +116,10 @@ export interface PurchaseWithAccessIds {
   id: string;
   status: string;
   expiresDate: Date | null;
+  /** Read by `computeDesiredAccess`: a GRACE_PERIOD purchase's paid
+   *  period has always lapsed, so its entitlement runs to here, not to
+   *  `expiresDate`. Nullable — the stores do not always state a window. */
+  gracePeriodExpires: Date | null;
   store: Store;
   accessIds: string[];
 }
@@ -132,6 +136,7 @@ export async function findPurchasesWithAccessIds(
       id: purchases.id,
       status: purchases.status,
       expiresDate: purchases.expiresDate,
+      gracePeriodExpires: purchases.gracePeriodExpires,
       store: purchases.store,
       accessIds: products.accessIds,
     })
@@ -142,6 +147,7 @@ export async function findPurchasesWithAccessIds(
     id: r.id,
     status: r.status,
     expiresDate: r.expiresDate,
+    gracePeriodExpires: r.gracePeriodExpires,
     store: r.store,
     accessIds: (r.accessIds ?? []) as string[],
   }));
@@ -256,7 +262,14 @@ export interface AccessReconciliationCandidate {
  * path, not of a project, so a sweep that only ever looked at one
  * project would leave every other project unchecked.
  *
- * Served by `subscribers_access_reconciliation_idx`.
+ * Soft-deleted (erased) subscribers are excluded; `mergedInto`
+ * subscribers are deliberately NOT — a merged-away subscriber whose
+ * purchases moved to the survivor is exactly the `orphan_row` class,
+ * and deactivating their stranded access rows is the desired repair.
+ *
+ * Served by `subscribers_access_reconciliation_idx`, which is declared
+ * NULLS FIRST to match this ORDER BY — Postgres cannot satisfy a NULLS
+ * FIRST ordering from a NULLS LAST index in either scan direction.
  */
 export async function selectAccessReconciliationCandidates(
   db: Db,
@@ -266,9 +279,18 @@ export async function selectAccessReconciliationCandidates(
     .select({ id: subscribers.id, projectId: subscribers.projectId })
     .from(subscribers)
     .where(
-      or(
-        isNull(subscribers.lastAccessReconciledAt),
-        lt(subscribers.lastAccessReconciledAt, args.staleBefore),
+      and(
+        // Erased subscribers are excluded. `services/gdpr/anonymize-subscriber.ts`
+        // stamps `deletedAt` and RETAINS the purchases, so an erased
+        // subscriber would otherwise stay a candidate forever: their
+        // entitlement rows rewritten and a fresh audit row naming their
+        // subscriberId written every time they went stale, indefinitely,
+        // in a product that ships erasure as a feature.
+        isNull(subscribers.deletedAt),
+        or(
+          isNull(subscribers.lastAccessReconciledAt),
+          lt(subscribers.lastAccessReconciledAt, args.staleBefore),
+        ),
       ),
     )
     // Raw, qualified SQL because Drizzle's `asc()` has no NULLS FIRST

@@ -1,0 +1,30 @@
+# Dependency and generated build output
+**/node_modules
+**/dist
+**/build
+**/.build
+**/.dart_tool
+**/.gradle
+**/Pods
+**/.symlinks
+target
+.turbo
+
+# Worktrees, VCS, and local tooling
+.git
+.worktrees
+.agents
+.claude
+.superpowers
+.vscode
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Files that are not part of runtime images
+docs
+**/*.log
+.DS_Store
+**/.DS_Store

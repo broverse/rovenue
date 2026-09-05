@@ -1,5 +1,5 @@
 {
-  "id": "9858c272-47b0-483f-ba67-544a8f7c6297",
+  "id": "2c9e8332-3f45-445e-9acf-84bcf9904224",
   "prevId": "c8c0740c-5adc-4698-994c-d6064af71adf",
   "version": "7",
   "dialect": "postgresql",
@@ -6992,14 +6992,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "grantOn": {
-          "name": "grantOn",
-          "type": "CurrencyGrantTrigger",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'PURCHASE'"
         }
       },
       "indexes": {
@@ -9920,7 +9912,7 @@
               "expression": "lastAccessReconciledAt",
               "isExpression": false,
               "asc": true,
-              "nulls": "last"
+              "nulls": "first"
             }
           ],
           "isUnique": false,
@@ -11055,15 +11047,6 @@
         "EXPIRE",
         "TRANSFER_IN",
         "TRANSFER_OUT"
-      ]
-    },
-    "public.CurrencyGrantTrigger": {
-      "name": "CurrencyGrantTrigger",
-      "schema": "public",
-      "values": [
-        "PURCHASE",
-        "RENEWAL",
-        "BOTH"
       ]
     },
     "public.CustomDomainCertStatus": {

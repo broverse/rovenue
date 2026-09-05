@@ -28,6 +28,7 @@ function rowToRecord(r: {
   expiresAt: Date | null;
   revokedAt: Date | null;
   environment: "PRODUCTION" | "SANDBOX";
+  allowedOrigins: string[];
   createdAt: Date;
   updatedAt: Date;
   projectName: string;
@@ -42,6 +43,7 @@ function rowToRecord(r: {
     expiresAt: r.expiresAt,
     revokedAt: r.revokedAt,
     environment: r.environment,
+    allowedOrigins: r.allowedOrigins,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     project: {
@@ -61,6 +63,11 @@ const selection = {
   expiresAt: apiKeys.expiresAt,
   revokedAt: apiKeys.revokedAt,
   environment: apiKeys.environment,
+  // Browser origin allow-list. Projected here as well as in the schema
+  // because this repository selects an explicit column list and maps rows by
+  // hand -- a column added to the table but not to BOTH is invisible to
+  // every caller, including the CORS preflight that depends on it.
+  allowedOrigins: apiKeys.allowedOrigins,
   createdAt: apiKeys.createdAt,
   updatedAt: apiKeys.updatedAt,
   projectName: projects.name,
@@ -132,6 +139,8 @@ export interface CreateApiKeyInput {
   keyPublic: string;
   keySecretHash: string;
   environment: "PRODUCTION" | "SANDBOX";
+  /** Browser origins permitted to use this key. Omitted means none. */
+  allowedOrigins?: string[];
 }
 
 /**
@@ -169,6 +178,7 @@ export async function createApiKey(
       keyPublic: input.keyPublic,
       keySecretHash: input.keySecretHash,
       environment: input.environment,
+      ...(input.allowedOrigins ? { allowedOrigins: input.allowedOrigins } : {}),
     })
     .returning();
   const row = rows[0];

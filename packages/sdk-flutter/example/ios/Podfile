@@ -1,6 +1,6 @@
-# rovenue_flutter_ios.podspec targets iOS 15.0, but its `Rovenue` pod
-# dependency (packages/sdk-swift/Rovenue.podspec) requires 16.0
-# (arm64-device-only static lib) — the higher floor wins.
+# Must be >= every pod in the graph. rovenue_flutter_ios.podspec and the
+# `Rovenue` pod it depends on (packages/sdk-swift/Rovenue.podspec, which reads
+# iosDeploymentTarget from release.config.json) both floor at iOS 16.0.
 platform :ios, '16.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
@@ -48,28 +48,5 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
-  end
-
-  # Work around a CocoaPods bug when `Rovenue`'s SWIFT_INCLUDE_PATHS
-  # (`Rovenue.podspec`'s `pod_target_xcconfig`, pointed at
-  # `Sources/RovenueFFI` so the generated `import RovenueFFI` Clang module
-  # resolves — a `:path`-relative `$(PODS_TARGET_SRCROOT)`) propagates to
-  # `rovenue_flutter_ios`'s own SWIFT_INCLUDE_PATHS: CocoaPods correctly
-  # re-derives the `../` hop count (`PODS_ROOT` here means the `Pods/`
-  # subdirectory the `Pods.xcodeproj` actually lives in, one level below
-  # this Podfile — 4 hops up from there lands on `packages/`), but drops
-  # the `RovenueFFI` leaf path segment and substitutes `Rovenue` instead,
-  # so `rovenue_flutter_ios`'s `import Rovenue` fails to resolve the
-  # transitive `RovenueFFI` Clang module ("Unable to resolve module
-  # dependency: 'RovenueFFI'"). Not fixable from `Rovenue.podspec` (out of
-  # scope — see task-8-context.md's hard constraints): pin the correct
-  # path directly on the affected pod targets instead.
-  rovenue_ffi_include_path = '$(PODS_ROOT)/../../../../sdk-swift/Sources/RovenueFFI'
-  installer.pods_project.targets.each do |target|
-    next unless ['Rovenue', 'rovenue_flutter_ios'].include?(target.name)
-    target.build_configurations.each do |config|
-      existing = Array(config.build_settings['SWIFT_INCLUDE_PATHS'])
-      config.build_settings['SWIFT_INCLUDE_PATHS'] = (['$(inherited)'] + existing + [rovenue_ffi_include_path]).uniq
-    end
   end
 end

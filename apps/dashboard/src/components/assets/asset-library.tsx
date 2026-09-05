@@ -427,6 +427,20 @@ const SEVERITY_FILL_CLASS: Record<NoticeSeverity, string> = {
   blocked: "bg-rv-danger",
 };
 
+/**
+ * A tile's two affordances — the "use this asset" bar and the delete button —
+ * stay hidden until the tile is hovered, so a wall of thumbnails reads as
+ * thumbnails rather than as a wall of buttons.
+ *
+ * A touch device has no hover, and in Tailwind v4 `group-hover` is itself
+ * wrapped in `@media (hover: hover)`, so the reveal never fires there at all.
+ * For the select bar that only costs a hint; for delete it costs the action —
+ * the tile's own tap runs `onSelect` and closes the picker, so there is no
+ * gesture that reaches the button. Where hover does not exist, show them.
+ */
+const HOVER_REVEAL_CLASS =
+  "opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-100";
+
 const SEVERITY_BOX_CLASS: Record<Exclude<NoticeSeverity, "idle">, string> = {
   attention: "border-rv-warning/30 bg-rv-warning/[0.08] text-rv-warning",
   blocked: "border-rv-danger/30 bg-rv-danger/10 text-rv-danger",
@@ -646,7 +660,12 @@ function AssetTile({
           {/* Nothing else marks a tile as clickable — the grid looks
               identical on the manage-only route. `pointer-events-none`
               keeps it from swallowing the click it advertises. */}
-          <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-rv-accent-500/90 py-1 text-center text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+          <span
+            className={cn(
+              "pointer-events-none absolute inset-x-0 bottom-0 bg-rv-accent-500/90 py-1 text-center text-[10px] font-medium text-white",
+              HOVER_REVEAL_CLASS,
+            )}
+          >
             {t("settings.assets.picker.select", "Use this asset")}
           </span>
         </button>
@@ -658,7 +677,10 @@ function AssetTile({
         onClick={onDelete}
         aria-label={t("settings.assets.delete.trigger", "Delete")}
         title={t("settings.assets.delete.trigger", "Delete")}
-        className="absolute right-1.5 top-1.5 rounded bg-rv-c1/85 p-1 text-rv-mute-500 opacity-0 transition hover:text-rv-danger focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-rv-accent-500 group-hover:opacity-100"
+        className={cn(
+          "absolute right-1.5 top-1.5 rounded bg-rv-c1/85 p-1 text-rv-mute-500 hover:text-rv-danger focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-rv-accent-500",
+          HOVER_REVEAL_CLASS,
+        )}
       >
         <Trash2 size={12} />
       </button>

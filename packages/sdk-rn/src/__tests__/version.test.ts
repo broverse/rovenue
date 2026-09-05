@@ -50,14 +50,20 @@ describe("Rovenue RN version parity", () => {
     expect(SDK_VERSION).toBe(m![1]);
   });
 
-  it("SDK_VERSION matches the sdk-swift podspec version", () => {
-    const podspec = readFileSync(
-      join(__dirname, "../../../sdk-swift/Rovenue.podspec"),
-      "utf8",
-    );
-    const m = podspec.match(/s\.version\s*=\s*'([^']+)'/);
-    expect(m, "could not find s.version in sdk-swift/Rovenue.podspec").not.toBeNull();
-    expect(SDK_VERSION).toBe(m![1]);
+  // Rovenue.podspec no longer carries a literal `s.version = '...'` — it
+  // reads `s.version = CONFIG['version']` from release.config.json (see
+  // packages/sdk-swift/Rovenue.podspec and Task 1's xcframework release
+  // work). Matching the podspec text by regex therefore matches the
+  // release config, so we read that file directly: it's the genuine
+  // source the podspec's version comes from, not a proxy for it.
+  it("SDK_VERSION matches the sdk-swift release config version", () => {
+    const releaseConfig = JSON.parse(
+      readFileSync(
+        join(__dirname, "../../../sdk-swift/release.config.json"),
+        "utf8",
+      ),
+    ) as { version: string };
+    expect(SDK_VERSION).toBe(releaseConfig.version);
   });
 
   // Dart pubspecs are hand-maintained strings just like the Kotlin/Swift

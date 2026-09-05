@@ -1,14 +1,11 @@
 # Lints packages/sdk-swift/Rovenue.podspec on any PR that touches the
 # sdk-swift package or this workflow.
 #
-# Expected to FAIL on the M7.1 merge PR itself (no GitHub Release exists
-# yet for the `:http` source URL to resolve). After M7.1 lands, the
-# operator runs `packages/sdk-swift/scripts/release-pod.sh` once, which
-# creates the release and patches the podspec sha256; subsequent PRs lint
-# green.
-#
-# --platforms=ios restricts lint to iOS device platform (skips simulator,
-# which would fail until M7.1 Open Question 1 — XCFramework — is solved).
+# Uses `pod lib lint`, which builds from the checked-out sources. The previous
+# `pod spec lint` resolved the podspec's :http source over the network, so it
+# could not pass until a GitHub Release existed — the workflow documented that
+# as an expected failure. That red was the wrong tool, not a missing release.
+# `pod spec lint` belongs in the release job, where the release exists.
 
 name: sdk-swift pod lint
 
@@ -23,5 +20,11 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: pod spec lint
-        run: pod spec lint packages/sdk-swift/Rovenue.podspec --allow-warnings --skip-tests --platforms=ios
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Build RovenueFFI.xcframework
+        run: ./packages/sdk-swift/scripts/build-xcframework.sh
+      - name: pod lib lint (iOS)
+        run: pod lib lint packages/sdk-swift/Rovenue.podspec --allow-warnings --skip-tests --platforms=ios
+      - name: pod lib lint (macOS)
+        run: pod lib lint packages/sdk-swift/Rovenue.podspec --allow-warnings --skip-tests --platforms=macos

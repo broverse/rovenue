@@ -6,7 +6,7 @@
     "rotate-encryption-key": "tsx rotate-encryption-key.ts",
     "verify:asset-headers": "tsx --env-file-if-exists=../.env verify-asset-headers.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --minWorkers=1 --maxWorkers=2"
   },
   "dependencies": {
     "@rovenue/db": "workspace:*",

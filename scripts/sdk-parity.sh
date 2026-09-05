@@ -35,14 +35,36 @@ cargo test -p librovenue --quiet \
 tail -3 /tmp/rovenue-rust-parity.log
 echo "  ✓ Rust M1 + M2 tests passed"
 
-# Swift façade test exercises sdkVersion() against the dylib.
-echo "→ Swift test"
-(
-    cd packages/sdk-swift
-    DYLD_LIBRARY_PATH="$ROOT/target/release" swift test 2>&1
-) | tee /tmp/rovenue-swift-parity.log >/dev/null
-grep -E "Test Suite 'All tests' passed" /tmp/rovenue-swift-parity.log >/dev/null
-echo "  ✓ Swift façade tests passed"
+# Every Apple-side check below — the Swift façade tests, the Flutter iOS
+# harness tests and the podspec lint — resolves RovenueFFI through
+# `.binaryTarget(path: "RovenueFFI.xcframework")`, a gitignored build artifact.
+# Without it `swift test` aborts before compiling a line ("local binary target
+# 'RovenueFFI' ... does not contain a binary artifact"), and `pod lib lint`
+# fails on a missing `s.vendored_frameworks`. Building it here replaces the old
+# DYLD_LIBRARY_PATH hop into target/release, which only ever supplied the host
+# platform's dylib and never the device slice.
+APPLE_ARTIFACT_BUILT=0
+if [ "$(uname -s)" = "Darwin" ] && command -v xcodebuild >/dev/null 2>&1; then
+    echo "→ build RovenueFFI.xcframework"
+    ./packages/sdk-swift/scripts/build-xcframework.sh >/tmp/rovenue-xcframework.log 2>&1
+    APPLE_ARTIFACT_BUILT=1
+    echo "  ✓ RovenueFFI.xcframework built"
+else
+    echo "→ RovenueFFI.xcframework build SKIPPED (needs macOS + xcodebuild)"
+fi
+
+# Swift façade test exercises sdkVersion() against the xcframework's macOS slice.
+if [ "$APPLE_ARTIFACT_BUILT" -eq 1 ]; then
+    echo "→ Swift test"
+    (
+        cd packages/sdk-swift
+        swift test 2>&1
+    ) | tee /tmp/rovenue-swift-parity.log >/dev/null
+    grep -E "Test Suite 'All tests' passed" /tmp/rovenue-swift-parity.log >/dev/null
+    echo "  ✓ Swift façade tests passed"
+else
+    echo "→ Swift test SKIPPED (no RovenueFFI.xcframework)"
+fi
 
 # Kotlin: only run if gradle is on PATH.
 if command -v gradle >/dev/null 2>&1; then
@@ -120,18 +142,19 @@ else
 fi
 
 echo "→ Flutter plugin iOS unit tests"
-if command -v flutter >/dev/null 2>&1 && command -v swift >/dev/null 2>&1 && [ "$(uname -s)" = "Darwin" ]; then
+# ios/Package.swift depends on packages/sdk-swift, so it needs the xcframework
+# built above just as the façade's own tests do.
+if command -v flutter >/dev/null 2>&1 && [ "$APPLE_ARTIFACT_BUILT" -eq 1 ]; then
     (
         cd packages/sdk-flutter/rovenue_flutter_ios/ios
-        DYLD_LIBRARY_PATH="$ROOT/target/release" swift test
+        swift test
     ) 2>&1 | tee /tmp/rovenue-flutter-ios-parity.log >/dev/null
     grep -E "Test Suite 'All tests' passed" /tmp/rovenue-flutter-ios-parity.log >/dev/null
     echo "  ✓ rovenue_flutter_ios swift tests passed"
-    # No iOS example build here (or in .github/workflows/sdk.yml):
-    # packages/sdk-swift vendors a stale, simulator-arch librovenue_ffi.a, so
-    # the device link fails for reasons outside this plugin.
+    # No iOS example build here (or in .github/workflows/sdk.yml). Whether to
+    # add one is an open decision, not a blocked one.
 else
-    echo "  ~ flutter/swift unavailable or non-macOS host — Flutter iOS native checks skipped"
+    echo "  ~ flutter unavailable, or no RovenueFFI.xcframework — Flutter iOS native checks skipped"
 fi
 
 # ---- RN sample app native compile (best-effort) ----
@@ -169,17 +192,21 @@ else
 fi
 
 # ---- Rovenue podspec lint (best-effort) ----
+# `pod lib lint`, never `pod spec lint`: lib lint builds from the checked-out
+# sources and the xcframework built above, which is what a local parity run can
+# actually assert. `pod spec lint` resolves the podspec's :http source over the
+# network, so it can only pass once a GitHub Release exists — it belongs in
+# release-sdk.yml's publish-swift job, and PR checks no longer run it.
 echo "→ Rovenue podspec lint"
-if command -v pod >/dev/null 2>&1; then
-  if pod spec lint packages/sdk-swift/Rovenue.podspec \
-       --allow-warnings --skip-tests --platforms=ios \
-       >/tmp/rovenue-podspec-lint.log 2>&1; then
-    echo "  ✓ Rovenue.podspec lints"
-  else
-    echo "  ~ Rovenue.podspec lint failed (expected pre-first-release — see /tmp/rovenue-podspec-lint.log)"
-  fi
+if command -v pod >/dev/null 2>&1 && [ "$APPLE_ARTIFACT_BUILT" -eq 1 ]; then
+  for platform in ios macos; do
+    pod lib lint packages/sdk-swift/Rovenue.podspec \
+      --allow-warnings --skip-tests "--platforms=$platform" \
+      >"/tmp/rovenue-podspec-lint-$platform.log" 2>&1
+    echo "  ✓ Rovenue.podspec lints ($platform)"
+  done
 else
-  echo "  ~ cocoapods unavailable — podspec lint skipped"
+  echo "  ~ cocoapods unavailable, or no RovenueFFI.xcframework — podspec lint skipped"
 fi
 
 echo

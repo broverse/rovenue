@@ -135,6 +135,7 @@ export const RevenueEventType = {
   REFUND: "REFUND",
   REACTIVATION: "REACTIVATION",
   CREDIT_PURCHASE: "CREDIT_PURCHASE",
+  NON_RENEWING_PURCHASE: "NON_RENEWING_PURCHASE",
 } as const;
 export type RevenueEventType =
   (typeof RevenueEventType)[keyof typeof RevenueEventType];
@@ -246,6 +247,7 @@ export { getDb, createDb, db, getPool, createPool } from "./drizzle";
 // Exported top-level so webhook/receipt callers import it directly rather
 // than through the (test-mocked) `drizzle.revenueEventRepo` namespace.
 export { revenueDedupeKind } from "./drizzle";
+export { productType } from "./drizzle";
 export {
   monthStartsUtc,
   describeRequiredPartitionSpan,

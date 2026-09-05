@@ -37,7 +37,10 @@ import {
   revenueEvents,
   subscribers,
 } from "@rovenue/db";
-import { handleAppleNotification } from "./apple-webhook";
+import {
+  handleAppleNotification,
+  REACTIVATION_REVERSAL_REASON,
+} from "./apple-webhook";
 import {
   APPLE_ENVIRONMENT,
   APPLE_NOTIFICATION_SUBTYPE,
@@ -233,6 +236,27 @@ async function outboxEventTypesFor(subscriberId: string) {
   return rows.map((r) => r.eventType);
 }
 
+/**
+ * The `revenue.event.recorded` outbox payloads for a purchase's revenue
+ * rows, oldest first — read through the REAL `revenueEventRepo` write path
+ * (`insertRevenueRow`), not reconstructed. This is what a consumer of
+ * `revenue.REACTIVATION` actually receives, `metadata` included.
+ */
+async function revenueOutboxPayloadsFor(purchaseId: string) {
+  const rows = await getDb()
+    .select({ payload: outboxEvents.payload })
+    .from(revenueEvents)
+    .innerJoin(outboxEvents, eq(outboxEvents.aggregateId, revenueEvents.id))
+    .where(
+      and(
+        eq(revenueEvents.purchaseId, purchaseId),
+        eq(outboxEvents.eventType, "revenue.event.recorded"),
+      ),
+    )
+    .orderBy(revenueEvents.createdAt);
+  return rows.map((r) => r.payload);
+}
+
 type SeedStatus = "EXPIRED" | "ACTIVE" | "BILLING_ISSUE";
 
 async function seedChain(chain: typeof LAPSED, status: SeedStatus) {
@@ -338,6 +362,12 @@ describe("handleAppleNotification — OFFER_REDEEMED", () => {
     expect(await outboxEventTypesFor(LAPSED.subscriberId)).toContain(
       OFFER_REDEEMED_KEY,
     );
+    // A win-back REACTIVATION is the case that must stay unmarked: only
+    // applyRefundReversed's compensating row gets `metadata.reason`.
+    const [winback] = await revenueOutboxPayloadsFor(purchase!.id);
+    expect(
+      (winback as Record<string, unknown> | undefined)?.metadata,
+    ).toBeUndefined();
   });
 
   it("records INITIAL, not REACTIVATION, when the chain was not expired", async () => {
@@ -480,5 +510,17 @@ describe("handleAppleNotification — OFFER_REDEEMED", () => {
     const after = await revenueTypesFor(purchase!.id);
     expect(after).toHaveLength(2);
     expect(after.every((t) => t === "REACTIVATION")).toBe(true);
+
+    // Same type, opposite meaning — a consumer can only tell them apart
+    // through the outbox payload's `metadata`. The win-back charge stays
+    // unmarked; only the reversal's row carries the reason.
+    const [winback, reversal] = await revenueOutboxPayloadsFor(purchase!.id);
+    expect(
+      (winback as Record<string, unknown> | undefined)?.metadata,
+    ).toBeUndefined();
+    expect(reversal).toMatchObject({
+      type: "REACTIVATION",
+      metadata: { reason: REACTIVATION_REVERSAL_REASON },
+    });
   });
 });

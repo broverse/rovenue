@@ -32,9 +32,14 @@ iOS platform implementation for the rovenue_flutter federated plugin.
   s.dependency 'Rovenue', '0.16.0'
 
   # Must be >= the `Rovenue` pod's own minimum (packages/sdk-swift/
-  # Rovenue.podspec: iOS 16.0, its arm64-device-only static lib) — Task 8's
-  # example app build surfaced the mismatch ("Compiling for iOS 15.0, but
-  # module 'Rovenue' has a minimum deployment target of iOS 16.0").
+  # Rovenue.podspec, which reads iosDeploymentTarget from release.config.json:
+  # iOS 16.0) — Task 8's example app build surfaced the mismatch ("Compiling
+  # for iOS 15.0, but module 'Rovenue' has a minimum deployment target of
+  # iOS 16.0").
+  #
+  # `s.version` and the `Rovenue` dependency version above are both asserted
+  # against release.config.json by
+  # packages/sdk-swift/Tests/config-version-parity.sh.
   s.platform = :ios, '16.0'
   s.swift_version = '5.9'
 

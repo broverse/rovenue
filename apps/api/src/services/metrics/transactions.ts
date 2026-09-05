@@ -1,5 +1,11 @@
 import { and, eq, inArray, isNull, sql as drizzleSql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
+import {
+  ALL_REVENUE_TYPES,
+  REVENUE_TYPES_MONEY_OUT,
+  REVENUE_TYPES_PURCHASE_COUNT,
+  sqlTypeList,
+} from "@rovenue/shared";
 import type {
   RevenueEventTypeName,
   TransactionRow,
@@ -50,9 +56,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Scope → CH `type` filter
 // =============================================================
 
-const SCOPE_TYPES: Record<TransactionScope, ReadonlyArray<RevenueEventTypeName> | null> = {
+export const SCOPE_TYPES: Record<TransactionScope, ReadonlyArray<RevenueEventTypeName> | null> = {
   all: null,
-  purchase: ["INITIAL", "REACTIVATION", "CREDIT_PURCHASE"],
+  purchase: REVENUE_TYPES_PURCHASE_COUNT,
   renewal: ["RENEWAL"],
   refund: ["REFUND"],
   trial: ["TRIAL_CONVERSION"],
@@ -167,16 +173,6 @@ interface ChTransactionRow {
   currency: string;
   event_date: string;
 }
-
-const ALL_REVENUE_TYPES: ReadonlyArray<RevenueEventTypeName> = [
-  "INITIAL",
-  "RENEWAL",
-  "TRIAL_CONVERSION",
-  "CANCELLATION",
-  "REFUND",
-  "REACTIVATION",
-  "CREDIT_PURCHASE",
-];
 
 function isKnownRevenueType(t: string): t is RevenueEventTypeName {
   return (ALL_REVENUE_TYPES as ReadonlyArray<string>).includes(t);
@@ -608,9 +604,9 @@ export async function listTransactionsVolume(
     `
       SELECT
         toString(toDate(eventDate))                                            AS day,
-        toString(countIf(type IN ('INITIAL','REACTIVATION','CREDIT_PURCHASE'))) AS purchases,
+        toString(countIf(type IN (${sqlTypeList(REVENUE_TYPES_PURCHASE_COUNT)}))) AS purchases,
         toString(countIf(type = 'RENEWAL'))                                     AS renewals,
-        toString(countIf(type IN ('REFUND','CHARGEBACK')))                       AS refunds
+        toString(countIf(type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})))                       AS refunds
       FROM rovenue.raw_revenue_events FINAL
       WHERE projectId = {projectId:String}
         AND toDate(eventDate) >= {from:Date}
@@ -721,7 +717,7 @@ export async function listStoreBreakdown(
         WHERE projectId = {projectId:String}
           AND toDate(eventDate) >= {from:Date}
           AND toDate(eventDate) <= {to:Date}
-          AND type NOT IN ('REFUND','CHARGEBACK')
+          AND type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)})
         GROUP BY store
         ORDER BY sum(amountUsd) DESC
       `,
@@ -734,8 +730,8 @@ export async function listStoreBreakdown(
       input.projectId,
       `
         SELECT
-          toString(sumIf(abs(amountUsd), type IN ('REFUND','CHARGEBACK') AND toDate(eventDate) >= {from:Date} AND toDate(eventDate) <= {to:Date}))                                                          AS refunds_usd,
-          toString(sumIf(amountUsd, type NOT IN ('REFUND','CHARGEBACK') AND toDate(eventDate) >= {prevFrom:Date} AND toDate(eventDate) <= {prevTo:Date}))                                                  AS prev_gross_usd
+          toString(sumIf(abs(amountUsd), type IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}) AND toDate(eventDate) >= {from:Date} AND toDate(eventDate) <= {to:Date}))                                                          AS refunds_usd,
+          toString(sumIf(amountUsd, type NOT IN (${sqlTypeList(REVENUE_TYPES_MONEY_OUT)}) AND toDate(eventDate) >= {prevFrom:Date} AND toDate(eventDate) <= {prevTo:Date}))                                                  AS prev_gross_usd
         FROM rovenue.raw_revenue_events FINAL
         WHERE projectId = {projectId:String}
           AND toDate(eventDate) >= {prevFrom:Date}

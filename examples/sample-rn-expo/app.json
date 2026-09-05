@@ -11,7 +11,7 @@
     },
     "plugins": [
       ["@rovenue/react-native-sdk", { "rovenueSwiftPath": "../../../packages/sdk-swift" }],
-      ["expo-build-properties", { "ios": { "deploymentTarget": "15.0" } }]
+      ["expo-build-properties", { "ios": { "deploymentTarget": "16.0" } }]
     ]
   }
 }

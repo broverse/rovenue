@@ -26,9 +26,9 @@ export type RovenueConfigOptions = {
    * If set: emit `pod 'Rovenue', :path => '<value>'` into the consumer's
    * iOS Podfile. The path is interpreted relative to `ios/Podfile`.
    *
-   * If unset (default): emit `pod 'Rovenue', '~> 0.1'` which resolves
-   * via CocoaPods Trunk. Requires the first Trunk push to have happened
-   * (see `packages/sdk-swift/scripts/release-pod.sh`).
+   * If unset (default): emit `pod 'Rovenue', '<this package's version>'`,
+   * an exact pin resolved via CocoaPods Trunk. Requires the first Trunk
+   * push to have happened (see `packages/sdk-swift/scripts/release-pod.sh`).
    */
   rovenueSwiftPath?: string;
 

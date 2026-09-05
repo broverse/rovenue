@@ -58,6 +58,17 @@ const PRODUCT_ID = `prod_import_write_${createId()}`;
 const PRODUCT_IDENTIFIER = "pro_monthly";
 const APPLE_STORE_PRODUCT_ID = "com.example.pro.monthly";
 
+// Task 6 (one-time revenue typing): two more catalog products, alongside
+// the SUBSCRIPTION one above, so the importer's
+// `oneTimeRevenueTypeFor(product.type) ?? deriveRevenueEventType(...)`
+// branch (write.ts) is actually exercised by a CONSUMABLE and a
+// NON_CONSUMABLE row, not just the all-SUBSCRIPTION fixtures every other
+// describe block in this file uses.
+const CONSUMABLE_PRODUCT_ID = `prod_import_write_consumable_${createId()}`;
+const CONSUMABLE_PRODUCT_IDENTIFIER = "coins_500_pack";
+const NON_CONSUMABLE_PRODUCT_ID = `prod_import_write_nonconsumable_${createId()}`;
+const NON_CONSUMABLE_PRODUCT_IDENTIFIER = "remove_ads_lifetime";
+
 /** Every fixture date in THIS file's other describe blocks sits inside
  *  the `revenue_events` partition range (2024-01 .. 2028-12, migration
  *  0015) — a range-partitioned table has no DEFAULT partition, so a date
@@ -293,6 +304,13 @@ async function findPurchases() {
     .where(eq(purchases.projectId, PROJECT_ID));
 }
 
+async function findRevenueEvents() {
+  return db
+    .select()
+    .from(revenueEvents)
+    .where(eq(revenueEvents.projectId, PROJECT_ID));
+}
+
 beforeAll(async () => {
   await db
     .insert(projects)
@@ -311,6 +329,24 @@ beforeAll(async () => {
     storeIds: { apple: APPLE_STORE_PRODUCT_ID },
     accessIds: [ACCESS_ID],
     displayName: "Pro Monthly",
+  });
+  await db.insert(products).values({
+    id: CONSUMABLE_PRODUCT_ID,
+    projectId: PROJECT_ID,
+    identifier: CONSUMABLE_PRODUCT_IDENTIFIER,
+    type: "CONSUMABLE",
+    storeIds: { apple: "com.example.coins500" },
+    accessIds: [],
+    displayName: "500 Coins",
+  });
+  await db.insert(products).values({
+    id: NON_CONSUMABLE_PRODUCT_ID,
+    projectId: PROJECT_ID,
+    identifier: NON_CONSUMABLE_PRODUCT_IDENTIFIER,
+    type: "NON_CONSUMABLE",
+    storeIds: { apple: "com.example.removeads" },
+    accessIds: [],
+    displayName: "Remove Ads (Lifetime)",
   });
 });
 
@@ -983,5 +1019,90 @@ describe("writeImportBatch — revenue_events partition provisioning", () => {
     } finally {
       provisionSpy.mockRestore();
     }
+  });
+});
+
+// =============================================================
+// Task 6 — one-time purchase revenue typing
+// =============================================================
+//
+// Every other describe block in this file imports the SUBSCRIPTION
+// product, so write.ts's
+//   type: oneTimeRevenueTypeFor(product.type) ?? deriveRevenueEventType(...)
+// branch was executed by no test at all — `oneTimeRevenueTypeFor` never
+// returned anything but `null` anywhere in this suite. These three tests
+// close that gap: a CONSUMABLE row, a NON_CONSUMABLE row, and a
+// SUBSCRIPTION regression pin proving the `??` fallback's OWN logic
+// (deriveRevenueEventType) is untouched.
+
+describe("writeImportBatch — one-time purchase revenue typing (Task 6)", () => {
+  it("writes a CONSUMABLE import row's revenue event as CREDIT_PURCHASE", async () => {
+    const jobId = await seedJob();
+
+    const outcome = await runFile(
+      jobId,
+      csvOf([
+        {
+          subscriberId: "rc_sub_credit_purchase",
+          productId: CONSUMABLE_PRODUCT_IDENTIFIER,
+          storeTxnId: "apple_txn_credit_purchase_1",
+          priceUsd: "4.99",
+        },
+      ]),
+    );
+
+    expect(outcome.outcomes.willCreate).toBe(1);
+    const events = await findRevenueEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("CREDIT_PURCHASE");
+    expect(events[0]!.productId).toBe(CONSUMABLE_PRODUCT_ID);
+  });
+
+  it("writes a NON_CONSUMABLE import row's revenue event as NON_RENEWING_PURCHASE", async () => {
+    const jobId = await seedJob();
+
+    const outcome = await runFile(
+      jobId,
+      csvOf([
+        {
+          subscriberId: "rc_sub_non_renewing_purchase",
+          productId: NON_CONSUMABLE_PRODUCT_IDENTIFIER,
+          storeTxnId: "apple_txn_non_renewing_purchase_1",
+          priceUsd: "19.99",
+        },
+      ]),
+    );
+
+    expect(outcome.outcomes.willCreate).toBe(1);
+    const events = await findRevenueEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("NON_RENEWING_PURCHASE");
+    expect(events[0]!.productId).toBe(NON_CONSUMABLE_PRODUCT_ID);
+  });
+
+  // Regression pin: oneTimeRevenueTypeFor returns null for SUBSCRIPTION,
+  // so this row's type must come ENTIRELY from deriveRevenueEventType —
+  // exactly the classification this import wrote before Task 6. A first
+  // purchase (no renewalNumber, originalTransactionId === the row's own
+  // storeTransactionId) is INITIAL.
+  it("still writes a SUBSCRIPTION import row's revenue event as INITIAL (regression pin)", async () => {
+    const jobId = await seedJob();
+
+    const outcome = await runFile(
+      jobId,
+      csvOf([
+        {
+          subscriberId: "rc_sub_subscription_pin",
+          storeTxnId: "apple_txn_subscription_pin_1",
+          priceUsd: "9.99",
+        },
+      ]),
+    );
+
+    expect(outcome.outcomes.willCreate).toBe(1);
+    const events = await findRevenueEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("INITIAL");
+    expect(events[0]!.productId).toBe(PRODUCT_ID);
   });
 });

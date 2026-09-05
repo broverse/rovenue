@@ -18,6 +18,7 @@
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "start": "node dist/index.js",
     "apple-pay:backfill": "tsx --env-file-if-exists=../../.env src/scripts/backfill-apple-pay-domains.ts",
+    "billing-issue:blast-radius": "tsx --env-file-if-exists=../../.env src/scripts/billing-issue-blast-radius.ts",
     "test": "vitest run && VITEST_CONTAINER_PASS=1 vitest run"
   },
   "dependencies": {

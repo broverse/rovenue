@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { ServiceProvider, useService } from "impair";
 import "../../../i18n/config";
 
@@ -49,6 +49,7 @@ import { StartModal } from "../start-modal";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../../lib/services/paywall-builder-api";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
 import { emptyBuilderConfig, type BuilderConfig } from "@rovenue/shared/paywall";
+import { TEMPLATES, TEMPLATE_CATEGORIES } from "../templates";
 
 const GENERATED_CONFIG: BuilderConfig = {
   formatVersion: 2,
@@ -274,5 +275,153 @@ describe("AI assist tab", () => {
     });
     expect(screen.getByText(/monthly quota is used up/i)).toBeInTheDocument();
     expect(screen.queryByText(/try rephrasing/i)).not.toBeInTheDocument();
+  });
+});
+
+// =============================================================
+// Template gallery (Task 10d): the presets tab's actual WIRING — that a
+// card calls `vm.applyTemplate` with ITS OWN id, that the two-click
+// data-loss confirm the App Store tab already has also protects a
+// template card, and that the category/search filters both narrow AND
+// restore the same grid `filterTemplates` (unit-tested on its own in
+// start-model.test.ts) is already proven to discriminate.
+//
+// Templates are picked BY ID from `TEMPLATES` so a copy edit doesn't
+// break the test, but assertions land on something specific to the
+// chosen template (a node id from its own `build()`, a literal copy
+// string lifted from templates.ts) rather than "the config changed" —
+// otherwise the test passes no matter which card fired.
+//
+// "hero" and "comparison" keep legacy translation overrides in
+// i18n/locales/en.json (stale for "hero" — its translated description
+// text has drifted from templates.ts's defaultValue) left over from the
+// two retired presets whose ids they inherit; every other template here
+// has no override, so the rendered text equals templates.ts's literal
+// name/tag/description. Tests below avoid "hero"/"comparison" for that
+// reason and pick templates whose name doesn't collide with a category
+// chip label ("Minimal" and "Comparison" are both a template name AND a
+// chip label, and chips stay in the DOM regardless of the grid filter).
+// =============================================================
+describe("Template gallery", () => {
+  const SINGLE_PLAN = TEMPLATES.find((t) => t.id === "singlePlan")!;
+  const BENEFIT_STACK = TEMPLATES.find((t) => t.id === "benefitStack")!;
+  const SCREENSHOT_TOUR = TEMPLATES.find((t) => t.id === "screenshotTour")!;
+  const MEDIA_LED_CATEGORY = TEMPLATE_CATEGORIES.find((c) => c.id === "mediaLed")!;
+
+  function grid(container: HTMLElement): HTMLElement {
+    return container.querySelector(".grid.grid-cols-3")!;
+  }
+
+  function cardFor(name: string): HTMLButtonElement {
+    return screen.getByText(name).closest("button")!;
+  }
+
+  it("a card applies its own template on an empty tree", async () => {
+    const { vm, onClose } = await renderModal();
+    await act(async () => {
+      fireEvent.click(cardFor(SINGLE_PLAN.name));
+    });
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(
+      SINGLE_PLAN.build("en").root.children.map((c) => c.id),
+    );
+    // A literal pulled from templates.ts, independent of calling `build()`
+    // again — pins the applied config to THIS template's own copy, not
+    // merely "a" template (proven by the discrimination break in the
+    // report: forcing every card to apply TEMPLATES[0] fails this line).
+    expect(vm.config.localizations.en.single_head_title).toBe(
+      "One plan. Everything included.",
+    );
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("a card arms a confirm before applying over a non-empty tree", async () => {
+    const nonEmpty = emptyBuilderConfig("en");
+    nonEmpty.root.children.push({ type: "spacer", id: "sp1" });
+    const { vm } = await renderModal(nonEmpty);
+    fireEvent.click(cardFor(BENEFIT_STACK.name));
+    // First click arms — nothing applied yet.
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["sp1"]);
+    expect(screen.getByText(/replace your current design/i)).toBeInTheDocument();
+    // Second click on the same card applies.
+    await act(async () => {
+      fireEvent.click(cardFor(BENEFIT_STACK.name));
+    });
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(
+      BENEFIT_STACK.build("en").root.children.map((c) => c.id),
+    );
+  });
+
+  it("the confirm copy warns about locale loss when other locales exist", async () => {
+    const nonEmpty = emptyBuilderConfig("en");
+    nonEmpty.root.children.push({ type: "spacer", id: "sp1" });
+    nonEmpty.localizations.tr = {};
+    await renderModal(nonEmpty);
+    fireEvent.click(cardFor(BENEFIT_STACK.name));
+    expect(screen.getByText(/deletes 1 other locale\b/i)).toBeInTheDocument();
+  });
+
+  it("the confirm copy has no locale-loss wording when there are no other locales", async () => {
+    const nonEmpty = emptyBuilderConfig("en");
+    nonEmpty.root.children.push({ type: "spacer", id: "sp1" });
+    await renderModal(nonEmpty);
+    fireEvent.click(cardFor(BENEFIT_STACK.name));
+    expect(
+      screen.getByText("Click again to replace your current design."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/other locale/i)).not.toBeInTheDocument();
+  });
+
+  it("a category chip narrows the grid to that category", async () => {
+    const { container } = await renderModal();
+    fireEvent.click(screen.getByRole("button", { name: MEDIA_LED_CATEGORY.label }));
+    expect(within(grid(container)).getByText(SCREENSHOT_TOUR.name)).toBeInTheDocument();
+    expect(within(grid(container)).queryByText(SINGLE_PLAN.name)).not.toBeInTheDocument();
+  });
+
+  it('"All" restores the full grid after a category has been chosen', async () => {
+    const { container } = await renderModal();
+    fireEvent.click(screen.getByRole("button", { name: MEDIA_LED_CATEGORY.label }));
+    expect(within(grid(container)).queryByText(SINGLE_PLAN.name)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(within(grid(container)).getByText(SINGLE_PLAN.name)).toBeInTheDocument();
+    expect(within(grid(container)).getByText(SCREENSHOT_TOUR.name)).toBeInTheDocument();
+  });
+
+  it("the search box narrows the grid by a description-only match", async () => {
+    // "exactly" sits only in singlePlan's description ("For apps that sell
+    // exactly one subscription.") — not in its name or tag, and not in any
+    // other template's name/tag/description. This is the case that fails
+    // if the search haystack is ever narrowed back to the name alone.
+    const { container } = await renderModal();
+    fireEvent.change(screen.getByPlaceholderText("Search templates"), {
+      target: { value: "exactly" },
+    });
+    expect(within(grid(container)).getByText(SINGLE_PLAN.name)).toBeInTheDocument();
+    expect(within(grid(container)).queryByText(SCREENSHOT_TOUR.name)).not.toBeInTheDocument();
+  });
+
+  it("a query matching nothing shows the empty-state message and no template cards", async () => {
+    const { container } = await renderModal();
+    fireEvent.change(screen.getByPlaceholderText("Search templates"), {
+      target: { value: "zzzznotfound-nothing-matches-this" },
+    });
+    expect(screen.getByText("No templates match that search.")).toBeInTheDocument();
+    // Blank canvas is not a template and is rendered outside the filtered
+    // list, so it survives — it is the only card left in the grid.
+    const cards = within(grid(container)).getAllByRole("button");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent("Blank canvas");
+  });
+
+  it("the Blank canvas card closes the modal without applying anything", async () => {
+    const nonEmpty = emptyBuilderConfig("en");
+    nonEmpty.root.children.push({ type: "spacer", id: "sp1" });
+    const { vm, onClose } = await renderModal(nonEmpty);
+    fireEvent.click(cardFor("Blank canvas"));
+    expect(onClose).toHaveBeenCalled();
+    // Untouched: still the one pre-existing node, not replaced or cleared,
+    // and never armed a confirm (there is nothing to confirm).
+    expect(vm.config.root.children.map((c) => c.id)).toEqual(["sp1"]);
+    expect(screen.queryByText(/replace your current design/i)).not.toBeInTheDocument();
   });
 });

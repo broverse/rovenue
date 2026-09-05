@@ -58,6 +58,7 @@ import {
 import { expireSupersededGooglePurchase } from "./google/google-supersede";
 import { guardStatusWrite } from "./subscription-transition-guard";
 import { billingIssueStamp } from "./subscription-state";
+import { oneTimeRevenueTypeFor } from "./revenue/one-time-type";
 import { convertToUsd } from "./fx";
 import { reassignAllAssets, safeSyncAccessAfterMerge } from "./subscriber-transfer";
 import type { PresentedContext } from "../lib/presented-context";
@@ -335,10 +336,14 @@ async function verifyAppleReceipt(
   if (transaction.price != null && transaction.currency) {
     const amount = transaction.price / 1_000_000;
     const amountUsd = await convertToUsd(amount, transaction.currency);
+    // A non-subscription product is never INITIAL/RENEWAL: see
+    // services/revenue/one-time-type.ts. Subscriptions fall through to the
+    // transaction-id classification unchanged.
     const type =
-      transaction.transactionId === transaction.originalTransactionId
+      oneTimeRevenueTypeFor(product.type) ??
+      (transaction.transactionId === transaction.originalTransactionId
         ? "INITIAL"
-        : "RENEWAL";
+        : "RENEWAL");
     await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
       projectId: args.projectId,
       subscriberId: subscriber.id,
@@ -758,7 +763,11 @@ async function verifyGoogleProductReceipt(
       },
     );
   } else {
-    const type = RevenueEventType.INITIAL;
+    // verifyGoogleProductReceipt only ever handles non-subscription
+    // products, so the `??` fallback below is unreachable in practice —
+    // kept so this call site reads identically to the Apple one above.
+    const type =
+      oneTimeRevenueTypeFor(product.type) ?? RevenueEventType.INITIAL;
     const amountUsd = await convertToUsd(pricing.amount, pricing.currency);
     await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
       projectId: args.projectId,

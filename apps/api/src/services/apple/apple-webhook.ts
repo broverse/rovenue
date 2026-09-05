@@ -42,6 +42,7 @@ import { guardStatusWrite } from "../subscription-transition-guard";
 import {
   applePlanChangeType,
   emitProductChanged,
+  emitSubscriptionRecovered,
   pendingPlanChangeFields,
 } from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
@@ -1015,6 +1016,13 @@ async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
     purchaseId: purchase.id,
     productId: purchase.productId,
     type: RevenueEventType.REACTIVATION,
+    // REACTIVATION means two different things. This one is an accounting
+    // reversal, not a subscriber coming back — a consumer that treats it
+    // as a win-back would fire a "welcome back" campaign at someone whose
+    // refund was simply declined. `metadata` flows into the outbox
+    // payload and nowhere else, which is exactly what it is for; the
+    // precedent is subscription.product_changed's `phase`.
+    metadata: { reason: REACTIVATION_REVERSAL_REASON },
   });
 }
 
@@ -1370,6 +1378,21 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           now: eventTime,
         });
       }
+
+      // BILLING_ISSUE -> a granting status is a genuine recovery: the
+      // store resolved the payment failure. Unlike inferring it from an
+      // invoice, this cannot fire on an unrelated renewal, because the
+      // before-image says where the row actually was.
+      await emitSubscriptionRecovered({
+        db: dbTx,
+        projectId: ctx.projectId,
+        subscriberId,
+        purchaseId: persisted.id,
+        guard,
+        status,
+        now: eventTime,
+      });
+
       return { purchase: persisted, statusApplied: guard.apply };
     },
   );
@@ -1569,6 +1592,25 @@ const APPLE_FIRST_CHARGE_DEDUPE_KIND = revenueDedupeKind(
   RevenueEventType.INITIAL,
 );
 
+/**
+ * `revenue.event.recorded`'s `metadata.reason` for `applyRefundReversed`'s
+ * compensating REACTIVATION. REACTIVATION carries two different economic
+ * meanings — a lapsed subscriber coming back on a win-back offer, and a
+ * refund being undone — and only this file's dedupe key
+ * (APPLE_FIRST_CHARGE_DEDUPE_KIND vs. the reactivation kind) ever held
+ * them apart. That key never reaches the outbox payload, so without this
+ * a consumer of `revenue.REACTIVATION` cannot tell "they came back" from
+ * "we un-did a refund" and could fire a win-back campaign at someone
+ * whose refund was simply declined.
+ *
+ * Precedent for the shape: `subscription.product_changed`'s `phase`
+ * (packages/shared/src/integrations.ts) — a missing field is the default
+ * case, not "unknown". Absence here means a win-back REACTIVATION;
+ * presence means the compensating one. Only `applyRefundReversed` sets
+ * this — every other REACTIVATION emit leaves `metadata` unset.
+ */
+export const REACTIVATION_REVERSAL_REASON = "refund_reversed";
+
 interface EmitRevenueArgs {
   ctx: DispatchContext;
   subscriberId: string;
@@ -1590,10 +1632,18 @@ interface EmitRevenueArgs {
    * transactionId per renewal, so a renewal never shares one.)
    */
   firstChargeOfTransaction?: boolean;
+  /**
+   * Folded into the co-located outbox row's payload only — see
+   * `CreateRevenueEventInput.metadata`. Today only
+   * `applyRefundReversed` sets `{ reason: REACTIVATION_REVERSAL_REASON }`;
+   * every other emit site omits it, so absence is the default and
+   * presence is the exception a consumer can branch on.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
-  const { ctx, subscriberId, purchaseId, productId, type } = args;
+  const { ctx, subscriberId, purchaseId, productId, type, metadata } = args;
   const tx = ctx.transaction;
 
   if (tx.price == null || !tx.currency) {
@@ -1654,6 +1704,7 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
         ? APPLE_FIRST_CHARGE_DEDUPE_KIND
         : revenueDedupeKind(type)
     }`,
+    ...(metadata ? { metadata } : {}),
   });
 
   if (type === RevenueEventType.REFUND) {

@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
+import { ALL_REVENUE_TYPES } from "@rovenue/shared";
 import type {
   OverviewActivityEvent,
   OverviewSystemHealth,
@@ -35,16 +36,6 @@ import {
 // wire convention.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-const ALL_REVENUE_TYPES: ReadonlyArray<RevenueEventTypeName> = [
-  "INITIAL",
-  "RENEWAL",
-  "TRIAL_CONVERSION",
-  "CANCELLATION",
-  "REFUND",
-  "REACTIVATION",
-  "CREDIT_PURCHASE",
-];
 
 function isKnownRevenueType(t: string): t is RevenueEventTypeName {
   return (ALL_REVENUE_TYPES as ReadonlyArray<string>).includes(t);

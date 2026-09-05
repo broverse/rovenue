@@ -14,6 +14,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   access,
+  drizzle,
   getDb,
   outboxEvents,
   projects,
@@ -21,6 +22,7 @@ import {
   products,
   purchases,
 } from "@rovenue/db";
+import { syncAccess } from "../services/access-engine";
 import {
   BILLING_ISSUE_MAX_AGE_DAYS,
   runBillingIssueAgeing,
@@ -171,6 +173,56 @@ async function seedPurchase({
   return purchase.id;
 }
 
+// Seeder for the Task 12c GRACE_PERIOD-retirement tests below. Unlike
+// seedOverduePurchase (fixed status: "ACTIVE"), this creates its own
+// project/subscriber/product/access per call and seeds the purchase
+// directly in GRACE_PERIOD with a caller-controlled gracePeriodExpires —
+// expiresDate is always in the past, matching the real shape of a grace
+// row (it only enters grace once its paid period has lapsed), which is
+// exactly why it's always a sweep candidate regardless of how open its
+// grace window still is.
+async function seedGracePurchase({
+  suffix,
+  gracePeriodExpires,
+}: {
+  suffix: string;
+  gracePeriodExpires: Date | null;
+}) {
+  const db = getDb();
+  const project = await seedProject(suffix);
+  const subscriber = await seedSubscriber(project.id, suffix);
+  const product = await seedProduct(project.id, suffix);
+  const synth = `comp_exp_${RUN_ID}_${suffix}_${Math.random().toString(36).slice(2, 8)}`;
+  const pastExpiry = new Date(Date.now() - 10 * 60 * 1000);
+
+  const [purchase] = await db
+    .insert(purchases)
+    .values({
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      productId: product.id,
+      store: "APP_STORE",
+      storeTransactionId: synth,
+      originalTransactionId: synth,
+      status: "GRACE_PERIOD",
+      isTrial: false,
+      isIntroOffer: false,
+      isSandbox: false,
+      environment: "PRODUCTION",
+      purchaseDate: new Date(),
+      originalPurchaseDate: new Date(),
+      expiresDate: pastExpiry,
+      gracePeriodExpires,
+      priceAmount: "9.99",
+      priceCurrency: "USD",
+      autoRenewStatus: false,
+    })
+    .returning();
+  if (!purchase) throw new Error("seedGracePurchase: no row returned");
+
+  return { purchase, subscriber, accessId: product.accessId };
+}
+
 async function statusOf(id: string): Promise<string | undefined> {
   const db = getDb();
   const [row] = await db
@@ -182,7 +234,7 @@ async function statusOf(id: string): Promise<string | undefined> {
 
 afterAll(async () => {
   const db = getDb();
-  for (const suffix of ["E1", "E2", "AF", "AS", "AN"]) {
+  for (const suffix of ["E1", "E2", "AF", "AS", "AN", "GO", "GC", "GN"]) {
     const projectId = `prj_exp_${RUN_ID}${suffix}`;
     await db.delete(outboxEvents).where(
       inArray(
@@ -306,5 +358,67 @@ describe("runBillingIssueAgeing — bounded exit from BILLING_ISSUE", () => {
     });
     await runExpiryCheck(new Date("2026-09-03T00:00:00Z"));
     await expect(statusOf(id)).resolves.toBe("BILLING_ISSUE");
+  });
+});
+
+describe("runExpiryCheck — Task 12c: an open GRACE_PERIOD window survives the sweep", () => {
+  it("a GRACE_PERIOD row with a future gracePeriodExpires (and a past expiresDate) is left alone, and access is still served through findActiveAccess", async () => {
+    // Real current time, matching seedGracePurchase's expiresDate (also
+    // real-time-derived) — a fixed historical `now` here would put
+    // expiresDate AFTER the sweep's cutoff and the row would never even
+    // become a candidate, making the assertion vacuous either way.
+    const now = new Date();
+    const futureGrace = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+    const { purchase, subscriber, accessId } = await seedGracePurchase({
+      suffix: "GO",
+      gracePeriodExpires: futureGrace,
+    });
+
+    // Populate subscriber_access the way the real flow does: syncAccess
+    // runs whenever a purchase transitions into GRACE_PERIOD (see
+    // processCandidate's promotion branch). Doing it explicitly here
+    // means the read-path assertion below is not begging the question —
+    // the row exists in subscriber_access before the sweep runs, so a
+    // sweep that (incorrectly) retired the purchase would also revoke it.
+    await syncAccess(subscriber.id);
+
+    await runExpiryCheck(now);
+
+    await expect(statusOf(purchase.id)).resolves.toBe("GRACE_PERIOD");
+
+    const activeAccess = await drizzle.accessRepo.findActiveAccess(
+      getDb(),
+      subscriber.id,
+      now,
+    );
+    expect(activeAccess.some((row) => row.accessId === accessId)).toBe(true);
+  });
+
+  it("the same shape of row IS retired once gracePeriodExpires has passed", async () => {
+    const now = new Date();
+    const pastGrace = new Date(now.getTime() - 60 * 1000);
+
+    const { purchase } = await seedGracePurchase({
+      suffix: "GC",
+      gracePeriodExpires: pastGrace,
+    });
+
+    await runExpiryCheck(now);
+
+    await expect(statusOf(purchase.id)).resolves.toBe("EXPIRED");
+  });
+
+  it("a GRACE_PERIOD row with a NULL gracePeriodExpires is retired exactly as today (NULL is never an open window)", async () => {
+    const now = new Date();
+
+    const { purchase } = await seedGracePurchase({
+      suffix: "GN",
+      gracePeriodExpires: null,
+    });
+
+    await runExpiryCheck(now);
+
+    await expect(statusOf(purchase.id)).resolves.toBe("EXPIRED");
   });
 });

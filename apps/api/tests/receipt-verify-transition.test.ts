@@ -9,83 +9,103 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // All `@rovenue/db` repo calls are mocked — no Postgres needed.
 // =============================================================
 
-const { drizzleMock, auditMock, googleMocks, loggerSpies } = vi.hoisted(() => {
-  const auditMock = vi.fn(async () => undefined);
-  // Google paid-state gate: the verifier + credential loader are swapped for
-  // configurable fns so each test can serve a fixture in any purchase state.
-  // The pricing lookups default to null (unresolvable) so pre-existing tests
-  // exercise the skip-emission path without extra setup.
-  const googleMocks = {
-    verifyGoogleSubscription: vi.fn(),
-    verifyGoogleProductPurchase: vi.fn(),
-    loadGoogleCredentials: vi.fn(async (): Promise<unknown> => null),
-    getSubscriptionBasePlanPricing: vi.fn(async (): Promise<unknown> => null),
-    getOneTimeProductPricing: vi.fn(async (): Promise<unknown> => null),
-  };
-  // Child-logger spies so tests can assert the pricing-miss error log.
-  const loggerSpies = {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  };
-  // FINDING 1: verifyReceipt runs the guard + upsert inside
-  // db.transaction(...). Run the callback inline with the same stub.
-  const db: Record<string, unknown> = {
-    transaction: async (fn: (tx: unknown) => unknown) => fn(db),
-  };
-  const drizzleMock = {
-    db: db as unknown,
-    subscriberRepo: {
-      findSubscriberById: vi.fn(async () => ({ id: "sub_1", projectId: "proj_1" })),
-      findSubscriberByAppleAppAccountToken: vi.fn(async () => null),
-      setAppleAppAccountToken: vi.fn(async () => undefined),
-      clearAppleAppAccountToken: vi.fn(async () => undefined),
-      upsertSubscriber: vi.fn(async () => ({ id: "sub_1" })),
-    },
-    offeringRepo: {
-      findProductByIdentifierOrStoreId: vi.fn(async () => ({
-        id: "prod_1",
-        accessIds: [],
-        // verifyAppleReceipt refuses to grant a product that does not
-        // correspond to the verified transaction — otherwise a valid cheap
-        // receipt could be paired with an expensive product identifier. The
-        // fixture predated that guard and carried neither an Apple store id
-        // nor an identifier, so the comparison failed and every call 400'd
-        // before reaching the status-transition logic under test.
-        identifier: "com.app.pro",
-        storeIds: { apple: "com.app.pro" },
+const { drizzleMock, auditMock, googleMocks, appleVerifyMocks, loggerSpies } =
+  vi.hoisted(() => {
+    const auditMock = vi.fn(async () => undefined);
+    // Task 6: the Apple JWS verifier used to return one hardcoded fixture
+    // for every test. Task 6's typing tests need to vary transactionId /
+    // originalTransactionId / price / productId per call, so it is now a
+    // configurable mock (mirroring googleMocks below) with the original
+    // fixture as its default — every pre-existing test that never
+    // overrides it keeps seeing exactly what it saw before.
+    const appleVerifyMocks = {
+      verifyTransaction: vi.fn(async (_jws: string) => ({
+        transactionId: "txn_1",
+        originalTransactionId: "otxn_1",
+        productId: "com.app.pro",
+        purchaseDate: 1_700_000_000_000,
+        originalPurchaseDate: 1_700_000_000_000,
+        expiresDate: 1_800_000_000_000,
+        price: 9_990_000,
+        currency: "USD",
+        environment: "Production",
       })),
-    },
-    // receipt-verify serialises concurrent verifications of the same
-    // transaction with a transaction-scoped advisory lock before touching
-    // purchase state. The mock had no lockRepo, so the call blew up on
-    // `undefined.advisoryXactLock2` once the product guard above stopped
-    // short-circuiting the request.
-    lockRepo: {
-      advisoryXactLock2: vi.fn(async () => undefined),
-    },
-    // Receipt verification resolves the subscriber the RC/Adapty way: the
-    // Apple originalTransactionId is the anchor and appAccountToken is the
-    // binding, so the lookup goes through purchaseExtRepo and the token
-    // helpers below. None of it existed when this mock was written; each
-    // missing member surfaced one at a time as
-    // "Cannot read properties of undefined".
-    purchaseExtRepo: {
-      findPurchaseByOriginalTransaction: vi.fn(async () => null),
-      findPurchaseByStoreTransaction: vi.fn(async () => null),
-    },
-    purchaseRepo: {
-      lockPurchaseStatusByStoreTransaction: vi.fn(),
-      upsertPurchase: vi.fn(async () => ({ id: "pur_1" })),
-    },
-    // R6: the receipt path now records revenue idempotently.
-    revenueEventRepo: {
-      createRevenueEvent: vi.fn(async () => ({ id: "rev_1" })),
-    },
-  };
-  return { drizzleMock, auditMock, googleMocks, loggerSpies };
-});
+    };
+    // Google paid-state gate: the verifier + credential loader are swapped for
+    // configurable fns so each test can serve a fixture in any purchase state.
+    // The pricing lookups default to null (unresolvable) so pre-existing tests
+    // exercise the skip-emission path without extra setup.
+    const googleMocks = {
+      verifyGoogleSubscription: vi.fn(),
+      verifyGoogleProductPurchase: vi.fn(),
+      loadGoogleCredentials: vi.fn(async (): Promise<unknown> => null),
+      getSubscriptionBasePlanPricing: vi.fn(async (): Promise<unknown> => null),
+      getOneTimeProductPricing: vi.fn(async (): Promise<unknown> => null),
+    };
+    // Child-logger spies so tests can assert the pricing-miss error log.
+    const loggerSpies = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
+    // FINDING 1: verifyReceipt runs the guard + upsert inside
+    // db.transaction(...). Run the callback inline with the same stub.
+    const db: Record<string, unknown> = {
+      transaction: async (fn: (tx: unknown) => unknown) => fn(db),
+    };
+    const drizzleMock = {
+      db: db as unknown,
+      subscriberRepo: {
+        findSubscriberById: vi.fn(async () => ({ id: "sub_1", projectId: "proj_1" })),
+        findSubscriberByAppleAppAccountToken: vi.fn(async () => null),
+        setAppleAppAccountToken: vi.fn(async () => undefined),
+        clearAppleAppAccountToken: vi.fn(async () => undefined),
+        upsertSubscriber: vi.fn(async () => ({ id: "sub_1" })),
+      },
+      offeringRepo: {
+        findProductByIdentifierOrStoreId: vi.fn(async () => ({
+          id: "prod_1",
+          accessIds: [],
+          // verifyAppleReceipt refuses to grant a product that does not
+          // correspond to the verified transaction — otherwise a valid cheap
+          // receipt could be paired with an expensive product identifier. The
+          // fixture predated that guard and carried neither an Apple store id
+          // nor an identifier, so the comparison failed and every call 400'd
+          // before reaching the status-transition logic under test.
+          identifier: "com.app.pro",
+          storeIds: { apple: "com.app.pro" },
+        })),
+      },
+      // receipt-verify serialises concurrent verifications of the same
+      // transaction with a transaction-scoped advisory lock before touching
+      // purchase state. The mock had no lockRepo, so the call blew up on
+      // `undefined.advisoryXactLock2` once the product guard above stopped
+      // short-circuiting the request.
+      lockRepo: {
+        advisoryXactLock2: vi.fn(async () => undefined),
+      },
+      // Receipt verification resolves the subscriber the RC/Adapty way: the
+      // Apple originalTransactionId is the anchor and appAccountToken is the
+      // binding, so the lookup goes through purchaseExtRepo and the token
+      // helpers below. None of it existed when this mock was written; each
+      // missing member surfaced one at a time as
+      // "Cannot read properties of undefined".
+      purchaseExtRepo: {
+        findPurchaseByOriginalTransaction: vi.fn(async () => null),
+        findPurchaseByStoreTransaction: vi.fn(async () => null),
+      },
+      purchaseRepo: {
+        lockPurchaseStatusByStoreTransaction: vi.fn(),
+        upsertPurchase: vi.fn(async () => ({ id: "pur_1" })),
+      },
+      // R6: the receipt path now records revenue idempotently.
+      revenueEventRepo: {
+        createRevenueEvent: vi.fn(async () => ({ id: "rev_1" })),
+      },
+    };
+    return { drizzleMock, auditMock, googleMocks, appleVerifyMocks, loggerSpies };
+  });
 
 vi.mock("@rovenue/db", async () => {
   const actual =
@@ -95,8 +115,10 @@ vi.mock("@rovenue/db", async () => {
 
 vi.mock("../src/lib/audit", () => ({ audit: auditMock }));
 
-// Stub the Apple verifier so verifyTransaction returns a fixed
-// ACTIVE-resolving transaction without any crypto / network.
+// Stub the Apple verifier so verifyTransaction returns whatever
+// `appleVerifyMocks.verifyTransaction` currently resolves to (the shared
+// hardcoded fixture by default; overridden per-test for Task 6's typing
+// tests below) without any crypto / network.
 vi.mock("../src/services/apple/apple-verify", async () => {
   const actual = await vi.importActual<
     typeof import("../src/services/apple/apple-verify")
@@ -104,18 +126,8 @@ vi.mock("../src/services/apple/apple-verify", async () => {
   return {
     ...actual,
     JoseAppleNotificationVerifier: class {
-      async verifyTransaction() {
-        return {
-          transactionId: "txn_1",
-          originalTransactionId: "otxn_1",
-          productId: "com.app.pro",
-          purchaseDate: 1_700_000_000_000,
-          originalPurchaseDate: 1_700_000_000_000,
-          expiresDate: 1_800_000_000_000,
-          price: 9_990_000,
-          currency: "USD",
-          environment: "Production",
-        };
+      async verifyTransaction(jws: string) {
+        return appleVerifyMocks.verifyTransaction(jws);
       }
     },
   };
@@ -237,6 +249,16 @@ const CONSUMABLE_PRODUCT_FIXTURE = {
   type: "CONSUMABLE",
   identifier: "com.app.coins",
   storeIds: { google: "com.app.coins" },
+  accessIds: [],
+};
+
+// Task 6: a NON_CONSUMABLE Google one-time purchase (e.g. an unlock, not a
+// coin pack) must record NON_RENEWING_PURCHASE, never CREDIT_PURCHASE.
+const NON_CONSUMABLE_PRODUCT_FIXTURE = {
+  id: "prod_gunlock",
+  type: "NON_CONSUMABLE",
+  identifier: "com.app.unlock",
+  storeIds: { google: "com.app.unlock" },
   accessIds: [],
 };
 
@@ -604,7 +626,11 @@ describe("verifyReceipt — Google one-time revenue emission", () => {
     drizzleMock.purchaseRepo.upsertPurchase.mockResolvedValue({ id: "pur_1" });
   });
 
-  it("emits an INITIAL revenue event keyed google:<orderId>:purchase", async () => {
+  // Task 6: a CONSUMABLE is a coin/credit pack, never a subscription-shaped
+  // INITIAL — see services/revenue/one-time-type.ts. The dedupeKey shape
+  // is UNCHANGED (CREDIT_PURCHASE converges on the same "purchase" kind as
+  // INITIAL — revenueDedupeKind), only the type column changes.
+  it("records a consumable Google purchase as CREDIT_PURCHASE, keyed google:<orderId>:purchase", async () => {
     googleMocks.verifyGoogleProductPurchase.mockResolvedValue({
       purchaseState: 0,
       purchaseTimeMillis: "1700000000000",
@@ -618,11 +644,38 @@ describe("verifyReceipt — Google one-time revenue emission", () => {
       drizzleMock.revenueEventRepo.createRevenueEvent.mock.calls[0];
     expect(revenueCall).toBeDefined();
     expect(revenueCall?.[1]).toMatchObject({
-      type: "INITIAL",
+      type: "CREDIT_PURCHASE",
       amount: "4.99",
       currency: "USD",
       store: "PLAY_STORE",
       dedupeKey: "google:GPA.ONE-TIME-1:purchase",
+    });
+  });
+
+  // Task 6: a NON_CONSUMABLE (a permanent unlock) is likewise never
+  // INITIAL — it must record NON_RENEWING_PURCHASE.
+  it("records a non-consumable Google purchase as NON_RENEWING_PURCHASE", async () => {
+    drizzleMock.offeringRepo.findProductByIdentifierOrStoreId.mockResolvedValue(
+      NON_CONSUMABLE_PRODUCT_FIXTURE,
+    );
+    googleMocks.verifyGoogleProductPurchase.mockResolvedValue({
+      purchaseState: 0,
+      purchaseTimeMillis: "1700000000000",
+      orderId: "GPA.ONE-TIME-2",
+      regionCode: "US",
+    });
+
+    await verifyGoogle("com.app.unlock");
+
+    const revenueCall =
+      drizzleMock.revenueEventRepo.createRevenueEvent.mock.calls[0];
+    expect(revenueCall).toBeDefined();
+    expect(revenueCall?.[1]).toMatchObject({
+      type: "NON_RENEWING_PURCHASE",
+      amount: "4.99",
+      currency: "USD",
+      store: "PLAY_STORE",
+      dedupeKey: "google:GPA.ONE-TIME-2:purchase",
     });
   });
 
@@ -641,5 +694,129 @@ describe("verifyReceipt — Google one-time revenue emission", () => {
       drizzleMock.revenueEventRepo.createRevenueEvent,
     ).not.toHaveBeenCalled();
     expect(loggerSpies.error).toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// Task 6: one-time purchase revenue typing (Apple + regression pin)
+//
+// A CONSUMABLE/NON_CONSUMABLE Apple purchase must never be recorded as
+// INITIAL/RENEWAL — see services/revenue/one-time-type.ts. The rule is
+// applied via `oneTimeRevenueTypeFor(product.type) ?? <old transaction-id
+// classification>`, so a SUBSCRIPTION product (where the rule returns
+// null) must fall through completely unchanged — that is the regression
+// pin below, not a formality.
+// =============================================================
+
+const APPLE_CONSUMABLE_PRODUCT_FIXTURE = {
+  id: "prod_acoin",
+  type: "CONSUMABLE",
+  identifier: "com.app.coins",
+  storeIds: { apple: "com.app.coins" },
+  accessIds: [],
+};
+
+const APPLE_SUBSCRIPTION_PRODUCT_FIXTURE = {
+  id: "prod_apro",
+  type: "SUBSCRIPTION",
+  identifier: "com.app.pro",
+  storeIds: { apple: "com.app.pro" },
+  accessIds: [],
+};
+
+function appleTransactionFixture(overrides: {
+  transactionId: string;
+  originalTransactionId: string;
+  productId: string;
+  price: number;
+  currency: string;
+}) {
+  return {
+    purchaseDate: 1_700_000_000_000,
+    originalPurchaseDate: 1_700_000_000_000,
+    expiresDate: 1_800_000_000_000,
+    environment: "Production",
+    ...overrides,
+  };
+}
+
+describe("verifyReceipt — Apple one-time revenue typing (Task 6)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    drizzleMock.subscriberRepo.upsertSubscriber.mockResolvedValue({
+      id: "sub_1",
+    });
+    drizzleMock.purchaseRepo.lockPurchaseStatusByStoreTransaction.mockResolvedValue(
+      null,
+    );
+    drizzleMock.purchaseRepo.upsertPurchase.mockResolvedValue({ id: "pur_1" });
+  });
+
+  it("records a consumable Apple purchase as CREDIT_PURCHASE", async () => {
+    drizzleMock.offeringRepo.findProductByIdentifierOrStoreId.mockResolvedValue(
+      APPLE_CONSUMABLE_PRODUCT_FIXTURE,
+    );
+    appleVerifyMocks.verifyTransaction.mockResolvedValueOnce(
+      appleTransactionFixture({
+        transactionId: "t1",
+        originalTransactionId: "t1",
+        productId: "com.app.coins",
+        price: 4_990_000,
+        currency: "USD",
+      }),
+    );
+
+    await verifyReceipt({
+      projectId: "prj_1",
+      store: "APP_STORE",
+      receipt: "signed-jws",
+      productId: "com.app.coins",
+      appUserId: "user_1",
+    });
+
+    const revenueCall =
+      drizzleMock.revenueEventRepo.createRevenueEvent.mock.calls[0];
+    expect(revenueCall).toBeDefined();
+    expect(revenueCall?.[1]).toMatchObject({
+      type: "CREDIT_PURCHASE",
+      amount: "4.99",
+      currency: "USD",
+      store: "APP_STORE",
+      dedupeKey: "apple:t1:purchase",
+    });
+  });
+
+  // Regression pin: the rule must be incapable of touching the
+  // subscription branch. A renewal (transactionId !== originalTransactionId)
+  // stays RENEWAL, exactly as before this task.
+  it("leaves a subscription receipt classified exactly as before (RENEWAL)", async () => {
+    drizzleMock.offeringRepo.findProductByIdentifierOrStoreId.mockResolvedValue(
+      APPLE_SUBSCRIPTION_PRODUCT_FIXTURE,
+    );
+    appleVerifyMocks.verifyTransaction.mockResolvedValueOnce(
+      appleTransactionFixture({
+        transactionId: "t2",
+        originalTransactionId: "t1",
+        productId: "com.app.pro",
+        price: 9_990_000,
+        currency: "USD",
+      }),
+    );
+
+    await verifyReceipt({
+      projectId: "prj_1",
+      store: "APP_STORE",
+      receipt: "signed-jws",
+      productId: "com.app.pro",
+      appUserId: "user_1",
+    });
+
+    const revenueCall =
+      drizzleMock.revenueEventRepo.createRevenueEvent.mock.calls[0];
+    expect(revenueCall).toBeDefined();
+    expect(revenueCall?.[1]).toMatchObject({
+      type: "RENEWAL",
+      dedupeKey: "apple:t2:purchase",
+    });
   });
 });

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
 import {
@@ -47,6 +48,8 @@ import { db } from "./src/drizzle/client";
 // (or SEED_PROJECT_ID=<id> to skip the name lookup). In that mode the seed
 // never creates a user or a project — it resolves them and fails loudly if
 // they are missing, ambiguous, or the user is not a member of the project.
+// The API key it mints there gets a random secret, printed once and never
+// again; only the demo project's is the fixed well-known string.
 const TARGET_PROJECT_ID = process.env.SEED_PROJECT_ID ?? null;
 const TARGET_PROJECT_NAME = process.env.SEED_PROJECT_NAME ?? null;
 const TARGET_USER_EMAIL = process.env.SEED_USER_EMAIL ?? null;
@@ -79,7 +82,6 @@ function seedIds(ns: string) {
   return {
     DEMO_PUBLIC_KEY: `rov_pub_${ns}_production`,
     DEMO_API_KEY_ID: apiKeyId,
-    DEMO_SECRET_PLAINTEXT: `rov_sec_${apiKeyId}_${ns}secret123456789`,
     DEMO_PRODUCT_PRO_ID: `prd_${ns}_pro_monthly`,
     DEMO_PRODUCT_CREDITS_ID: `prd_${ns}_credits_100`,
     DEMO_OFFERING_ID: `ofr_${ns}_default`,
@@ -97,6 +99,27 @@ function seedIds(ns: string) {
   };
 }
 
+// The demo project's secret key is a fixed, well-known string. That is safe
+// exactly because the project is the seed's own throwaway — and it keeps a
+// re-run the byte-for-byte no-op the namespace comment above promises.
+//
+// A REAL project's must not be derivable from anything on screen. In targeted
+// mode the namespace IS the project id, which sits in every dashboard URL,
+// while this row is a PRODUCTION key that `lookupSecretKey` accepts verbatim:
+// a derived secret would hand a working S2S credential to anyone who has seen
+// the id. So targeted mode mints the same shape the dashboard mints (see
+// `routes/dashboard/projects.ts`) and prints it once — the database keeps only
+// the bcrypt hash, so a re-run cannot show it again.
+const DEMO_SECRET_SUFFIX = `${DEFAULT_NS}secret123456789`;
+const SECRET_RANDOM_BYTES = 32;
+
+function mintSecretPlaintext(target: SeedTarget, apiKeyId: string): string {
+  const suffix = target.createsAccount
+    ? DEMO_SECRET_SUFFIX
+    : randomBytes(SECRET_RANDOM_BYTES).toString("base64url");
+  return `rov_sec_${apiKeyId}_${suffix}`;
+}
+
 interface SeedTarget {
   ns: string;
   projectId: string;
@@ -107,7 +130,21 @@ interface SeedTarget {
 }
 
 async function resolveTarget(): Promise<SeedTarget> {
+  // Every other way of getting these wrong fails loudly below; these two used
+  // to be the exceptions, and both fail in the direction that matters — the
+  // operator believes they are feeding their own project while the seed writes
+  // somewhere else, or by a name it never read.
+  if (TARGET_PROJECT_ID && TARGET_PROJECT_NAME) {
+    throw new Error(
+      `Set SEED_PROJECT_ID or SEED_PROJECT_NAME, not both — SEED_PROJECT_NAME=${TARGET_PROJECT_NAME} would be ignored.`,
+    );
+  }
   if (!TARGET_PROJECT_ID && !TARGET_PROJECT_NAME) {
+    if (TARGET_USER_EMAIL) {
+      throw new Error(
+        `SEED_USER_EMAIL=${TARGET_USER_EMAIL} names a user but no project. Add SEED_PROJECT_NAME="..." (or SEED_PROJECT_ID=...), or unset it to seed the demo project.`,
+      );
+    }
     return {
       ns: DEFAULT_NS,
       projectId: DEFAULT_PROJECT_ID,
@@ -185,7 +222,6 @@ async function main() {
   const {
     DEMO_PUBLIC_KEY,
     DEMO_API_KEY_ID,
-    DEMO_SECRET_PLAINTEXT,
     DEMO_PRODUCT_PRO_ID,
     DEMO_PRODUCT_CREDITS_ID,
     DEMO_OFFERING_ID,
@@ -312,17 +348,40 @@ async function main() {
       .onConflictDoNothing();
   }
 
-  await db
-    .insert(apiKeys)
-    .values({
-      id: DEMO_API_KEY_ID,
-      projectId: DEMO_PROJECT_ID,
-      label: "Default production key",
-      keyPublic: DEMO_PUBLIC_KEY,
-      keySecretHash: await bcrypt.hash(DEMO_SECRET_PLAINTEXT, 10),
-      environment: "PRODUCTION",
-    })
-    .onConflictDoNothing();
+  // Read before write, rather than INSERT ... ON CONFLICT DO NOTHING: the row
+  // may already exist from an earlier run, and its secret is not recoverable
+  // from the hash. Knowing which case we are in is what lets the summary below
+  // print a secret only when the secret it prints actually works.
+  const [existingApiKey] = await db
+    .select({ id: apiKeys.id })
+    .from(apiKeys)
+    .where(eq(apiKeys.id, DEMO_API_KEY_ID))
+    .limit(1);
+
+  const mintedSecret = existingApiKey
+    ? null
+    : mintSecretPlaintext(target, DEMO_API_KEY_ID);
+
+  if (mintedSecret) {
+    await db
+      .insert(apiKeys)
+      .values({
+        id: DEMO_API_KEY_ID,
+        projectId: DEMO_PROJECT_ID,
+        label: "Default production key",
+        keyPublic: DEMO_PUBLIC_KEY,
+        keySecretHash: await bcrypt.hash(mintedSecret, 10),
+        environment: "PRODUCTION",
+      })
+      .onConflictDoNothing();
+  }
+
+  // The demo secret is a constant, so a re-run can show it again; a targeted
+  // one is random and lives only in the hash, so on a re-run there is nothing
+  // truthful left to show.
+  const secretPlaintext =
+    mintedSecret ??
+    (target.createsAccount ? mintSecretPlaintext(target, DEMO_API_KEY_ID) : null);
 
   // -------- Access catalog (replaces free-form entitlement keys) --------
   await db
@@ -935,7 +994,13 @@ async function main() {
   console.log(`  user:        ${target.userEmail ?? "(existing members)"}`);
   console.log(`  project:     ${target.projectName} (${DEMO_PROJECT_ID})`);
   console.log(`  public key:  ${DEMO_PUBLIC_KEY}`);
-  console.log(`  secret key:  ${DEMO_SECRET_PLAINTEXT} (DEV ONLY)`);
+  console.log(
+    secretPlaintext === null
+      ? `  secret key:  (kept the existing key ${DEMO_API_KEY_ID} — its secret is only in the hash)`
+      : target.createsAccount
+        ? `  secret key:  ${secretPlaintext} (DEV ONLY)`
+        : `  secret key:  ${secretPlaintext} (shown once — not recoverable)`,
+  );
   console.log(`  subscribers: ${SUBSCRIBER_COUNT}`);
   console.log(`  experiments: 1 (paywall_price_test, RUNNING)`);
   console.log(`  flags:       1 (new_onboarding)`);

@@ -1,143 +1,108 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# release-pod.sh — orchestrates a CocoaPods Trunk-ready release of the
-# Rovenue pod. Does NOT execute `pod trunk push` — prints the command for
-# the operator to run manually.
+# release-pod.sh — builds the two release artifacts and prints their checksums.
 #
-# Usage:
-#   ./packages/sdk-swift/scripts/release-pod.sh [--dry-run] [--skip-upload]
+# This script MUTATES NOTHING. It does not create releases, patch files, commit
+# or tag; .github/workflows/release-sdk.yml is the single authoritative release
+# path. A local script that can also cut a release is how a release gets cut
+# from an unclean tree.
 #
-# Flags:
-#   --dry-run      build + zip + sha only; no upload, no patch, no lint, no echo
-#   --skip-upload  build + zip + sha + patch + lint + echo; skip the GH upload
-#                  (use when the release already exists from a prior partial run)
+# Two artifacts, because the channels need differently shaped zips:
+#
+#   Rovenue-<v>.zip                  Sources/ + RovenueFFI.xcframework + podspec
+#                                    → pinned by Rovenue.podspec's :sha256
+#   RovenueFFI-<v>.xcframework.zip   the xcframework at the ZIP ROOT, nothing
+#                                    else → pinned by the SwiftPM distribution
+#                                    package's binaryTarget(checksum:)
+#
+# `binaryTarget(url:)` fails to resolve if the .xcframework is nested inside a
+# directory in the zip, and the error does not say so.
+#
+# Usage: ./packages/sdk-swift/scripts/release-pod.sh
 
-DRY_RUN=0
-SKIP_UPLOAD=0
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run)     DRY_RUN=1 ;;
-    --skip-upload) SKIP_UPLOAD=1 ;;
-    *) echo "unknown flag: $arg" >&2; exit 2 ;;
-  esac
-done
-
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-SWIFT_DIR="$ROOT/packages/sdk-swift"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SWIFT_DIR="$(cd "$HERE/.." && pwd)"
+CONFIG="$SWIFT_DIR/release.config.json"
 PODSPEC="$SWIFT_DIR/Rovenue.podspec"
 BUILD_DIR="$SWIFT_DIR/build"
 
 # -------- Preflight --------
+# ruby must be checked before the first cfg() call below, since cfg() shells
+# out to it — otherwise a machine without ruby gets a raw LoadError instead of
+# this script's own message.
 echo "→ preflight"
-
-for tool in pod shasum zip; do
+for tool in ruby pod shasum zip swift; do
   command -v "$tool" >/dev/null 2>&1 \
     || { echo "✗ missing required tool: $tool" >&2; exit 1; }
 done
 
-if [ "$DRY_RUN" -eq 0 ] && [ "$SKIP_UPLOAD" -eq 0 ]; then
-  command -v gh >/dev/null 2>&1 \
-    || { echo "✗ missing gh CLI (required unless --dry-run or --skip-upload)" >&2; exit 1; }
-  gh auth status >/dev/null 2>&1 \
-    || { echo "✗ gh CLI not authenticated — run 'gh auth login'" >&2; exit 1; }
-fi
+cfg() { ruby -rjson -e "print JSON.parse(File.read('$CONFIG'))['$1']"; }
 
-if [ "$DRY_RUN" -eq 0 ]; then
-  # Working tree must be clean for an honest release.
-  if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
-    echo "✗ working tree not clean — commit or stash before releasing" >&2
-    exit 1
-  fi
-  BRANCH=$(git -C "$ROOT" branch --show-current)
-  if [ "$BRANCH" != "main" ]; then
-    echo "⚠  on branch '$BRANCH' (expected 'main') — continuing anyway"
-  fi
-fi
+POD_NAME="$(cfg podName)"
+VERSION="$(cfg version)"
+XCF_NAME="$(cfg xcframeworkName)"
 
-# -------- Read version --------
-VERSION=$(grep -E "^\s*s\.version\s+=" "$PODSPEC" \
-  | sed -E "s/.*'([^']+)'.*/\1/" | head -n 1)
-test -n "$VERSION" || { echo "✗ could not parse version from $PODSPEC" >&2; exit 1; }
-echo "→ Rovenue.podspec version: $VERSION"
+"$SWIFT_DIR/Tests/config-version-parity.sh"
 
-ZIP_NAME="Rovenue-$VERSION.zip"
-STAGE_DIR="$BUILD_DIR/Rovenue-$VERSION"
-ZIP_PATH="$BUILD_DIR/$ZIP_NAME"
-RELEASE_TAG="sdk-swift-v$VERSION"
+STAGE_DIR="$BUILD_DIR/$POD_NAME-$VERSION"
+POD_ZIP="$BUILD_DIR/$POD_NAME-$VERSION.zip"
+XCF_ZIP="$BUILD_DIR/${XCF_NAME%.xcframework}-$VERSION.xcframework.zip"
 
 # -------- Build --------
-echo "→ build host bindings (UniFFI sources)"
-"$ROOT/packages/core-rs/scripts/build-bindings.sh" >/dev/null
+# Build into $SWIFT_DIR (build-xcframework.sh's default with no OUT_DIR arg),
+# i.e. beside the podspec — never straight into the ephemeral $STAGE_DIR.
+# pod lib lint resolves `s.vendored_frameworks` relative to the podspec's own
+# directory, not the staging directory, so the lint step below needs the
+# xcframework to actually land at $SWIFT_DIR/$XCF_NAME. One build then serves
+# both the lint and the pod zip via the copy in the staging step.
+echo "→ build $XCF_NAME"
+"$HERE/build-xcframework.sh" >/dev/null
 
-echo "→ build iOS staticlib"
 rm -rf "$STAGE_DIR"
-mkdir -p "$STAGE_DIR/Sources/Rovenue"
-"$SWIFT_DIR/scripts/build-ios-static.sh" "$STAGE_DIR/Sources/Rovenue" >/dev/null
+mkdir -p "$STAGE_DIR"
 
-# -------- Stage --------
-echo "→ stage Sources + podspec into $STAGE_DIR"
-cp -R "$SWIFT_DIR/Sources/Rovenue/." "$STAGE_DIR/Sources/Rovenue/"
-# The staticlib we just built goes alongside the Swift sources;
-# `cp -R` above would have overwritten it with whatever's in the
-# source tree (typically nothing). Re-place it.
-"$SWIFT_DIR/scripts/build-ios-static.sh" "$STAGE_DIR/Sources/Rovenue" >/dev/null
+# -------- Stage the CocoaPods artifact --------
+echo "→ stage Sources + xcframework + podspec into $STAGE_DIR"
+mkdir -p "$STAGE_DIR/Sources"
+cp -R "$SWIFT_DIR/Sources/Rovenue" "$STAGE_DIR/Sources/Rovenue"
+cp -R "$SWIFT_DIR/$XCF_NAME" "$STAGE_DIR/"
+cp "$PODSPEC" "$CONFIG" "$STAGE_DIR/"
 
-cp "$PODSPEC" "$STAGE_DIR/Rovenue.podspec"
+echo "→ zip → $POD_ZIP"
+rm -f "$POD_ZIP"
+( cd "$BUILD_DIR" && zip -rq "$(basename "$POD_ZIP")" "$POD_NAME-$VERSION" )
 
-# -------- Zip --------
-echo "→ zip → $ZIP_PATH"
-rm -f "$ZIP_PATH"
-( cd "$BUILD_DIR" && zip -rq "$ZIP_NAME" "Rovenue-$VERSION" )
+# -------- Zip the SwiftPM artifact (xcframework at the root) --------
+echo "→ zip → $XCF_ZIP"
+rm -f "$XCF_ZIP"
+( cd "$STAGE_DIR" && zip -rq "$XCF_ZIP" "$XCF_NAME" )
 
-# -------- SHA256 --------
-SHA=$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')
-echo "→ sha256: $SHA"
+# -------- Checksums --------
+POD_SHA=$(shasum -a 256 "$POD_ZIP" | awk '{print $1}')
+XCF_SHA=$(swift package compute-checksum "$XCF_ZIP")
 
-if [ "$DRY_RUN" -eq 1 ]; then
-  echo
-  echo "✓ DRY RUN complete. Artifacts in $BUILD_DIR/"
-  echo "  zip:    $ZIP_PATH"
-  echo "  sha256: $SHA"
-  exit 0
-fi
+# -------- Local lint --------
+# pod lib lint, never pod spec lint: the :http source does not exist until the
+# release job uploads. pod spec lint runs there, against the live URL.
+echo "→ pod lib lint (ios, macos)"
+pod lib lint "$PODSPEC" --allow-warnings --skip-tests --platforms=ios
+pod lib lint "$PODSPEC" --allow-warnings --skip-tests --platforms=macos
 
-# -------- Upload --------
-if [ "$SKIP_UPLOAD" -eq 0 ]; then
-  echo "→ gh release create $RELEASE_TAG"
-  if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-    echo "✗ release $RELEASE_TAG already exists — bump version in $PODSPEC or use --skip-upload" >&2
-    exit 1
-  fi
-  gh release create "$RELEASE_TAG" "$ZIP_PATH" \
-    --title "sdk-swift v$VERSION" \
-    --notes "Rovenue Swift façade ($VERSION). See packages/sdk-swift/CHANGELOG.md (if present)."
-else
-  echo "→ --skip-upload: assume release $RELEASE_TAG already exists"
-fi
+# -------- Report --------
+cat <<REPORT
 
-# -------- Patch podspec --------
-echo "→ patch sha256 into $PODSPEC"
-# Replace the 64-char hex placeholder with the real sha. Use sed -i'' for
-# portability (BSD sed on macOS requires the empty backup arg form).
-sed -i'' -E "s/:sha256 => '[0-9a-fA-F]{64}'/:sha256 => '$SHA'/" "$PODSPEC"
-git -C "$ROOT" add "$PODSPEC"
-git -C "$ROOT" commit -m "chore(sdk-swift): pin Rovenue podspec sha256 for v$VERSION"
+──────────────────────────────────────────────────────────────
+Artifacts built. Nothing was uploaded, patched, committed or tagged.
 
-# -------- Lint --------
-echo "→ pod spec lint"
-if ! pod spec lint "$PODSPEC" --allow-warnings --skip-tests --platforms=ios; then
-  echo "✗ lint failed — reverting sha pin commit"
-  git -C "$ROOT" reset --hard HEAD~1
-  exit 1
-fi
+  $POD_ZIP
+    sha256 (Rovenue.podspec :sha256)      $POD_SHA
 
-# -------- Echo Trunk push --------
-echo
-echo "──────────────────────────────────────────────────────────────"
-echo "✓ Release ready. To publish to CocoaPods Trunk, run:"
-echo
-echo "    pod trunk push $PODSPEC --allow-warnings"
-echo
-echo "Prereq: pod trunk register <your-email> '<your-name>' (one-time)"
-echo "──────────────────────────────────────────────────────────────"
+  $XCF_ZIP
+    checksum (binaryTarget checksum:)     $XCF_SHA
+
+To publish, run the release-sdk.yml workflow with swift: true.
+It pins both checksums, commits, tags that commit, then uploads and
+publishes — checksums first, because they describe these local files.
+──────────────────────────────────────────────────────────────
+REPORT

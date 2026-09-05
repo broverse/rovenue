@@ -163,12 +163,22 @@ export const STORE_EVENT_TO_PUBLIC_KEY: Record<string, RovenueEventKey> = {
   // Stripe (event.type)
   "invoice.payment_failed": "subscription.billing_issue",
 
-  // Stripe gets no `paused` row and no `recovered` row: its paused status
-  // arrives on `customer.subscription.updated`, whose delta never reaches
-  // this bridge (see the deferral above), and it sends no recovery signal
-  // at all. Inferring one from an `invoice.paid` following a
-  // `payment_failed` would fire on unrelated renewals and stop a
-  // consumer's dunning campaign for a subscriber who has not recovered.
+  // Stripe gets no `paused` row: its paused status arrives on
+  // `customer.subscription.updated`, whose delta never reaches this
+  // bridge (see the deferral above).
+  //
+  // Stripe (and Apple) get no `recovered` row HERE either, but for a
+  // different reason than `paused` does: `recovered` is produced directly
+  // by the Apple and Stripe webhook handlers (`subscription-plan-change.ts`'s
+  // `emitSubscriptionRecovered`) on the `BILLING_ISSUE -> granting`
+  // transition, rather than by this table. This table is keyed on event
+  // TYPE, and a recovery is a state TRANSITION: Stripe's
+  // `customer.subscription.updated` and Apple's `DID_RENEW` each fire on
+  // an ordinary renewal of an already-ACTIVE row just as often as on a
+  // genuine recovery, so the bare event-type string can't tell the two
+  // apart. The handlers can, because they read the guard's before-image —
+  // the row's actual prior status, captured under the same lock as the
+  // write — instead of the event type alone.
 };
 
 // =============================================================

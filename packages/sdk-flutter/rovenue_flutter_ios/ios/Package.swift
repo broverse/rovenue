@@ -78,23 +78,6 @@ let flutterMacOSXCFrameworkAbsolutePath =
 let flutterMacOSXCFrameworkPath = relativePath(
   from: packageRoot, to: flutterMacOSXCFrameworkAbsolutePath)
 
-// The `Rovenue` package's own `-L../../target/release` linker flag (see
-// `packages/sdk-swift/Package.swift`) is a relative `unsafeFlags` string
-// forwarded to `ld` verbatim — SwiftPM does NOT re-root it against
-// `Rovenue`'s package directory, so it only resolves correctly when `swift
-// build`/`swift test` is invoked FROM `packages/sdk-swift`. Invoked from
-// here (`ios/`), that relative path misses. Re-supply the same
-// `librovenue` static lib via an absolute `-L` on our own target instead
-// of touching `sdk-swift/Package.swift` (out of scope — see
-// task-4-context.md's hard constraints).
-let repoRoot = URL(fileURLWithPath: packageRoot)
-  .deletingLastPathComponent()  // .../packages/sdk-flutter/rovenue_flutter_ios
-  .deletingLastPathComponent()  // .../packages/sdk-flutter
-  .deletingLastPathComponent()  // .../packages
-  .deletingLastPathComponent()  // repo root
-  .path
-let librovenueReleaseDir = repoRoot + "/target/release"
-
 let package = Package(
   name: "RovenueFlutterIosTestHarness",
   platforms: [.macOS(.v12)],
@@ -126,9 +109,6 @@ let package = Package(
       exclude: [
         "PaywallPlatformView.swift",
         "PaywallViewFactory.swift",
-      ],
-      linkerSettings: [
-        .unsafeFlags(["-L\(librovenueReleaseDir)"], .when(platforms: [.macOS]))
       ]
     ),
     .testTarget(

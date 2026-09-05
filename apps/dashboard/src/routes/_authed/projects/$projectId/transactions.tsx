@@ -171,6 +171,7 @@ const TYPE_MAP: Record<RevenueEventTypeName, TxType> = {
   REFUND: "refund",
   REACTIVATION: "purchase",
   CREDIT_PURCHASE: "credit",
+  NON_RENEWING_PURCHASE: "purchase",
 };
 
 const STORE_MAP: Record<string, TxStore> = {

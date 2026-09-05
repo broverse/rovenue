@@ -61,12 +61,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
-      - run: ./packages/core-rs/scripts/build-bindings.sh
+      # config-version-parity.sh evaluates Rovenue.podspec and
+      # rovenue_flutter_ios.podspec with cocoapods-core instead of
+      # pattern-matching them (Rovenue.podspec derives its version from
+      # release.config.json, so a regex would only re-read that file). This job
+      # installs CocoaPods nowhere else, and the parity check is its FIRST
+      # step — without this, an image whose ruby lacks the gem fails the whole
+      # Swift job with a LoadError on a check unrelated to what it tests.
+      - name: Ensure cocoapods-core is available
+        run: ruby -rcocoapods-core -e '' 2>/dev/null || gem install cocoapods-core --no-document
+      - name: Version parity (config / Cargo / podspecs / RN package)
+        run: ./packages/sdk-swift/Tests/config-version-parity.sh
+      # Builds the bindings and all five Apple slices, then asserts the
+      # artifact's shape. Replaces the previous DYLD_LIBRARY_PATH hop into
+      # target/release, which only ever worked for the host platform.
+      - name: Build RovenueFFI.xcframework
+        run: ./packages/sdk-swift/scripts/build-xcframework.sh
       - name: swift test
         working-directory: packages/sdk-swift
-        run: |
-          export DYLD_LIBRARY_PATH="$GITHUB_WORKSPACE/target/release"
-          swift test
+        run: swift test
 
   kotlin:
     name: Kotlin façade (JVM)
@@ -186,16 +199,17 @@ jobs:
       # ios/Package.swift links FlutterMacOS.xcframework out of the Flutter
       # SDK cache; precache puts it there on a cold runner.
       - run: flutter precache --macos
-      - run: ./packages/core-rs/scripts/build-bindings.sh
+      # ios/Package.swift depends on `packages/sdk-swift`, whose Package.swift
+      # resolves RovenueFFI through `.binaryTarget(path:)`. That artifact is a
+      # gitignored build product, so on a clean checkout SwiftPM aborts before
+      # compiling anything: "local binary target 'RovenueFFI' … does not
+      # contain a binary artifact". This script also regenerates the uniffi
+      # bindings, which is why build-bindings.sh is no longer a separate step.
+      - name: Build RovenueFFI.xcframework
+        run: ./packages/sdk-swift/scripts/build-xcframework.sh
       - name: swift test (plugin unit tests)
         working-directory: packages/sdk-flutter/rovenue_flutter_ios/ios
-        run: |
-          export DYLD_LIBRARY_PATH="$GITHUB_WORKSPACE/target/release"
-          swift test
-      # NO iOS example build step on purpose. `flutter build ios` /
-      # `xcodebuild` on packages/sdk-flutter/example cannot pass today:
-      # packages/sdk-swift vendors a stale, simulator-arch
-      # `Sources/Rovenue/librovenue_ffi.a`, so the device link fails for
-      # reasons that live outside this plugin. Re-add a step here once that
-      # vendored archive is rebuilt as a proper multi-arch xcframework —
-      # a permanently-red step is worse than no step.
+        run: swift test
+      # This job builds and runs the plugin's Swift unit tests; it does not
+      # build the example app for iOS. Whether to add `flutter build ios` here
+      # is an open decision, not a blocked one.

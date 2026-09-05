@@ -9,7 +9,7 @@ Adds the `Rovenue` pod to your `ios/Podfile`:
 
 | Mode             | Trigger                                   | Podfile line                                  |
 |------------------|-------------------------------------------|-----------------------------------------------|
-| Trunk (default)  | `["@rovenue/react-native-sdk"]`           | `pod 'Rovenue', '~> 0.1'`                     |
+| Trunk (default)  | `["@rovenue/react-native-sdk"]`           | `pod 'Rovenue', '<exact version>'`            |
 | Local `:path =>` | `["@rovenue/react-native-sdk", { rovenueSwiftPath: "../../packages/sdk-swift" }]` | `pod 'Rovenue', :path => '<value>'` |
 
 The `rovenueSwiftPath` is relative to the generated `ios/Podfile`, NOT

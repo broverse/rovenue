@@ -41,12 +41,17 @@ import {
   MIN_BATCH_FOR_CIRCUIT_BREAKER,
   runAccessReconciliationSweep,
 } from "./access-reconciliation";
+import { verifyAuditChain } from "../lib/audit";
+import { hasAccess, syncAccess } from "../services/access-engine";
 
 const RUN_ID = Date.now();
 
 /** Purchases are seeded well clear of `now` in both directions so no
  *  assertion can turn on the sweep's own clock. */
 const FUTURE_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** How far in the past a lapsed purchase's `expiresDate` sits. */
+const PAST_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 /** The bogus expiry `wrong_expiry` is injected with — far enough from
  *  the purchase's real expiry that no rounding could reconcile them. */
@@ -72,14 +77,23 @@ interface SeededSubscriber {
  * correct `subscriber_access` row for it — i.e. a subscriber the
  * reconciler must report as clean until a test corrupts them.
  */
-async function seedActiveSubscriberWithAccess(): Promise<SeededSubscriber> {
+async function seedActiveSubscriberWithAccess(opts?: {
+  status?: "ACTIVE" | "GRACE_PERIOD";
+  /** Past-dated, as a GRACE_PERIOD purchase's `expiresDate` always is. */
+  expiredAlready?: boolean;
+  /** Skip the hand-built access row (for cases that call syncAccess). */
+  withoutAccessRow?: boolean;
+  deleted?: boolean;
+}): Promise<SeededSubscriber> {
   const db = getDb();
   const s = nextSuffix();
   const projectId = `prj_arc_${s}`;
   const accessId = `acc_arc_${s}`;
   const productId = `prod_arc_${s}`;
   const subscriberId = `sub_arc_${s}`;
-  const expiresDate = new Date(Date.now() + FUTURE_EXPIRY_MS);
+  const expiresDate = opts?.expiredAlready
+    ? new Date(Date.now() - PAST_EXPIRY_MS)
+    : new Date(Date.now() + FUTURE_EXPIRY_MS);
 
   await db.insert(projects).values({
     id: projectId,
@@ -105,6 +119,8 @@ async function seedActiveSubscriberWithAccess(): Promise<SeededSubscriber> {
     projectId,
     rovenueId: `rovenue_arc_${s}`,
     appUserId: `app_user_arc_${s}`,
+    // GDPR/KVKK erasure stamps this and RETAINS the purchases.
+    deletedAt: opts?.deleted ? new Date() : null,
   });
   const [purchase] = await db
     .insert(purchases)
@@ -115,7 +131,7 @@ async function seedActiveSubscriberWithAccess(): Promise<SeededSubscriber> {
       store: "APP_STORE",
       storeTransactionId: `arc_txn_${s}`,
       originalTransactionId: `arc_txn_${s}`,
-      status: "ACTIVE",
+      status: opts?.status ?? "ACTIVE",
       isTrial: false,
       isIntroOffer: false,
       isSandbox: false,
@@ -123,6 +139,10 @@ async function seedActiveSubscriberWithAccess(): Promise<SeededSubscriber> {
       purchaseDate: new Date(),
       originalPurchaseDate: new Date(),
       expiresDate,
+      // Grace runs from the (past) expiry to here.
+      gracePeriodExpires: opts?.expiredAlready
+        ? new Date(Date.now() + FUTURE_EXPIRY_MS)
+        : null,
       priceAmount: "9.99",
       priceCurrency: "USD",
       autoRenewStatus: true,
@@ -132,14 +152,16 @@ async function seedActiveSubscriberWithAccess(): Promise<SeededSubscriber> {
 
   // Hand-built, not syncAccess-built: the baseline must be independent
   // of the thing being verified.
-  await db.insert(subscriberAccess).values({
-    subscriberId,
-    purchaseId: purchase.id,
-    accessId,
-    isActive: true,
-    expiresDate,
-    store: "APP_STORE",
-  });
+  if (!opts?.withoutAccessRow) {
+    await db.insert(subscriberAccess).values({
+      subscriberId,
+      purchaseId: purchase.id,
+      accessId,
+      isActive: true,
+      expiresDate,
+      store: "APP_STORE",
+    });
+  }
 
   return {
     projectId,
@@ -314,6 +336,17 @@ describe("runAccessReconciliationSweep", () => {
     expect(after.classes).toEqual(["missing_grant"]);
     expect(after.source).toBe("access:reconciliation-sweep");
     expect(after.backfill).toBe(false);
+
+    // The row must also VERIFY. `writeChained` hashes `entry.userId` as
+    // given while `verifyAuditChain` re-hashes it as `row.userId ?? ""`,
+    // so a `userId: null` here would write "userId":null and verify as
+    // "userId":"" — every row this worker produces would report
+    // `bad_hash`, the chain's tamper signal, in a DB-enforced
+    // append-only table that can never be repaired. Asserting the row
+    // EXISTS does not catch that; only re-verifying the chain does.
+    const chain = await verifyAuditChain(projectId);
+    expect(chain.errors).toEqual([]);
+    expect(chain.rowCount).toBe(1);
   });
 
   it("records backfill mode on the audit row", async () => {
@@ -417,5 +450,230 @@ describe("runAccessReconciliationSweep", () => {
     const second = await runAccessReconciliationSweep(new Date());
     expect(second.candidates).toBe(0);
     expect(second.drifted).toBe(0);
+  });
+
+  it("excludes erased subscribers from the worklist", async () => {
+    // GDPR/KVKK erasure stamps `deletedAt` and retains the purchases, so
+    // without the filter an erased subscriber stays a candidate forever:
+    // entitlement rows rewritten and a fresh audit row naming their
+    // subscriberId written every time they go stale, indefinitely.
+    const erased = await seedActiveSubscriberWithAccess({ deleted: true });
+    await getDb().execute(
+      sql`DELETE FROM "subscriber_access" WHERE "subscriberId" = ${erased.subscriberId}`,
+    );
+
+    const result = await runAccessReconciliationSweep(new Date());
+
+    expect(result.candidates).toBe(0);
+    expect(result.drifted).toBe(0);
+    await expect(activeAccessIds(erased.subscriberId)).resolves.toEqual([]);
+    await expect(
+      auditRowsFor(erased.projectId, "access.drift_repaired"),
+    ).resolves.toHaveLength(0);
+    // Never even stamped — the row is not in the worklist at all.
+    await expect(lastReconciledAt(erased.subscriberId)).resolves.toBeNull();
+  });
+
+  it("still sweeps a merged-away subscriber", async () => {
+    // The counterpart to the case above, and the reason `mergedInto` is
+    // deliberately NOT filtered: a merged-away subscriber's stranded
+    // access rows ARE the orphan/stale classes, and clearing them is the
+    // desired repair rather than something to skip.
+    const merged = await seedActiveSubscriberWithAccess();
+    const survivor = await seedActiveSubscriberWithAccess();
+    await getDb().execute(
+      sql`UPDATE "subscribers" SET "mergedInto" = ${survivor.subscriberId} WHERE "id" = ${merged.subscriberId}`,
+    );
+
+    const result = await runAccessReconciliationSweep(new Date());
+
+    expect(result.candidates).toBe(2);
+  });
+
+  it("staleAfterMs lets an operator re-sweep a slice the breaker stamped", async () => {
+    const seeded = await seedActiveSubscriberWithAccess();
+
+    // First sweep stamps it, so the default window excludes it.
+    await runAccessReconciliationSweep(new Date());
+    const blocked = await runAccessReconciliationSweep(new Date());
+    expect(blocked.candidates).toBe(0);
+
+    // Now inject drift the way an incident would have left it, and
+    // re-sweep with the override rather than hand-written SQL against
+    // `subscribers`.
+    await getDb().execute(
+      sql`DELETE FROM "subscriber_access" WHERE "subscriberId" = ${seeded.subscriberId}`,
+    );
+    const recovery = await runAccessReconciliationSweep(new Date(), {
+      staleAfterMs: 0,
+    });
+
+    expect(recovery.candidates).toBe(1);
+    expect(recovery.drift.missing_grant).toBe(1);
+    expect(recovery.healed).toBe(1);
+    await expect(activeAccessIds(seeded.subscriberId)).resolves.toEqual([
+      seeded.accessId,
+    ]);
+  });
+
+  it("writes exactly one audit row across a heal and a clean re-sweep", async () => {
+    // HONEST SCOPE: this does NOT exercise the no-op guard's positive
+    // branch. That branch fires only when detection races a concurrent
+    // write so that `syncAccess` finds nothing left to do, which cannot
+    // be produced deterministically here without mocking the very code
+    // under test. What this pins is the accounting either side of it —
+    // a real heal counts once with `noops: 0`, and a re-sweep of the
+    // now-correct subscriber adds no second audit row to an append-only
+    // table. The guard itself is covered by review, not by this test.
+    const seeded = await seedActiveSubscriberWithAccess();
+    await getDb().execute(
+      sql`DELETE FROM "subscriber_access" WHERE "subscriberId" = ${seeded.subscriberId}`,
+    );
+
+    const first = await runAccessReconciliationSweep(new Date());
+    expect(first.healed).toBe(1);
+    expect(first.noops).toBe(0);
+
+    // Re-sweep the same, now-correct subscriber: nothing is detected, so
+    // nothing is healed and exactly one audit row exists in total.
+    const second = await runAccessReconciliationSweep(new Date(), {
+      staleAfterMs: 0,
+    });
+    expect(second.drifted).toBe(0);
+    expect(second.healed).toBe(0);
+    await expect(
+      auditRowsFor(seeded.projectId, "access.drift_repaired"),
+    ).resolves.toHaveLength(1);
+  });
+
+  // -------------------------------------------------------------
+  // GRACE_PERIOD — the empirical question (review Important 4)
+  // -------------------------------------------------------------
+  //
+  // `subscription-status.ts` declares GRACE_PERIOD access-granting. Until
+  // Task 12b `computeDesiredAccess` skipped any purchase whose
+  // `expiresDate < now` — definitionally every grace-period purchase,
+  // since a subscription only enters grace once its paid period lapsed —
+  // so that declaration granted nothing and the whole GRACE_PERIOD vs
+  // BILLING_ISSUE distinction was empty in entitlement terms. A grace
+  // purchase's entitlement now runs to `gracePeriodExpires`.
+  //
+  // The stored rows here are whatever the WRITER produces: seeded
+  // without an access row, then `syncAccess` is called. Whatever it
+  // decides is by definition not drift, because the checker calls the
+  // same function.
+  it("reports no drift for a grace-period subscriber the writer produced", async () => {
+    const grace = await seedActiveSubscriberWithAccess({
+      status: "GRACE_PERIOD",
+      expiredAlready: true,
+      withoutAccessRow: true,
+    });
+    await syncAccess(grace.subscriberId);
+
+    const storedByWriter = await activeAccessIds(grace.subscriberId);
+    const result = await runAccessReconciliationSweep(new Date());
+
+    expect(result.candidates).toBe(1);
+    expect(result.drifted).toBe(0);
+    expect(result.drift.stale_grant).toBe(0);
+    expect(result.drift.missing_grant).toBe(0);
+    // CHANGED BY TASK 12b — this asserted `[]` before, which is exactly
+    // the contradiction the task fixed: the writer granted a grace
+    // subscriber nothing at all. It now grants the access, and the
+    // checker agrees with it (drifted: 0), because both call
+    // `computeDesiredAccess`.
+    expect(storedByWriter).toEqual([grace.accessId]);
+    // Asserted through the READ path, not just the table: a row whose
+    // stored expiry were the purchase's lapsed `expiresDate` would be
+    // filtered out by `findActiveAccess` and grant nothing.
+    await expect(hasAccess(grace.subscriberId, grace.accessId)).resolves.toBe(
+      true,
+    );
+  });
+
+  // The shape ABOVE is not how a grace-period subscriber actually reaches
+  // the database. `apple-webhook.ts`'s `applyFailedRenewal` writes only
+  // the purchase's status + `gracePeriodExpires`; it calls neither
+  // `grantAccess` nor `revokeAccessForTransaction`, so the access row
+  // from the prior ACTIVE period survives untouched — still `isActive`,
+  // still carrying the lapsed period's expiry. THAT is the production
+  // shape: seeded already-lapsed (purchase AND access row carry the same
+  // past expiry, as they do the moment a renewal fails), then only the
+  // status is flipped, which is all the webhook writes.
+  it("heals a real Apple grace-period subscriber into live access", async () => {
+    const grace = await seedActiveSubscriberWithAccess({
+      expiredAlready: true,
+    });
+    // Exactly what applyFailedRenewal writes: the status. The seed
+    // already carries the lapsed `expiresDate` and the future
+    // `gracePeriodExpires`, and `subscriber_access` is left untouched.
+    await getDb().execute(
+      sql`UPDATE "purchases" SET "status" = 'GRACE_PERIOD' WHERE "id" = ${grace.purchaseId}`,
+    );
+
+    // Nothing serves this subscriber before the sweep: the surviving row
+    // is active but its expiry is in the past.
+    await expect(hasAccess(grace.subscriberId, grace.accessId)).resolves.toBe(
+      false,
+    );
+
+    const dry = await runAccessReconciliationSweep(new Date(), {
+      dryRun: true,
+    });
+
+    // CHANGED BY TASK 12b. This case asserted `stale_grant: 1` before:
+    // the grace purchase produced no desired entry at all, so the
+    // surviving row had no counterpart and the sweep's "repair" was to
+    // REVOKE it. The purchase now grants until `gracePeriodExpires`, so
+    // the row has a counterpart and the only disagreement left is its
+    // expiry — the lapsed period's end rather than the grace window's.
+    //
+    // Note this is `wrong_expiry`, not "no drift": the stored row was
+    // written before the grace window existed and genuinely must be
+    // rewritten for the read path (`expiresDate > now`) to serve it. The
+    // heal below EXTENDS the entitlement; nothing is taken away.
+    expect(dry.drift.stale_grant).toBe(0);
+    expect(dry.drift.wrong_expiry).toBe(1);
+    expect(dry.drifted).toBe(1);
+
+    const healed = await runAccessReconciliationSweep(new Date(), {
+      staleAfterMs: 0,
+    });
+    expect(healed.healed).toBe(1);
+
+    // The observable proof: a subscriber who could not read their
+    // entitlement now can, through the same read path the SDK uses.
+    await expect(hasAccess(grace.subscriberId, grace.accessId)).resolves.toBe(
+      true,
+    );
+    const [row] = await getDb()
+      .select({ expiresDate: subscriberAccess.expiresDate })
+      .from(subscriberAccess)
+      .where(eq(subscriberAccess.subscriberId, grace.subscriberId));
+    expect(row?.expiresDate?.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  // The other half of the rule: a grace window that has itself elapsed
+  // grants nothing, so the row is revoked rather than extended. Without
+  // this, "grace grants access" would have no upper bound in the tests.
+  it("revokes a grace-period subscriber whose grace window has elapsed", async () => {
+    const grace = await seedActiveSubscriberWithAccess({
+      expiredAlready: true,
+    });
+    await getDb().execute(
+      sql`UPDATE "purchases"
+          SET "status" = 'GRACE_PERIOD',
+              "gracePeriodExpires" = now() - interval '1 hour'
+          WHERE "id" = ${grace.purchaseId}`,
+    );
+
+    const result = await runAccessReconciliationSweep(new Date());
+
+    expect(result.drift.stale_grant).toBe(1);
+    expect(result.healed).toBe(1);
+    await expect(activeAccessIds(grace.subscriberId)).resolves.toEqual([]);
+    await expect(hasAccess(grace.subscriberId, grace.accessId)).resolves.toBe(
+      false,
+    );
   });
 });
