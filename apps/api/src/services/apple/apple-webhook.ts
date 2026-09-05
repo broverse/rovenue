@@ -42,6 +42,7 @@ import { guardStatusWrite } from "../subscription-transition-guard";
 import {
   applePlanChangeType,
   emitProductChanged,
+  emitSubscriptionRecovered,
   pendingPlanChangeFields,
 } from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
@@ -1370,6 +1371,21 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
           now: eventTime,
         });
       }
+
+      // BILLING_ISSUE -> a granting status is a genuine recovery: the
+      // store resolved the payment failure. Unlike inferring it from an
+      // invoice, this cannot fire on an unrelated renewal, because the
+      // before-image says where the row actually was.
+      await emitSubscriptionRecovered({
+        db: dbTx,
+        projectId: ctx.projectId,
+        subscriberId,
+        purchaseId: persisted.id,
+        guard,
+        status,
+        now: eventTime,
+      });
+
       return { purchase: persisted, statusApplied: guard.apply };
     },
   );

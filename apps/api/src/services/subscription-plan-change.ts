@@ -1,11 +1,14 @@
-import type { Db } from "@rovenue/db";
-import { drizzle } from "@rovenue/db";
+import { PurchaseStatus, drizzle, type Db } from "@rovenue/db";
 import { PRODUCT_CHANGE_PHASE_EFFECTIVE } from "@rovenue/shared";
-import type { PlanChangeType } from "@rovenue/shared/subscription-status";
+import {
+  SUBSCRIPTION_STATUS_SEMANTICS,
+  type PlanChangeType,
+} from "@rovenue/shared/subscription-status";
 import {
   APPLE_NOTIFICATION_SUBTYPE,
   type AppleNotificationSubtype,
 } from "./apple/apple-types";
+import type { GuardStatusWriteResult } from "./subscription-transition-guard";
 
 /**
  * Re-exported so this module stays the one place the api reads plan-change
@@ -141,6 +144,71 @@ export async function emitProductChanged(args: {
       // beside `subscription.product_changed` in
       // packages/shared/src/integrations.ts.
       phase: PRODUCT_CHANGE_PHASE_EFFECTIVE,
+      timestamp: args.now.toISOString(),
+    },
+  });
+}
+
+/**
+ * The public lifecycle key for a subscription leaving BILLING_ISSUE into a
+ * status that grants access again. Already present in
+ * `STORE_EVENT_TO_PUBLIC_KEY` for Google's own `SUBSCRIPTION_RECOVERED`
+ * event type — this is the SAME key, produced by a second route for the
+ * two stores that send no such event type at all.
+ */
+const SUBSCRIPTION_RECOVERED_EVENT_KEY = "subscription.recovered";
+
+/**
+ * Emit the public `subscription.recovered` key for Apple and Stripe, whose
+ * webhooks carry no dedicated "you recovered" event type the way Google's
+ * `SUBSCRIPTION_RECOVERED` does.
+ *
+ * `packages/shared/src/store-event-normalization.ts` used to explain why
+ * this was NOT done: inferring a recovery from an `invoice.paid` following
+ * a `payment_failed` fires on unrelated renewals too. That reasoning no
+ * longer applies here, because the predicate below is not an inference —
+ * it reads the guard's own before-image
+ * (`GuardStatusWriteResult.previous`, taken under the same FOR UPDATE lock
+ * as the write) and only fires when the row actually SAT in BILLING_ISSUE
+ * immediately before this write. An ordinary renewal on an already-ACTIVE
+ * row has no BILLING_ISSUE before-image, so it cannot trigger this.
+ *
+ * "Grants access again" is read off `SUBSCRIPTION_STATUS_SEMANTICS` rather
+ * than hand-listing statuses, so a future status addition inherits the
+ * right behavior instead of silently missing it.
+ *
+ * `db` must be the caller's transaction handle — same invariant as
+ * `emitProductChanged`: the outbox row and the purchase write commit
+ * together or not at all. Callers must also gate on `guard.apply` being
+ * true themselves before relying on `status` — this function additionally
+ * checks it so a caller can never accidentally announce a withheld write.
+ */
+export async function emitSubscriptionRecovered(args: {
+  db: Db;
+  projectId: string;
+  subscriberId: string;
+  purchaseId: string;
+  guard: Pick<GuardStatusWriteResult, "apply" | "previous">;
+  status: PurchaseStatus;
+  now: Date;
+}): Promise<void> {
+  if (
+    !args.guard.apply ||
+    args.guard.previous?.status !== PurchaseStatus.BILLING_ISSUE ||
+    !SUBSCRIPTION_STATUS_SEMANTICS[args.status].grantsAccess
+  ) {
+    return;
+  }
+  await drizzle.outboxRepo.insert(args.db, {
+    aggregateType: SUBSCRIPTION_AGGREGATE,
+    aggregateId: args.subscriberId,
+    eventType: SUBSCRIPTION_RECOVERED_EVENT_KEY,
+    payload: {
+      projectId: args.projectId,
+      subscriberId: args.subscriberId,
+      purchaseId: args.purchaseId,
+      previousStatus: args.guard.previous.status,
+      status: args.status,
       timestamp: args.now.toISOString(),
     },
   });

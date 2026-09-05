@@ -29,6 +29,7 @@ import { hasPaidOrAttachedACard } from "./payment-settled";
 import { guardStatusWrite } from "../subscription-transition-guard";
 import {
   emitProductChanged,
+  emitSubscriptionRecovered,
   pendingPlanChangeFields,
 } from "../subscription-plan-change";
 import { billingIssueStamp } from "../subscription-state";
@@ -749,6 +750,21 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
           now: stripeEventTime(ctx) ?? new Date(),
         });
       }
+
+      // BILLING_ISSUE -> a granting status is a genuine recovery: the
+      // store resolved the payment failure. Unlike inferring it from an
+      // invoice, this cannot fire on an unrelated renewal, because the
+      // before-image says where the row actually was.
+      await emitSubscriptionRecovered({
+        db: dbTx,
+        projectId: ctx.projectId,
+        subscriberId: subscriber.id,
+        purchaseId: result.purchase.id,
+        guard,
+        status,
+        now: stripeEventTime(ctx) ?? new Date(),
+      });
+
       return { ...result, statusApplied: guard.apply };
     },
   );
