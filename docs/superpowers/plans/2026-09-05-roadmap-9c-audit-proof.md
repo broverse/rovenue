@@ -270,7 +270,13 @@ copying the shape of the existing `./crypto` entry exactly:
     },
 ```
 
-Also re-export from `packages/shared/src/index.ts` alongside the other modules.
+Do NOT add `export * from "./audit-chain"` to `packages/shared/src/index.ts`.
+That barrel deliberately excludes `./crypto`, the bucketing helpers and
+`./import/keys` because they import `node:crypto` and "would crash the dashboard
+Vite bundle" — the comments saying so are at `index.ts:184`, `:193`, `:204` and
+`:316`. `audit-chain.ts` imports `node:crypto` too, so it belongs in the same
+category: reachable as `@rovenue/shared/audit-chain`, absent from the barrel.
+Add a comment there recording the exclusion, matching the `./crypto` precedent.
 
 - [ ] **Step 5: Run it to verify it passes**
 
@@ -301,7 +307,7 @@ Run all four existing audit suites:
 ```bash
 cd apps/api && nice -n 19 npx vitest run \
   tests/audit-chain.test.ts tests/audit-log.test.ts \
-  tests/audit-tx-rollback.test.ts tests/audit-integrations.test.ts \
+  tests/audit-tx-rollback.test.ts src/lib/audit-integrations.test.ts \
   --maxWorkers=2
 ```
 
