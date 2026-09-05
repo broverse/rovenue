@@ -252,4 +252,133 @@ describe("<LeaderboardsPage />", () => {
     fireEvent.change(customPeriodInput, { target: { value: "14" } });
     expect(submit).not.toBeDisabled();
   });
+
+  test("switching directly between two leaderboards does not leak the first leaderboard's selected season", async () => {
+    const lb1 = configuredLeaderboard({
+      id: "lb_1",
+      identifier: "weekly-top-spenders",
+      name: "Weekly Top Spenders",
+    });
+    const lb2 = configuredLeaderboard({
+      id: "lb_2",
+      identifier: "monthly-top-consumers",
+      name: "Monthly Top Consumers",
+      metric: "TOP_CONSUMERS",
+      cadence: "MONTHLY",
+    });
+
+    const lb1Active = {
+      id: "lb1_season_2",
+      leaderboardId: lb1.id,
+      seasonNumber: 2,
+      startsAt: "2026-08-25T00:00:00.000Z",
+      endsAt: "2026-09-01T00:00:00.000Z",
+      status: "ACTIVE",
+      closedAt: null,
+      createdAt: "2026-08-25T00:00:00.000Z",
+    };
+    const lb1Closed = {
+      id: "lb1_season_1",
+      leaderboardId: lb1.id,
+      seasonNumber: 1,
+      startsAt: "2026-08-18T00:00:00.000Z",
+      endsAt: "2026-08-25T00:00:00.000Z",
+      status: "CLOSED",
+      closedAt: "2026-08-25T00:00:00.000Z",
+      createdAt: "2026-08-18T00:00:00.000Z",
+    };
+    const lb2Active = {
+      id: "lb2_season_1",
+      leaderboardId: lb2.id,
+      seasonNumber: 1,
+      startsAt: "2026-08-01T00:00:00.000Z",
+      endsAt: "2026-09-01T00:00:00.000Z",
+      status: "ACTIVE",
+      closedAt: null,
+      createdAt: "2026-08-01T00:00:00.000Z",
+    };
+
+    server.use(
+      noCurrencies(),
+      ...adHocHandlers(),
+      http.get(ROOT, () =>
+        HttpResponse.json({ data: { leaderboards: [lb1, lb2] } }),
+      ),
+      http.get(`${ROOT}/${lb1.id}/seasons`, () =>
+        HttpResponse.json({ data: { seasons: [lb1Active, lb1Closed] } }),
+      ),
+      http.get(`${ROOT}/${lb2.id}/seasons`, () =>
+        HttpResponse.json({ data: { seasons: [lb2Active] } }),
+      ),
+      http.get(`${ROOT}/${lb1.id}/current`, () =>
+        HttpResponse.json({
+          data: {
+            season: lb1Active,
+            entries: [{ subscriberId: "sub_lb1_live", score: "10.00", eventCount: 1 }],
+          },
+        }),
+      ),
+      http.get(`${ROOT}/${lb2.id}/current`, () =>
+        HttpResponse.json({
+          data: {
+            season: lb2Active,
+            entries: [{ subscriberId: "sub_lb2_live", score: "20.00", eventCount: 2 }],
+          },
+        }),
+      ),
+      // Keyed by season id only, same as the real route -- if the panel
+      // leaks lb1's selected season id while displaying lb2, this is the
+      // handler that ends up serving lb1's data under lb2's header.
+      http.get(`${ROOT}/seasons/:seasonId/standings`, ({ params }) => {
+        if (params.seasonId !== lb1Closed.id) {
+          throw new Error(`unexpected seasonId ${String(params.seasonId)}`);
+        }
+        return HttpResponse.json({
+          data: {
+            season: lb1Closed,
+            standings: [
+              {
+                id: "st_1",
+                seasonId: lb1Closed.id,
+                rank: 1,
+                subscriberId: "sub_lb1_frozen",
+                score: "99.00",
+                eventCount: 3,
+              },
+            ],
+          },
+        });
+      }),
+    );
+
+    renderWithRouter(
+      <LeaderboardsPage projectId={PROJECT_ID} />,
+      "/projects/proj_1/leaderboards",
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Top Spenders")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Monthly Top Consumers")).toBeInTheDocument();
+
+    // Select leaderboard 1 and switch its panel to the past (CLOSED) season.
+    fireEvent.click(
+      screen.getByRole("button", { name: /view weekly top spenders standings/i }),
+    );
+    await waitFor(() => expect(screen.getByText("sub_lb1_live")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("tab", { name: /season 1/i }));
+    await waitFor(() => expect(screen.getByText("sub_lb1_frozen")).toBeInTheDocument());
+
+    // Switch directly to leaderboard 2 -- A's id straight to B's id, never
+    // through null. The panel must not keep showing A's frozen season
+    // under B's name/header.
+    fireEvent.click(
+      screen.getByRole("button", { name: /view monthly top consumers standings/i }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("sub_lb2_live")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("sub_lb1_frozen")).not.toBeInTheDocument();
+  });
 });

@@ -211,7 +211,17 @@ function ConfiguredLeaderboardsSection({ projectId }: { projectId: string }) {
       )}
 
       {selected && (
-        <LeaderboardStandingsPanel projectId={projectId} leaderboard={selected} />
+        // `key` forces a remount (and a fresh `seasonSelection` state) on
+        // every leaderboard switch -- otherwise clicking straight from one
+        // leaderboard's row to another's (never through `null`) keeps the
+        // panel's previously-selected season id alive, and it goes on
+        // fetching that OTHER leaderboard's frozen standings under the
+        // newly-selected leaderboard's name/header.
+        <LeaderboardStandingsPanel
+          key={selected.id}
+          projectId={projectId}
+          leaderboard={selected}
+        />
       )}
 
       <LeaderboardFormDialog
