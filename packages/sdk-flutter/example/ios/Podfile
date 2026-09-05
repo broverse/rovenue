@@ -1,6 +1,6 @@
-# rovenue_flutter_ios.podspec targets iOS 15.0, but its `Rovenue` pod
-# dependency (packages/sdk-swift/Rovenue.podspec) requires 16.0
-# (arm64-device-only static lib) — the higher floor wins.
+# Must be >= every pod in the graph. rovenue_flutter_ios.podspec and the
+# `Rovenue` pod it depends on (packages/sdk-swift/Rovenue.podspec, which reads
+# iosDeploymentTarget from release.config.json) both floor at iOS 16.0.
 platform :ios, '16.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
