@@ -180,6 +180,12 @@ export type FeatureFlagEnv =
 export type LeaderboardCadence =
   (typeof drizzleNamespace.leaderboardCadence)["enumValues"][number];
 
+// LeaderboardMetric is inferred from the `leaderboardMetric` pgEnum
+// (Task 1) rather than hand-copied as a union, same single-source
+// rule as LeaderboardCadence above.
+export type LeaderboardMetric =
+  (typeof drizzleNamespace.leaderboardMetric)["enumValues"][number];
+
 // =============================================================
 // Row types
 // =============================================================
