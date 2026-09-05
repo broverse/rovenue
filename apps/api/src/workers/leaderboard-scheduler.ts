@@ -229,123 +229,137 @@ async function closeDueSeasons(
   let skipped = 0;
 
   for (const season of dueSeasons) {
-    const leaderboard = await deps.findLeaderboardById(
-      drizzle.db,
-      season.leaderboardId,
-    );
-    if (!leaderboard) {
-      log.error("due season references a missing leaderboard, skipping", {
+    try {
+      const leaderboard = await deps.findLeaderboardById(
+        drizzle.db,
+        season.leaderboardId,
+      );
+      if (!leaderboard) {
+        log.error("due season references a missing leaderboard, skipping", {
+          seasonId: season.id,
+          leaderboardId: season.leaderboardId,
+        });
+        skipped += 1;
+        leaderboardSeasonCloseSkippedTotal.inc({
+          reason: SKIP_REASON_MISSING_LEADERBOARD,
+        });
+        continue;
+      }
+
+      // 1. Query ClickHouse FIRST. Nothing is written yet, so a failure
+      // here is a plain retry: leave the season ACTIVE, pick it up next
+      // sweep.
+      let standings: StandingRow[];
+      try {
+        standings = await deps.queryStandings({
+          projectId: leaderboard.projectId,
+          metric: leaderboard.metric as LeaderboardMetric,
+          currencyId: leaderboard.currencyId,
+          startsAt: season.startsAt,
+          endsAt: season.endsAt,
+          limit: leaderboard.entryLimit ?? LEADERBOARD_DEFAULT_ENTRY_LIMIT,
+        });
+      } catch (err) {
+        leaderboardSeasonCloseSkippedTotal.inc({ reason: SKIP_REASON_CLICKHOUSE });
+        log.warn("standings query failed, leaving season ACTIVE", {
+          seasonId: season.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+        skipped += 1;
+        continue;
+      }
+
+      const next = nextSeasonWindow(
+        { startsAt: season.startsAt, endsAt: season.endsAt },
+        leaderboard.cadence,
+        leaderboard.timezone,
+        leaderboard.customPeriodDays,
+        leaderboard.anchorAt,
+      );
+
+      // 2. Claim + snapshot + close + open-next, all in ONE transaction.
+      // `successorOpened` is tracked distinctly from `claimed`: the season
+      // can close successfully (the claim won) while the next season's
+      // insert still loses inside the same transaction, and that must
+      // never be reported as an ordinary, fully-successful close.
+      const outcome = await deps.transaction(async (tx) => {
+        const claimed = await deps.claimSeasonForClose(tx, season.id, now);
+        if (!claimed) return null; // another replica won the claim
+
+        await deps.insertStandings(
+          tx,
+          claimed.id,
+          standings.map((row, index) => ({ rank: index + 1, ...row })),
+        );
+
+        await deps.audit(
+          {
+            projectId: leaderboard.projectId,
+            userId: "system",
+            action: "leaderboard_season.closed",
+            resource: "leaderboard_season",
+            resourceId: claimed.id,
+            before: { status: "ACTIVE" },
+            after: { status: "CLOSED", standingsCount: standings.length },
+            ipAddress: null,
+            userAgent: null,
+          },
+          tx as unknown as AuditTx,
+        );
+
+        // Open the next season starting exactly at the old endsAt, so no
+        // event can ever fall between two seasons. A lost race here does
+        // NOT undo the close above — the transaction still commits it —
+        // but it is reported distinctly below, never as a plain success.
+        const openedNext = await deps.openSeason(tx, {
+          leaderboardId: season.leaderboardId,
+          seasonNumber: season.seasonNumber + 1,
+          startsAt: next.startsAt,
+          endsAt: next.endsAt,
+        });
+
+        return { claimed, successorOpened: openedNext !== null };
+      });
+
+      if (!outcome) {
+        skipped += 1;
+        leaderboardSeasonCloseSkippedTotal.inc({ reason: SKIP_REASON_RACE });
+        continue;
+      }
+
+      closed += 1;
+      leaderboardSeasonsClosedTotal.inc();
+
+      if (outcome.successorOpened) {
+        opened += 1;
+        leaderboardSeasonsOpenedTotal.inc();
+      } else {
+        // The partial unique index guarantees at most one ACTIVE season per
+        // leaderboard, so this insert losing here is not a normal race the
+        // way claimSeasonForClose's is — it means the season just closed
+        // has no successor yet. Silent about this would be worse than the
+        // race itself: every visible counter would say the close was a
+        // complete success.
+        leaderboardSeasonCloseSkippedTotal.inc({
+          reason: SKIP_REASON_SUCCESSOR_CONFLICT,
+        });
+        log.warn("season closed but its successor could not be opened", {
+          leaderboardId: season.leaderboardId,
+          collidedSeasonNumber: season.seasonNumber + 1,
+        });
+      }
+    } catch (err) {
+      // Per-season isolation, mirroring openFirstSeasons above: one bad
+      // leaderboard's cadence blowing up (or a transaction error) must
+      // not throw out of the loop and abort every remaining leaderboard's
+      // close in this sweep.
+      log.error("failed to close due season", {
         seasonId: season.id,
         leaderboardId: season.leaderboardId,
-      });
-      skipped += 1;
-      leaderboardSeasonCloseSkippedTotal.inc({
-        reason: SKIP_REASON_MISSING_LEADERBOARD,
-      });
-      continue;
-    }
-
-    // 1. Query ClickHouse FIRST. Nothing is written yet, so a failure
-    // here is a plain retry: leave the season ACTIVE, pick it up next
-    // sweep.
-    let standings: StandingRow[];
-    try {
-      standings = await deps.queryStandings({
-        projectId: leaderboard.projectId,
-        metric: leaderboard.metric as LeaderboardMetric,
-        currencyId: leaderboard.currencyId,
-        startsAt: season.startsAt,
-        endsAt: season.endsAt,
-        limit: leaderboard.entryLimit ?? LEADERBOARD_DEFAULT_ENTRY_LIMIT,
-      });
-    } catch (err) {
-      leaderboardSeasonCloseSkippedTotal.inc({ reason: SKIP_REASON_CLICKHOUSE });
-      log.warn("standings query failed, leaving season ACTIVE", {
-        seasonId: season.id,
         err: err instanceof Error ? err.message : String(err),
       });
       skipped += 1;
-      continue;
-    }
-
-    const next = nextSeasonWindow(
-      { startsAt: season.startsAt, endsAt: season.endsAt },
-      leaderboard.cadence,
-      leaderboard.timezone,
-      leaderboard.customPeriodDays,
-      leaderboard.anchorAt,
-    );
-
-    // 2. Claim + snapshot + close + open-next, all in ONE transaction.
-    // `successorOpened` is tracked distinctly from `claimed`: the season
-    // can close successfully (the claim won) while the next season's
-    // insert still loses inside the same transaction, and that must
-    // never be reported as an ordinary, fully-successful close.
-    const outcome = await deps.transaction(async (tx) => {
-      const claimed = await deps.claimSeasonForClose(tx, season.id, now);
-      if (!claimed) return null; // another replica won the claim
-
-      await deps.insertStandings(
-        tx,
-        claimed.id,
-        standings.map((row, index) => ({ rank: index + 1, ...row })),
-      );
-
-      await deps.audit(
-        {
-          projectId: leaderboard.projectId,
-          userId: "system",
-          action: "leaderboard_season.closed",
-          resource: "leaderboard_season",
-          resourceId: claimed.id,
-          before: { status: "ACTIVE" },
-          after: { status: "CLOSED", standingsCount: standings.length },
-          ipAddress: null,
-          userAgent: null,
-        },
-        tx as unknown as AuditTx,
-      );
-
-      // Open the next season starting exactly at the old endsAt, so no
-      // event can ever fall between two seasons. A lost race here does
-      // NOT undo the close above — the transaction still commits it —
-      // but it is reported distinctly below, never as a plain success.
-      const openedNext = await deps.openSeason(tx, {
-        leaderboardId: season.leaderboardId,
-        seasonNumber: season.seasonNumber + 1,
-        startsAt: next.startsAt,
-        endsAt: next.endsAt,
-      });
-
-      return { claimed, successorOpened: openedNext !== null };
-    });
-
-    if (!outcome) {
-      skipped += 1;
-      leaderboardSeasonCloseSkippedTotal.inc({ reason: SKIP_REASON_RACE });
-      continue;
-    }
-
-    closed += 1;
-    leaderboardSeasonsClosedTotal.inc();
-
-    if (outcome.successorOpened) {
-      opened += 1;
-      leaderboardSeasonsOpenedTotal.inc();
-    } else {
-      // The partial unique index guarantees at most one ACTIVE season per
-      // leaderboard, so this insert losing here is not a normal race the
-      // way claimSeasonForClose's is — it means the season just closed
-      // has no successor yet. Silent about this would be worse than the
-      // race itself: every visible counter would say the close was a
-      // complete success.
-      leaderboardSeasonCloseSkippedTotal.inc({
-        reason: SKIP_REASON_SUCCESSOR_CONFLICT,
-      });
-      log.warn("season closed but its successor could not be opened", {
-        leaderboardId: season.leaderboardId,
-        collidedSeasonNumber: season.seasonNumber + 1,
-      });
+      leaderboardSeasonCloseSkippedTotal.inc({ reason: SKIP_REASON_ERROR });
     }
   }
 

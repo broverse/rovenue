@@ -25,6 +25,11 @@ const FIRST_DAY_OF_MONTH = 1;
 const MONTHS_PER_YEAR = 12;
 const MIDNIGHT = { hour: 0, minute: 0, second: 0 };
 const MAX_FIXPOINT_PASSES = 2;
+// How far either side of the naive guess to search for a spring-forward
+// DST transition (see resolveForwardThroughGap below). Real IANA zones
+// never carry two transitions this close together, so a window this wide
+// always contains at most one offset change.
+const GAP_SEARCH_WINDOW_DAYS = 2;
 
 interface LocalParts {
   year: number;
@@ -112,10 +117,25 @@ function localPartsIn(instant: Date, timezone: string): LocalParts {
  * suffice for every real IANA zone, including DST edges, because the
  * offset only ever changes once between the initial guess and the
  * corrected instant (there is no zone with two transitions within one
- * offset's magnitude of each other). If the second pass disagrees with
- * the first correction, the fixpoint hasn't settled — throw rather than
- * return a silently wrong instant, since every season boundary for that
- * zone would be corrupted downstream.
+ * offset's magnitude of each other).
+ *
+ * POLICY — non-existent local time (spring-forward gap): when the
+ * fixpoint doesn't settle, the requested local wall-clock time may simply
+ * never occur, because the zone's clocks jump forward through it (e.g.
+ * America/Santiago, America/Havana and Asia/Beirut all spring forward
+ * exactly at local midnight in some years, so that day's 00:00-01:00
+ * doesn't exist on the clock). Rather than return a silently wrong
+ * instant either side of the jump, this resolves FORWARD to the first
+ * instant that does exist that day — the moment the gap ends, typically
+ * 01:00 local. That is a deliberate, documented convention (the same one
+ * most schedulers use for "this cron time doesn't exist today"), not a
+ * guess: the caller gets a real, existing instant on the requested
+ * calendar day, later than requested by exactly the size of the gap.
+ * Only when that resolution itself doesn't check out (the search below
+ * can't find a clean, single forward transition landing back on the
+ * requested day) does this still throw, since at that point the input is
+ * genuinely unresolvable and returning anything would corrupt every
+ * season boundary for that zone downstream.
  */
 function utcInstantForLocal(
   parts: Pick<LocalParts, "year" | "month" | "day" | "hour" | "minute" | "second">,
@@ -147,14 +167,98 @@ function utcInstantForLocal(
 
   // One more read to see whether the last correction actually stabilised.
   const finalOffsetMs = offsetAt(new Date(candidateMs), timezone);
-  if (finalOffsetMs !== previousOffsetMs) {
-    throw new Error(
-      `utcInstantForLocal: offset for timezone "${timezone}" did not stabilise ` +
-        `after ${MAX_FIXPOINT_PASSES} passes (local ${JSON.stringify(parts)})`,
-    );
+  if (finalOffsetMs === previousOffsetMs) {
+    return new Date(candidateMs);
   }
 
-  return new Date(candidateMs);
+  // The offset never stabilised: see if this is a spring-forward gap that
+  // has a well-defined forward resolution (policy above) before giving up.
+  const resolved = resolveForwardThroughGap(naiveUtcMs, timezone, parts);
+  if (resolved !== null) {
+    return resolved;
+  }
+
+  throw new Error(
+    `utcInstantForLocal: offset for timezone "${timezone}" did not stabilise ` +
+      `after ${MAX_FIXPOINT_PASSES} passes (local ${JSON.stringify(parts)})`,
+  );
+}
+
+/**
+ * Implements the forward-resolution policy documented on
+ * `utcInstantForLocal`: when the requested local time falls inside a
+ * spring-forward DST gap (the zone's UTC offset increases, skipping a
+ * span of wall-clock time), find the exact transition instant and return
+ * it — it is, by construction, the first instant whose local reading is
+ * on or after the requested (non-existent) time.
+ *
+ * The transition is located by binary search rather than derived
+ * algebraically from the two offsets the fixpoint already saw: which of
+ * those two readings corresponds to "before" vs. "after" the transition
+ * depends on the sign of the zone's UTC offset (confirmed against
+ * America/Santiago, America/Havana and Asia/Beirut — ahead-of-UTC and
+ * behind-of-UTC zones resolve the two fixpoint passes in opposite order),
+ * so a search that only trusts monotonicity of the real offset function
+ * is the robust option.
+ *
+ * Returns null when the surrounding window doesn't show a clean single
+ * forward transition landing back on the requested calendar day — at
+ * that point this isn't the gap this policy covers, and the caller should
+ * throw rather than guess.
+ */
+function resolveForwardThroughGap(
+  naiveUtcMs: number,
+  timezone: string,
+  parts: Pick<LocalParts, "year" | "month" | "day">,
+): Date | null {
+  const lowMs = naiveUtcMs - GAP_SEARCH_WINDOW_DAYS * MS_PER_DAY;
+  const highMs = naiveUtcMs + GAP_SEARCH_WINDOW_DAYS * MS_PER_DAY;
+  const offsetLow = offsetAt(new Date(lowMs), timezone);
+  const offsetHigh = offsetAt(new Date(highMs), timezone);
+
+  // A gap only exists when the offset increases (clocks spring forward)
+  // somewhere in this window. Anything else — no change, or a decrease
+  // (a fall-back overlap, which has two valid instants rather than none)
+  // is not this policy's concern.
+  if (offsetHigh <= offsetLow) {
+    return null;
+  }
+
+  // Binary search for the first whole SECOND that already reads the
+  // post-transition offset — not the first millisecond. `offsetAt` reads
+  // whole-second wall-clock parts back from Intl, so probing it at a
+  // sub-second instant compares a whole-second reading against a
+  // fractional-millisecond `instant.getTime()` and returns a bogus,
+  // non-physical offset. Every real IANA transition lands on a whole
+  // second anyway, so searching in seconds loses no precision that
+  // matters.
+  let loSec = Math.floor(lowMs / 1000);
+  let hiSec = Math.floor(highMs / 1000);
+  while (hiSec - loSec > 1) {
+    const midSec = loSec + Math.floor((hiSec - loSec) / 2);
+    const midOffset = offsetAt(new Date(midSec * 1000), timezone);
+    if (midOffset === offsetHigh) {
+      hiSec = midSec;
+    } else {
+      loSec = midSec;
+    }
+  }
+
+  const transition = new Date(hiSec * 1000);
+
+  // The resolved instant must land on the requested calendar day — if it
+  // doesn't, the 2-day search window found some other zone quirk, not
+  // the gap this local time fell into, so don't guess.
+  const resolvedParts = localPartsIn(transition, timezone);
+  if (
+    resolvedParts.year !== parts.year ||
+    resolvedParts.month !== parts.month ||
+    resolvedParts.day !== parts.day
+  ) {
+    return null;
+  }
+
+  return transition;
 }
 
 /**

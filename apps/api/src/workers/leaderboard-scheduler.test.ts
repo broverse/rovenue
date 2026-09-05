@@ -188,6 +188,49 @@ describe("sweepLeaderboardSeasons", () => {
     );
   });
 
+  test("one leaderboard's close throwing does not abort the others in the same sweep", async () => {
+    // Regression: closeDueSeasons had no per-season error isolation (its
+    // sibling openFirstSeasons already did), so a single bad leaderboard
+    // — e.g. a cadence/timezone combination that throws building the
+    // next window, or a transaction failure — threw out of the `for`
+    // loop and aborted every remaining leaderboard's close in the sweep,
+    // failing the whole BullMQ job.
+    const seasonA = season({ id: "sea_1", leaderboardId: "lb_1" });
+    const seasonB = season({ id: "sea_2", leaderboardId: "lb_2" });
+    deps.findDueSeasons.mockResolvedValue([seasonA, seasonB]);
+
+    deps.findLeaderboardById.mockImplementation(
+      async (_db: unknown, leaderboardId: string) =>
+        leaderboard({ id: leaderboardId, projectId: `prj_${leaderboardId}` }),
+    );
+
+    let transactionCalls = 0;
+    deps.transaction.mockImplementation(
+      async (fn: (tx: unknown) => Promise<unknown>) => {
+        transactionCalls += 1;
+        if (transactionCalls === 1) {
+          // Simulates a real failure inside the claim/snapshot/close
+          // transaction for the FIRST due season.
+          throw new Error("boom: simulated postgres failure closing sea_1");
+        }
+        return fn({});
+      },
+    );
+
+    const result = await sweepLeaderboardSeasons(NOW, deps as never);
+
+    // The second leaderboard's close still went through...
+    expect(result.closed).toBe(1);
+    expect(deps.claimSeasonForClose).toHaveBeenCalledWith(
+      expect.anything(),
+      "sea_2",
+      NOW,
+    );
+    // ...and the first leaderboard's failure is reported as a skip, never
+    // swallowed and never thrown back out of the sweep.
+    expect(result.skipped).toBeGreaterThanOrEqual(1);
+  });
+
   test("a successor season that fails to open inside the close transaction is a distinct signal, not a plain close", async () => {
     // The claim succeeds (season DOES close) but the "open next" insert
     // inside the SAME transaction loses — e.g. another writer already

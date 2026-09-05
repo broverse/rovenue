@@ -4,6 +4,7 @@ import {
   seasonWindowContaining,
   validateCadence,
 } from "./cadence";
+import type { SeasonWindow } from "./cadence";
 import type { LeaderboardCadence } from "@rovenue/db";
 
 const ISTANBUL = "Europe/Istanbul";   // UTC+3, no DST since 2016
@@ -159,6 +160,82 @@ describe("seasonWindowContaining — CUSTOM", () => {
     expect(next.startsAt.getTime()).toBe(w.endsAt.getTime());
     expect(next.endsAt.getTime()).toBeGreaterThan(next.startsAt.getTime());
   });
+});
+
+// Regression: some IANA zones spring forward exactly at local midnight,
+// so that calendar day's 00:00 never occurs on the clock. All of the
+// dates below were confirmed against the real IANA database by a
+// reviewer; each is a Sunday, so WEEKLY (Monday) and MONTHLY (the 1st)
+// never land on one — only a CUSTOM cadence can, and did, until this fix
+// threw instead of producing a window. Policy: resolve forward to the
+// first instant that DOES exist that local day (see cadence.ts).
+describe("seasonWindowContaining — CUSTOM lands on a non-existent local midnight", () => {
+  function localParts(date: Date, timeZone: string): Record<string, string> {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    const by: Record<string, string> = {};
+    for (const part of fmt.formatToParts(date)) {
+      by[part.type] = part.value;
+    }
+    return by;
+  }
+
+  const cases: Array<{ zone: string; date: string }> = [
+    { zone: "America/Santiago", date: "2026-09-06" },
+    { zone: "America/Santiago", date: "2027-09-05" },
+    { zone: "America/Santiago", date: "2028-09-03" },
+    { zone: "America/Santiago", date: "2029-09-02" },
+    { zone: "America/Havana", date: "2026-03-08" },
+    { zone: "Asia/Beirut", date: "2027-03-28" },
+    { zone: "Asia/Beirut", date: "2028-03-26" },
+    { zone: "Asia/Beirut", date: "2029-03-25" },
+  ];
+
+  for (const { zone, date } of cases) {
+    test(`${zone} ${date}: produces a window starting at the first existing local instant, not a throw`, () => {
+      // A daily CUSTOM period anchored on the target date, with `instant`
+      // on the same date, makes the elapsed-period count 0 — the window
+      // start is exactly `toUtc(date, 0:00, zone)`, the boundary that
+      // does not exist.
+      const anchor = new Date(`${date}T12:00:00.000Z`);
+
+      let window: SeasonWindow | undefined;
+      expect(() => {
+        window = seasonWindowContaining(anchor, "CUSTOM", zone, 1, anchor);
+      }).not.toThrow();
+
+      const w = window as unknown as SeasonWindow;
+      const startParts = localParts(w.startsAt, zone);
+      const [year, month, day] = date.split("-");
+
+      // Lands on the requested calendar day...
+      expect(startParts.year).toBe(year);
+      expect(startParts.month).toBe(month);
+      expect(startParts.day).toBe(day);
+      // ...but not at local midnight, since that instant doesn't exist.
+      expect(`${startParts.hour}:${startParts.minute}:${startParts.second}`).not.toBe(
+        "00:00:00",
+      );
+
+      // One millisecond earlier must read the PREVIOUS calendar day —
+      // proving this is the FIRST existing instant of the day, not just
+      // some later instant that happens to also exist.
+      const justBefore = localParts(new Date(w.startsAt.getTime() - 1), zone);
+      const sameDay =
+        justBefore.year === startParts.year &&
+        justBefore.month === startParts.month &&
+        justBefore.day === startParts.day;
+      expect(sameDay).toBe(false);
+    });
+  }
 });
 
 describe("nextSeasonWindow", () => {
