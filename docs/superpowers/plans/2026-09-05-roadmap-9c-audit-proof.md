@@ -348,7 +348,13 @@ existing suites green."
 
 **Interfaces:**
 - Consumes: `AuditChainPayload` from `@rovenue/shared/audit-chain` (Task 1).
-- Produces: `export interface AuditProofRow extends AuditChainPayload { id: string; rowHash: string }`.
+- Produces: `export interface AuditProofRow extends AuditChainPayload { id: string; rowHash: string | null }`.
+  `rowHash` is NULLABLE in the schema (`schema.ts:586`) for rows predating the
+  chain, and this read has no `WHERE rowHash IS NOT NULL` filter, so such a row
+  can reach a proof range. Do not filter nulls out and do not assert them away:
+  an export must KNOW an unhashed row was in range, and the verifier treats that
+  as a hard error. A non-nullable type here would hide the exact case the
+  verifier exists to catch.
 - Produces: `export async function listAuditProofRows(db: Db, args: { projectId: string; from?: Date; to?: Date; limit: number }): Promise<AuditProofRow[]>` — ordered by `createdAt` then `id` ascending, so the chain can be walked deterministically.
 
 **Why a separate read:** the existing `listAuditLogs` joins the user table and
@@ -453,7 +459,12 @@ id) since createdAt alone is not a total order."
 - Consumes: `listAuditProofRows` (Task 2), `AUDIT_CHAIN_FORMAT_V1` (Task 1).
 - Produces: `GET /dashboard/projects/:projectId/audit-logs/proof` returning
   `{ data: AuditProofBundle }` where
-  `AuditProofBundle = { formatVersion: string; projectId: string; exportedAt: string; origin: { rowHash: string; createdAt: string } | null; tip: { rowHash: string; createdAt: string } | null; entries: AuditProofRow[] }`.
+  `AuditProofBundle = { formatVersion: string; projectId: string; exportedAt: string; origin: { rowHash: string } | null; tip: { rowHash: string | null; createdAt: string } | null; entries: AuditProofRow[] }`.
+  `origin` is derived purely from `entries[0].prevHash` — no second read, no
+  predecessor timestamp; the anchor a verifier needs is the hash. `rowHash` is
+  nullable on both an entry and the tip: `audit_logs.rowHash` is nullable for
+  pre-chain legacy rows, and `listAuditProofRows` deliberately does not filter
+  them out. Carry a null through; never drop the row, never coerce it.
 - Produces: `export const AUDIT_PROOF_MAX_ENTRIES = 5000`.
 
 **Authorisation:** gate it exactly as the existing list route does —
@@ -527,9 +538,9 @@ Expected: FAIL — route not found.
 
 Add the route to `apps/api/src/routes/dashboard/audit-logs.ts`, following the
 file's existing structure, its `ok()` envelope and its Zod error mapping. Accept
-optional `from` / `to` ISO query params validated with Zod. `origin` is the
-`prevHash` of the first returned entry resolved to its predecessor row (or null
-when that `prevHash` is null); `tip` is the last entry's `rowHash` and
+optional `from` / `to` ISO query params validated with Zod. `origin` is
+`{ rowHash: entries[0].prevHash }`, or null when that `prevHash` is null — do NOT
+read the predecessor row; `tip` is the last entry's `rowHash` (possibly null) and
 `createdAt`.
 
 - [ ] **Step 4: Run it to verify it passes**
