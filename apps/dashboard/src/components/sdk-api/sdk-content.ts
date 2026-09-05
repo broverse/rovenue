@@ -24,7 +24,27 @@ export const API_BASE_URL = "https://api.rovenue.io/v1";
 // instead of `href="#"`.
 export const DOCS_URL = "https://docs.rovenue.io";
 export const API_REFERENCE_URL = "https://docs.rovenue.io/api";
-export const CHANGELOG_URL = "https://github.com/rovenue/rovenue/releases";
+
+// The monorepo every SDK in this list is built from, and the generated SwiftPM
+// distribution repository external Swift consumers actually resolve (see
+// packages/sdk-swift/scripts/generate-swift-dist.sh — SPM cannot depend on the
+// monorepo, whose manifest uses a local binaryTarget path).
+export const REPO_URL = "https://github.com/broverse/rovenue";
+export const SWIFT_PACKAGE_URL = "https://github.com/broverse/rovenue-swift.git";
+export const CHANGELOG_URL = `${REPO_URL}/releases`;
+
+// One version for every façade: packages/sdk-swift/release.config.json,
+// Cargo.toml, sdk-rn/package.json, sdk-kotlin/build.gradle.kts and the Flutter
+// pubspecs are locked to a single number by
+// packages/sdk-swift/Tests/config-version-parity.sh and
+// packages/sdk-rn/src/__tests__/version.test.ts. Bump this alongside them.
+export const SDK_VERSION = "0.16.0";
+
+// Published package coordinates. These are copy-and-run strings shown to
+// operators, so they must match what is actually published, not an older name.
+export const RN_PACKAGE_NAME = "@rovenue/react-native-sdk";
+export const ANDROID_COORDINATES = `dev.rovenue:sdk:${SDK_VERSION}`;
+export const SWIFT_PACKAGE_INSTALL = `.package(url: "${SWIFT_PACKAGE_URL}", from: "${SDK_VERSION}")`;
 
 // Placeholder token embedded in the init snippets below. QuickstartCard
 // swaps this for the project's real publishable key at render time when one
@@ -37,9 +57,9 @@ export const PLATFORMS: ReadonlyArray<PlatformDescriptor> = [
     id: "react-native",
     labelKey: "reactNative",
     language: "bash",
-    installCommand: "pnpm add @rovenue/react-native",
+    installCommand: `pnpm add ${RN_PACKAGE_NAME}`,
     installFilename: "terminal",
-    initSnippet: `import { Rovenue } from "@rovenue/react-native";
+    initSnippet: `import { Rovenue } from "${RN_PACKAGE_NAME}";
 
 await Rovenue.configure({
   publicKey: "${PUBLISHABLE_KEY_PLACEHOLDER}",
@@ -54,7 +74,7 @@ const offerings = await Rovenue.getOfferings();`,
     id: "ios",
     labelKey: "ios",
     language: "swift",
-    installCommand: ".package(url: \"https://github.com/rovenue/rovenue-ios\", from: \"0.6.0\")",
+    installCommand: SWIFT_PACKAGE_INSTALL,
     initSnippet: `import Rovenue
 
 Rovenue.configure(
@@ -71,8 +91,8 @@ let offerings = try await Rovenue.shared.getOfferings()`,
     id: "android",
     labelKey: "android",
     language: "kotlin",
-    installCommand: "implementation(\"io.rovenue:rovenue-android:0.7.0\")",
-    initSnippet: `import io.rovenue.Rovenue
+    installCommand: `implementation("${ANDROID_COORDINATES}")`,
+    initSnippet: `import dev.rovenue.sdk.Rovenue
 
 Rovenue.configure(
   publicKey = "${PUBLISHABLE_KEY_PLACEHOLDER}",
@@ -100,8 +120,8 @@ val offerings = Rovenue.shared.getOfferings()`,
 ];
 
 // The clients that actually exist in this monorepo (Rust core + native
-// façades). Versions track the workspace source of truth: Cargo / Kotlin at
-// 0.7.0, the Swift package at 0.6.0. node / go / web SDKs don't exist yet, so
+// façades). All of them ship at SDK_VERSION — the version parity checks make a
+// per-façade number impossible. node / go / web SDKs don't exist yet, so
 // they're intentionally absent rather than shown as fabricated releases.
 export const SDK_PACKAGES: ReadonlyArray<SdkPackage> = [
   {
@@ -110,11 +130,11 @@ export const SDK_PACKAGES: ReadonlyArray<SdkPackage> = [
     targetKey: "reactNative",
     icon: Smartphone,
     iconClass: "text-rv-accent-400",
-    version: "0.7.0",
+    version: SDK_VERSION,
     status: "stable",
-    install: "pnpm add @rovenue/react-native",
+    install: `pnpm add ${RN_PACKAGE_NAME}`,
     installLanguage: "bash",
-    repoLabel: "github.com/rovenue/sdk-rn",
+    repoLabel: "github.com/broverse/rovenue",
     docsKey: "rnDocs",
   },
   {
@@ -123,11 +143,11 @@ export const SDK_PACKAGES: ReadonlyArray<SdkPackage> = [
     targetKey: "ios",
     icon: Apple,
     iconClass: "text-foreground",
-    version: "0.6.0",
+    version: SDK_VERSION,
     status: "stable",
-    install: ".package(url: \"https://github.com/rovenue/rovenue-ios\", from: \"0.6.0\")",
+    install: SWIFT_PACKAGE_INSTALL,
     installLanguage: "swift",
-    repoLabel: "github.com/rovenue/rovenue-ios",
+    repoLabel: "github.com/broverse/rovenue-swift",
     docsKey: "iosDocs",
   },
   {
@@ -136,11 +156,11 @@ export const SDK_PACKAGES: ReadonlyArray<SdkPackage> = [
     targetKey: "android",
     icon: Smartphone,
     iconClass: "text-rv-success",
-    version: "0.7.0",
+    version: SDK_VERSION,
     status: "stable",
-    install: "implementation(\"io.rovenue:rovenue-android:0.7.0\")",
+    install: `implementation("${ANDROID_COORDINATES}")`,
     installLanguage: "kotlin",
-    repoLabel: "github.com/rovenue/rovenue-android",
+    repoLabel: "github.com/broverse/rovenue",
     docsKey: "androidDocs",
   },
 ];
@@ -247,7 +267,7 @@ export const RESOURCES: ReadonlyArray<ResourceLink> = [
     id: "github",
     labelKey: "github",
     descriptionKey: "github",
-    href: "https://github.com/rovenue",
+    href: REPO_URL,
     icon: FolderGit2,
   },
   {
