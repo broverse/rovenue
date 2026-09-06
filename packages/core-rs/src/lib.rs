@@ -1,5 +1,11 @@
 // UniFFI-generated scaffolding triggers this lint; suppress it crate-wide.
 #![allow(clippy::empty_line_after_doc_comments)]
+// Doc-coverage ratchet (ROADMAP §11): every public item, field, and enum
+// variant should carry a doc comment before this crate gets a generated
+// rustdoc/DocC/Dokka/TypeDoc reference site. `warn` (not `deny`) so this
+// doesn't fail the build yet — see scripts/sdk-doc-coverage.mjs for the
+// tracked floor and scripts/sdk-doc-coverage.json for its current value.
+#![warn(missing_docs)]
 
 pub mod api;
 pub mod attributes;

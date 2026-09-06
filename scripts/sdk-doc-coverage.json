@@ -1,0 +1,32 @@
+{
+  "core-rs": {
+    "floor": 28.9,
+    "measuredAt": "2026-09-06",
+    "documented": 179,
+    "total": 619
+  },
+  "sdk-swift": {
+    "floor": 25,
+    "measuredAt": "2026-09-06",
+    "documented": 174,
+    "total": 697
+  },
+  "sdk-kotlin": {
+    "floor": 31.4,
+    "measuredAt": "2026-09-06",
+    "documented": 196,
+    "total": 624
+  },
+  "sdk-rn": {
+    "floor": 39.3,
+    "measuredAt": "2026-09-06",
+    "documented": 33,
+    "total": 84
+  },
+  "sdk-flutter": {
+    "floor": 17.2,
+    "measuredAt": "2026-09-06",
+    "documented": 11,
+    "total": 64
+  }
+}
