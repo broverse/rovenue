@@ -39,9 +39,19 @@ with no bridge in between.
 
   This cross-compiles `librovenue` (the Rust core) for device + simulator +
   macOS and packages it as `packages/sdk-swift/RovenueFFI.xcframework`.
-  Requires `rustup`, `cargo`, `ruby`, and Xcode's command-line tools. Without
-  this step, SwiftPM cannot resolve the local `Rovenue` package dependency
-  and the project will not build.
+  Requires `rustup`, `cargo`, `ruby`, and Xcode's command-line tools. The
+  script also regenerates the UniFFI bindings first, so this one command is
+  the whole prerequisite — no separate bindgen step. Without this step,
+  SwiftPM cannot resolve the local `Rovenue` package dependency and the
+  project will not build; both this Xcode project and a bare `swift build`
+  in `packages/sdk-swift` fail with:
+
+  ```
+  error: local binary target 'RovenueFFI' at '<repo>/packages/sdk-swift/RovenueFFI.xcframework' does not contain a binary artifact.
+  ```
+
+  CI (`.github/workflows/sdk.yml`'s `swift` job) runs this script before
+  building, which is why this only bites a fresh local clone.
 
 ## Running
 
