@@ -824,6 +824,42 @@ else in the framework/provider-breadth dimension is done.
 - [x] Backup / restore documentation — `docs/operations/backup-restore.md`
       (422 lines), alongside `deploy/backup/restore.sh` and its test suite.
 - [ ] Close the nosniff/ETag edge-layer gap (asset CDN)
+- [ ] `scripts/rotate-encryption-key.ts` does not typecheck and cannot run.
+      Found while writing the operator handbook's secret-rotation section
+      (`docs/runbooks/secret-rotation.md`). It does
+      `import prisma, { ... } from "@rovenue/db"` — a leftover from before
+      this codebase moved to Drizzle — and `@rovenue/db` has no default
+      export at all (`pnpm --filter @rovenue/scripts typecheck` fails on it
+      today). Its `CREDENTIAL_FIELDS` list also includes `stripeCredentials`,
+      a column that does not exist on `projects`
+      (`appleCredentials`/`googleCredentials` are the only two encrypted
+      JSONB fields there; Stripe uses Connect OAuth, not a stored encrypted
+      credential). The three real building blocks it should be rewritten
+      around already work — `encryptCredential`, `decryptCredential`,
+      `isEncryptedCredential` (`packages/db/src/helpers/encrypted-field.ts`)
+      — a corrected version would use Drizzle to select/update
+      `projects.appleCredentials`/`googleCredentials` directly. Do not point
+      an operator at the script as-is; the `ENCRYPTION_KEY` rotation tool is
+      broken.
+- [ ] Fresh self-hosted installs never register `revenue_events` or
+      `credit_ledger` with `partman.part_config`. Migration `0019` calls
+      `partman.create_parent(...)` for both tables, but the fresh-install
+      runner (`packages/db/src/fresh-install.ts`'s `TIMESCALE_LEGACY_TAGS`)
+      intentionally skips `0019` — running it against a fresh install would
+      abort with "would overlap partition" against the 60 monthly partitions
+      `0015`/`0016` already pre-create through 2028-12. That skip is
+      deliberate and already commented in the source, but nothing outside
+      the source told an operator: a fresh install's `revenue_events` and
+      `credit_ledger` are absent from `partman.part_config`, so nothing
+      creates a partition for either table once 2028-12 passes, and an
+      insert with `eventDate`/`createdAt` outside 2024–2028 fails outright
+      with "no partition found for row." Documented live (with the actual
+      `partman.part_config` query output) in `docs/operations/handbook.md`'s
+      "fresh-install divergence" section — an operator needs to run
+      `partman.create_parent(...)` by hand before 2028, or migrate onto
+      partman management sooner. Distinct from the earlier partition-worker
+      bug: the maintenance worker itself runs fine here — it correctly
+      refuses to touch tables that were never registered with it.
 
 ## 9. GDPR / KVKK tooling (85 → 95)
 
@@ -905,6 +941,16 @@ else in the framework/provider-breadth dimension is done.
       The **status page is won't-do here**: it needs hosting and a domain, which
       is an operator decision, not a repository one. Nothing in the repo can
       close it.
+- [ ] No Alertmanager is wired into `docker-compose.yml`. `slo.yml`'s own
+      header already says so (`ROUTING: there is no Alertmanager in
+      docker-compose.yml`) — the multi-window burn-rate alerts above (99.9%
+      availability, 99% under 500ms) plus the correctness alerts labelled
+      `page` evaluate and are visible in Prometheus/Grafana, but nothing
+      actually pages anyone: `deploy/prometheus/prometheus.yml` has no
+      `alerting:` block and no `alertmanager` service exists in
+      `docker-compose.yml`. Add the service plus `alerting.alertmanagers`,
+      or point operators at Grafana's own contact points instead — the SLO
+      rules evaluate correctly either way, only routing is missing.
 - [x] Chaos tests: dispatcher death + Kafka outage/recovery (2026-09-05,
       `apps/api/tests/outbox-dispatcher.integration.test.ts`). The
       dispatcher's crash window is between `producer.send` and
@@ -989,6 +1035,26 @@ else in the framework/provider-breadth dimension is done.
       surfaced only when a test harness rebuilt a database from the journal.
       `db:migrate` now refuses to be quiet about it — it warns, by filename,
       before either runner starts.
+- [ ] Migration journal timestamps keep needing hand-fixes to stay reachable.
+      0121–0126 are all hand-set to the same synthetic future +86400000
+      (1-day) cadence — `0121`'s `when` is 2026-09-05 22:40 UTC, `0126`'s is
+      2026-09-10 22:40 UTC, each exactly one day after the last — putting the
+      journal watermark days ahead of wall clock. Any migration
+      `drizzle-kit generate` produces afterward from real time lands BELOW
+      that watermark and is silently skipped forever on upgrade-path
+      databases (see `journal-monotonic.test.ts`'s header for the mechanism);
+      this hit `0125` and `0126` independently while they were authored in
+      this same batch and had to be hand-corrected onto the same future
+      cadence rather than fixed at the root. **Correction to how this was
+      first reported:** `packages/db/tests/journal-monotonic.test.ts`
+      (added 2026-09-05, commit `634fb2e0`) is not an orphaned guard — it
+      matches `packages/db`'s default `vitest run` test glob with no config
+      excluding it, and CI's `pnpm test` (`ci.yml`) exports `DATABASE_URL`
+      for turbo's `test` task, so it already executes on every CI build and
+      currently passes (confirmed via `vitest list` and a direct run). What's
+      still unsolved is the habit, not the coverage: nothing stops the next
+      hand-set round timestamp from repeating this pattern, and the test can
+      only catch it once a bad entry is actually committed.
 
 ## 11. Docs & developer experience (65 → 95)
 
@@ -1085,6 +1151,31 @@ else in the framework/provider-breadth dimension is done.
          SDK's own example) until `packages/sdk-swift/scripts/build-xcframework.sh`
          generates it, and until now that requirement was documented nowhere
          a new consumer would think to look.
+
+      Deferred follow-up on hazard (2): upgrading `sample-rn-expo` to
+      `expo >=52` / `react-native >=0.76` may also dissolve hazard (1) rather
+      than just uncover it — the CocoaPods hoisting bug depends on which
+      React Native version gets hoisted where in the monorepo's
+      `node_modules`, and a version bump changes that resolution. Not
+      verified; recorded so whoever does the upgrade checks it rather than
+      assuming both hazards still need independent fixes.
+- [ ] `apps/docs/content/docs/reference/methods.mdx` has no section for
+      three real, exported RN SDK method groups: Paywalls
+      (`RovenuePaywallView`, exported from `packages/sdk-rn/src/index.ts`),
+      Remote Config (`getRemoteConfig` / `refreshRemoteConfig`), and
+      Attributes (`setAttributes`). All three exist and work; the reference
+      page simply never grew a section for them. Distinct from the fiction
+      already purged from this file elsewhere in this batch — this is
+      absent coverage, not false coverage.
+- [ ] Docs search does not work in the shipped image. `apps/docs`'s
+      production `Dockerfile` builds the static site in a `node:22-alpine`
+      stage and serves the output from a `caddy:2-alpine` runtime stage with
+      no Node process at all. `/api/search`'s loader
+      (`apps/docs/app/routes/search.ts`, `fumadocs-core/search/server`)
+      needs a live server to answer requests, so it is unreachable behind
+      Caddy in production. Either switch to a static/client-side search
+      index (fumadocs supports this) or run the docs app as a Node server
+      instead of prerendered-static-behind-Caddy.
 - [ ] Interactive API explorer
 - [x] Error-code catalog — shipped 2026-09-06: `packages/shared/src/error-catalog.ts`'s
       `ERROR_CATALOG` (one entry per code — wire value, HTTP status, summary, resolution)
@@ -1124,7 +1215,32 @@ else in the framework/provider-breadth dimension is done.
       by dropping the barrel re-export and exposing `@rovenue/shared/error-catalog` as its
       own subpath export instead, matching several sibling modules already exposed that
       way (`./crypto`, `./subscription-status`, `./experiments`, ...).
-- [ ] Self-host operator handbook (scaling, monitoring, disaster recovery)
+- [x] Self-host operator handbook (scaling, monitoring, disaster recovery) —
+      shipped 2026-09-06: `docs/operations/handbook.md` (scaling, monitoring
+      and alerting, capacity planning, pg_partman partition maintenance,
+      connection pooling, disaster recovery with RPO/RTO worked as
+      arithmetic against real numbers, and secret rotation), plus
+      `docs/runbooks/secret-rotation.md` and
+      `docs/runbooks/incident-response.md` (one scenario per alert:
+      what it means, how to confirm it against live data, where to look
+      first), and a root `README.md` — the repository had none.
+
+      Backup/restore and the upgrade/rollback runbook were already well
+      covered (`docs/operations/backup-restore.md`,
+      `docs/operations/upgrade.md`) and are linked from the handbook, not
+      restated. The actual gap this closed: the monitoring stack (Prometheus,
+      Grafana, Alloy, the SLO rules) had already shipped in §10 and was
+      documented nowhere an operator would find it before this.
+
+      Every command in the handbook was run against the live compose stack
+      and its real output recorded, not invented — table sizes, `pg_dump`
+      timings, `SELECT` output from `partman.part_config`, Grafana/Prometheus
+      URLs that actually resolve. Anything that needed a running `api`
+      process and could not be executed from this session is labelled as
+      such rather than presented as verified. Writing it surfaced two real
+      operational defects, recorded above in §8: `scripts/rotate-encryption-key.ts`
+      does not typecheck, and fresh self-hosted installs never register
+      `revenue_events`/`credit_ledger` with `partman.part_config`.
 
 ## 12. Feature breadth (85 → 95)
 
