@@ -85,6 +85,7 @@ import {
   scheduleExperimentScheduler,
 } from "./workers/experiment-scheduler";
 import { ensureLeaderboardScheduler } from "./workers/leaderboard-scheduler";
+import { ensureDsarExportWorker } from "./workers/dsar-export";
 import { ensureRetentionSweep } from "./workers/retention-sweep";
 import { bootIntegrations } from "./integrations-boot";
 import { bootRenewalGrants } from "./renewal-grants-boot";
@@ -302,6 +303,18 @@ scheduleExperimentScheduler().catch((err: unknown) => {
 // leaves the season untouched instead of closed-but-empty. See
 // workers/leaderboard-scheduler.ts.
 ensureLeaderboardScheduler();
+
+// DSAR export worker (ROADMAP §9.1, Task 4) — consumes the dedicated
+// rovenue-dsar-export queue enqueued by POST /v1/dsar/export. Claims a
+// PENDING request (conditional UPDATE ... RETURNING, safe across
+// replicas), runs exportSubscriber, writes and confirms the artifact in
+// the private import bucket under dsar-exports/, then marks the row
+// COMPLETED with the artifact key and its expiry — or FAILED, never
+// left RUNNING. Split onto its own queue (not shared with the Task 5
+// erasure worker) so a backlog of heavy exports can never delay
+// erasure, which carries a statutory deadline export does not. See
+// workers/dsar-export.ts.
+ensureDsarExportWorker();
 
 // Retention sweep (ROADMAP §9.2) — nightly at 03:00 UTC. Registry-driven
 // replacement for the three bespoke retention workers that used to live

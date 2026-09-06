@@ -188,3 +188,30 @@ export const retentionSweepBatchCapReachedTotal = new Counter({
   labelNames: ["table"] as const,
   registers: [registry],
 });
+
+// =============================================================
+// DSAR export worker (workers/dsar-export.ts, ROADMAP §9.1 Task 4)
+// =============================================================
+
+// Incremented once per `dsar_requests` row the worker actually completed
+// (artifact written, confirmed, and the row marked COMPLETED).
+export const dsarExportCompletedTotal = new Counter({
+  name: "rovenue_dsar_export_completed_total",
+  help: "DSAR export jobs completed",
+  registers: [registry],
+});
+
+// Incremented once per job the worker did NOT complete, by reason:
+// "race" (claimDsarRequest returned null — another replica already has
+// this row, not an error), "storage-unconfigured" (fail-closed: the
+// customer must never be told an export is ready that was never
+// written), or "error" (exportSubscriber or the storage write threw).
+// A sustained "storage-unconfigured" rate means a deployment is
+// missing its object-storage env vars while customers are actively
+// filing DSAR requests against it.
+export const dsarExportSkippedTotal = new Counter({
+  name: "rovenue_dsar_export_skipped_total",
+  help: "DSAR export jobs that did not complete, by reason",
+  labelNames: ["reason"] as const,
+  registers: [registry],
+});

@@ -202,7 +202,18 @@ export type AuditAction =
   // shared-partition problem — every row already belongs to exactly
   // one project), so one of these is written per (project, sweep run),
   // never fanned out across projects.
-  | typeof AUDIT_ACTION_RETENTION_CHECKPOINT;
+  | typeof AUDIT_ACTION_RETENTION_CHECKPOINT
+  // --- DSAR export worker (workers/dsar-export.ts, ROADMAP §9.1 Task 4) ---
+  // One row per `dsar_requests` status transition the worker drives:
+  // PENDING -> RUNNING on claim, then RUNNING -> COMPLETED or
+  // RUNNING -> FAILED on the terminal outcome. `userId` is "system" —
+  // this is an asynchronous worker, not a dashboard session. Distinct
+  // from "subscriber.exported" (already written by exportSubscriber
+  // itself for the underlying data read) — these three describe the
+  // REQUEST record's own lifecycle, not the export contents.
+  | "dsar_request.claimed"
+  | "dsar_request.export_completed"
+  | "dsar_request.export_failed";
 
 // Exported (not just inlined like this file's other action literals)
 // because retention-sweep.ts lives in a different subsystem and needs
@@ -257,7 +268,9 @@ export type AuditResource =
   // proof bundle's storage key is built from (see
   // services/audit-retention/checkpoint.ts) — so an operator can go
   // straight from the audit row to the bundle it describes.
-  | "retention_checkpoint";
+  | "retention_checkpoint"
+  // `resourceId` is the `dsar_requests` row id (workers/dsar-export.ts).
+  | "dsar_request";
 
 export interface AuditEntry {
   projectId: string;

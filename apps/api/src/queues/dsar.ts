@@ -2,29 +2,37 @@ import { Queue, type JobsOptions } from "bullmq";
 import { createBullConnection } from "../lib/redis";
 
 // =============================================================
-// dsar queue — contract + BullMQ producer (ROADMAP §9.1, Task 3)
+// dsar queues — contract + BullMQ producer (ROADMAP §9.1, Tasks 3-5)
 // =============================================================
 //
-// One queue, two job NAMEs — mirrors queues/imports.ts's
-// IMPORT_RUN_JOB_NAME / IMPORT_DRY_RUN_JOB_NAME split on a single queue:
-// an EXPORT ask and an ERASURE ask are two phases of the same
-// subject-access-request lifecycle (one `dsar_requests` row each), not
-// two independent systems, so Task 4 (the export worker) and Task 5
-// (the erasure worker) both attach a `Worker` to THIS SAME queue name
-// and dispatch on job NAME, exactly like `workers/import-runner.ts`'s
-// `createImportRunnerWorker` does for its two job names.
+// TWO queues, one per job NAME — `DSAR_EXPORT_QUEUE_NAME` for
+// `DSAR_EXPORT_JOB_NAME` jobs, `DSAR_ERASURE_QUEUE_NAME` for
+// `DSAR_ERASURE_JOB_NAME` jobs. This module originally shipped (Task 3)
+// as ONE queue with two job names, mirroring queues/imports.ts's
+// IMPORT_RUN_JOB_NAME / IMPORT_DRY_RUN_JOB_NAME split. The controller
+// overruled that for Task 4: a BullMQ `Worker` attached to a queue
+// consumes EVERY job on it regardless of job name — there is no
+// per-name routing at the Worker level — so a single shared queue makes
+// a dedicated erasure worker impossible; the only way to run export and
+// erasure on separate workers is to give them separate queues. That
+// separation matters because it is not cosmetic: erasure carries a
+// statutory deadline that export does not, and a backlog of heavy
+// multi-table exports must never delay it by sitting in front of it on
+// one queue.
 //
-// This module owns the actual `new Queue(...)` instance and IS the
-// producer (`enqueueDsarJob` is the only function that ever calls
+// This module still owns the actual `new Queue(...)` instances and IS
+// the producer (`enqueueDsarJob` is the only function that ever calls
 // `.add()`) — following queues/notifier.ts's precedent of a queues/*.ts
 // module owning its own BullMQ factory, rather than queues/imports.ts's
-// (whose factory lives in the worker file), because there is no DSAR
-// worker file yet for either job name to hang it off of. Tasks 4/5
-// should import `DSAR_QUEUE_NAME` (and, if useful, `DSAR_EXPORT_JOB_NAME`
-// / `DSAR_ERASURE_JOB_NAME` / `DsarJobData`) from here rather than
-// re-declaring any of this.
+// (whose factory lives in the worker file), because Task 4/5's worker
+// files need a queue name to attach their `Worker` to before either
+// exists on its own. `workers/dsar-export.ts` (Task 4) attaches to
+// `DSAR_EXPORT_QUEUE_NAME`; the Task 5 erasure worker attaches to
+// `DSAR_ERASURE_QUEUE_NAME`. Neither worker file should re-declare any
+// of this — import from here.
 
-export const DSAR_QUEUE_NAME = "rovenue-dsar";
+export const DSAR_EXPORT_QUEUE_NAME = "rovenue-dsar-export";
+export const DSAR_ERASURE_QUEUE_NAME = "rovenue-dsar-erasure";
 
 export const DSAR_EXPORT_JOB_NAME = "dsar:export";
 export const DSAR_ERASURE_JOB_NAME = "dsar:erasure";
@@ -57,19 +65,39 @@ const DSAR_JOB_OPTIONS: JobsOptions = {
   removeOnFail: { age: 90 * 86_400 },
 };
 
-let cachedQueue: Queue<DsarJobData> | undefined;
+let cachedExportQueue: Queue<DsarJobData> | undefined;
+let cachedErasureQueue: Queue<DsarJobData> | undefined;
 
-export function getDsarQueue(): Queue<DsarJobData> {
-  if (cachedQueue) return cachedQueue;
-  cachedQueue = new Queue<DsarJobData>(DSAR_QUEUE_NAME, {
-    connection: createBullConnection("dsar"),
+export function getDsarExportQueue(): Queue<DsarJobData> {
+  if (cachedExportQueue) return cachedExportQueue;
+  cachedExportQueue = new Queue<DsarJobData>(DSAR_EXPORT_QUEUE_NAME, {
+    connection: createBullConnection("dsar-export"),
     defaultJobOptions: DSAR_JOB_OPTIONS,
   });
-  return cachedQueue;
+  return cachedExportQueue;
+}
+
+export function getDsarErasureQueue(): Queue<DsarJobData> {
+  if (cachedErasureQueue) return cachedErasureQueue;
+  cachedErasureQueue = new Queue<DsarJobData>(DSAR_ERASURE_QUEUE_NAME, {
+    connection: createBullConnection("dsar-erasure"),
+    defaultJobOptions: DSAR_JOB_OPTIONS,
+  });
+  return cachedErasureQueue;
+}
+
+function queueForJobName(
+  jobName: typeof DSAR_EXPORT_JOB_NAME | typeof DSAR_ERASURE_JOB_NAME,
+): Queue<DsarJobData> {
+  return jobName === DSAR_EXPORT_JOB_NAME
+    ? getDsarExportQueue()
+    : getDsarErasureQueue();
 }
 
 /**
- * Enqueues exactly one job for one `dsar_requests` row.
+ * Enqueues exactly one job for one `dsar_requests` row, onto the queue
+ * that matches its job name (see the module doc above for why there are
+ * two queues now).
  *
  * `jobId` is pinned to the row's own id. This is safe here in a way it
  * is NOT for `import_jobs` (see `workers/import-runner.ts`'s
@@ -88,6 +116,6 @@ export async function enqueueDsarJob(
   jobName: typeof DSAR_EXPORT_JOB_NAME | typeof DSAR_ERASURE_JOB_NAME,
   data: DsarJobData,
 ): Promise<void> {
-  const queue = getDsarQueue();
+  const queue = queueForJobName(jobName);
   await queue.add(jobName, data, { ...DSAR_JOB_OPTIONS, jobId: data.dsarRequestId });
 }
