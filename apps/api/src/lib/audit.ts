@@ -213,7 +213,17 @@ export type AuditAction =
   // REQUEST record's own lifecycle, not the export contents.
   | "dsar_request.claimed"
   | "dsar_request.export_completed"
-  | "dsar_request.export_failed";
+  | "dsar_request.export_failed"
+  // --- DSAR erasure worker (workers/dsar-erasure.ts, ROADMAP §9.1 Task 5) ---
+  // Same "claimed" transition as export above (shared literal — both
+  // workers use `claimDsarRequest`), plus this worker's own terminal
+  // transitions. Distinct from "subscriber.anonymized" (already written
+  // by anonymizeSubscriber itself for the underlying Postgres write) —
+  // these describe the REQUEST record's own lifecycle, which also
+  // covers the ClickHouse purge that anonymizeSubscriber knows nothing
+  // about.
+  | "dsar_request.erasure_completed"
+  | "dsar_request.erasure_failed";
 
 // Exported (not just inlined like this file's other action literals)
 // because retention-sweep.ts lives in a different subsystem and needs

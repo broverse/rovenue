@@ -215,3 +215,33 @@ export const dsarExportSkippedTotal = new Counter({
   labelNames: ["reason"] as const,
   registers: [registry],
 });
+
+// =============================================================
+// DSAR erasure worker (workers/dsar-erasure.ts, ROADMAP §9.1 Task 5)
+// =============================================================
+
+// Incremented once per `dsar_requests` ERASURE row the worker actually
+// completed: Postgres anonymised AND every ClickHouse mutation
+// confirmed `is_done` (not merely submitted).
+export const dsarErasureCompletedTotal = new Counter({
+  name: "rovenue_dsar_erasure_completed_total",
+  help: "DSAR erasure jobs completed",
+  registers: [registry],
+});
+
+// Incremented once per job the worker did NOT complete, by reason:
+// "race" (claimDsarRequest returned null — another replica already has
+// this row, not an error), "clickhouse-unconfigured" (fail-closed: a
+// request must never be marked COMPLETED while ClickHouse rows remain
+// untouched because there was nowhere to send the DELETE), or "error"
+// (anonymizeSubscriber threw, a ClickHouse mutation failed, or the
+// bounded wait for `system.mutations.is_done` timed out). A sustained
+// "clickhouse-unconfigured" rate means a deployment is missing its
+// ClickHouse env vars while customers are actively filing erasure
+// requests against it.
+export const dsarErasureSkippedTotal = new Counter({
+  name: "rovenue_dsar_erasure_skipped_total",
+  help: "DSAR erasure jobs that did not complete, by reason",
+  labelNames: ["reason"] as const,
+  registers: [registry],
+});

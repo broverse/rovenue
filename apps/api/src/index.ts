@@ -86,6 +86,7 @@ import {
 } from "./workers/experiment-scheduler";
 import { ensureLeaderboardScheduler } from "./workers/leaderboard-scheduler";
 import { ensureDsarExportWorker } from "./workers/dsar-export";
+import { ensureDsarErasureWorker } from "./workers/dsar-erasure";
 import { ensureRetentionSweep } from "./workers/retention-sweep";
 import { bootIntegrations } from "./integrations-boot";
 import { bootRenewalGrants } from "./renewal-grants-boot";
@@ -315,6 +316,15 @@ ensureLeaderboardScheduler();
 // erasure, which carries a statutory deadline export does not. See
 // workers/dsar-export.ts.
 ensureDsarExportWorker();
+
+// DSAR erasure worker (ROADMAP §9.1, Task 5) — consumes the dedicated
+// rovenue-dsar-erasure queue enqueued by POST /v1/dsar/erasure. Claims
+// a PENDING request, anonymises the subscriber in Postgres, then
+// purges every ClickHouse table that carries that subscriber's id and
+// waits for each `ALTER ... DELETE` mutation to actually finish
+// (`system.mutations.is_done`) before marking the row COMPLETED — or
+// FAILED, never left RUNNING. See workers/dsar-erasure.ts.
+ensureDsarErasureWorker();
 
 // Retention sweep (ROADMAP §9.2) — nightly at 03:00 UTC. Registry-driven
 // replacement for the three bespoke retention workers that used to live
