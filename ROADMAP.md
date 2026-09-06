@@ -1059,14 +1059,19 @@ else in the framework/provider-breadth dimension is done.
 ## 11. Docs & developer experience (65 → 95)
 
 - [ ] Quickstart + full API reference per SDK (auto-generated: rustdoc / DocC / Dokka / TypeDoc)
-      — NEITHER half is actually done, corrected 2026-09-06 after wrongly ticking this: the six
-      generators (rustdoc, DocC, Dokka, TypeDoc for sdk-rn AND sdk-web, dartdoc) run end-to-end
-      and are wired into a root `pnpm docs:sdk-ref`, but the output is GENERATED, not SERVED —
-      `apps/docs/public/api` doesn't exist, nothing is reachable at `docs.rovenue.app/api/<sdk>/`
-      — and no per-SDK quickstart ending at a working purchase has been written (earlier tasks
-      only corrected existing platform pages; `web.mdx` doesn't mention purchase at all). Coverage
-      is floor-level per SDK (25–86%, see `scripts/sdk-doc-coverage.json`) — raising it is a
-      separate, not-yet-scheduled item.
+      — the reference half SHIPPED 2026-09-06: `.github/workflows/sdk-docs.yml` generates all six
+      (rustdoc, DocC, Dokka, TypeDoc for sdk-rn AND sdk-web, dartdoc) on runners that can actually
+      build each toolchain and uploads them as artifacts; `apps/docs/Dockerfile` downloads them
+      into `apps/docs/public/api/<sdk>/` before `react-router build` and FAILS the image build by
+      name if one is missing (never a silent 404); `release-images.yml`'s `rovenue-docs` build was
+      split out to depend on that generation step. The hub page
+      (`apps/docs/content/docs/reference/sdk-reference.mdx`) renders one card per SDK, linking the
+      generated site when present and saying plainly when it wasn't generated in this build — a
+      dead-simple `docs:sdk-ref` local build (missing DocC/Dokka toolchains) now shows exactly that
+      state instead of a broken link. Still not done: no per-SDK quickstart ending at a working
+      purchase has been written (earlier tasks only corrected existing platform pages; `web.mdx`
+      doesn't mention purchase at all). Coverage is still floor-level per SDK (25–86%, see
+      `scripts/sdk-doc-coverage.json`) — raising it is a separate, not-yet-scheduled item.
 - [x] "Migrate from RevenueCat" and "Migrate from Adapty" guides — strategically the two
       most valuable docs (correction: the RevenueCat guide already existed as a lean
       concept-mapping page before this line was written — it was never unwritten, only

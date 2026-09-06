@@ -30,6 +30,31 @@ COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/docs ./apps/docs
 
+# The six SDK API references (rustdoc/DocC/Dokka/TypeDoc x2/dartdoc) can't be
+# generated here — DocC needs macOS+Xcode, Dokka needs a JVM, none of which
+# exist in this Linux builder stage. They're generated per-SDK on a runner
+# that can build each toolchain (.github/workflows/sdk-docs.yml) and must be
+# placed under apps/docs/public/api/<sdk>/ in the build context, by whoever
+# invokes `docker build`, BEFORE this stage runs — `public/` is copied
+# verbatim (not prerendered) by the `COPY apps/docs ./apps/docs` above, so by
+# this point the six directories are either already here or they never will
+# be. Fail loudly and by name rather than silently shipping a docs site that
+# 404s (or worse, silently serves the SPA shell) under /api/<sdk>/.
+RUN set -eu; \
+    missing=""; \
+    for sdk in core-rs sdk-swift sdk-kotlin sdk-rn sdk-web sdk-flutter; do \
+      if [ ! -f "apps/docs/public/api/$sdk/index.html" ]; then \
+        missing="$missing $sdk"; \
+      fi; \
+    done; \
+    if [ -n "$missing" ]; then \
+      echo "ERROR: missing generated SDK reference(s):$missing" >&2; \
+      echo "Expected apps/docs/public/api/<sdk>/index.html for each of: core-rs sdk-swift sdk-kotlin sdk-rn sdk-web sdk-flutter" >&2; \
+      echo "Run 'pnpm docs:sdk-ref' (or download the sdk-docs.yml CI artifacts) and place the" >&2; \
+      echo "output under apps/docs/public/api/<sdk>/ before building this image." >&2; \
+      exit 1; \
+    fi
+
 RUN pnpm --filter @rovenue/docs build
 
 # =============================================================

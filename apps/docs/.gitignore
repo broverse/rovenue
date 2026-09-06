@@ -5,3 +5,9 @@
 /.react-router/
 /build/
 .source
+
+# Generated SDK API references (rustdoc/DocC/Dokka/TypeDoc/dartdoc). These
+# are produced by .github/workflows/sdk-docs.yml on runners that can build
+# each toolchain, or locally via `pnpm docs:sdk-ref`, and placed here before
+# `docker build`/`react-router build` — never committed.
+/public/api/

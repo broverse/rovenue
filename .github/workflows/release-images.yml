@@ -31,15 +31,15 @@ jobs:
           # ROVENUE_REQUIRE_RUNTIME_CONFIG=1 makes the dashboard entrypoint
           # refuse to start with ROVENUE_API_URL unset — correct for a
           # published image (whose baked-in VITE_API_URL default is
-          # meaningless), wrong for the other three images, which don't have
-          # this build arg at all.
+          # meaningless), wrong for the other images, which don't have this
+          # build arg at all. (rovenue-docs is built in the separate
+          # build-docs job below, not this matrix — see its comment.)
           - {
               name: rovenue-dashboard,
               dockerfile: apps/dashboard/Dockerfile,
               context: ".",
               build_args: "ROVENUE_REQUIRE_RUNTIME_CONFIG=1",
             }
-          - { name: rovenue-docs, dockerfile: apps/docs/Dockerfile, context: ".", build_args: "" }
           - {
               name: rovenue-postgres,
               dockerfile: deploy/postgres/Dockerfile,
@@ -112,9 +112,104 @@ jobs:
           path: /tmp/digests/*
           retention-days: 1
 
+  # rovenue-docs can't sit in the `build` matrix above: its Dockerfile
+  # requires six SDK API-reference artifacts (rustdoc/DocC/Dokka/TypeDoc x2/
+  # dartdoc) to already be under apps/docs/public/api/<sdk>/ in the build
+  # context — generated on runners that can actually build each toolchain
+  # (DocC needs macOS+Xcode, Dokka needs a JVM, dartdoc needs Flutter — see
+  # sdk-docs.yml), not on the ubuntu/arm runners this matrix uses. This job
+  # calls that workflow, downloads its six artifacts into place, and only
+  # then runs the same build/scan/digest sequence as the `build` job above.
+  sdk-docs:
+    name: Generate SDK docs
+    uses: ./.github/workflows/sdk-docs.yml
+
+  build-docs:
+    name: build rovenue-docs (${{ matrix.platform }})
+    needs: sdk-docs
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # Each sdk-docs-<sdk> artifact lands in its own subdirectory named
+      # after the artifact (merge-multiple: false, the default) — exactly
+      # the apps/docs/public/api/<sdk>/ layout the Dockerfile expects, once
+      # the "sdk-docs-" prefix is stripped below.
+      - name: Download generated SDK references
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: sdk-docs-*
+          path: apps/docs/public/api
+
+      - name: Lay out apps/docs/public/api/<sdk>/
+        run: |
+          set -euo pipefail
+          cd apps/docs/public/api
+          for d in sdk-docs-*/; do
+            d="${d%/}"
+            mv "$d" "${d#sdk-docs-}"
+          done
+          ls -la .
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: "."
+          file: apps/docs/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/rovenue-docs,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=rovenue-docs-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=rovenue-docs-${{ matrix.platform }}
+
+      - name: Scan for HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/rovenue-docs@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          echo "${{ steps.build.outputs.digest }}" > \
+            "/tmp/digests/rovenue-docs-$(echo '${{ matrix.platform }}' | tr / -)"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digests-rovenue-docs-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          retention-days: 1
+
   manifest:
     name: manifest ${{ matrix.image }}
-    needs: build
+    needs: [build, build-docs]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

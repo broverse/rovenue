@@ -1,0 +1,25 @@
+---
+title: SDK API Reference
+description: Full, generated API reference documentation for every Rovenue SDK.
+---
+
+import { SdkReferenceCards } from '@/components/sdk-reference-cards';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Every Rovenue SDK ships a full, generated API reference — every public
+type, method, and property, straight from doc comments in the source. These
+aren't hand-written: each one is produced by the standard documentation
+generator for its language (rustdoc, DocC, Dokka, TypeDoc, dartdoc) and
+served here as a static site.
+
+<SdkReferenceCards />
+
+<Callout type="info">
+A card that isn't a link means that SDK's reference wasn't generated as part
+of *this* docs build — each toolchain only runs on a runner that can build
+it (DocC needs macOS + Xcode, Dokka needs a JVM, dartdoc needs the Flutter
+SDK), so a local `pnpm --filter @rovenue/docs build` will usually be missing
+whichever toolchains aren't installed on your machine. The production build
+(`.github/workflows/sdk-docs.yml`) generates all six on the runners that can
+build them, so `docs.rovenue.app/api/<sdk>/` always has the complete set.
+</Callout>

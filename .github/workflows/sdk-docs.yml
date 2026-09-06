@@ -1,0 +1,211 @@
+name: SDK docs
+
+# Generates each SDK's API reference on the runner that can actually build
+# it (DocC needs macOS + Xcode; Dokka needs a JVM; TypeDoc needs node;
+# dartdoc needs the Flutter SDK; rustdoc needs only cargo) and uploads each
+# as a build artifact. Nothing in this workflow serves the output —
+# apps/docs/Dockerfile expects the six artifacts to already be sitting under
+# apps/docs/public/api/<sdk>/ in its build context before `react-router
+# build` runs, and fails loudly if one is missing (never a 404 under
+# /api/<sdk>/). `workflow_call` lets release-images.yml pull this in as a
+# prerequisite of the rovenue-docs image build; the push/pull_request
+# triggers below catch a generator regression without cutting a release.
+#
+# Mirrors sdk.yml's toolchain setup (rust-toolchain pin, rust-cache,
+# temurin 17 + gradle/actions/setup-gradle, pnpm 9 + node 22, flutter
+# stable) so the two workflows don't drift on how each SDK is built.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/core-rs/**"
+      - "packages/sdk-swift/**"
+      - "packages/sdk-kotlin/**"
+      - "packages/sdk-rn/**"
+      - "packages/sdk-web/**"
+      - "packages/sdk-flutter/**"
+      - "scripts/generate-sdk-docs.sh"
+      - ".github/workflows/sdk-docs.yml"
+  pull_request:
+    paths:
+      - "packages/core-rs/**"
+      - "packages/sdk-swift/**"
+      - "packages/sdk-kotlin/**"
+      - "packages/sdk-rn/**"
+      - "packages/sdk-web/**"
+      - "packages/sdk-flutter/**"
+      - "scripts/generate-sdk-docs.sh"
+      - ".github/workflows/sdk-docs.yml"
+  workflow_call:
+
+jobs:
+  # Same shape as sdk.yml's bindgen-host: the Kotlin/Dokka job and the
+  # Swift/DocC job both need the UniFFI-generated bindings before they can
+  # compile anything. Swift additionally rebuilds RovenueFFI.xcframework
+  # itself (below), which regenerates the Swift binding fresh, but Dokka
+  # only needs the Kotlin binding, which is exactly what this job verifies
+  # exists before that job re-generates it on its own runner.
+  bindgen-host:
+    name: UniFFI bindgen (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: System build deps (rusqlite-bundled)
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: Swatinem/rust-cache@v2
+      - run: ./packages/core-rs/scripts/build-bindings.sh
+      - name: Confirm Kotlin binding emitted
+        run: ls packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/generated/librovenue.kt
+
+  rustdoc:
+    name: rustdoc (core-rs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: System build deps (rusqlite-bundled)
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps -p librovenue
+      # `cargo doc --no-deps` on a single-crate workspace never writes a
+      # root target/doc/index.html (only target/doc/<lib-name>/index.html —
+      # the crate's `[lib] name` is `rovenue`, not the package name
+      # `librovenue`). Without this, `/api/core-rs/` would fall through
+      # Caddy's try_files to the docs site's own SPA shell instead of the
+      # crate reference — not a 404, but just as much a dead link.
+      - name: Add root index.html (redirect to the crate landing page)
+        run: |
+          echo '<!DOCTYPE html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=rovenue/index.html"><a href="rovenue/index.html">Redirecting to the librovenue API reference…</a>' > target/doc/index.html
+      - name: Confirm rustdoc output
+        run: test -f target/doc/index.html && test -f target/doc/rovenue/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-docs-core-rs
+          path: target/doc
+          if-no-files-found: error
+
+  docc:
+    name: DocC (sdk-swift)
+    runs-on: macos-14
+    needs: bindgen-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      # RovenueFFI.xcframework is gitignored yet required by Package.swift —
+      # DocC cannot resolve the package without it. Same script the `swift`
+      # and `flutter-ios-native` jobs in sdk.yml use; it regenerates the
+      # UniFFI bindings itself as part of building the five Apple slices.
+      - name: Build RovenueFFI.xcframework
+        run: ./packages/sdk-swift/scripts/build-xcframework.sh
+      # `--disable-sandbox` goes on `swift package`, before the plugin
+      # subcommand — `generate-documentation --disable-sandbox` is silently
+      # misparsed as a `docc convert` argument. Without it, SwiftPM's own
+      # plugin sandbox refuses to move the archive into .build.
+      - name: Generate DocC archive
+        working-directory: packages/sdk-swift
+        run: swift package --disable-sandbox generate-documentation --target Rovenue --output-path .build/docc-archive
+      - name: Confirm DocC output
+        run: test -d packages/sdk-swift/.build/docc-archive/data
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-docs-sdk-swift
+          path: packages/sdk-swift/.build/docc-archive
+          if-no-files-found: error
+
+  dokka:
+    name: Dokka (sdk-kotlin)
+    runs-on: ubuntu-latest
+    needs: bindgen-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: System build deps (rusqlite-bundled)
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v3
+      - run: ./packages/core-rs/scripts/build-bindings.sh
+      - name: gradle dokkaHtml
+        working-directory: packages/sdk-kotlin
+        run: gradle dokkaHtml --no-daemon
+      - name: Confirm Dokka output
+        run: test -f packages/sdk-kotlin/build/dokka/html/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-docs-sdk-kotlin
+          path: packages/sdk-kotlin/build/dokka/html
+          if-no-files-found: error
+
+  typedoc-rn:
+    name: TypeDoc (sdk-rn)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: typedoc
+        working-directory: packages/sdk-rn
+        run: npx typedoc
+      - name: Confirm TypeDoc output
+        run: test -f packages/sdk-rn/docs/api/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-docs-sdk-rn
+          path: packages/sdk-rn/docs/api
+          if-no-files-found: error
+
+  typedoc-web:
+    name: TypeDoc (sdk-web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: typedoc
+        working-directory: packages/sdk-web
+        run: npx typedoc
+      - name: Confirm TypeDoc output
+        run: test -f packages/sdk-web/docs/api/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-docs-sdk-web
+          path: packages/sdk-web/docs/api
+          if-no-files-found: error
+
+  dartdoc:
+    name: dartdoc (sdk-flutter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable }
+      - name: dart doc
+        working-directory: packages/sdk-flutter/rovenue_flutter
+        run: |
+          dart pub get
+          dart doc .
+      - name: Confirm dartdoc output
+        run: test -f packages/sdk-flutter/rovenue_flutter/doc/api/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-docs-sdk-flutter
+          path: packages/sdk-flutter/rovenue_flutter/doc/api
+          if-no-files-found: error
