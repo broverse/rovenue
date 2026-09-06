@@ -12,9 +12,9 @@
     "total": 697
   },
   "sdk-kotlin": {
-    "floor": 31.4,
+    "floor": 32.1,
     "measuredAt": "2026-09-06",
-    "documented": 196,
+    "documented": 200,
     "total": 624
   },
   "sdk-rn": {

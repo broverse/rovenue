@@ -322,10 +322,19 @@ class Rovenue private constructor(
         }
     }
 
+    /** Subscriber's email → the $email reserved attribute. Pass `null` to
+     *  clear it. Same buffered-write, background-flush contract as
+     *  [setAttributes]. */
     @Throws(RovenueException::class)
     suspend fun setEmail(email: String?) = setAttributes(mapOf("\$email" to email))
+    /** Subscriber's display name → the $displayName reserved attribute.
+     *  Pass `null` to clear it. Same buffered-write, background-flush
+     *  contract as [setAttributes]. */
     @Throws(RovenueException::class)
     suspend fun setDisplayName(name: String?) = setAttributes(mapOf("\$displayName" to name))
+    /** Subscriber's phone number → the $phoneNumber reserved attribute.
+     *  Pass `null` to clear it. Same buffered-write, background-flush
+     *  contract as [setAttributes]. */
     @Throws(RovenueException::class)
     suspend fun setPhoneNumber(phone: String?) = setAttributes(mapOf("\$phoneNumber" to phone))
     /** Android push token → the $fcmTokens reserved attribute. */
@@ -819,6 +828,12 @@ class Rovenue private constructor(
      *  Does not hit the network. */
     fun installId(): String = core.installId()
 
+    /** Whether this install has already successfully claimed a funnel token
+     *  (deep-link / QR code / referral code / email). A synchronous local
+     *  read of persisted install state — does not hit the network. Use it to
+     *  gate first-launch attribution orchestration so [claimFunnelToken] /
+     *  [claimInstall] / [claimViaEmail] only run once per install, even
+     *  across process restarts. */
     fun hasResolvedFunnelClaim(): Boolean = core.hasResolvedFunnelClaim()
 
     /**
