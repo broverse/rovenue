@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  AMBIGUOUS_HEADER,
   findInsertionPointAfterLeadingSettingsHeader,
   withRovenueAndroid,
 } from "../withRovenueAndroid";
@@ -264,6 +265,159 @@ describe("findInsertionPointAfterLeadingSettingsHeader", () => {
     // between pluginManagement and the plugins{} block.
     const after = REAL_PREBUILD_SETTINGS_GRADLE.slice(idx);
     expect(after.trimStart().startsWith("def getRNMinorVersion()")).toBe(true);
+  });
+});
+
+// Adversarial coverage: a naive brace counter treats every literal `{`/`}`
+// as structural, but a `}` can legitimately appear inside a string
+// literal or a comment without closing anything. Landing an insertion
+// there doesn't just fail to find the real end of the header — it
+// corrupts a real consumer's settings.gradle by inserting mid-string or
+// mid-comment, producing a syntax error that points at code THIS plugin
+// injected in the wrong place. Real Expo consumers hand-edit their
+// settings.gradle, so this isn't theoretical. Each fixture below carries
+// a `pluginManagement {}` immediately followed by `plugins { id(...) }`
+// (the real shape) with one adversarial form injected into
+// pluginManagement, plus a `rootProject.name` marker line right after
+// the header so the true end can be asserted precisely.
+describe("findInsertionPointAfterLeadingSettingsHeader — brace-blind spans", () => {
+  const HEADER_TAIL = `
+
+plugins { id("com.facebook.react.settings") }
+rootProject.name = 'sampleApp'
+`;
+
+  function assertLandsAtTrueEnd(fixture: string) {
+    const idx = findInsertionPointAfterLeadingSettingsHeader(fixture);
+    expect(idx).not.toBe(-1);
+    expect(idx).not.toBe(AMBIGUOUS_HEADER);
+    const before = fixture.slice(0, idx);
+    const after = fixture.slice(idx);
+    // The whole adversarial pluginManagement body, AND the plugins{}
+    // block that follows it, must be intact on the "before" side.
+    expect(before).toContain('plugins { id("com.facebook.react.settings") }');
+    expect(before.trim().endsWith('plugins { id("com.facebook.react.settings") }')).toBe(true);
+    // The cut must land exactly at the true end of the header, not
+    // mid-string / mid-comment / one nested closure early.
+    expect(after.trimStart().startsWith("rootProject.name = 'sampleApp'")).toBe(true);
+    return idx;
+  }
+
+  it("a string literal containing a stray `}` does not fool the scanner", () => {
+    const fixture = `pluginManagement {
+  def x = "unexpected } brace inside a string"
+  repositories { google() }
+}${HEADER_TAIL}`;
+    assertLandsAtTrueEnd(fixture);
+  });
+
+  it("a // line comment containing a stray `}` does not fool the scanner", () => {
+    const fixture = `pluginManagement {
+  // this comment has a stray } in it, and another } for good measure
+  repositories { google() }
+}${HEADER_TAIL}`;
+    assertLandsAtTrueEnd(fixture);
+  });
+
+  it("a /* */ block comment containing a stray `}` does not fool the scanner", () => {
+    const fixture = `pluginManagement {
+  /* this block comment
+     has a stray } in it
+     and spans multiple lines */
+  repositories { google() }
+}${HEADER_TAIL}`;
+    assertLandsAtTrueEnd(fixture);
+  });
+
+  it("a single-quoted string containing a stray `}` does not fool the scanner", () => {
+    const fixture = `pluginManagement {
+  def x = 'unexpected } brace inside a single-quoted string'
+  repositories { google() }
+}${HEADER_TAIL}`;
+    assertLandsAtTrueEnd(fixture);
+  });
+
+  it("a GString with ${...} interpolation and an unbalanced brace count is skipped as one opaque span, not by luck", () => {
+    // The interpolated expression has ONE `{`/`}` pair from the ternary
+    // plus a lone extra `}` right after it, inside the SAME string — an
+    // odd, unbalanced brace count within the span. A counter that looks
+    // inside the string (instead of skipping it wholesale) would get
+    // this wrong regardless of which way it's wrong; skipping the whole
+    // string as one opaque unit is correct independent of what's inside.
+    const fixture = `pluginManagement {
+  def x = "computed: \${ true ? 1 : 2 } } stray"
+  repositories { google() }
+}${HEADER_TAIL}`;
+    assertLandsAtTrueEnd(fixture);
+  });
+
+  it("a triple-quoted string containing a stray `}` and a newline does not fool the scanner", () => {
+    const fixture = `pluginManagement {
+  def x = """
+    unexpected } brace
+    inside a triple-quoted string
+  """
+  repositories { google() }
+}${HEADER_TAIL}`;
+    assertLandsAtTrueEnd(fixture);
+  });
+
+  it("a nested closure combined with a string, a line comment, and a block comment together still lands at the true end", () => {
+    const fixture = `pluginManagement {
+  def version = providers.exec {
+    commandLine("node", "-e", "console.log('}')")
+  }.standardOutput.asText.get().trim()
+  // a line comment with a stray } brace
+  /* a block comment
+     with a stray } brace */
+  if (version == "x") {
+    includeBuild("some/path")
+  }
+}${HEADER_TAIL}`;
+    assertLandsAtTrueEnd(fixture);
+  });
+
+  it("confirms the CURRENT (fixed) scanner actually differs from a naive brace counter on the string case", () => {
+    // Regression guard for "fixture luck, not a structural guarantee":
+    // directly demonstrate that a naive counter (blind to strings) would
+    // stop after the FIRST literal `}` — which, in this fixture, is the
+    // one inside the string, long before the real close.
+    const fixture = `pluginManagement {
+  def x = "unexpected } brace inside a string"
+  repositories { google() }
+}${HEADER_TAIL}`;
+    const naiveIdx = (() => {
+      let depth = 1;
+      let i = fixture.indexOf("{") + 1;
+      for (; i < fixture.length && depth > 0; i++) {
+        if (fixture[i] === "{") depth++;
+        else if (fixture[i] === "}") depth--;
+      }
+      return i;
+    })();
+    const fixedIdx = findInsertionPointAfterLeadingSettingsHeader(fixture);
+    expect(naiveIdx).not.toBe(fixedIdx);
+    // The naive index lands INSIDE the string's text, mid-statement.
+    expect(fixture.slice(0, naiveIdx).endsWith("unexpected }")).toBe(true);
+  });
+
+  it("refuses (AMBIGUOUS_HEADER) rather than guess when the header's real close can't be found", () => {
+    // Genuinely unterminated pluginManagement — no closing brace anywhere
+    // in the content at all.
+    const fixture = `pluginManagement {
+  repositories { google() }
+`;
+    expect(findInsertionPointAfterLeadingSettingsHeader(fixture)).toBe(AMBIGUOUS_HEADER);
+  });
+
+  it("withRovenueAndroid's settingsGradle mod throws (refuses to modify) rather than corrupt an ambiguous file", async () => {
+    const fixture = `pluginManagement {
+  repositories { google() }
+`;
+    const cfg = withRovenueAndroid(makeFakeConfig(), undefined);
+    await expect(runSettingsGradleMod(cfg, fixture)).rejects.toThrow(
+      /could not safely locate the end/i,
+    );
   });
 });
 
