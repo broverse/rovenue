@@ -325,3 +325,75 @@ export async function findDsarRequestById(
   const rows = await db.select().from(dsarRequests).where(eq(dsarRequests.id, id));
   return rows[0] ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// findCompletedExportArtifactsForSubscriber / invalidateExportArtifacts
+// ---------------------------------------------------------------------------
+//
+// Finding 1 (roadmap-9a final fix wave): erasure never touched object
+// storage, so a COMPLETED export's artifact — which contains the same
+// appUserId, attributes, purchases and full credit_ledger erasure exists
+// to remove — outlived it, downloadable for its full 30-day
+// `DSAR_ARTIFACT_TTL_DAYS` window (and reachable in the bucket forever
+// after that, since import-retention.ts only ever deletes keys it reads
+// off `import_jobs` rows, never a `dsar_requests` one). A subject can have
+// MULTIPLE completed exports over their lifetime (dsar.mdx: asking again
+// after a completed export produces a NEW artifact, not a refresh of the
+// old one), so erasure must purge every one it finds, not just the most
+// recent.
+
+export interface CompletedExportArtifact {
+  id: string;
+  artifactKey: string;
+}
+
+/**
+ * Every COMPLETED EXPORT row for this subscriber that still points at a
+ * live artifact. `workers/dsar-erasure.ts` deletes each returned
+ * `artifactKey` from storage (OUTSIDE any DB transaction — storage writes
+ * never run inside one, per this repo's convention) and then calls
+ * `invalidateExportArtifacts` with the matching ids.
+ */
+export async function findCompletedExportArtifactsForSubscriber(
+  db: Db,
+  subscriberId: string,
+): Promise<CompletedExportArtifact[]> {
+  const rows = await db
+    .select({ id: dsarRequests.id, artifactKey: dsarRequests.artifactKey })
+    .from(dsarRequests)
+    .where(
+      and(
+        eq(dsarRequests.subscriberId, subscriberId),
+        eq(dsarRequests.type, "EXPORT"),
+        eq(dsarRequests.status, "COMPLETED"),
+        isNotNull(dsarRequests.artifactKey),
+      ),
+    );
+  // The isNotNull filter above already guarantees this at the SQL level;
+  // this narrows Drizzle's inferred `string | null` back to `string` for
+  // callers without an unsound cast.
+  return rows.filter(
+    (row): row is CompletedExportArtifact => row.artifactKey != null,
+  );
+}
+
+/**
+ * Clears `artifactKey`/`expiresAt` on a set of already-COMPLETED EXPORT
+ * rows once their artifact has been deleted from storage — see
+ * `findCompletedExportArtifactsForSubscriber` and
+ * `workers/dsar-erasure.ts`'s Finding-1 fix. `status` and `completedAt`
+ * are left untouched: the export genuinely did complete at the time it
+ * ran; only its now-deleted artifact stops being downloadable. A no-op on
+ * an empty list (erasure calls this unconditionally after the storage
+ * loop, whether or not there was anything to purge).
+ */
+export async function invalidateExportArtifacts(
+  db: Db,
+  ids: string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  await db
+    .update(dsarRequests)
+    .set({ artifactKey: null, expiresAt: null, updatedAt: new Date() })
+    .where(inArray(dsarRequests.id, ids));
+}

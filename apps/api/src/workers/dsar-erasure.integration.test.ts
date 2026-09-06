@@ -32,6 +32,7 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
+import bcrypt from "bcryptjs";
 import { createId } from "@paralleldrive/cuid2";
 import { drizzle, getDb } from "@rovenue/db";
 import {
@@ -41,12 +42,15 @@ import {
   DSAR_ERASURE_CLICKHOUSE_DATABASE,
   type DsarErasureDeps,
 } from "./dsar-erasure";
+import { runDsarExport, type DsarExportDeps } from "./dsar-export";
 import { getClickHouseClient, isClickHouseConfigured } from "../lib/clickhouse";
 import { anonymizeSubscriber } from "../services/gdpr/anonymize-subscriber";
+import { exportSubscriber } from "../services/gdpr/export-subscriber";
 import { audit } from "../lib/audit";
 import { apiKeyAuth } from "../middleware/api-key-auth";
 import { errorHandler } from "../middleware/error";
 import { meRoute } from "../routes/v1/me";
+import { dsarRoute } from "../routes/v1/dsar";
 
 const schema = drizzle.schema;
 
@@ -128,6 +132,16 @@ async function fetchSubscriber(id: string) {
  * ambient Postgres + ClickHouse. Nothing here is mocked to always succeed;
  * overrides are passed per test only where a specific test needs to
  * observe a different (still real) code path.
+ *
+ * The Finding-1 export-artifact-purge deps use REAL Postgres
+ * (`findCompletedExportArtifactsForSubscriber`/`invalidateExportArtifacts`
+ * run against the ambient docker-compose Postgres, same as every other DB
+ * op in this file) but a STUBBED storage side — this environment has no
+ * real MinIO configured (see dsar-export.integration.test.ts's own
+ * comment on this), so `deleteExportArtifact` defaults to a
+ * resolving/succeeding stub and `isExportStorageConfigured` defaults to
+ * `true` ("storage working") so tests that need to reach the real DB
+ * write can do so deterministically.
  */
 function realDeps(overrides: Partial<DsarErasureDeps> = {}): DsarErasureDeps {
   return {
@@ -135,6 +149,17 @@ function realDeps(overrides: Partial<DsarErasureDeps> = {}): DsarErasureDeps {
     completeDsarRequest: vi.fn(drizzle.dsarRequestRepo.completeDsarRequest),
     failDsarRequest: vi.fn(drizzle.dsarRequestRepo.failDsarRequest),
     anonymizeSubscriber: vi.fn(anonymizeSubscriber),
+    findCompletedExportArtifacts: vi.fn((subscriberId: string) =>
+      drizzle.dsarRequestRepo.findCompletedExportArtifactsForSubscriber(
+        getDb(),
+        subscriberId,
+      ),
+    ),
+    deleteExportArtifact: vi.fn(async () => {}),
+    isExportStorageConfigured: vi.fn(() => true),
+    invalidateExportArtifacts: vi.fn((db, ids: string[]) =>
+      drizzle.dsarRequestRepo.invalidateExportArtifacts(db, ids),
+    ),
     isClickHouseConfigured: vi.fn(isClickHouseConfigured),
     purgeSubscriberFromClickHouse: vi.fn((subscriberId: string) =>
       purgeSubscriberFromClickHouseTables(subscriberId),
@@ -143,6 +168,46 @@ function realDeps(overrides: Partial<DsarErasureDeps> = {}): DsarErasureDeps {
     transaction: (fn) => getDb().transaction((tx) => fn(tx as never)),
     ...overrides,
   };
+}
+
+/**
+ * Builds a REAL DsarExportDeps (real Postgres, real `exportSubscriber`,
+ * stubbed storage — same rationale as `realDeps` above) so Finding 1's
+ * test below can produce a genuinely-completed EXPORT `dsar_requests` row
+ * through the actual export worker, not a hand-crafted `completeDsarRequest`
+ * call standing in for one.
+ */
+function realExportDeps(overrides: Partial<DsarExportDeps> = {}): DsarExportDeps {
+  return {
+    claimDsarRequest: vi.fn(drizzle.dsarRequestRepo.claimDsarRequest),
+    completeDsarRequest: vi.fn(drizzle.dsarRequestRepo.completeDsarRequest),
+    failDsarRequest: vi.fn(drizzle.dsarRequestRepo.failDsarRequest),
+    exportSubscriber: vi.fn(exportSubscriber),
+    putObject: vi.fn(async () => {}),
+    deleteObject: vi.fn(async () => {}),
+    isStorageConfigured: vi.fn(() => true),
+    audit: vi.fn(audit),
+    transaction: (fn) => getDb().transaction((tx) => fn(tx as never)),
+    now: () => new Date(),
+    ...overrides,
+  };
+}
+
+/** Mints a real, working secret key row (real bcrypt hash) — mirrors
+ *  routes/v1/dsar.test.ts's own `mintSecretKey`. */
+async function mintSecretKey(projectId: string, label: string): Promise<string> {
+  const id = createId();
+  const rawKey = `rov_sec_${id}_${createId()}`;
+  const hash = await bcrypt.hash(rawKey, 10);
+  await getDb().insert(schema.apiKeys).values({
+    id,
+    projectId,
+    label: `test-secret-${label}`,
+    keyPublic: `rov_pub_placeholder_${id}`,
+    keySecretHash: hash,
+    environment: "PRODUCTION",
+  });
+  return rawKey;
 }
 
 // ---------------------------------------------------------------------------
@@ -718,4 +783,84 @@ describe("runDsarErasure", () => {
     const healed = await fetchRequest(dsarRequestId);
     expect(healed.status).toBe("FAILED");
   }, 30_000);
+
+  it("purges a prior EXPORT artifact and makes it genuinely unreachable (Finding 1)", async () => {
+    // Reproduces the exact roadmap-9a final-fix-wave Finding 1 failure END
+    // TO END: a subject exports at T0 (a REAL completed artifact, produced
+    // by the REAL export worker — not a hand-crafted `completeDsarRequest`
+    // call), erases at T1, and this test proves the artifact is ACTUALLY
+    // gone (the real deleteExportArtifact call, the DB row's own
+    // artifactKey nulled) and that GET /v1/dsar/:id/download for that
+    // SAME export request genuinely refuses it — not merely that a new
+    // guard function returns false when called directly. Before the
+    // Finding-1 fix, `runDsarErasure` never touched object storage at
+    // all, so this same download call would have kept streaming the
+    // pre-erasure artifact indefinitely.
+    const projectId = await seedProject();
+    const subscriberId = await seedSubscriber(projectId);
+
+    // T0: a real, completed export.
+    const exportRequestId = await drizzle.dsarRequestRepo
+      .createDsarRequest(getDb(), {
+        projectId,
+        subscriberId,
+        type: "EXPORT",
+        requestedBy: "support@customer.example",
+      })
+      .then((r) => r.id);
+
+    const exportDeps = realExportDeps();
+    const exportOutcome = await runDsarExport(
+      { dsarRequestId: exportRequestId, projectId, subscriberId, type: "EXPORT" },
+      exportDeps,
+    );
+    expect(exportOutcome.outcome).toBe("completed");
+    const exportedRow = await fetchRequest(exportRequestId);
+    expect(exportedRow.artifactKey).toMatch(/^dsar-exports\//);
+    const artifactKey = exportedRow.artifactKey as string;
+
+    // T1: erasure of the SAME subject.
+    const erasureRequestId = await seedPendingErasureRequest(projectId, subscriberId);
+    const erasureDeps = realDeps();
+    const erasureOutcome = await runDsarErasure(
+      { dsarRequestId: erasureRequestId, projectId, subscriberId, type: "ERASURE" },
+      erasureDeps,
+    );
+    expect(erasureOutcome).toEqual({ outcome: "completed" });
+
+    // The real storage delete was actually called with the EXACT key the
+    // export produced — not a different one, not skipped.
+    expect(vi.mocked(erasureDeps.deleteExportArtifact)).toHaveBeenCalledWith(artifactKey);
+
+    // The export's OWN row (still COMPLETED — it genuinely did complete
+    // at the time) no longer points at anything downloadable.
+    const exportRowAfterErasure = await fetchRequest(exportRequestId);
+    expect(exportRowAfterErasure.status).toBe("COMPLETED");
+    expect(exportRowAfterErasure.artifactKey).toBeNull();
+    expect(exportRowAfterErasure.expiresAt).toBeNull();
+
+    // End-to-end proof through the REAL, unmocked download route: a
+    // secret-key caller polling this SAME export request id is refused,
+    // not served the pre-erasure artifact.
+    const secretKey = await mintSecretKey(projectId, "finding1-download");
+    const app = new Hono().use("*", apiKeyAuth("any")).route("/v1/dsar", dsarRoute);
+    app.onError(errorHandler);
+
+    const downloadRes = await app.request(`/v1/dsar/${exportRequestId}/download`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${secretKey}` },
+    });
+    expect(downloadRes.status).toBe(404);
+
+    const statusRes = await app.request(`/v1/dsar/${exportRequestId}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${secretKey}` },
+    });
+    expect(statusRes.status).toBe(200);
+    const statusBody = (await statusRes.json()) as {
+      data: { request: { status: string; downloadReady: boolean } };
+    };
+    expect(statusBody.data.request.status).toBe("COMPLETED");
+    expect(statusBody.data.request.downloadReady).toBe(false);
+  }, 60_000);
 });

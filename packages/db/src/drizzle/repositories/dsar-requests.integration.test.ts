@@ -11,8 +11,10 @@ import {
   createDsarRequest,
   DSAR_CLAIM_STALE_RUNNING_MS,
   failDsarRequest,
+  findCompletedExportArtifactsForSubscriber,
   findDsarRequestById,
   findOpenDsarRequest,
+  invalidateExportArtifacts,
 } from "./dsar-requests";
 
 // Against the ambient Postgres. The partial unique index is the one thing
@@ -311,5 +313,131 @@ describe("dsar requests", () => {
       type: "EXPORT",
     });
     expect(stillOpen).toBeNull();
+  });
+
+  it("finds every COMPLETED export artifact for a subject and invalidates only those", async () => {
+    // Finding 1 (roadmap-9a final fix wave): a subject can have MULTIPLE
+    // completed exports over their lifetime (dsar.mdx — asking again
+    // after a completed export produces a NEW artifact). This pins that
+    // `findCompletedExportArtifactsForSubscriber` returns ALL of them,
+    // that a row with no artifact (FAILED) or a different type (ERASURE)
+    // or a different subscriber is never included, and that
+    // `invalidateExportArtifacts` only nulls the ids it's given.
+    const subscriberId = await seedSubscriber(PROJECT_ID, "artifacts");
+    const otherSubscriberId = await seedSubscriber(PROJECT_ID, "artifacts-other");
+
+    const first = await createDsarRequest(getDb(), {
+      projectId: PROJECT_ID,
+      subscriberId,
+      type: "EXPORT",
+      requestedBy: "a@customer.example",
+    });
+    await claimDsarRequest(getDb(), first.id);
+    await completeDsarRequest(getDb(), {
+      id: first.id,
+      artifactKey: "dsar-exports/first.json",
+      expiresAt: new Date("2026-10-01T00:00:00.000Z"),
+    });
+
+    const second = await createDsarRequest(getDb(), {
+      projectId: PROJECT_ID,
+      subscriberId,
+      type: "EXPORT",
+      requestedBy: "b@customer.example",
+    });
+    await claimDsarRequest(getDb(), second.id);
+    await completeDsarRequest(getDb(), {
+      id: second.id,
+      artifactKey: "dsar-exports/second.json",
+      expiresAt: new Date("2026-10-02T00:00:00.000Z"),
+    });
+
+    // Decoys that must NOT be returned: a FAILED export (no live
+    // artifact), an ERASURE (never has an artifact), and another
+    // subscriber's own completed export.
+    const failedExport = await createDsarRequest(getDb(), {
+      projectId: PROJECT_ID,
+      subscriberId,
+      type: "EXPORT",
+      requestedBy: "c@customer.example",
+    });
+    await claimDsarRequest(getDb(), failedExport.id);
+    await failDsarRequest(getDb(), failedExport.id, "storage unconfigured");
+
+    const erasure = await createDsarRequest(getDb(), {
+      projectId: PROJECT_ID,
+      subscriberId,
+      type: "ERASURE",
+      requestedBy: "d@customer.example",
+    });
+    await claimDsarRequest(getDb(), erasure.id);
+    await completeDsarRequest(getDb(), {
+      id: erasure.id,
+      artifactKey: null,
+      expiresAt: null,
+    });
+
+    const otherSubscriberExport = await createDsarRequest(getDb(), {
+      projectId: PROJECT_ID,
+      subscriberId: otherSubscriberId,
+      type: "EXPORT",
+      requestedBy: "e@customer.example",
+    });
+    await claimDsarRequest(getDb(), otherSubscriberExport.id);
+    await completeDsarRequest(getDb(), {
+      id: otherSubscriberExport.id,
+      artifactKey: "dsar-exports/decoy.json",
+      expiresAt: new Date("2026-10-03T00:00:00.000Z"),
+    });
+
+    const found = await findCompletedExportArtifactsForSubscriber(getDb(), subscriberId);
+    expect(found.map((a) => a.id).sort()).toEqual([first.id, second.id].sort());
+    expect(found.map((a) => a.artifactKey).sort()).toEqual(
+      ["dsar-exports/first.json", "dsar-exports/second.json"].sort(),
+    );
+
+    await invalidateExportArtifacts(getDb(), [first.id]);
+
+    const firstAfter = await findDsarRequestById(getDb(), first.id);
+    expect(firstAfter?.status).toBe("COMPLETED");
+    expect(firstAfter?.artifactKey).toBeNull();
+    expect(firstAfter?.expiresAt).toBeNull();
+
+    // The SECOND export (not passed to invalidateExportArtifacts) must be
+    // untouched — this is a targeted invalidation, not a subject-wide one.
+    const secondAfter = await findDsarRequestById(getDb(), second.id);
+    expect(secondAfter?.artifactKey).toBe("dsar-exports/second.json");
+
+    // The decoy from another subscriber is untouched either way.
+    const decoyAfter = await findDsarRequestById(getDb(), otherSubscriberExport.id);
+    expect(decoyAfter?.artifactKey).toBe("dsar-exports/decoy.json");
+
+    // No longer returned once invalidated.
+    const foundAfter = await findCompletedExportArtifactsForSubscriber(getDb(), subscriberId);
+    expect(foundAfter.map((a) => a.id)).toEqual([second.id]);
+  });
+
+  it("invalidateExportArtifacts is a no-op on an empty list", async () => {
+    // Erasure calls this unconditionally after the storage-delete loop,
+    // whether or not there was anything to purge — must not throw or
+    // touch unrelated rows on an empty id list.
+    const subscriberId = await seedSubscriber(PROJECT_ID, "artifacts-noop");
+    const created = await createDsarRequest(getDb(), {
+      projectId: PROJECT_ID,
+      subscriberId,
+      type: "EXPORT",
+      requestedBy: "support@customer.example",
+    });
+    await claimDsarRequest(getDb(), created.id);
+    await completeDsarRequest(getDb(), {
+      id: created.id,
+      artifactKey: "dsar-exports/untouched.json",
+      expiresAt: new Date("2026-10-01T00:00:00.000Z"),
+    });
+
+    await expect(invalidateExportArtifacts(getDb(), [])).resolves.toBeUndefined();
+
+    const after = await findDsarRequestById(getDb(), created.id);
+    expect(after?.artifactKey).toBe("dsar-exports/untouched.json");
   });
 });

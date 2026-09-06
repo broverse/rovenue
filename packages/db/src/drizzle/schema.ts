@@ -3745,10 +3745,17 @@ export const dsarRequests = pgTable(
     // requested what, on the customer's own say-so.
     requestedBy: text("requestedBy").notNull(),
     // Populated once an EXPORT artifact has been written AND confirmed.
-    // Always null for ERASURE, which produces no artifact.
+    // Always null for ERASURE, which produces no artifact. Also nulled
+    // back out, on an otherwise still-COMPLETED EXPORT row, the moment a
+    // LATER erasure of the same subscriber deletes this artifact from
+    // storage (roadmap-9a final fix wave, Finding 1 —
+    // `dsarRequestRepo.invalidateExportArtifacts`, called from
+    // `workers/dsar-erasure.ts`): the export genuinely completed at the
+    // time, it just no longer has anything downloadable.
     artifactKey: text("artifactKey"),
     // The artifact's download deadline. Always null until COMPLETED, and
-    // always null for ERASURE.
+    // always null for ERASURE. Nulled alongside `artifactKey` by the same
+    // Finding-1 erasure-triggered invalidation described above.
     expiresAt: timestamp("expiresAt", { withTimezone: true }),
     // Populated only when status = FAILED.
     error: text("error"),

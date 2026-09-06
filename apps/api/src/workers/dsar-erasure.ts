@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 import { audit, type AuditEntry, type AuditTx } from "../lib/audit";
 import { dsarErasureCompletedTotal, dsarErasureSkippedTotal } from "../lib/metrics";
 import { getClickHouseClient, isClickHouseConfigured } from "../lib/clickhouse";
+import * as importStore from "../lib/import-store";
 import {
   anonymizeSubscriber,
   type AnonymizeSubscriberInput,
@@ -33,17 +34,31 @@ import {
 // Postgres stores that same value as `subscribers.appUserId` after
 // anonymisation, so the link between the pseudonym and any retained
 // ClickHouse row would be trivially re-established. Erasure therefore
-// has TWO halves, and both must complete before the request is
-// COMPLETED:
+// has THREE parts, and all three must complete before the request is
+// COMPLETED (Finding 1, roadmap-9a final fix wave, added part 2 below —
+// the original two-part version shipped without it, which is exactly
+// what that finding described: an EXPORT artifact written before erasure
+// contains the same appUserId/attributes/purchases/credit_ledger erasure
+// exists to remove, and nothing was ever deleting it):
 //
 //   1. Postgres anonymisation (`anonymizeSubscriber`) — replaces
 //      `appUserId` with a deterministic HMAC token, clears attributes,
 //      and stamps `deletedAt`. The subscriber row's OWN id
 //      (`subscribers.id`, i.e. this job's `subscriberId`) is NEVER
 //      changed by this step — which is exactly why it is safe to run
-//      the ClickHouse purge (step 2) keyed on that same id, in either
-//      order relative to step 1.
-//   2. ClickHouse purge (`purgeSubscriberFromClickHouseTables`) —
+//      the export-artifact purge and the ClickHouse purge (parts 2 and
+//      3) keyed on that same id, in any order relative to part 1.
+//   2. Export-artifact purge (`purgeSubscriberExportArtifacts`) — every
+//      COMPLETED EXPORT `dsar_requests` row for this subscriber that
+//      still has a live `artifactKey` gets that object deleted from
+//      storage, then the row's `artifactKey`/`expiresAt` are nulled so
+//      `GET /v1/dsar/:id/download` can never serve it again (see
+//      packages/db's `findCompletedExportArtifactsForSubscriber` /
+//      `invalidateExportArtifacts`). `anonymizeSubscriber` never touches
+//      `purchases`/`subscriberAccess`/`creditLedger` — a prior export's
+//      artifact is the only place a subject's full history could
+//      otherwise outlive this worker.
+//   3. ClickHouse purge (`purgeSubscriberFromClickHouseTables`) —
 //      issues `ALTER TABLE ... DELETE WHERE subscriberId = ?` against
 //      every STORED ClickHouse table that carries a plain, queryable
 //      subscriberId column, then POLLS `system.mutations` until every
@@ -58,19 +73,28 @@ import {
 //      than no record, because it is documentary evidence of a promise
 //      that was not kept.
 //
-// Ordering: Postgres FIRST, ClickHouse SECOND. Postgres holds the
-// compliance-critical half of erasure (identity) and this deployment's
-// Postgres is always present; ClickHouse is a derived store that some
-// self-host deployments may not run at all in early bring-up, so the
-// `isClickHouseConfigured()` guard below fails the WHOLE job closed
-// (never silently "succeeds" by skipping the purge) before Postgres is
-// touched, matching workers/dsar-export.ts's fail-closed treatment of
-// `isStorageConfigured()`. If ClickHouse purge fails or times out
-// AFTER Postgres has already been anonymised, the job is marked FAILED
-// (never COMPLETED) and a retry is safe: `anonymizeSubscriber` is
-// idempotent (same deterministic token, plain re-set of the same
-// columns) and re-submitting the same `ALTER ... DELETE` against
-// already-purged rows matches zero rows and is a no-op.
+// Ordering: Postgres FIRST, export-artifact purge SECOND, ClickHouse
+// THIRD. Postgres holds the compliance-critical part of erasure
+// (identity) and this deployment's Postgres is always present; ClickHouse
+// is a derived store that some self-host deployments may not run at all
+// in early bring-up, so the `isClickHouseConfigured()` guard below fails
+// the WHOLE job closed (never silently "succeeds" by skipping the purge)
+// before Postgres is touched, matching workers/dsar-export.ts's
+// fail-closed treatment of `isStorageConfigured()`. The export-artifact
+// purge gets the SAME fail-closed treatment, but only conditionally:
+// object storage is required ONLY when this subscriber actually has a
+// completed export artifact to delete — a subscriber who never exported
+// must not have their erasure blocked by storage being unconfigured in a
+// deployment that has simply never used DSAR export. If ANY part fails or
+// times out after an earlier part has already succeeded, the job is
+// marked FAILED (never COMPLETED) and a retry is safe: `anonymizeSubscriber`
+// is idempotent (same deterministic token, plain re-set of the same
+// columns), the export-artifact purge re-queries fresh state each run (an
+// already-nulled row's artifact was already deleted, so it is simply not
+// found again), a storage DELETE on an already-deleted key is itself
+// idempotent (S3-compatible semantics), and re-submitting the same
+// `ALTER ... DELETE` against already-purged ClickHouse rows matches zero
+// rows and is a no-op.
 //
 // -----------------------------------------------------------------
 // The ClickHouse table list — established by reading every migration
@@ -209,6 +233,12 @@ export const DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS =
 // dsarErasureSkippedTotal reason labels.
 const SKIP_REASON_RACE = "race";
 const SKIP_REASON_CLICKHOUSE_UNCONFIGURED = "clickhouse-unconfigured";
+// Finding 1 (roadmap-9a final fix wave): the subscriber has at least one
+// completed export artifact, but export storage is unconfigured, so
+// erasure cannot verify it deleted them. Distinct from
+// SKIP_REASON_CLICKHOUSE_UNCONFIGURED so the two independent stores this
+// worker depends on are distinguishable in metrics.
+const SKIP_REASON_EXPORT_STORAGE_UNCONFIGURED = "export-storage-unconfigured";
 const SKIP_REASON_ERROR = "error";
 
 // The worker has no dashboard session to attribute audit rows or the
@@ -359,6 +389,61 @@ export async function purgeSubscriberFromClickHouseTables(
   }
 }
 
+/**
+ * Finding 1 (roadmap-9a final fix wave), part 2 of erasure's three parts
+ * (see module doc): deletes every COMPLETED EXPORT artifact this
+ * subscriber has from storage, then nulls the owning `dsar_requests`
+ * rows' `artifactKey`/`expiresAt` so `GET /v1/dsar/:id/download` can never
+ * serve them again. Storage deletes run OUTSIDE any DB transaction (this
+ * repo's convention: storage writes never run inside one); the DB write
+ * that invalidates the rows runs in its own transaction only AFTER every
+ * delete has resolved, so a crash mid-loop leaves some artifacts already
+ * gone from storage but their rows not yet nulled — safe, because the
+ * download route independently probes `importStore.objectExists` before
+ * streaming (dsar.ts) and because a retry of this same function re-reads
+ * fresh state and only re-deletes rows still pointing at a live
+ * artifactKey (an idempotent no-op for ones already nulled, and an
+ * idempotent no-op storage delete for a key already gone).
+ *
+ * Object storage is required ONLY when there is at least one artifact to
+ * delete — `deps.isStorageConfigured` is checked for real here (never
+ * assumed), exactly like `workers/dsar-export.ts`'s own fail-closed
+ * check, but conditionally: a subscriber who never ran a DSAR export must
+ * not have their erasure blocked by storage being unconfigured in a
+ * deployment that has simply never used DSAR export at all.
+ */
+async function purgeSubscriberExportArtifacts(
+  subscriberId: string,
+  deps: Pick<
+    DsarErasureDeps,
+    | "findCompletedExportArtifacts"
+    | "deleteExportArtifact"
+    | "isExportStorageConfigured"
+    | "invalidateExportArtifacts"
+    | "transaction"
+  >,
+): Promise<void> {
+  const artifacts = await deps.findCompletedExportArtifacts(subscriberId);
+  if (artifacts.length === 0) return;
+
+  if (!deps.isExportStorageConfigured()) {
+    throw new Error(
+      "DSAR export storage is not configured — refusing to complete erasure while a prior export artifact for this subscriber may still be downloadable",
+    );
+  }
+
+  for (const artifact of artifacts) {
+    await deps.deleteExportArtifact(artifact.artifactKey);
+  }
+
+  await deps.transaction((tx) =>
+    deps.invalidateExportArtifacts(
+      tx,
+      artifacts.map((a) => a.id),
+    ),
+  );
+}
+
 export interface DsarErasureDeps {
   claimDsarRequest: typeof drizzle.dsarRequestRepo.claimDsarRequest;
   completeDsarRequest: typeof drizzle.dsarRequestRepo.completeDsarRequest;
@@ -366,6 +451,14 @@ export interface DsarErasureDeps {
   anonymizeSubscriber: (
     input: AnonymizeSubscriberInput,
   ) => Promise<{ anonymousId: string; deletedAt: Date }>;
+  // Finding 1 (roadmap-9a final fix wave), erasure's part 2 — see
+  // `purgeSubscriberExportArtifacts` above and the module doc.
+  findCompletedExportArtifacts: (
+    subscriberId: string,
+  ) => ReturnType<typeof drizzle.dsarRequestRepo.findCompletedExportArtifactsForSubscriber>;
+  deleteExportArtifact: typeof importStore.deleteObject;
+  isExportStorageConfigured: typeof importStore.isStorageConfigured;
+  invalidateExportArtifacts: typeof drizzle.dsarRequestRepo.invalidateExportArtifacts;
   isClickHouseConfigured: typeof isClickHouseConfigured;
   purgeSubscriberFromClickHouse: (subscriberId: string) => Promise<void>;
   audit: (entry: AuditEntry, tx?: AuditTx) => Promise<void>;
@@ -385,6 +478,14 @@ export const defaultDeps: DsarErasureDeps = {
   completeDsarRequest: drizzle.dsarRequestRepo.completeDsarRequest,
   failDsarRequest: drizzle.dsarRequestRepo.failDsarRequest,
   anonymizeSubscriber,
+  findCompletedExportArtifacts: (subscriberId) =>
+    drizzle.dsarRequestRepo.findCompletedExportArtifactsForSubscriber(
+      drizzle.db,
+      subscriberId,
+    ),
+  deleteExportArtifact: importStore.deleteObject,
+  isExportStorageConfigured: importStore.isStorageConfigured,
+  invalidateExportArtifacts: drizzle.dsarRequestRepo.invalidateExportArtifacts,
   isClickHouseConfigured,
   purgeSubscriberFromClickHouse: (subscriberId) =>
     purgeSubscriberFromClickHouseTables(subscriberId),
@@ -394,7 +495,7 @@ export const defaultDeps: DsarErasureDeps = {
 
 /**
  * Pure, directly-testable body — no BullMQ types cross this boundary.
- * See the module doc above for the two-store ordering this function
+ * See the module doc above for the three-part ordering this function
  * exists to enforce.
  */
 export async function runDsarErasure(
@@ -447,9 +548,10 @@ export async function runDsarErasure(
       );
     }
 
-    // 1. Postgres — the compliance-critical half. `subscriberId` (the
+    // 1. Postgres — the compliance-critical part. `subscriberId` (the
     //    row's own id) is unchanged by this call, which is exactly why
-    //    step 2 below can key on the same value regardless of order.
+    //    parts 2 and 3 below can key on the same value regardless of
+    //    order.
     await deps.anonymizeSubscriber({
       subscriberId,
       projectId,
@@ -457,7 +559,15 @@ export async function runDsarErasure(
       reason: ANONYMIZE_REASON,
     });
 
-    // 2. ClickHouse — submit every table's DELETE, then wait for every
+    // 2. Export artifacts (Finding 1, roadmap-9a final fix wave) — every
+    //    COMPLETED EXPORT this subscriber ever produced gets its object
+    //    deleted from storage and its row's artifactKey/expiresAt nulled.
+    //    `anonymizeSubscriber` never touches purchases/subscriberAccess/
+    //    creditLedger, so a prior export's artifact is the one place a
+    //    subject's full history could otherwise outlive this worker.
+    await purgeSubscriberExportArtifacts(subscriberId, deps);
+
+    // 3. ClickHouse — submit every table's DELETE, then wait for every
     //    mutation to actually finish. Throws (never returns early) on
     //    a mutation failure or a bounded-wait timeout.
     await deps.purgeSubscriberFromClickHouse(subscriberId);
@@ -490,6 +600,15 @@ export async function runDsarErasure(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const isClickHouseUnconfigured = !deps.isClickHouseConfigured();
+    // Matched on the exact message `purgeSubscriberExportArtifacts` throws
+    // (our own text, not a third party's) rather than re-checking
+    // `isExportStorageConfigured()` here — that flag being false does not
+    // by itself prove THIS run's failure came from the export-artifact
+    // step, since it could equally be false while some other step (e.g.
+    // `anonymizeSubscriber`) threw for an unrelated reason.
+    const isExportStorageUnconfigured = /export storage is not configured/i.test(
+      message,
+    );
 
     await deps.transaction(async (tx) => {
       await deps.failDsarRequest(tx, dsarRequestId, message);
@@ -512,7 +631,9 @@ export async function runDsarErasure(
     dsarErasureSkippedTotal.inc({
       reason: isClickHouseUnconfigured
         ? SKIP_REASON_CLICKHOUSE_UNCONFIGURED
-        : SKIP_REASON_ERROR,
+        : isExportStorageUnconfigured
+          ? SKIP_REASON_EXPORT_STORAGE_UNCONFIGURED
+          : SKIP_REASON_ERROR,
     });
     log.error("dsar erasure failed", { dsarRequestId, projectId, err: message });
     return { outcome: "failed", error: message };
