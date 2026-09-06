@@ -133,6 +133,27 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
 ---
 
+## Identifying users
+
+Anonymous subscribers get a permanent id automatically. Call `identify` once your own auth flow completes, to link that install to your backend user:
+
+```dart
+await Rovenue.instance.identify('user_123');
+
+// When your user signs out:
+await Rovenue.instance.logOut();
+```
+
+<Callout type="info">
+Unlike the iOS and Android examples, `packages/sdk-flutter/example` does
+not call `identify()` — it demonstrates the anonymous-subscriber path only.
+The method exists and works identically on Flutter; add this step if your
+app has its own auth. See [Identifying Users](/docs/guides/identifying-users)
+for the full identity model.
+</Callout>
+
+---
+
 ## Entitlements
 
 ```dart
@@ -160,12 +181,21 @@ Listen for server-pushed updates with `Rovenue.instance.changes` and re-read on 
 final sub = Rovenue.instance.changes.listen((event) {
   // event.kind: entitlementsChanged | identityChanged |
   //             virtualCurrenciesChanged | remoteConfigChanged
-  refreshEntitlements();
+  Rovenue.instance.entitlementsAll().then((updated) {
+    // update your local state with `updated`
+  });
 });
 
 // Cancel on teardown:
 await sub.cancel();
 ```
+
+<Callout type="warn">
+`entitlementsAll()` is a local cache read — never call `refreshEntitlements()`
+from inside this listener. `refreshEntitlements()` hits the network and, on
+success, re-emits `entitlementsChanged` itself, which would re-invoke this
+same listener forever.
+</Callout>
 
 <Callout type="info">
 See [Entitlements](/docs/guides/entitlements) and [Reacting to Changes](/docs/guides/reacting-to-changes) for the full guides.
@@ -361,3 +391,4 @@ Flutter tracks the React Native SDK as its parity bar. As of this release:
 - [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
 - [Reference: Methods](/docs/reference/methods) — full method reference.
 - [Reference: Types](/docs/reference/types) — all SDK types in one place.
+- [SDK API Reference](/docs/reference/sdk-reference) — the generated dartdoc reference for every public Dart type and method, at `/api/sdk-flutter/`.

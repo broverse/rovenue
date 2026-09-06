@@ -6,6 +6,18 @@ description: Install and wire the Rovenue SDK in an Expo or bare React Native ap
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Steps, Step } from 'fumadocs-ui/components/steps';
 
+<Callout type="warn">
+The code on this page is verified against `@rovenue/react-native-sdk`'s
+actual exported surface (`examples/sample-rn-expo` typechecks against it),
+but that example app cannot currently be Metro-bundled or run on a
+device/simulator in this monorepo — two dependency-hoisting mismatches
+between the app's pinned Expo/React Native versions and the SDK's peer
+range break both CocoaPods and Metro before any app code runs. If you hit
+similar resolution errors in your own app, pin `expo`/`react-native` to
+versions inside the SDK's declared peer range rather than assuming your
+`App.tsx` is the problem.
+</Callout>
+
 <Steps>
 
 <Step>
@@ -56,6 +68,7 @@ import { Rovenue } from '@rovenue/react-native-sdk';
 
 Rovenue.configure({
   apiKey: 'rov_pub_YOUR_API_KEY',
+  logLevel: 'info',
 });
 
 export default function App() {
@@ -74,8 +87,9 @@ export default function App() {
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
   baseUrl?: string;    // optional — defaults to https://api.rovenue.io
-  debug?: boolean;     // verbose SDK logs (dev only)
+  logLevel?: 'off' | 'error' | 'warn' | 'info' | 'debug' | 'trace'; // default 'warn'
   appVersion?: string; // override auto-detected version
+  environment?: 'prod' | 'staging' | 'development';
 };
 ```
 
@@ -83,8 +97,9 @@ type RovenueConfig = {
 |-------|------|-------------|
 | `apiKey` | `string` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
 | `baseUrl` | `string?` | Optional. Defaults to `https://api.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
-| `debug` | `boolean` | Enables verbose SDK logs. Do not ship enabled in production. |
+| `logLevel` | `string?` | Verbosity of SDK logs. Defaults to `'warn'` — turn up to `'info'`/`'debug'` locally, never ship `'debug'`/`'trace'` in production. |
 | `appVersion` | `string` | Overrides the version auto-read from the bundle. |
+| `environment` | `string?` | Optional environment label forwarded with requests. |
 
 <Callout type="warn">
 Call `configure` exactly once, before rendering any component that calls a Rovenue hook. Calling it more than once after initialisation is a no-op but logs a warning.
@@ -125,6 +140,28 @@ export default function App() {
 </Step>
 
 </Steps>
+
+---
+
+## Identifying users
+
+Anonymous subscribers get a permanent `rovenueId` automatically. Call `identify` once your own auth flow completes, to link that install to your backend user:
+
+```ts
+import { Rovenue } from '@rovenue/react-native-sdk';
+
+// After your auth flow completes:
+await Rovenue.identify('user_123');
+
+// When your user signs out:
+await Rovenue.logOut();
+```
+
+`useCurrentUser()` (below) reflects the result reactively — no manual refetch needed.
+
+<Callout type="info">
+See [Identifying Users](/docs/guides/identifying-users) for the full identity model, including what happens when `identify` and `logOut` are called.
+</Callout>
 
 ---
 
@@ -214,11 +251,7 @@ See [Entitlements](/docs/guides/entitlements) and [Virtual Currencies](/docs/gui
 Use `getOfferings()` to fetch products configured in your Rovenue dashboard, then `purchase(pkg)` to drive the full purchase flow. The SDK triggers the native StoreKit 2 / Play Billing sheet, validates the receipt server-side, and resolves with updated entitlements and virtual-currency balances.
 
 ```tsx
-import {
-  Rovenue,
-  PurchaseCancelledError,
-  PurchasePendingError,
-} from '@rovenue/react-native-sdk';
+import { Rovenue, RovenueError } from '@rovenue/react-native-sdk';
 
 const offerings = await Rovenue.getOfferings();
 const pkg = offerings.current?.packages[0];
@@ -226,12 +259,16 @@ const pkg = offerings.current?.packages[0];
 if (pkg) {
   try {
     const result = await Rovenue.purchase(pkg);
-    // result.entitlements and result.virtualCurrencies are already up to date
+    if (result.isDeferred) {
+      // Ask-to-Buy / parental-control hold — no entitlements yet. The SDK
+      // reconciles it in the background; watch addChangeListener for
+      // 'ENTITLEMENTS_CHANGED' to know when it resolves.
+    } else {
+      // result.entitlements and result.virtualCurrencies are already up to date
+    }
   } catch (e) {
-    if (e instanceof PurchaseCancelledError) {
+    if (e instanceof RovenueError && e.kind === 'PurchaseCanceled') {
       // User dismissed the store sheet — no action needed
-    } else if (e instanceof PurchasePendingError) {
-      // Ask-to-Buy / deferred — inform the user and wait for a change event
     } else {
       throw e;
     }
@@ -251,6 +288,7 @@ type PurchaseResult = {
   virtualCurrencies: Record<string, number>;
   productId: string;
   storeTransactionId: string;
+  isDeferred: boolean; // true for an Ask-to-Buy / parental-control hold
 };
 ```
 
@@ -260,9 +298,10 @@ type PurchaseResult = {
 | `virtualCurrencies` | `Record<string, number>` | Updated virtual-currency balances after the purchase (currency code → amount). |
 | `productId` | `string` | The product identifier that was purchased. |
 | `storeTransactionId` | `string` | The store-side transaction ID. |
+| `isDeferred` | `boolean` | `true` when the purchase is pending external approval — no entitlements are granted yet. |
 
 <Callout type="info">
-See [Processing Purchases](/docs/guides/processing-purchases) for the full API reference including all error types and the `StoreProduct` shape.
+There is no `PurchaseCancelledError`/`PurchasePendingError` — every failure is a single `RovenueError` class discriminated by `.kind`, and there is no `'PurchasePending'` kind at all: as of 0.16.0, a deferred purchase does not throw; it returns normally with `isDeferred = true`. See [Reference: Errors](/docs/reference/errors) for the full 24-value `ErrorKind` taxonomy and [Processing Purchases](/docs/guides/processing-purchases) for the complete purchase API and the `StoreProduct` shape.
 </Callout>
 
 ---
@@ -287,6 +326,7 @@ const paywall = await getPaywall('onboarding_end', 'en');
   onPurchaseCompleted={(result) => close()}
   onPurchaseFailed={(error) => {/* keep the paywall up */}}
   onClose={() => close()}
+  onRestore={() => { /* Rovenue.restorePurchases() — omit to hide the restore button */ }}
   onUrl={(url) => {/* scheme-check, then open */}}
 />
 ```
@@ -342,3 +382,4 @@ See [Reacting to Changes](/docs/guides/reacting-to-changes) for a complete guide
 - [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
 - [Reference: Methods](/docs/reference/methods) — full method reference.
 - [Reference: Types](/docs/reference/types) — all SDK types in one place.
+- [SDK API Reference](/docs/reference/sdk-reference) — the generated TypeDoc reference for every exported type and method, at `/api/sdk-rn/`.

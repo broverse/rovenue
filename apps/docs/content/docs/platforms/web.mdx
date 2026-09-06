@@ -120,6 +120,12 @@ than followed.
 
 ## Checkout
 
+The web SDK has no `purchase()` — there is no native store sheet in a
+browser. `checkout()` is where a web purchase flow ends: it starts a Stripe
+Checkout session and hands you the URL to redirect to. This is the one
+place the web quickstart genuinely diverges from the native SDKs' flow
+(`getOfferings()` → `purchase()`).
+
 ```ts
 const session = await rovenue.checkout({
   offeringId: "off_...",
@@ -165,3 +171,9 @@ Any browser with `fetch`, `localStorage` and WebCrypto. WebCrypto is only expose
 on secure origins, so experiment assignment needs `https` (or
 `http://localhost`); the SDK says so explicitly rather than silently bucketing
 everyone into one variant.
+
+## What's next
+
+- [Entitlements](/docs/guides/entitlements) — read and gate on active subscriptions.
+- [Placements & Paywalls](/docs/guides/placements-and-paywalls) — how a placement resolves to a paywall or an A/B experiment variant.
+- [SDK API Reference](/docs/reference/sdk-reference) — the generated TypeDoc reference for every exported type and method, at `/api/sdk-web/`. [Reference: Methods](/docs/reference/methods) and [Reference: Types](/docs/reference/types) cover the React Native/Swift/Kotlin SDKs only — the web SDK's surface differs too much (no `purchase()`, no native paywall renderer) to share those tables, so `/api/sdk-web/` is the accurate reference here.

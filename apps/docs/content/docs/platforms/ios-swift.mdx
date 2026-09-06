@@ -47,9 +47,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    Rovenue.configure(
-      apiKey: "rov_pub_YOUR_API_KEY"
-    )
+    do {
+      try Rovenue.configure(
+        apiKey: "rov_pub_YOUR_API_KEY",
+        logLevel: .info
+      )
+    } catch {
+      // Only throws for a blank/malformed apiKey — a configuration
+      // problem to fix before shipping, not a runtime condition to
+      // recover from.
+      print("Rovenue.configure failed: \(error)")
+    }
     return true
   }
 }
@@ -64,24 +72,26 @@ The SDK reads `CFBundleShortVersionString` from the main bundle automatically �
 ### Types on this page
 
 ```swift
-// Swift mirror of RovenueConfig
-struct RovenueConfig {
-  var apiKey: String       // public SDK key — prefix rov_pub_
-  var baseUrl: String?     // optional — defaults to https://api.rovenue.io
-  var debug: Bool          // default false
-  var appVersion: String?  // override auto-detected version
-}
+// Swift mirror of Rovenue.configure's parameters
+func configure(
+  apiKey: String,
+  baseUrl: String? = nil,      // optional — defaults to https://api.rovenue.io
+  logLevel: LogLevel = .warn,  // .off | .error | .warn | .info | .debug | .trace
+  appVersion: String? = nil,   // override auto-detected version
+  environment: String? = nil
+) throws
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
 | `baseUrl` | `String?` | Optional. Defaults to `https://api.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
-| `debug` | `Bool` | Enables verbose SDK logs. Do not ship enabled in production. |
+| `logLevel` | `LogLevel` | Verbosity of SDK logs. Defaults to `.warn` — turn up to `.info`/`.debug` locally, never ship `.debug`/`.trace` in production. |
 | `appVersion` | `String?` | Overrides the version auto-read from the bundle. |
+| `environment` | `String?` | Optional environment label forwarded with requests. |
 
 <Callout type="warn">
-Call `configure` exactly once before any other SDK call. The ideal location is `applicationDidFinishLaunching`. Calling it after the first SDK method is invoked will throw `RovenueError.notConfigured`.
+Call `configure` exactly once, before any other SDK call — the ideal location is `application(_:didFinishLaunchingWithOptions:)`. `configure` itself only throws for a blank/malformed `apiKey`; there is no `RovenueError.notConfigured` case. Calling any *other* SDK method (`Rovenue.shared.…`) before `configure` has ever run is a hard, uncatchable crash (`fatalError`) — not a throwable error on any platform. This is an ordering bug to fix at the call site, not a condition to catch. See [Calling the SDK before configure()](/docs/reference/errors#calling-the-sdk-before-configure).
 </Callout>
 </Step>
 
@@ -115,6 +125,29 @@ If your app uses the SwiftUI `@main` lifecycle rather than a `SceneDelegate`, ob
 
 ---
 
+## Identifying users
+
+Anonymous subscribers get a permanent `rovenueId` automatically. Call `identify` once your own auth flow completes, to link that install to your backend user:
+
+```swift
+import Rovenue
+
+// After your auth flow completes:
+try await Rovenue.shared.identify("user_123")
+
+// When your user signs out:
+try await Rovenue.shared.logOut()
+
+let user = await Rovenue.shared.currentUser()
+// user.rovenueId (always present), user.appUserId (nil until identify())
+```
+
+<Callout type="info">
+See [Identifying Users](/docs/guides/identifying-users) for the full identity model, including what happens when `identify` and `logOut` are called.
+</Callout>
+
+---
+
 ## Purchases
 
 Use `getOfferings()` to fetch products configured in your Rovenue dashboard, then `purchase(_:)` to drive the full StoreKit 2 purchase flow. The SDK validates the receipt server-side and resolves with updated entitlements.
@@ -124,11 +157,20 @@ let offerings = try await Rovenue.shared.getOfferings()
 if let pkg = offerings.current?.packages.first {
   do {
     let result = try await Rovenue.shared.purchase(pkg)
-    // result.entitlements and result.virtualCurrencies are already up to date
-  } catch Rovenue.Error.purchaseCancelled {
-    // User dismissed the sheet — no action needed
-  } catch Rovenue.Error.purchasePending {
-    // Ask-to-Buy / deferred — inform the user and wait for a change event
+    if result.isDeferred {
+      // Ask-to-Buy / parental-control hold — no entitlements yet. The SDK
+      // reconciles it in the background; watch `Rovenue.shared.changes` for
+      // `.entitlementsChanged` to know when it resolves.
+    } else {
+      // result.entitlements and result.virtualCurrencies are already up to date
+    }
+  } catch let e as RovenueError {
+    switch e.kind {
+    case .purchaseCanceled:
+      break // User dismissed the sheet — no action needed
+    default:
+      throw e
+    }
   }
 }
 
@@ -143,6 +185,7 @@ struct PurchaseResult {
   var virtualCurrencies: [String: Int64]
   var productId: String
   var storeTransactionId: String
+  var isDeferred: Bool // true for an Ask-to-Buy / parental-control hold
 }
 
 struct Entitlement {
@@ -160,9 +203,37 @@ struct Entitlement {
 | `virtualCurrencies` | `[String: Int64]` | Updated virtual-currency balances after the purchase (currency code → amount). |
 | `productId` | `String` | The product identifier that was purchased. |
 | `storeTransactionId` | `String` | The StoreKit transaction ID. |
+| `isDeferred` | `Bool` | `true` when the purchase is pending external approval — no entitlements are granted yet. |
 
 <Callout type="info">
-See [Processing Purchases](/docs/guides/processing-purchases) for the full API reference including all error types and the `StoreProduct` shape.
+There is no `RovenueError.purchasePending` case — as of 0.16.0, a deferred purchase (Ask-to-Buy) does not throw at all; it returns normally with `isDeferred = true`. See [Reference: Errors](/docs/reference/errors) for the full 24-value `ErrorKind` taxonomy and [Processing Purchases](/docs/guides/processing-purchases) for the complete purchase API and the `StoreProduct` shape.
+</Callout>
+
+---
+
+## Paywall
+
+`RovenuePaywallView` renders a builder paywall (see [Placements & Paywalls](/docs/guides/placements-and-paywalls)) using the shared SwiftUI paywall renderer. Resolve the placement with `getPaywall` first — the view takes the already-resolved `Paywall`, it does not take a placement identifier:
+
+```swift
+import Rovenue
+import SwiftUI
+
+if let paywall = try await Rovenue.shared.getPaywall(placementId: "onboarding") {
+  // paywall is nil when the placement has no assignment — render nothing.
+  RovenuePaywallView(
+    paywall: paywall,
+    onPurchaseCompleted: { result in /* dismiss */ },
+    onPurchaseFailed: { error in /* keep the paywall up */ },
+    onClose: { /* dismiss */ },
+    onRestore: { Task { try? await Rovenue.shared.restorePurchases() } },
+    onUrl: { url in /* scheme-check, then open */ }
+  )
+}
+```
+
+<Callout type="info">
+See [Placements & Paywalls](/docs/guides/placements-and-paywalls) for how placements resolve to a paywall or an A/B experiment variant.
 </Callout>
 
 ---
@@ -212,3 +283,4 @@ Rovenue.shared.setLogHandler { entry in
 - [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
 - [Reference: Methods](/docs/reference/methods) — full method reference.
 - [Reference: Types](/docs/reference/types) — all SDK types in one place.
+- [SDK API Reference](/docs/reference/sdk-reference) — the generated DocC reference for every public Swift type and method, at `/api/sdk-swift/`.

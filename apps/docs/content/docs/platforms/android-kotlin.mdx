@@ -40,6 +40,7 @@ Call `Rovenue.configure` once in your `Application.onCreate()`, before any compo
 ```kotlin
 import android.app.Application
 import dev.rovenue.sdk.Rovenue
+import dev.rovenue.sdk.generated.LogLevel
 
 class App : Application() {
 
@@ -52,11 +53,21 @@ class App : Application() {
 
     Rovenue.configure(
       apiKey = "rov_pub_YOUR_API_KEY",
+      logLevel = LogLevel.INFO,
       appVersion = versionName,
+      context = this,
     )
   }
 }
 ```
+
+<Callout type="warn">
+Pass `context` (the `Application` itself works, or any `Context` — the SDK
+keeps `context.applicationContext`). Without it, `getOfferings()` still
+works, but `purchase()` and `restorePurchases()` throw
+`RovenueException(kind = ErrorKind.STORE_PROBLEM)` — Play Billing needs a
+`Context` to bind to, and there is no fallback.
+</Callout>
 
 <Callout type="info">
 **Self-hosting?** `baseUrl` is optional and defaults to the hosted endpoint `https://api.rovenue.io`. Override it to point at your own deployment, e.g. `Rovenue.configure(apiKey = "rov_pub_YOUR_API_KEY", baseUrl = "https://api.acme.com", appVersion = versionName)`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
@@ -71,12 +82,15 @@ Register `App` in your `AndroidManifest.xml`:
 ### Types on this page
 
 ```kotlin
-// Kotlin mirror of RovenueConfig
-data class RovenueConfig(
-  val apiKey: String,          // public SDK key — prefix rov_pub_
-  val baseUrl: String? = null, // optional — defaults to https://api.rovenue.io
-  val debug: Boolean = false,
-  val appVersion: String? = null,
+// Kotlin mirror of Rovenue.configure's parameters — there is no separate
+// RovenueConfig type on this platform, only named parameters.
+fun configure(
+  apiKey: String,
+  baseUrl: String? = null,           // optional — defaults to https://api.rovenue.io
+  logLevel: LogLevel = LogLevel.WARN, // OFF | ERROR | WARN | INFO | DEBUG | TRACE
+  appVersion: String? = null,
+  context: Context? = null,          // required for purchase()/restorePurchases()
+  environment: String? = null,
 )
 ```
 
@@ -84,8 +98,10 @@ data class RovenueConfig(
 |-------|------|-------------|
 | `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
 | `baseUrl` | `String?` | Optional. Defaults to `https://api.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
-| `debug` | `Boolean` | Enables verbose SDK logs. Default `false`. |
+| `logLevel` | `LogLevel` | Verbosity of SDK logs. Defaults to `WARN` — turn up to `INFO`/`DEBUG` locally, never ship `DEBUG`/`TRACE` in production. |
 | `appVersion` | `String?` | Overrides the version read from the package manager. |
+| `context` | `Context?` | An Android `Context` (the SDK stores `context.applicationContext`). Pass it — `purchase()` and `restorePurchases()` throw `STORE_PROBLEM` without it. |
+| `environment` | `String?` | Optional environment label forwarded with requests. |
 
 <Callout type="warn">
 Call `configure` in `Application.onCreate` — not inside an `Activity`. Calling
@@ -121,6 +137,7 @@ class App : Application() {
     Rovenue.configure(
       apiKey = "rov_pub_YOUR_API_KEY",
       appVersion = versionName,
+      context = this,
     )
 
     ProcessLifecycleOwner.get().lifecycle.addObserver(
@@ -152,8 +169,8 @@ Use `getOfferings()` to fetch products configured in your Rovenue dashboard, the
 
 ```kotlin
 import dev.rovenue.sdk.Rovenue
-import dev.rovenue.sdk.PurchaseCancelledException
-import dev.rovenue.sdk.PurchasePendingException
+import dev.rovenue.sdk.RovenueException
+import dev.rovenue.sdk.generated.ErrorKind
 
 val offerings = Rovenue.shared.getOfferings()
 val pkg = offerings.current?.packages?.firstOrNull()
@@ -162,11 +179,18 @@ if (pkg != null) {
   try {
     // `activity` is your current Activity — Play Billing requires it.
     val result = Rovenue.shared.purchase(activity, pkg)
-    // result.entitlements and result.virtualCurrencies are already up to date
-  } catch (e: PurchaseCancelledException) {
-    // User dismissed the store sheet — no action needed
-  } catch (e: PurchasePendingException) {
-    // Deferred — inform the user and wait for a change event
+    if (result.isDeferred) {
+      // Ask-to-Buy / parental-control hold — no entitlements yet. The SDK
+      // reconciles it in the background; collect Rovenue.shared.changes for
+      // ChangeEvent.ENTITLEMENTS_CHANGED to know when it resolves.
+    } else {
+      // result.entitlements and result.virtualCurrencies are already up to date
+    }
+  } catch (e: RovenueException) {
+    when (e.kind) {
+      ErrorKind.PURCHASE_CANCELED -> Unit // User dismissed the store sheet — no action needed
+      else -> throw e
+    }
   }
 }
 
@@ -181,6 +205,7 @@ data class PurchaseResult(
   val virtualCurrencies: Map<String, Long>,
   val productId: String,
   val storeTransactionId: String,
+  val isDeferred: Boolean, // true for an Ask-to-Buy / parental-control hold
 )
 
 data class Entitlement(
@@ -198,9 +223,44 @@ data class Entitlement(
 | `virtualCurrencies` | `Map<String, Long>` | Updated virtual-currency balances after the purchase (currency code → amount). |
 | `productId` | `String` | The product identifier that was purchased. |
 | `storeTransactionId` | `String` | The Play Store transaction ID. |
+| `isDeferred` | `Boolean` | `true` when the purchase is pending external approval — no entitlements are granted yet. |
 
 <Callout type="info">
-See [Processing Purchases](/docs/guides/processing-purchases) for the full API reference including all error types and the `StoreProduct` shape.
+There is no `PurchaseCancelledException`/`PurchasePendingException` — every SDK method throws the single `RovenueException`, discriminated by `.kind`. And there is no `PURCHASE_PENDING` kind at all: as of 0.16.0, a deferred purchase does not throw; it returns normally with `isDeferred = true`. See [Reference: Errors](/docs/reference/errors) for the full 24-value `ErrorKind` taxonomy and [Processing Purchases](/docs/guides/processing-purchases) for the complete purchase API and the `StoreProduct` shape.
+</Callout>
+
+---
+
+## Paywall
+
+`RovenuePaywallView` (Android Views, `dev.rovenue.sdk.paywallui`) renders a builder paywall (see [Placements & Paywalls](/docs/guides/placements-and-paywalls)). Resolve the placement with `getPaywall` first — it takes the already-resolved `Paywall`, not a placement identifier:
+
+```kotlin
+import dev.rovenue.sdk.Rovenue
+import dev.rovenue.sdk.paywallui.PaywallViewOptions
+import dev.rovenue.sdk.paywallui.RovenuePaywallView
+
+val paywall = Rovenue.shared.getPaywall("onboarding")
+if (paywall != null) {
+  val view = RovenuePaywallView(activity)
+  view.bind(
+    paywall,
+    PaywallViewOptions(
+      onPurchaseCompleted = { result -> /* dismiss */ },
+      onPurchaseFailed = { error -> /* keep the paywall up */ },
+      onClose = { /* dismiss */ },
+      onRestore = { /* Rovenue.shared.restorePurchases(activity) */ },
+      onUrl = { url -> /* scheme-check, then open */ },
+    ),
+  )
+}
+```
+
+<Callout type="warn">
+`RovenuePaywallView` walks its hosting `View`'s `Context` chain to find an
+`Activity` to launch Play Billing from — host it inside an `Activity`
+(directly, or via Compose's `AndroidView`), not a themeless application
+context.
 </Callout>
 
 ---
@@ -263,3 +323,4 @@ See [Identifying Users](/docs/guides/identifying-users) for the full identity mo
 - [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
 - [Reference: Methods](/docs/reference/methods) — full method reference.
 - [Reference: Types](/docs/reference/types) — all SDK types in one place.
+- [SDK API Reference](/docs/reference/sdk-reference) — the generated Dokka reference for every public Kotlin type and method, at `/api/sdk-kotlin/`.
