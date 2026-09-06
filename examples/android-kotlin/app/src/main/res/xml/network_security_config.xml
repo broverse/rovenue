@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android's analogue of the iOS example's narrow ATS exception
+    (examples/ios-swift/RovenueExample/Info.plist's
+    NSExceptionDomains -> localhost only).
+
+    Plain http:// is blocked by Android's cleartext-traffic policy by
+    default (API 28+). Rather than the blanket
+    android:usesCleartextTraffic="true" escape hatch, this config allows
+    cleartext ONLY to 10.0.2.2 — the emulator's alias for the host
+    loopback interface, i.e. a `docker compose up` API running on your
+    dev machine (see ExampleConfig.kt for the full explanation).
+
+    A build that only ever talks to a real https:// Rovenue deployment
+    does not need this file at all, or the
+    android:networkSecurityConfig reference to it in AndroidManifest.xml.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
