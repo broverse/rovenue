@@ -211,7 +211,13 @@ allow-list rejects Docker-Desktop-forwarded host traffic; see
 ```bash
 # The bare default user has no password set up in this stack's
 # users.d config — auth as the write user (rovenue) or the reader
-# (rovenue_reader), same credentials .env already has:
+# (rovenue_reader), same credentials .env already has. The
+# database='rovenue' filter on every query below is load-bearing —
+# see the callout after the output for why.
+docker compose exec clickhouse clickhouse-client --user rovenue --password "$CLICKHOUSE_WRITE_PASSWORD" --query "
+  SELECT formatReadableSize(sum(bytes_on_disk)) AS total_size, count() AS parts
+  FROM system.parts WHERE active AND database='rovenue'"
+
 docker compose exec clickhouse clickhouse-client --user rovenue --password "$CLICKHOUSE_WRITE_PASSWORD" --query "
   SELECT table, formatReadableSize(sum(bytes_on_disk)) AS size, sum(rows) AS rows
   FROM system.parts WHERE active AND database='rovenue'
@@ -229,11 +235,30 @@ match; there was no `api`/compose project running to `exec` through, and a
 bare unauthenticated `clickhouse-client --query "SELECT 1"` was tried first
 and confirmed to fail with `AUTHENTICATION_FAILED` — the `default` user has
 no working password in this stack's `users.d` config, so the `--user
-rovenue` form above is not optional): total active data was **1.56 GiB
-across 134 parts** — a seed-scale dev database, not a sizing reference. Run
-the query above against your own install; there is no built-in retention
-alarm, so watch `system.disks`' free space yourself (or scrape it —
-`clickhouse:9363` is already an Alloy target, §2).
+rovenue` form above is not optional): total active data in the `rovenue`
+database was **400.10 KiB across 26 parts** — a seed-scale dev database,
+not a sizing reference.
+
+**Filter on `database='rovenue'` explicitly, and check the total, not just
+the per-table breakdown, against it.** An earlier draft of this section
+reported a total of 1.56 GiB across ~130 parts — that number is real, but
+it's ClickHouse's own internal `system` database (`query_log` and
+friends), not `rovenue`'s actual data, confirmed live:
+
+```
+SELECT database, formatReadableSize(sum(bytes_on_disk)), count()
+  FROM system.parts WHERE active GROUP BY database ORDER BY 2 DESC;
+  system    1.56 GiB   114
+  rovenue   400.10 KiB  26
+```
+
+The per-table query above already carried the `database='rovenue'` filter
+and was always correct (`raw_revenue_events` at 322.28 KiB / 1257 rows,
+matching exactly); the total quoted alongside it had been read off a
+separate, unfiltered query. Run the corrected total query above against
+your own install, with the filter, before trusting the number. There is no
+built-in retention alarm, so watch `system.disks`' free space yourself (or
+scrape it — `clickhouse:9363` is already an Alloy target, §2).
 
 The `clickhouse` service is capped at `cpus: 2, mem_limit: 3g` in
 `docker-compose.yml` — raise both together if `system.parts` shows sustained
@@ -342,19 +367,28 @@ Runs daily at 03:00 UTC via a BullMQ repeatable job
 ### The fresh-install divergence — read this before assuming coverage
 
 `revenue_events` and `credit_ledger` are the two tables migration `0019`
-registers with pg_partman (`create_parent`, 7-year retention). That
-migration falls inside the **TimescaleDB-era range (0001–0019)** that the
-fresh-install runner (`packages/db/src/fresh-install.ts`) marks applied
+registers with pg_partman (`create_parent`, 7-year retention). `0019` is one
+of eleven specific migrations the fresh-install runner
+(`packages/db/src/fresh-install.ts`'s `TIMESCALE_LEGACY_TAGS`) marks applied
 **without executing**, on any database that never ran against the old
 `timescale/timescaledb` image — which is every self-hosted install starting
-fresh against the shipped `postgres:16-bookworm` image. On those
-databases:
+fresh against the shipped `postgres:16-bookworm` image. **The skip set is
+sparse, not a contiguous range**: `0001`–`0007`, `0009`, `0010`, `0014`, and
+`0019` — eleven of the nineteen migrations between `0001` and `0019`.
+`0008`, `0011`–`0013`, and `0015`–`0018` all execute normally on a fresh
+install (each is either a safe no-op against a fresh DB, per the runner's
+own comments on `0011`/`0012`, or — for `0015`–`0017` specifically — gets a
+targeted rewrite rather than a skip, below). On those databases:
 
 - `revenue_events`/`credit_ledger` still get partitioned — migrations
-  `0015`/`0016` bulk pre-create 60 monthly partitions covering **2024-01
-  through 2028-12** as part of the fresh-install path (verified live against
-  this session's dev database: `pg_inherits` shows exactly 60 partitions per
-  table, `revenue_events_2024_01` … `revenue_events_2028_12`).
+  `0015`/`0016` **do execute** (they are not in the skip set) and bulk
+  pre-create 60 monthly partitions covering **2024-01 through 2028-12** as
+  part of the fresh-install path (verified live against this session's dev
+  database: `pg_inherits` shows exactly 60 partitions per table,
+  `revenue_events_2024_01` … `revenue_events_2028_12`). `fresh-install.ts`
+  rewrites their upgrade-path `RENAME`-to-`_legacy_hypertable` statement
+  into a no-op first (`PARTITION_RENAME_TAGS`), since a fresh install has no
+  legacy hypertable to rename away — the partitioning itself still runs.
 - Those partitions are **not** premade or retained by pg_partman going
   forward, because `revenue_events`/`credit_ledger` are absent from
   `partman.part_config` on a fresh install — `fresh-install.ts`'s own
