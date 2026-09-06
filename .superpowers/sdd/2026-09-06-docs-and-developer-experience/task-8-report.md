@@ -243,3 +243,175 @@ other consumer could have been relying on the removed barrel re-export.
   demonstrably pre-existing and unrelated (see §4). If a fully-green `check:links` run is a
   hard gate regardless of cause, that's a one-line fix in `methods.mdx` I can make on
   request, but I did not make it unprompted since it's unrelated to this task's brief.
+
+---
+---
+
+# Fix round 1 — a real regression guard for the barrel boundary, and the pre-existing broken link
+
+Status: **DONE**. Both closed; the guard was watched fail, then watched pass again, per the
+instruction not to trust a guard that was never seen to fail.
+
+## 1. The regression guard
+
+The reviewer's point was exactly right and worth restating precisely: `error-catalog.test.ts`
+imports via `../index` and `../error-catalog` — relative specifiers. Node's ESM resolver
+never consults `package.json#exports` for a relative import, so that test's import graph
+physically cannot exercise the barrel boundary (`@rovenue/shared` / `@rovenue/shared/error-
+catalog` as package specifiers) that actually broke. It tests the catalog's *content*, not
+the *boundary*. If `export * from "./error-catalog"` came back to `index.ts` tomorrow, that
+test would keep passing — the same masking mechanism (Vitest/Vite's bundler-aware resolver
+not reproducing Node's real cyclic-evaluation order) that let the original bug ship clean.
+
+**What I built:** two new files, both new to git (nothing existing modified for this part):
+
+- `packages/shared/src/__tests__/fixtures/smoke-import-error-catalog.mjs` — a standalone
+  ESM script that imports `ERROR_CODE` from `@rovenue/shared` and `ERROR_CATALOG` from
+  `@rovenue/shared/error-catalog`, by their real package specifiers, and exits 1 with a
+  labeled `SMOKE FAIL` message if the catalog resolves empty or its key count disagrees
+  with `ERROR_CODE`'s.
+- `packages/shared/src/__tests__/error-catalog-barrel-boundary.test.ts` — a Vitest test that
+  does **not** import the catalog in-process at all. It shells out via `node:child_process`'s
+  `execFileSync` to a real `tsx` (resolved via `require.resolve("tsx/cli")`, `tsx` added as a
+  devDependency of `packages/shared` — not a hoisting assumption) subprocess running the
+  fixture above. That subprocess is genuine, bundler-free Node ESM — the same resolution
+  path `apps/docs/scripts/generate-error-catalog.mjs` actually runs under. On a non-zero
+  exit, the test throws an error that names the barrel explicitly, states the likely cause
+  (`export * from "./error-catalog"` back in `index.ts`), explains why Vitest itself
+  wouldn't have caught it, and includes the raw subprocess stderr/stdout so nobody has to
+  re-derive TDZ semantics from a bare stack trace.
+
+**Import order inside the fixture is load-bearing, and I nearly shipped a guard that
+couldn't see the thing it exists to catch.** My first draft imported the subpath
+(`@rovenue/shared/error-catalog`) before the bare barrel (`@rovenue/shared`) — matching the
+generator script's own current import order. I re-added `export * from "./error-catalog"`
+to `index.ts` to test the guard and **it still passed**. Root cause: ESM evaluates a cyclic
+pair based on which module is reached *first* from the actual entry file. Subpath-first
+means `error-catalog.ts` is the module Node reaches first; its dependency (`index.ts`) then
+evaluates as *error-catalog.ts's* dependency, completes fully (the reintroduced `export *`
+just becomes a redundant, already-evaluating link back to the in-progress `error-catalog.ts`,
+which no-ops), and by the time `error-catalog.ts`'s own body runs, `ERROR_CODE` is already
+defined — no crash, regardless of whether the barrel re-export exists. This is the same
+"import order I happened to pick accidentally avoids the bug" trap the reviewer described,
+just one level deeper — I'd have shipped a guard proven only to pass, never proven to fail.
+Caught it only because the instruction required watching it fail first.
+
+Fixed by flipping the fixture's import order — bare barrel (`@rovenue/shared`) first, subpath
+second — which forces `index.ts` to be the first-reached module. That reproduces the actual
+historical crash direction: evaluating `index.ts` (if the cycle exists) requires first
+evaluating `error-catalog.ts` as *its own* dependency (via the reintroduced `export *`),
+which requires `./index` — already mid-evaluation, cycle short-circuited, `ERROR_CODE`
+still in its TDZ. Verified this by hand in both directions with a throwaway script before
+touching the real fixture (see the transcript below) — not asserted from the spec, observed.
+
+**The generator itself (`generate-error-catalog.mjs`) still imports subpath-first.** I left
+it as-is rather than "fixing" its order too: with the barrel cycle genuinely gone (which it
+is, after the earlier fix), import order is irrelevant to correctness — there's no cycle to
+be sensitive to either way. Reordering it wouldn't change its current behavior, and doing so
+here would blur the report's claim that the regression guard, not the generator's import
+order, is what makes this durable. Noting for the record: the generator's current order is
+not itself a safety net against a reintroduced cycle (the test above is), just a working
+script against the current, correct topology.
+
+### Verification — the guard observed failing, then passing (not assumed)
+
+Reintroduced the cycle by hand:
+
+    $ echo 'export * from "./error-catalog";' >> packages/shared/src/index.ts
+
+Ran the guard — **it failed**, with the labeled message and full subprocess trace:
+
+    $ nice -n 19 npx vitest run --maxWorkers=2 packages/shared/src/__tests__/error-catalog-barrel-boundary.test.ts
+
+     ❯ error-catalog barrel boundary (real Node ESM resolution) > resolves @rovenue/shared and
+       @rovenue/shared/error-catalog as real package specifiers without a TDZ crash
+
+    Error: The @rovenue/shared barrel boundary broke under real Node ESM resolution
+    (packages/shared/src/index.ts <-> packages/shared/src/error-catalog.ts).
+    This almost certainly means index.ts re-exports error-catalog.ts again (e.g.
+    `export * from "./error-catalog"`), recreating the circular import whose eager
+    top-level ERROR_CODE dereference throws a TDZ ReferenceError under plain Node
+    ESM (Vitest's bundler-aware resolver will NOT catch this — it hid the
+    original bug). Keep `@rovenue/shared/error-catalog` as its own subpath
+    export, never re-exported from the package root.
+
+    subprocess stderr:
+    packages/shared/src/error-catalog.ts:48
+        code: ERROR_CODE.HTTP_ERROR,
+              ^
+    ReferenceError: Cannot access 'ERROR_CODE' before initialization
+        at <anonymous> (packages/shared/src/error-catalog.ts:48:11)
+        ...
+
+     Test Files  1 failed (1)
+          Tests  1 failed (1)
+
+Restored `index.ts` from a pre-mutation backup, diffed identical to confirm an exact
+restore, then re-ran — **passes**:
+
+    $ diff /tmp/index.ts.bak packages/shared/src/index.ts && echo "restored clean"
+    restored clean
+
+    $ nice -n 19 npx vitest run --maxWorkers=2 \
+        packages/shared/src/__tests__/error-catalog-barrel-boundary.test.ts \
+        packages/shared/src/__tests__/error-catalog.test.ts
+     ✓ packages/shared/src/__tests__/error-catalog-barrel-boundary.test.ts (1 test) 202ms
+     ✓ packages/shared/src/__tests__/error-catalog.test.ts (4 tests) 3ms
+     Test Files  2 passed (2)
+          Tests  5 passed (5)
+
+## 2. The pre-existing broken link
+
+`reference/methods.mdx` linked to `/docs/guides/funnel-attribution`, which has never existed
+(confirmed: no `funnel-attribution.mdx` anywhere in `content/docs/guides/`, and a repo-wide
+`grep -rli funnel content/docs` across every guide file found zero matches for the topic
+under any other name — `platforms/flutter.mdx` and two integration pages mention "funnel"
+only in passing, none of them a conceptual guide covering funnel attribution). There is no
+page to honestly repoint this at.
+
+**Fix: removed the link, kept the prose.** The offending text was a standalone `**See also:**
+[Funnel Attribution guide](/docs/guides/funnel-attribution)` line at the very end of
+`methods.mdx` — its entire content *was* the dangling link, with no surrounding sentence to
+preserve. Deleted that line and the `---` divider that only existed to separate it from the
+paragraph above (which already stands complete on its own: it explains what
+`addFunnelClaimListener`/`claimFromUrl` return). The in-page `Quick navigation` anchor link
+to `#funnel-attribution` (the `## Funnel Attribution` heading further up the same file) is
+untouched and unaffected — that's a same-page anchor, not a cross-page link, and it resolves
+correctly since the heading exists on the page itself. Did not create a stub
+`funnel-attribution.mdx` page.
+
+### Verification
+
+    $ pnpm --filter @rovenue/docs run check:links
+    ✓ check-links: all internal /docs/... links are valid (44 files checked)
+
+## 3. Full re-verification after both fixes
+
+    $ pnpm --filter @rovenue/docs run build
+    ...
+    Prerender (html): /docs/reference/api-errors -> build/client/docs/reference/api-errors/index.html
+    ✓ built in 2.69s
+    $ echo $?
+    0
+
+    $ pnpm --filter @rovenue/docs run check:links
+    ✓ check-links: all internal /docs/... links are valid (44 files checked)
+
+    $ nice -n 19 npx vitest run --maxWorkers=2 \
+        packages/shared/src/__tests__/error-catalog.test.ts \
+        packages/shared/src/__tests__/error-catalog-barrel-boundary.test.ts
+     Test Files  2 passed (2)
+          Tests  5 passed (5)
+
+## Files touched (this round)
+
+- `packages/shared/src/__tests__/error-catalog-barrel-boundary.test.ts` (new)
+- `packages/shared/src/__tests__/fixtures/smoke-import-error-catalog.mjs` (new)
+- `packages/shared/package.json` (added `tsx` devDependency for the subprocess to resolve)
+- `apps/docs/content/docs/reference/methods.mdx` (removed dangling `funnel-attribution` link)
+- `pnpm-lock.yaml` (lockfile update for the new devDependency)
+
+## Concerns
+
+- None new. The guard is now proven in both directions, not assumed; the broken link is
+  gone without inventing a page nobody wrote.
