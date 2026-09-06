@@ -78,6 +78,8 @@ import { claimFunnelToken, claimInstall, claimViaEmail, installId, addFunnelClai
 
 export const Rovenue = {
   configure,
+  /** This JS package's own semantic version — a plain constant read, not
+   *  the native module's or Rust core's version, and not network-derived. */
   getVersion: () => SDK_VERSION,
   currentUser,
   identify,
@@ -119,6 +121,18 @@ export const Rovenue = {
   resolveFunnelClaim,
   installId,
   addFunnelClaimListener,
+  /**
+   * Subscribe to the raw native change stream — `ENTITLEMENTS_CHANGED`,
+   * `IDENTITY_CHANGED`, `VIRTUAL_CURRENCIES_CHANGED`, `REMOTE_CONFIG_CHANGED`.
+   * Returns an unsubscribe function; call it on unmount to avoid leaking the
+   * native listener. Most apps should prefer the reactive hooks
+   * (`useCurrentUser`, `useEntitlements`, `useRemoteConfig`, ...), which
+   * already listen on this stream — reach for this only for imperative,
+   * non-component code. Never call the matching `refreshX()` (e.g.
+   * `refreshEntitlements()` on `ENTITLEMENTS_CHANGED`) from inside this
+   * callback: the refresh re-emits the same event, which re-invokes the
+   * callback, forever.
+   */
   addChangeListener: (cb: (event: import("./types").ChangeEvent) => void): (() => void) => {
     const sub = getEmitter().addListener("onChange", (payload: { event: string }) => {
       cb(payload.event as import("./types").ChangeEvent);

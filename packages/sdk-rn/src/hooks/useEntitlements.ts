@@ -7,6 +7,13 @@ import type { Entitlement } from "../types";
 // fresh array reference on every render when the store is empty.
 const EMPTY: Entitlement[] = [];
 
+/**
+ * Reactive read of every currently-granted entitlement. Returns an empty
+ * array until the first native `entitlementsAll()` read completes (lazily
+ * primed on mount), then re-renders on `ENTITLEMENTS_CHANGED`. Also
+ * populates the per-id store entries `useEntitlement` reads, so mounting
+ * this hook once can prime individual lookups elsewhere in the tree.
+ */
 export function useEntitlements(): Entitlement[] {
   useEffect(() => {
     if (store.get("entitlementsAll") === undefined) {

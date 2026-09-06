@@ -16,6 +16,14 @@ export type LogEntry = {
 
 let subscription: { remove(): void } | null = null;
 
+/**
+ * Register a sink for the Rust core's structured log records, bridged
+ * through the native module's `onLog` event. There is only ever one active
+ * handler — calling this again replaces (implicitly unsubscribes) the
+ * previous one; pass `null` to remove it entirely. The core is the sole
+ * log authority (there is no separate JS-side `debug` flag) — this is the
+ * only way to observe its logs from JS.
+ */
 export function setLogHandler(fn: ((entry: LogEntry) => void) | null): void {
   subscription?.remove();
   subscription = null;

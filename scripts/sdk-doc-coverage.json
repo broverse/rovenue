@@ -18,9 +18,9 @@
     "total": 624
   },
   "sdk-rn": {
-    "floor": 39.3,
+    "floor": 65.5,
     "measuredAt": "2026-09-06",
-    "documented": 33,
+    "documented": 55,
     "total": 84
   },
   "sdk-flutter": {

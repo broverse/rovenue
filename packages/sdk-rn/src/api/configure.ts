@@ -47,6 +47,18 @@ export function getConfiguredAppVersion(): string | undefined {
   return configuredAppVersion;
 }
 
+/**
+ * Initialize the SDK. Must be called before any other `Rovenue.*` call —
+ * every other method assumes a configured native module and crashes
+ * (`fatalError` on iOS, `IllegalStateException` on Android) otherwise.
+ * Synchronous: also starts the native-event bridge that feeds the reactive
+ * hooks/`addChangeListener`, and the foreground/background session
+ * tracker (both are internally guarded to start at most once).
+ *
+ * Throws `RovenueError` (`kind: "InvalidApiKey"`) synchronously — before
+ * any native call — when `apiKey` is blank or `baseUrl` doesn't start with
+ * `http://`/`https://`.
+ */
 export function configure(opts: RovenueConfig): void {
   if (!opts.apiKey || opts.apiKey.trim() === "") {
     throw new RovenueError("InvalidApiKey", "apiKey is blank");
