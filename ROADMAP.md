@@ -1043,7 +1043,44 @@ else in the framework/provider-breadth dimension is done.
       `verifyImportedAnchors`.
 - [ ] Working example apps (iOS / Android / RN / Flutter demo repos)
 - [ ] Interactive API explorer
-- [ ] Error-code catalog
+- [x] Error-code catalog — shipped 2026-09-06: `packages/shared/src/error-catalog.ts`'s
+      `ERROR_CATALOG` (one entry per code — wire value, HTTP status, summary, resolution)
+      is typed as a TOTAL `Record<keyof typeof ERROR_CODE, ...>`, never `Partial` or an
+      index signature, so adding a code to `ERROR_CODE` without documenting it here is a
+      compile error, not a doc that quietly falls behind. `apps/docs/scripts/generate-
+      error-catalog.mjs` renders it into `apps/docs/content/docs/reference/api-errors.mdx`
+      (42 entries) and is wired into the docs `build` script, so a built image can never
+      serve a stale page. Five codes are lowercase on the wire despite a SCREAMING_CASE
+      key (`ASSET_IN_USE` → `asset_in_use`, `ASSET_MISSING`, `PURCHASE_NOT_PAID`,
+      `APPLE_OFFER_SIGNING_UNAVAILABLE`, `APPLE_OFFER_SIGNING_FAILED`) — a generator naive
+      enough to publish the object key instead of `entry.code` would have shipped five
+      strings no client could ever match against a real response; the generator emits
+      `entry.code` throughout and a test (`error-catalog.test.ts`) pins all five.
+
+      Writing real per-code prose (not templated boilerplate) surfaced two producer
+      defects, neither fixed here — raised separately:
+      1. **Four API-key-auth codes have no producer at all.** `BEARER_REQUIRED`,
+         `INVALID_API_KEY`, `INVALID_API_KEY_FORMAT`, and `API_KEY_KIND_MISMATCH` exist in
+         `ERROR_CODE` but `middleware/api-key-auth.ts` throws bare `HTTPException`s with no
+         `cause` for every one of their failure modes, so they all collapse to the generic
+         `UNAUTHORIZED`/`FORBIDDEN` on the wire — a client can never distinguish "missing
+         Bearer header" from "revoked key" from "wrong key kind" by code alone today.
+      2. **`STRIPE_NOT_CONNECTED` is inconsistently wired.** `billing-portal.ts` sets it
+         properly as an `HTTPException` `cause`, so it reaches `error.code` correctly. The
+         funnel-builder validation route and the public funnel-payment checkout route
+         reject with the identical string but embed it inside a JSON-stringified `message`
+         on a generic HTTPException with no `cause` — those two never surface the code on
+         the wire (`error.code` reads `VALIDATION_ERROR`/`HTTP_ERROR` instead).
+
+      Also found and fixed while wiring the generator: `packages/shared/src/index.ts`'s
+      `export * from "./error-catalog"` made the barrel and error-catalog.ts mutually
+      dependent, and error-catalog.ts dereferences `ERROR_CODE` eagerly at module-eval
+      time — under plain Node ESM (the generator, run via `tsx`) that's a `ReferenceError:
+      Cannot access 'ERROR_CODE' before initialization`, which Vitest's bundler-aware
+      resolver hid completely (its own `error-catalog.test.ts` passed throughout). Fixed
+      by dropping the barrel re-export and exposing `@rovenue/shared/error-catalog` as its
+      own subpath export instead, matching several sibling modules already exposed that
+      way (`./crypto`, `./subscription-status`, `./experiments`, ...).
 - [ ] Self-host operator handbook (scaling, monitoring, disaster recovery)
 
 ## 12. Feature breadth (85 → 95)
