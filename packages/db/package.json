@@ -11,7 +11,7 @@
     "db:migrate": "tsx --env-file-if-exists=../../.env src/migrate.ts",
     "db:migrate:fresh": "tsx --env-file-if-exists=../../.env src/migrate-fresh.ts",
     "db:migrate:baseline": "tsx --env-file-if-exists=../../.env src/migrate-baseline.ts",
-    "db:migrate:generate": "drizzle-kit generate",
+    "db:migrate:generate": "drizzle-kit generate && tsx scripts/fix-journal-watermark.ts",
     "db:verify:clickhouse": "tsx --env-file-if-exists=../../.env scripts/verify-clickhouse.ts",
     "db:partition:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate-hypertable-to-partitioned.ts",
     "db:clickhouse:migrate": "tsx --env-file-if-exists=../../.env src/clickhouse-migrate.ts",
