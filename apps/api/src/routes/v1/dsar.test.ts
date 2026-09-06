@@ -47,8 +47,13 @@ vi.mock("../../lib/import-store", () => ({
 }));
 
 import { dsarRoute, DSAR_ENDPOINT_MAX_PER_MINUTE } from "./dsar";
-import { enqueueDsarJob, DSAR_EXPORT_JOB_NAME } from "../../queues/dsar";
+import {
+  enqueueDsarJob,
+  DSAR_EXPORT_JOB_NAME,
+  DSAR_ERASURE_JOB_NAME,
+} from "../../queues/dsar";
 import * as importStore from "../../lib/import-store";
+import { anonymizeSubscriber } from "../../services/gdpr/anonymize-subscriber";
 
 // ---------------------------------------------------------------------------
 // DB setup
@@ -264,6 +269,34 @@ describe("DSAR routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.data.request.status).toBe("PENDING");
+  });
+
+  it("refuses to start a new export for a subscriber already erased (Finding 2, newly-submitted case)", async () => {
+    // The OTHER half of Finding 2's fix: a request submitted AFTER
+    // erasure has already completed must never even reach the queue.
+    // This is not new route code — `resolveSubscriber` already 404s a
+    // soft-deleted row with no live `mergedInto` survivor (the same
+    // path a merged-away rovenueId hits) — this test exists so that
+    // guarantee is pinned for the erased case specifically, using the
+    // REAL production `anonymizeSubscriber`, not a hand-crafted
+    // `deletedAt` UPDATE.
+    const key = await mintSecretKey(PROJECT_ID, "erased-newly-submitted");
+    const sub = await seedSubscriber(PROJECT_ID, "erased-newly-submitted");
+
+    await anonymizeSubscriber({
+      subscriberId: sub.id,
+      projectId: PROJECT_ID,
+      actorUserId: "system",
+      reason: "dsar_request",
+    });
+
+    const res = await post("/export", key, {
+      appUserId: sub.rovenueId,
+      requestedBy: "support@customer.example",
+    });
+
+    expect(res.status).toBe(404);
+    expect(vi.mocked(enqueueDsarJob)).not.toHaveBeenCalled();
   });
 
   it("refuses a public API key", async () => {

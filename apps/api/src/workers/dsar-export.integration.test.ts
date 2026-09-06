@@ -45,6 +45,7 @@ import {
 import * as importStore from "../lib/import-store";
 import { audit } from "../lib/audit";
 import { exportSubscriber } from "../services/gdpr/export-subscriber";
+import { anonymizeSubscriber } from "../services/gdpr/anonymize-subscriber";
 
 const schema = drizzle.schema;
 
@@ -350,5 +351,53 @@ describe("runDsarExport", () => {
     expect(retryOutcome.outcome).toBe("failed");
     const healed = await fetchRequest(dsarRequestId);
     expect(healed.status).toBe("FAILED");
+  });
+
+  it("produces no artifact when the subject was erased before the export could run (Finding 2)", async () => {
+    // Reproduces the exact roadmap-9a final-fix-wave Finding 2 scenario
+    // END TO END, not merely a guard function returning false in
+    // isolation: an EXPORT job whose subscriberId points at a subscriber
+    // that a REAL erasure (the same `anonymizeSubscriber` production
+    // service the erasure worker calls, not a hand-crafted UPDATE) has
+    // already anonymised — modelling "erasure completes at T1, the
+    // export job (claimed earlier, or reclaimed as stale-RUNNING) then
+    // runs `exportSubscriber` at T1+n". Before the Finding-2 fix,
+    // `exportSubscriber` had no `deletedAt` check at all and would have
+    // read `purchases`/`subscriberAccess`/`creditLedger` straight
+    // through (`anonymizeSubscriber` never touches those tables) and
+    // written a brand-new artifact containing the subject's full
+    // history — this test's `putObject` assertion is what catches that
+    // regression coming back.
+    const projectId = await seedProject();
+    const subscriberId = await seedSubscriber(projectId);
+    const dsarRequestId = await seedPendingExportRequest(projectId, subscriberId);
+
+    await anonymizeSubscriber({
+      subscriberId,
+      projectId,
+      actorUserId: "system",
+      reason: "dsar_request",
+    });
+
+    const deps = realDeps();
+
+    const outcome = await runDsarExport(
+      { dsarRequestId, projectId, subscriberId, type: "EXPORT" },
+      deps,
+    );
+
+    expect(outcome.outcome).toBe("failed");
+    if (outcome.outcome === "failed") {
+      expect(outcome.error).toMatch(/erased/i);
+    }
+    // The crux of Finding 2: no PII artifact was ever written, not even
+    // one that gets cleaned up afterward.
+    expect(vi.mocked(deps.putObject)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.deleteObject)).not.toHaveBeenCalled();
+
+    const finalRow = await fetchRequest(dsarRequestId);
+    expect(finalRow.status).toBe("FAILED");
+    expect(finalRow.artifactKey).toBeNull();
+    expect(finalRow.error).toMatch(/erased/i);
   });
 });

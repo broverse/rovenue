@@ -1,11 +1,16 @@
 import { Worker, type Job } from "bullmq";
+import { HTTPException } from "hono/http-exception";
 import { drizzle, type Db } from "@rovenue/db";
 import { createBullConnection } from "../lib/redis";
 import { logger } from "../lib/logger";
 import { audit, type AuditEntry, type AuditTx } from "../lib/audit";
 import { dsarExportCompletedTotal, dsarExportSkippedTotal } from "../lib/metrics";
 import * as importStore from "../lib/import-store";
-import { exportSubscriber, type SubscriberExport } from "../services/gdpr/export-subscriber";
+import {
+  exportSubscriber,
+  SUBSCRIBER_ERASED_STATUS,
+  type SubscriberExport,
+} from "../services/gdpr/export-subscriber";
 import {
   DSAR_EXPORT_QUEUE_NAME,
   DSAR_EXPORT_JOB_NAME,
@@ -52,6 +57,24 @@ import {
 // ever reach a `dsar-exports/` key (import-retention.ts only deletes
 // keys read off `import_jobs` rows), so leaving it behind would leak a
 // PII export with no request row pointing at it, forever.
+//
+// Fails CLOSED when the subject has been erased in the meantime (Finding
+// 2, roadmap-9a final fix wave): `exportSubscriber` itself checks the
+// subscriber's `deletedAt` and throws before reading `purchases` /
+// `subscriberAccess` / `creditLedger` — none of which `anonymizeSubscriber`
+// ever touches, so a subscriberId that outlives erasure still has its
+// full history sitting under it. This closes the EXPORT/ERASURE race the
+// unique index alone cannot prevent (EXPORT and ERASURE are two different
+// `type`s, so both can be open on this subject at once, on two
+// independent queues): a job claimed before erasure completes but that
+// finishes reading data after it now fails instead of manufacturing a
+// fresh artifact full of exactly what the subject asked to have
+// forgotten. See `SKIP_REASON_SUBSCRIBER_ERASED` below — this is an
+// EXPECTED interlock outcome, not treated as a generic worker failure.
+// A brand-new request for an already-erased subject never reaches this
+// worker at all: `resolveSubscriber` (routes/v1/dsar.ts) 404s at request
+// time, because a soft-deleted row with no live `mergedInto` survivor
+// resolves to nothing.
 //
 // Fails CLOSED when storage is unconfigured: `isStorageConfigured()` is
 // checked for real (never mocked into always-true), and a false result
@@ -105,6 +128,13 @@ const DSAR_EXPORT_CONTENT_TYPE = "application/json";
 // dsarExportSkippedTotal reason labels.
 const SKIP_REASON_RACE = "race";
 const SKIP_REASON_STORAGE_UNCONFIGURED = "storage-unconfigured";
+// Finding 2 (roadmap-9a final fix wave): the subject was erased between
+// this job being claimed and `exportSubscriber` actually reading their
+// data — see export-subscriber.ts's own deletedAt check. Labelled
+// separately from a generic "error" so this EXPECTED interlock outcome
+// (the export correctly refusing to manufacture fresh PII for an erased
+// subject) never gets triaged as an unexpected worker failure.
+const SKIP_REASON_SUBSCRIBER_ERASED = "subscriber-erased";
 const SKIP_REASON_ERROR = "error";
 
 // The worker has no dashboard session to attribute audit rows or the
@@ -265,6 +295,12 @@ export async function runDsarExport(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const isStorageUnconfigured = !deps.isStorageConfigured();
+    // Finding 2: `exportSubscriber` throws this SPECIFIC status when the
+    // subject was erased between claim and read — never a bare 404 (that
+    // one is a genuine "no such subscriber" bug, not an expected race)
+    // and never treated as storage-unconfigured or a generic error.
+    const isSubscriberErased =
+      err instanceof HTTPException && err.status === SUBSCRIBER_ERASED_STATUS;
 
     if (artifactKey) {
       // The artifact was written and confirmed, but something AFTER
@@ -274,9 +310,15 @@ export async function runDsarExport(
       try {
         await deps.deleteObject(artifactKey);
       } catch (cleanupErr) {
+        // Finding 5 (roadmap-9a final fix wave): the key itself is not
+        // logged here — it is not a capability (the download route
+        // re-authorises on every call) and carries no subject
+        // identifier, but `dsarRequestId` alone already lets an
+        // operator look the row up (and its artifactKey) if the cleanup
+        // genuinely needs following up, so there is no reason to also
+        // put the raw storage key in a log line.
         log.error("dsar export: failed to clean up orphaned artifact", {
           dsarRequestId,
-          artifactKey,
           err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
         });
       }
@@ -301,9 +343,20 @@ export async function runDsarExport(
     });
 
     dsarExportSkippedTotal.inc({
-      reason: isStorageUnconfigured ? SKIP_REASON_STORAGE_UNCONFIGURED : SKIP_REASON_ERROR,
+      reason: isSubscriberErased
+        ? SKIP_REASON_SUBSCRIBER_ERASED
+        : isStorageUnconfigured
+          ? SKIP_REASON_STORAGE_UNCONFIGURED
+          : SKIP_REASON_ERROR,
     });
-    log.error("dsar export failed", { dsarRequestId, projectId, err: message });
+    if (isSubscriberErased) {
+      log.info("dsar export skipped: subscriber was erased before export could run", {
+        dsarRequestId,
+        projectId,
+      });
+    } else {
+      log.error("dsar export failed", { dsarRequestId, projectId, err: message });
+    }
     return { outcome: "failed", error: message };
   }
 }
