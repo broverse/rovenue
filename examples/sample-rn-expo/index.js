@@ -9,7 +9,7 @@ import { Rovenue } from "@rovenue/react-native-sdk";
 import App, { API_KEY, BASE_URL } from "./App";
 
 // Configure the SDK BEFORE the app mounts. The reactive hooks
-// (useCurrentUser / useEntitlements / useCreditBalance) call into the
+// (useCurrentUser / useEntitlements / useVirtualCurrencies) call into the
 // native module on first render, and the native SDK raises a fatalError
 // if `Rovenue.shared` is accessed before configure(). configure() is
 // synchronous, so running it here guarantees the SDK is ready before any

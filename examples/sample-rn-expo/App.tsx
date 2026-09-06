@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -12,12 +13,14 @@ import {
 import {
   Rovenue,
   RovenueError,
-  useCreditBalance,
+  RovenuePaywallView,
   useCurrentUser,
   useEntitlements,
+  useVirtualCurrencies,
   type LogEntry,
   type Offerings,
   type Package,
+  type Paywall,
 } from "@rovenue/react-native-sdk";
 
 // ---------------------------------------------------------------------------
@@ -37,18 +40,27 @@ import {
 export const API_KEY = "rov_pub_F9WSmqmMB9ijsG4vQ_owy1q_uZLU3Q8y";
 export const BASE_URL = "http://localhost:3000";
 
+// Same placement identifier the Flutter, iOS (SwiftUI) and Android (Compose)
+// examples use, so all four apps demonstrate one flow against the same
+// server-side placement.
+const PLACEMENT_IDENTIFIER = "onboarding";
+
 export default function App() {
   const [version, setVersion] = useState<string | null>(null);
   const [appUserId, setAppUserId] = useState("");
   const [offerings, setOfferings] = useState<Offerings | null>(null);
+  const [activePaywall, setActivePaywall] = useState<Paywall | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
 
   // Reactive state from the SDK store — updates automatically when the SDK
-  // fires ENTITLEMENTS_CHANGED / IDENTITY_CHANGED / CREDIT_BALANCE_CHANGED.
+  // fires ENTITLEMENTS_CHANGED / IDENTITY_CHANGED / VIRTUAL_CURRENCIES_CHANGED.
+  // (Note: this app previously called a `useCreditBalance` hook that no
+  // longer exists post the credit→virtual-currency rename — fixed here to
+  // the current `useVirtualCurrencies` shape so the app typechecks.)
   const user = useCurrentUser();
   const entitlements = useEntitlements();
-  const creditBalance = useCreditBalance();
+  const virtualCurrencies = useVirtualCurrencies();
 
   const appendLog = useCallback((line: string) => {
     setLogs((prev) => [line, ...prev].slice(0, 50));
@@ -68,10 +80,10 @@ export default function App() {
     setVersion(Rovenue.getVersion());
 
     // Observe SDK change events (for the log panel only). Do NOT call
-    // refreshEntitlements/refreshCredits here: a successful refresh itself
-    // emits ENTITLEMENTS_CHANGED / CREDIT_BALANCE_CHANGED, so re-fetching on
-    // the event creates an infinite loop. The reactive hooks
-    // (useEntitlements / useCreditBalance) already update from the store
+    // refreshEntitlements/refreshVirtualCurrencies here: a successful refresh
+    // itself emits ENTITLEMENTS_CHANGED / VIRTUAL_CURRENCIES_CHANGED, so
+    // re-fetching on the event creates an infinite loop. The reactive hooks
+    // (useEntitlements / useVirtualCurrencies) already update from the store
     // when these events fire — no manual refetch needed.
     const unsubscribe = Rovenue.addChangeListener((event) => {
       appendLog(`change: ${event}`);
@@ -112,6 +124,28 @@ export default function App() {
   const onPurchase = (pkg: Package) =>
     run(`purchase ${pkg.product.id}`, () => Rovenue.purchase(pkg));
 
+  // getPaywall() resolves a placement to either a direct assignment or the
+  // winning variant of a client-drawn PAYWALL experiment — `null` means the
+  // placement resolved to nothing (retired, target: none, unknown
+  // identifier), not an error. RovenuePaywallView takes the ALREADY-RESOLVED
+  // Paywall (same shape as the iOS example), not a placement identifier —
+  // it hosts the native Swift/Kotlin paywall renderer, it is not a fourth
+  // JS renderer.
+  const onOpenPaywall = () =>
+    run("getPaywall", async () => {
+      const paywall = await Rovenue.getPaywall(PLACEMENT_IDENTIFIER);
+      if (!paywall) {
+        appendLog(
+          `getPaywall(${PLACEMENT_IDENTIFIER}) resolved to nothing (no assignment for this placement)`,
+        );
+        return;
+      }
+      appendLog(
+        `getPaywall(${PLACEMENT_IDENTIFIER}) succeeded: paywall ${paywall.paywallIdentifier ?? "(remote-config only)"}`,
+      );
+      setActivePaywall(paywall);
+    });
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -135,9 +169,15 @@ export default function App() {
           </View>
         </Section>
 
-        {/* Entitlements + credits (reactive hooks) */}
+        {/* Entitlements + virtual currencies (reactive hooks) */}
         <Section title="Access">
-          <Row label="credit balance" value={String(creditBalance)} />
+          {Object.keys(virtualCurrencies).length === 0 ? (
+            <Text style={styles.muted}>No virtual currency balances</Text>
+          ) : (
+            Object.entries(virtualCurrencies).map(([code, amount]) => (
+              <Row key={code} label={code} value={String(amount)} />
+            ))
+          )}
           {entitlements.length === 0 ? (
             <Text style={styles.muted}>No active entitlements</Text>
           ) : (
@@ -178,6 +218,16 @@ export default function App() {
           ) : null}
         </Section>
 
+        {/* Paywall — RovenuePaywallView hosts the native Swift/Kotlin
+            paywall renderer; it takes an already-resolved Paywall, so we
+            resolve the placement with getPaywall() first. */}
+        <Section title="Paywall">
+          <Button
+            title={`Open paywall (${PLACEMENT_IDENTIFIER})`}
+            onPress={onOpenPaywall}
+          />
+        </Section>
+
         {/* Log */}
         <Section title="Log">
           {logs.length === 0 ? (
@@ -196,6 +246,47 @@ export default function App() {
           <Text style={styles.busyText}>{busy}…</Text>
         </View>
       ) : null}
+
+      {/* Full-screen presentation of the resolved paywall. All five
+          callbacks route into the same rolling log the rest of the app
+          uses — mirrors the iOS (PaywallSheet) and Flutter (PaywallScreen)
+          examples' event wiring. */}
+      <Modal
+        visible={activePaywall !== null}
+        animationType="slide"
+        onRequestClose={() => setActivePaywall(null)}
+      >
+        {activePaywall ? (
+          <SafeAreaView style={styles.safe}>
+            <RovenuePaywallView
+              paywall={activePaywall}
+              onPurchaseCompleted={(result) => {
+                appendLog(`paywall: onPurchaseCompleted: ${result.productId}`);
+                setActivePaywall(null);
+                run("refreshEntitlements", () => Rovenue.refreshEntitlements());
+              }}
+              onPurchaseFailed={(err) => {
+                const msg =
+                  err instanceof RovenueError
+                    ? `${err.constructor.name}: ${err.message}`
+                    : err instanceof Error
+                      ? err.message
+                      : String(err);
+                appendLog(`paywall: onPurchaseFailed: ${msg}`);
+              }}
+              onClose={() => {
+                appendLog("paywall: onClose");
+                setActivePaywall(null);
+              }}
+              onRestore={() => {
+                appendLog("paywall: onRestore");
+                onRestore();
+              }}
+              onUrl={(url) => appendLog(`paywall: onUrl: ${url}`)}
+            />
+          </SafeAreaView>
+        ) : null}
+      </Modal>
     </SafeAreaView>
   );
 }
