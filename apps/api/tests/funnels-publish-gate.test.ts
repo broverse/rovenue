@@ -144,7 +144,11 @@ describe("funnel publish paywall gate", () => {
     chargesEnabled.mockResolvedValue(false);
     const res = await publish();
     expect(res.status).toBe(400);
-    expect(JSON.stringify(await res.json())).toContain("STRIPE_NOT_CONNECTED");
+    const body = (await res.json()) as { error: { code: string } };
+    // The envelope's own error.code — not just a substring buried inside
+    // a JSON-stringified message — must be the specific code so clients
+    // can switch on it without parsing `message`.
+    expect(body.error.code).toBe("STRIPE_NOT_CONNECTED");
     expect(insertVersion).not.toHaveBeenCalled();
   });
 

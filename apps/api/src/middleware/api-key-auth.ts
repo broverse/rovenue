@@ -5,6 +5,7 @@ import {
   API_KEY_KIND,
   API_KEY_PREFIX,
   BEARER_SCHEME,
+  ERROR_CODE,
   HEADER,
   type ApiKeyKind,
 } from "@rovenue/shared";
@@ -119,18 +120,25 @@ export function apiKeyAuth(
   const middleware: MiddlewareHandler = async (c, next) => {
     const header = c.req.header(HEADER.AUTHORIZATION);
     if (!header || !header.toLowerCase().startsWith(BEARER_PREFIX_LOWER)) {
-      throw new HTTPException(401, { message: "Bearer token required" });
+      throw new HTTPException(401, {
+        message: "Bearer token required",
+        cause: ERROR_CODE.BEARER_REQUIRED,
+      });
     }
 
     const rawKey = header.slice(BEARER_PREFIX_LOWER.length).trim();
     const detected = detectKind(rawKey);
     if (!detected) {
-      throw new HTTPException(401, { message: "Invalid API key format" });
+      throw new HTTPException(401, {
+        message: "Invalid API key format",
+        cause: ERROR_CODE.INVALID_API_KEY_FORMAT,
+      });
     }
 
     if (required !== "any" && detected !== required) {
       throw new HTTPException(403, {
         message: `${required.toLowerCase()} API key required`,
+        cause: ERROR_CODE.API_KEY_KIND_MISMATCH,
       });
     }
 
@@ -142,7 +150,10 @@ export function apiKeyAuth(
     const now = new Date();
     const isExpired = record?.expiresAt != null && record.expiresAt < now;
     if (!record || record.revokedAt || isExpired) {
-      throw new HTTPException(401, { message: "Invalid or expired API key" });
+      throw new HTTPException(401, {
+        message: "Invalid or expired API key",
+        cause: ERROR_CODE.INVALID_API_KEY,
+      });
     }
 
     c.set("project", {

@@ -111,9 +111,9 @@ The final fallback in middleware/error.ts for any thrown value that is neither a
 
 **HTTP status:** `401`
 
-The status→code mapping's answer for any HTTPException(401, ...) whose `cause` isn't a recognized ERROR_CODE — which today is every 401 in the codebase, since none of the dedicated auth codes (BEARER_REQUIRED, INVALID_API_KEY, INVALID_API_KEY_FORMAT) are actually wired up. Covers a missing/malformed Authorization header and an unknown, revoked, or expired API key alike.
+The status→code mapping's answer for any HTTPException(401, ...) whose `cause` isn't a recognized ERROR_CODE. As of Task 5 (2026-09-06), the four `api-key-auth.ts` branches that used to fall through to this generic code now set their own `cause` (BEARER_REQUIRED, INVALID_API_KEY_FORMAT, INVALID_API_KEY), so this code no longer covers those. It remains the answer for any other 401 raised without a typed cause.
 
-**What to do:** Re-check the Authorization header is present as `Bearer <key>` and that the key itself is current in the dashboard (not revoked or expired). There is currently no way to tell these apart from the code alone — read `message` for which one it was.
+**What to do:** This is a generic 401 with no more specific code attached — read `message` for detail. If you expected BEARER_REQUIRED, INVALID_API_KEY_FORMAT or INVALID_API_KEY instead, check that you're hitting `apiKeyAuth`-guarded `/v1` routes; other 401 producers in the codebase have not been given typed causes.
 
 ---
 
@@ -121,9 +121,9 @@ The status→code mapping's answer for any HTTPException(401, ...) whose `cause`
 
 **HTTP status:** `403`
 
-The status→code mapping's answer for any HTTPException(403, ...) without a recognized `cause` — the authenticated caller is real but not allowed to do this. Producers include a public key used where a secret key is required (`requireSecretKey`), a public/secret key presented where the route demanded the other kind, and a dashboard user's role lacking the capability the route checks (`assertProjectCapability`/`assertProjectAccess`).
+The status→code mapping's answer for any HTTPException(403, ...) without a recognized `cause` — the authenticated caller is real but not allowed to do this. As of Task 5 (2026-09-06), `apiKeyAuth`'s own wrong-kind check now sets `cause: API_KEY_KIND_MISMATCH` instead of falling through here. This code still covers the separate route-level guards `requireSecretKey`/`requirePublicApiKey` (which run AFTER `apiKeyAuth` and have not been given a typed cause) and a dashboard user's role lacking the capability the route checks (`assertProjectCapability`/`assertProjectAccess`).
 
-**What to do:** For SDK callers: switch to a secret key for server-to-server endpoints (credit grants and similar) — never ship a secret key in a client app. For dashboard callers: the signed-in user's project role doesn't include the needed capability; ask a project owner to grant it.
+**What to do:** For SDK callers: switch to a secret key for server-to-server endpoints (credit grants and similar) — never ship a secret key in a client app. For dashboard callers: the signed-in user's project role doesn't include the needed capability; ask a project owner to grant it. If you expected API_KEY_KIND_MISMATCH instead, the rejection came from a route-level guard, not `apiKeyAuth`'s own kind check.
 
 ---
 
@@ -181,9 +181,9 @@ The project's monthly Rovi usage (message count or token count, whichever the ti
 
 **HTTP status:** `401`
 
-Named for 'the Authorization header is missing or not a Bearer token', which `middleware/api-key-auth.ts` does check for — but that check throws a bare `HTTPException(401, { message: 'Bearer token required' })` with no `cause`, so it resolves through the generic status mapping to UNAUTHORIZED on the wire, never to this code. No current call site sets `cause: ERROR_CODE.BEARER_REQUIRED`.
+The Authorization header is missing or not a Bearer token. `middleware/api-key-auth.ts`'s first check throws `HTTPException(401, { message: 'Bearer token required', cause: ERROR_CODE.BEARER_REQUIRED })`, so this is a distinct wire code from UNAUTHORIZED (as of Task 5, 2026-09-06).
 
-**What to do:** Do not match on this code today — a missing/malformed Authorization header currently arrives as the generic UNAUTHORIZED (401) instead. If you need to detect this specific case, inspect `message` for 'Bearer token required' until the middleware is updated to set the typed cause.
+**What to do:** Send the header as `Authorization: Bearer <key>` (public `rov_pub_...` or secret `rov_sec_...`). No key was presented at all, or it wasn't in Bearer scheme — nothing to rotate or look up in the dashboard yet.
 
 ---
 
@@ -191,9 +191,9 @@ Named for 'the Authorization header is missing or not a Bearer token', which `mi
 
 **HTTP status:** `401`
 
-Named for an API key that doesn't resolve to a live record — unknown, revoked, or expired. `api-key-auth.ts`'s actual check throws a bare `HTTPException(401, { message: 'Invalid or expired API key' })` with no `cause`, so this also resolves to the generic UNAUTHORIZED on the wire. No current call site produces this exact code.
+The presented API key doesn't resolve to a live record — unknown, revoked, or expired. `api-key-auth.ts`'s post-lookup check throws `HTTPException(401, { message: 'Invalid or expired API key', cause: ERROR_CODE.INVALID_API_KEY })` (as of Task 5, 2026-09-06) once the key has the right prefix and kind but fails the DB lookup or the revoked/expired check.
 
-**What to do:** Do not match on this code today — treat any UNAUTHORIZED (401) from a `/v1` route as covering this case, and inspect `message` if you need to distinguish it from a missing header. Rotate the key in the dashboard if it's genuinely invalid or expired.
+**What to do:** Rotate the key in the dashboard if it's genuinely invalid, revoked, or expired. If the key looks right, double-check it belongs to the project you think it does — a key for a different project also resolves to nothing here.
 
 ---
 
@@ -201,9 +201,9 @@ Named for an API key that doesn't resolve to a live record — unknown, revoked,
 
 **HTTP status:** `401`
 
-Named for a Bearer token that doesn't match either recognized key prefix (`rov_pub_`/`rov_sec_`, via `detectKind`). The actual check in `api-key-auth.ts` throws a bare `HTTPException(401, { message: 'Invalid API key format' })` with no `cause`, so it also resolves to the generic UNAUTHORIZED, never to this code.
+The Bearer token doesn't match either recognized key prefix (`rov_pub_`/`rov_sec_`, via `detectKind`). `api-key-auth.ts` throws `HTTPException(401, { message: 'Invalid API key format', cause: ERROR_CODE.INVALID_API_KEY_FORMAT })` (as of Task 5, 2026-09-06) before ever attempting a DB lookup.
 
-**What to do:** Do not match on this code today. Verify the key was copied in full and unmodified from the dashboard — a truncated or hand-edited key is the usual cause of a format mismatch, which currently surfaces as generic UNAUTHORIZED (401).
+**What to do:** Verify the key was copied in full and unmodified from the dashboard — a truncated or hand-edited key, or a credential from a different product, is the usual cause of a format mismatch.
 
 ---
 
@@ -211,9 +211,9 @@ Named for a Bearer token that doesn't match either recognized key prefix (`rov_p
 
 **HTTP status:** `403`
 
-Named for presenting a public key where a secret key is required, or vice versa. `api-key-auth.ts`'s `required !== detected` branch throws a bare `HTTPException(403, { message: '<kind> API key required' })` with no `cause`, so it resolves to the generic FORBIDDEN, never to this code; `requireSecretKey` follows the same pattern.
+A public key was presented where a secret key is required, or vice versa. `api-key-auth.ts`'s `required !== detected` branch throws `HTTPException(403, { message: '<kind> API key required', cause: ERROR_CODE.API_KEY_KIND_MISMATCH })` (as of Task 5, 2026-09-06). NOTE: the separate route-level guards `requireSecretKey`/`requirePublicApiKey` (which run after `apiKeyAuth`, for routes that share one middleware stack across both key kinds) have NOT been given a typed cause and still fall through to the generic FORBIDDEN — see that entry.
 
-**What to do:** Do not match on this code today — a wrong-kind key currently surfaces as generic FORBIDDEN (403). Read `message` for which kind was required, and use a secret key for server-to-server endpoints (never ship one in a client app) or a public key for SDK/client endpoints.
+**What to do:** Use a secret key for server-to-server endpoints (never ship one in a client app) or a public key for SDK/client endpoints. Read `message` for which kind this specific route required.
 
 ---
 
@@ -471,9 +471,9 @@ The API-wide global body-size ceiling (`app.ts`'s root `bodyLimit`) was exceeded
 
 **HTTP status:** `503`
 
-On `POST /v1/billing-portal` (the SDK-facing endpoint), the project has no active Stripe Connect account to open a portal session on. Note: the funnel-builder validation route and the public funnel-payment checkout route separately reject with the SAME string `STRIPE_NOT_CONNECTED`, but embedded inside a JSON-stringified `message` on a generic HTTPException — those do NOT set this as the envelope's actual `error.code` (they resolve to VALIDATION_ERROR/HTTP_ERROR on the wire), so don't expect this code from those two routes.
+The project has no active Stripe Connect account to charge or open a portal session on. Produced at three sites, each keeping its own pre-existing HTTP status: `POST /v1/billing-portal` (503, `lib/stripe-platform.ts`'s `StripeNotConnectedError` caught and re-thrown with `cause`), the dashboard funnel-publish paywall gate (`dashboard/funnels.ts`, 400), and the public funnel-payment `payment-intent` route (`public/funnel-payment.ts`, 409). As of Task 5 (2026-09-06) all three set `cause: ERROR_CODE.STRIPE_NOT_CONNECTED`, so `error.code` is this value from every one of them — the two funnel routes additionally still embed `{ code: 'STRIPE_NOT_CONNECTED' }` as a JSON-stringified `message` for backward compatibility, but a client no longer needs to parse that: read `error.code` directly.
 
-**What to do:** An operator must connect Stripe for this project (dashboard's Stripe Connect flow) before the billing portal can be used. For the funnel/checkout routes specifically, parse `message` as JSON to see the embedded `{ code: 'STRIPE_NOT_CONNECTED' }` instead of relying on `error.code`.
+**What to do:** An operator must connect Stripe for this project (dashboard's Stripe Connect flow) — and, for the funnel routes specifically, complete Stripe's own verification so `charges_enabled` is true — before the billing portal, a funnel can be published with a paywall page, or a funnel-payment checkout can proceed.
 
 ---
 

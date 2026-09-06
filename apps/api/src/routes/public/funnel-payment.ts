@@ -13,6 +13,7 @@ import {
   chargesEnabled,
   requireConnectedStripe,
 } from "../../lib/stripe-platform";
+import { ERROR_CODE } from "@rovenue/shared";
 import { resolvePricesForPackages } from "../../services/stripe/price-resolver";
 import { hasPaidOrAttachedACard } from "../../services/stripe/payment-settled";
 import {
@@ -733,6 +734,7 @@ export const funnelPaymentRoute = new Hono()
     if (!(await chargesEnabled(session.projectId))) {
       throw new HTTPException(409, {
         message: JSON.stringify({ code: "STRIPE_NOT_CONNECTED" }),
+        cause: ERROR_CODE.STRIPE_NOT_CONNECTED,
       });
     }
 

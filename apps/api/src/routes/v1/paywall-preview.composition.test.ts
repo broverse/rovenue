@@ -94,7 +94,12 @@ describe("app.ts mount order: paywallPreviewRoute composed with v1Route", () => 
 
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({
-      error: { code: "UNAUTHORIZED", message: "Bearer token required" },
+      // As of Task 5 (2026-09-06), the missing-Bearer branch in
+      // api-key-auth.ts sets a typed `cause`, so this is the specific
+      // BEARER_REQUIRED code rather than the generic UNAUTHORIZED
+      // fallback — the wildcard `/v1/*` auth still runs, it just now
+      // reports a more precise code for this failure mode.
+      error: { code: "BEARER_REQUIRED", message: "Bearer token required" },
     });
   });
 });

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { MemberRole, drizzle } from "@rovenue/db";
 import { pagesArraySchema, type Page } from "@rovenue/shared/funnel";
+import { ERROR_CODE } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
@@ -365,6 +366,7 @@ export const funnelsRoute = new Hono()
       if (!canCharge) {
         throw new HTTPException(400, {
           message: JSON.stringify({ code: "STRIPE_NOT_CONNECTED" }),
+          cause: ERROR_CODE.STRIPE_NOT_CONNECTED,
         });
       }
     }

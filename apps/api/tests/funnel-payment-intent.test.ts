@@ -322,7 +322,11 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
     chargesEnabled.mockResolvedValue(false);
     const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
     expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).toContain("STRIPE_NOT_CONNECTED");
+    const body = (await res.json()) as { error: { code: string } };
+    // The envelope's own error.code — not just a substring buried inside
+    // a JSON-stringified message — must be the specific code so clients
+    // can switch on it without parsing `message`.
+    expect(body.error.code).toBe("STRIPE_NOT_CONNECTED");
   });
 
   it("400s for a package that is not in the paywall's offering", async () => {
