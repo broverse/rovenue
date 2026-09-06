@@ -98,6 +98,17 @@ jobs:
       - name: OpenAPI spec is up to date
         run: pnpm --filter @rovenue/api openapi:check
 
+      # apps/docs/scripts/check-links.mjs validates every internal /docs/...
+      # link (route exists) and every #fragment on one (the anchor actually
+      # exists on the target page's rendered headings — same slugger fumadocs
+      # uses), including the API explorer's ERROR_CATALOG-driven links, which
+      # it cross-checks against the real generated api-errors page rather
+      # than trusting the anchor-computation convention to stay in sync by
+      # hand. Runs in well under a second; was written but never wired into
+      # CI until now, so nothing enforced it on a PR.
+      - name: Docs links + anchors are valid
+        run: pnpm --filter @rovenue/docs check:links
+
       # apps/api's `test` script is two passes: `vitest run` excludes the
       # testcontainer suites, then `VITEST_CONTAINER_PASS=1 vitest run` runs
       # them. The second pass starts its own Redpanda and ClickHouse; what it

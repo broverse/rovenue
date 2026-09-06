@@ -150,7 +150,15 @@ for (const file of mdxFiles) {
 
 const PATTERNS = [
   // Markdown link:  [text](/docs/...)  or  [text](#...)
-  /\[[^\]]*\]\((\/docs\/[^)\s"]+|#[^)\s"]+)\)/g,
+  //
+  // The label is matched lazily (`.*?`, not `[^\]]*`) so a label containing
+  // its own `]` — e.g. an array-type code span like
+  // `` [`PricingPhase[]`](#pricingphase) `` — doesn't truncate the match at
+  // that inner `]` and silently fail to find the real `](` boundary. A
+  // `[^\]]*` version of this regex missed exactly that shape (confirmed:
+  // it dropped one of five real broken `#pricinphase` links during
+  // development, undercounting by one).
+  /\[.*?\]\((\/docs\/[^)\s"]+|#[^)\s"]+)\)/g,
   // JSX href prop:  href="/docs/..."  or  href="#..."
   /href=['"](\/docs\/[^'"\s]+|#[^'"\s]+)['"]/g,
   // JSX to prop:    to="/docs/..."

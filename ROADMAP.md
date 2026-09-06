@@ -1254,13 +1254,32 @@ for whoever picks them up next.
       `ERROR_CODE` key. `apps/docs/scripts/check-links.mjs` now computes the real
       github-slugger anchors every page renders and validates both literal
       `#fragment` links and this one dynamic, wire-value-driven source against them —
-      proven by deliberately renaming a heading and watching the check fail by name, then
-      restoring it. Running it for the first time also caught 21 pre-existing broken
-      same-page/cross-page anchor links across `outbound-webhooks.mdx`, `singular.mdx`,
-      `methods.mdx`, and `types.mdx` (numbered-heading anchors that don't match their
-      unnumbered link text, a bolded pseudo-heading with no real anchor, and a
-      `FunnelClaimResult` type referenced nine times but never documented) — all fixed,
-      not just detected.
+      proven by deliberately renaming a heading and watching the check fail by name
+      (`pnpm --filter @rovenue/docs check:links` exits 1, naming both the page's own
+      broken self-link and the dynamic explorer link), then restoring it. It is now a
+      `.github/workflows/ci.yml` step ("Docs links + anchors are valid", next to
+      "OpenAPI spec is up to date") — it runs in well under a second, so shipping it
+      unwired was the one gap worth closing before this batch ended: the first real
+      defect this whole batch found (migration 0125's journal-timestamp bug) got as far
+      as it did because a test that would have caught it, `packages/db/tests/journal-
+      monotonic.test.ts`, already existed and nothing ran it. A guard nobody runs is
+      indistinguishable from no guard.
+
+      Running the check for the first time — reproducibly: `git checkout <pre-fix
+      commit> -- outbound-webhooks.mdx singular.mdx methods.mdx types.mdx` and re-run
+      `check-links.mjs` against that content — surfaced **22** pre-existing broken
+      same-page/cross-page anchor links across `outbound-webhooks.mdx` (4),
+      `singular.mdx` (1), `methods.mdx` (1 `#trackparams` + 11 `#funnelclaimresult`),
+      and `types.mdx` (5 `#pricinphase`). All 22 fixed, not just detected: numbered-
+      heading anchors that don't match their unnumbered link text, a bolded
+      pseudo-heading with no real anchor, a `FunnelClaimResult` type referenced 11 times
+      but never documented, and a `#pricinphase` → `#pricingphase` typo. The checker
+      itself first reported only 21 — its markdown-link regex used `[^\]]*` for the link
+      label, which truncates at the first `]` and silently fails to match a label
+      containing its own `]` (`` [`PricingPhase[]`](#pricinphase) ``, one of the five
+      `#pricinphase` occurrences), undercounting by exactly one. Fixed by switching to a
+      lazy `.*?` label match; re-verified against the same reverted content that the
+      count is 22, then re-verified clean (0) against the real, fixed content.
 - [x] Error-code catalog — shipped 2026-09-06: `packages/shared/src/error-catalog.ts`'s
       `ERROR_CATALOG` (one entry per code — wire value, HTTP status, summary, resolution)
       is typed as a TOTAL `Record<keyof typeof ERROR_CODE, ...>`, never `Partial` or an
