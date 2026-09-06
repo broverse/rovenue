@@ -420,3 +420,8 @@ pick a retention window and enforce it with whatever your storage layer
 already offers (S3/R2 lifecycle rules, a `find -mtime +90 -delete` cron
 line next to the backup one, etc.) rather than teaching `backup.sh` to
 delete its own output.
+
+The backup cadence you pick here is also what determines your disaster-
+recovery RPO — see the [operator handbook's DR section](./handbook.md#6-disaster-recovery--rpo-and-rto)
+for the arithmetic (this document takes no position on cadence beyond
+"quarterly, on a calendar" for the *test*-restore above).

@@ -5,7 +5,10 @@ from the repo root on the host.
 
 This document covers the **first install**. For moving an existing install
 to a new version, see [`upgrade.md`](./upgrade.md). For what's backed up
-and how to restore it, see [`backup-restore.md`](./backup-restore.md).
+and how to restore it, see [`backup-restore.md`](./backup-restore.md). For
+everything after day one — horizontal scaling, monitoring, capacity
+planning, connection pooling, disaster recovery and secret rotation — see
+the [self-host operator handbook](./handbook.md).
 
 ## 0. Prerequisites
 - Docker + Compose v2.

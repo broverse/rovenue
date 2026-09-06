@@ -4,7 +4,7 @@ Use before flipping `is_enabled=true` in production for any new Meta CAPI or Tik
 
 ## Pre-deployment environment check
 
-- [ ] `ENCRYPTION_KEY` is set and is the same value used to encrypt all other existing credentials (rotate-then-deploy is a separate runbook).
+- [ ] `ENCRYPTION_KEY` is set and is the same value used to encrypt all other existing credentials (rotate-then-deploy is a separate runbook — see [`docs/runbooks/secret-rotation.md`](../runbooks/secret-rotation.md)).
 - [ ] `KAFKA_BROKERS` resolves and the API process has reached its first heartbeat against Redpanda (`integrations-fanout` consumer group registered).
 - [ ] `REDIS_URL` reachable; `BullMQ` queues `rovenue-integrations-deliver` visible in the BullMQ UI.
 - [ ] Migration `0053_integrations_framework.sql` applied (verify via `pnpm db:migrate:status` or `SELECT * FROM drizzle.__drizzle_migrations ORDER BY id DESC LIMIT 5`).

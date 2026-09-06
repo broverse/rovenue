@@ -6,6 +6,10 @@ repo kökünden, sunucu üzerinde çalıştırılır.
 
 > Özet referans için ayrıca `docs/operations/deployment.md` (kısa runbook)
 > ve değişmez kurallar için `docs/architecture/outbox-dispatcher.md` dosyalarına bakın.
+> İlk kurulumdan sonrası (monitoring/alerting, kapasite planlama, connection
+> pooling, disaster recovery, secret rotation) için İngilizce
+> `docs/operations/handbook.md` dosyasına bakın — bu rehberin §11'i o
+> dosyanın §1'i ile senkron tutulur.
 
 ---
 
