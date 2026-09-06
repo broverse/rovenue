@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   dsarRequests,
@@ -158,9 +158,29 @@ export async function createDsarRequest(
 // The resulting threshold (240s) stays comfortably below the DSAR
 // queues' own cumulative BullMQ backoff window before the final retry
 // attempt (30s+60s+120s+240s = 450s, from
-// `DSAR_JOB_ATTEMPTS`/`DSAR_JOB_BACKOFF_MS` in apps/api/src/queues/dsar.ts),
-// so a genuinely wedged row still gets reclaimed by a retry before the
-// job's attempts are exhausted rather than staying wedged forever.
+// `DSAR_JOB_ATTEMPTS`/`DSAR_JOB_BACKOFF_MS` in apps/api/src/queues/dsar.ts).
+//
+// Correctness-of-reasoning note (roadmap-9a final fix wave, Finding 4):
+// that 450s comparison is NOT general cover for "a genuinely wedged row
+// gets reclaimed before BullMQ gives up" — it only protects ONE narrow
+// case. Both `runDsarExport` and `runDsarErasure` catch every ORDINARY
+// failure (a ClickHouse timeout, a storage error, either fail-closed
+// check) and resolve with `{ outcome: "failed" }` rather than throwing —
+// from BullMQ's point of view that job RESOLVED, so it is marked
+// succeeded and never retried, regardless of `DSAR_JOB_ATTEMPTS`. The
+// 450s window (and this constant's margin below it) only matters on the
+// DOUBLE fault this whole comment block is about: the ordinary failure is
+// caught, AND the catch block's own FAILED-transition write also throws,
+// so the throw escapes the worker function uncaught and the job's promise
+// genuinely rejects — only then does BullMQ retry, and only then does the
+// 240s-vs-450s margin do any work. An ordinary single-fault row is
+// instead left FAILED (terminal, no longer "open") and recovered a
+// different way entirely: the next `POST /v1/dsar/export` or `/erasure`
+// for that subject starts a brand-new request and job
+// (`findOpenDsarRequest` no longer returns the FAILED row) — this
+// constant plays no part in that path, and does nothing for a row that
+// never got a job enqueued in the first place (see routes/v1/dsar.ts's
+// own Finding-3 fix for that separate gap).
 
 /**
  * The TOTAL wait budget `purgeSubscriberFromClickHouseTables`
