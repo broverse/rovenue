@@ -33,7 +33,11 @@ vi.mock("../lib/clickhouse", () => ({
 import {
   purgeSubscriberFromClickHouseTables,
   DSAR_ERASURE_CLICKHOUSE_TABLES,
+  runDsarErasure,
+  type DsarErasureDeps,
 } from "./dsar-erasure";
+import { dsarErasureSkippedTotal, registry } from "../lib/metrics";
+import type { Db } from "@rovenue/db";
 
 // DSAR_ERASURE_CLICKHOUSE_TABLES in declaration order:
 //   raw_exposures, raw_revenue_events, raw_credit_ledger,
@@ -179,5 +183,143 @@ describe("purgeSubscriberFromClickHouseTables — shared total budget", () => {
     const assertion = expect(promise).rejects.toThrow(/did not finish within/i);
     await vi.advanceTimersByTimeAsync(2_000);
     await assertion;
+  });
+});
+
+// =============================================================
+// runDsarErasure — export-storage-unconfigured skip reason must not
+// depend on the thrown error's MESSAGE text (Minor 2, roadmap-9a
+// final-fix wave residual)
+// =============================================================
+//
+// Before this fix, the catch block in `runDsarErasure` chose the
+// `SKIP_REASON_EXPORT_STORAGE_UNCONFIGURED` metric label by running a
+// regex against the caught error's `message`. The two tests below name
+// the exact mutation that invited:
+//
+//   1. An UNRELATED failure (e.g. `anonymizeSubscriber` throwing for its
+//      own reasons) whose message merely happens to CONTAIN the phrase
+//      "export storage is not configured" must still be labelled
+//      "error", never misattributed to export storage. The old regex
+//      would have mislabelled this — a real risk given the conditional
+//      nature of the check (see `ExportStorageUnconfiguredError`'s doc
+//      comment in dsar-erasure.ts for why a bare predicate re-check,
+//      the sibling `isClickHouseConfigured()` shape, would ALSO get
+//      this wrong).
+//   2. The REAL export-storage-unconfigured failure (thrown by
+//      `purgeSubscriberExportArtifacts` internally) must still be
+//      labelled "export-storage-unconfigured" — the fix must not have
+//      broken the case it exists for.
+//
+// All deps are hand-built fakes — no BullMQ, no real Postgres/ClickHouse
+// — because this suite exercises the pure catch-block branching logic in
+// `runDsarErasure` itself, which `dsar-erasure.integration.test.ts`
+// already covers end to end against real infra.
+
+function fakeClaimedRow(
+  overrides: Partial<
+    NonNullable<Awaited<ReturnType<DsarErasureDeps["claimDsarRequest"]>>>
+  > = {},
+): NonNullable<Awaited<ReturnType<DsarErasureDeps["claimDsarRequest"]>>> {
+  return {
+    id: "dsar_req_1",
+    projectId: "proj_1",
+    subscriberId: "sub_1",
+    type: "ERASURE",
+    status: "RUNNING",
+    requestedBy: "support@customer.example",
+    artifactKey: null,
+    expiresAt: null,
+    error: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    completedAt: null,
+    ...overrides,
+  };
+}
+
+function baseErasureDeps(overrides: Partial<DsarErasureDeps> = {}): DsarErasureDeps {
+  return {
+    claimDsarRequest: vi.fn(async () => fakeClaimedRow()),
+    completeDsarRequest: vi.fn(async () => fakeClaimedRow({ status: "COMPLETED" })),
+    failDsarRequest: vi.fn(async () => fakeClaimedRow({ status: "FAILED" })),
+    anonymizeSubscriber: vi.fn(async () => ({
+      anonymousId: "anon_1",
+      deletedAt: new Date(),
+    })),
+    findCompletedExportArtifacts: vi.fn(async () => []),
+    deleteExportArtifact: vi.fn(async () => {}),
+    isExportStorageConfigured: vi.fn(() => true),
+    invalidateExportArtifacts: vi.fn(async () => {}),
+    isClickHouseConfigured: vi.fn(() => true),
+    purgeSubscriberFromClickHouse: vi.fn(async () => {}),
+    audit: vi.fn(async () => {}),
+    transaction: (fn) => fn({} as Db),
+    ...overrides,
+  };
+}
+
+describe("runDsarErasure — export-storage-unconfigured skip reason (not message-matched)", () => {
+  beforeEach(() => {
+    registry.resetMetrics();
+  });
+
+  async function skippedCount(reason: string): Promise<number> {
+    const metric = await dsarErasureSkippedTotal.get();
+    return metric.values.find((v) => v.labels.reason === reason)?.value ?? 0;
+  }
+
+  it("does not mislabel an unrelated failure whose message happens to contain the export-storage phrase", async () => {
+    const deps = baseErasureDeps({
+      anonymizeSubscriber: vi.fn(async () => {
+        throw new Error(
+          "anonymizeSubscriber blew up for an unrelated reason, but this message happens to say export storage is not configured too",
+        );
+      }),
+    });
+
+    const outcome = await runDsarErasure(
+      {
+        dsarRequestId: "dsar_req_1",
+        projectId: "proj_1",
+        subscriberId: "sub_1",
+        type: "ERASURE",
+      },
+      deps,
+    );
+
+    expect(outcome.outcome).toBe("failed");
+    // anonymizeSubscriber is the very first step inside the try block,
+    // before purgeSubscriberExportArtifacts — these must never run.
+    expect(deps.findCompletedExportArtifacts).not.toHaveBeenCalled();
+    expect(deps.isExportStorageConfigured).not.toHaveBeenCalled();
+
+    expect(await skippedCount("export-storage-unconfigured")).toBe(0);
+    expect(await skippedCount("error")).toBe(1);
+  });
+
+  it("still labels the real export-storage-unconfigured failure correctly", async () => {
+    const deps = baseErasureDeps({
+      findCompletedExportArtifacts: vi.fn(async () => [
+        { id: "dsar_req_export_1", artifactKey: "dsar-exports/sub_1/export_1.json" },
+      ]),
+      isExportStorageConfigured: vi.fn(() => false),
+    });
+
+    const outcome = await runDsarErasure(
+      {
+        dsarRequestId: "dsar_req_1",
+        projectId: "proj_1",
+        subscriberId: "sub_1",
+        type: "ERASURE",
+      },
+      deps,
+    );
+
+    expect(outcome.outcome).toBe("failed");
+    expect(deps.deleteExportArtifact).not.toHaveBeenCalled();
+
+    expect(await skippedCount("export-storage-unconfigured")).toBe(1);
+    expect(await skippedCount("error")).toBe(0);
   });
 });

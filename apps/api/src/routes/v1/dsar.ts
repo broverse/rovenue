@@ -123,12 +123,21 @@ function serializeDsarRequest(request: DsarRequestRow) {
  * finds no job with this id yet — because the row's own FIRST enqueue
  * attempt never actually reached Redis — and creates it for the first
  * time, or it finds the job it already added and returns that job
- * unchanged. There is no THIRD case where this id could refer to a
- * stale, already-REMOVED job from an earlier run of this row: a row this
- * function is ever called for is, by construction, still open
- * (PENDING/RUNNING — see both call sites below), and a job is only ever
- * removed once its row has gone terminal (COMPLETED/FAILED,
- * `removeOnComplete`/`removeOnFail` in queues/dsar.ts). Verified by test:
+ * unchanged. A row this function is called for is, by construction,
+ * still open (PENDING/RUNNING — see both call sites below); ordinarily
+ * that means a job is only removed once its row has gone terminal
+ * (COMPLETED/FAILED, `removeOnComplete`/`removeOnFail` in
+ * queues/dsar.ts) — but those are AGE-based sweeps, not synchronous with
+ * the row's own status, so that is not an absolute guarantee. A job that
+ * exhausts its BullMQ attempts on the double-fault path (the run itself
+ * failed, AND the transaction that would have written the row to FAILED
+ * also failed) can leave this row RUNNING while BullMQ has already
+ * marked that SAME job terminal and later swept it — a stale,
+ * already-removed job under a row that is still open. That case is
+ * still safe, though, not a third code path to worry about: it just
+ * collapses into the FIRST branch above (no job with this id, so BullMQ
+ * creates one fresh), the identical outcome to a row whose first
+ * enqueue attempt never reached Redis. Verified by test:
  * queues/dsar.integration.test.ts's "re-enqueuing an existing jobId"
  * case, against real Redis.
  */

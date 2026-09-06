@@ -241,6 +241,29 @@ const SKIP_REASON_CLICKHOUSE_UNCONFIGURED = "clickhouse-unconfigured";
 const SKIP_REASON_EXPORT_STORAGE_UNCONFIGURED = "export-storage-unconfigured";
 const SKIP_REASON_ERROR = "error";
 
+/**
+ * Thrown ONLY by `purgeSubscriberExportArtifacts` when it finds at least
+ * one export artifact to purge but export storage is unconfigured. The
+ * catch block in `runDsarErasure` below matches this with `instanceof`
+ * to choose `SKIP_REASON_EXPORT_STORAGE_UNCONFIGURED`, never by
+ * pattern-matching the thrown message: a message match would silently
+ * degrade to `SKIP_REASON_ERROR` the moment anyone edited this class's
+ * message text.
+ *
+ * A bare `deps.isExportStorageConfigured()` re-check in the catch block
+ * — the sibling `isClickHouseConfigured()` pattern just above — would
+ * NOT be correct here, unlike for ClickHouse: `isClickHouseConfigured()`
+ * is checked unconditionally at the very top of this function, before
+ * any other step runs, so re-reading it in the catch always reflects
+ * why THIS run failed. `isExportStorageConfigured()` is checked only
+ * conditionally, inside `purgeSubscriberExportArtifacts`, and only when
+ * that function finds at least one artifact to purge — so a bare
+ * re-check could be false (storage genuinely unconfigured) while some
+ * unrelated step (e.g. `anonymizeSubscriber`) is what actually threw.
+ * A typed error tied to the one throw site avoids that false positive.
+ */
+class ExportStorageUnconfiguredError extends Error {}
+
 // The worker has no dashboard session to attribute audit rows or the
 // underlying `anonymizeSubscriber` write to — mirrors dsar-export.ts's
 // `SYSTEM_ACTOR`.
@@ -427,7 +450,7 @@ async function purgeSubscriberExportArtifacts(
   if (artifacts.length === 0) return;
 
   if (!deps.isExportStorageConfigured()) {
-    throw new Error(
+    throw new ExportStorageUnconfiguredError(
       "DSAR export storage is not configured — refusing to complete erasure while a prior export artifact for this subscriber may still be downloadable",
     );
   }
@@ -600,15 +623,14 @@ export async function runDsarErasure(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const isClickHouseUnconfigured = !deps.isClickHouseConfigured();
-    // Matched on the exact message `purgeSubscriberExportArtifacts` throws
-    // (our own text, not a third party's) rather than re-checking
-    // `isExportStorageConfigured()` here — that flag being false does not
-    // by itself prove THIS run's failure came from the export-artifact
-    // step, since it could equally be false while some other step (e.g.
-    // `anonymizeSubscriber`) threw for an unrelated reason.
-    const isExportStorageUnconfigured = /export storage is not configured/i.test(
-      message,
-    );
+    // Matched by type (`ExportStorageUnconfiguredError`, thrown only by
+    // `purgeSubscriberExportArtifacts`) rather than re-checking
+    // `isExportStorageConfigured()` here — see that class's doc comment
+    // for why a bare predicate re-check would be wrong for this one
+    // (unlike the `isClickHouseConfigured()` sibling above) — and rather
+    // than matching the thrown message, which would silently degrade to
+    // `SKIP_REASON_ERROR` if the message text ever changed.
+    const isExportStorageUnconfigured = err instanceof ExportStorageUnconfiguredError;
 
     await deps.transaction(async (tx) => {
       await deps.failDsarRequest(tx, dsarRequestId, message);
