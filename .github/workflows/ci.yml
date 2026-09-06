@@ -109,6 +109,13 @@ jobs:
       - name: Docs links + anchors are valid
         run: pnpm --filter @rovenue/docs check:links
 
+      # scripts/sdk-doc-coverage.mjs measures documented-public-symbol
+      # density per SDK and fails if any SDK regresses below the floor
+      # recorded in scripts/sdk-doc-coverage.json. Was written but never
+      # wired into CI until now — same class of gap as the check above.
+      - name: SDK doc-coverage ratchet
+        run: node scripts/sdk-doc-coverage.mjs
+
       # apps/api's `test` script is two passes: `vitest run` excludes the
       # testcontainer suites, then `VITEST_CONTAINER_PASS=1 vitest run` runs
       # them. The second pass starts its own Redpanda and ClickHouse; what it
