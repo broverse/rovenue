@@ -100,6 +100,8 @@ On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants a
           print("Identity changed — re-read current user")
         case .virtualCurrenciesChanged:
           print("Virtual-currency balances changed — re-read balances")
+        case .remoteConfigChanged:
+          print("Remote config changed — re-read values")
         }
       }
     }
@@ -118,6 +120,7 @@ On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants a
           ChangeEvent.ENTITLEMENTS_CHANGED       -> println("Entitlements updated")
           ChangeEvent.IDENTITY_CHANGED           -> println("Identity changed")
           ChangeEvent.VIRTUAL_CURRENCIES_CHANGED -> println("Virtual-currency balances changed")
+          ChangeEvent.REMOTE_CONFIG_CHANGED      -> println("Remote config changed")
         }
       }
     }
@@ -227,6 +230,9 @@ A `ChangeEvent` is a signal to re-read — the event itself does not carry the n
         case .virtualCurrenciesChanged:
           let balances = await Rovenue.shared.virtualCurrencyBalances()
           print("New balances:", balances)
+        case .remoteConfigChanged:
+          let config = await Rovenue.shared.remoteConfigAllJSON()
+          print("Remote config:", config)
         }
       }
     }
@@ -248,6 +254,10 @@ A `ChangeEvent` is a signal to re-read — the event itself does not carry the n
           ChangeEvent.VIRTUAL_CURRENCIES_CHANGED -> {
             val balances = Rovenue.shared.virtualCurrencyBalances()
             println("New balances: $balances")
+          }
+          ChangeEvent.REMOTE_CONFIG_CHANGED -> {
+            val config = Rovenue.shared.remoteConfigAllJson()
+            println("Remote config: $config")
           }
         }
       }
