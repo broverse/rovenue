@@ -79,4 +79,5 @@ packages/sdk-web/dist/
 # Dokka HTML (packages/sdk-kotlin/build/) are already covered by the
 # /target/ and per-package .build/ / build/ rules above.
 packages/sdk-rn/docs/
+packages/sdk-web/docs/
 packages/sdk-flutter/rovenue_flutter/doc/

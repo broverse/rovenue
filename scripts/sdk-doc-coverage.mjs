@@ -2,11 +2,11 @@
 /* global process, console */
 // sdk-doc-coverage.mjs
 //
-// Measures documented-public-symbol density per SDK, across the five
+// Measures documented-public-symbol density per SDK, across the six
 // language surfaces a generated reference site (rustdoc / DocC / Dokka /
-// TypeDoc / dartdoc) would actually publish, then enforces a ratchet
-// against scripts/sdk-doc-coverage.json: coverage may never regress below
-// the recorded floor for an SDK.
+// TypeDoc for sdk-rn AND sdk-web / dartdoc) would actually publish, then
+// enforces a ratchet against scripts/sdk-doc-coverage.json: coverage may
+// never regress below the recorded floor for an SDK.
 //
 // Usage:
 //   node scripts/sdk-doc-coverage.mjs            # measure + enforce floors
@@ -761,6 +761,142 @@ function hasDartDocAbove(lines, idx) {
 }
 
 // ---------------------------------------------------------------------
+// Web (sdk-web)
+// ---------------------------------------------------------------------
+//
+// Scope: everything reachable from the package's three published entry
+// points (packages/sdk-web/package.json's "exports" map — ".", "./react",
+// "./paywall"): src/index.ts, src/react/index.ts, src/paywall/index.tsx —
+// direct/type re-exports plus declarations made directly in an entry file,
+// resolved back to their original declaration site (same reachability rule
+// as sdk-rn, generalized to three entry files instead of one).
+//
+// UNLIKE sdk-rn (whose public surface is a handful of standalone
+// functions/types plus one `Rovenue` object literal), sdk-web's surface is
+// almost entirely `interface`-shaped — `Rovenue`, `HttpClient`, `Identity`,
+// `SdkStorage`, `EventQueue`, `EntitlementCache`, the hook state interfaces,
+// etc. TypeDoc renders each interface member as its own documentable row,
+// so — matching how the Rust/Swift/Kotlin/Flutter measurers above already
+// expand struct/class members rather than treating the type as one opaque
+// unit — every member (method or property signature) of every reachable
+// exported interface is counted individually; a function/class/const/type
+// alias/enum still counts as one symbol (there is no member list to expand).
+// Excludes: *.test.ts(x), bundle-size.test.ts.
+
+const WEB_ENTRY_POINTS = [
+  "packages/sdk-web/src/index.ts",
+  "packages/sdk-web/src/react/index.ts",
+  "packages/sdk-web/src/paywall/index.tsx",
+];
+
+function measureWeb() {
+  const webRoot = path.join(ROOT, "packages/sdk-web/src");
+  const srcFiles = walk(webRoot, {
+    extensions: [".ts", ".tsx"],
+    exclude: [".test.ts", ".test.tsx", "__tests__"],
+  });
+
+  const fileLines = new Map();
+  for (const file of srcFiles) fileLines.set(file, readLines(file));
+
+  // name -> { file, lineIdx, kind } for every top-level exported
+  // declaration across the package (function/const/class/interface/type/enum).
+  const declByName = new Map();
+  for (const file of srcFiles) {
+    const lines = fileLines.get(file);
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].trim();
+      const m = t.match(
+        /^export\s+(?:default\s+)?(?:declare\s+)?(?:async\s+)?(function|const|class|interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
+      );
+      if (m && !declByName.has(m[2])) {
+        declByName.set(m[2], { file, lineIdx: i, kind: m[1] });
+      }
+    }
+  }
+
+  // Names reachable from the three entry points: local declarations made
+  // directly IN an entry file, plus `export { A, B } from "./x"` /
+  // `export type { A, B } from "./x"` re-exports out of one.
+  const reachable = new Set();
+  for (const entryRel of WEB_ENTRY_POINTS) {
+    const entryFile = path.join(ROOT, entryRel);
+    if (!existsSync(entryFile)) continue;
+    const src = readFileSync(entryFile, "utf8");
+
+    for (const m of src.matchAll(/export\s*(?:type)?\s*\{([^}]*)\}\s*(?:from\s*["'][^"']+["'])?;/g)) {
+      for (const part of m[1].split(",")) {
+        const name = part
+          .trim()
+          .replace(/^type\s+/, "")
+          .split(/\s+as\s+/)[0]
+          .trim();
+        if (name) reachable.add(name);
+      }
+    }
+    for (const m of src.matchAll(
+      /^export\s+(?:default\s+)?(?:declare\s+)?(?:async\s+)?(?:function|const|class|interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm,
+    )) {
+      reachable.add(m[1]);
+    }
+  }
+
+  let total = 0;
+  let documented = 0;
+  const undocumentedSamples = [];
+
+  for (const name of reachable) {
+    const decl = declByName.get(name);
+    if (!decl) continue; // re-exported name whose declaration site wasn't found (none observed today)
+    const { file, lineIdx, kind } = decl;
+    const lines = fileLines.get(file);
+
+    if (kind === "interface") {
+      // Expand direct members only (one brace-depth inside the interface
+      // body) — a nested inline object type inside a method signature
+      // (e.g. `recordExposure(input: { ... }): Promise<void>` in the
+      // Rovenue interface) sits one level deeper and must NOT be counted
+      // as sibling members of the interface itself.
+      let depth = 0;
+      let interfaceDepth = null;
+      for (let i = lineIdx; i < lines.length; i++) {
+        const code = stripLineCommentAndStrings(lines[i]);
+        if (i === lineIdx) {
+          depth += (code.match(/\{/g) || []).length - (code.match(/\}/g) || []).length;
+          interfaceDepth = depth;
+          continue;
+        }
+        if (depth === interfaceDepth) {
+          const trimmed = lines[i].trim();
+          const memberMatch = trimmed.match(/^(?:readonly\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\??\s*(\(|:)/);
+          if (memberMatch) {
+            total++;
+            if (hasTSDocAbove(lines, i)) {
+              documented++;
+            } else if (undocumentedSamples.length < 20) {
+              undocumentedSamples.push(`${path.relative(ROOT, file)}:${i + 1}: ${name}.${memberMatch[1]}`);
+            }
+          }
+        }
+        const opens = (code.match(/\{/g) || []).length;
+        const closes = (code.match(/\}/g) || []).length;
+        depth += opens - closes;
+        if (depth < interfaceDepth) break; // closed the interface body
+      }
+    } else {
+      total++;
+      if (hasTSDocAbove(lines, lineIdx)) {
+        documented++;
+      } else if (undocumentedSamples.length < 20) {
+        undocumentedSamples.push(`${path.relative(ROOT, file)}:${lineIdx + 1}: ${name}`);
+      }
+    }
+  }
+
+  return { sdk: "sdk-web", total, documented, undocumentedSamples };
+}
+
+// ---------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------
 
@@ -775,7 +911,14 @@ function pct(documented, total) {
 function main() {
   const asJson = process.argv.includes("--json");
 
-  const results = [measureRust(), measureSwift(), measureKotlin(), measureRN(), measureFlutter()];
+  const results = [
+    measureRust(),
+    measureSwift(),
+    measureKotlin(),
+    measureRN(),
+    measureFlutter(),
+    measureWeb(),
+  ];
   const floors = loadFloors();
 
   const report = results.map((r) => {

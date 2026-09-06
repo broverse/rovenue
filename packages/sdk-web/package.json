@@ -25,12 +25,14 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run --minWorkers=1 --maxWorkers=2"
+    "test": "vitest run --minWorkers=1 --maxWorkers=2",
+    "docs": "typedoc"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^2.2.2"
   },
   "devDependencies": {
+    "typedoc": "^0.28.20",
     "typescript": "^5.4.0",
     "vitest": "^3.2.6",
     "@testing-library/react": "^16.1.0",

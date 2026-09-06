@@ -1,0 +1,10 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts", "src/react/index.ts", "src/paywall/index.tsx"],
+  "out": "docs/api",
+  "name": "Rovenue Web SDK",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "githubPages": false
+}

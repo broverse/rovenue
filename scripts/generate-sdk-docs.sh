@@ -7,21 +7,21 @@ set -uo pipefail
 
 # generate-sdk-docs.sh — per-SDK API reference generation (ROADMAP §11).
 #
-# Runs whatever doc toolchain is present on this machine for each of the five
+# Runs whatever doc toolchain is present on this machine for each of the six
 # SDKs (core-rs/rustdoc, sdk-swift/DocC, sdk-kotlin/Dokka, sdk-rn/TypeDoc,
-# sdk-flutter/dartdoc) and a root orchestrator (this script, `pnpm
-# docs:sdk-ref`). The contract, deliberately:
+# sdk-flutter/dartdoc, sdk-web/TypeDoc) and a root orchestrator (this script,
+# `pnpm docs:sdk-ref`). The contract, deliberately:
 #
 #   - A MISSING toolchain is a SKIP, not a failure — this script must still
-#     exit 0 on a machine that only has some of the five installed.
+#     exit 0 on a machine that only has some of the six installed.
 #   - A PRESENT toolchain that fails to generate, or generates a suspiciously
 #     empty archive, is a hard FAILURE — silently accepting an empty output
 #     directory is exactly the bug this repo already shipped once (a
 #     simulator slice labelled as a device slice, in code nothing ever
 #     built). So every generator is verified on file COUNT, not exit code.
 #
-# Usage: ./scripts/generate-sdk-docs.sh [rustdoc|docc|dokka|typedoc|dartdoc ...]
-#   With no arguments, runs all five.
+# Usage: ./scripts/generate-sdk-docs.sh [rustdoc|docc|dokka|typedoc|typedoc-web|dartdoc ...]
+#   With no arguments, runs all six.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -45,6 +45,10 @@ MIN_FILES_DOCC=500
 MIN_FILES_DOKKA=100
 MIN_FILES_TYPEDOC=20
 MIN_FILES_DARTDOC=50
+# sdk-web's public surface is the smallest of the six (three thin entry
+# points, no native purchase surface) — 35 files measured when this was
+# written, well above a broken/near-empty run's handful of scaffold files.
+MIN_FILES_TYPEDOC_WEB=15
 
 FAILED=0
 RAN=0
@@ -209,9 +213,32 @@ run_dartdoc() {
     fi
 }
 
+run_typedoc_web() {
+    echo "→ TypeDoc (sdk-web)"
+    if ! command -v node >/dev/null 2>&1; then
+        echo "  ⊘ skipping: node not found"
+        SKIPPED=$((SKIPPED + 1))
+        return 0
+    fi
+    RAN=$((RAN + 1))
+    local WEB_DIR="$ROOT/packages/sdk-web"
+    local td_out="$WEB_DIR/docs/api"
+    rm -rf "$td_out"
+    if ! (cd "$WEB_DIR" && npx typedoc >/tmp/rovenue-typedoc-web.log 2>&1); then
+        echo "  ✗ typedoc failed:" >&2
+        tail -60 /tmp/rovenue-typedoc-web.log >&2
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+    if ! assert_min_files "TypeDoc (sdk-web)" "$td_out" "$MIN_FILES_TYPEDOC_WEB"; then
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+}
+
 TARGETS=("$@")
 if [ "${#TARGETS[@]}" -eq 0 ]; then
-    TARGETS=(rustdoc docc dokka typedoc dartdoc)
+    TARGETS=(rustdoc docc dokka typedoc typedoc-web dartdoc)
 fi
 
 for t in "${TARGETS[@]}"; do
@@ -220,9 +247,10 @@ for t in "${TARGETS[@]}"; do
         docc) run_docc ;;
         dokka) run_dokka ;;
         typedoc) run_typedoc ;;
+        typedoc-web) run_typedoc_web ;;
         dartdoc) run_dartdoc ;;
         *)
-            echo "unknown target: $t (expected one of rustdoc docc dokka typedoc dartdoc)" >&2
+            echo "unknown target: $t (expected one of rustdoc docc dokka typedoc typedoc-web dartdoc)" >&2
             exit 2
             ;;
     esac

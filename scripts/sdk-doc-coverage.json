@@ -28,5 +28,11 @@
     "measuredAt": "2026-09-06",
     "documented": 55,
     "total": 64
+  },
+  "sdk-web": {
+    "floor": 38.8,
+    "measuredAt": "2026-09-06",
+    "documented": 26,
+    "total": 67
   }
 }
