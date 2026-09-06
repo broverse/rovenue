@@ -106,7 +106,7 @@ decided for the experiments routes and why. A dead-ended subscriber being assign
 to an experiment is a different question from one being written to, and you should
 answer it deliberately rather than by omission.
 
-- [ ] **Step 1: Write the failing regression test**
+- [x] **Step 1: Write the failing regression test**
 
 Create `apps/api/src/routes/v1/me.dead-ended.test.ts`:
 
@@ -135,7 +135,7 @@ describe("POST /v1/me/attributes on an erased subscriber", () => {
 
 Fill each comment with real code.
 
-- [ ] **Step 2: Run it and watch the first test fail**
+- [x] **Step 2: Run it and watch the first test fail**
 
 ```bash
 cd apps/api && nice -n 19 npx vitest run src/routes/v1/me.dead-ended.test.ts --maxWorkers=2
@@ -143,9 +143,9 @@ cd apps/api && nice -n 19 npx vitest run src/routes/v1/me.dead-ended.test.ts --m
 
 Expected: the first test FAILS against current code. Report the exact message. If it passes, STOP — the bug is not where the plan says it is.
 
-- [ ] **Step 3: Surface `deadEnded` and refuse the write**
+- [x] **Step 3: Surface `deadEnded` and refuse the write**
 
-- [ ] **Step 4: Run it green, then re-run the neighbours**
+- [x] **Step 4: Run it green, then re-run the neighbours**
 
 ```bash
 cd apps/api && nice -n 19 npx vitest run src/routes/v1/me.dead-ended.test.ts --maxWorkers=2
@@ -153,7 +153,7 @@ cd apps/api && nice -n 19 npx vitest run src/routes/v1/experiments.test.ts src/m
 nice -n 19 npx tsc --noEmit -p apps/api
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Message:
 
@@ -198,7 +198,7 @@ value rather than interpolating between neighbours. `packages/db/tests/journal-m
 is the guard; run it. Verify the migration applies on an upgrade-path database, not
 only a fresh one.
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 Create `packages/db/src/drizzle/repositories/dsar-requests.integration.test.ts`. Read `retention-overrides.integration.test.ts` in the same directory first and match how it obtains a handle, seeds and cleans up.
 
@@ -230,7 +230,7 @@ describe("dsar requests", () => {
 
 Fill each comment with real code.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 ```bash
 export DATABASE_URL="postgresql://rovenue:rovenue@localhost:5433/rovenue"
@@ -239,9 +239,9 @@ cd packages/db && nice -n 19 npx vitest run src/drizzle/repositories/dsar-reques
 
 Expected: FAIL — relation does not exist.
 
-- [ ] **Step 3: Implement schema, migration and repository**
+- [x] **Step 3: Implement schema, migration and repository**
 
-- [ ] **Step 4: Run green, verify the journal and the upgrade path**
+- [x] **Step 4: Run green, verify the journal and the upgrade path**
 
 ```bash
 cd packages/db && nice -n 19 npx vitest run src/drizzle/repositories/dsar-requests.integration.test.ts tests/journal-monotonic.test.ts --maxWorkers=2
@@ -250,7 +250,7 @@ nice -n 19 npx tsc --noEmit -p packages/db
 
 Report the `when` you ended up with and the upgrade-path `max(created_at)` before and after.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(gdpr): a durable record for subject-access requests
@@ -289,7 +289,7 @@ receipts shares one across `/apple` and `/google`.
 is not `COMPLETED`, whose `expiresAt` has passed, or whose `artifactKey` is null.
 Stream from the import bucket; never return a URL.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/api/src/routes/v1/dsar.test.ts`:
 
@@ -330,7 +330,7 @@ describe("DSAR routes", () => {
 
 Fill each comment with real code.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 ```bash
 cd apps/api && nice -n 19 npx vitest run src/routes/v1/dsar.test.ts --maxWorkers=2
@@ -338,9 +338,9 @@ cd apps/api && nice -n 19 npx vitest run src/routes/v1/dsar.test.ts --maxWorkers
 
 Expected: FAIL — routes not found.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
-- [ ] **Step 4: Run green**
+- [x] **Step 4: Run green**
 
 ```bash
 cd apps/api && nice -n 19 npx vitest run src/routes/v1/dsar.test.ts --maxWorkers=2
@@ -349,7 +349,7 @@ nice -n 19 npx tsc --noEmit -p apps/api
 
 Red-check the authorisation: make the route read `projectId` from the body instead of from the resolved subscriber, confirm the foreign-project test fails, restore. Report what you saw.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(gdpr): self-service DSAR endpoints
@@ -383,7 +383,7 @@ Every state change is audited.
 clear error rather than pretending to succeed. A customer who was told their export
 was ready and finds nothing has been misinformed about a legal obligation.
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 ```ts
 describe("runDsarExport", () => {
@@ -406,15 +406,15 @@ describe("runDsarExport", () => {
 
 Fill each comment with real code.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
-- [ ] **Step 4: Run green plus `tsc`**
+- [x] **Step 4: Run green plus `tsc`**
 
 Red-check: move the storage write after the COMPLETED update, confirm the ordering test fails, restore.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(gdpr): asynchronous DSAR export worker
@@ -454,7 +454,7 @@ it is evidence of a promise that was not kept.
 1's guarantee, verified end to end through the real erasure path — if Task 1 ever
 regresses, this is what catches it.
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 ```ts
 describe("runDsarErasure", () => {
@@ -479,13 +479,13 @@ describe("runDsarErasure", () => {
 
 Fill each comment with real code.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
-- [ ] **Step 4: Run green plus `tsc`**
+- [x] **Step 4: Run green plus `tsc`**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(gdpr): erasure purges analytics, not just Postgres
@@ -516,15 +516,15 @@ which is what makes the ledger's append-only guarantee possible); erasure DOES n
 purge the analytics tables, but not any copy the customer has exported themselves;
 and an export is a point-in-time snapshot, not a subscription.
 
-- [ ] **Step 1: Write the page**
+- [x] **Step 1: Write the page**
 
 Register it in `meta.json`'s `pages` array — a page missing from that array is unreachable with no error. Keep every brace inside a fenced code block; a bare double-brace in MDX prose breaks the static prerender. Read `apps/docs/content/docs/guides/retention-policies.mdx` and `audit-proof.mdx` and match their conventions.
 
-- [ ] **Step 2: Tick the ROADMAP checkbox**
+- [x] **Step 2: Tick the ROADMAP checkbox**
 
 `ROADMAP.md`, the FIRST bullet under `## 9. GDPR / KVKK tooling` — "Self-service DSAR API". With Tasks 1–5 done and §9.2 and §9.3 already ticked, this closes the section: update the section's score line too. Do not claim coverage the tests do not have.
 
-- [ ] **Step 3: Build the docs and commit**
+- [x] **Step 3: Build the docs and commit**
 
 ```bash
 nice -n 19 pnpm --filter @rovenue/docs build
