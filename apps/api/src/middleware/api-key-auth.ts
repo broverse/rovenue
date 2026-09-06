@@ -147,3 +147,21 @@ export const requireSecretKey: MiddlewareHandler = async (c, next) => {
   }
   await next();
 };
+
+/**
+ * Route-level guard that runs after `apiKeyAuth` and enforces that the
+ * authenticated caller presented a PUBLIC key. Used for SDK-facing
+ * endpoints (e.g. /v1/events, /v1/sdk/sessions) that are mounted under
+ * /v1 alongside secret-key routes and must reject secret keys.
+ *
+ * A single shared export (rather than an independently-declared closure
+ * per route file) so a route walk can detect this guard by reference
+ * equality, the same way `requireSecretKey` already is.
+ */
+export const requirePublicApiKey: MiddlewareHandler = async (c, next) => {
+  const project = c.get("project");
+  if (project?.keyKind !== API_KEY_KIND.PUBLIC) {
+    throw new HTTPException(403, { message: "Public API key required" });
+  }
+  await next();
+};

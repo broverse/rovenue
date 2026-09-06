@@ -1,11 +1,11 @@
 import { Hono } from "hono";
-import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { drizzle } from "@rovenue/db";
-import { API_KEY_KIND, REVENUE_EVENT_KEY_PREFIX } from "@rovenue/shared";
+import { REVENUE_EVENT_KEY_PREFIX } from "@rovenue/shared";
 import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscriber";
+import { requirePublicApiKey } from "../../middleware/api-key-auth";
 
 // =============================================================
 // POST /v1/events — public ingest with identityContext forwarding
@@ -17,7 +17,8 @@ import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscribe
 //
 // Authentication: PUBLIC API key (rov_pub_*). The route is mounted
 // under /v1 which runs `apiKeyAuth("any")` globally; we enforce
-// public-only via `requirePublicApiKey` below.
+// public-only via the shared `requirePublicApiKey` guard
+// (middleware/api-key-auth.ts).
 //
 // Aggregate type mapping:
 //   "revenue.*" prefix → REVENUE_EVENT
@@ -26,21 +27,6 @@ import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscribe
 // The raw validated body is stored as the outbox payload without
 // re-wrapping so downstream consumers (processFanoutMessage) can
 // read payload.identityContext directly.
-
-// =============================================================
-// Route-level guard — public key only
-// =============================================================
-
-const requirePublicApiKey: import("hono").MiddlewareHandler = async (
-  c,
-  next,
-) => {
-  const project = c.get("project");
-  if (project?.keyKind !== API_KEY_KIND.PUBLIC) {
-    throw new HTTPException(403, { message: "Public API key required" });
-  }
-  await next();
-};
 
 // =============================================================
 // Zod schemas

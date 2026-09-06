@@ -2,11 +2,10 @@ import { Hono } from "hono";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { API_KEY_KIND } from "@rovenue/shared";
-import { HTTPException } from "hono/http-exception";
 import { resolveOrCreateSubscriber } from "../../lib/resolve-or-create-subscriber";
 import { assertTopic, getProducer } from "../../lib/kafka";
 import { logger } from "../../lib/logger";
+import { requirePublicApiKey } from "../../middleware/api-key-auth";
 
 // =============================================================
 // POST /v1/sdk/sessions — Refund Shield telemetry ingest
@@ -33,8 +32,8 @@ import { logger } from "../../lib/logger";
 //
 // Authentication: PUBLIC API key (rov_pub_*). The route is
 // mounted under /v1 which already runs `apiKeyAuth("any")` — we
-// enforce public-only via the same `requirePublicApiKey` guard
-// pattern used by /v1/events.
+// enforce public-only via the shared `requirePublicApiKey` guard
+// (middleware/api-key-auth.ts), the same one used by /v1/events.
 //
 // Queue envelope (matches CH migration 0009 columns):
 //   { eventId, aggregateId, eventType, payload }
@@ -83,17 +82,6 @@ function sessionEventId(
     .digest("hex")
     .slice(0, 32);
 }
-
-const requirePublicApiKey: import("hono").MiddlewareHandler = async (
-  c,
-  next,
-) => {
-  const project = c.get("project");
-  if (project?.keyKind !== API_KEY_KIND.PUBLIC) {
-    throw new HTTPException(403, { message: "Public API key required" });
-  }
-  await next();
-};
 
 const sessionEventSchema = z.object({
   type: z.enum(["open", "background", "close"]),
