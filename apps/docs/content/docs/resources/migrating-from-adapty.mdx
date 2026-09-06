@@ -34,10 +34,10 @@ const pkg = offerings.current?.packages[0];
 if (pkg) {
   try {
     const result = await Rovenue.purchase(pkg);
+    if (result.isDeferred) { /* Ask-to-Buy / deferred — not an error, wait for it to resolve */ }
     // result.entitlements / result.virtualCurrencies are already up to date
   } catch (e) {
-    if (e instanceof PurchaseCancelledError) { /* user dismissed — ignore */ }
-    else if (e instanceof PurchasePendingError) { /* Ask-to-Buy / deferred */ }
+    if (e instanceof RovenueError && e.kind === 'PurchaseCanceled') { /* user dismissed — ignore */ }
     else throw e;
   }
 }

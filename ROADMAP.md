@@ -1098,8 +1098,11 @@ for whoever picks them up next.
       types on the iOS/Android/RN platform pages (`.purchaseCancelled`/`.purchasePending` etc. —
       none of those names exist in any SDK; the real shape is one error type with an `ErrorKind`),
       a `debug: boolean` config field that was removed when logging moved to `logLevel` but still
-      documented on five platform pages plus the `methods.mdx`/`types.mdx` reference (all now
-      fixed), Android `configure()` examples missing `context` (so purchases would fail with
+      documented on five platform pages plus the `methods.mdx`/`types.mdx` reference (that
+      enumeration was itself incomplete — `guides/configuring.mdx`'s RN and Swift samples and
+      `getting-started/quickstart.mdx`'s `RovenueConfig` type block and prose also carried it;
+      missed by this pass, caught and fixed only in the branch's final review), Android
+      `configure()` examples missing `context` (so purchases would fail with
       `STORE_PROBLEM` while `configure()` itself appeared to succeed), and a Flutter change-listener
       example that called `refreshEntitlements()` from inside `onChange` — the exact re-emit
       infinite-loop footgun the SDK's own doc comment warns against.

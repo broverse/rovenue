@@ -19,7 +19,7 @@ If you have not installed the SDK yet, start with [Installation](/docs/getting-s
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
   baseUrl?: string;    // API endpoint — defaults to https://api.rovenue.io
-  debug?: boolean;
+  logLevel?: 'off' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   appVersion?: string;
 };
 
@@ -132,7 +132,7 @@ Call `configure()` before any other SDK method — in your app entry point, befo
 Call `configure()` once at app startup, before any other Rovenue call. Calling it again later is supported — it replaces the shared instance — but calling any *other* method before the first `configure()` has run is a programming error to fix at the call site, not something to catch: on iOS it's a hard crash, and on Android it throws a plain (non-`RovenueException`) `IllegalStateException`. See [Calling the SDK before configure()](/docs/reference/errors#calling-the-sdk-before-configure) for the full per-platform breakdown.
 </Callout>
 
-See [Configuring](/docs/guides/configuring) for all `RovenueConfig` options, including `debug`, `appVersion`, and self-hosted `baseUrl` values.
+See [Configuring](/docs/guides/configuring) for all `RovenueConfig` options, including `logLevel`, `appVersion`, and self-hosted `baseUrl` values.
 </Step>
 
 <Step>
@@ -212,11 +212,7 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts title="PaywallScreen.tsx"
-    import {
-      Rovenue,
-      PurchaseCancelledError,
-      PurchasePendingError,
-    } from '@rovenue/react-native-sdk';
+    import { Rovenue, RovenueError } from '@rovenue/react-native-sdk';
 
     async function handlePurchase() {
       // 1. Fetch the current offering (cached; network-refreshed in background)
@@ -228,13 +224,16 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
         // 2. Launch native purchase sheet; resolves after server validation
         const result = await Rovenue.purchase(pkg);
 
+        if (result.isDeferred) {
+          // Ask-to-Buy / deferred payment — not an error; inform the user to wait
+          return;
+        }
+
         console.log('Entitlements:', result.entitlements);
         console.log('Virtual currencies:', result.virtualCurrencies);
       } catch (e) {
-        if (e instanceof PurchaseCancelledError) {
+        if (e instanceof RovenueError && e.kind === 'PurchaseCanceled') {
           // User dismissed the sheet — not an error; do nothing
-        } else if (e instanceof PurchasePendingError) {
-          // Ask-to-Buy / deferred payment — inform the user to wait
         } else {
           throw e;
         }
@@ -258,14 +257,20 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
         // 2. Launch native purchase sheet; resolves after server validation
         let result = try await Rovenue.shared.purchase(pkg)
 
+        if result.isDeferred {
+          // Ask-to-Buy / deferred — not an error; inform user
+          return
+        }
+
         print("Entitlements:", result.entitlements)
         print("Virtual currencies:", result.virtualCurrencies)
-      } catch Rovenue.Error.purchaseCancelled {
-        // User dismissed — not an error
-      } catch Rovenue.Error.purchasePending {
-        // Ask-to-Buy / deferred — inform user
-      } catch {
-        throw error
+      } catch let e as RovenueError {
+        switch e.kind {
+        case .purchaseCanceled:
+          break // User dismissed — not an error
+        default:
+          throw e
+        }
       }
     }
 
@@ -277,8 +282,8 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
     ```kotlin title="PaywallViewModel.kt"
     import android.app.Activity
     import dev.rovenue.sdk.Rovenue
-    import dev.rovenue.sdk.PurchaseCancelledException
-    import dev.rovenue.sdk.PurchasePendingException
+    import dev.rovenue.sdk.RovenueException
+    import dev.rovenue.sdk.ErrorKind
 
     // `activity` is your current Activity — Play Billing requires it.
     suspend fun handlePurchase(activity: Activity) {
@@ -290,12 +295,18 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
         // 2. Launch native purchase sheet; resolves after server validation
         val result = Rovenue.shared.purchase(activity, pkg)
 
+        if (result.isDeferred) {
+          // Deferred payment — not an error; inform user
+          return
+        }
+
         println("Entitlements: ${result.entitlements}")
         println("Virtual currencies: ${result.virtualCurrencies}")
-      } catch (e: PurchaseCancelledException) {
-        // User dismissed — not an error
-      } catch (e: PurchasePendingException) {
-        // Deferred payment — inform user
+      } catch (e: RovenueException) {
+        when (e.kind) {
+          ErrorKind.PURCHASE_CANCELED -> { /* User dismissed — not an error */ }
+          else -> throw e
+        }
       }
     }
 

@@ -20,20 +20,22 @@ In React Native you rarely need the imperative listener directly — the hooks (
 ```ts
 // React Native — string union
 type ChangeEvent =
-  | 'EntitlementsChanged'
-  | 'IdentityChanged'
-  | 'VirtualCurrenciesChanged';
+  | 'ENTITLEMENTS_CHANGED'
+  | 'IDENTITY_CHANGED'
+  | 'VIRTUAL_CURRENCIES_CHANGED'
+  | 'REMOTE_CONFIG_CHANGED';
 ```
 
-On **Swift** the change stream is `AsyncStream<ChangeEvent>` and the cases are `.entitlementsChanged`, `.identityChanged`, `.virtualCurrenciesChanged`.
+On **Swift** the change stream is `AsyncStream<ChangeEvent>` and the cases are `.entitlementsChanged`, `.identityChanged`, `.virtualCurrenciesChanged`, `.remoteConfigChanged`.
 
-On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants are `ChangeEvent.ENTITLEMENTS_CHANGED`, `ChangeEvent.IDENTITY_CHANGED`, `ChangeEvent.VIRTUAL_CURRENCIES_CHANGED`.
+On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants are `ChangeEvent.ENTITLEMENTS_CHANGED`, `ChangeEvent.IDENTITY_CHANGED`, `ChangeEvent.VIRTUAL_CURRENCIES_CHANGED`, `ChangeEvent.REMOTE_CONFIG_CHANGED`.
 
 | Event value | When it fires |
 |-------------|--------------|
-| `EntitlementsChanged` | After the entitlement cache is refreshed — e.g. after a purchase, `refreshEntitlements()`, or a foreground sync. |
-| `IdentityChanged` | After `identify()` succeeds or `logOut()` resets the user. |
-| `VirtualCurrenciesChanged` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
+| `ENTITLEMENTS_CHANGED` | After the entitlement cache is refreshed — e.g. after a purchase, `refreshEntitlements()`, or a foreground sync. |
+| `IDENTITY_CHANGED` | After `identify()` succeeds or `logOut()` resets the user. |
+| `VIRTUAL_CURRENCIES_CHANGED` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
+| `REMOTE_CONFIG_CHANGED` | After the remote-config cache is refreshed — e.g. after `refreshRemoteConfig()` or a foreground sync. |
 
 ---
 
@@ -50,14 +52,17 @@ On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants a
     // addChangeListener returns an unsubscribe function — call it to clean up
     const unsub = Rovenue.addChangeListener((event) => {
       switch (event) {
-        case 'EntitlementsChanged':
+        case 'ENTITLEMENTS_CHANGED':
           console.log('Entitlements updated — re-check access');
           break;
-        case 'IdentityChanged':
+        case 'IDENTITY_CHANGED':
           console.log('Identity changed — re-read current user');
           break;
-        case 'VirtualCurrenciesChanged':
+        case 'VIRTUAL_CURRENCIES_CHANGED':
           console.log('Virtual-currency balances changed — re-read balances');
+          break;
+        case 'REMOTE_CONFIG_CHANGED':
+          console.log('Remote config changed — re-read values');
           break;
       }
     });
@@ -75,7 +80,7 @@ On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants a
     } from '@rovenue/react-native-sdk';
 
     function ProBadge() {
-      const pro = useEntitlement('pro'); // re-renders on EntitlementsChanged
+      const pro = useEntitlement('pro'); // re-renders on ENTITLEMENTS_CHANGED
       return pro?.isActive ? <Crown /> : null;
     }
     ```
@@ -184,19 +189,24 @@ A `ChangeEvent` is a signal to re-read — the event itself does not carry the n
 
     const unsub = Rovenue.addChangeListener(async (event) => {
       switch (event) {
-        case 'EntitlementsChanged': {
+        case 'ENTITLEMENTS_CHANGED': {
           const all = await Rovenue.entitlementsAll();
           console.log('Active entitlements:', all.filter(e => e.isActive));
           break;
         }
-        case 'IdentityChanged': {
+        case 'IDENTITY_CHANGED': {
           const user = await Rovenue.currentUser();
           console.log('Current user:', user.rovenueId, user.appUserId);
           break;
         }
-        case 'VirtualCurrenciesChanged': {
+        case 'VIRTUAL_CURRENCIES_CHANGED': {
           const balances = Rovenue.virtualCurrencies();
           console.log('New balances:', balances);
+          break;
+        }
+        case 'REMOTE_CONFIG_CHANGED': {
+          const config = await Rovenue.getRemoteConfig();
+          console.log('Remote config:', config);
           break;
         }
       }

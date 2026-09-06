@@ -54,10 +54,11 @@ type StoreProduct = {
 type ProductType = 'subscription' | 'consumable' | 'non_consumable';
 
 type PurchaseResult = {
-  entitlements: Entitlement[];              // verified entitlements after the purchase
+  entitlements: Entitlement[];              // verified entitlements after the purchase; empty when isDeferred
   virtualCurrencies: Record<string, number>; // updated virtual-currency balances (code → amount)
   productId: string;                        // store product ID that was purchased
-  storeTransactionId: string;               // store-issued transaction identifier
+  storeTransactionId: string;               // store-issued transaction identifier; empty when isDeferred
+  isDeferred: boolean;                      // true when pending external approval (Ask-to-Buy) — not an error
 };
 ```
 
@@ -67,7 +68,7 @@ type PurchaseResult = {
 | `Offering` | `identifier`, `packages` | A named group of packages configured in the dashboard. |
 | `Package` | `identifier`, `product` | A purchasable unit wrapping a `StoreProduct`. |
 | `StoreProduct` | `type`, `priceString`, `price` | Live pricing data from the store; localised automatically. |
-| `PurchaseResult` | `entitlements`, `virtualCurrencies` | Returned after server-validated purchase. |
+| `PurchaseResult` | `entitlements`, `virtualCurrencies`, `isDeferred` | Returned after server-validated purchase. |
 
 > See [Types](/docs/reference/types) for the full `Entitlement` shape included in `PurchaseResult`.
 
@@ -187,17 +188,18 @@ unlocks) or adds credits (consumables). Both product types go through the same
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    import {
-      Rovenue,
-      RovenueError,
-      PurchaseCancelledError,
-      PurchasePendingError,
-      StoreProblemError,
-    } from '@rovenue/react-native-sdk';
+    import { Rovenue, RovenueError } from '@rovenue/react-native-sdk';
 
     async function handlePurchase(pkg) {
       try {
         const result = await Rovenue.purchase(pkg);
+
+        if (result.isDeferred) {
+          // Ask-to-Buy / parental controls — not an error. Wait for
+          // 'ENTITLEMENTS_CHANGED' via addChangeListener before granting entitlements.
+          showPendingMessage();
+          return;
+        }
 
         // result.entitlements — verified, up-to-date array
         // result.virtualCurrencies — updated balances (for currency-pack products)
@@ -206,20 +208,21 @@ unlocks) or adds credits (consumables). Both product types go through the same
 
         navigateToSuccess();
       } catch (e) {
-        if (e instanceof PurchaseCancelledError) {
-          // User dismissed the store sheet — no action needed
-        } else if (e instanceof PurchasePendingError) {
-          // Ask-to-Buy / deferred payment — show a "waiting for approval" message
-          // The SDK will emit EntitlementsChanged when it resolves
-          showPendingMessage();
-        } else if (e instanceof RovenueError && e.kind === 'ProductNotAvailable') {
-          // Product ID not available in this store environment
-          showError('This product is not available. Please try again later.');
-        } else if (e instanceof StoreProblemError) {
-          // Unexpected StoreKit / Play Billing error
-          showError('Store error. Please try again.');
-        } else {
-          throw e; // unexpected — re-throw
+        if (!(e instanceof RovenueError)) throw e; // not an SDK error — re-throw
+        switch (e.kind) {
+          case 'PurchaseCanceled':
+            // User dismissed the store sheet — no action needed
+            break;
+          case 'ProductNotAvailable':
+            // Product ID not available in this store environment
+            showError('This product is not available. Please try again later.');
+            break;
+          case 'StoreProblem':
+            // Unexpected StoreKit / Play Billing error
+            showError('Store error. Please try again.');
+            break;
+          default:
+            throw e; // unexpected — re-throw
         }
       }
     }
@@ -231,21 +234,29 @@ unlocks) or adds credits (consumables). Both product types go through the same
       do {
         let result = try await Rovenue.shared.purchase(pkg)
 
+        if result.isDeferred {
+          // Ask-to-Buy / deferred — inform the user and wait for a change event
+          showPendingMessage()
+          return
+        }
+
         // result.entitlements — verified, up-to-date array
         // result.virtualCurrencies — updated balances (for currency-pack products)
         print("Purchase succeeded: \(result.productId)")
         print("Transaction ID: \(result.storeTransactionId)")
 
         navigateToSuccess()
-      } catch Rovenue.Error.purchaseCancelled {
-        // User dismissed the store sheet — no action needed
-      } catch Rovenue.Error.purchasePending {
-        // Ask-to-Buy / deferred — inform the user and wait for a change event
-        showPendingMessage()
-      } catch Rovenue.Error.productNotAvailable {
-        showError("This product is not available. Please try again later.")
-      } catch Rovenue.Error.storeProblem {
-        showError("Store error. Please try again.")
+      } catch let e as RovenueError {
+        switch e.kind {
+        case .purchaseCanceled:
+          break // User dismissed the store sheet — no action needed
+        case .productNotAvailable:
+          showError("This product is not available. Please try again later.")
+        case .storeProblem:
+          showError("Store error. Please try again.")
+        default:
+          throw e
+        }
       }
     }
     ```
@@ -257,21 +268,25 @@ unlocks) or adds credits (consumables). Both product types go through the same
       try {
         val result = Rovenue.shared.purchase(activity, pkg)
 
+        if (result.isDeferred) {
+          // Deferred payment — inform the user and wait for a change event
+          showPendingMessage()
+          return
+        }
+
         // result.entitlements — verified, up-to-date list
         // result.virtualCurrencies — updated balances (for currency-pack products)
         println("Purchase succeeded: ${result.productId}")
         println("Transaction ID: ${result.storeTransactionId}")
 
         navigateToSuccess()
-      } catch (e: PurchaseCancelledException) {
-        // User dismissed the store sheet — no action needed
-      } catch (e: PurchasePendingException) {
-        // Deferred payment — inform the user and wait for a change event
-        showPendingMessage()
-      } catch (e: ProductNotAvailableException) {
-        showError("This product is not available. Please try again later.")
-      } catch (e: StoreProblemException) {
-        showError("Store error. Please try again.")
+      } catch (e: RovenueException) {
+        when (e.kind) {
+          ErrorKind.PURCHASE_CANCELED -> { /* User dismissed the store sheet — no action needed */ }
+          ErrorKind.PRODUCT_NOT_AVAILABLE -> showError("This product is not available. Please try again later.")
+          ErrorKind.STORE_PROBLEM -> showError("Store error. Please try again.")
+          else -> throw e
+        }
       }
     }
     ```
@@ -281,10 +296,10 @@ unlocks) or adds credits (consumables). Both product types go through the same
 <Callout type="warn">
 **Errors to handle explicitly**
 
-- `PurchaseCancelledError` — the user dismissed the store sheet. Safe to ignore; do not show an error.
-- `PurchasePendingError` — Ask-to-Buy (iOS) or a pending Play Billing transaction. Show a "waiting for approval" message and listen for an `EntitlementsChanged` event via `addChangeListener`.
-- `RovenueError` with `kind === 'ProductNotAvailable'` — the product ID is not available in this store environment. Check your dashboard configuration.
-- `StoreProblemError` — an unexpected StoreKit / Play Billing error. Retry or surface to the user.
+- `RovenueError`/`RovenueException` with `kind === 'PurchaseCanceled'` — the user dismissed the store sheet. Safe to ignore; do not show an error.
+- `result.isDeferred` (not an error) — Ask-to-Buy (iOS) or a pending Play Billing transaction. Show a "waiting for approval" message and listen for an `ENTITLEMENTS_CHANGED` event via `addChangeListener`.
+- `kind === 'ProductNotAvailable'` — the product ID is not available in this store environment. Check your dashboard configuration.
+- `kind === 'StoreProblem'` — an unexpected StoreKit / Play Billing error. Retry or surface to the user.
 
 See [Errors](/docs/reference/errors) for the full error reference.
 </Callout>
@@ -335,7 +350,7 @@ devices.
 </Tabs>
 
 <Callout type="info">
-On completion, the SDK emits an `EntitlementsChanged` change event with the
+On completion, the SDK emits an `ENTITLEMENTS_CHANGED` change event with the
 refreshed entitlement state. If you have a listener attached via
 `addChangeListener`, it fires automatically — you do not need to poll. See
 [Reacting to changes](/docs/guides/reacting-to-changes).

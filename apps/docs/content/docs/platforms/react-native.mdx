@@ -357,7 +357,7 @@ import { Rovenue } from '@rovenue/react-native-sdk';
 
 useEffect(() => {
   const unsub = Rovenue.addChangeListener((event) => {
-    // event: 'EntitlementsChanged' | 'IdentityChanged' | 'VirtualCurrenciesChanged'
+    // event: 'ENTITLEMENTS_CHANGED' | 'IDENTITY_CHANGED' | 'VIRTUAL_CURRENCIES_CHANGED' | 'REMOTE_CONFIG_CHANGED'
     console.log('Rovenue change:', event);
   });
 

@@ -28,7 +28,7 @@ on iOS, or `Application.onCreate()` on Android — to make this impossible to ge
 type RovenueConfig = {
   apiKey: string;       // your public SDK key (prefix rov_pub_)
   baseUrl?: string;     // optional — defaults to https://api.rovenue.io
-  debug?: boolean;      // verbose logging; default false
+  logLevel?: 'off' | 'error' | 'warn' | 'info' | 'debug' | 'trace'; // default 'warn'
   appVersion?: string;  // overrides the platform manifest value
 };
 ```
@@ -37,7 +37,7 @@ type RovenueConfig = {
 |-------|------|----------|-------------|
 | `apiKey` | `string` | Yes | Your **public** SDK key (`rov_pub_…`). Never use the secret key in the app. |
 | `baseUrl` | `string` | No | Your Rovenue API base URL. Defaults to the hosted endpoint `https://api.rovenue.io`; override only when self-hosting. |
-| `debug` | `boolean` | No | When `true`, routes verbose logs to your log handler. Default `false`. |
+| `logLevel` | `'off' \| 'error' \| 'warn' \| 'info' \| 'debug' \| 'trace'` | No | Verbosity of SDK logs. Defaults to `'warn'` — turn up to `'info'`/`'debug'` locally, never ship `'debug'`/`'trace'` in production. |
 | `appVersion` | `string` | No | App version string. Auto-read from the platform manifest — only override for standalone JVM builds. |
 
 > Swift and Kotlin mirror these with platform-idiomatic parameter labels. See [Types](/docs/reference/types).
@@ -74,7 +74,7 @@ Kotlin) at the very first line of your app's lifecycle hook.
 
     Rovenue.configure({
       apiKey: 'rov_pub_...',
-      debug: true,       // optional — enables verbose logging in dev
+      logLevel: 'info',  // optional — turn up from the 'warn' default in dev
       appVersion: '1.2', // optional — inferred from app.json by default
     });
     ```
@@ -86,7 +86,7 @@ Kotlin) at the very first line of your app's lifecycle hook.
     // AppDelegate.application(_:didFinishLaunchingWithOptions:)
     Rovenue.configure(
       apiKey: "rov_pub_...",
-      debug: true,        // optional
+      logLevel: .info,     // optional — turn up from the .warn default
       appVersion: "1.2"   // optional — inferred from CFBundleShortVersionString
     )
     ```
@@ -98,7 +98,7 @@ Kotlin) at the very first line of your app's lifecycle hook.
     // Application.onCreate()
     Rovenue.configure(
       apiKey = "rov_pub_...",
-      debug = true,        // optional
+      logLevel = LogLevel.INFO, // optional — turn up from the LogLevel.WARN default
       appVersion = "1.2",  // optional — inferred from versionName
     )
     ```
