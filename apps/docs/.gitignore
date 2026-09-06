@@ -11,3 +11,8 @@
 # each toolchain, or locally via `pnpm docs:sdk-ref`, and placed here before
 # `docker build`/`react-router build` — never committed.
 /public/api/
+
+# Copy of apps/api/openapi/openapi.json, refreshed by `generate:openapi`
+# (scripts/copy-openapi.mjs) on every `dev`/`build` — never committed, so a
+# stale copy can't ship: see scripts/copy-openapi.mjs for why.
+/public/openapi.json

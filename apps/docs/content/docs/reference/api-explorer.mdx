@@ -1,0 +1,24 @@
+---
+title: API Explorer
+description: Browse every /v1 endpoint against apps/api/openapi/openapi.json and try requests against your own deployment.
+---
+
+import { ApiExplorer } from '@/components/api-explorer';
+
+This page renders [`apps/api/openapi/openapi.json`](/openapi.json) — the OpenAPI 3.1 document covering the 33
+canonical `/v1` endpoints — as a browsable reference with a "try it" panel. It runs entirely in your browser: this
+docs site ships as static files with no server behind it, so nothing here proxies your requests or sees your API key.
+
+Rovenue is self-hosted, so there's no shared host to point this at. Enter your own deployment's base URL below, plus
+a public or secret API key, and expand any endpoint to see its parameters, request body, and responses — or send a
+real request and inspect what comes back.
+
+<ApiExplorer />
+
+## If the interactive parts don't load
+
+Every endpoint's panel also has a copyable `curl` command built from the same base URL and key you entered — that
+works from a terminal regardless of CORS, JavaScript, or browser extensions. For error codes without the explorer,
+see [API Errors](/docs/reference/api-errors); for the raw document, see [`/openapi.json`](/openapi.json) or the
+committed [`apps/api/openapi/openapi.json`](https://github.com/rovenue/rovenue/blob/main/apps/api/openapi/openapi.json)
+in the repository.

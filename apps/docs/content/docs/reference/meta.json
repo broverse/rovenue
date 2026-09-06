@@ -1,5 +1,5 @@
 {
   "title": "Reference",
   "icon": "Code",
-  "pages": ["sdk-reference", "methods", "types", "errors", "api-errors"]
+  "pages": ["sdk-reference", "methods", "types", "errors", "api-errors", "api-explorer"]
 }

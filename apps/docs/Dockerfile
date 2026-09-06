@@ -30,6 +30,16 @@ COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/docs ./apps/docs
 
+# The API explorer (apps/docs/app/components/api-explorer.tsx) fetches a
+# static copy of apps/api/openapi/openapi.json at runtime, refreshed at
+# build time by `pnpm --filter @rovenue/docs generate:openapi` (part of the
+# `build` script below) — see scripts/copy-openapi.mjs. apps/api's own
+# package.json was already copied above (for `pnpm install`'s workspace
+# resolution), but not its source, so the openapi/ directory has to be
+# copied explicitly here or the docs build fails loudly with a missing-file
+# error rather than silently shipping a stale or absent spec.
+COPY apps/api/openapi ./apps/api/openapi
+
 # The six SDK API references (rustdoc/DocC/Dokka/TypeDoc x2/dartdoc) can't be
 # generated here — DocC needs macOS+Xcode, Dokka needs a JVM, none of which
 # exist in this Linux builder stage. They're generated per-SDK on a runner
