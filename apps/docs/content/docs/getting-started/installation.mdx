@@ -268,7 +268,7 @@ After `configure()`, call `getVersion()` to confirm the SDK is wired correctly. 
   </Tab>
 </Tabs>
 
-If `configure()` was skipped or ran after this code, this step will not fail gracefully: on iOS it crashes outright (the console/crash log shows `"Rovenue: must call Rovenue.configure(apiKey:baseUrl:) before accessing shared"` just before the process terminates), and on Android it throws an uncaught `IllegalStateException` with the same message. Neither is a catchable "NotConfigured" error — see [Calling the SDK before configure()](/docs/reference/errors#calling-the-sdk-before-configure). If you hit either, double-check `configure()` actually ran first — see [App lifecycle](/docs/guides/app-lifecycle) for the correct startup order.
+If `configure()` was skipped or ran after this code, this step will not fail gracefully: on iOS it crashes outright (the console/crash log shows `"Rovenue: must call Rovenue.configure(apiKey:baseUrl:) before accessing shared"` just before the process terminates), and on Android it throws an uncaught `IllegalStateException` carrying the same intent, worded for Kotlin's call syntax (`"Rovenue: must call Rovenue.configure(apiKey, baseUrl) before accessing shared"`). Neither is a catchable "NotConfigured" error — see [Calling the SDK before configure()](/docs/reference/errors#calling-the-sdk-before-configure). If you hit either, double-check `configure()` actually ran first — see [App lifecycle](/docs/guides/app-lifecycle) for the correct startup order.
 </Step>
 </Steps>
 

@@ -27,7 +27,7 @@ Initialise the SDK. Call this **once at app startup**, before any other Rovenue 
 
 **Returns** — `void`
 
-**Throws** — [`InvalidApiKeyError`](/docs/reference/errors#error-table) if the key format is invalid at call time (a malformed prefix). The key is not validated against the server until the first network request.
+**Throws** — [`InvalidApiKey`](/docs/reference/errors#error-table) if the key format is invalid at call time (a malformed prefix). The key is not validated against the server until the first network request.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -83,7 +83,7 @@ Initialise the SDK. Call this **once at app startup**, before any other Rovenue 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
 | `currentUser` | `currentUser()` | [`User`](/docs/reference/types#user) | — |
-| `identify` | `identify(appUserId)` | `void` | [`InvalidArgumentError`](/docs/reference/errors#error-table) |
+| `identify` | `identify(appUserId)` | `void` | [`InvalidArgument`](/docs/reference/errors#error-table) |
 | `logOut` | `logOut()` | `void` | — |
 
 ---
@@ -147,7 +147,7 @@ Bind a backend user ID to the current install. Rovenue attaches the `appUserId` 
 
 **Returns** — `void`
 
-**Throws** — [`InvalidArgumentError`](/docs/reference/errors#error-table) if `appUserId` is empty or blank.
+**Throws** — [`InvalidArgument`](/docs/reference/errors#error-table) if `appUserId` is empty or blank.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -172,7 +172,7 @@ Bind a backend user ID to the current install. Rovenue attaches the `appUserId` 
 Use **opaque, unguessable** IDs — never an email address or username. Because `identify()` can transfer purchases between installs, a guessable ID is an account-takeover surface. See the [Identifying users guide](/docs/guides/identifying-users) for the recommended token-based flow.
 </Callout>
 
-**Errors:** [`InvalidArgumentError`](/docs/reference/errors#error-table)
+**Errors:** [`InvalidArgument`](/docs/reference/errors#error-table)
 
 ---
 
@@ -216,7 +216,7 @@ Mint a fresh anonymous `rovenueId`, clear `appUserId`, and drop all scope-bound 
 |--------|---------------|---------|--------|
 | `entitlement` | `entitlement(id)` | [`Entitlement`](/docs/reference/types#entitlement) `\| null` | — |
 | `entitlementsAll` | `entitlementsAll()` | [`Entitlement[]`](/docs/reference/types#entitlement) | — |
-| `refreshEntitlements` | `refreshEntitlements()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `refreshEntitlements` | `refreshEntitlements()` | `void` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
 
 `entitlement()` and `entitlementsAll()` are **synchronous cache reads** — instant, no network. The cache is populated on configure and kept current by the [change stream](#change-stream). Call `refreshEntitlements()` to force a server round-trip (e.g. after a server-side grant).
 
@@ -312,13 +312,13 @@ Return every cached entitlement for the current user.
 
 ### `refreshEntitlements`
 
-Force a server round-trip to refresh the entitlement cache. Fires a [`EntitlementsChanged`](/docs/reference/types#changeevent) change event when the cache is updated.
+Force a server round-trip to refresh the entitlement cache. Fires an entitlements-changed [`ChangeEvent`](/docs/reference/types#changeevent) (RN: `'ENTITLEMENTS_CHANGED'`; Swift: `.entitlementsChanged`; Kotlin: `ChangeEvent.ENTITLEMENTS_CHANGED`) when the cache is updated.
 
 **Params** — none
 
 **Returns** — `void`
 
-**Throws** — [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -339,7 +339,7 @@ Force a server round-trip to refresh the entitlement cache. Fires a [`Entitlemen
   </Tab>
 </Tabs>
 
-**Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+**Errors:** [`NetworkUnavailable`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
 
 **See also:** [Entitlements guide](/docs/guides/entitlements)
 
@@ -353,7 +353,7 @@ Force a server round-trip to refresh the entitlement cache. Fires a [`Entitlemen
 |--------|---------------|---------|--------|
 | `virtualCurrencies` | `virtualCurrencies()` | `Promise<Record<string, number>>` | — |
 | `virtualCurrency` | `virtualCurrency(code)` | `Promise<number>` | — |
-| `refreshVirtualCurrencies` | `refreshVirtualCurrencies()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `refreshVirtualCurrencies` | `refreshVirtualCurrencies()` | `void` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
 
 React Native also exposes `useVirtualCurrencies()` and `useVirtualCurrency(code)` hooks. Swift uses `virtualCurrencyBalances() -> [String: Int64]` and `virtualCurrency(_ code:) -> Int64`. Kotlin uses `virtualCurrencyBalances(): Map<String, Long>` and `virtualCurrency(code): Long`.
 
@@ -433,13 +433,13 @@ Return the cached balance for a single currency code. Returns `0` if the currenc
 
 ### `refreshVirtualCurrencies`
 
-Force a server round-trip to refresh the virtual-currency balance cache. Fires a [`VirtualCurrenciesChanged`](/docs/reference/types#changeevent) change event when the cache is updated.
+Force a server round-trip to refresh the virtual-currency balance cache. Fires a virtual-currencies-changed [`ChangeEvent`](/docs/reference/types#changeevent) (RN: `'VIRTUAL_CURRENCIES_CHANGED'`; Swift: `.virtualCurrenciesChanged`; Kotlin: `ChangeEvent.VIRTUAL_CURRENCIES_CHANGED`) when the cache is updated.
 
 **Params** — none
 
 **Returns** — `void`
 
-**Throws** — [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -459,7 +459,7 @@ Force a server round-trip to refresh the virtual-currency balance cache. Fires a
   </Tab>
 </Tabs>
 
-**Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+**Errors:** [`NetworkUnavailable`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
 
 **See also:** [Virtual Currencies guide](/docs/guides/credits)
 
@@ -588,9 +588,9 @@ The typed `track(eventType, params)` signature is the React Native API. On **Swi
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `getOfferings` | `getOfferings()` | [`Offerings`](/docs/reference/types#offerings) | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
-| `purchase` | `purchase(pkg)` | [`PurchaseResult`](/docs/reference/types#purchaseresult) | [`PurchaseCancelledError`](/docs/reference/errors#error-table), [`PurchasePendingError`](/docs/reference/errors#error-table), [`ProductNotAvailableError`](/docs/reference/errors#error-table), [`StoreProblemError`](/docs/reference/errors#error-table), [`ReceiptInvalidError`](/docs/reference/errors#error-table) |
-| `restorePurchases` | `restorePurchases()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `getOfferings` | `getOfferings()` | [`Offerings`](/docs/reference/types#offerings) | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `purchase` | `purchase(pkg)` | [`PurchaseResult`](/docs/reference/types#purchaseresult) | [`PurchaseCanceled`](/docs/reference/errors#error-table), [`ProductNotAvailable`](/docs/reference/errors#error-table), [`StoreProblem`](/docs/reference/errors#error-table), [`ReceiptInvalid`](/docs/reference/errors#error-table) |
+| `restorePurchases` | `restorePurchases()` | `void` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
 
 ---
 
@@ -611,7 +611,7 @@ type Offerings = {
 
 → Full type reference: [`Offerings`](/docs/reference/types#offerings), [`Offering`](/docs/reference/types#offering), [`Package`](/docs/reference/types#package), [`StoreProduct`](/docs/reference/types#storeproduct)
 
-**Throws** — [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -654,7 +654,7 @@ type Offerings = {
   </Tab>
 </Tabs>
 
-**Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+**Errors:** [`NetworkUnavailable`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
 
 ---
 
@@ -678,32 +678,33 @@ type PurchaseResult = {
   virtualCurrencies: Record<string, number>; // virtual-currency balances after the purchase
   productId: string;                        // the store product ID purchased
   storeTransactionId: string;               // StoreKit 2 transaction ID or Play Billing order ID
+  isDeferred: boolean;                      // true for Ask-to-Buy / parental-control holds — see below
 };
 ```
 
 → Full type reference: [`PurchaseResult`](/docs/reference/types#purchaseresult)
 
+<Callout type="warn">
+**Ask-to-Buy / parental-control holds are not an error.** `purchase()` does not throw
+for a pending approval — it resolves normally with `isDeferred: true` (and empty
+`entitlements` / `storeTransactionId`, since nothing has been granted yet). See
+[Handling a deferred purchase](#handling-a-deferred-purchase) below. Do not write a
+catch branch for this condition; there is no `kind` for it.
+</Callout>
+
 **Throws** — see table below
 
 | Error | When it fires |
 |-------|--------------|
-| [`PurchaseCancelledError`](/docs/reference/errors#error-table) | User dismissed the store sheet without completing payment |
-| [`PurchasePendingError`](/docs/reference/errors#error-table) | Ask-to-Buy / parental approval pending — transaction not yet complete |
-| [`ProductNotAvailableError`](/docs/reference/errors#error-table) | The product is not available in the user's storefront |
-| [`StoreProblemError`](/docs/reference/errors#error-table) | The store returned a non-specific error (e.g. billing issue) |
-| [`ReceiptInvalidError`](/docs/reference/errors#error-table) | Server-side receipt validation failed |
+| [`PurchaseCanceled`](/docs/reference/errors#error-table) | User dismissed the store sheet without completing payment |
+| [`ProductNotAvailable`](/docs/reference/errors#error-table) | The product is not available in the user's storefront |
+| [`StoreProblem`](/docs/reference/errors#error-table) | The store returned a non-specific error (e.g. billing issue) |
+| [`ReceiptInvalid`](/docs/reference/errors#error-table) | Server-side receipt validation failed |
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    import {
-      Rovenue,
-      PurchaseCancelledError,
-      PurchasePendingError,
-      ProductNotAvailableError,
-      StoreProblemError,
-      ReceiptInvalidError,
-    } from '@rovenue/react-native-sdk';
+    import { Rovenue, RovenueError } from '@rovenue/react-native-sdk';
 
     const offerings = await Rovenue.getOfferings();
     const pkg = offerings.current?.packages[0];
@@ -711,17 +712,23 @@ type PurchaseResult = {
     if (pkg) {
       try {
         const result = await Rovenue.purchase(pkg);
-        console.log('Purchase succeeded:', result.productId);
-        // result.entitlements and result.virtualCurrencies are already up to date
-      } catch (e) {
-        if (e instanceof PurchaseCancelledError) {
-          // User dismissed — no action needed
-        } else if (e instanceof PurchasePendingError) {
-          // Ask-to-Buy — tell the user to wait for approval
-        } else if (e instanceof ReceiptInvalidError) {
-          // Show a retry prompt
+        if (result.isDeferred) {
+          // Ask-to-Buy — tell the user to wait for approval (see below)
         } else {
-          throw e;
+          console.log('Purchase succeeded:', result.productId);
+          // result.entitlements and result.virtualCurrencies are already up to date
+        }
+      } catch (e) {
+        if (!(e instanceof RovenueError)) throw e;
+        switch (e.kind) {
+          case 'PurchaseCanceled':
+            // User dismissed — no action needed
+            break;
+          case 'ReceiptInvalid':
+            // Show a retry prompt
+            break;
+          default:
+            throw e;
         }
       }
     }
@@ -733,13 +740,20 @@ type PurchaseResult = {
     if let pkg = offerings.current?.packages.first {
       do {
         let result = try await Rovenue.shared.purchase(pkg)
-        print("Purchase succeeded: \(result.productId)")
-      } catch Rovenue.Error.purchaseCancelled {
-        // User dismissed — no action needed
-      } catch Rovenue.Error.purchasePending {
-        // Ask-to-Buy — tell the user to wait for approval
-      } catch Rovenue.Error.receiptInvalid {
-        // Show a retry prompt
+        if result.isDeferred {
+          // Ask-to-Buy — tell the user to wait for approval (see below)
+        } else {
+          print("Purchase succeeded: \(result.productId)")
+        }
+      } catch let e as RovenueError {
+        switch e.kind {
+        case .purchaseCanceled:
+          break // User dismissed — no action needed
+        case .receiptInvalid:
+          break // Show a retry prompt
+        default:
+          throw e
+        }
       }
     }
     ```
@@ -753,20 +767,34 @@ type PurchaseResult = {
       try {
         // `activity` is your current Activity — Play Billing requires it.
         val result = Rovenue.shared.purchase(activity, pkg)
-        Log.d("App", "Purchase succeeded: ${result.productId}")
-      } catch (e: PurchaseCancelledException) {
-        // User dismissed — no action needed
-      } catch (e: PurchasePendingException) {
-        // Ask-to-Buy — tell the user to wait for approval
-      } catch (e: RovenueException.ReceiptInvalid) {
-        // Show a retry prompt
+        if (result.isDeferred) {
+          // Ask-to-Buy — tell the user to wait for approval (see below)
+        } else {
+          Log.d("App", "Purchase succeeded: ${result.productId}")
+        }
+      } catch (e: RovenueException) {
+        when (e.kind) {
+          ErrorKind.PURCHASE_CANCELED -> { /* User dismissed — no action needed */ }
+          ErrorKind.RECEIPT_INVALID -> { /* Show a retry prompt */ }
+          else -> throw e
+        }
       }
     }
     ```
   </Tab>
 </Tabs>
 
-**Errors:** [`PurchaseCancelledError`](/docs/reference/errors#error-table) · [`PurchasePendingError`](/docs/reference/errors#error-table) · [`ProductNotAvailableError`](/docs/reference/errors#error-table) · [`StoreProblemError`](/docs/reference/errors#error-table) · [`ReceiptInvalidError`](/docs/reference/errors#error-table)
+**Errors:** [`PurchaseCanceled`](/docs/reference/errors#error-table) · [`ProductNotAvailable`](/docs/reference/errors#error-table) · [`StoreProblem`](/docs/reference/errors#error-table) · [`ReceiptInvalid`](/docs/reference/errors#error-table)
+
+#### Handling a deferred purchase
+
+There is no purchase-specific notification for when a deferred (Ask-to-Buy) purchase
+resolves — the SDK reconciles it in the background and reports the result the same way
+as any other entitlement change. Listen for `ChangeEvent`'s entitlements-changed value
+on each platform's [change stream](#change-stream): RN
+`Rovenue.addChangeListener((event) => { if (event === 'ENTITLEMENTS_CHANGED') { /* re-check entitlements */ } })`;
+Swift/Kotlin — collect `Rovenue.shared.changes` and match `.entitlementsChanged` /
+`ChangeEvent.ENTITLEMENTS_CHANGED`.
 
 ---
 
@@ -778,7 +806,7 @@ Re-validate the user's existing store receipts against the Rovenue server and up
 
 **Returns** — `void`
 
-**Throws** — [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -799,7 +827,7 @@ Re-validate the user's existing store receipts against the Rovenue server and up
   </Tab>
 </Tabs>
 
-**Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+**Errors:** [`NetworkUnavailable`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
 
 **See also:** [Processing purchases guide](/docs/guides/processing-purchases)
 
@@ -815,7 +843,7 @@ Return a stable UUID tied to the current `rovenueId`. Pass it to StoreKit's `.ap
 
 **Returns** — `string` (UUID v4)
 
-**Throws** — [`StorageError`](/docs/reference/errors#error-table) if MMKV is unavailable.
+**Throws** — [`Storage`](/docs/reference/errors#error-table) if MMKV is unavailable.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -839,7 +867,7 @@ Return a stable UUID tied to the current `rovenueId`. Pass it to StoreKit's `.ap
   </Tab>
 </Tabs>
 
-**Errors:** [`StorageError`](/docs/reference/errors#error-table)
+**Errors:** [`Storage`](/docs/reference/errors#error-table)
 
 ---
 
@@ -1010,13 +1038,15 @@ Subscribe to real-time state change notifications from the SDK. The SDK fires an
 | `changes` | Swift | `AsyncStream<ChangeEvent>` — iterate with `for await`. |
 | `changes` | Kotlin | `SharedFlow<ChangeEvent>` — collect with `.onEach { }.launchIn(scope)`. |
 
-The [`ChangeEvent`](/docs/reference/types#changeevent) values:
+The [`ChangeEvent`](/docs/reference/types#changeevent) values (shown as the React Native
+string value — see [`ChangeEvent`](/docs/reference/types#changeevent) for the exact
+Swift case / Kotlin constant spelling of each):
 
-| Value | When it fires |
+| Value (RN) | When it fires |
 |-------|--------------|
-| `EntitlementsChanged` | After any entitlement cache refresh (purchase, `refreshEntitlements()`, foreground sync). |
-| `IdentityChanged` | After `identify()` succeeds or `logOut()` resets the user. |
-| `VirtualCurrenciesChanged` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
+| `'ENTITLEMENTS_CHANGED'` | After any entitlement cache refresh (purchase, `refreshEntitlements()`, foreground sync). |
+| `'IDENTITY_CHANGED'` | After `identify()` succeeds or `logOut()` resets the user. |
+| `'VIRTUAL_CURRENCIES_CHANGED'` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
 
 → Full type reference: [`ChangeEvent`](/docs/reference/types#changeevent)
 
@@ -1027,13 +1057,13 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
 
     const unsub = Rovenue.addChangeListener((event) => {
       switch (event) {
-        case 'EntitlementsChanged':
+        case 'ENTITLEMENTS_CHANGED':
           // Re-read entitlements and update gated UI
           break;
-        case 'IdentityChanged':
+        case 'IDENTITY_CHANGED':
           // User identity has changed — re-read currentUser()
           break;
-        case 'VirtualCurrenciesChanged':
+        case 'VIRTUAL_CURRENCIES_CHANGED':
           // Re-read virtualCurrencies() and update the balance display
           break;
       }
@@ -1084,11 +1114,11 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `claimFunnelToken` | `claimFunnelToken(token)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
+| `claimFunnelToken` | `claimFunnelToken(token)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) | [`FunnelTokenNotFound`](/docs/reference/errors#error-table), [`FunnelTokenExpired`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimed`](/docs/reference/errors#error-table) |
 | `claimInstall` | `claimInstall(params)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
 | `resolveFunnelClaim` | `resolveFunnelClaim(opts?)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
 | `claimFromClipboard` | `claimFromClipboard()` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
-| `claimFromUrl` | `claimFromUrl(url)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
+| `claimFromUrl` | `claimFromUrl(url)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | [`FunnelTokenNotFound`](/docs/reference/errors#error-table), [`FunnelTokenExpired`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimed`](/docs/reference/errors#error-table) |
 | `claimViaEmail` | `claimViaEmail(email)` | `void` | — |
 | `installId` | `installId()` | `string` | — |
 | `addFunnelClaimListener` | `addFunnelClaimListener(cb)` | `() => void` | — |
@@ -1108,11 +1138,20 @@ Exchange a funnel token (obtained from a deep link or QR code) for the subscribe
 **Returns**
 
 ```ts
+// React Native
 type FunnelClaimResult = {
   subscriberId: string;      // Rovenue subscriber ID of the matched user
-  funnelAnswers: Record<string, unknown>; // key-value map of funnel step answers
+  funnelAnswers: Record<string, unknown>; // key-value map of funnel step answers, already parsed
 };
 ```
+
+<Callout type="info">
+**Swift and Kotlin return the funnel answers as a raw JSON string, not a parsed object.**
+Their `FunnelClaimResult` is `{ subscriberId: String, funnelAnswersJson: String }` —
+decode `funnelAnswersJson` yourself (e.g. `JSONSerialization` on Swift,
+`org.json.JSONObject`/`kotlinx.serialization` on Kotlin) if you need the parsed shape.
+Only the React Native binding pre-parses it into `funnelAnswers`.
+</Callout>
 
 → Full type reference: [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult)
 
@@ -1120,19 +1159,14 @@ type FunnelClaimResult = {
 
 | Error | When it fires |
 |-------|--------------|
-| [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table) | The token does not match any known funnel session |
-| [`FunnelTokenExpiredError`](/docs/reference/errors#error-table) | The token has passed its expiry window |
-| [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) | The token was already consumed by a previous install |
+| [`FunnelTokenNotFound`](/docs/reference/errors#error-table) | The token does not match any known funnel session |
+| [`FunnelTokenExpired`](/docs/reference/errors#error-table) | The token has passed its expiry window |
+| [`FunnelTokenAlreadyClaimed`](/docs/reference/errors#error-table) | The token was already consumed by a previous install |
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    import {
-      Rovenue,
-      FunnelTokenNotFoundError,
-      FunnelTokenExpiredError,
-      FunnelTokenAlreadyClaimedError,
-    } from '@rovenue/react-native-sdk';
+    import { Rovenue, RovenueError } from '@rovenue/react-native-sdk';
 
     // Called from your deep-link handler:
     try {
@@ -1140,14 +1174,19 @@ type FunnelClaimResult = {
       console.log('Claimed subscriber:', result.subscriberId);
       console.log('Funnel answers:', result.funnelAnswers);
     } catch (e) {
-      if (e instanceof FunnelTokenNotFoundError) {
-        // Token unknown — may be an old or invalid link
-      } else if (e instanceof FunnelTokenExpiredError) {
-        // Prompt the user to re-visit the funnel
-      } else if (e instanceof FunnelTokenAlreadyClaimedError) {
-        // Already claimed — proceed without re-claiming
-      } else {
-        throw e;
+      if (!(e instanceof RovenueError)) throw e;
+      switch (e.kind) {
+        case 'FunnelTokenNotFound':
+          // Token unknown — may be an old or invalid link
+          break;
+        case 'FunnelTokenExpired':
+          // Prompt the user to re-visit the funnel
+          break;
+        case 'FunnelTokenAlreadyClaimed':
+          // Already claimed — proceed without re-claiming
+          break;
+        default:
+          throw e;
       }
     }
     ```
@@ -1158,13 +1197,18 @@ type FunnelClaimResult = {
     do {
         let result = try await Rovenue.shared.claimFunnelToken(token)
         print("Claimed subscriber: \(result.subscriberId)")
-        print("Funnel answers: \(result.funnelAnswers)")
-    } catch Rovenue.Error.funnelTokenNotFound {
-        // Token unknown — may be an old or invalid link
-    } catch Rovenue.Error.funnelTokenExpired {
-        // Prompt the user to re-visit the funnel
-    } catch Rovenue.Error.funnelTokenAlreadyClaimed {
-        // Already claimed — proceed without re-claiming
+        print("Funnel answers (raw JSON): \(result.funnelAnswersJson)")
+    } catch let e as RovenueError {
+        switch e.kind {
+        case .funnelTokenNotFound:
+            break // Token unknown — may be an old or invalid link
+        case .funnelTokenExpired:
+            break // Prompt the user to re-visit the funnel
+        case .funnelTokenAlreadyClaimed:
+            break // Already claimed — proceed without re-claiming
+        default:
+            throw e
+        }
     }
     ```
   </Tab>
@@ -1174,13 +1218,14 @@ type FunnelClaimResult = {
     try {
         val result = Rovenue.shared.claimFunnelToken(token) // suspend fun
         Log.d("App", "Claimed subscriber: ${result.subscriberId}")
-        Log.d("App", "Funnel answers: ${result.funnelAnswers}")
-    } catch (e: FunnelTokenNotFoundException) {
-        // Token unknown — may be an old or invalid link
-    } catch (e: FunnelTokenExpiredException) {
-        // Prompt the user to re-visit the funnel
-    } catch (e: FunnelTokenAlreadyClaimedException) {
-        // Already claimed — proceed without re-claiming
+        Log.d("App", "Funnel answers (raw JSON): ${result.funnelAnswersJson}")
+    } catch (e: RovenueException) {
+        when (e.kind) {
+            ErrorKind.FUNNEL_TOKEN_NOT_FOUND -> { /* Token unknown — may be an old or invalid link */ }
+            ErrorKind.FUNNEL_TOKEN_EXPIRED -> { /* Prompt the user to re-visit the funnel */ }
+            ErrorKind.FUNNEL_TOKEN_ALREADY_CLAIMED -> { /* Already claimed — proceed without re-claiming */ }
+            else -> throw e
+        }
     }
     ```
   </Tab>
@@ -1194,18 +1239,31 @@ Recover a prior funnel session deterministically from caller-supplied install co
 
 On **iOS**, when no explicit token is available, recovery falls back to a deterministic server-side **IP match within a 1-hour window** — no device fingerprinting is used. For clipboard-based recovery on iOS, see [`claimFromClipboard`](#claimfromclipboard).
 
-**Params** — all optional
+**Params** — all optional on React Native; on native Swift and Kotlin every field must
+be supplied (see the callout below).
 
-On **Android**, the SDK auto-collects `platform`, `locale`, `timezone`, `screenDims`, `deviceModel`, and the Google Play Install Referrer from the native layer — pass any field only to override the auto-collected value. On **iOS**, callers still supply context explicitly (auto-collection for iOS will land in a later release).
+On **React Native's Android bridge specifically**, the SDK auto-collects `platform`,
+`locale`, `timezone`, `screenDims`, `deviceModel`, and the Google Play Install Referrer
+from the native layer — pass any field only to override the auto-collected value. On
+**React Native's iOS bridge**, callers still supply context explicitly (auto-collection
+for iOS will land in a later release).
+
+<Callout type="warn">
+**Native Swift and Kotlin have no auto-collection at all.** The auto-collection above is
+a convenience built into the React Native Android bridge specifically — the underlying
+`packages/sdk-swift` and `packages/sdk-kotlin` façades take one `ClaimInstallParams`
+struct with no default values, so a native caller must always compute and supply every
+field itself (see the Swift/Kotlin tabs below for how to derive them).
+</Callout>
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `platform` | `"ios" \| "android" \| "web"` | No | Platform of the current install. Auto-collected on Android. |
-| `locale` | `string` | No | IETF BCP 47 locale tag (e.g. `"en-US"`). Auto-collected on Android. |
-| `timezone` | `string` | No | IANA timezone identifier (e.g. `"America/New_York"`). Auto-collected on Android. |
-| `screenDims` | `{ width: number; height: number }` | No | Logical screen dimensions in points/dp. Auto-collected on Android. |
-| `deviceModel` | `string` | No | Device model string (e.g. `"iPhone16,1"`). Auto-collected on Android. |
-| `installReferrer` | `string` | No | Android Install Referrer string from the Play Store; auto-collected on Android, omit on iOS. |
+| `platform` | `"ios" \| "android"` | No (RN) / Yes (Swift, Kotlin) | Platform of the current install. Auto-collected on RN's Android bridge. |
+| `locale` | `string` | No (RN) / Yes (Swift, Kotlin) | IETF BCP 47 locale tag (e.g. `"en-US"`). Auto-collected on RN's Android bridge. |
+| `timezone` | `string` | No (RN) / Yes (Swift, Kotlin) | IANA timezone identifier (e.g. `"America/New_York"`). Auto-collected on RN's Android bridge. |
+| `screenDims` | `string` | No (RN) / Yes (Swift, Kotlin) | Screen dimensions in pixels, formatted `"WIDTHxHEIGHT"` (e.g. `"1080x2400"`) — a plain string, not a width/height object. Auto-collected on RN's Android bridge. |
+| `deviceModel` | `string \| null` | No | Device model string (e.g. `"iPhone16,1"`). Auto-collected on RN's Android bridge; pass `null` on native Swift/Kotlin if you have nothing to send. |
+| `installReferrer` | `string \| null` | No | Android Install Referrer string from the Play Store; auto-collected on RN's Android bridge, `null` on iOS and on native Kotlin unless you read it yourself. |
 
 **Returns** — [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `| null` (`null` means no prior funnel session was matched)
 
@@ -1232,16 +1290,16 @@ On **Android**, the SDK auto-collects `platform`, `locale`, `timezone`, `screenD
     import UIKit
 
     let screen = UIScreen.main.bounds
-    let result = await Rovenue.shared.claimInstall(
+    let scale = UIScreen.main.scale
+    let params = ClaimInstallParams(
         platform: "ios",
         locale: Locale.current.identifier,
         timezone: TimeZone.current.identifier,
-        screenDims: RovenueScreenDims(
-            width: Double(screen.width),
-            height: Double(screen.height)
-        )
-        // deviceModel: UIDevice.current.model  // optional
+        screenDims: "\(Int(screen.width * scale))x\(Int(screen.height * scale))",
+        deviceModel: UIDevice.current.model,
+        installReferrer: nil
     )
+    let result = await Rovenue.shared.claimInstall(params)
 
     if let result {
         print("Matched funnel session: \(result.subscriberId)")
@@ -1252,24 +1310,24 @@ On **Android**, the SDK auto-collects `platform`, `locale`, `timezone`, `screenD
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
+    import android.os.Build
     import android.util.DisplayMetrics
+    import dev.rovenue.sdk.generated.ClaimInstallParams
     import java.util.Locale
     import java.util.TimeZone
 
     val metrics = DisplayMetrics()
     windowManager.defaultDisplay.getMetrics(metrics)
 
-    val result = Rovenue.shared.claimInstall(
+    val params = ClaimInstallParams(
         platform = "android",
         locale = Locale.getDefault().toLanguageTag(),
         timezone = TimeZone.getDefault().id,
-        screenDims = RovenueScreenDims(
-            width = metrics.widthPixels / metrics.density.toDouble(),
-            height = metrics.heightPixels / metrics.density.toDouble()
-        )
-        // deviceModel = Build.MODEL,        // optional
-        // installReferrer = referrerString, // optional
-    ) // suspend fun
+        screenDims = "${metrics.widthPixels}x${metrics.heightPixels}",
+        deviceModel = Build.MODEL,
+        installReferrer = null, // or a Play Install Referrer string you've read yourself
+    )
+    val result = Rovenue.shared.claimInstall(params) // suspend fun
 
     if (result != null) {
         Log.d("App", "Matched funnel session: ${result.subscriberId}")
@@ -1386,7 +1444,7 @@ Initiate an email-based funnel claim. The SDK sends a magic-link email to the pr
 
 **Returns** — `void` (resolves as soon as the magic-link request is dispatched; the actual claim fires via [`addFunnelClaimListener`](#addfunnelclaimlistener) when the deep link is opened)
 
-**Throws** — [`InvalidArgumentError`](/docs/reference/errors#error-table) if the email address fails format validation.
+**Throws** — [`InvalidArgument`](/docs/reference/errors#error-table) if the email address fails format validation.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -1488,7 +1546,7 @@ Register a callback that fires whenever a funnel claim resolves — whether trig
     // Typically in a Task {} inside your SwiftUI view or AppDelegate:
     for await result in Rovenue.shared.funnelClaims {
         print("Funnel claim resolved for subscriber: \(result.subscriberId)")
-        print("Funnel answers: \(result.funnelAnswers)")
+        print("Funnel answers (raw JSON): \(result.funnelAnswersJson)")
         // Apply funnel-specific onboarding, unlock content, etc.
     }
     ```
@@ -1499,7 +1557,7 @@ Register a callback that fires whenever a funnel claim resolves — whether trig
     Rovenue.shared.funnelClaims
         .onEach { result ->
             Log.d("App", "Funnel claim resolved for subscriber: ${result.subscriberId}")
-            Log.d("App", "Funnel answers: ${result.funnelAnswers}")
+            Log.d("App", "Funnel answers (raw JSON): ${result.funnelAnswersJson}")
             // Apply funnel-specific onboarding, unlock content, etc.
         }
         .launchIn(viewModelScope)
@@ -1529,7 +1587,7 @@ Recognized URL shapes:
 
 **Returns** — `Promise<`[`FunnelClaimResult`](/docs/reference/types#funnelclaimresult)` | null>` (`null` for URLs that contain no recognizable funnel token — no network call is made)
 
-**Throws** — funnel claim errors when a **recognized** token fails server-side: [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), or [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table). Non-funnel URLs resolve `null` and never throw — so always wrap the call (a fire-and-forget handler should `.catch`).
+**Throws** — funnel claim errors when a **recognized** token fails server-side: [`FunnelTokenNotFound`](/docs/reference/errors#error-table), [`FunnelTokenExpired`](/docs/reference/errors#error-table), or [`FunnelTokenAlreadyClaimed`](/docs/reference/errors#error-table). Non-funnel URLs resolve `null` and never throw — so always wrap the call (a fire-and-forget handler should `.catch`).
 
 This is a React Native helper. On Swift/Kotlin, parse the token from the incoming URL yourself and call [`claimFunnelToken`](#claimfunneltoken).
 
