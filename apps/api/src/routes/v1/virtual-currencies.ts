@@ -54,6 +54,11 @@ export const virtualCurrenciesV1Route = new Hono()
   // -----------------------------------------------------------
   // GET /me — public or secret key; subscriber from context
   // -----------------------------------------------------------
+  // Deliberately not guarded against `subscriberDeadEnded`: this handler
+  // only reads balances for the resolved subscriber id and writes
+  // nothing, so there is no write path here that could re-populate an
+  // erased row. (Guarding matters for `appUserContext` routes that
+  // WRITE -- see /v1/checkout, /v1/me/attributes.)
   .get("/me", appUserContext, async (c) => {
     const project = c.get("project");
     const subscriber = c.get("subscriber");

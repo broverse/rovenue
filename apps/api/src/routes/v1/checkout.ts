@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { createId } from "@paralleldrive/cuid2";
 import { drizzle } from "@rovenue/db";
 import { ERROR_CODE } from "@rovenue/shared";
 import { appUserContext } from "../../middleware/app-user-context";
@@ -8,7 +9,10 @@ import { validate } from "../../lib/validate";
 import { ok, fail } from "../../lib/response";
 import { StripeNotConnectedError } from "../../lib/stripe-platform";
 import { createCheckoutSession } from "../../services/stripe/checkout-session";
-import { RedirectUrlNotAllowedError } from "../../services/stripe/verified-return-url";
+import {
+  assertRedirectUrlAllowed,
+  RedirectUrlNotAllowedError,
+} from "../../services/stripe/verified-return-url";
 
 // =============================================================
 // POST /v1/checkout — SDK-facing Stripe Checkout Session
@@ -43,6 +47,38 @@ export const checkoutRoute = new Hono()
     const subscriber = c.get("subscriber");
     const { offeringId, packageIdentifier, successUrl, cancelUrl } =
       c.req.valid("json");
+
+    // An erased subject's next checkout attempt must never create a REAL
+    // Stripe Checkout Session: createCheckoutSession stamps its metadata
+    // with subscriber.rovenueId (see stripe-webhook's resolveSubscriber),
+    // and a completed session would re-grant entitlements onto a row the
+    // subject asked to be forgotten from -- un-erasing them through a
+    // second path. Reported as accepted rather than refused, matching
+    // /v1/me/attributes: a 4xx would tell a device-side caller this
+    // subject was erased, a disclosure to a party not necessarily
+    // entitled to it. Both redirect URLs still run through the SAME
+    // verified-domain check the real path applies, so a caller cannot
+    // erase themselves and then use this branch as an open-redirect
+    // oracle by supplying an arbitrary URL -- a bad URL 400s identically
+    // either way. The returned "url" is the verified cancelUrl rather
+    // than a live Stripe URL, so following it behaves exactly like an
+    // ordinary cancelled checkout.
+    if (c.get("subscriberDeadEnded")) {
+      try {
+        await assertRedirectUrlAllowed(drizzle.db, project.id, successUrl);
+        const safeCancelUrl = await assertRedirectUrlAllowed(
+          drizzle.db,
+          project.id,
+          cancelUrl,
+        );
+        return c.json(ok({ sessionId: createId(), url: safeCancelUrl }));
+      } catch (err) {
+        if (err instanceof RedirectUrlNotAllowedError) {
+          return c.json(fail(ERROR_CODE.VALIDATION_ERROR, err.message), 400);
+        }
+        throw err;
+      }
+    }
 
     try {
       const session = await createCheckoutSession({

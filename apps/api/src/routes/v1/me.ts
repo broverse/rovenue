@@ -33,6 +33,11 @@ export const meRoute = new Hono()
   // -------------------------------------------------------------
   // GET /me — subscriber profile + access
   // -------------------------------------------------------------
+  // GET /, /access and /entitlements below are deliberately not guarded
+  // against `subscriberDeadEnded`: all three only READ (buildAccessResponse
+  // + the resolved subscriber row) and write nothing, so there is no write
+  // path for an erased subject to re-populate. Only POST /attributes below
+  // writes, and it guards.
   .get("/", async (c) => {
     const subscriber = c.get("subscriber");
     const access = await buildAccessResponse(subscriber.id);

@@ -64,6 +64,29 @@ describe("resolveOrCreateSubscriber", () => {
     expect(sub.id).toBe("s_live");
     expect(upsert).not.toHaveBeenCalled();
   });
+
+  it("passes `deadEnded: true` through from resolveSubscriberForWrite", async () => {
+    // The bug this whole sub-project's Task 1 exists to fix: this wrapper
+    // used to destructure `{ subscriber }` and drop `deadEnded` on the
+    // floor, so every caller behind it (this is the ONLY entry point the
+    // SDK's public-key /v1 surface uses) silently lost the flag and wrote
+    // onto soft-deleted rows. resolveSubscriberForWrite's own test already
+    // covers the underlying computation; this one covers the wrapper not
+    // re-dropping it.
+    resolveByRovenueId.mockResolvedValue(null);
+    findByRovenueId.mockResolvedValue({
+      id: "s_dead_wrapper",
+      rovenueId: "r_erased_wrapper",
+      deletedAt: new Date(),
+      mergedInto: null,
+    });
+
+    const result = await resolveOrCreateSubscriber("p1", "r_erased_wrapper");
+
+    expect(result.deadEnded).toBe(true);
+    expect(result.subscriber.id).toBe("s_dead_wrapper");
+    expect(upsert).not.toHaveBeenCalled();
+  });
 });
 
 describe("resolveSubscriberForWrite", () => {

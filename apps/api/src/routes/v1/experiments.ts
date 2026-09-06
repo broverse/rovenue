@@ -187,6 +187,17 @@ export const experimentsRoute = new Hono()
         input.subscriberId,
       );
 
+      // An erased subject accumulates no new assignment row and no
+      // exposure event -- both would key new records to a soft-deleted
+      // subscriber and un-erase them through a second path, exactly the
+      // hole this whole guard exists to close (see /track above).
+      // Reported as accepted rather than refused: a 4xx would disclose
+      // the erasure to a device-side caller, which is not this caller's
+      // to know.
+      if (deadEnded) {
+        return c.json(ok({ accepted: true }));
+      }
+
       // Client-side draw: persist the assignment lazily so results/assignment
       // queries keep working without a fetch-time write. Idempotent by design
       // (onConflictDoNothing on (experimentId, subscriberId)) — a retried or
