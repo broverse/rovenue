@@ -151,6 +151,7 @@ export interface DsarExportDeps {
   claimDsarRequest: typeof drizzle.dsarRequestRepo.claimDsarRequest;
   completeDsarRequest: typeof drizzle.dsarRequestRepo.completeDsarRequest;
   failDsarRequest: typeof drizzle.dsarRequestRepo.failDsarRequest;
+  lockSubscriberDeletionState: typeof drizzle.dsarRequestRepo.lockSubscriberDeletionState;
   exportSubscriber: (input: {
     subscriberId: string;
     projectId: string;
@@ -177,6 +178,8 @@ export const defaultDeps: DsarExportDeps = {
   claimDsarRequest: drizzle.dsarRequestRepo.claimDsarRequest,
   completeDsarRequest: drizzle.dsarRequestRepo.completeDsarRequest,
   failDsarRequest: drizzle.dsarRequestRepo.failDsarRequest,
+  lockSubscriberDeletionState:
+    drizzle.dsarRequestRepo.lockSubscriberDeletionState,
   exportSubscriber,
   putObject: importStore.putObject,
   deleteObject: importStore.deleteObject,
@@ -264,6 +267,29 @@ export async function runDsarExport(
     const expiresAt = new Date(deps.now().getTime() + DSAR_ARTIFACT_TTL_MS);
 
     await deps.transaction(async (tx) => {
+      // The LAST word on whether this artifact may exist. Finding 2 put
+      // a deletedAt check in `exportSubscriber`, at the point the data
+      // is read; that closes the common case but not the race, because
+      // an erasure committing between that read and this point would
+      // leave the artifact written and referenced with nothing to catch
+      // it. Locking the subscriber row here makes the two serialise
+      // against `anonymizeSubscriberRow` — see
+      // `lockSubscriberDeletionState` for why either interleaving now
+      // ends with no artifact.
+      //
+      // Throwing (rather than returning) hands this to the catch below,
+      // which already deletes the orphaned artifact, marks the row
+      // FAILED and labels the metric SKIP_REASON_SUBSCRIBER_ERASED —
+      // the same terminal state as losing the race one step earlier,
+      // reached by the same code path rather than a parallel one.
+      const subject = await deps.lockSubscriberDeletionState(tx, subscriberId);
+      if (subject?.deletedAt) {
+        throw new HTTPException(SUBSCRIBER_ERASED_STATUS, {
+          message:
+            "Subscriber was erased while this export was being written — refusing to publish the artifact",
+        });
+      }
+
       await deps.completeDsarRequest(tx, {
         id: dsarRequestId,
         artifactKey: key,

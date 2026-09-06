@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   dsarRequests,
+  subscribers,
   OPEN_DSAR_REQUEST_STATUSES,
   type DsarRequest,
 } from "../schema";
@@ -396,4 +397,43 @@ export async function invalidateExportArtifacts(
     .update(dsarRequests)
     .set({ artifactKey: null, expiresAt: null, updatedAt: new Date() })
     .where(inArray(dsarRequests.id, ids));
+}
+
+/**
+ * Takes a row lock on one subscriber and reports whether it is erased.
+ *
+ * This exists for ONE caller: `workers/dsar-export.ts`'s final check
+ * before it marks a request COMPLETED. Finding 2 put a `deletedAt` check
+ * in `exportSubscriber` at the point the data is READ, which closes the
+ * common case — but an export that read the subscriber microseconds
+ * before `anonymizeSubscriber` committed could still write its artifact
+ * afterwards, because nothing made the two decisions serialise.
+ *
+ * `FOR UPDATE` is what makes them serialise, since `anonymizeSubscriberRow`
+ * updates this same row:
+ *
+ *   - erasure commits first  -> this lock waits, then sees `deletedAt`,
+ *     and the export refuses and deletes the artifact it just wrote.
+ *   - the export commits first -> erasure's anonymise waits, and its
+ *     artifact-purge pass (which runs AFTER the anonymise) then finds a
+ *     COMPLETED row carrying an `artifactKey` and deletes it.
+ *
+ * Either order ends with no artifact for an erased subject, which the
+ * unordered version could not guarantee. It lives in this file rather
+ * than the subscriber repository because its contract is the DSAR
+ * interlock, not general subscriber access — a caller reaching for
+ * "is this subscriber deleted" outside that interlock wants a plain read,
+ * not a lock that blocks erasure.
+ */
+export async function lockSubscriberDeletionState(
+  db: Db,
+  subscriberId: string,
+): Promise<{ deletedAt: Date | null } | null> {
+  const [row] = await db
+    .select({ deletedAt: subscribers.deletedAt })
+    .from(subscribers)
+    .where(eq(subscribers.id, subscriberId))
+    .for("update")
+    .limit(1);
+  return row ?? null;
 }

@@ -182,6 +182,9 @@ function realExportDeps(overrides: Partial<DsarExportDeps> = {}): DsarExportDeps
     claimDsarRequest: vi.fn(drizzle.dsarRequestRepo.claimDsarRequest),
     completeDsarRequest: vi.fn(drizzle.dsarRequestRepo.completeDsarRequest),
     failDsarRequest: vi.fn(drizzle.dsarRequestRepo.failDsarRequest),
+    lockSubscriberDeletionState: vi.fn(
+      drizzle.dsarRequestRepo.lockSubscriberDeletionState,
+    ),
     exportSubscriber: vi.fn(exportSubscriber),
     putObject: vi.fn(async () => {}),
     deleteObject: vi.fn(async () => {}),

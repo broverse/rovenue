@@ -120,6 +120,9 @@ function realDeps(overrides: Partial<DsarExportDeps> = {}): DsarExportDeps {
     claimDsarRequest: vi.fn(drizzle.dsarRequestRepo.claimDsarRequest),
     completeDsarRequest: vi.fn(drizzle.dsarRequestRepo.completeDsarRequest),
     failDsarRequest: vi.fn(drizzle.dsarRequestRepo.failDsarRequest),
+    lockSubscriberDeletionState: vi.fn(
+      drizzle.dsarRequestRepo.lockSubscriberDeletionState,
+    ),
     exportSubscriber: vi.fn(exportSubscriber),
     putObject: vi.fn(async () => {}),
     deleteObject: vi.fn(async () => {}),
@@ -399,5 +402,57 @@ describe("runDsarExport", () => {
     expect(finalRow.status).toBe("FAILED");
     expect(finalRow.artifactKey).toBeNull();
     expect(finalRow.error).toMatch(/erased/i);
+  });
+  it("deletes the artifact when the subject is erased AFTER the data was read (Finding 2 residual race)", async () => {
+    // The window Finding 2's own fix left open, reproduced in the only
+    // order that opens it: `exportSubscriber` reads the subject while
+    // they are still live, the erasure commits, and only THEN does the
+    // artifact get written and the row completed. The deletedAt check
+    // inside `exportSubscriber` cannot see this — it already ran and
+    // correctly passed.
+    //
+    // Erasure is landed from inside the exportSubscriber stub, which is
+    // exactly the interleaving described: after the read, before the
+    // write. Without the FOR UPDATE re-check in the completion
+    // transaction, this run marks COMPLETED and leaves a full-history
+    // artifact for an erased subject with an artifactKey pointing at it
+    // — erasure's own purge pass has already been and gone.
+    const projectId = await seedProject();
+    const subscriberId = await seedSubscriber(projectId);
+    const dsarRequestId = await seedPendingExportRequest(projectId, subscriberId);
+
+    const deps = realDeps({
+      exportSubscriber: vi.fn(async (input) => {
+        const data = await exportSubscriber(input);
+        await anonymizeSubscriber({
+          subscriberId,
+          projectId,
+          actorUserId: "system",
+          reason: "dsar_request",
+        });
+        return data;
+      }),
+    });
+
+    const outcome = await runDsarExport(
+      { dsarRequestId, projectId, subscriberId, type: "EXPORT" },
+      deps,
+    );
+
+    // The artifact WAS written here — unlike the test above, the read
+    // succeeded — so the guarantee is that it does not survive.
+    expect(vi.mocked(deps.putObject)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.deleteObject)).toHaveBeenCalledTimes(1);
+
+    expect(outcome.outcome).toBe("failed");
+    if (outcome.outcome === "failed") {
+      expect(outcome.error).toMatch(/erased/i);
+    }
+
+    const finalRow = await fetchRequest(dsarRequestId);
+    expect(finalRow.status).toBe("FAILED");
+    // The row must not reference an artifact that no longer exists, and
+    // must not be COMPLETED — a COMPLETED row here is the bug.
+    expect(finalRow.artifactKey).toBeNull();
   });
 });
