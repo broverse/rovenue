@@ -18,6 +18,7 @@
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "start": "node dist/index.js",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
+    "openapi:check": "tsx scripts/generate-openapi.ts --check",
     "apple-pay:backfill": "tsx --env-file-if-exists=../../.env src/scripts/backfill-apple-pay-domains.ts",
     "billing-issue:blast-radius": "tsx --env-file-if-exists=../../.env src/scripts/billing-issue-blast-radius.ts",
     "test": "vitest run && VITEST_CONTAINER_PASS=1 vitest run"
@@ -61,6 +62,7 @@
     "zod": "^3.22.0"
   },
   "devDependencies": {
+    "@seriousme/openapi-schema-validator": "2.9.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.11.0",

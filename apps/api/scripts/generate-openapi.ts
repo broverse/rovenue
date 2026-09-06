@@ -41,7 +41,7 @@
  *     silently dropping it.
  */
 
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RouterRoute } from "hono/types";
@@ -575,7 +575,58 @@ function capitalise(value: string): string {
 // CLI
 // =============================================================
 
+/** `--check`: exit 1 rather than write, when the committed file is stale. */
+const CHECK_FLAG = "--check";
+
+/**
+ * Regenerates the document in memory and compares it byte-for-byte against
+ * the committed `openapi.json`, without writing anything.
+ *
+ * Nothing before this enforced that the committed file matches what the
+ * generator would produce right now — the previous task's reviewer verified
+ * that by hand. A zod schema edited without re-running `openapi:generate`
+ * would leave `openapi.json` describing a request body the server no longer
+ * accepts (or now requires), silently, since nothing re-derives it. This is
+ * the CI gate for that: same document builder, same serialisation, run
+ * against the file already on disk instead of overwriting it.
+ */
+function checkUpToDate(): boolean {
+  const document = buildOpenApiDocument(app);
+  const fresh = `${JSON.stringify(document, null, 2)}\n`;
+
+  let committed: string | undefined;
+  try {
+    committed = readFileSync(OUTPUT_PATH, "utf8");
+  } catch {
+    committed = undefined;
+  }
+
+  if (committed === fresh) {
+    process.stdout.write(
+      `${OUTPUT_PATH} is up to date with the route table and openapi/responses.ts.\n`,
+    );
+    return true;
+  }
+
+  process.stderr.write(
+    [
+      committed === undefined
+        ? `${OUTPUT_PATH} does not exist.`
+        : `${OUTPUT_PATH} is stale — it no longer matches what the app and openapi/responses.ts would generate.`,
+      "A route, its Zod schema, its auth, or openapi/responses.ts changed without regenerating the spec.",
+      "Run `pnpm --filter @rovenue/api openapi:generate` and commit the result.",
+      "",
+    ].join("\n"),
+  );
+  return false;
+}
+
 function main(): void {
+  if (process.argv.includes(CHECK_FLAG)) {
+    process.exitCode = checkUpToDate() ? 0 : 1;
+    return;
+  }
+
   const document = buildOpenApiDocument(app);
   mkdirSync(dirname(OUTPUT_PATH), { recursive: true });
   writeFileSync(OUTPUT_PATH, `${JSON.stringify(document, null, 2)}\n`, "utf8");
@@ -626,5 +677,7 @@ if (
   main();
   // The app opens no connections at import time, but tsx keeps the process
   // alive if anything did; exiting explicitly keeps the script a script.
-  process.exit(0);
+  // `process.exitCode` carries `--check`'s pass/fail — default to 0 for the
+  // plain generate path, which never sets it.
+  process.exit(process.exitCode ?? 0);
 }

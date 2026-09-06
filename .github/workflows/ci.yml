@@ -84,6 +84,20 @@ jobs:
       - name: Typecheck - test tree
         run: pnpm exec turbo run typecheck:tests
 
+      # apps/api/openapi/openapi.json is generated (apps/api/scripts/
+      # generate-openapi.ts) from the live route table, Zod schemas and
+      # apiKeyAuth() tags — nothing re-derives it automatically, so a zod
+      # schema or route edited without re-running `openapi:generate` leaves
+      # the committed file describing a request body the server no longer
+      # accepts. `--check` rebuilds the document in memory and fails if it
+      # differs from what's committed, without writing anything. The
+      # apps/api/tests/openapi-contract.test.ts suite (run below, as part of
+      # `pnpm test`) is the complementary guarantee: it fails by name when
+      # the route table and openapi/responses.ts disagree about which
+      # endpoints exist, independent of whether this step also catches it.
+      - name: OpenAPI spec is up to date
+        run: pnpm --filter @rovenue/api openapi:check
+
       # apps/api's `test` script is two passes: `vitest run` excludes the
       # testcontainer suites, then `VITEST_CONTAINER_PASS=1 vitest run` runs
       # them. The second pass starts its own Redpanda and ClickHouse; what it
