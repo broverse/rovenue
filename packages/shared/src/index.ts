@@ -322,3 +322,12 @@ export * from "./import";
 // =============================================================
 
 export * from "./revenue-types";
+
+// =============================================================
+// Error-code catalog (ROADMAP §11) — one documented entry per
+// ERROR_CODE key, typed as a total Record so an undocumented code is
+// a compile error. See error-catalog.ts's header for the full
+// rationale.
+// =============================================================
+
+export * from "./error-catalog";
