@@ -96,4 +96,50 @@ final class ErrorMappingTests: XCTestCase {
             XCTAssertEqual(e.kind, kind, "kind should be preserved for \(kind)")
         }
     }
+
+    // ------------------------------------------------------------------
+    // Unknown wire `code` tolerance
+    //
+    // `mapError` never switches on the wire `code` string — it only ever
+    // lifts an already-typed, closed-set Rust `ErrorKind` (uniffi enums
+    // cannot carry an out-of-range discriminant across the FFI boundary).
+    // The one place a *string* error code participates in kind selection
+    // is Rust core's `error_from_status` (packages/core-rs/src/transport/
+    // http_client.rs), which keys purely off HTTP status and treats the
+    // backend `code` as opaque metadata carried in `serverCode` — proven by
+    // `preserves_backend_code_and_message` in
+    // packages/core-rs/tests/error_mapping.rs. These tests pin the
+    // consequence at this layer: an arbitrary/never-seen serverCode must
+    // ride through `mapError` unchanged, never thrown or altered.
+    // ------------------------------------------------------------------
+
+    func testMapError_preservesUnrecognizedServerCode() {
+        // BEARER_REQUIRED is one of the codes Task 5 is about to start
+        // emitting for the first time; from this already-built package's
+        // point of view it is indistinguishable from any other novel code.
+        let ffi = RovenueErrorFfi.Generic(
+            kind: .invalidApiKey,
+            detail: "missing bearer token",
+            serverCode: "BEARER_REQUIRED",
+            httpStatus: UInt16(401),
+            retryable: false
+        )
+        let mapped = mapError(ffi)
+        XCTAssertEqual(mapped.kind, .invalidApiKey)
+        XCTAssertEqual(mapped.serverCode, "BEARER_REQUIRED")
+        XCTAssertEqual(mapped.httpStatus, 401)
+    }
+
+    func testMapError_preservesWhollyNovelServerCode() {
+        let ffi = RovenueErrorFfi.Generic(
+            kind: .forbidden,
+            detail: "wrong key kind",
+            serverCode: "SOME_CODE_THIS_RELEASE_HAS_NEVER_SEEN",
+            httpStatus: UInt16(403),
+            retryable: false
+        )
+        let mapped = mapError(ffi)
+        XCTAssertEqual(mapped.kind, .forbidden)
+        XCTAssertEqual(mapped.serverCode, "SOME_CODE_THIS_RELEASE_HAS_NEVER_SEEN")
+    }
 }

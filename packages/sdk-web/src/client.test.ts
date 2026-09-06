@@ -184,6 +184,35 @@ describe("errors", () => {
       status: 502,
     });
   });
+
+  // RovenueApiError.code is `string`, never a closed enum — there is no
+  // switch/lookup anywhere in this file that classifies `error.code`. That
+  // makes an "unknown code" structurally impossible to mishandle: any code,
+  // recognized or not, takes the exact same path onto the thrown error. This
+  // pins that for the four codes the API is about to start emitting for the
+  // first time (BEARER_REQUIRED, INVALID_API_KEY, INVALID_API_KEY_FORMAT,
+  // API_KEY_KIND_MISMATCH), none of which this package's code has ever seen.
+  it.each([
+    ["BEARER_REQUIRED", 401],
+    ["INVALID_API_KEY", 401],
+    ["INVALID_API_KEY_FORMAT", 401],
+    ["API_KEY_KIND_MISMATCH", 403],
+  ] as const)(
+    "passes an unrecognized code (%s) through unchanged, without throwing internally",
+    async (code, status) => {
+      fetchImpl.mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code, message: "denied" } }),
+          { status, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await expect(sdk().getEntitlements()).rejects.toMatchObject({
+        status,
+        code,
+        message: "denied",
+      });
+    },
+  );
 });
 
 describe("configure", () => {
