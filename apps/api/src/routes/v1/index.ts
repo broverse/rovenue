@@ -5,6 +5,7 @@ import { billingPortalRoute } from "./billing-portal";
 import { checkoutRoute } from "./checkout";
 import { requireMatchingPathKey } from "../../middleware/browser-cors";
 import { configRoute } from "./config";
+import { dsarRoute } from "./dsar";
 import { eventsRoute } from "./events";
 import { experimentsRoute } from "./experiments";
 import { fontsRoute } from "./fonts";
@@ -52,6 +53,7 @@ export const v1Route = new Hono()
   .route("/billing-portal", billingPortalRoute)
   .route("/checkout", checkoutRoute)
   .route("/config", configRoute)
+  .route("/dsar", dsarRoute)
   .route("/identify", identifyRoute)
   .route("/events", eventsRoute)
   .route("/experiments", experimentsRoute)
