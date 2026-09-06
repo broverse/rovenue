@@ -232,7 +232,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
 </Callout>
 
 <Callout type="warn">
-Call `configure()` exactly once per process. Calling it again after initialisation throws `NotConfiguredError` on iOS/Android and a `console.error` on React Native. If you need to change the key (e.g. in a multi-tenant app), call `shutdown()` first.
+Call `configure()` once at app startup, before any other Rovenue call. Calling it again later is supported on every platform — it replaces the shared instance rather than throwing — so if you need to change the key (e.g. in a multi-tenant app), you can call `configure()` again directly; `shutdown()` first is not required. What is a real hazard is the *other* ordering mistake: calling any method other than `configure()` before the first `configure()` call. That's a programming error to fix at the call site — see [Calling the SDK before configure()](/docs/reference/errors#calling-the-sdk-before-configure) for what actually happens per platform (a hard crash on iOS, not a catchable error).
 </Callout>
 </Step>
 
@@ -268,7 +268,7 @@ After `configure()`, call `getVersion()` to confirm the SDK is wired correctly. 
   </Tab>
 </Tabs>
 
-If you see a `NotConfigured` error here, `configure()` was either not called or called after this code ran. See [App lifecycle](/docs/guides/app-lifecycle) for the correct startup order.
+If `configure()` was skipped or ran after this code, this step will not fail gracefully: on iOS it crashes outright (the console/crash log shows `"Rovenue: must call Rovenue.configure(apiKey:baseUrl:) before accessing shared"` just before the process terminates), and on Android it throws an uncaught `IllegalStateException` with the same message. Neither is a catchable "NotConfigured" error — see [Calling the SDK before configure()](/docs/reference/errors#calling-the-sdk-before-configure). If you hit either, double-check `configure()` actually ran first — see [App lifecycle](/docs/guides/app-lifecycle) for the correct startup order.
 </Step>
 </Steps>
 

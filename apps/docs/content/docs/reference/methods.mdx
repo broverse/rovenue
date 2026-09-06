@@ -68,8 +68,8 @@ Initialise the SDK. Call this **once at app startup**, before any other Rovenue 
   </Tab>
 </Tabs>
 
-<Callout type="info">
-`configure` must be called before `Rovenue.shared` is accessed. Accessing any other method before `configure` throws [`NotConfiguredError`](/docs/reference/errors#error-table).
+<Callout type="warn">
+`configure` must be called before any other Rovenue method. This is a programming error to prevent by call-site ordering, not a runtime error to catch: on **iOS**, accessing the SDK before `configure` is a hard crash (`fatalError`, not a throwable error — no `catch` anywhere can intercept it); on **Android**, it throws a plain `IllegalStateException` that is not a `RovenueException`. See [Calling the SDK before `configure()`](/docs/reference/errors#calling-the-sdk-before-configure) for the full per-platform breakdown, including React Native and Flutter.
 </Callout>
 
 **See also:** [Configuring the SDK guide](/docs/guides/configuring)

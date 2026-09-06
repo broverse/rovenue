@@ -108,11 +108,39 @@ try {
 
 ---
 
+## Calling the SDK before `configure()`
+
+This is **not** an entry in the table below — it isn't part of the `ErrorKind` taxonomy
+at all, and it is not something to write a `catch` for. Calling any other SDK method
+before `configure()` has run is a programming error to fix at the call site (always
+`configure()` first, at app startup — see [App lifecycle](/docs/guides/app-lifecycle)),
+not a runtime condition your code should branch on. What actually happens if you get
+the ordering wrong, per platform:
+
+- **iOS** (native Swift, and React Native / Flutter on iOS, which call into the same
+  Swift singleton) — a **hard crash**. Accessing `Rovenue.shared` before `configure()`
+  triggers Swift's `fatalError`, which aborts the process immediately. This is not a
+  throwable Swift error: no `do`/`catch` in Swift, no `try`/`catch` in JS, and no
+  `try`/`catch` in Dart can intercept it — the crash log will show `"Rovenue: must
+  call Rovenue.configure(apiKey:baseUrl:) before accessing shared"` just before the
+  process terminates.
+- **Android** (native Kotlin) — throws a plain `IllegalStateException`, **not** a
+  `RovenueException`. A `catch (e: RovenueException)` will not observe it at all; you'd
+  need a broader `catch (e: Exception)` to see it, and even then it carries no
+  `ErrorKind` — it's outside the taxonomy this page documents.
+- **React Native on Android** and **Flutter on Android** — the native bridge on this
+  platform catches everything and re-surfaces it as a normal, catchable error, but
+  because the underlying `IllegalStateException` isn't a `RovenueException`, it
+  normalizes to the generic `kind: "Internal"` (RN) / `RovenueErrorKind.internal`
+  (Flutter) — indistinguishable from any other unexpected internal failure, not a
+  signal you can branch on to detect "not configured" specifically.
+
+The only reliable fix is ordering: call `configure()` before anything else, every time.
+
 ## Error table
 
 | When it fires | React Native (class) | Swift (enum case) | Kotlin (exception) |
 |---------------|---------------------|-------------------|--------------------|
-| SDK not configured — `configure()` was not called before accessing `Rovenue.shared` | `NotConfiguredError` | `.notConfigured` | `RovenueException.NotConfigured` |
 | API key is missing, malformed, or rejected by the server | `InvalidApiKeyError` | `.invalidApiKey` | `RovenueException.InvalidApiKey` |
 | An argument was invalid — e.g. an empty string passed to `identify()` | `InvalidArgumentError` | `.invalidArgument` | `RovenueException.InvalidArgument` |
 | Server returned a non-recoverable error response | `ServerError` | `.serverError` | `RovenueException.ServerException` |
@@ -120,10 +148,7 @@ try {
 | Request exceeded the allowed time limit | `TimeoutError` | `.timeout` | `RovenueException.Timeout` |
 | Too many requests — SDK is being rate-limited; back off and retry | `RateLimitedError` | `.rateLimited` | `RovenueException.RateLimited` |
 | Local persistent storage (MMKV) read/write failure | `StorageError` | `.storage` | `RovenueException.Storage` |
-| Subscriber record not found on the server | `UserNotFoundError` | `.userNotFound` | `RovenueException.UserNotFound` |
 | Returned by the server when a virtual-currency spend transaction has insufficient balance (server-side API only — no client SDK method throws this) | `InsufficientCreditsError` | `.insufficientCredits` | `RovenueException.InsufficientCredits` |
-| Entitlement exists but is not currently active | `EntitlementInactiveError` | `.entitlementInactive` | `RovenueException.EntitlementInactive` |
-| Receipt was already recorded for this transaction (idempotency deduplication) | `DuplicatePurchaseError` | `.duplicatePurchase` | `RovenueException.DuplicatePurchase` |
 | Receipt could not be validated by the store or server | `ReceiptInvalidError` | `.receiptInvalid` | `RovenueException.ReceiptInvalid` |
 | Unexpected internal SDK error | `InternalError` | `.internalError` | `RovenueException.Internal` |
 | User cancelled the store purchase sheet | `PurchaseCancelledError` | `.purchaseCancelled` | `PurchaseCancelledException` |
@@ -257,4 +282,4 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
 | [`purchase()`](/docs/reference/methods#purchase) | `PurchaseCancelledError`, `PurchasePendingError`, `ProductNotAvailableError`, `StoreProblemError`, `ReceiptInvalidError`, `NetworkUnavailableError` |
 | [`restorePurchases()`](/docs/reference/methods#restorepurchases) | `NetworkUnavailableError`, `ServerError` |
 | [`getAppAccountToken()`](/docs/reference/methods#account-token) | `StorageError` |
-| All methods | `NotConfiguredError` (if `configure()` was not called), `InternalError` (unexpected failures) |
+| All methods | `InternalError` (unexpected failures) — see [Calling the SDK before `configure()`](#calling-the-sdk-before-configure) for what happens if `configure()` was skipped; it is not one of these errors |

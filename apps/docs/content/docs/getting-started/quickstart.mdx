@@ -129,7 +129,7 @@ Call `configure()` before any other SDK method — in your app entry point, befo
 </Callout>
 
 <Callout type="warn">
-Call `configure()` exactly **once** per process. Calling it a second time without first calling `shutdown()` is a programmer error. The SDK throws `NotConfiguredError` if any method is called before `configure()`.
+Call `configure()` once at app startup, before any other Rovenue call. Calling it again later is supported — it replaces the shared instance — but calling any *other* method before the first `configure()` has run is a programming error to fix at the call site, not something to catch: on iOS it's a hard crash, and on Android it throws a plain (non-`RovenueException`) `IllegalStateException`. See [Calling the SDK before configure()](/docs/reference/errors#calling-the-sdk-before-configure) for the full per-platform breakdown.
 </Callout>
 
 See [Configuring](/docs/guides/configuring) for all `RovenueConfig` options, including `debug`, `appVersion`, and self-hosted `baseUrl` values.

@@ -12,10 +12,14 @@ before any other Rovenue method. Every other method is invalid until
 `configure` has run.
 
 <Callout type="warn">
-Calling any SDK method before `configure` throws `NotConfigured`. Put
-`configure` at the earliest possible entry point — `App.tsx` on React Native,
-`AppDelegate.application(_:didFinishLaunchingWithOptions:)` on iOS, or
-`Application.onCreate()` on Android.
+Calling any other SDK method before `configure` has run is a programming error,
+not a runtime condition to catch — on iOS it's a hard crash (not a throwable
+error), and on Android it throws a plain, non-`RovenueException`
+`IllegalStateException`. See [Calling the SDK before
+configure()](/docs/reference/errors#calling-the-sdk-before-configure) for the
+full per-platform breakdown. Put `configure` at the earliest possible entry
+point — `App.tsx` on React Native, `AppDelegate.application(_:didFinishLaunchingWithOptions:)`
+on iOS, or `Application.onCreate()` on Android — to make this impossible to get wrong.
 </Callout>
 
 ### Types on this page

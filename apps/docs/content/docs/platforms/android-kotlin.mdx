@@ -88,7 +88,12 @@ data class RovenueConfig(
 | `appVersion` | `String?` | Overrides the version read from the package manager. |
 
 <Callout type="warn">
-Call `configure` in `Application.onCreate` — not inside an `Activity`. Calling SDK methods before `configure` throws `RovenueException.NotConfigured`.
+Call `configure` in `Application.onCreate` — not inside an `Activity`. Calling
+any other SDK method before `configure` has run throws a plain
+`IllegalStateException` — **not** a `RovenueException` — so `catch (e:
+RovenueException)` will not observe it. This is a programming error to fix by
+ordering (always `configure` first), not a condition to catch. See [Calling
+the SDK before configure()](/docs/reference/errors#calling-the-sdk-before-configure).
 </Callout>
 </Step>
 
