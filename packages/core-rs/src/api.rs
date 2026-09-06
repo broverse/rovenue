@@ -426,7 +426,7 @@ impl RovenueCore {
 
     /// Look up one entitlement by id from the local cache — never hits the
     /// network directly. `None` when the id is unknown or not (yet) granted.
-    /// If the cache is older than 30s this kicks off a background refresh
+    /// If the cache is older than 60s this kicks off a background refresh
     /// (fire-and-forget) before returning, so do not call `refresh_entitlements`
     /// from inside the `EntitlementsChanged`/`Observer` callback this refresh
     /// triggers — that re-emits the change event and loops forever.
@@ -438,7 +438,7 @@ impl RovenueCore {
 
     /// All currently-granted entitlements from the local cache (empty vec on
     /// a cache-read error, never an `Err`) — a cache read, not a network
-    /// call. As with [`entitlement`](Self::entitlement), a stale (>30s) cache
+    /// call. As with [`entitlement`](Self::entitlement), a stale (>60s) cache
     /// triggers a background refresh; never call this from the change
     /// listener the refresh fires, or it loops.
     pub fn entitlements_all(&self) -> Vec<Entitlement> {
@@ -448,7 +448,7 @@ impl RovenueCore {
     }
 
     /// Force a synchronous entitlement refresh against the server, bypassing
-    /// the 30s staleness window that [`entitlement`](Self::entitlement)/
+    /// the 60s staleness window that [`entitlement`](Self::entitlement)/
     /// [`entitlements_all`](Self::entitlements_all) use. Never call this from
     /// inside their change-listener callback — the refresh re-emits the
     /// change event, which re-triggers the listener, forever.
@@ -523,7 +523,7 @@ impl RovenueCore {
     }
 
     /// All virtual-currency balances, keyed by currency code, from the local
-    /// cache — a cache read, not a network call. Stale (>30s) balances
+    /// cache — a cache read, not a network call. Stale (>60s) balances
     /// trigger a background refresh; never call `refresh_virtual_currencies`
     /// from inside the balance-changed listener the refresh fires, or it
     /// loops.
@@ -544,7 +544,7 @@ impl RovenueCore {
     }
 
     /// Force a synchronous virtual-currency balance refresh against the
-    /// server, bypassing the 30s staleness window. Never call this from
+    /// server, bypassing the 60s staleness window. Never call this from
     /// inside the balance-changed listener callback it fires — that
     /// re-triggers the listener, forever.
     pub fn refresh_virtual_currencies(&self) -> RovenueResult<()> {
@@ -580,12 +580,14 @@ impl RovenueCore {
     /// from the receipt so a retried POST never double-processes it). On
     /// success, hydrates the local entitlement/virtual-currency caches
     /// directly from the response and returns the resulting
-    /// [`ReceiptResult`] — no follow-up `GET`. Any paywall-attribution
-    /// snapshot stamped by a preceding `get_paywall()` call rides along as
-    /// `presentedContext` and is cleared only once the POST succeeds, so a
-    /// failed/retried submission doesn't lose it. Errors surface as
-    /// `RovenueResult::Err` with a `RovenueError` `kind` such as
-    /// `ReceiptInvalid`, `AlreadyOwned`, or `ServerError`.
+    /// [`ReceiptResult`] — no follow-up `GET`, except when the response
+    /// omits `access` entirely (an older server), which falls back to one
+    /// (see `finish_receipt`). Any paywall-attribution snapshot stamped by
+    /// a preceding `get_paywall()` call rides along as `presentedContext`
+    /// and is cleared only once the POST succeeds, so a failed/retried
+    /// submission doesn't lose it. Errors surface as `RovenueResult::Err`
+    /// with a `RovenueError` `kind` such as `ReceiptInvalid`,
+    /// `AlreadyOwned`, or `ServerError`.
     pub fn post_apple_receipt(
         &self,
         receipt: String,
@@ -1045,8 +1047,13 @@ impl RovenueCore {
     /// the local buffer for later at-least-once delivery — does not itself
     /// hit the network. `duration_ms` is only meaningful for `Close`
     /// (foreground session length); pass `None` for `Open`/`Background`.
-    /// `occurred_at` must be an RFC3339/ISO-8601 UTC timestamp or this
-    /// returns `Err(InvalidArgument)`.
+    /// Unlike `track`/`enqueue_paywall_event`, `occurred_at` is NOT format
+    /// validated here — it is written straight through to local storage as
+    /// given. The caller is responsible for supplying a well-formed
+    /// RFC3339/ISO-8601 UTC timestamp; a malformed value is stored as-is
+    /// and only surfaces downstream (e.g. a server-side rejection on
+    /// dispatch). The `Err` this can return is `RovenueError::Storage`, on
+    /// a local write failure — never `InvalidArgument`.
     pub fn record_session_event(
         &self,
         kind: SessionEventKind,

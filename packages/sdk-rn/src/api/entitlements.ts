@@ -13,7 +13,7 @@ async function call<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * Look up one entitlement by id from the native SDK's local cache — resolves
  * from disk/memory, not a network round trip. `null` when the id is unknown
- * or not currently granted. A stale (>30s) cache triggers a background
+ * or not currently granted. A stale (>60s) cache triggers a background
  * refresh on the native side; never call `refreshEntitlements()` from an
  * `ENTITLEMENTS_CHANGED` listener that refresh fires, or it loops.
  */
@@ -32,7 +32,7 @@ export async function entitlementsAll(): Promise<Entitlement[]> {
 }
 
 /**
- * Force a network refresh of entitlements, bypassing the 30s staleness
+ * Force a network refresh of entitlements, bypassing the 60s staleness
  * window that {@link entitlement}/{@link entitlementsAll} use. Never call
  * this from inside an `ENTITLEMENTS_CHANGED` listener — the refresh
  * re-emits that same event, which re-invokes the listener, forever.
