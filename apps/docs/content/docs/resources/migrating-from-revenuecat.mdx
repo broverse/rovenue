@@ -133,6 +133,14 @@ is in your Rovenue catalog — the pass matches on the catalog product, not on
 the raw string.
 </Callout>
 
+Unlike the history import, this pass reads the whole file into memory before
+it resolves anything — it has to, because "this file gives one subscriber and
+product two different tokens" is a property of the file, not of any single
+row. Files above 500,000 rows are therefore refused outright rather than
+partly enriched, with a message saying so; split one that large and upload
+each part as its own import. The pass is idempotent, so overlapping parts are
+safe.
+
 The dry run classifies every row and writes nothing, exactly as it does for
 a history import. Its buckets are:
 

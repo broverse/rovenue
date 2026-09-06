@@ -103,3 +103,38 @@ export const IMPORT_STORAGE_PREFIX = "imports";
  * partway through, rather than silently going quiet.
  */
 export const IMPORT_DUPLICATE_TRACKING_MAX_KEYS = 2_000_000;
+
+/**
+ * Upper bound on how many rows a GOOGLE_TOKEN_ENRICHMENT run will hold in
+ * memory.
+ *
+ * That pass cannot stream. "This file supplies exactly one token for this
+ * (subscriber, product) pair" is a property of the WHOLE FILE, invisible
+ * from any single row, so every valid row is accumulated and then grouped
+ * into pairs before anything can be resolved — peak memory holds both
+ * structures. Nothing else bounds it: `IMPORT_MAX_UPLOAD_BYTES` is 2 GiB
+ * and no route rejects a large upload for this kind, so an operator who
+ * uploads the wrong file (a Transactions export, say) would OOM the
+ * worker and take any co-scheduled import down with it.
+ *
+ * Rows, not pairs, because pairs are DERIVED from rows and can never
+ * exceed them — one number bounds both structures, and it can be checked
+ * while the file is still being read rather than after it is all resident.
+ *
+ * 500,000 rows is roughly 100-150 MB for the accumulated rows plus their
+ * pair map at these field sizes, and it is far above any realistic file:
+ * this is the three-column CSV RevenueCat support hand-delivers, one row
+ * per Android SUBSCRIPTION, so half a million rows is already a very
+ * large Android install base.
+ *
+ * REACHING THIS CAP FAILS THE RUN — it does not degrade it. That is a
+ * deliberate departure from `IMPORT_DUPLICATE_TRACKING_MAX_KEYS` above,
+ * and the reason is in that constant's own comment: duplicate detection
+ * "is informational, not a correctness guarantee this cap is allowed to
+ * break", so stopping tracking past the cap costs a redundant upsert and
+ * nothing more. A pair dropped here is a subscription that silently never
+ * gets its token — un-enriched data, reported to the operator as a clean
+ * run. There is no honest way to disclose that as a footnote, so the run
+ * stops and says so, and the operator splits the file.
+ */
+export const IMPORT_ENRICHMENT_MAX_ROWS = 500_000;

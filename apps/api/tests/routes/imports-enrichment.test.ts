@@ -392,12 +392,17 @@ describe("GET /:id reconstructs dry-run counters per kind", () => {
     getImportJob.mockResolvedValue(
       makeJob({
         status: "DRY_RUN_COMPLETE",
+        // Written by `buildDryRunCounters`, so EVERY key of this kind —
+        // auxiliaries included — carries the `dryRun_` prefix. An
+        // auxiliary persisted plainly here would be a shape the dry run
+        // cannot actually produce, and asserting on it would prove
+        // nothing about the reconstruction.
         counters: {
           dryRun_enriched: 4,
           dryRun_alreadyEnriched: 1,
           dryRun_ungroupedChains: 2,
-          enrichedPurchaseRows: 9,
-          ungroupedChainsPurchaseRows: 6,
+          dryRun_enrichedPurchaseRows: 9,
+          dryRun_ungroupedChainsPurchaseRows: 6,
         },
       }),
     );
@@ -417,6 +422,15 @@ describe("GET /:id reconstructs dry-run counters per kind", () => {
     // zero) and none of the ones above.
     expect(counters.willCreate).toBeUndefined();
     expect(counters.androidNoToken).toBeUndefined();
+
+    // The AUXILIARY keys have to survive the same reconstruction. They
+    // are not outcome buckets, so a reconstruction driven by the bucket
+    // list alone drops them — silently, and in exactly the phase they
+    // exist for: `ungroupedChainsPurchaseRows` is the number the
+    // dashboard's opt-in callout quotes ("re-run the dry run to enrich N
+    // more purchase rows"), so losing it renders an offer to enrich zero.
+    expect(counters.enrichedPurchaseRows).toBe(9);
+    expect(counters.ungroupedChainsPurchaseRows).toBe(6);
   });
 
   it("still reports the history buckets for a HISTORY job", async () => {

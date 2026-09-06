@@ -5,7 +5,8 @@
 // reads a GOOGLE_TOKEN_ENRICHMENT job's file, resolves every
 // (subscriber, product) pair, streams a report, persists counters, and —
 // on a commit run only — writes `purchases.googlePurchaseToken` and
-// hands the newly enriched chains to Phase B.
+// hands every chain the file names, whether this run wrote it or a
+// previous one did, to Phase B.
 //
 // -------------------------------------------------------------
 // One pass, two modes — deliberately not two functions
@@ -33,17 +34,20 @@
 // any single row (see enrich.ts's own comment). So the pair map is
 // resident for the run.
 //
-// That is proportionate. An enrichment file is the three-column token
-// file RevenueCat support hand-delivers — one row per Android
-// subscription, not one row per transaction — so its pair count is
-// bounded by a project's Android subscriber count, orders of magnitude
-// below the multi-gigabyte Transactions export report.ts's streaming
-// rules were written for. Row-level OUTCOMES are still never
-// accumulated: they go straight to the NDJSON report as each pair
-// resolves.
+// That is proportionate for the file this pass is for — the three-column
+// token CSV RevenueCat support hand-delivers, one row per Android
+// SUBSCRIPTION, not one row per transaction. But "the file is small" is a
+// property of the expected input, not an enforced one: the upload cap is
+// 2 GiB and no route rejects a large file for this kind, so the
+// accumulation is bounded explicitly by `IMPORT_ENRICHMENT_MAX_ROWS` and
+// the run FAILS with an actionable message when it is exceeded (see that
+// constant for why it fails rather than degrading). Row-level OUTCOMES
+// are still never accumulated: they go straight to the NDJSON report as
+// each pair resolves.
 import type { Readable } from "node:stream";
 import { drizzle, type Db, type ImportJobOptions } from "@rovenue/db";
 import {
+  IMPORT_ENRICHMENT_MAX_ROWS,
   normalizeEnrichmentRow,
   parseCsvStream,
   type CanonicalField,
@@ -59,6 +63,7 @@ import {
 } from "./enrich";
 import { buildCanonicalRow } from "./plan";
 import {
+  ENRICHMENT_COUNTER_KEYS,
   ENRICHMENT_OUTCOMES,
   buildDryRunCounters,
   createReportWriter,
@@ -82,28 +87,6 @@ const log = logger.child("import-enrich-run");
  *  plan.ts's `DRY_RUN_CANCELLATION_CHECK_INTERVAL_MS` and verify.ts's
  *  `CANCELLATION_CHECK_INTERVAL_MS`. */
 const CANCELLATION_CHECK_INTERVAL_MS = 2_000;
-
-/**
- * Auxiliary counter keys, deliberately OUTSIDE the outcome-bucket
- * namespace (same separation verify.ts's `verifyAnchor*` keys use).
- *
- * The outcome buckets count SOURCE ROWS, because that is what a job's
- * counters have always described and what a report line corresponds to.
- * But the unit an operator actually cares about here is purchase rows —
- * one enrichment row can patch a whole renewal chain — and "3 rows
- * enriched" vs "3 subscriptions enriched" is the difference between a
- * believable dry run and a confusing one. Neither number can be derived
- * from the other, so both are persisted.
- */
-const ENRICHMENT_COUNTER_KEYS = {
-  /** Purchase rows the run wrote (or, on a dry run, would write). */
-  ENRICHED_PURCHASE_ROWS: "enrichedPurchaseRows",
-  /** Purchase rows that `enrichUngroupedChains` would ADDITIONALLY
-   *  enrich if the operator turned it on. Zero when no pair reported
-   *  `ungroupedChains`; this is what makes that outcome actionable
-   *  rather than merely alarming. */
-  UNGROUPED_PURCHASE_ROWS: "ungroupedChainsPurchaseRows",
-} as const;
 
 export type EnrichmentRunMode = "DRY_RUN" | "COMMIT";
 
@@ -247,6 +230,20 @@ async function readEnrichmentFile(args: {
       continue;
     }
     valid.push({ lineNumber: event.lineNumber, row: normalized.row });
+    // Checked WHILE reading, so an oversized file is refused before it
+    // is resident rather than after. See the constant's own comment for
+    // why this fails the run instead of degrading it the way
+    // `IMPORT_DUPLICATE_TRACKING_MAX_KEYS` degrades duplicate detection.
+    if (valid.length > IMPORT_ENRICHMENT_MAX_ROWS) {
+      throw new Error(
+        `This enrichment file has more than ${IMPORT_ENRICHMENT_MAX_ROWS.toLocaleString()} ` +
+          `mappable rows. The Google purchase-token pass has to hold the whole file in memory ` +
+          `to detect a subscriber+product given two different tokens, so it refuses a file this ` +
+          `large rather than enriching part of it and reporting a clean run. Split the file and ` +
+          `upload each part as its own import — the pass is idempotent, so overlapping parts are ` +
+          `safe.`,
+      );
+    }
   }
 
   return { totalRows, invalidRows, pairs: groupEnrichmentRowsByPair(valid) };
@@ -301,6 +298,66 @@ async function applyResolution(args: {
 }
 
 /**
+ * The chain, if any, this pair contributes to Phase B.
+ *
+ * **`alreadyEnriched` counts, and that is the whole point of this
+ * function.** A commit run is re-enterable: `POST /:id/resume` and
+ * BullMQ's own retry both call `runEnrichmentJob(COMMIT)` again, and
+ * that is the ONLY recovery path for a run that legitimately ended
+ * `VERIFICATION_INCOMPLETE` — Play throttling, a store outage, or
+ * `IMPORT_VERIFY_MAX_ANCHORS_PER_RUN` tripping partway through the
+ * chains. On that second run the tokens are already stored, so every
+ * pair resolves `alreadyEnriched` and NOTHING is written.
+ *
+ * If the chain set were built from writes alone, the resume would hand
+ * Phase B zero chains, `verifyAnchorGroups` would see an empty group map
+ * with nothing pending, and it would persist **COMPLETED** for a run
+ * that verified nothing at all. Tokens written, entitlements never live,
+ * and the only operator-facing signal saying it finished. The status
+ * vocabulary was reused; the resumable semantics behind it have to be
+ * reused too.
+ *
+ * Re-offering an already-verified chain costs nothing: it is
+ * `verifyEnrichedGoogleAnchors`'s own resume checkpoint
+ * (`purchases.verifiedAt`) that drops those rows, before they can take a
+ * cap slot or a store call.
+ *
+ * `conflictingToken` is deliberately NOT included even though it also
+ * carries `purchaseIds`: those rows store a DIFFERENT token, so
+ * verifying them under this file's token would ask the store about the
+ * wrong subscription — the same reason nothing writes to them.
+ */
+async function chainToVerify(args: {
+  db: Db;
+  pair: EnrichmentPair;
+  resolution: EnrichmentResolution;
+  written: { id: string; storeTransactionId: string }[];
+}): Promise<EnrichedGoogleChain | null> {
+  const { db, pair, resolution, written } = args;
+  const base = {
+    purchaseToken: pair.tokens[0]!,
+    productIdentifier: pair.productIdentifier,
+  };
+
+  if (resolution.outcome === "enriched") {
+    // The UPDATE already returned these — no second read.
+    if (written.length === 0) return null;
+    return { ...base, storeTransactionIds: written.map((row) => row.storeTransactionId) };
+  }
+
+  if (resolution.outcome !== "alreadyEnriched") return null;
+
+  // The resolver reports purchase IDS; Phase B is keyed by
+  // `storeTransactionId` (PLAY_STORE rows have no chain column, so
+  // `applyVerifiedResult` updates each one individually). This read is
+  // the only place the two are joined, and it only runs on a re-entered
+  // commit — the first commit's pairs never take this branch.
+  const rows = await drizzle.purchaseRepo.findPurchasesByIds(db, resolution.purchaseIds);
+  if (rows.length === 0) return null;
+  return { ...base, storeTransactionIds: rows.map((row) => row.storeTransactionId) };
+}
+
+/**
  * Runs one GOOGLE_TOKEN_ENRICHMENT job, in dry-run or commit mode.
  *
  * Idempotent: a second commit of the same file resolves every pair to
@@ -345,9 +402,21 @@ export async function runEnrichmentJob(
   const counters = emptyOutcomeCounters(ENRICHMENT_OUTCOMES);
   let enrichedPurchaseRows = 0;
   let ungroupedChainsPurchaseRows = 0;
-  const enrichedChains: EnrichedGoogleChain[] = [];
+  // Every chain Phase B should look at — the ones this run wrote AND
+  // the ones a previous run already wrote (`chainToVerify`). Not
+  // "chains this run enriched": that name is what made the resume path
+  // silently verify nothing.
+  const chainsToVerify: EnrichedGoogleChain[] = [];
   let cancelled = false;
   let lastCancelCheckAt = 0;
+
+  /** This run's auxiliary counters, built in ONE place so the dry-run,
+   *  commit and cancel branches below can never persist a different set
+   *  of them. `report.ts` owns the key names. */
+  const auxiliaryCounters = (): Record<string, number> => ({
+    [ENRICHMENT_COUNTER_KEYS.ENRICHED_PURCHASE_ROWS]: enrichedPurchaseRows,
+    [ENRICHMENT_COUNTER_KEYS.UNGROUPED_PURCHASE_ROWS]: ungroupedChainsPurchaseRows,
+  });
 
   try {
     const objectStream = await importStore.getObject(job.storageKey);
@@ -406,13 +475,11 @@ export async function runEnrichmentJob(
       if (mode === "COMMIT") {
         const { written } = await applyResolution({ db, projectId, pair, resolution });
         enrichedPurchaseRows += written.length;
-        if (written.length > 0) {
-          enrichedChains.push({
-            purchaseToken: pair.tokens[0]!,
-            productIdentifier: pair.productIdentifier,
-            storeTransactionIds: written.map((row) => row.storeTransactionId),
-          });
-        }
+        // Built from what this pair RESOLVED to, not from what it wrote
+        // — see `chainToVerify` for why a re-entered commit must still
+        // reach Phase B.
+        const chain = await chainToVerify({ db, pair, resolution, written });
+        if (chain) chainsToVerify.push(chain);
       } else if (resolution.outcome === "enriched") {
         enrichedPurchaseRows += resolution.purchaseIds.length;
       }
@@ -445,9 +512,26 @@ export async function runEnrichmentJob(
       // what the cancelled run had already done.
       await drizzle.importJobRepo.setImportJobCounters(db, projectId, jobId, {
         ...counters,
-        [ENRICHMENT_COUNTER_KEYS.ENRICHED_PURCHASE_ROWS]: enrichedPurchaseRows,
-        [ENRICHMENT_COUNTER_KEYS.UNGROUPED_PURCHASE_ROWS]: ungroupedChainsPurchaseRows,
+        ...auxiliaryCounters(),
       });
+      // The report PART this attempt opened must be recorded even though
+      // the run was abandoned — exactly as the error path below does,
+      // and as the history runner's own cancel branch does. Without it
+      // the row still reads part N-1 while part N exists in storage, so
+      // the NEXT commit claims N and overwrites the cancelled run's only
+      // record of why each pair was refused, which is precisely what
+      // numbered, immutable parts exist to prevent.
+      //
+      // `status: "CANCELLED"` here is a re-assertion of what the row
+      // already says (that is how this branch was reached), not a new
+      // decision — `setImportJobStatus` requires a status, and
+      // re-writing the same one leaves `finishedAt` untouched.
+      if (reportPartNumber !== undefined) {
+        await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
+          status: "CANCELLED",
+          reportPartCount: reportPartNumber,
+        });
+      }
       log.info("enrichment job cancelled mid-run", { jobId, enrichedPurchaseRows });
       return {
         jobId,
@@ -467,11 +551,18 @@ export async function runEnrichmentJob(
       // the same `dryRun_` prefix — a re-run after flipping
       // `enrichUngroupedChains` must REPLACE the previous attempt's
       // counts, not stack on them.
-      await drizzle.importJobRepo.setImportJobCounters(db, projectId, jobId, {
-        ...buildDryRunCounters(ENRICHMENT_OUTCOMES, counters),
-        [ENRICHMENT_COUNTER_KEYS.ENRICHED_PURCHASE_ROWS]: enrichedPurchaseRows,
-        [ENRICHMENT_COUNTER_KEYS.UNGROUPED_PURCHASE_ROWS]: ungroupedChainsPurchaseRows,
-      });
+      // The auxiliary keys go through `buildDryRunCounters` too, NOT
+      // alongside it: `readDryRunCounters` rebuilds a pre-commit job's
+      // counters from the key list and drops anything it was not told
+      // about, so a plainly-written auxiliary reaches the dashboard as
+      // absent — and the opt-in callout, whose whole job is to say how
+      // many more rows `enrichUngroupedChains` would enrich, offers zero.
+      await drizzle.importJobRepo.setImportJobCounters(
+        db,
+        projectId,
+        jobId,
+        buildDryRunCounters(ENRICHMENT_OUTCOMES, counters, auxiliaryCounters()),
+      );
       await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
         status: "DRY_RUN_COMPLETE",
         reportStorageKey,
@@ -498,8 +589,7 @@ export async function runEnrichmentJob(
     // replace the first's rather than doubling them.
     await drizzle.importJobRepo.setImportJobCounters(db, projectId, jobId, {
       ...counters,
-      [ENRICHMENT_COUNTER_KEYS.ENRICHED_PURCHASE_ROWS]: enrichedPurchaseRows,
-      [ENRICHMENT_COUNTER_KEYS.UNGROUPED_PURCHASE_ROWS]: ungroupedChainsPurchaseRows,
+      ...auxiliaryCounters(),
     });
     await drizzle.importJobRepo.setImportJobStatus(db, projectId, jobId, {
       status: "VERIFYING",
@@ -522,7 +612,7 @@ export async function runEnrichmentJob(
       const summary = await verifyEnrichedGoogleAnchors(
         jobId,
         options.verifyDeps ?? createProductionImportVerifyDeps(),
-        enrichedChains,
+        chainsToVerify,
       );
       if (summary.status !== "COMPLETED") status = summary.status;
     } catch (verifyErr) {

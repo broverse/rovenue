@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "../../i18n/config";
 import { DryRunSummary } from "./dry-run-summary";
+import {
+  ENRICHMENT_AUXILIARY_KEYS,
+  IMPORT_ENRICHMENT_OUTCOME_ORDER,
+} from "./constants";
 import type { ImportJob } from "../../lib/hooks/useImports";
 
 // =============================================================
@@ -94,14 +98,21 @@ describe("DryRunSummary", () => {
     const warning = screen.getByTestId("import-android-no-token-warning");
     expect(warning).toHaveTextContent("1,284");
     expect(warning).toHaveTextContent(/android/i);
-    // Final-fix-wave FIX 9: the recommended action must be one that
-    // actually works today — the old copy told the operator to "request
-    // the Google purchase-token file... and run a second import", which
-    // 400s on every attempt (the token file can never satisfy the
-    // mapper's required store/purchaseDate fields, and no code path
-    // joins it to an existing purchase regardless).
+    // The recommended action must be one that actually works.
+    //
+    // Final-fix-wave FIX 9 asserted the OPPOSITE of the line below —
+    // that the copy must NOT mention a second import — because at the
+    // time the token file 400'd on every attempt (its three columns
+    // could not satisfy the then-global required store/purchaseDate
+    // fields, and nothing joined a token to an existing purchase). The
+    // Google purchase-token second pass now exists, so recovering these
+    // subscriptions no longer depends on the user's device ever opening
+    // the app again, and the second import is the FIRST thing to
+    // recommend. The SDK cut-over stays as the fallback for anyone the
+    // token file misses.
     expect(warning).toHaveTextContent(/no live entitlement grant/i);
-    expect(warning).not.toHaveTextContent(/second import/i);
+    expect(warning).toHaveTextContent(/second import/i);
+    expect(warning).toHaveTextContent(/purchase-token file/i);
     expect(warning).toHaveTextContent(/restorePurchases/);
   });
 
@@ -312,8 +323,36 @@ describe("DryRunSummary — disclosures (final-fix-wave FIX 7)", () => {
 // =============================================================
 
 describe("DryRunSummary — enrichment jobs", () => {
+  /**
+   * Builds the counters object the API ACTUALLY emits for an enrichment
+   * job at DRY_RUN_COMPLETE, rather than only the keys a given assertion
+   * cares about.
+   *
+   * That distinction is not pedantry — it is the bug this helper exists
+   * because of. `toDto` reconstructs a pre-commit job's counters from the
+   * kind's key list, so the object the client receives always carries
+   * EVERY key of that kind at zero, never a sparse subset. The first
+   * version of these tests hand-built `{ungroupedChains: 4,
+   * ungroupedChainsPurchaseRows: 11}` — a shape the route could not
+   * produce at that status at all, because the two auxiliary keys were
+   * being dropped by exactly that reconstruction. The component tests
+   * passed while the real callout rendered "enrich 0 more purchase
+   * row(s)".
+   *
+   * Mirrors `readDryRunCounters(kind, …)` in
+   * apps/api/src/services/import/report.ts.
+   */
+  function dtoCounters(present: Record<string, number>): Record<string, number> {
+    const keys = [...IMPORT_ENRICHMENT_OUTCOME_ORDER, ...ENRICHMENT_AUXILIARY_KEYS];
+    return Object.fromEntries(keys.map((key) => [key, present[key] ?? 0]));
+  }
+
   function enrichmentJob(counters: Record<string, number>): ImportJob {
-    return makeJob({ kind: "GOOGLE_TOKEN_ENRICHMENT", counters });
+    return makeJob({
+      kind: "GOOGLE_TOKEN_ENRICHMENT",
+      status: "DRY_RUN_COMPLETE",
+      counters: dtoCounters(counters),
+    });
   }
 
   it("renders the enrichment buckets under their own labels", () => {
@@ -332,7 +371,10 @@ describe("DryRunSummary — enrichment jobs", () => {
 
   it("names enrichUngroupedChains whenever that bucket is non-zero", () => {
     // The whole point: an operator whose file lands here has no other
-    // way to learn the option exists.
+    // way to learn the option exists. The purchase-row count is what
+    // makes it an offer rather than a complaint, so it is asserted as a
+    // distinct number from the bucket count — "11" cannot be satisfied
+    // by the "4" above it.
     render(
       <DryRunSummary
         job={enrichmentJob({ ungroupedChains: 4, ungroupedChainsPurchaseRows: 11 })}
@@ -341,8 +383,18 @@ describe("DryRunSummary — enrichment jobs", () => {
 
     const warning = screen.getByTestId("import-ungrouped-chains-warning");
     expect(warning).toHaveTextContent(/link unlinked renewals/i);
-    expect(warning).toHaveTextContent("4");
-    expect(warning).toHaveTextContent("11");
+    expect(warning).toHaveTextContent("4 subscribers");
+    expect(warning).toHaveTextContent("enrich 11 more purchase row");
+  });
+
+  it("shows the purchase-row count alongside the applied-token bucket", () => {
+    render(
+      <DryRunSummary job={enrichmentJob({ enriched: 4, enrichedPurchaseRows: 9 })} />,
+    );
+
+    expect(screen.getByTestId("import-enriched-purchase-rows")).toHaveTextContent(
+      "9 purchase row",
+    );
   });
 
   it("does not show that warning when nothing landed in the bucket", () => {

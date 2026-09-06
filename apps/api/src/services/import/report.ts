@@ -100,6 +100,46 @@ export const OUTCOMES_BY_KIND: Record<ImportJobKind, readonly ImportOutcome[]> =
   GOOGLE_TOKEN_ENRICHMENT: ENRICHMENT_OUTCOMES,
 };
 
+// =============================================================
+// Auxiliary counters — same jsonb column, not a bucket
+// =============================================================
+//
+// A pass sometimes needs to persist a number that is NOT a row bucket:
+// something counted in a different unit, that no bucket can express and
+// that cannot be derived from the buckets. These keys live in the same
+// `import_jobs.counters` object, deliberately outside the bucket
+// vocabulary (the same separation verify.ts's `verifyAnchor*` keys use).
+//
+// They are declared HERE, beside the buckets, and not in the pass that
+// writes them, for one concrete reason: the dry-run namespace
+// (`dryRun_`-prefixed) is applied and reversed by this module, and a key
+// this module does not know about is silently DROPPED when a pre-commit
+// job's counters are reconstructed for the API. That is not a
+// hypothetical — it is exactly what happened to both keys below on their
+// first outing, in the one phase they exist for.
+
+/** GOOGLE_TOKEN_ENRICHMENT. The outcome buckets count SOURCE ROWS (that
+ *  is what a job's counters have always described, and what a report
+ *  line corresponds to). These count PURCHASE ROWS: one enrichment row
+ *  can patch a whole renewal chain, so "4 rows" and "11 subscriptions"
+ *  are different numbers and neither is derivable from the other. */
+export const ENRICHMENT_COUNTER_KEYS = {
+  /** Purchase rows the run wrote, or on a dry run would write. */
+  ENRICHED_PURCHASE_ROWS: "enrichedPurchaseRows",
+  /** Purchase rows `enrichUngroupedChains` would ADDITIONALLY reach if
+   *  the operator turned it on. This is the number the dry-run summary's
+   *  opt-in callout quotes, so it has to survive the pre-commit
+   *  reconstruction below or the callout offers to enrich zero rows. */
+  UNGROUPED_PURCHASE_ROWS: "ungroupedChainsPurchaseRows",
+} as const;
+
+/** Auxiliary keys each kind's passes persist alongside their buckets.
+ *  Total over `ImportJobKind`, same reason as `OUTCOMES_BY_KIND`. */
+export const AUXILIARY_COUNTER_KEYS_BY_KIND: Record<ImportJobKind, readonly string[]> = {
+  HISTORY: [],
+  GOOGLE_TOKEN_ENRICHMENT: Object.values(ENRICHMENT_COUNTER_KEYS),
+};
+
 /**
  * A complete, all-zero counter record over one kind's bucket list.
  *
@@ -141,35 +181,59 @@ export function emptyOutcomeCounters<K extends ImportOutcome>(
 // unreliable to answer on the commit side anyway.
 const DRY_RUN_COUNTER_PREFIX = "dryRun_";
 
-export function dryRunCounterKey(outcome: ImportOutcome): string {
-  return `${DRY_RUN_COUNTER_PREFIX}${outcome}`;
+export function dryRunCounterKey(key: string): string {
+  return `${DRY_RUN_COUNTER_PREFIX}${key}`;
 }
 
-/** Builds the full prefixed-key object `setImportJobCounters` persists
- *  for one dry-run attempt — always the complete, from-scratch count for
- *  every bucket of THAT JOB'S KIND, never a delta and never another
- *  kind's buckets. Pass the same list the counts were accumulated over
- *  (`HISTORY_OUTCOMES` / `ENRICHMENT_OUTCOMES`). */
+/** Every counter key a job of this kind persists — buckets first, then
+ *  auxiliaries. The single list both halves of the dry-run namespace are
+ *  driven by, so a key can never be written under the prefix and then
+ *  not read back out of it. */
+export function counterKeysForKind(kind: ImportJobKind): readonly string[] {
+  return [...OUTCOMES_BY_KIND[kind], ...AUXILIARY_COUNTER_KEYS_BY_KIND[kind]];
+}
+
+/**
+ * Builds the full prefixed-key object `setImportJobCounters` persists for
+ * one dry-run attempt — always the complete, from-scratch count for every
+ * key of THAT JOB'S KIND, never a delta and never another kind's keys.
+ *
+ * `outcomes` is the bucket list the counts were accumulated over
+ * (`HISTORY_OUTCOMES` / `ENRICHMENT_OUTCOMES`), typed so a missing bucket
+ * is a compile error rather than a defaulted zero. `auxiliary` carries
+ * that kind's non-bucket keys; they are prefixed too, because a dry run
+ * writing them PLAIN would leave them indistinguishable from a commit
+ * run's — and `readDryRunCounters` below, which rebuilds the object from
+ * the key list alone, would drop them.
+ */
 export function buildDryRunCounters<K extends ImportOutcome>(
   outcomes: readonly K[],
   counts: Record<K, number>,
+  auxiliary: Record<string, number> = {},
 ): Record<string, number> {
-  return Object.fromEntries(
-    outcomes.map((outcome) => [dryRunCounterKey(outcome), counts[outcome]]),
-  );
+  return Object.fromEntries([
+    ...outcomes.map((outcome) => [dryRunCounterKey(outcome), counts[outcome]]),
+    ...Object.entries(auxiliary).map(([key, value]) => [dryRunCounterKey(key), value]),
+  ]);
 }
 
-/** Reverses `buildDryRunCounters` — reads the dry-run pass's own counts
- *  back out of a job's persisted `counters` object, defaulting an absent
- *  key to 0 (a job that has never had a dry run yet). `outcomes` is the
- *  bucket list for the job's kind, normally `OUTCOMES_BY_KIND[job.kind]`. */
-export function readDryRunCounters<K extends ImportOutcome>(
-  outcomes: readonly K[],
+/**
+ * Reverses `buildDryRunCounters` — reads the dry-run pass's own counts
+ * back out of a job's persisted `counters` object, defaulting an absent
+ * key to 0 (a job that has never had a dry run yet).
+ *
+ * Takes the KIND rather than a key list because its caller (the route's
+ * `toDto`) has only a job row, and because driving both directions from
+ * `counterKeysForKind` is what stops the two halves from disagreeing
+ * about which keys exist.
+ */
+export function readDryRunCounters(
+  kind: ImportJobKind,
   counters: Record<string, number>,
-): Record<K, number> {
+): Record<string, number> {
   return Object.fromEntries(
-    outcomes.map((outcome) => [outcome, counters[dryRunCounterKey(outcome)] ?? 0]),
-  ) as Record<K, number>;
+    counterKeysForKind(kind).map((key) => [key, counters[dryRunCounterKey(key)] ?? 0]),
+  );
 }
 
 /** One line of the NDJSON report artefact. Deliberately narrow — enough

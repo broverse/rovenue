@@ -19,7 +19,7 @@ import {
   type CanonicalField,
   type ImportJobKind,
 } from "@rovenue/shared";
-import { OUTCOMES_BY_KIND, readDryRunCounters } from "../../services/import/report";
+import { readDryRunCounters } from "../../services/import/report";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { validate } from "../../lib/validate";
@@ -353,7 +353,7 @@ function toDto(job: { storageKey: string } & Record<string, unknown>) {
   // a caller that handed this a partial row.
   const kind = (rest.kind as ImportJobKind | undefined) ?? "HISTORY";
   const counters = PRE_COMMIT_STATUSES.has(status)
-    ? readDryRunCounters(OUTCOMES_BY_KIND[kind], rawCounters)
+    ? readDryRunCounters(kind, rawCounters)
     : rawCounters;
   return {
     ...rest,

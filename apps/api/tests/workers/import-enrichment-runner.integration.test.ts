@@ -4,6 +4,7 @@ import { eq, inArray } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { db, drizzle, purchases, subscribers } from "@rovenue/db";
 import {
+  IMPORT_ENRICHMENT_MAX_ROWS,
   REVENUECAT_GOOGLE_TOKEN_PRESET_ID,
   detectPreset,
   type CanonicalField,
@@ -108,6 +109,17 @@ const VERIFIED_DEPS: ImportVerifyDeps = {
   verifyStripeAnchor: async () => ({ kind: "notFound" }),
 };
 
+/** Every Google anchor comes back THROTTLED — a non-answer, so the run
+ *  ends VERIFICATION_INCOMPLETE with the anchor still pending, which is
+ *  the state `POST /:id/resume` exists to recover. `sleep` is stubbed so
+ *  the retry/backoff schedule costs no wall-clock time. */
+const THROTTLED_DEPS: ImportVerifyDeps = {
+  verifyAppleAnchor: async () => ({ kind: "notFound" }),
+  verifyGoogleAnchor: async () => ({ kind: "throttled" }),
+  verifyStripeAnchor: async () => ({ kind: "notFound" }),
+  sleep: async () => undefined,
+};
+
 const TOKEN_FILE_HEADER = "user_id,google_purchase_token,google_product_id";
 
 /** The mapping comes from the REAL preset detector, not a literal — the
@@ -203,6 +215,17 @@ describe("runEnrichmentJob — dry run", () => {
     expect(result.enrichedPurchaseRows).toBe(3);
 
     expect(await tokensOf(chain.purchaseIds)).toEqual([null, null, null]);
+
+    // The auxiliary counters ride in the SAME `dryRun_` namespace as the
+    // buckets. Written plainly they would survive the DB but be dropped
+    // by the route's pre-commit reconstruction, which rebuilds the
+    // counters object from the kind's key list — so the dashboard's
+    // opt-in callout would quote zero. This asserts the persisted key
+    // NAMES, not just the numbers, because the name is the bug.
+    const job = await drizzle.importJobRepo.getImportJobById(db, jobId);
+    expect(job?.counters.dryRun_enrichedPurchaseRows).toBe(3);
+    expect(job?.counters.dryRun_ungroupedChainsPurchaseRows).toBe(0);
+    expect(job?.counters.enrichedPurchaseRows).toBeUndefined();
   });
 });
 
@@ -497,6 +520,121 @@ describe("runEnrichmentJob — cancellation", () => {
     expect(job?.status).toBe("CANCELLED");
     // The counters still describe what the abandoned run did.
     expect(job?.counters.enrichedPurchaseRows).toBe(1);
+    // And the report PART this attempt opened is recorded, so the next
+    // commit claims part 2 instead of overwriting part 1 — which is the
+    // whole reason parts are numbered and immutable.
+    expect(job?.reportPartCount).toBe(1);
+  });
+});
+
+// =============================================================
+// Resume — the second commit must still verify
+// =============================================================
+
+describe("runEnrichmentJob — resume after VERIFICATION_INCOMPLETE", () => {
+  it("re-offers already-enriched chains to Phase B instead of reporting a false all-clear", async () => {
+    // `POST /:id/resume` re-enqueues the SAME job, which lands back here
+    // as another COMMIT. By then the tokens are already stored, so every
+    // pair resolves `alreadyEnriched` and NOTHING is written — and a
+    // chain set built from writes alone would be empty, `verifyAnchorGroups`
+    // would see nothing pending, and it would persist COMPLETED for a run
+    // that verified nothing at all.
+    googleAnchorCalls.length = 0;
+    const chain = await seedHistoryImport.playChain({ projectId, renewals: 2 });
+    const jobId = await createEnrichmentJob({
+      projectId,
+      rows: [rowFor(chain, "tok_resume")],
+    });
+
+    // First commit: tokens land, but the store gives no answer.
+    const first = await runEnrichmentJob(jobId, {
+      mode: "COMMIT",
+      verifyDeps: THROTTLED_DEPS,
+    });
+    expect(first.status).toBe("VERIFICATION_INCOMPLETE");
+    expect(first.enrichedPurchaseRows).toBe(2);
+    expect(await tokensOf(chain.purchaseIds)).toEqual(["tok_resume", "tok_resume"]);
+    // Nothing verified — that is the whole premise of the resume.
+    let rows = await db
+      .select({ verifiedAt: purchases.verifiedAt })
+      .from(purchases)
+      .where(inArray(purchases.id, chain.purchaseIds));
+    expect(rows.every((row) => row.verifiedAt === null)).toBe(true);
+
+    // The resume. Nothing left to write.
+    googleAnchorCalls.length = 0;
+    const second = await runEnrichmentJob(jobId, {
+      mode: "COMMIT",
+      verifyDeps: VERIFIED_DEPS,
+    });
+
+    expect(second.counters.enriched).toBe(0);
+    expect(second.counters.alreadyEnriched).toBe(1);
+    expect(second.enrichedPurchaseRows).toBe(0);
+
+    // ...but the chain still reached the store, under the token the
+    // FIRST run wrote. Asserting the status alone would pass with the
+    // bug present: the false all-clear is also COMPLETED.
+    expect(googleAnchorCalls).toEqual([
+      { purchaseToken: "tok_resume", productIdentifier: chain.productIdentifier },
+    ]);
+    expect(second.status).toBe("COMPLETED");
+
+    rows = await db
+      .select({ verifiedAt: purchases.verifiedAt })
+      .from(purchases)
+      .where(inArray(purchases.id, chain.purchaseIds));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.verifiedAt !== null)).toBe(true);
+  });
+
+  it("does not re-verify a chain an earlier run already resolved", async () => {
+    // The other half of re-offering everything: `verifyEnrichedGoogleAnchors`
+    // drops rows carrying `verifiedAt` before they can cost a store call,
+    // so a third run over an already-settled file is free rather than
+    // re-hammering Play.
+    const chain = await seedHistoryImport.playChain({ projectId, renewals: 2 });
+    const jobId = await createEnrichmentJob({
+      projectId,
+      rows: [rowFor(chain, "tok_settled")],
+    });
+    await runEnrichmentJob(jobId, { mode: "COMMIT", verifyDeps: VERIFIED_DEPS });
+
+    googleAnchorCalls.length = 0;
+    const again = await runEnrichmentJob(jobId, {
+      mode: "COMMIT",
+      verifyDeps: VERIFIED_DEPS,
+    });
+
+    expect(again.status).toBe("COMPLETED");
+    expect(googleAnchorCalls).toEqual([]);
+  });
+});
+
+// =============================================================
+// The in-memory cap
+// =============================================================
+
+describe("runEnrichmentJob — row cap", () => {
+  it("fails the run with an actionable message rather than enriching part of the file", async () => {
+    // The pass cannot stream (the two-tokens-for-one-pair check is a
+    // property of the whole file), and nothing else bounds it — the
+    // upload cap is 2 GiB. Dropping pairs past a cap would report a
+    // clean run over data that was never examined, so it fails instead.
+    const rows = Array.from({ length: IMPORT_ENRICHMENT_MAX_ROWS + 1 }, (_, index) => ({
+      userId: `cap_user_${index}`,
+      token: `cap_tok_${index}`,
+      productId: "com.example.cap",
+    }));
+    const jobId = await createEnrichmentJob({ projectId, rows });
+
+    await expect(runEnrichmentJob(jobId, { mode: "DRY_RUN" })).rejects.toThrow(
+      /more than [\d,]+ mappable rows/,
+    );
+
+    const job = await drizzle.importJobRepo.getImportJobById(db, jobId);
+    expect(job?.status).toBe("FAILED");
+    expect(job?.errorMessage).toMatch(/Split the file/);
   });
 });
 

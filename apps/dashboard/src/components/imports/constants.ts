@@ -175,6 +175,17 @@ export const IMPORT_ENRICHMENT_OUTCOME_LABELS: Record<EnrichmentOutcome, string>
 export const IMPORT_ENRICHED_PURCHASE_ROWS_KEY = "enrichedPurchaseRows";
 export const IMPORT_UNGROUPED_PURCHASE_ROWS_KEY = "ungroupedChainsPurchaseRows";
 
+/** Both of the above, as one list — the client-side mirror of the
+ *  server's `AUXILIARY_COUNTER_KEYS_BY_KIND.GOOGLE_TOKEN_ENRICHMENT`.
+ *  These keys ride in the same `counters` object as the buckets and are
+ *  carried through the `dryRun_` namespace with them, so anything
+ *  reconstructing the shape the API emits (a test fixture, say) needs
+ *  the bucket list AND this one. */
+export const ENRICHMENT_AUXILIARY_KEYS: readonly string[] = [
+  IMPORT_ENRICHED_PURCHASE_ROWS_KEY,
+  IMPORT_UNGROUPED_PURCHASE_ROWS_KEY,
+];
+
 /**
  * The `ungroupedChains` bucket's callout — the ONLY place
  * `enrichUngroupedChains` is discoverable from a dry run.
