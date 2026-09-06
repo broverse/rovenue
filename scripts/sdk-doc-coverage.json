@@ -1,8 +1,8 @@
 {
   "core-rs": {
-    "floor": 28.9,
+    "floor": 32.8,
     "measuredAt": "2026-09-06",
-    "documented": 179,
+    "documented": 203,
     "total": 619
   },
   "sdk-swift": {

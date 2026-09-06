@@ -79,6 +79,15 @@ pub struct RovenueCore {
 }
 
 impl RovenueCore {
+    /// Construct and fully wire a core instance backed by the on-disk cache
+    /// database (`default_db_path()`), starting the background polling
+    /// scheduler (entitlements every 30s, remote config every 60s while
+    /// foregrounded). This is `configure()` as the façades see it — every
+    /// façade method that needs a subscriber scope, cache, or network client
+    /// assumes an instance built this way. Fails fast with
+    /// [`RovenueError::InvalidApiKey`] when `config.api_key` is blank;
+    /// otherwise normalizes `config` (trims/validates `base_url` etc.) before
+    /// opening storage.
     pub fn new(config: Config) -> RovenueResult<Self> {
         if config.api_key.trim().is_empty() {
             return Err(RovenueError::InvalidApiKey());
@@ -309,10 +318,16 @@ impl RovenueCore {
         );
     }
 
+    /// The core crate's own semantic version (`SDK_VERSION`), for façades to
+    /// surface in diagnostics/support bundles. Not the app's version and not
+    /// network-derived — a plain constant read.
     pub fn get_version(&self) -> String {
         SDK_VERSION.to_string()
     }
 
+    /// Current identity: the anonymous `rovenue_id` plus `app_user_id` when
+    /// [`identify`](Self::identify) has been called. A synchronous local read
+    /// (no network) — safe to call before any purchase or entitlement flow.
     pub fn current_user(&self) -> User {
         self.identity.current_user()
     }
@@ -409,18 +424,34 @@ impl RovenueCore {
             .unwrap_or(0)
     }
 
+    /// Look up one entitlement by id from the local cache — never hits the
+    /// network directly. `None` when the id is unknown or not (yet) granted.
+    /// If the cache is older than 30s this kicks off a background refresh
+    /// (fire-and-forget) before returning, so do not call `refresh_entitlements`
+    /// from inside the `EntitlementsChanged`/`Observer` callback this refresh
+    /// triggers — that re-emits the change event and loops forever.
     pub fn entitlement(&self, id: String) -> Option<Entitlement> {
         let out = self.entitlements.get(&id).ok().flatten();
         self.entitlements.maybe_refresh_async(STALENESS_MS);
         out
     }
 
+    /// All currently-granted entitlements from the local cache (empty vec on
+    /// a cache-read error, never an `Err`) — a cache read, not a network
+    /// call. As with [`entitlement`](Self::entitlement), a stale (>30s) cache
+    /// triggers a background refresh; never call this from the change
+    /// listener the refresh fires, or it loops.
     pub fn entitlements_all(&self) -> Vec<Entitlement> {
         let out = self.entitlements.list_all().unwrap_or_default();
         self.entitlements.maybe_refresh_async(STALENESS_MS);
         out
     }
 
+    /// Force a synchronous entitlement refresh against the server, bypassing
+    /// the 30s staleness window that [`entitlement`](Self::entitlement)/
+    /// [`entitlements_all`](Self::entitlements_all) use. Never call this from
+    /// inside their change-listener callback — the refresh re-emits the
+    /// change event, which re-triggers the listener, forever.
     pub fn refresh_entitlements(&self) -> RovenueResult<()> {
         self.log_op(
             LogLevel::Info,
@@ -464,6 +495,13 @@ impl RovenueCore {
         self.logger.set_sink(Arc::from(sink));
     }
 
+    /// Tell the core whether the host app is foregrounded, gating the
+    /// background polling cadence (entitlements/remote config only poll
+    /// while `foreground == true`). Transitioning to `true` also resets the
+    /// poll cadence immediately (instead of waiting out the remaining
+    /// interval) and triggers a non-blocking drain of the queued paywall
+    /// event queue — call this from `applicationDidBecomeActive`/`onResume`
+    /// and its background counterpart; it never blocks on network I/O.
     pub fn set_foreground(&self, foreground: bool) {
         self.scheduler.set_foreground(foreground);
         if foreground {
@@ -476,22 +514,39 @@ impl RovenueCore {
         }
     }
 
+    /// Stop the background polling scheduler. Call once, when the host app
+    /// is tearing down the SDK instance (there is no way to restart it on
+    /// the same instance) — this does not flush queued events or attributes;
+    /// call `flush_session_events`/`flush_attributes` first if that matters.
     pub fn shutdown(&self) {
         self.scheduler.shutdown();
     }
 
+    /// All virtual-currency balances, keyed by currency code, from the local
+    /// cache — a cache read, not a network call. Stale (>30s) balances
+    /// trigger a background refresh; never call `refresh_virtual_currencies`
+    /// from inside the balance-changed listener the refresh fires, or it
+    /// loops.
     pub fn virtual_currency_balances(&self) -> std::collections::HashMap<String, i64> {
         let out = self.virtual_currencies.balances().into_iter().collect();
         self.virtual_currencies.maybe_refresh_async(STALENESS_MS);
         out
     }
 
+    /// One virtual-currency balance by code from the local cache (`0` when
+    /// the code is unknown — never an error). Cache read, no network call;
+    /// same staleness-triggered background refresh and re-entrancy footgun
+    /// as [`virtual_currency_balances`](Self::virtual_currency_balances).
     pub fn virtual_currency(&self, code: String) -> i64 {
         let out = self.virtual_currencies.balance(&code);
         self.virtual_currencies.maybe_refresh_async(STALENESS_MS);
         out
     }
 
+    /// Force a synchronous virtual-currency balance refresh against the
+    /// server, bypassing the 30s staleness window. Never call this from
+    /// inside the balance-changed listener callback it fires — that
+    /// re-triggers the listener, forever.
     pub fn refresh_virtual_currencies(&self) -> RovenueResult<()> {
         self.log_op(
             LogLevel::Info,
@@ -520,6 +575,17 @@ impl RovenueCore {
         result
     }
 
+    /// Submit an App Store transaction receipt for server-side validation
+    /// (`POST` to the receipts endpoint, keyed by an idempotency key derived
+    /// from the receipt so a retried POST never double-processes it). On
+    /// success, hydrates the local entitlement/virtual-currency caches
+    /// directly from the response and returns the resulting
+    /// [`ReceiptResult`] — no follow-up `GET`. Any paywall-attribution
+    /// snapshot stamped by a preceding `get_paywall()` call rides along as
+    /// `presentedContext` and is cleared only once the POST succeeds, so a
+    /// failed/retried submission doesn't lose it. Errors surface as
+    /// `RovenueResult::Err` with a `RovenueError` `kind` such as
+    /// `ReceiptInvalid`, `AlreadyOwned`, or `ServerError`.
     pub fn post_apple_receipt(
         &self,
         receipt: String,
@@ -574,6 +640,12 @@ impl RovenueCore {
         result
     }
 
+    /// Submit a Google Play purchase token for server-side validation. Same
+    /// contract as [`post_apple_receipt`](Self::post_apple_receipt) —
+    /// idempotency-keyed POST, caches hydrated directly from the response,
+    /// pending paywall-attribution snapshot carried and cleared only on
+    /// success — but for the Google Play Developer API, whose obfuscated
+    /// account/profile ids substitute for Apple's `app_account_token`.
     pub fn post_google_receipt(
         &self,
         receipt: String,
@@ -969,6 +1041,12 @@ impl RovenueCore {
         }
     }
 
+    /// Append one session-lifecycle event (`Open`/`Background`/`Close`) to
+    /// the local buffer for later at-least-once delivery — does not itself
+    /// hit the network. `duration_ms` is only meaningful for `Close`
+    /// (foreground session length); pass `None` for `Open`/`Background`.
+    /// `occurred_at` must be an RFC3339/ISO-8601 UTC timestamp or this
+    /// returns `Err(InvalidArgument)`.
     pub fn record_session_event(
         &self,
         kind: SessionEventKind,
@@ -978,6 +1056,11 @@ impl RovenueCore {
         self.sessions.record(kind, &occurred_at, duration_ms)
     }
 
+    /// Force an immediate POST of buffered session events, bypassing the
+    /// dispatcher's own tick. Returns the number actually sent. Buffered
+    /// events already survive a process kill (peek→post→delete-on-2xx), so
+    /// this is for callers that want the flush to happen now rather than on
+    /// the next automatic tick — e.g. before `shutdown()`.
     pub fn flush_session_events(&self) -> RovenueResult<u32> {
         self.session_dispatcher.flush_once().map(|n| n as u32)
     }
@@ -1025,6 +1108,13 @@ impl RovenueCore {
             .unwrap_or(0)
     }
 
+    /// Return the current scope's Apple `appAccountToken` (a UUID), creating
+    /// and persisting one on first call. Pass this to StoreKit's purchase
+    /// options so the resulting transaction carries the token Apple echoes
+    /// back — the anchor `post_apple_receipt`/the server-to-server
+    /// notification path uses to bind the transaction to this subscriber.
+    /// Stable per identity scope: `log_out()` clears it so a new anonymous
+    /// scope gets its own token, never reusing the previous user's.
     pub fn get_or_create_app_account_token(&self) -> RovenueResult<String> {
         self.log_op(
             LogLevel::Info,
@@ -1056,6 +1146,14 @@ impl RovenueCore {
         result
     }
 
+    /// Fetch the project's current offerings (products grouped into
+    /// offerings/packages) from `GET /v1/offerings`, persisting the raw
+    /// response on success. On a *connectivity* failure (`NetworkUnavailable`
+    /// / `Timeout`) the last cached offerings are served instead, so paywalls
+    /// keep rendering offline; auth/server failures (`InvalidApiKey`,
+    /// `ServerError`, `RateLimited`, `Internal`) are NOT masked by the cache
+    /// and propagate as `Err` — those mean the backend is reachable but
+    /// rejecting the call, not that the network is down.
     pub fn get_offerings(&self) -> RovenueResult<CoreOfferings> {
         self.log_op(LogLevel::Info, "get_offerings", "get_offerings", &[]);
         let result = self.offerings.get_offerings();
@@ -1234,24 +1332,41 @@ impl RovenueCore {
         result
     }
 
+    /// Boolean feature-flag value for `key` from the local cache, or
+    /// `fallback` when the key is absent or has a different type. Cache
+    /// read, never blocks on network; a stale (>60s) cache triggers a
+    /// background refresh, so never call `refresh_remote_config` from a
+    /// remote-config-changed listener this can trigger.
     pub fn remote_config_bool(&self, key: String, fallback: bool) -> bool {
         let out = self.remote_config.bool(&key, fallback);
         self.remote_config.maybe_refresh_async(STALENESS_MS);
         out
     }
 
+    /// String feature-flag value for `key` from the local cache, or
+    /// `fallback` when absent/mistyped. Same cache-read and background
+    /// staleness-refresh behaviour as
+    /// [`remote_config_bool`](Self::remote_config_bool).
     pub fn remote_config_string(&self, key: String, fallback: String) -> String {
         let out = self.remote_config.string(&key, fallback);
         self.remote_config.maybe_refresh_async(STALENESS_MS);
         out
     }
 
+    /// Integer feature-flag value for `key` from the local cache, or
+    /// `fallback` when absent/mistyped. Same cache-read and background
+    /// staleness-refresh behaviour as
+    /// [`remote_config_bool`](Self::remote_config_bool).
     pub fn remote_config_int(&self, key: String, fallback: i64) -> i64 {
         let out = self.remote_config.int(&key, fallback);
         self.remote_config.maybe_refresh_async(STALENESS_MS);
         out
     }
 
+    /// Floating-point feature-flag value for `key` from the local cache, or
+    /// `fallback` when absent/mistyped. Same cache-read and background
+    /// staleness-refresh behaviour as
+    /// [`remote_config_bool`](Self::remote_config_bool).
     pub fn remote_config_double(&self, key: String, fallback: f64) -> f64 {
         let out = self.remote_config.double(&key, fallback);
         self.remote_config.maybe_refresh_async(STALENESS_MS);
@@ -1266,12 +1381,22 @@ impl RovenueCore {
         out
     }
 
+    /// All feature-flag keys currently present in the local remote-config
+    /// cache. Cache read; triggers the same background staleness refresh as
+    /// the typed getters above.
     pub fn remote_config_keys(&self) -> Vec<String> {
         let out = self.remote_config.keys();
         self.remote_config.maybe_refresh_async(STALENESS_MS);
         out
     }
 
+    /// This subscriber's variant assignment for experiment `key`, or `None`
+    /// when not enrolled. Unlike the flag getters, a non-`None` result also
+    /// records an exposure (best-effort, deduped) for experiment analysis —
+    /// call this only where the variant assignment actually drives what the
+    /// user sees, not speculatively, or exposure counts get inflated. Cache
+    /// read with the same background staleness refresh as
+    /// [`remote_config_bool`](Self::remote_config_bool).
     pub fn experiment(&self, key: String) -> Option<ExperimentAssignment> {
         let out = self.remote_config.experiment(&key);
         self.remote_config.maybe_refresh_async(STALENESS_MS);
@@ -1281,6 +1406,10 @@ impl RovenueCore {
         out
     }
 
+    /// Every experiment this subscriber is currently enrolled in. Unlike
+    /// [`experiment`](Self::experiment), this does NOT record exposures —
+    /// it's a plain cache read for callers that need the full set (e.g.
+    /// debug UI) without treating enumeration as "shown to the user".
     pub fn experiments_all(&self) -> Vec<ExperimentAssignment> {
         let out = self.remote_config.experiments_all();
         self.remote_config.maybe_refresh_async(STALENESS_MS);
