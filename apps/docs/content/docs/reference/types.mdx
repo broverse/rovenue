@@ -395,7 +395,7 @@ type Period = {
 | `unit` | `'day' \| 'week' \| 'month' \| 'year'` | The time unit. |
 | `iso8601` | `string` | ISO 8601 duration string (e.g. `"P1M"` for 1 month, `"P1Y"` for 1 year). Useful for standardised duration calculations. |
 
-**Used by:** [`StoreProduct.subscriptionPeriod`](#storeproduct), [`IntroPrice.period`](#introprice), [`Discount.period`](#discount), [`PricingPhase.billingPeriod`](#pricinphase)
+**Used by:** [`StoreProduct.subscriptionPeriod`](#storeproduct), [`IntroPrice.period`](#introprice), [`Discount.period`](#discount), [`PricingPhase.billingPeriod`](#pricingphase)
 
 **Example**
 
@@ -554,10 +554,10 @@ type SubscriptionOption = {
 | `tags` | `string[]` | User-assigned tags from the Play Console (e.g. `["trial", "new_user"]`). Empty if none. |
 | `isBasePlan` | `boolean` | `true` if this option is the base plan (no offer applied). |
 | `isPrepaid` | `boolean` | `true` if prepaid (e.g. annual upfront). |
-| `pricingPhases` | [`PricingPhase[]`](#pricinphase) | All pricing phases in order (free → intro → full price, or just full price). Used to compute net price. |
-| `freePhase` | [`PricingPhase`](#pricinphase) `\| null` | The free phase if present (e.g. 2-week free trial). `null` if none. |
-| `introPhase` | [`PricingPhase`](#pricinphase) `\| null` | The introductory discounted phase if present. `null` if none. |
-| `fullPricePhase` | [`PricingPhase`](#pricinphase) `\| null` | The full-price phase that lasts indefinitely (the recurring rate). `null` if unavailable. |
+| `pricingPhases` | [`PricingPhase[]`](#pricingphase) | All pricing phases in order (free → intro → full price, or just full price). Used to compute net price. |
+| `freePhase` | [`PricingPhase`](#pricingphase) `\| null` | The free phase if present (e.g. 2-week free trial). `null` if none. |
+| `introPhase` | [`PricingPhase`](#pricingphase) `\| null` | The introductory discounted phase if present. `null` if none. |
+| `fullPricePhase` | [`PricingPhase`](#pricingphase) `\| null` | The full-price phase that lasts indefinitely (the recurring rate). `null` if unavailable. |
 
 **Platform:** Android only. `null` on iOS.
 
@@ -1000,3 +1000,35 @@ const unsub = Rovenue.setLogHandler((entry) => {
   }
 });
 ```
+
+---
+
+## FunnelClaimResult
+
+Returned by the [funnel-claim methods](/docs/reference/methods#claimfunneltoken) (`claimFunnelToken`, `claimInstall`, `resolveFunnelClaim`, `claimFromClipboard`, `claimFromUrl`) when a prior funnel session is matched, or delivered via [`addFunnelClaimListener`](/docs/reference/methods#addfunnelclaimlistener).
+
+```ts
+// React Native
+type FunnelClaimResult = {
+  subscriberId: string;      // Rovenue subscriber ID of the matched user
+  funnelAnswers: Record<string, unknown>; // key-value map of funnel step answers, already parsed
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subscriberId` | `string` | Rovenue subscriber ID of the matched funnel session. |
+| `funnelAnswers` | `Record<string, unknown>` | Key-value map of funnel step answers, already parsed. React Native only — see below. |
+
+<Callout type="info">
+**Swift and Kotlin return the funnel answers as a raw JSON string, not a parsed object.**
+Their `FunnelClaimResult` is `{ subscriberId: String, funnelAnswersJson: String }` —
+decode `funnelAnswersJson` yourself (e.g. `JSONSerialization` on Swift,
+`org.json.JSONObject`/`kotlinx.serialization` on Kotlin) if you need the parsed shape.
+Only the React Native binding pre-parses it into `funnelAnswers`.
+</Callout>
+
+**Returned by:** [`claimFunnelToken()`](/docs/reference/methods#claimfunneltoken), [`claimInstall()`](/docs/reference/methods#claiminstall), [`resolveFunnelClaim()`](/docs/reference/methods#resolvefunnelclaim), [`claimFromClipboard()`](/docs/reference/methods#claimfromclipboard), [`claimFromUrl()`](/docs/reference/methods#claimfromurl)
+

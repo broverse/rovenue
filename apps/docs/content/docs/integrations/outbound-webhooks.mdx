@@ -36,8 +36,8 @@ Every delivery body is JSON with this shape:
 
 | Field | Description |
 |---|---|
-| `id` | The originating event's stable identifier. Use this for [idempotency](#idempotency--at-least-once-delivery) — see below for how it behaves on retries and manual redeliver. |
-| `type` | One of the [event keys](#event-catalog) below. |
+| `id` | The originating event's stable identifier. Use this for [idempotency](#7-idempotency--at-least-once-delivery) — see below for how it behaves on retries and manual redeliver. |
+| `type` | One of the [event keys](#3-event-catalog) below. |
 | `created` | ISO-8601 timestamp of when the underlying event occurred (not when it was delivered). |
 | `apiVersion` | A date-versioned string identifying the payload schema, currently `2026-08-24`. Bump only accompanies a documented breaking change to the envelope or `data` shape. |
 | `projectId` | The Rovenue project the event belongs to. |
@@ -261,7 +261,7 @@ Every delivery carries both a `webhook-*` and a Svix-compatible `svix-*` alias f
 |---|---|---|
 | `webhook-id` | `svix-id` | The event id — same value as the payload's `id` field. |
 | `webhook-timestamp` | `svix-timestamp` | Unix seconds (as a string) when the request was signed. |
-| `webhook-signature` | `svix-signature` | One or more space-separated `v1,<base64>` signatures — see [rotation](#secret-rotation) below. |
+| `webhook-signature` | `svix-signature` | One or more space-separated `v1,<base64>` signatures — see [rotation](#5-secret-rotation) below. |
 
 ### Signature scheme
 
@@ -356,7 +356,7 @@ def verify_rovenue_webhook(id_, timestamp, signature_header, raw_body, secrets, 
 
 ## 6. Delivery, retries & timeouts
 
-- Delivery is **at-least-once** — always design your handler to be safe to run more than once for the same event (see [idempotency](#idempotency--at-least-once-delivery)).
+- Delivery is **at-least-once** — always design your handler to be safe to run more than once for the same event (see [idempotency](#7-idempotency--at-least-once-delivery)).
 - A response is read for up to **15 seconds**; anything slower is treated as a failed attempt and retried per the schedule below.
 - **2xx** — delivery is marked successful, no retry.
 - **3xx** — redirects are never followed; treated as a permanent failure (no retry).

@@ -8,7 +8,7 @@
     "dev": "pnpm run generate:openapi && react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && fumadocs-mdx && tsc --noEmit",
-    "check:links": "node ./scripts/check-links.mjs",
+    "check:links": "tsx ./scripts/check-links.mjs",
     "generate:errors": "tsx scripts/generate-error-catalog.mjs",
     "generate:openapi": "node scripts/copy-openapi.mjs",
     "postinstall": "fumadocs-mdx"
@@ -36,6 +36,7 @@
     "@types/node": "^25.9.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "github-slugger": "2.0.0",
     "react-router-devtools": "^6.2.1",
     "tailwindcss": "^4.3.0",
     "tsx": "^4.22.4",

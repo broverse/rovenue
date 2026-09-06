@@ -21,7 +21,7 @@ Singular has two EVENT endpoint versions. This integration picks between them pe
 | `$idfa` (no SDID) | `POST https://s2s.singular.net/api/v1/evt` | `idfa` |
 | `$gpsAdId` (no SDID, no IDFA) | `POST https://s2s.singular.net/api/v1/evt` | `aifa` |
 
-All request parameters — including your SDK key (`a`) and app ID (`i`) — are sent as `application/x-www-form-urlencoded` **POST body** fields, never as a query string. Every event also carries `n` (the mapped event name), `is_revenue_event`/`amt`/`cur` on revenue events (see [Event mapping](#event-mapping)), and an `e` field — a JSON object with `outbox_event_id` and `rovenue_event` — so every Singular event traces back to its Rovenue source. Singular does not deduplicate events server-side; Rovenue's own delivery pipeline is the real dedup guarantee.
+All request parameters — including your SDK key (`a`) and app ID (`i`) — are sent as `application/x-www-form-urlencoded` **POST body** fields, never as a query string. Every event also carries `n` (the mapped event name), `is_revenue_event`/`amt`/`cur` on revenue events (see [Event mapping](#3-event-mapping)), and an `e` field — a JSON object with `outbox_event_id` and `rovenue_event` — so every Singular event traces back to its Rovenue source. Singular does not deduplicate events server-side; Rovenue's own delivery pipeline is the real dedup guarantee.
 
 **Known limitations:**
 
