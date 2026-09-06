@@ -441,3 +441,19 @@ export const leaderboardSeasonStatus = pgEnum("LeaderboardSeasonStatus", [
   "ACTIVE",
   "CLOSED",
 ]);
+
+// =============================================================
+// GDPR/KVKK pgEnums (ROADMAP §9.1 — self-service DSAR API)
+// =============================================================
+
+export const dsarRequestType = pgEnum("DsarRequestType", [
+  "EXPORT",
+  "ERASURE",
+]);
+
+export const dsarRequestStatus = pgEnum("DsarRequestStatus", [
+  "PENDING",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+]);

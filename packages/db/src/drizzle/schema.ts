@@ -41,6 +41,8 @@ import {
   creditLedgerType,
   currencyGrantTrigger,
   customDomainCertStatus,
+  dsarRequestStatus,
+  dsarRequestType,
   environment,
   experimentPrimaryMetric,
   experimentStatus,
@@ -2399,6 +2401,8 @@ export {
   creditLedgerType,
   currencyGrantTrigger,
   customDomainCertStatus,
+  dsarRequestStatus,
+  dsarRequestType,
   environment,
   experimentPrimaryMetric,
   experimentStatus,
@@ -3702,3 +3706,78 @@ export type Leaderboard = typeof leaderboards.$inferSelect;
 export type NewLeaderboard = typeof leaderboards.$inferInsert;
 export type LeaderboardSeason = typeof leaderboardSeasons.$inferSelect;
 export type LeaderboardStanding = typeof leaderboardStandings.$inferSelect;
+
+// =============================================================
+// dsar_requests (ROADMAP §9.1 — self-service subject-access requests)
+// =============================================================
+//
+// One row per customer-initiated EXPORT or ERASURE ask for one of their
+// subscribers. The record exists because DSARs carry legal deadlines: it
+// makes a retry idempotent (see the partial unique index below), gives
+// the customer evidence of when Rovenue responded, and makes outstanding
+// obligations queryable instead of living only inside a BullMQ job that
+// leaves no trace once it finishes.
+
+/**
+ * Statuses that count as "still open" — a subject must not have two
+ * concurrent asks of the SAME right in flight. Named once and read by
+ * both the partial unique index below and the repository's
+ * `findOpenDsarRequest`, so the database's idea of "open" and the
+ * application's cannot drift apart.
+ */
+export const OPEN_DSAR_REQUEST_STATUSES = ["PENDING", "RUNNING"] as const;
+
+export const dsarRequests = pgTable(
+  "dsar_requests",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    subscriberId: text("subscriberId")
+      .notNull()
+      .references(() => subscribers.id, { onDelete: "cascade" }),
+    type: dsarRequestType("type").notNull(),
+    status: dsarRequestStatus("status").notNull().default("PENDING"),
+    // Free text the customer's own backend supplies, identifying who
+    // asked (an admin email, a support-ticket id). Never validated as an
+    // identity — it exists purely so a later audit can show who
+    // requested what, on the customer's own say-so.
+    requestedBy: text("requestedBy").notNull(),
+    // Populated once an EXPORT artifact has been written AND confirmed.
+    // Always null for ERASURE, which produces no artifact.
+    artifactKey: text("artifactKey"),
+    // The artifact's download deadline. Always null until COMPLETED, and
+    // always null for ERASURE.
+    expiresAt: timestamp("expiresAt", { withTimezone: true }),
+    // Populated only when status = FAILED.
+    error: text("error"),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completedAt", { withTimezone: true }),
+  },
+  (t) => ({
+    // The idempotency guarantee itself: "one open request of each type
+    // per subject", enforced at the database rather than only in the
+    // route, so a concurrent double-submit is a unique-violation instead
+    // of two exports racing each other. Scoped to (subscriberId, type)
+    // rather than including projectId — a subscriber belongs to exactly
+    // one project, so the pair alone already identifies the row the
+    // constraint must protect.
+    openRequestUniq: uniqueIndex("dsar_requests_open_subscriber_type_uniq")
+      .on(t.subscriberId, t.type)
+      .where(
+        sql`${t.status} IN (${sql.raw(
+          OPEN_DSAR_REQUEST_STATUSES.map((s) => `'${s}'`).join(", "),
+        )})`,
+      ),
+    projectIdIdx: index("dsar_requests_projectId_idx").on(t.projectId),
+  }),
+);
+
+export type DsarRequest = typeof dsarRequests.$inferSelect;
+export type NewDsarRequest = typeof dsarRequests.$inferInsert;
