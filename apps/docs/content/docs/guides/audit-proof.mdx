@@ -1,0 +1,177 @@
+---
+title: Audit Proof Bundle
+description: Export a per-project audit hash chain and verify it offline, running none of Rovenue's server code — and know exactly what that does and does not prove.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Every dashboard mutation writes an append-only audit log row. Each row's `rowHash` is a SHA-256 hash over that row's fields plus the previous row's hash, forming a per-project chain — the same construction as a blockchain's block-hash link, without the distributed-consensus part. This guide describes the exported proof bundle, the exact hashing rule a verifier must reproduce, and how to run the standalone verifier script.
+
+<Callout type="warn">
+The chain detects **alteration of recorded rows**. It does not prove that everything which happened was recorded. If a row was never written, there is no gap for the chain to reveal.
+</Callout>
+
+## What the chain does and does not guarantee
+
+- It guarantees that once a row is written, its fields and its position in the sequence cannot be silently changed without breaking the hash link to every row after it.
+- It does **not** guarantee completeness. A missing write (a bug, a rollback, a code path that never called the audit writer) leaves no trace — there is nothing for the recomputed hashes to disagree with.
+- It does **not** cover rows written before the chain existed. See [Unhashed rows](#unhashed-rows) below.
+
+## Adversary model — what a single bundle actually proves
+
+<Callout type="warn">
+Verifying one bundle in isolation proves the bundle is **internally self-consistent** — its hashes and links agree with each other and with its own declared `tip`. It does not, by itself, prove that history wasn't rewritten, because the same database that stores the rows also computes every hash and the `tip` that the bundle asks you to trust.
+</Callout>
+
+The audit chain lives in the same Postgres database as the rows it protects. An actor with write access to `audit_logs` — a compromised operator, a malicious self-host admin, anyone who can run SQL against that table — can alter a row and then recompute every later `rowHash`, relink every later `prevHash`, and recompute the exported `tip` to match. The resulting bundle verifies `ok: true`: nothing in `verify-audit-bundle.ts` can distinguish a rewritten-and-recomputed chain from a genuine one, because both are internally consistent by construction.
+
+This matters most for tail deletion. `TIP_MISMATCH` — the one check in the table below that can catch newest-rows-deleted — works only because it compares `entries` against the bundle's own `tip` field. That `tip` is computed and served by the same route (`audit-logs.ts`) that assembled `entries`. Against a server that is itself the adversary, `tip` is not an independent witness; it's the adversary's own claim about where its own chain ends.
+
+The real defense is comparing against something the server operator cannot alter after the fact: retain a bundle's `tip.rowHash` (or the whole bundle) outside the system — a separate machine, cold storage, a signed log shipped to a third party, whatever your threat model calls for — every time you export. On your next export, walk the new bundle's chain and confirm the previously-retained `rowHash` still appears, at the same position, with the same neighbours. A retained tip that has silently vanished, or now sits with different links, is evidence of a rewrite that no single bundle's internal check can show. That is a real and useful property of this format — an auditor who periodically retains tips gets exactly the tamper-evidence they're after — but it depends on doing the retaining; the format does not do it for you.
+
+## Obtaining a bundle
+
+```
+GET /dashboard/audit-logs/proof?projectId=<id>&from=<ISO-8601>&to=<ISO-8601>
+```
+
+`from` and `to` are optional and filter by `createdAt`; both accept an offset (e.g. `2026-09-01T00:00:00+03:00`). The route requires an authenticated dashboard session with access to the project, same as the rest of the audit log viewer.
+
+The export is capped at 5000 entries per request. A bundle that hit the cap sets `"truncated": true` — see [Truncation](#truncation) below for what that does and does not mean.
+
+Like every Rovenue API response, the HTTP body is `{ "data": <bundle> }` — the bundle (`formatVersion`, `entries`, and everything else on this page) is the *value* of `data`, not the top-level response. Strip the envelope before handing the file to the verifier:
+
+```bash
+curl -s --cookie "<dashboard session cookie>" \
+  "https://<your-instance>/dashboard/audit-logs/proof?projectId=<id>" \
+  | jq '.data' > bundle.json
+
+pnpm --filter @rovenue/scripts verify:audit-bundle bundle.json
+```
+
+Running the verifier against the raw response with the envelope still attached fails with `UNSUPPORTED_FORMAT_VERSION`: the verifier reads the bundle's top-level `formatVersion`, which is `undefined` on `{ "data": { "formatVersion": ... } }` — not a sign the export is broken, just an un-stripped wrapper.
+
+## Bundle shape
+
+The shape below — and the fixture excerpt after it — is the value of `data`, already stripped of the response envelope described above.
+
+```json
+{
+  "formatVersion": "rovenue.audit-chain.v1",
+  "projectId": "prj_demo1",
+  "exportedAt": "2026-09-05T12:00:00.000Z",
+  "range": { "from": null, "to": null },
+  "origin": null,
+  "tip": {
+    "rowHash": "5b8baf33b9d5508ea35f85d6bfa9f67f9bbb595e1fc0a11bfda55551c98340a2",
+    "createdAt": "2026-09-03T00:00:00.000Z"
+  },
+  "truncated": false,
+  "entries": [
+    {
+      "id": "aud_demo1",
+      "projectId": "prj_demo1",
+      "userId": "usr_demo1",
+      "action": "project.create",
+      "resource": "project",
+      "resourceId": "prj_demo1",
+      "before": null,
+      "after": { "name": "Demo Project" },
+      "ipAddress": "203.0.113.7",
+      "userAgent": "rovenue-dashboard/1.0",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "prevHash": null,
+      "rowHash": "cb6cba48a098b0209efb2a5bcd49d0b2246f3526ec10ce087f9822add8f63239"
+    }
+  ]
+}
+```
+
+This is an excerpt of the real fixture committed at `packages/shared/src/audit-proof-bundle-fixture.json` — it is the fixture the verifier's own tests run against, not a hand-written example.
+
+| Field | Meaning |
+|-------|---------|
+| `formatVersion` | Names the canonical encoding used to produce every `rowHash` in this bundle. Currently always `"rovenue.audit-chain.v1"`. A verifier that does not implement a given version must refuse the bundle rather than guess at its encoding. |
+| `projectId` | The project this chain belongs to. Chains are per-project — there is no cross-project ordering. |
+| `exportedAt` | When the export ran. Not part of any hash; purely informational. |
+| `range` | `{ from, to }` — the `from`/`to` query parameters this export actually used, as ISO-8601 strings, or `null` for whichever side wasn't given. Purely informational, like `exportedAt`: it tells a reader what was **asked for**, so a non-null `origin` (below) with a non-null `range.from` reads as "this is a deliberately ranged export," while a non-null `origin` with `range.from: null` is unexplained. It does not make that distinction *trustworthy* — see [Adversary model](#adversary-model--what-a-single-bundle-actually-proves): the same server supplies `range`, `origin`, and `entries`, so a server willing to lie about one can lie about all three consistently. |
+| `origin` | `{ rowHash }` naming the hash the exported bundle's first entry's own `prevHash` field carries, or `null` if that first entry's `prevHash` is itself `null`. **This is not independent evidence that a predecessor row exists.** The server derives `origin` entirely from `entries[0].prevHash` — it never reads the row `origin.rowHash` supposedly names, so `origin` is consistent with `entries` by construction, whether the export is a legitimate `from`-filtered slice or a chain whose head rows were deleted outright. See [Adversary model](#adversary-model--what-a-single-bundle-actually-proves) for what that limitation means for verification, and `range` above for the one piece of context that at least distinguishes "a `from` filter was requested" from "no filter was requested." |
+| `tip` | `{ rowHash, createdAt }` of the last entry in `entries`, or `null` if `entries` is empty. `rowHash` here is nullable too — it carries a legacy, never-hashed row's `null` through unchanged if that row happens to be the last one exported. Lets a verifier confirm the bundle wasn't silently trimmed from the end (see [What a broken chain looks like](#what-a-broken-chain-looks-like)) — but only as far as the [adversary model](#adversary-model--what-a-single-bundle-actually-proves) above allows. |
+| `truncated` | `true` when the read hit the 5000-entry cap. See [Truncation](#truncation). |
+| `entries` | The rows themselves, oldest first, each carrying every field the row hash covers, plus `id`, `prevHash`, and `rowHash`. |
+
+### Entry fields
+
+Each entry contains `id` and `rowHash` alongside exactly the fields the hash is computed over: `projectId`, `userId`, `action`, `resource`, `resourceId`, `before`, `after`, `ipAddress`, `userAgent`, `createdAt`, `prevHash`.
+
+<Callout type="warn">
+`id` is **not** part of the hashed payload. It identifies the row for humans and tooling; changing it would not be detected by re-hashing. Do not treat a matching `id` as evidence of anything — only `rowHash` and the chain of `prevHash` values carry that weight.
+</Callout>
+
+## The canonical encoding rule
+
+A `rowHash` is `SHA-256` over a canonical JSON string built from exactly these eleven fields: `projectId`, `userId`, `action`, `resource`, `resourceId`, `before`, `after`, `ipAddress`, `userAgent`, `createdAt`, `prevHash`. The encoding rules, defined in `packages/shared/src/audit-chain.ts`, are:
+
+- Object keys are emitted in **sorted (lexicographic) order**, recursively — not the order the field list above happens to be written in. For this fixed field set, the actual key order in the canonical string is always: `action, after, before, createdAt, ipAddress, prevHash, projectId, resource, resourceId, userAgent, userId`. Plain `JSON.stringify` does not guarantee key order across JS engines, and a compliance-grade chain must be byte-identical on re-hash — a reimplementation that emits keys in any other order will not reproduce Rovenue's hashes.
+- Arrays and objects are recursed into explicitly rather than delegated to `JSON.stringify`, so the sorting rule applies at every depth of `before` / `after`.
+- `null` and `undefined` both serialize to `null`.
+- A non-finite number (`NaN`, `Infinity`, `-Infinity`) serializes to `null`.
+- `createdAt` is always an ISO-8601 string — this module never sees a `Date` object; the caller stringifies it first.
+
+A verifier does not need to trust anything the server says about a row: given the entry's own fields, it recomputes this canonical string, hashes it, and compares the result to the stored `rowHash`.
+
+## The origin rule
+
+The chain is a singly-linked list ordered by `createdAt`: each row's `prevHash` must equal the previous row's `rowHash`, and the very first row a project ever wrote has `prevHash: null`.
+
+A bundle's `origin` field tells a reader whether this exported slice begins at the chain's true start:
+
+- `origin: null` means the first entry in this bundle is the genuine start of the chain (its `prevHash` is `null`).
+- `origin: { rowHash }` means the first entry's own `prevHash` is non-null — this segment does **not** begin at the chain's start. In practice that's a `from` filter excluding earlier history. (The 5000-row cap alone never produces this: entries are read oldest-first, so a truncated export still starts at the true beginning of the range — see [Truncation](#truncation).)
+
+<Callout type="warn">
+`origin` is **not** independent evidence that a predecessor row exists. It is computed as `{ rowHash: entries[0].prevHash }` — read straight off the very entry it is supposed to anchor — and the server never reads the row `origin.rowHash` names to confirm it is actually there. `verifyAuditBundle` checks `entries[0].prevHash === origin.rowHash`, which is tautologically true for any bundle this server assembled; it is not a check against anything outside the bundle. A chain whose earliest rows were deleted outright produces a byte-identical `origin` to a genuine `from`-filtered export of the same remaining rows. This is the same limitation the [Adversary model](#adversary-model--what-a-single-bundle-actually-proves) section describes for `tip`, for the same reason: the entity supplying the evidence and the entity being checked are the same server. `range` (above) tells you whether a `from` filter was *requested*, which at least lets an honest server's bundle explain itself — but that, too, is something only the server attests to.
+</Callout>
+
+## Running the verifier
+
+`scripts/verify-audit-bundle.ts` is a standalone script: it imports only the canonical encoder (`@rovenue/shared/audit-chain`, which itself touches only `node:crypto`) and `node:` builtins. No code from `apps/api` or `packages/db` runs during verification. That is a *code*-trust guarantee — you are not running the server's software to check the server's claims. It is not a *data*-trust guarantee against a server that is itself the adversary; see [Adversary model](#adversary-model--what-a-single-bundle-actually-proves) above for what recomputing hashes offline does and does not rule out.
+
+```bash
+pnpm --filter @rovenue/scripts verify:audit-bundle <path-to-bundle.json>
+# or directly:
+tsx scripts/verify-audit-bundle.ts <path-to-bundle.json>
+```
+
+It exits `0` and prints `OK -- N entries verified` when the chain holds, or exits `1` and prints the first failure it hit, with a reason and (for entry-level failures) the offending entry's index and `id`.
+
+### Failure reasons
+
+| Reason | What it means |
+|--------|----------------|
+| `MALFORMED_BUNDLE` | The input isn't a JSON object, `entries` isn't an array, an element of `entries` isn't itself an object, or `origin`/`tip` has the wrong shape (e.g. an `origin` object with no string `rowHash`). Deleting the `entries` array entirely — the simplest possible tamper — lands here, not as "zero entries, nothing to check." |
+| `UNSUPPORTED_FORMAT_VERSION` | `formatVersion` isn't a value this verifier implements. It refuses rather than guessing at an encoding it doesn't know. |
+| `UNHASHED_ROW` | An entry's `rowHash` is missing, not a string, or an empty string. See [Unhashed rows](#unhashed-rows) — this is a finding about the data, not a bug in the verifier. |
+| `PREV_HASH_MISMATCH` | An entry's `prevHash` doesn't match the previous entry's `rowHash` (or `origin.rowHash` / `null` for the first entry). The link between two specific rows is broken. |
+| `ROW_HASH_MISMATCH` | An entry's own `rowHash` doesn't reproduce from recomputing the canonical encoding over its fields — the row's content was altered after it was hashed. |
+| `TIP_MISMATCH` | `tip` disagrees with the last entry actually present in either `rowHash` or `createdAt`, including a bundle that has entries but no `tip`, or a `tip` but no entries. This is the only check that can catch a deleted **tail**: the `prevHash` walk only ever looks backward, so removing a chain's newest rows leaves every remaining link internally consistent. |
+
+## Unhashed rows
+
+`rowHash` can be `null` on an entry. Audit logging predates the hash chain in this codebase; rows written before the chain existed were never hashed and have no `rowHash` or `prevHash` to check. The export deliberately **includes** these rows rather than hiding them, and the verifier fails a bundle containing one with `UNHASHED_ROW`.
+
+This is not a bug report against the tool — it is the tool correctly telling you that a portion of this project's history predates cryptographic verification and cannot be attested to. Rows before the gap and rows after it verify independently; the gap itself is the thing being reported.
+
+## Truncation
+
+<Callout type="warn">
+`truncated: true` means the export hit the 5000-entry cap, not that anything is wrong. A truncated bundle can still verify `ok: true` — that means the rows actually exported are internally consistent, **not** that they are the project's complete history. Narrow the export with `from` / `to` to confirm a specific window is captured in full.
+</Callout>
+
+The cap exists so exporting a busy project's entire history can't be used as a denial-of-service vector. Rows are read oldest-first (`ORDER BY createdAt ASC, id ASC`) and the read simply stops at the limit, so a truncated export always starts at the true beginning of the requested range and drops the **newest** rows in that range — not the earliest. (That is also why the cap alone never produces a non-null `origin`; see [The origin rule](#the-origin-rule) above.) Because a bundle sitting at exactly the cap is otherwise byte-indistinguishable from a complete export, `truncated` is derived server-side from whether the read returned exactly `AUDIT_PROOF_MAX_ENTRIES` (5000) rows — it is never something a caller can influence — and the verifier surfaces it unconditionally in its result (`entriesChecked` and `truncated` accompany every outcome, success or failure) so a programmatic consumer can never read one field without the other.
+
+## What a broken chain looks like
+
+- Editing any field of a stored entry (e.g. `after.priceUsd`) changes what the canonical encoding produces, so the entry's own `ROW_HASH_MISMATCH` fires immediately on that row.
+- Deleting a row in the middle of the chain breaks the link between its neighbours: the next surviving row's `prevHash` no longer matches its new predecessor's `rowHash`, surfacing as `PREV_HASH_MISMATCH`.
+- Deleting the newest row(s) does **not** break any `prevHash` link — the remaining chain is internally consistent end to end. It is caught only by `TIP_MISMATCH`, because `tip` (recorded by the server at export time) no longer names the last entry actually present in `entries`.

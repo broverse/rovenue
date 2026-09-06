@@ -5,6 +5,7 @@ import {
   normalizeStored,
 } from "@rovenue/shared";
 import { resolveSubscriberForWrite } from "../lib/resolve-or-create-subscriber";
+import { publishSubscriberInvalidation } from "../lib/config-invalidation";
 import { evaluateAllFlags } from "./flag-engine";
 import { evaluateExperiments } from "./experiment-engine";
 
@@ -22,6 +23,12 @@ import { evaluateExperiments } from "./experiment-engine";
 export interface SubscriberConfig {
   flags: Awaited<ReturnType<typeof evaluateAllFlags>>;
   experiments: Awaited<ReturnType<typeof evaluateExperiments>>;
+  // The resolved row id (subscriber.id post-resolveSubscriberForWrite), never
+  // the caller's appUserId. A device can address itself by rovenueId or by
+  // external id, and a /v1/subscribers/transfer merge changes which row
+  // either resolves to — later invalidation matching relies on this being
+  // the stable, post-merge identity.
+  subscriberId: string;
 }
 
 export async function evaluateSubscriberConfig(args: {
@@ -63,6 +70,13 @@ export async function evaluateSubscriberConfig(args: {
       subscriber.id,
       mergedNested,
     );
+
+    // Attributes are what move a subscriber between audience segments, so
+    // this is the moment an open stream's config went stale. Guarded on the
+    // SAME condition as the write above: the SSE stream calls this function
+    // with empty requestAttributes on every push, so an unguarded publish
+    // here would make every push trigger another one — an endless loop.
+    await publishSubscriberInvalidation(projectId, [subscriber.id]);
   }
 
   const [flags, experiments] = await Promise.all([
@@ -70,5 +84,5 @@ export async function evaluateSubscriberConfig(args: {
     evaluateExperiments(projectId, subscriber.id, evalAttributes),
   ]);
 
-  return { flags, experiments };
+  return { flags, experiments, subscriberId: subscriber.id };
 }

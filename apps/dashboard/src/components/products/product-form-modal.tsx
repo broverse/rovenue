@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { X } from "lucide-react";
 import type {
+  CurrencyGrantTrigger,
   DashboardProductCreateInput,
   DashboardProductRow,
   DashboardProductUpdateInput,
@@ -31,7 +32,22 @@ type Props = {
   onSaved?: (id: string) => void;
 };
 
-type CurrencyGrantRow = { currencyId: string; amount: string };
+type CurrencyGrantRow = {
+  currencyId: string;
+  amount: string;
+  grantOn: CurrencyGrantTrigger;
+};
+
+/**
+ * Looked up explicitly rather than built at runtime (e.g.
+ * `t(`...trigger.${grantOn}`)`) so every key stays visible to the i18n
+ * extractor.
+ */
+const GRANT_TRIGGER_LABEL_KEYS: Record<CurrencyGrantTrigger, string> = {
+  PURCHASE: "products.grants.trigger.purchase",
+  RENEWAL: "products.grants.trigger.renewal",
+  BOTH: "products.grants.trigger.both",
+};
 
 type FormState = {
   identifier: string;
@@ -87,6 +103,7 @@ function rowToForm(row: DashboardProductRow): FormState {
     currencyGrants: (row.currencyGrants ?? []).map((g) => ({
       currencyId: g.currencyId,
       amount: String(g.amount),
+      grantOn: g.grantOn ?? "PURCHASE",
     })),
   };
 }
@@ -162,13 +179,19 @@ export function ProductFormModal({
       delete baseMeta.period;
     }
 
-    // Filter out incomplete rows before sending to the backend.
+    // Filter out incomplete rows before sending to the backend. A
+    // non-subscription product can only grant on PURCHASE — the select is
+    // disabled in that case, but normalise defensively here too.
     const currencyGrants = form.currencyGrants
       .filter((g) => {
         const amt = Number(g.amount);
         return g.currencyId.trim() !== "" && !Number.isNaN(amt) && amt > 0;
       })
-      .map((g) => ({ currencyId: g.currencyId, amount: Number(g.amount) }));
+      .map((g) => ({
+        currencyId: g.currencyId,
+        amount: Number(g.amount),
+        grantOn: form.type === "SUBSCRIPTION" ? g.grantOn : "PURCHASE",
+      }));
 
     try {
       let savedId: string;
@@ -332,7 +355,10 @@ function FormBody({
   const addGrant = () =>
     setForm((f) => ({
       ...f,
-      currencyGrants: [...f.currencyGrants, { currencyId: "", amount: "" }],
+      currencyGrants: [
+        ...f.currencyGrants,
+        { currencyId: "", amount: "", grantOn: "PURCHASE" },
+      ],
     }));
 
   const removeGrant = (idx: number) =>
@@ -442,43 +468,71 @@ function FormBody({
           {form.currencyGrants.map((g, idx) => {
             // Resolve label for potentially-archived currency.
             const match = allCurrencies.find((c) => c.id === g.currencyId);
+            // RENEWAL/BOTH only ever fire from the renewal worker, which
+            // only runs for subscriptions — the server rejects them on any
+            // other product type, so the control is locked to PURCHASE here.
+            const triggerLocked = form.type !== "SUBSCRIPTION";
             return (
-              <div key={idx} className="flex items-center gap-2">
-                <NativeSelect
-                  value={g.currencyId}
-                  onChange={(e) => setGrant(idx, { currencyId: e.target.value })}
-                  className="flex-1"
-                >
-                  <option value="">{t("products.form.currencyGrants.currency")}</option>
-                  {/* Show current value if archived so it isn't silently dropped */}
-                  {match && match.archivedAt !== null && (
-                    <option key={match.id} value={match.id}>
-                      {match.name} ({match.code}) — archived
-                    </option>
-                  )}
-                  {activeCurrencies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.code})
-                    </option>
-                  ))}
-                </NativeSelect>
-                <Input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={g.amount}
-                  onChange={(e) => setGrant(idx, { amount: e.target.value })}
-                  placeholder={t("products.form.currencyGrants.amount")}
-                  className="w-24"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeGrant(idx)}
-                  className="shrink-0 rounded p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger"
-                  aria-label={t("products.form.currencyGrants.remove")}
-                >
-                  <X size={14} />
-                </button>
+              <div key={idx} className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <NativeSelect
+                    value={g.currencyId}
+                    onChange={(e) => setGrant(idx, { currencyId: e.target.value })}
+                    className="flex-1"
+                  >
+                    <option value="">{t("products.form.currencyGrants.currency")}</option>
+                    {/* Show current value if archived so it isn't silently dropped */}
+                    {match && match.archivedAt !== null && (
+                      <option key={match.id} value={match.id}>
+                        {match.name} ({match.code}) — archived
+                      </option>
+                    )}
+                    {activeCurrencies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </NativeSelect>
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={g.amount}
+                    onChange={(e) => setGrant(idx, { amount: e.target.value })}
+                    placeholder={t("products.form.currencyGrants.amount")}
+                    className="w-24"
+                  />
+                  <NativeSelect
+                    value={triggerLocked ? "PURCHASE" : g.grantOn}
+                    onChange={(e) =>
+                      setGrant(idx, { grantOn: e.target.value as CurrencyGrantTrigger })
+                    }
+                    disabled={triggerLocked}
+                    className="w-40 shrink-0"
+                    aria-label={t("products.grants.trigger.label")}
+                  >
+                    {(Object.keys(GRANT_TRIGGER_LABEL_KEYS) as CurrencyGrantTrigger[]).map(
+                      (trigger) => (
+                        <option key={trigger} value={trigger}>
+                          {t(GRANT_TRIGGER_LABEL_KEYS[trigger])}
+                        </option>
+                      ),
+                    )}
+                  </NativeSelect>
+                  <button
+                    type="button"
+                    onClick={() => removeGrant(idx)}
+                    className="shrink-0 rounded p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger"
+                    aria-label={t("products.form.currencyGrants.remove")}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                {triggerLocked && (
+                  <p className="pl-1 text-[10px] text-rv-mute-500">
+                    {t("products.grants.trigger.subscriptionOnly")}
+                  </p>
+                )}
               </div>
             );
           })}
@@ -495,6 +549,11 @@ function FormBody({
             + {t("products.form.currencyGrants.add")}
           </button>
         </div>
+        {form.currencyGrants.length > 0 && (
+          <p className="mt-0.5 text-[11px] text-rv-mute-500">
+            {t("products.grants.trigger.hint")}
+          </p>
+        )}
       </div>
 
       <div>

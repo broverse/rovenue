@@ -861,11 +861,67 @@ else in the framework/provider-breadth dimension is done.
       bug: the maintenance worker itself runs fine here — it correctly
       refuses to touch tables that were never registered with it.
 
-## 9. GDPR / KVKK tooling (85 → 95)
+## 9. GDPR / KVKK tooling (85 → 95) — CLOSED 2026-09-06
 
-- [ ] Self-service DSAR API (exposed by customers to their end users)
-- [ ] Per-table data-retention policy automation
-- [ ] Externally verifiable proof format for the audit hash chain
+- [x] Self-service DSAR API (exposed by customers to their end users) — four
+      secret-key S2S endpoints (`POST /v1/dsar/export`, `POST
+      /v1/dsar/erasure`, `GET /v1/dsar/:id`, `GET /v1/dsar/:id/download`) let
+      a customer's own backend fulfil export/erasure for its own end users
+      without a Rovenue support ticket; Rovenue never authenticates that end
+      user itself. Export and erasure run on two separate BullMQ queues (a
+      backlog of heavy exports must never delay erasure, which carries a
+      statutory deadline export does not), each with its own claim-lease
+      recovery so a crashed worker's row is reclaimed rather than stuck
+      `RUNNING` forever. A second request for a subject already `PENDING` or
+      `RUNNING` returns the same request record rather than starting a
+      second job — idempotent both by an application-level check and by the
+      database's own partial unique index as the race-proof backstop.
+      Erasure anonymises rather than deletes the Postgres row (the row's own
+      id survives, `appUserId` becomes a deterministic HMAC token, attributes
+      clear — preserving the append-only `credit_ledger`'s guarantee), then
+      purges the subscriber from every ClickHouse table carrying a plain
+      subscriberId at rest (`raw_exposures`, `raw_revenue_events`,
+      `raw_credit_ledger`, `raw_sdk_session_events`, `raw_paywall_events`),
+      polling each `ALTER ... DELETE` mutation to actual completion before
+      marking the request `COMPLETED` — never on submission alone. A
+      completed export is a point-in-time snapshot (not a subscription),
+      downloadable for 30 days through an authenticated stream with no
+      shareable link — no signed URL exists. Two open gaps, stated rather
+      than papered over: the artifact bucket has no expiry sweep of its own
+      (access is gated by `expiresAt`, the object itself isn't purged), and
+      the guard that stops an erased subscriber's next SDK call from
+      silently un-erasing them is enforced per write-route today, true by
+      audit rather than by a CI check. Documented at
+      `apps/docs/content/docs/guides/dsar.mdx`.
+- [x] Per-table data-retention policy automation — `RETENTION_POLICIES`
+      (`packages/shared/src/retention/policies.ts`) is the single registry: a
+      window per project resolves from its billing tier (optional — self-host
+      has none) clamped by an override that may only shorten it, floored at a
+      per-policy minimum. A tier-less, override-less project is skipped (keeps
+      everything) for every table EXCEPT `webhook_events` and
+      `copilot_messages`, which carry a `defaultDays` of 90 — the exact window
+      each was deleted at unconditionally by the bespoke worker it replaces,
+      carried forward so removing that worker did not silently stop retention
+      for the ~90% of projects with no billing tier (fix round 1, Finding 1).
+      A nightly sweep (`workers/retention-sweep.ts`) reclaims `audit_logs`
+      (checkpoint-then-truncate, preserving a verifiable proof bundle),
+      `credit_ledger` / `revenue_events` (fleet-wide partition drops, gated on
+      every project having resolved a window), and `outgoing_webhooks` /
+      `webhook_events` / `copilot_messages` (per-project DELETE). Replaces the
+      three bespoke workers (`rovi-retention`, `webhook-retention`, plus
+      `import-retention`'s hardcoded window) this task retired or converted.
+      `import_jobs` keeps its own worker — it also deletes object-storage
+      files, which the generic sweep deliberately does not model — but now
+      resolves its window the same way, with NO default: a tier-less project
+      keeps its import files forever until it sets an override, unlike
+      `webhook_events`/`copilot_messages`. ClickHouse's fixed `INTERVAL 2
+      YEAR` TTL is explicitly out of scope. Documented at
+      `apps/docs/content/docs/guides/retention-policies.mdx`.
+- [x] Externally verifiable proof format for the audit hash chain — `GET
+      /dashboard/audit-logs/proof` exports a bundle over the canonical
+      encoder in `@rovenue/shared/audit-chain`; verify offline with
+      `scripts/verify-audit-bundle.ts` (no Rovenue code, no server trust).
+      Documented at `apps/docs/content/docs/guides/audit-proof.mdx`.
 
 ## 10. Production maturity & scale proof (45 → 95) — earned over time
 
@@ -1350,8 +1406,25 @@ for whoever picks them up next.
 
 ## 12. Feature breadth (85 → 95)
 
-- [ ] Feature flags: percentage rollout + kill switch
-- [ ] Real-time audience segment updates
-- [ ] Leaderboards: season/reset automation
-- [ ] Subscription-renewing credit grant automation (merges with the PR3
-      `product_currency_grants` work)
+- [x] Feature flags: percentage rollout + kill switch — already implemented
+      (`isEnabled` kill switch + per-rule `rolloutPercentage` through
+      `isInRollout`); regression-tested in
+      `apps/api/tests/flag-engine.rollout-kill.test.ts` (2026-09-04)
+- [x] Real-time audience segment updates — attribute writes publish a
+      per-subscriber Redis invalidation that the SSE `/v1/config/stream`
+      matches against its own resolved subscriber id and coalesces, proven
+      end-to-end over real Postgres/Redis in
+      `apps/api/src/routes/v1/config-stream.integration.test.ts` (2026-09-05)
+- [x] Leaderboards: season/reset automation — three tables, season-window
+      arithmetic, a shared ClickHouse standings query, a
+      `leaderboard-scheduler` worker that opens/closes seasons on cadence,
+      dashboard CRUD + season/standings endpoints, and a dashboard UI
+      (configured-leaderboards list, create/edit form, season selector)
+      surfacing all of it alongside the pre-existing ad-hoc range view
+      (2026-09-05)
+- [x] Subscription-renewing credit grant automation (merges with the PR3
+      `product_currency_grants` work) — `grantOn` (PURCHASE/RENEWAL/BOTH)
+      end-to-end: schema + trigger matrix, trigger-aware grant service,
+      BullMQ queue/worker, Kafka renewal consumer, dashboard selector with
+      server-side rejection of RENEWAL/BOTH on non-subscription products
+      (2026-09-05)

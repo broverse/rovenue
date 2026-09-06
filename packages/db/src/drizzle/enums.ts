@@ -417,6 +417,47 @@ export const importJobStatus = pgEnum("ImportJobStatus", [
   "VERIFYING",
 ]);
 
+// Which lifecycle events a product_currency_grants row fires on.
+// PURCHASE is the default so every row that existed before this
+// column keeps exactly its previous behaviour.
+export const currencyGrantTrigger = pgEnum("CurrencyGrantTrigger", [
+  "PURCHASE",
+  "RENEWAL",
+  "BOTH",
+]);
+
+export const leaderboardMetric = pgEnum("LeaderboardMetric", [
+  "TOP_SPENDERS",
+  "TOP_CONSUMERS",
+]);
+
+export const leaderboardCadence = pgEnum("LeaderboardCadence", [
+  "WEEKLY",
+  "MONTHLY",
+  "CUSTOM",
+]);
+
+export const leaderboardSeasonStatus = pgEnum("LeaderboardSeasonStatus", [
+  "ACTIVE",
+  "CLOSED",
+]);
+
+// =============================================================
+// GDPR/KVKK pgEnums (ROADMAP §9.1 — self-service DSAR API)
+// =============================================================
+
+export const dsarRequestType = pgEnum("DsarRequestType", [
+  "EXPORT",
+  "ERASURE",
+]);
+
+export const dsarRequestStatus = pgEnum("DsarRequestStatus", [
+  "PENDING",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+]);
+
 // An enrichment import is a fundamentally different operation from a
 // history import: it creates no purchases, accepts no mapping in the
 // normal sense, and has its own required-field set (a Google purchase

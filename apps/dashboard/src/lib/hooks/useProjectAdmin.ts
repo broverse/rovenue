@@ -114,6 +114,196 @@ export function useTopConsumers({
 }
 
 // =============================================================
+// Configured, season-based leaderboards (ROADMAP §12 item 3)
+// =============================================================
+//
+// The dashboard has no build-time dependency on @rovenue/db (see
+// apps/dashboard/package.json), so these wire shapes are declared here
+// rather than imported — they mirror
+// apps/api/src/routes/dashboard/leaderboards.ts and
+// packages/db/src/drizzle/schema.ts (the `leaderboards` /
+// `leaderboard_seasons` / `leaderboard_standings` tables) field for
+// field. Dates cross the wire as ISO strings (Hono JSON-serializes
+// Date columns), never Date objects.
+
+export type LeaderboardMetric = "TOP_SPENDERS" | "TOP_CONSUMERS";
+export type LeaderboardCadence = "WEEKLY" | "MONTHLY" | "CUSTOM";
+export type LeaderboardSeasonStatus = "ACTIVE" | "CLOSED";
+
+export interface ConfiguredLeaderboard {
+  id: string;
+  projectId: string;
+  identifier: string;
+  name: string;
+  metric: LeaderboardMetric;
+  currencyId: string | null;
+  cadence: LeaderboardCadence;
+  customPeriodDays: number | null;
+  timezone: string;
+  entryLimit: number;
+  anchorAt: string;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeaderboardSeasonRow {
+  id: string;
+  leaderboardId: string;
+  seasonNumber: number;
+  startsAt: string;
+  /** Exclusive. */
+  endsAt: string;
+  status: LeaderboardSeasonStatus;
+  closedAt: string | null;
+  createdAt: string;
+}
+
+/** A `/current` (live) standings row — no persisted rank; the caller derives one from array order. */
+export interface LeaderboardLiveEntry {
+  subscriberId: string;
+  /** Decimal-as-string; never routed through a float. */
+  score: string;
+  eventCount: number;
+}
+
+/** A frozen `/seasons/:seasonId/standings` row — rank is persisted, not derived. */
+export interface LeaderboardStandingRow extends LeaderboardLiveEntry {
+  id: string;
+  seasonId: string;
+  rank: number;
+}
+
+export interface LeaderboardCurrentResponse {
+  season: LeaderboardSeasonRow | null;
+  entries: LeaderboardLiveEntry[];
+}
+
+export interface SeasonStandingsResponse {
+  season: LeaderboardSeasonRow;
+  standings: LeaderboardStandingRow[];
+}
+
+const configuredLeaderboardsRoot = (projectId: string) =>
+  `/dashboard/projects/${projectId}/leaderboards`;
+
+const configuredLeaderboardsKey = (projectId: string) =>
+  ["leaderboards", "configured", projectId] as const;
+
+export function useConfiguredLeaderboards(projectId: string) {
+  return useQuery({
+    queryKey: configuredLeaderboardsKey(projectId),
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      api<{ leaderboards: ConfiguredLeaderboard[] }>(
+        configuredLeaderboardsRoot(projectId),
+      ),
+    select: (res) => res.leaderboards,
+  });
+}
+
+export interface CreateConfiguredLeaderboardVars {
+  identifier: string;
+  name: string;
+  metric: LeaderboardMetric;
+  currencyId?: string | null;
+  cadence: LeaderboardCadence;
+  customPeriodDays?: number | null;
+  timezone?: string;
+  entryLimit?: number;
+  isEnabled?: boolean;
+}
+
+export function useCreateConfiguredLeaderboard(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateConfiguredLeaderboardVars) =>
+      api<{ leaderboard: ConfiguredLeaderboard }>(
+        configuredLeaderboardsRoot(projectId),
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: configuredLeaderboardsKey(projectId) }),
+  });
+}
+
+export interface UpdateConfiguredLeaderboardVars {
+  name?: string;
+  currencyId?: string | null;
+  entryLimit?: number;
+  timezone?: string;
+  isEnabled?: boolean;
+}
+
+export function useUpdateConfiguredLeaderboard(projectId: string, id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateConfiguredLeaderboardVars) =>
+      api<{ leaderboard: ConfiguredLeaderboard }>(
+        `${configuredLeaderboardsRoot(projectId)}/${id}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: configuredLeaderboardsKey(projectId) }),
+  });
+}
+
+export function useDeleteConfiguredLeaderboard(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<{ deleted: true }>(`${configuredLeaderboardsRoot(projectId)}/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: configuredLeaderboardsKey(projectId) }),
+  });
+}
+
+export function useLeaderboardSeasons(
+  projectId: string,
+  leaderboardId: string | null,
+) {
+  return useQuery({
+    queryKey: ["leaderboards", "seasons", projectId, leaderboardId],
+    enabled: Boolean(projectId && leaderboardId),
+    queryFn: () =>
+      api<{ seasons: LeaderboardSeasonRow[] }>(
+        `${configuredLeaderboardsRoot(projectId)}/${leaderboardId}/seasons`,
+      ),
+    select: (res) => res.seasons,
+  });
+}
+
+export function useLeaderboardCurrent(
+  projectId: string,
+  leaderboardId: string | null,
+) {
+  return useQuery({
+    queryKey: ["leaderboards", "current", projectId, leaderboardId],
+    enabled: Boolean(projectId && leaderboardId),
+    queryFn: () =>
+      api<LeaderboardCurrentResponse>(
+        `${configuredLeaderboardsRoot(projectId)}/${leaderboardId}/current`,
+      ),
+  });
+}
+
+export function useSeasonStandings(
+  projectId: string,
+  seasonId: string | null,
+) {
+  return useQuery({
+    queryKey: ["leaderboards", "standings", projectId, seasonId],
+    enabled: Boolean(projectId && seasonId),
+    queryFn: () =>
+      api<SeasonStandingsResponse>(
+        `${configuredLeaderboardsRoot(projectId)}/seasons/${seasonId}/standings`,
+      ),
+  });
+}
+
+// =============================================================
 // Members
 // =============================================================
 

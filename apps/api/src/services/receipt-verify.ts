@@ -25,6 +25,7 @@ import {
   type AppleNotificationVerifier,
 } from "./apple/apple-verify";
 import { appleStorefrontToCountry } from "./apple/apple-country";
+import { isAppleRenewalCharge } from "./apple/renewal-charge";
 import { normalizeAlpha2Country } from "./country";
 import {
   APPLE_ENVIRONMENT,
@@ -90,6 +91,21 @@ export interface VerifyReceiptResult {
   subscriber: Subscriber;
   product: Product;
   purchase: Purchase;
+  /**
+   * True when the verified transaction is an Apple auto-renewal charge,
+   * not a customer-initiated purchase. The Swift SDK reposts EVERY
+   * `Transaction.updates` delivery to this route — "renewals, refunds,
+   * Ask-to-Buy approvals, and cross-device buys" per its own comment —
+   * so a renewal reaches `/v1/receipts` directly, not only the App
+   * Store Server Notification webhook. The route uses this to withhold
+   * the PURCHASE-trigger product-currency grant: a renewal is granted
+   * exclusively through the RENEWAL trigger (services/renewal-grants),
+   * driven off the revenue event, never through the purchase path.
+   * Google is always `false` here — its storeTransactionId is the
+   * stable purchaseToken, so a re-verify reuses the SAME purchase row
+   * and `addCredits`' reference dedupe already catches a repeat grant.
+   */
+  isRenewalCharge: boolean;
 }
 
 // =============================================================
@@ -368,7 +384,17 @@ async function verifyAppleReceipt(
     });
   }
 
-  return { subscriber, product, purchase };
+  return {
+    subscriber,
+    product,
+    purchase,
+    // "This charge is an auto-renewal, not a customer purchase" — see
+    // VerifyReceiptResult.isRenewalCharge for why the distinction gates a
+    // grant, and isAppleRenewalCharge for how a payload that predates
+    // Apple's own `transactionReason` field is resolved from the
+    // transaction chain instead of defaulting.
+    isRenewalCharge: isAppleRenewalCharge(transaction),
+  };
 }
 
 // =============================================================
@@ -659,7 +685,10 @@ async function verifyGoogleSubscriptionReceipt(
     }
   }
 
-  return { subscriber, product, purchase };
+  // Google's storeTransactionId is the stable purchaseToken, so a
+  // renewal reuses the same purchase row and addCredits' reference dedupe
+  // already catches a repeat grant — no gate needed here.
+  return { subscriber, product, purchase, isRenewalCharge: false };
 }
 
 async function verifyGoogleProductReceipt(
@@ -792,7 +821,7 @@ async function verifyGoogleProductReceipt(
     });
   }
 
-  return { subscriber, product, purchase };
+  return { subscriber, product, purchase, isRenewalCharge: false };
 }
 
 // =============================================================

@@ -7,6 +7,14 @@ import { resolveOrCreateSubscriber } from "../lib/resolve-or-create-subscriber";
 declare module "hono" {
   interface ContextVariableMap {
     subscriber: Subscriber;
+    /**
+     * True when the resolved subscriber is soft-deleted -- GDPR-erased,
+     * or retired by a `/v1/subscribers/transfer` merge. Routes that
+     * WRITE must consult it: re-populating such a row resurrects a
+     * subject who asked to be forgotten. Routes that only read may
+     * ignore it.
+     */
+    subscriberDeadEnded: boolean;
   }
 }
 
@@ -31,7 +39,12 @@ export const appUserContext: MiddlewareHandler = async (c, next) => {
   // First-install platform (ios/android/web). Only persisted when the
   // subscriber is created on this call; ignored for existing subscribers.
   const platform = parseSdkPlatform(c.req.header(HEADER.X_ROVENUE_PLATFORM));
-  const subscriber = await resolveOrCreateSubscriber(project.id, key, platform);
+  const { subscriber, deadEnded } = await resolveOrCreateSubscriber(
+    project.id,
+    key,
+    platform,
+  );
   c.set("subscriber", subscriber);
+  c.set("subscriberDeadEnded", deadEnded);
   await next();
 };

@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { AttributeMap, SubscriberAttributes } from "./attributes";
 import type { WebhookEventCategory } from "./webhook-events";
 import type { PlacementRows } from "./placements";
+import type { CurrencyGrantTrigger } from "./virtual-currencies";
 
 export type MemberRoleName =
   | "OWNER"
@@ -1912,6 +1913,13 @@ export type ProductTypeName = "SUBSCRIPTION" | "CONSUMABLE" | "NON_CONSUMABLE";
 export interface DashboardProductCurrencyGrant {
   currencyId: string;
   amount: number;
+  /**
+   * Which lifecycle event fires this grant. Omitted on write defaults to
+   * PURCHASE server-side; RENEWAL/BOTH are only valid on a SUBSCRIPTION
+   * product (a non-subscription never renews, so the grant would
+   * silently never fire).
+   */
+  grantOn?: CurrencyGrantTrigger;
 }
 
 export interface DashboardProductRow {

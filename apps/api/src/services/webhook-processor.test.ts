@@ -10,9 +10,9 @@ import {
 } from "./webhook-processor";
 
 vi.mock("./purchase-credits", () => ({
-  grantPurchaseCurrencies: vi.fn().mockResolvedValue(undefined),
+  grantProductCurrencies: vi.fn().mockResolvedValue(undefined),
 }));
-import { grantPurchaseCurrencies } from "./purchase-credits";
+import { grantProductCurrencies } from "./purchase-credits";
 
 vi.mock("./access-engine", () => ({
   syncAccess: vi.fn().mockResolvedValue(undefined),
@@ -69,12 +69,12 @@ const outboxInsertSpy = () => vi.mocked(drizzle.outboxRepo.insert);
 
 const mockFindPurchase = () =>
   vi.mocked(drizzle.purchaseExtRepo.findPurchaseWithCreditInfo);
-const mockGrant = () => vi.mocked(grantPurchaseCurrencies);
+const mockGrant = () => vi.mocked(grantProductCurrencies);
 
 describe("maybeCreditConsumablePurchase", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it("calls grantPurchaseCurrencies for a consumable purchase", async () => {
+  it("calls grantProductCurrencies with the purchase trigger", async () => {
     mockFindPurchase().mockResolvedValue({
       id: "purchase-1",
       subscriberId: "sub-1",
@@ -91,8 +91,9 @@ describe("maybeCreditConsumablePurchase", () => {
     expect(mockGrant()).toHaveBeenCalledWith({
       subscriberId: "sub-1",
       productId: "product-1",
-      purchaseId: "purchase-1",
+      referenceId: "purchase-1",
       productIdentifier: "com.example.coins100",
+      trigger: "PURCHASE",
     });
   });
 
@@ -104,7 +105,13 @@ describe("maybeCreditConsumablePurchase", () => {
     expect(mockGrant()).not.toHaveBeenCalled();
   });
 
-  it("does nothing for a non-consumable product", async () => {
+  // The old CONSUMABLE-only gate is gone: whether a grant fires is now
+  // decided by the product's grant rows (matched against the trigger
+  // inside grantProductCurrencies / the repository), not by the
+  // product's type. A non-consumable product with no grant rows still
+  // reaches grantProductCurrencies — it just resolves to zero grants
+  // there, which this unit doesn't need to re-assert.
+  it("calls grantProductCurrencies for a non-consumable product too", async () => {
     mockFindPurchase().mockResolvedValue({
       id: "purchase-2",
       subscriberId: "sub-1",
@@ -117,7 +124,14 @@ describe("maybeCreditConsumablePurchase", () => {
 
     await maybeCreditConsumablePurchase("sub-1", "purchase-2");
 
-    expect(mockGrant()).not.toHaveBeenCalled();
+    expect(mockGrant()).toHaveBeenCalledOnce();
+    expect(mockGrant()).toHaveBeenCalledWith({
+      subscriberId: "sub-1",
+      productId: "product-2",
+      referenceId: "purchase-2",
+      productIdentifier: "com.example.pro",
+      trigger: "PURCHASE",
+    });
   });
 });
 
@@ -480,6 +494,106 @@ describe("runPostProcessing durability", () => {
     expect(vi.mocked(syncAccess)).toHaveBeenCalledWith("s1");
     expect(enqueueSpy()).toHaveBeenCalledTimes(1);
     expect(outboxInsertSpy()).toHaveBeenCalledTimes(1);
+  });
+});
+
+// =============================================================
+// runPostProcessing — isRenewalCharge gate (Apple renewal double-grant)
+// =============================================================
+//
+// Apple mints a NEW transactionId for every renewal, so DID_RENEW
+// creates a brand-new purchase row each time — addCredits' (referenceType,
+// referenceId) dedupe can never catch a repeat PURCHASE-trigger grant
+// fired against it. `applyRenewal` (apple-webhook.ts) sets
+// `isRenewalCharge: true` on its postProcess call specifically so this
+// gate can withhold the grant; every other caller leaves it unset and
+// must keep granting exactly as before (guards against over-correcting
+// into granting nothing for an ordinary purchase).
+describe("runPostProcessing — isRenewalCharge gate", () => {
+  const renewalArgs = {
+    projectId: "p1",
+    subscriberId: "s1",
+    purchaseId: "pur_renew_1",
+    eventType: "DID_RENEW",
+    webhookEventId: "whe_renew_1",
+    isRenewalCharge: true,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(syncAccess).mockResolvedValue(undefined);
+    // vi.clearAllMocks() only clears call history, not a previously set
+    // mockRejectedValue (e.g. "runPostProcessing durability"'s "ledger
+    // down" case) — reassert the happy-path implementation so this
+    // block's assertions are about the isRenewalCharge gate, not
+    // leftover state from an earlier describe block.
+    mockGrant().mockResolvedValue(undefined);
+    cfg([]);
+  });
+
+  it("does not credit a grantOn PURCHASE row a second time on an Apple renewal", async () => {
+    mockFindPurchase().mockResolvedValue({
+      id: "pur_renew_1",
+      subscriberId: "s1",
+      product: {
+        id: "product-sub-purchase-only",
+        identifier: "com.example.pro_monthly",
+        type: ProductType.SUBSCRIPTION,
+      },
+    });
+
+    await runPostProcessing(renewalArgs);
+
+    // The PURCHASE-trigger grant is the only call site this gate
+    // touches, so "never called" here is exactly "not granted again" —
+    // whatever the product's grant rows are configured to fire on.
+    expect(mockGrant()).not.toHaveBeenCalled();
+  });
+
+  it("does not fire the PURCHASE-trigger call at all for a grantOn BOTH row on an Apple renewal (its RENEWAL-trigger grant is a separate, unaffected path)", async () => {
+    mockFindPurchase().mockResolvedValue({
+      id: "pur_renew_1",
+      subscriberId: "s1",
+      product: {
+        id: "product-sub-both",
+        identifier: "com.example.pro_monthly_both",
+        type: ProductType.SUBSCRIPTION,
+      },
+    });
+
+    await runPostProcessing(renewalArgs);
+
+    expect(mockGrant()).not.toHaveBeenCalled();
+  });
+
+  it("still credits an ordinary (non-renewal) consumable purchase — the gate is opt-in, not a default deny", async () => {
+    mockFindPurchase().mockResolvedValue({
+      id: "pur_consumable_1",
+      subscriberId: "s1",
+      product: {
+        id: "product-coins",
+        identifier: "com.example.coins100",
+        type: ProductType.CONSUMABLE,
+      },
+    });
+
+    await runPostProcessing({
+      projectId: "p1",
+      subscriberId: "s1",
+      purchaseId: "pur_consumable_1",
+      eventType: "SUBSCRIBED",
+      webhookEventId: "whe_purchase_1",
+      // isRenewalCharge omitted — every non-Apple-renewal caller today.
+    });
+
+    expect(mockGrant()).toHaveBeenCalledOnce();
+    expect(mockGrant()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productId: "product-coins",
+        referenceId: "pur_consumable_1",
+        trigger: "PURCHASE",
+      }),
+    );
   });
 });
 

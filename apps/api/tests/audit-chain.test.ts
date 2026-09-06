@@ -296,6 +296,25 @@ describe("verifyAuditChain", () => {
     expect(result.errors).toEqual([]);
   });
 
+  it("verifies a null-userId row (webhook-initiated action) without a false bad_hash", async () => {
+    // FIX 4 (final review): writeChained hashes a null userId as null
+    // (AuditEntry.userId is string | null — e.g. a Stripe-side webhook
+    // revoking a Connect authorization with no dashboard user to
+    // attribute it to). verifyAuditChain must recompute with the SAME
+    // null, not coerce it to "", or it would report a false hash
+    // mismatch on every such row.
+    await audit({
+      projectId: "proj_a",
+      userId: null,
+      action: "stripe.disconnected",
+      resource: "project",
+      resourceId: "proj_a",
+    });
+
+    const result = await verifyAuditChain("proj_a");
+    expect(result.errors).toEqual([]);
+  });
+
   it("detects a tampered row via bad_hash", async () => {
     await audit({
       projectId: "proj_a",

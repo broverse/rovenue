@@ -1,7 +1,11 @@
-import { createHash } from "node:crypto";
 import type { Context } from "hono";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
+import {
+  canonicalJSON,
+  hashAuditRow,
+  type AuditChainPayload,
+} from "@rovenue/shared/audit-chain";
 import { logger } from "./logger";
 
 // =============================================================
@@ -173,7 +177,66 @@ export type AuditAction =
   // rewrote. `resource` is "subscriber"; before/after carry the access
   // row summaries and the drift classes that were detected, so an
   // operator can tell an automated repair apart from a webhook write.
-  | "access.drift_repaired";
+  | "access.drift_repaired"
+  // --- leaderboard seasons (workers/leaderboard-scheduler.ts) ---
+  | "leaderboard_season.closed"
+  // --- retention sweep DROP_PARTITION strategy (workers/retention-sweep.ts) ---
+  // Written BEFORE the DDL that drops a credit_ledger/revenue_events
+  // partition, never after: a partition drop bypasses the ledger's
+  // append-only trigger on every DDL path (row triggers fire on row
+  // DML, not DDL), so this row is the only durable record the drop
+  // happened at all. A partition holds rows for every project sharing
+  // it, so the sweep writes ONE of these into EACH affected project's
+  // own chain — not one global row — which is also why this action
+  // needed no `projectId`-nullability change here at all. See
+  // AUDIT_ACTION_RETENTION_PARTITION_DROPPED.
+  | typeof AUDIT_ACTION_RETENTION_PARTITION_DROPPED
+  // --- retention sweep CHECKPOINT_TRUNCATE strategy (workers/retention-sweep.ts,
+  // services/audit-retention/checkpoint.ts) ---
+  // Written AFTER the deleted segment's proof bundle has been stored
+  // and its rows deleted, never before: this row's `after` is the only
+  // durable record of WHERE the bundle went and WHICH row's hash the
+  // surviving chain now chains from. Unlike
+  // AUDIT_ACTION_RETENTION_PARTITION_DROPPED, this action is scoped to
+  // exactly one project's own audit_logs rows (a hash chain has no
+  // shared-partition problem — every row already belongs to exactly
+  // one project), so one of these is written per (project, sweep run),
+  // never fanned out across projects.
+  | typeof AUDIT_ACTION_RETENTION_CHECKPOINT
+  // --- DSAR export worker (workers/dsar-export.ts, ROADMAP §9.1 Task 4) ---
+  // One row per `dsar_requests` status transition the worker drives:
+  // PENDING -> RUNNING on claim, then RUNNING -> COMPLETED or
+  // RUNNING -> FAILED on the terminal outcome. `userId` is "system" —
+  // this is an asynchronous worker, not a dashboard session. Distinct
+  // from "subscriber.exported" (already written by exportSubscriber
+  // itself for the underlying data read) — these three describe the
+  // REQUEST record's own lifecycle, not the export contents.
+  | "dsar_request.claimed"
+  | "dsar_request.export_completed"
+  | "dsar_request.export_failed"
+  // --- DSAR erasure worker (workers/dsar-erasure.ts, ROADMAP §9.1 Task 5) ---
+  // Same "claimed" transition as export above (shared literal — both
+  // workers use `claimDsarRequest`), plus this worker's own terminal
+  // transitions. Distinct from "subscriber.anonymized" (already written
+  // by anonymizeSubscriber itself for the underlying Postgres write) —
+  // these describe the REQUEST record's own lifecycle, which also
+  // covers the ClickHouse purge that anonymizeSubscriber knows nothing
+  // about.
+  | "dsar_request.erasure_completed"
+  | "dsar_request.erasure_failed";
+
+// Exported (not just inlined like this file's other action literals)
+// because retention-sweep.ts lives in a different subsystem and needs
+// a type-checked reference to this exact string rather than
+// retyping the literal at its own call site.
+export const AUDIT_ACTION_RETENTION_PARTITION_DROPPED =
+  "retention.partition_dropped" as const;
+
+// Exported for the same reason as AUDIT_ACTION_RETENTION_PARTITION_DROPPED
+// above — services/audit-retention/checkpoint.ts needs a type-checked
+// reference rather than retyping the literal at its call site.
+export const AUDIT_ACTION_RETENTION_CHECKPOINT =
+  "retention.audit_checkpointed" as const;
 
 export type AuditResource =
   | "audience"
@@ -202,8 +265,22 @@ export type AuditResource =
   | "font_family"
   | "paywall_asset"
   | "import_job"
+  | "leaderboard_season"
   // Scoped by projectId; `resourceId` is the store the rate applies to.
-  | "commission_rate";
+  | "commission_rate"
+  // A dropped credit_ledger/revenue_events partition affects every
+  // project sharing it, so the sweep writes one of these into EACH
+  // affected project's own chain (see workers/retention-sweep.ts).
+  // `resourceId` is the partition's table name.
+  | "retention_partition"
+  // One CHECKPOINT_TRUNCATE checkpoint row per (project, sweep run).
+  // `resourceId` is the checkpoint's own id — the same id the exported
+  // proof bundle's storage key is built from (see
+  // services/audit-retention/checkpoint.ts) — so an operator can go
+  // straight from the audit row to the bundle it describes.
+  | "retention_checkpoint"
+  // `resourceId` is the `dsar_requests` row id (workers/dsar-export.ts).
+  | "dsar_request";
 
 export interface AuditEntry {
   projectId: string;
@@ -254,48 +331,17 @@ export type AuditTx = {
 // Canonical JSON for the hash
 // =============================================================
 //
-// `JSON.stringify` does not guarantee key order across engines. A
-// compliance-grade chain must be byte-identical on re-hash, so we
-// emit keys in sorted order and recurse through arrays/objects
-// ourselves.
-
-function canonicalJSON(value: unknown): string {
-  if (value === null || value === undefined) return "null";
-  if (typeof value === "number" && !Number.isFinite(value)) return "null";
-  if (typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJSON).join(",")}]`;
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  return `{${keys
-    .map((k) => `${JSON.stringify(k)}:${canonicalJSON(obj[k])}`)
-    .join(",")}}`;
-}
-
-function hashRow(canonical: string): string {
-  return createHash("sha256").update(canonical).digest("hex");
-}
-
-interface CanonicalPayload {
-  projectId: string;
-  userId: string | null;
-  action: string;
-  resource: string;
-  resourceId: string;
-  before: Record<string, unknown> | null;
-  after: Record<string, unknown> | null;
-  ipAddress: string | null;
-  userAgent: string | null;
-  createdAt: string;
-  prevHash: string | null;
-}
+// The canonical encoder and the row hash function themselves live in
+// `@rovenue/shared/audit-chain` — moved there so an external verifier
+// can recompute a hash without importing anything from this server.
+// `buildCanonicalPayload` stays here: it's API-side glue mapping an
+// `AuditEntry` onto the shared `AuditChainPayload` shape.
 
 function buildCanonicalPayload(
   entry: AuditEntry,
   createdAt: Date,
   prevHash: string | null,
-): CanonicalPayload {
+): AuditChainPayload {
   return {
     projectId: entry.projectId,
     userId: entry.userId,
@@ -318,6 +364,17 @@ function buildCanonicalPayload(
 export async function audit(
   entry: AuditEntry,
   callerTx?: AuditTx,
+  // The connection to open audit()'s OWN transaction on when there is
+  // no `callerTx` — never passed as `callerTx` itself: `db` here is an
+  // ordinary (non-transactional) handle, and starting the advisory
+  // lock on one of those releases it right after the LOCK statement
+  // itself, before the read-compute-insert it exists to serialise ever
+  // runs (see access-reconciliation.ts's comment on the same trap).
+  // Defaults to the module singleton so all but one caller
+  // (workers/retention-sweep.ts, which threads through whatever `Db`
+  // it was actually given rather than silently reaching around it)
+  // need not pass this at all.
+  db: DrizzleDb = drizzle.db,
 ): Promise<void> {
   if (entry.resource === "credential") {
     for (const snapshot of [entry.before, entry.after]) {
@@ -334,7 +391,7 @@ export async function audit(
     return;
   }
 
-  await drizzle.db.transaction(async (innerTx) =>
+  await db.transaction(async (innerTx) =>
     writeChained(entry, innerTx as unknown as AuditTx),
   );
 }
@@ -381,10 +438,9 @@ async function writeChained(
   const createdAt = new Date(
     tip ? Math.max(now, tip.createdAt.getTime() + 1) : now,
   );
-  const canonical = canonicalJSON(
+  const rowHash = hashAuditRow(
     buildCanonicalPayload(entry, createdAt, prevHash),
   );
-  const rowHash = hashRow(canonical);
 
   try {
     await tx.insert(auditLogs).values({
@@ -468,15 +524,23 @@ export async function verifyAuditChain(
       });
     }
 
-    // Schema allows null projectId/userId, but every chained row (one
-    // with a rowHash, filtered above) is written by writeChained which
-    // requires both to be non-null. Coerce here so the canonical type
-    // stays narrow.
-    const canonical = canonicalJSON(
+    // Schema allows null projectId/userId. `writeChained` requires
+    // `projectId` to be a real project id (it's typed `string`, never
+    // `string | null`, on `AuditEntry`) -- every chained row (one with a
+    // rowHash, filtered above) was written with one, so the coercion below
+    // is just narrowing a type FK cascades can null out later. `userId`,
+    // by contrast, is genuinely nullable on `AuditEntry` -- a webhook-
+    // initiated action (e.g. Stripe revoking a Connect authorization) has
+    // no dashboard user to attribute it to, and such a row is written and
+    // hashed with `userId: null`. Coercing it to `""` here would recompute
+    // a DIFFERENT hash than the one actually stored, so it is passed
+    // through unchanged to match what `buildCanonicalPayload` hashed at
+    // write time.
+    const recomputed = hashAuditRow(
       buildCanonicalPayload(
         {
           projectId: row.projectId ?? "",
-          userId: row.userId ?? "",
+          userId: row.userId,
           action: row.action as AuditAction,
           resource: row.resource as AuditResource,
           resourceId: row.resourceId,
@@ -489,7 +553,6 @@ export async function verifyAuditChain(
         row.prevHash,
       ),
     );
-    const recomputed = hashRow(canonical);
 
     if (recomputed !== row.rowHash) {
       errors.push({
@@ -543,6 +606,6 @@ export function redactCredentials(
 
 export const __testing = {
   canonicalJSON,
-  hashRow,
+  hashAuditRow,
   buildCanonicalPayload,
 };

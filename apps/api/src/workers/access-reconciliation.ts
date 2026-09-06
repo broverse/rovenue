@@ -354,17 +354,15 @@ export async function runAccessReconciliationSweep(
         // as a pseudo-tx would release that lock after the LOCK statement
         // itself, which is the one thing the chain cannot tolerate.
         //
-        // `userId` MUST be "system", never null, even though the column
-        // is nullable and this is not a dashboard action. `writeChained`
-        // hashes `entry.userId` as given, but `verifyAuditChain`
-        // re-hashes the stored row with `row.userId ?? ""` — so a null
-        // here writes `"userId":null` into the canonical JSON and
-        // verifies as `"userId":""`, and every row this worker produced
-        // would report `bad_hash`, the chain's tamper signal. `audit_logs`
-        // is DB-enforced append-only, so such rows can never be repaired.
-        // Every other non-dashboard caller passes "system" for this
-        // reason; access-reconciliation.integration.test.ts pins it by
-        // running verifyAuditChain over a healed project.
+        // `userId` is "system" rather than null because no dashboard
+        // session did this and "system" names the actor. Either value
+        // would hash consistently — `verifyAuditChain` recomputes
+        // `userId` exactly as written — so this is a statement about who
+        // acted, not a workaround for the chain. Every other
+        // non-dashboard caller uses the same sentinel;
+        // access-reconciliation.integration.test.ts still re-verifies the
+        // chain over a healed project, because asserting the row exists
+        // would not catch a hash the writer and the checker disagree on.
         await audit({
           projectId: entry.projectId,
           userId: "system",

@@ -27,7 +27,17 @@ const log = logger.child("gdpr:anonymize");
 export type AnonymizeReason =
   | "gdpr_request"
   | "kvkk_request"
-  | "retention_policy";
+  | "retention_policy"
+  // A self-service DSAR erasure (workers/dsar-erasure.ts, ROADMAP §9.1
+  // Task 5), reached via POST /v1/dsar/erasure. Distinct from
+  // "gdpr_request" / "kvkk_request" (an admin's own jurisdiction choice
+  // made from the dashboard — routes/dashboard/subscribers.ts) and from
+  // "retention_policy" (the automated nightly sweep,
+  // workers/retention-sweep.ts): a bare `dsar_requests` row carries no
+  // jurisdiction field for the worker to read, so this reason exists
+  // purely to keep the audit trail honest about which path triggered
+  // the anonymisation.
+  | "dsar_request";
 
 export interface AnonymizeSubscriberInput {
   subscriberId: string;

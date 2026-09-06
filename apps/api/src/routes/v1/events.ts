@@ -140,11 +140,17 @@ export const eventsRoute = new Hono()
         // device's rovenueId still names the retired row, and attributing
         // paywall telemetry there permanently orphans it from the
         // subscriber's revenue events.
-        const subscriber = await resolveOrCreateSubscriber(
+        const { subscriber, deadEnded } = await resolveOrCreateSubscriber(
           project.id,
           body.subscriberId,
         );
-        payload = { ...payload, subscriberId: subscriber.id };
+        // A GDPR-erased subject gets no NEW records keyed to them. The
+        // event still flows -- dropping it would distort the project's
+        // own aggregates -- but it travels unattributed rather than
+        // re-linking analytics to someone who asked to be forgotten.
+        if (!deadEnded) {
+          payload = { ...payload, subscriberId: subscriber.id };
+        }
       }
 
       await drizzle.outboxRepo.insert(drizzle.db, {

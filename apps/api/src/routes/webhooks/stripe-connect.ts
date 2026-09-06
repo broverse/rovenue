@@ -103,11 +103,11 @@ export const stripeConnectWebhookRoute = new Hono().post(
       // the audit log is an append-only per-project hash chain sold as a
       // compliance record. A revocation that leaves no trace there is a
       // hole in that record regardless of which side triggered it.
-      // `userId` is "system" rather than null: no dashboard session did
-      // this, but `writeChained` hashes the value as given while
-      // `verifyAuditChain` re-hashes it as `row.userId ?? ""`, so a null
-      // would make this row — and therefore this project's whole chain —
-      // report `bad_hash` forever in an append-only table.
+      // `userId` is "system" rather than null because no dashboard
+      // session did this and "system" says so. Either would hash
+      // consistently — `verifyAuditChain` recomputes `userId` exactly as
+      // written — so this is a statement about who acted, not a
+      // workaround for the chain.
       await drizzle.db.transaction(async (tx) => {
         await drizzle.stripeConnectionRepo.markDisconnected(
           tx,

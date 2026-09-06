@@ -1,0 +1,95 @@
+---
+title: Data Retention Policies
+description: Which tables age out automatically, how a project's window is resolved from its billing tier and any override, and what happens to audit history and shared partitions when a window elapses.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Rovenue used to retire old rows with three unrelated, hand-rolled workers — one hardcoded window, one environment variable, one constant, none of them aware of a project's billing tier. This guide describes the registry-driven replacement: a single source of truth for which tables age out, how long a given project keeps each one, and the nightly sweep that reclaims what has expired.
+
+<Callout type="warn">
+Retention is **tier-driven, and a project's tier is optional.** Billing is cloud-only and `HOST_MODE` defaults to `self`, so most self-hosted projects have no billing tier at all. A project with no tier and no override for a given table is, with two named exceptions below, **skipped** for that table — it keeps everything. A self-hosted deployment opts in per table by setting an override; nothing is defaulted into having its history deleted just because a tier is absent.
+</Callout>
+
+## Which tables have a policy, and which retain by default
+
+The registry lives at `packages/shared/src/retention/policies.ts` (`RETENTION_POLICIES`). Each entry names a physical table, the column that ages it, a reclaim strategy, a floor no tier, override or default may go below, and — for exactly two tables — a **default window** used when a project has neither a tier nor an override:
+
+| Table | Ages on | Strategy | Floor | No-tier, no-override default |
+|---|---|---|---|---|
+| `audit_logs` | `createdAt` | `CHECKPOINT_TRUNCATE` | 30 days | none — kept forever until configured |
+| `credit_ledger` | `createdAt` | `DROP_PARTITION` | 365 days | none — kept forever until configured |
+| `revenue_events` | `eventDate` | `DROP_PARTITION` | 365 days | none — kept forever until configured |
+| `outgoing_webhooks` | `createdAt`, terminal rows only | `DELETE_ROWS` | 7 days | none — kept forever until configured |
+| `webhook_events` | `createdAt` | `DELETE_ROWS` | 7 days | **90 days** |
+| `copilot_messages` | `createdAt` | `DELETE_ROWS` | 7 days | **90 days** |
+| `import_jobs` | `finishedAt`, terminal jobs only | `EXTERNAL_WORKER` | 7 days | none — kept forever until configured |
+
+`outgoing_webhooks` only ever expires rows in a terminal state (`SENT`, `DEAD`, `DISMISSED`) — a row still owed a delivery attempt is never destroyed merely because it is old, regardless of how long its window has been open.
+
+<Callout type="warn">
+**`webhook_events` and `copilot_messages` are the only two tables this system retains automatically with zero configuration** — a self-hosted project with no billing tier and no override still has both swept at 90 days. This is not the general rule; it exists only because both tables were already deleted unconditionally, for every project, by the bespoke workers this registry replaced (a hardcoded 90-day window and an env var defaulting to 90, respectively) — the default carries that existing behaviour forward rather than silently dropping it. Every other table — including `audit_logs` — has **no** default: a self-hosted operator's audit log, credit ledger, revenue events, outgoing webhooks and import files are all kept **forever** until an override is explicitly set for that table.
+</Callout>
+
+<Callout type="warn">
+The `credit_ledger` and `revenue_events` floors are 365 days each — a financial ledger and the revenue rollups derived from it. At that floor, a tier's `retentionDays` is **inert** for the free (30 days) and indie (180 days) tiers: both retain a full year of this data no matter what their tier advertises for everything else. This is deliberate, not a bug to report.
+</Callout>
+
+## How a project's window is resolved
+
+For every (project, table) pair, the sweep applies these rules, in order:
+
+1. **A project with a billing subscription and a matching tier-limits row** resolves normally: the tier's window (`retentionDays` or `auditLogDays` on `billing_tier_limits`, depending on the table), clamped down by any override, floored at the table's own minimum.
+2. **A project with no billing subscription but an explicit override** for that table uses the override, floored only — there is no tier to clamp against, and the operator who wrote the override is the authority. This is how a self-hosted deployment opts in, and how it can shorten `webhook_events`/`copilot_messages` below their 90-day default.
+3. **A project with neither a tier nor an override falls back to the table's `defaultDays`, if it has one** — today, only `webhook_events` and `copilot_messages` (see the callout above). The floor still applies.
+4. **A project with neither a tier nor an override, on a table with no `defaultDays`, is skipped** for that table. It is **not** defaulted to the free tier's window: free is the most aggressive rung on the ladder, and defaulting to it would silently delete a self-hoster's history a week after they installed. Retaining too much is recoverable; deleting what nobody asked to delete is not. This is the outcome for every table except the two named above.
+5. **A project that names a (tier, cycle) pair with no matching row in `billing_tier_limits`** — a reference-ladder integrity gap — is not treated as "no tier." Falling through to rule 2, 3 or 4 would silently drop a paying project's tier clamp (or hand it a plain default meant for tier-less projects), so this gets its own outcome and a warning log instead.
+
+<Callout type="warn">
+An override can only ever **shorten** the window a project's tier (rule 1) or default (rule 3) would otherwise give it — never lengthen it. A longer window is a storage-cost and compliance decision the tier already made. When a project has no tier at all (rule 2), there is nothing to clamp against, so the floor is the only remaining limit.
+</Callout>
+
+There is currently no dashboard or API surface for setting an override — it is a row in `project_retention_overrides` (`projectId`, `tableName`, `retentionDays`), written directly today. A self-hosted operator who wants `webhook_events` cleaned up after 14 days instead of the 90-day default inserts one row naming that table; an operator who wants `outgoing_webhooks` cleaned up at all (it has no default — rule 4 applies until an override exists) does the same.
+
+## Partition drops are fleet-wide
+
+`credit_ledger` and `revenue_events` are `DROP_PARTITION` tables — physically partitioned by month, shared across every project. A partition cannot be dropped for one tenant only, so the rule here is stricter than a plain per-project delete:
+
+- A partition is only dropped once **every project in the fleet has resolved some window** for that table this run.
+- One project without a resolved window (no tier and no override, or a tier-limits integrity gap) **blocks the drop for everyone**, not just itself — an unresolved requirement must never be read as permission to delete on that project's behalf.
+- When every project has resolved a window, the drop uses the **longest** of them. Since an override can only shorten a tier's window, the project asking to keep the most history is the one whose requirement legitimately bounds what the shared table may lose.
+
+Each dropped partition still writes one audit row **per affected project**, before the `DROP TABLE` runs — never a single global row, so the event stays inside every affected project's own audit chain (and the §9.3 proof export). Each row records that project's own row count in the partition, never the partition's whole total.
+
+## What a checkpoint row means
+
+`audit_logs` cannot be age-deleted like the other tables: it is an append-only hash chain, and deleting a row in the middle breaks every later row's link back to it. Instead, `CHECKPOINT_TRUNCATE` does this, in order, for every project whose window has a segment old enough to reclaim:
+
+1. Export the aging segment as a [proof bundle](/docs/guides/audit-proof) — the exact same assembly the `/proof` dashboard endpoint uses.
+2. Write that bundle to object storage and confirm the write succeeded.
+3. Only then delete the segment's rows.
+4. Chain a `retention.audit_checkpointed` audit row recording the boundary: the cutoff used, how many rows were deleted, the last deleted row's id and hash, and the bundle's storage key.
+
+If you find a gap in a project's audit chain — the earliest surviving row's `prevHash` doesn't resolve to anything still in the table — look for a `retention.audit_checkpointed` row immediately before it. Its `after.lastDeletedRowHash` is exactly the hash the surviving chain's first row should chain from, and `after.bundleKey` names where the deleted segment's proof bundle was archived before it was removed, so the full history is still recoverable and verifiable — just not from `audit_logs` itself anymore.
+
+The bundle lives in the same private bucket import uploads use (`IMPORT_STORAGE_BUCKET`; no separate bucket, env var, or storage policy was worth adding for this alone), under a distinct `audit-checkpoints/` prefix — `audit-checkpoints/<projectId>/<checkpointId>.json`. It never overlaps with `imports/<projectId>/...`, so the import-file retention worker (below) can never reach one of these objects even by accident. Fetch it directly from your object store, or reconstruct the same request the `/proof` endpoint would have made, and verify it exactly as described in the [audit proof guide](/docs/guides/audit-proof).
+
+If object storage isn't configured at all, `CHECKPOINT_TRUNCATE` fails closed: nothing is deleted, and a project's audit history is left exactly as-is rather than risking a compliance record with nowhere to put its proof.
+
+## `import_jobs` is retained, but not swept by this system
+
+Uploaded RevenueCat/Adapty import files (and their generated reports) are end-user PII sitting in object storage — a separate worker (`workers/import-retention.ts`) deletes those files and the `import_jobs` row's file references once its window elapses, tracking that with a `filesDeletedAt` column so a re-run never re-selects the same job.
+
+`import_jobs` carries a registry entry (strategy `EXTERNAL_WORKER`) purely so its **window** comes from the exact same tier + override + floor rules as every other table — the nightly sweep described above never touches its rows directly, because a plain row delete would leave that job's files orphaned in the bucket with nothing left to mark them handled.
+
+<Callout type="warn">
+Before this system existed, every project's import files were deleted after a fixed 7 days, unconditionally. Under the rules above, a project with no tier and no override for `import_jobs` now keeps its files indefinitely — the same "unconfigured means keep everything" rule every other table follows — and a tiered project's window can run well past 7 days, up to that tier's own `retentionDays` (as long as 1825 days for enterprise). A self-hosted deployment that wants its old import files cleaned up on a schedule needs an explicit override, the same as it would for any other table.
+</Callout>
+
+## What this does not cover
+
+<Callout type="warn">
+**ClickHouse is out of scope, and that is a decision, not an oversight.** Analytics tables carry their own fixed `INTERVAL 2 YEAR` TTL, set once in a ClickHouse migration. It is not tier-driven, it is not read from `RETENTION_POLICIES`, and nothing described on this page touches it. Making ClickHouse's retention tier-aware is a separate piece of work.
+</Callout>
+
+The sweep itself is a nightly BullMQ repeatable job (`workers/retention-sweep.ts`, 03:00 UTC), safe to run on multiple API replicas — every reclaim is either scoped to one project or, for a partition drop, gated on having heard from every project first.

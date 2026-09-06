@@ -3,6 +3,7 @@ import type { Db } from "../client";
 import type { BillingCycle, BillingTier } from "../enums";
 import {
   billingSubscriptions,
+  projects,
   type BillingSubscription,
 } from "../schema";
 
@@ -37,6 +38,48 @@ export async function listProjectIdsWithBillingSubscription(
     .select({ projectId: billingSubscriptions.projectId })
     .from(billingSubscriptions);
   return rows.map((r) => r.projectId);
+}
+
+export interface ProjectWithTier {
+  projectId: string;
+  tier: BillingTier | null;
+  cycle: BillingCycle | null;
+}
+
+/**
+ * Every project, LEFT JOINed to its active (non-deleted) billing
+ * subscription. `tier`/`cycle` come back `null` for a project with no
+ * billing row at all — the common case, not the exception: billing is
+ * cloud-only, `HOST_MODE` defaults to `self`, and on the development
+ * database this is 34 billing rows against 407 projects.
+ *
+ * Built for the retention sweep (workers/retention-sweep.ts), which
+ * must consider every project — including the nine-in-ten with no
+ * tier — rather than only the ones a tier-keyed query would find. The
+ * partial unique index `billing_subscriptions_project_active_uq`
+ * guarantees at most one non-deleted row per project, so the join
+ * cannot fan a project out into duplicate rows.
+ */
+export async function listProjectsWithTier(db: Db): Promise<ProjectWithTier[]> {
+  const rows = await db
+    .select({
+      projectId: projects.id,
+      tier: billingSubscriptions.tier,
+      cycle: billingSubscriptions.cycle,
+    })
+    .from(projects)
+    .leftJoin(
+      billingSubscriptions,
+      and(
+        eq(billingSubscriptions.projectId, projects.id),
+        ne(billingSubscriptions.state, "deleted"),
+      ),
+    );
+  return rows.map((r) => ({
+    projectId: r.projectId,
+    tier: r.tier ?? null,
+    cycle: r.cycle ?? null,
+  }));
 }
 
 export async function findBillingSubscriptionByProject(

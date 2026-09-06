@@ -21,6 +21,15 @@ import { logger } from "../../lib/logger";
 
 const log = logger.child("gdpr:export");
 
+/**
+ * HTTP status `exportSubscriber` throws for an already-erased subscriber
+ * (Finding 2, roadmap-9a final fix wave) — named so a caller (e.g.
+ * workers/dsar-export.ts) can recognise this SPECIFIC, expected outcome
+ * apart from a generic 404 or an unexpected error, without re-typing the
+ * literal 410 at each call site.
+ */
+export const SUBSCRIBER_ERASED_STATUS = 410;
+
 export interface ExportSubscriberInput {
   subscriberId: string;
   projectId: string;
@@ -59,6 +68,28 @@ export async function exportSubscriber(
     // to a different project.
     throw new HTTPException(404, {
       message: `Subscriber not found: ${input.subscriberId}`,
+    });
+  }
+  if (subscriberRow.deletedAt) {
+    // Finding 2 (roadmap-9a final fix wave): a subscriber this soft-
+    // deleted is the SAME "erased, dead-ended" row
+    // `resolveSubscriberForWrite` refuses to write onto — see its
+    // `deadEnded` flag and comment (lib/resolve-or-create-subscriber.ts).
+    // This is the read-side mirror of that guard: `anonymizeSubscriber`
+    // never touches `purchases` / `subscriberAccess` / `creditLedger` —
+    // only Postgres's own `subscribers` row and (separately, in
+    // workers/dsar-erasure.ts) ClickHouse — so a subscriberId that
+    // outlives erasure still has its FULL purchase and credit history
+    // sitting under it. Without this check, a DSAR export claimed
+    // BEFORE erasure but finishing AFTER it (or the dashboard's own
+    // manual GDPR-export tool run against an already-erased row) would
+    // read that history straight through and hand back a fresh
+    // artifact containing everything the subject asked to have
+    // forgotten — the sharpest possible failure of this feature's
+    // promise. 410 Gone: the subscriber existed and was reachable when
+    // this export was requested; it no longer is, permanently.
+    throw new HTTPException(SUBSCRIBER_ERASED_STATUS, {
+      message: `Subscriber ${input.subscriberId} has been erased and can no longer be exported`,
     });
   }
 

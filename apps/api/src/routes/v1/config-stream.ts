@@ -7,6 +7,8 @@ import { attachRedisErrorLogger } from "../../lib/redis";
 import { apiKeyAuth } from "../../middleware/api-key-auth";
 import {
   CONFIG_INVALIDATE_CHANNEL,
+  parseConfigInvalidation,
+  type ConfigInvalidationMessage,
 } from "../../lib/config-invalidation";
 import { evaluateSubscriberConfig } from "../../services/subscriber-config";
 import { resolveEnv, resolveSubscriberId } from "./config";
@@ -30,6 +32,32 @@ import { logger } from "../../lib/logger";
 
 const log = logger.child("config-stream");
 
+/**
+ * Trailing-edge window for re-evaluating after an invalidation. A burst of
+ * attribute writes for one subscriber collapses into a single push. This
+ * bounds push RATE, never correctness: the trailing evaluation always reads
+ * current state, so the last push in a burst is always right.
+ */
+export const CONFIG_STREAM_COALESCE_MS = 250;
+
+/**
+ * Whether an invalidation message concerns this stream.
+ *
+ * `resolvedSubscriberId` is null until the initial evaluation completes.
+ * In that window a targeted message wakes the stream anyway — a wasted
+ * evaluation is cheap, a dropped update is not.
+ */
+export function shouldWakeStream(
+  message: ConfigInvalidationMessage,
+  projectId: string,
+  resolvedSubscriberId: string | null,
+): boolean {
+  if (message.projectId !== projectId) return false;
+  if (!message.subscriberIds) return true;
+  if (resolvedSubscriberId === null) return true;
+  return message.subscriberIds.includes(resolvedSubscriberId);
+}
+
 export const configStreamRoute = new Hono().get(
   "/v1/config/stream",
   apiKeyAuth("any"),
@@ -49,19 +77,35 @@ export const configStreamRoute = new Hono().get(
     const featureFlagEnv = resolveEnv(c);
 
     return streamSSE(c, async (stream) => {
-      const evaluate = () =>
-        evaluateSubscriberConfig({
+      // Tracked from each evaluation and matched against invalidation
+      // messages — the RESOLVED row id, never the appUserId the stream was
+      // opened with. A /transfer merge changes which row an id resolves to,
+      // so matching on the external id would strand a device after a merge.
+      let resolvedSubscriberId: string | null = null;
+
+      const evaluate = async () => {
+        const config = await evaluateSubscriberConfig({
           projectId,
           appUserId,
           env: featureFlagEnv,
           requestAttributes: {},
         });
+        resolvedSubscriberId = config.subscriberId;
+        return config;
+      };
 
       // Initial evaluated config so the SDK has working state immediately.
+      // Wire shape is exactly `{ flags, experiments, projectId }` — mirrors
+      // GET /v1/config. subscriberId is an internal row id and must never
+      // reach the public SDK wire.
       const initial = await evaluate();
       await stream.writeSSE({
         event: "initial",
-        data: JSON.stringify({ ...initial, projectId }),
+        data: JSON.stringify({
+          flags: initial.flags,
+          experiments: initial.experiments,
+          projectId,
+        }),
       });
 
       // Dedicated subscriber connection — ioredis requires a separate client
@@ -72,20 +116,40 @@ export const configStreamRoute = new Hono().get(
       );
       await subscriber.subscribe(CONFIG_INVALIDATE_CHANNEL);
 
-      const onMessage = async (_channel: string, payload: string) => {
+      let coalesceTimer: NodeJS.Timeout | null = null;
+
+      const pushFreshConfig = async () => {
+        coalesceTimer = null;
         try {
-          const parsed = JSON.parse(payload) as { projectId: string };
-          if (parsed.projectId !== projectId) return;
           const next = await evaluate();
           await stream.writeSSE({
             event: "invalidate",
-            data: JSON.stringify({ ...next, projectId }),
+            data: JSON.stringify({
+              flags: next.flags,
+              experiments: next.experiments,
+              projectId,
+            }),
           });
         } catch (err) {
           log.warn("invalidation delivery failed", {
             err: err instanceof Error ? err.message : String(err),
           });
         }
+      };
+
+      const onMessage = (_channel: string, payload: string) => {
+        const message = parseConfigInvalidation(payload);
+        if (!message) return;
+        if (!shouldWakeStream(message, projectId, resolvedSubscriberId)) {
+          return;
+        }
+
+        // Trailing edge: an invalidation arriving while one is already
+        // pending collapses into it rather than queueing a second push.
+        if (coalesceTimer !== null) return;
+        coalesceTimer = setTimeout(() => {
+          void pushFreshConfig();
+        }, CONFIG_STREAM_COALESCE_MS);
       };
       subscriber.on("message", onMessage);
 
@@ -96,6 +160,7 @@ export const configStreamRoute = new Hono().get(
 
       stream.onAbort(() => {
         clearInterval(keepalive);
+        if (coalesceTimer !== null) clearTimeout(coalesceTimer);
         void subscriber
           .unsubscribe(CONFIG_INVALIDATE_CHANNEL)
           .catch(() => undefined);

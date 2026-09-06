@@ -11,6 +11,7 @@ import {
 } from "@rovenue/shared";
 import { appUserContext } from "../../middleware/app-user-context";
 import { buildAccessResponse } from "../../lib/access-response";
+import { publishSubscriberInvalidation } from "../../lib/config-invalidation";
 import { ok } from "../../lib/response";
 
 // =============================================================
@@ -32,6 +33,11 @@ export const meRoute = new Hono()
   // -------------------------------------------------------------
   // GET /me — subscriber profile + access
   // -------------------------------------------------------------
+  // GET /, /access and /entitlements below are deliberately not guarded
+  // against `subscriberDeadEnded`: all three only READ (buildAccessResponse
+  // + the resolved subscriber row) and write nothing, so there is no write
+  // path for an erased subject to re-populate. Only POST /attributes below
+  // writes, and it guards.
   .get("/", async (c) => {
     const subscriber = c.get("subscriber");
     const access = await buildAccessResponse(subscriber.id);
@@ -87,6 +93,24 @@ export const meRoute = new Hono()
       const now = new Date().toISOString();
       const merged = applyMutations(current, body.attributes, "sdk", now);
 
+      // A dead-ended row (GDPR-erased, or retired by a transfer merge)
+      // must never be re-populated; report it untouched instead of
+      // resurrecting it. Mirrors routes/v1/subscribers.ts, deliberately
+      // including the 200: a 4xx would tell a device-side SDK that this
+      // subject was erased, which is a disclosure to a party that is not
+      // necessarily entitled to it and that the subject never asked for.
+      if (c.get("subscriberDeadEnded")) {
+        return c.json(
+          ok({
+            subscriber: {
+              id: subscriber.id,
+              appUserId: subscriber.appUserId,
+              attributes: flattenAttributes(subscriber.attributes),
+            },
+          }),
+        );
+      }
+
       const updated = await drizzle.subscriberRepo.upsertSubscriber(
         drizzle.db,
         {
@@ -96,6 +120,8 @@ export const meRoute = new Hono()
           updateAttributes: merged,
         },
       );
+
+      await publishSubscriberInvalidation(project.id, [updated.id]);
 
       return c.json(
         ok({

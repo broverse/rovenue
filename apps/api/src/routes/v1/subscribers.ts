@@ -17,6 +17,7 @@ import { requireSecretKey } from "../../middleware/api-key-auth";
 import { buildAccessResponse } from "../../lib/access-response";
 import { resolveSubscriber } from "../../lib/resolve-subscriber";
 import { resolveSubscriberForWrite } from "../../lib/resolve-or-create-subscriber";
+import { publishSubscriberInvalidation } from "../../lib/config-invalidation";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -165,6 +166,7 @@ export const subscribersRoute = new Hono()
           subscriber.id,
           merged,
         );
+        await publishSubscriberInvalidation(project.id, [subscriber.id]);
       }
 
       return c.json(

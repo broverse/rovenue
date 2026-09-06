@@ -37,7 +37,7 @@ describe("sdkInstalledAt is SDK-create-path truth", () => {
   });
 
   it("stamps sdkInstalledAt when the SDK creates the subscriber", async () => {
-    const s = await resolveOrCreateSubscriber(
+    const { subscriber: s } = await resolveOrCreateSubscriber(
       PROJECT_ID,
       `rv_sdk_${RUN_ID}`,
       "ios",
@@ -50,7 +50,7 @@ describe("sdkInstalledAt is SDK-create-path truth", () => {
     // `X-Rovenue-Platform` still installed the app. This is why the
     // column exists rather than the reader keying off the `platform`
     // attribute.
-    const s = await resolveOrCreateSubscriber(PROJECT_ID, `rv_np_${RUN_ID}`);
+    const { subscriber: s } = await resolveOrCreateSubscriber(PROJECT_ID, `rv_np_${RUN_ID}`);
     expect(s.sdkInstalledAt).toBeInstanceOf(Date);
   });
 
@@ -63,12 +63,12 @@ describe("sdkInstalledAt is SDK-create-path truth", () => {
   });
 
   it("never re-stamps an existing row", async () => {
-    const first = await resolveOrCreateSubscriber(
+    const { subscriber: first } = await resolveOrCreateSubscriber(
       PROJECT_ID,
       `rv_twice_${RUN_ID}`,
       "ios",
     );
-    const again = await resolveOrCreateSubscriber(
+    const { subscriber: again } = await resolveOrCreateSubscriber(
       PROJECT_ID,
       `rv_twice_${RUN_ID}`,
       "android",

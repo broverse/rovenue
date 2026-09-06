@@ -88,7 +88,7 @@ vi.mock("../access-engine", () => ({
 }));
 
 vi.mock("../purchase-credits", () => ({
-  grantPurchaseCurrencies: vi.fn(async () => undefined),
+  grantProductCurrencies: vi.fn(async () => undefined),
 }));
 
 import { handleAppleNotification } from "./apple-webhook";

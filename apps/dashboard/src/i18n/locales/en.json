@@ -1113,6 +1113,16 @@
         "imported": "Imported"
       }
     },
+    "grants": {
+      "trigger": {
+        "label": "Grant on",
+        "purchase": "Purchase",
+        "renewal": "Renewal",
+        "both": "Purchase & renewal",
+        "hint": "Choose when this grant fires. Renewal (and purchase & renewal) requires a subscription product.",
+        "subscriptionOnly": "Only subscription products renew, so this product can only grant on purchase."
+      }
+    },
     "import": {
       "title": "Import from store",
       "subtitle": "Paste store identifiers to bulk-create products. Anything that already exists is skipped.",
@@ -3348,6 +3358,80 @@
       "totalUsd": "USD",
       "totalCredits": "Credits",
       "events": "Events"
+    },
+    "cadence": {
+      "weekly": "Weekly",
+      "monthly": "Monthly",
+      "custom": "Custom"
+    },
+    "metric": {
+      "topSpenders": "Top spenders",
+      "topConsumers": "Top consumers"
+    },
+    "configured": {
+      "sectionTitle": "Configured leaderboards",
+      "sectionSubtitle": "Season-based leaderboards that reset on a schedule and freeze a final snapshot when each season closes.",
+      "new": "New leaderboard",
+      "empty": {
+        "title": "No leaderboards configured yet",
+        "body": "Create one to run season-based competitions that snapshot final standings when each season closes."
+      },
+      "list": {
+        "entryLimit": "Top {{count}}"
+      },
+      "actions": {
+        "viewAria": "View {{name}} standings"
+      },
+      "delete": {
+        "confirm": "Delete leaderboard \"{{name}}\"? This also deletes its season history.",
+        "error": "Could not delete the leaderboard. Please try again."
+      },
+      "season": {
+        "ariaLabel": "Season",
+        "ordinal": "Season {{number}}"
+      },
+      "standings": {
+        "empty": "No season has opened for this leaderboard yet."
+      }
+    },
+    "form": {
+      "createTitle": "New leaderboard",
+      "editTitle": "Edit leaderboard",
+      "createSubtitle": "Configure a season-based leaderboard. Identifier, metric and cadence can't be changed after creation.",
+      "editSubtitle": "Update the name, currency, entry limit, timezone, or enabled state.",
+      "fields": {
+        "identifier": "Identifier",
+        "name": "Name",
+        "metric": "Metric",
+        "currency": "Currency",
+        "cadence": "Cadence",
+        "customPeriodDays": "Custom period (days)",
+        "timezone": "Timezone",
+        "entryLimit": "Entry limit",
+        "enabled": "Enabled"
+      },
+      "identifier": {
+        "hint": "Stable slug used to reference this leaderboard. Can't be changed after creation.",
+        "locked": "Can't be changed after creation."
+      },
+      "metric": {
+        "locked": "Can't be changed after creation."
+      },
+      "cadence": {
+        "locked": "Can't be changed after creation."
+      },
+      "currency": {
+        "allOption": "All currencies"
+      },
+      "errors": {
+        "identifierRequired": "Identifier is required",
+        "nameRequired": "Name is required",
+        "customPeriodDaysRequired": "Enter a positive number of days for this custom cadence",
+        "unknown": "Something went wrong. Please try again."
+      },
+      "submit": {
+        "create": "Create leaderboard"
+      }
     }
   },
   "cohorts": {

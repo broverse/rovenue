@@ -25,10 +25,6 @@ import {
   scheduleDelivery,
 } from "./workers/webhook-delivery";
 import {
-  createWebhookRetentionWorker,
-  scheduleWebhookRetention,
-} from "./workers/webhook-retention";
-import {
   createWebhookReaperWorker,
   scheduleWebhookReaper,
 } from "./workers/webhook-reaper";
@@ -79,23 +75,21 @@ import {
   scheduleRoviReaper,
 } from "./workers/rovi-reaper";
 import {
-  createRoviRetentionWorker,
-  scheduleRoviRetention,
-} from "./workers/rovi-retention";
-import {
   createRefundShieldResponderWorker,
   scheduleRefundShieldResponder,
 } from "./workers/refund-shield-responder";
 import { createImportRunnerWorker } from "./workers/import-runner";
-import {
-  createImportRetentionWorker,
-  scheduleImportRetention,
-} from "./workers/import-retention";
+import { ensureImportRetention } from "./workers/import-retention";
 import {
   createExperimentSchedulerWorker,
   scheduleExperimentScheduler,
 } from "./workers/experiment-scheduler";
+import { ensureLeaderboardScheduler } from "./workers/leaderboard-scheduler";
+import { ensureDsarExportWorker } from "./workers/dsar-export";
+import { ensureDsarErasureWorker } from "./workers/dsar-erasure";
+import { ensureRetentionSweep } from "./workers/retention-sweep";
 import { bootIntegrations } from "./integrations-boot";
+import { bootRenewalGrants } from "./renewal-grants-boot";
 import { checkConnectWebhookEvents } from "./services/stripe/connect-endpoint-check";
 import { applySharpHardening } from "./services/assets/sharp-hardening";
 
@@ -151,16 +145,6 @@ scheduleFxFetch().catch((err: unknown) => {
 createDeliveryWorker();
 scheduleDelivery().catch((err: unknown) => {
   logger.error("failed to schedule webhook delivery", {
-    err: err instanceof Error ? err.message : String(err),
-  });
-});
-
-// webhook_events retention — nightly DELETE pass for rows older
-// than 90 days. Replaces a hypertable drop_chunks policy; see
-// workers/webhook-retention.ts for the rationale.
-createWebhookRetentionWorker();
-scheduleWebhookRetention().catch((err: unknown) => {
-  logger.error("failed to schedule webhook retention", {
     err: err instanceof Error ? err.message : String(err),
   });
 });
@@ -272,15 +256,6 @@ scheduleRoviReaper().catch((err: unknown) => {
   });
 });
 
-// Rovi retention — nightly at 03:00 UTC, hard-deletes copilot_messages
-// older than ROVI_MESSAGE_RETENTION_DAYS (GDPR Art. 5(1)(e)).
-createRoviRetentionWorker();
-scheduleRoviRetention().catch((err: unknown) => {
-  logger.error("failed to schedule rovi retention", {
-    err: err instanceof Error ? err.message : String(err),
-  });
-});
-
 // Refund Shield responder — 30-second repeatable BullMQ job. Claims
 // PENDING refund_shield_responses rows whose scheduledFor has arrived
 // and POSTs the per-subscriber ConsumptionRequest to Apple. Multiple
@@ -300,14 +275,13 @@ scheduleRefundShieldResponder().catch((err: unknown) => {
 createImportRunnerWorker();
 
 // Data-import file retention — nightly sweep that deletes a terminal
-// job's uploaded file (and report) once IMPORT_FILE_RETENTION_DAYS has
-// passed. See workers/import-retention.ts.
-createImportRetentionWorker();
-scheduleImportRetention().catch((err: unknown) => {
-  logger.error("failed to schedule import file retention", {
-    err: err instanceof Error ? err.message : String(err),
-  });
-});
+// job's uploaded file (and report) once its registry-resolved window
+// (ROADMAP §9.2, table "import_jobs") has passed. Kept as its own
+// worker rather than folded into the generic retention sweep below: it
+// also deletes object-storage files and tracks that with
+// `filesDeletedAt`, which the generic sweep deliberately does not
+// model. See workers/import-retention.ts.
+ensureImportRetention();
 
 // Experiment scheduler (Task 9) — 5-minute repeatable BullMQ job. Starts
 // DRAFT experiments whose scheduledStartAt is due (chaining successors on
@@ -323,9 +297,57 @@ scheduleExperimentScheduler().catch((err: unknown) => {
   });
 });
 
+// Leaderboard season scheduler (ROADMAP §12 item 3) — 5-minute repeatable
+// BullMQ job. Opens a first season for enabled leaderboards that have
+// none, and closes ACTIVE seasons past endsAt + the ClickHouse settle
+// delay: ClickHouse is queried before anything is claimed, so an outage
+// leaves the season untouched instead of closed-but-empty. See
+// workers/leaderboard-scheduler.ts.
+ensureLeaderboardScheduler();
+
+// DSAR export worker (ROADMAP §9.1, Task 4) — consumes the dedicated
+// rovenue-dsar-export queue enqueued by POST /v1/dsar/export. Claims a
+// PENDING request (conditional UPDATE ... RETURNING, safe across
+// replicas), runs exportSubscriber, writes and confirms the artifact in
+// the private import bucket under dsar-exports/, then marks the row
+// COMPLETED with the artifact key and its expiry — or FAILED, never
+// left RUNNING. Split onto its own queue (not shared with the Task 5
+// erasure worker) so a backlog of heavy exports can never delay
+// erasure, which carries a statutory deadline export does not. See
+// workers/dsar-export.ts.
+ensureDsarExportWorker();
+
+// DSAR erasure worker (ROADMAP §9.1, Task 5) — consumes the dedicated
+// rovenue-dsar-erasure queue enqueued by POST /v1/dsar/erasure. Claims
+// a PENDING request, anonymises the subscriber in Postgres, then
+// purges every ClickHouse table that carries that subscriber's id and
+// waits for each `ALTER ... DELETE` mutation to actually finish
+// (`system.mutations.is_done`) before marking the row COMPLETED — or
+// FAILED, never left RUNNING. See workers/dsar-erasure.ts.
+ensureDsarErasureWorker();
+
+// Retention sweep (ROADMAP §9.2) — nightly at 03:00 UTC. Registry-driven
+// replacement for the three bespoke retention workers that used to live
+// here (rovi-retention for copilot_messages, webhook-retention for
+// webhook_events, both retired — their tables are registry rows now).
+// Walks every project x every policy in RETENTION_POLICIES
+// (@rovenue/shared/retention), resolving each project's own window from
+// its billing tier and any override, and reclaims whatever has aged out
+// via DELETE_ROWS, DROP_PARTITION or CHECKPOINT_TRUNCATE depending on
+// the table. import_jobs stays on its own worker (see
+// ensureImportRetention above) even though it also carries a registry
+// entry — its strategy is EXTERNAL_WORKER, which this sweep never
+// dispatches. See workers/retention-sweep.ts.
+ensureRetentionSweep();
+
 // Integrations fanout + delivery pipeline (Kafka → BullMQ → worker).
 // bootIntegrations() no-ops gracefully when KAFKA_BROKERS is unset.
 const integrationsHandle = bootIntegrations();
+
+// Renewal-credit-grant consumer (Kafka rovenue.revenue → BullMQ → worker).
+// A second, independent consumer group beside rovenue-integrations-fanout.
+// bootRenewalGrants() no-ops gracefully when KAFKA_BROKERS is unset.
+const renewalGrantsHandle = bootRenewalGrants();
 
 // Advisory: the funnel's one-time backstop depends on the platform's
 // Connect endpoint having `payment_intent.succeeded` selected, and
@@ -347,6 +369,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     void getScheduledActionsWorker().close();
     void getScheduledActionsQueue().close();
     void integrationsHandle.then((h) => h.stop());
+    void renewalGrantsHandle.then((h) => h.stop());
   });
 }
 

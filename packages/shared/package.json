@@ -14,6 +14,11 @@
       "types": "./src/crypto.ts",
       "default": "./src/crypto.ts"
     },
+    "./audit-chain": {
+      "types": "./src/audit-chain.ts",
+      "default": "./src/audit-chain.ts"
+    },
+    "./audit-proof-bundle-fixture.json": "./src/audit-proof-bundle-fixture.json",
     "./subscription-status": {
       "types": "./src/subscription-status.ts",
       "default": "./src/subscription-status.ts"
@@ -45,6 +50,10 @@
     "./import/keys": {
       "types": "./src/import/keys.ts",
       "default": "./src/import/keys.ts"
+    },
+    "./retention": {
+      "types": "./src/retention/policies.ts",
+      "default": "./src/retention/policies.ts"
     },
     "./experiments/bucketing-web": {
       "types": "./src/experiments/bucketing-web.ts",

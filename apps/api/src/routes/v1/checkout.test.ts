@@ -36,6 +36,7 @@ const CANCEL_URL = "https://app.example.com/cancelled";
 
 const findApiKeyByPublicMock = vi.fn();
 const resolveSubscriberByRovenueIdMock = vi.fn();
+const findSubscriberByRovenueIdMock = vi.fn();
 const listByProjectMock = vi.fn();
 const findOfferingByIdMock = vi.fn();
 const findProductsByIdsMock = vi.fn();
@@ -53,7 +54,8 @@ vi.mock("@rovenue/db", () => ({
     subscriberRepo: {
       resolveSubscriberByRovenueId: (...args: unknown[]) =>
         resolveSubscriberByRovenueIdMock(...args),
-      findSubscriberByRovenueId: vi.fn(async () => null),
+      findSubscriberByRovenueId: (...args: unknown[]) =>
+        findSubscriberByRovenueIdMock(...args),
       upsertSubscriber: vi.fn(),
     },
     customDomainRepo: {
@@ -115,6 +117,8 @@ let sessionsCreateMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   findApiKeyByPublicMock.mockReset();
   resolveSubscriberByRovenueIdMock.mockReset();
+  findSubscriberByRovenueIdMock.mockReset();
+  findSubscriberByRovenueIdMock.mockResolvedValue(null);
   listByProjectMock.mockReset();
   findOfferingByIdMock.mockReset();
   findProductsByIdsMock.mockReset();
@@ -413,5 +417,90 @@ describe("POST /v1/checkout", () => {
       body: validBody(),
     });
     expect(res.status).toBe(401);
+  });
+});
+
+// =============================================================
+// POST /v1/checkout — dead-ended subscriber (IMPORTANT fix-round finding)
+// =============================================================
+//
+// Closes the missing-coverage gap AND the underlying bug: this route
+// mounts `appUserContext` and so has `subscriberDeadEnded` available,
+// but originally never read it — an erased subscriber could open a real
+// Stripe Checkout Session stamped with their rovenueId in metadata, and
+// the existing webhook resolves completed subscriptions back onto that
+// id, re-granting entitlements to a row that was supposed to stay
+// forgotten.
+//
+// `resolveSubscriberByRovenueId` → null + `findSubscriberByRovenueId` →
+// the row is resolveSubscriberForWrite's "dead-ended" shape (soft-deleted,
+// no live mergedInto survivor).
+describe("POST /v1/checkout — dead-ended subscriber", () => {
+  it("creates NO real Stripe session for an erased subscriber, but still reports success", async () => {
+    resolveSubscriberByRovenueIdMock.mockResolvedValue(null);
+    findSubscriberByRovenueIdMock.mockResolvedValue({
+      id: SUBSCRIBER_ID,
+      projectId: PROJECT_ID,
+      rovenueId: APP_USER_ID,
+      deletedAt: new Date(),
+    });
+
+    const res = await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: authedHeaders(),
+      body: validBody(),
+    });
+
+    expect(res.status).toBe(200);
+    // This is the CRITICAL-adjacent regression check: reverting the
+    // `subscriberDeadEnded` guard must make this fail.
+    expect(sessionsCreateMock).not.toHaveBeenCalled();
+
+    const body = (await res.json()) as {
+      data: { sessionId: string; url: string };
+    };
+    // Same shape a live subscriber's success response has (sessionId +
+    // url) — no 4xx, no divergent body a caller could use to infer
+    // erasure. The URL is the verified cancelUrl, never a live Stripe URL.
+    expect(typeof body.data.sessionId).toBe("string");
+    expect(body.data.sessionId.length).toBeGreaterThan(0);
+    expect(body.data.url).toBe(CANCEL_URL);
+  });
+
+  it("still 400s a dead-ended caller's unverified cancelUrl (no disclosure via a differing validation path)", async () => {
+    resolveSubscriberByRovenueIdMock.mockResolvedValue(null);
+    findSubscriberByRovenueIdMock.mockResolvedValue({
+      id: SUBSCRIBER_ID,
+      projectId: PROJECT_ID,
+      rovenueId: APP_USER_ID,
+      deletedAt: new Date(),
+    });
+
+    const res = await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: authedHeaders(),
+      body: validBody({ cancelUrl: "https://evil.example/cancelled" }),
+    });
+
+    // Erasure must not turn this endpoint into an open-redirect oracle:
+    // an unverified cancelUrl is refused exactly as it would be for a
+    // live subscriber, never reflected back in a 200.
+    expect(res.status).toBe(400);
+    expect(sessionsCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("creates a real Stripe session for a live subscriber", async () => {
+    // The mirror. Without it the test above passes against a route that
+    // has stopped creating sessions for everyone.
+    const res = await buildApp().request("/v1/checkout", {
+      method: "POST",
+      headers: authedHeaders(),
+      body: validBody(),
+    });
+
+    expect(res.status).toBe(200);
+    expect(sessionsCreateMock).toHaveBeenCalledTimes(1);
+    const body = (await res.json()) as { data: { url: string } };
+    expect(body.data.url).toBe("https://checkout.stripe.com/c/pay/cs_1");
   });
 });

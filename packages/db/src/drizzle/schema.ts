@@ -39,7 +39,10 @@ import {
   billingStateEnum,
   billingTierEnum,
   creditLedgerType,
+  currencyGrantTrigger,
   customDomainCertStatus,
+  dsarRequestStatus,
+  dsarRequestType,
   environment,
   experimentPrimaryMetric,
   experimentStatus,
@@ -55,6 +58,9 @@ import {
   importJobStatus,
   integrationDeliveryStatus,
   invitationDeliveryStatus,
+  leaderboardCadence,
+  leaderboardMetric,
+  leaderboardSeasonStatus,
   memberRole,
   notificationChannel,
   notificationDeliveryStatus,
@@ -748,6 +754,10 @@ export const productCurrencyGrants = pgTable(
       .notNull()
       .references(() => virtualCurrencies.id, { onDelete: "cascade" }),
     amount: integer("amount").notNull(),
+    // Which lifecycle events this row fires on. Defaults to PURCHASE so
+    // every grant row that existed before this column keeps exactly its
+    // previous (purchase-only) behaviour.
+    grantOn: currencyGrantTrigger("grantOn").notNull().default("PURCHASE"),
   },
   (t) => ({
     productIdCurrencyIdKey: uniqueIndex(
@@ -1466,6 +1476,57 @@ export type ProjectStoreCommissionRate =
   typeof projectStoreCommissionRates.$inferSelect;
 export type NewProjectStoreCommissionRate =
   typeof projectStoreCommissionRates.$inferInsert;
+
+// =============================================================
+// project_retention_overrides (per-table retention windows)
+// =============================================================
+
+export const projectRetentionOverrides = pgTable(
+  "project_retention_overrides",
+  {
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    // The physical table this override applies to. Deliberately a plain
+    // text column rather than an enum: the set of retainable tables lives
+    // in @rovenue/shared/retention's RETENTION_POLICIES, which is code
+    // because it names physical tables. An enum here would be a second
+    // copy of that list, free to drift, and a migration away from the
+    // registry it is supposed to mirror.
+    tableName: text("tableName").notNull(),
+    // A SHORTER window than the project's tier allows. The clamping is
+    // done by resolveRetentionWindowDays, not here — a stored value that
+    // exceeds the tier is simply ignored at read time rather than
+    // rejected at write time, so a tier downgrade cannot strand a row
+    // that was valid when it was written.
+    retentionDays: integer("retentionDays").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    // One override per (project, table). The composite PK is what makes
+    // an upsert idempotent; without it a second write would silently add
+    // a row and the sweep would have two windows to choose between.
+    pk: primaryKey({ columns: [t.projectId, t.tableName] }),
+    // Zero or negative would mean "delete everything". The registry's
+    // floor already clamps that at read time, but the constraint states
+    // the intent at the one layer no caller can bypass.
+    positiveWindow: check(
+      "project_retention_overrides_days_positive",
+      sql`${t.retentionDays} > 0`,
+    ),
+  }),
+);
+
+export type ProjectRetentionOverride =
+  typeof projectRetentionOverrides.$inferSelect;
+export type NewProjectRetentionOverride =
+  typeof projectRetentionOverrides.$inferInsert;
+
 
 // =============================================================
 // audiences (sift-style targeting rules)
@@ -2350,7 +2411,10 @@ export {
   billingStateEnum,
   billingTierEnum,
   creditLedgerType,
+  currencyGrantTrigger,
   customDomainCertStatus,
+  dsarRequestStatus,
+  dsarRequestType,
   environment,
   experimentPrimaryMetric,
   experimentStatus,
@@ -2366,6 +2430,9 @@ export {
   importJobStatus,
   integrationDeliveryStatus,
   invitationDeliveryStatus,
+  leaderboardCadence,
+  leaderboardMetric,
+  leaderboardSeasonStatus,
   memberRole,
   notificationChannel,
   notificationDeliveryStatus,
@@ -3605,3 +3672,179 @@ export const paywallAssetReservations = pgTable(
 
 export type PaywallAssetReservation = typeof paywallAssetReservations.$inferSelect;
 export type NewPaywallAssetReservation = typeof paywallAssetReservations.$inferInsert;
+
+// =============================================================
+// leaderboards (configured, season-based)
+// =============================================================
+
+export const leaderboards = pgTable(
+  "leaderboards",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    identifier: text("identifier").notNull(),
+    name: text("name").notNull(),
+    metric: leaderboardMetric("metric").notNull(),
+    // Only meaningful for TOP_CONSUMERS. Null = every currency, which is
+    // what the existing ad-hoc endpoint does.
+    currencyId: text("currencyId").references(() => virtualCurrencies.id, {
+      onDelete: "set null",
+    }),
+    cadence: leaderboardCadence("cadence").notNull(),
+    customPeriodDays: integer("customPeriodDays"),
+    // IANA name. Season boundaries roll at local midnight in this zone.
+    timezone: text("timezone").notNull().default("UTC"),
+    entryLimit: integer("entryLimit").notNull().default(100),
+    anchorAt: timestamp("anchorAt", { withTimezone: true }).notNull(),
+    isEnabled: boolean("isEnabled").notNull().default(true),
+    createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    projectIdIdentifierKey: uniqueIndex("leaderboards_projectId_identifier_key").on(
+      t.projectId,
+      t.identifier,
+    ),
+    projectIdIdx: index("leaderboards_projectId_idx").on(t.projectId),
+  }),
+);
+
+export const leaderboardSeasons = pgTable(
+  "leaderboard_seasons",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    leaderboardId: text("leaderboardId")
+      .notNull()
+      .references(() => leaderboards.id, { onDelete: "cascade" }),
+    seasonNumber: integer("seasonNumber").notNull(),
+    startsAt: timestamp("startsAt", { withTimezone: true }).notNull(),
+    /** Exclusive. */
+    endsAt: timestamp("endsAt", { withTimezone: true }).notNull(),
+    status: leaderboardSeasonStatus("status").notNull().default("ACTIVE"),
+    closedAt: timestamp("closedAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leaderboardIdSeasonNumberKey: uniqueIndex(
+      "leaderboard_seasons_leaderboardId_seasonNumber_key",
+    ).on(t.leaderboardId, t.seasonNumber),
+    statusEndsAtIdx: index("leaderboard_seasons_status_endsAt_idx").on(
+      t.status,
+      t.endsAt,
+    ),
+  }),
+);
+
+export const leaderboardStandings = pgTable(
+  "leaderboard_standings",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    seasonId: text("seasonId")
+      .notNull()
+      .references(() => leaderboardSeasons.id, { onDelete: "cascade" }),
+    rank: integer("rank").notNull(),
+    // Deliberately NOT a foreign key: standings are a historical snapshot,
+    // and a closed season's numbers must not change or vanish because a
+    // subscriber row was later removed.
+    subscriberId: text("subscriberId").notNull(),
+    // Numeric as text: USD sums and large credit totals must not go
+    // through a float.
+    score: text("score").notNull(),
+    eventCount: integer("eventCount").notNull(),
+  },
+  (t) => ({
+    seasonIdRankKey: uniqueIndex("leaderboard_standings_seasonId_rank_key").on(
+      t.seasonId,
+      t.rank,
+    ),
+  }),
+);
+
+export type Leaderboard = typeof leaderboards.$inferSelect;
+export type NewLeaderboard = typeof leaderboards.$inferInsert;
+export type LeaderboardSeason = typeof leaderboardSeasons.$inferSelect;
+export type LeaderboardStanding = typeof leaderboardStandings.$inferSelect;
+
+// =============================================================
+// dsar_requests (ROADMAP §9.1 — self-service subject-access requests)
+// =============================================================
+//
+// One row per customer-initiated EXPORT or ERASURE ask for one of their
+// subscribers. The record exists because DSARs carry legal deadlines: it
+// makes a retry idempotent (see the partial unique index below), gives
+// the customer evidence of when Rovenue responded, and makes outstanding
+// obligations queryable instead of living only inside a BullMQ job that
+// leaves no trace once it finishes.
+
+/**
+ * Statuses that count as "still open" — a subject must not have two
+ * concurrent asks of the SAME right in flight. Named once and read by
+ * both the partial unique index below and the repository's
+ * `findOpenDsarRequest`, so the database's idea of "open" and the
+ * application's cannot drift apart.
+ */
+export const OPEN_DSAR_REQUEST_STATUSES = ["PENDING", "RUNNING"] as const;
+
+export const dsarRequests = pgTable(
+  "dsar_requests",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    subscriberId: text("subscriberId")
+      .notNull()
+      .references(() => subscribers.id, { onDelete: "cascade" }),
+    type: dsarRequestType("type").notNull(),
+    status: dsarRequestStatus("status").notNull().default("PENDING"),
+    // Free text the customer's own backend supplies, identifying who
+    // asked (an admin email, a support-ticket id). Never validated as an
+    // identity — it exists purely so a later audit can show who
+    // requested what, on the customer's own say-so.
+    requestedBy: text("requestedBy").notNull(),
+    // Populated once an EXPORT artifact has been written AND confirmed.
+    // Always null for ERASURE, which produces no artifact. Also nulled
+    // back out, on an otherwise still-COMPLETED EXPORT row, the moment a
+    // LATER erasure of the same subscriber deletes this artifact from
+    // storage (roadmap-9a final fix wave, Finding 1 —
+    // `dsarRequestRepo.invalidateExportArtifacts`, called from
+    // `workers/dsar-erasure.ts`): the export genuinely completed at the
+    // time, it just no longer has anything downloadable.
+    artifactKey: text("artifactKey"),
+    // The artifact's download deadline. Always null until COMPLETED, and
+    // always null for ERASURE. Nulled alongside `artifactKey` by the same
+    // Finding-1 erasure-triggered invalidation described above.
+    expiresAt: timestamp("expiresAt", { withTimezone: true }),
+    // Populated only when status = FAILED.
+    error: text("error"),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completedAt", { withTimezone: true }),
+  },
+  (t) => ({
+    // The idempotency guarantee itself: "one open request of each type
+    // per subject", enforced at the database rather than only in the
+    // route, so a concurrent double-submit is a unique-violation instead
+    // of two exports racing each other. Scoped to (subscriberId, type)
+    // rather than including projectId — a subscriber belongs to exactly
+    // one project, so the pair alone already identifies the row the
+    // constraint must protect.
+    openRequestUniq: uniqueIndex("dsar_requests_open_subscriber_type_uniq")
+      .on(t.subscriberId, t.type)
+      .where(
+        sql`${t.status} IN (${sql.raw(
+          OPEN_DSAR_REQUEST_STATUSES.map((s) => `'${s}'`).join(", "),
+        )})`,
+      ),
+    projectIdIdx: index("dsar_requests_projectId_idx").on(t.projectId),
+  }),
+);
+
+export type DsarRequest = typeof dsarRequests.$inferSelect;
+export type NewDsarRequest = typeof dsarRequests.$inferInsert;

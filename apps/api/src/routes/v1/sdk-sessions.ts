@@ -114,10 +114,17 @@ export const sdkSessionsRoute = new Hono().post(
     // (mirrors /me, /track). A raw foreign id would otherwise corrupt the
     // engagement aggregates feeding Refund Shield. Merge-aware — a bare
     // upsert would attribute post-transfer sessions to the retired row.
-    const subscriber = await resolveOrCreateSubscriber(
+    const { subscriber, deadEnded } = await resolveOrCreateSubscriber(
       project.id,
       rawSubscriberId,
     );
+    // A GDPR-erased subject accumulates no new session telemetry. The
+    // batch is accepted so the SDK's at-least-once dispatcher can drop
+    // it and move on -- returning an error would make it retry the same
+    // batch forever -- but nothing is published for them.
+    if (deadEnded) {
+      return c.body(null, 202);
+    }
     const subscriberId = subscriber.id;
 
     const messages = events.map((e) => ({

@@ -5,6 +5,7 @@
   "scripts": {
     "rotate-encryption-key": "tsx rotate-encryption-key.ts",
     "verify:asset-headers": "tsx --env-file-if-exists=../.env verify-asset-headers.ts",
+    "verify:audit-bundle": "tsx verify-audit-bundle.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --minWorkers=1 --maxWorkers=2"
   },

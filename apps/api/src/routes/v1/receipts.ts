@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
-import { ProductType, drizzle } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { getAllBalances } from "../../services/credit-engine";
-import { grantPurchaseCurrencies } from "../../services/purchase-credits";
+import { grantProductCurrencies } from "../../services/purchase-credits";
 import { syncAccess } from "../../services/access-engine";
 import { recordEvent } from "../../services/experiment-engine";
 import {
@@ -55,23 +55,36 @@ async function handleReceipt(
   projectId: string,
   body: ReceiptBody,
 ) {
-  const { subscriber, product, purchase } = await verifyReceipt({
-    projectId,
-    store,
-    receipt: body.receipt,
-    productId: body.productId,
-    appUserId: body.appUserId,
-    presentedContext: body.presentedContext,
-  });
+  const { subscriber, product, purchase, isRenewalCharge } =
+    await verifyReceipt({
+      projectId,
+      store,
+      receipt: body.receipt,
+      productId: body.productId,
+      appUserId: body.appUserId,
+      presentedContext: body.presentedContext,
+    });
 
   await syncAccess(subscriber.id);
 
-  if (product.type === ProductType.CONSUMABLE) {
-    await grantPurchaseCurrencies({
+  // No product-type gate: whether a grant fires is decided by the
+  // product's grant rows and their trigger, not by the product's type.
+  //
+  // isRenewalCharge gate: the Swift SDK reposts EVERY `Transaction.updates`
+  // delivery here, including Apple auto-renewals (see
+  // VerifyReceiptResult.isRenewalCharge) — this is not only a
+  // client-initiated-purchase endpoint. A renewal must be granted
+  // exclusively through the RENEWAL trigger (services/renewal-grants),
+  // never through this PURCHASE-trigger path: Apple mints a new
+  // transactionId (and so a new purchase row) per renewal, which
+  // addCredits' (referenceType, referenceId) dedupe cannot catch.
+  if (!isRenewalCharge) {
+    await grantProductCurrencies({
       subscriberId: subscriber.id,
       productId: product.id,
-      purchaseId: purchase.id,
+      referenceId: purchase.id,
       productIdentifier: product.identifier,
+      trigger: "PURCHASE",
     });
   }
 
@@ -158,3 +171,5 @@ export const receiptsRoute = new Hono()
     },
   );
 
+// Test-only export — see webhook-processor.ts's `__test_*` convention.
+export { handleReceipt as __test_handleReceipt };

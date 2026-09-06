@@ -234,7 +234,12 @@ const envSchema = z
     // tier when projects.metadata has no rovi_tier override.
     ROVI_TIER: z.enum(["free", "team", "business", "enterprise"]).optional(),
     ROVI_RATE_LIMIT_PER_USER: z.coerce.number().int().positive().default(30),
-    ROVI_MESSAGE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+    // copilot_messages' retention window used to live here
+    // (ROVI_MESSAGE_RETENTION_DAYS) — ROADMAP §9.2 Task 6 retired
+    // rovi-retention.ts and moved this table to the registry-driven
+    // sweep (workers/retention-sweep.ts), which resolves the window per
+    // project from its billing tier / override instead of one global
+    // env var.
     // Optional operator-funded fallback when a project has no BYOK
     // credentials.
     ROVI_DEFAULT_PROVIDER: z

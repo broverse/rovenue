@@ -33,6 +33,17 @@ import {
 //     applies `apiKeyAuth("any")` + `apiKeyRateLimit()` to every request
 //     before it reaches here — an unauthenticated call never gets this
 //     far.
+//   - Deliberately NOT guarded against `c.get("subscriberDeadEnded")`,
+//     unlike /v1/checkout. This handler never writes to Postgres and
+//     never stamps Stripe metadata that a webhook resolves back onto the
+//     subscriber row -- it only reads the subscriber's EXISTING Stripe
+//     customer id (funnelPurchaseRepo) and asks Stripe for a portal URL
+//     into that customer's own billing history. There is no write path
+//     here for an erased subject to re-populate, and erasure already
+//     cancels their live Stripe subscriptions (anonymizeSubscriber) --
+//     so a dead-ended subscriber with a past Stripe customer can, at
+//     most, view billing history Stripe itself already retains. Revisit
+//     this if the handler ever starts writing to our own tables.
 
 const bodySchema = z
   .object({

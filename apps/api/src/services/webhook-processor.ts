@@ -1,10 +1,7 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { createBullConnection } from "../lib/redis";
 import type Stripe from "stripe";
-import {
-  ProductType,
-  drizzle,
-} from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import {
   isRovenueEventKey,
   resolveStorePublicKey,
@@ -15,7 +12,7 @@ import { logger } from "../lib/logger";
 import { loadGoogleCredentials } from "../lib/project-credentials";
 import { requireConnectedStripe } from "../lib/stripe-platform";
 import { syncAccess } from "./access-engine";
-import { grantPurchaseCurrencies } from "./purchase-credits";
+import { grantProductCurrencies } from "./purchase-credits";
 import {
   handleAppleNotification,
   type HandleAppleNotificationResult,
@@ -90,6 +87,16 @@ export type WebhookPostProcess = (ctx: {
    * identically to before this field existed.
    */
   eventContext?: StoreEventContext;
+  /**
+   * Set only by Apple's `applyRenewal` (DID_RENEW) — see
+   * `DispatchOutcome.isRenewalCharge` in apple-webhook.ts. Tells
+   * `runPostProcessing` to withhold the PURCHASE-trigger product-currency
+   * grant: a renewal is granted exclusively through the RENEWAL trigger
+   * (services/renewal-grants), never through the purchase path. Every
+   * other caller leaves this undefined and behaves identically to
+   * before this field existed.
+   */
+  isRenewalCharge?: boolean;
 }) => Promise<void>;
 
 // =============================================================
@@ -174,6 +181,7 @@ export async function processWebhookEvent(
       eventType: ctx.eventType,
       webhookEventId: ctx.webhookEventId,
       eventContext: ctx.eventContext,
+      isRenewalCharge: ctx.isRenewalCharge,
     });
   };
 
@@ -239,6 +247,8 @@ interface PostProcessingArgs {
   eventType: string;
   webhookEventId: string;
   eventContext?: StoreEventContext;
+  /** See `WebhookPostProcess`'s field of the same name. */
+  isRenewalCharge?: boolean;
 }
 
 /**
@@ -260,7 +270,15 @@ async function runPostProcessing(args: PostProcessingArgs): Promise<void> {
     throw err;
   }
 
-  if (args.purchaseId) {
+  // The PURCHASE-trigger grant fires for a charge that is NOT a renewal:
+  // a consumable/non-consumable purchase, or a subscription's first
+  // charge. `isRenewalCharge` is set only by Apple's `applyRenewal`
+  // (DID_RENEW) — every other caller leaves it undefined, so this gate
+  // is a no-op for them. Skipping it here, rather than inside
+  // `maybeCreditConsumablePurchase`, keeps that function's job the same
+  // ("credit this purchase") and keeps the renewal exclusion visible
+  // alongside the other post-processing steps.
+  if (args.purchaseId && !args.isRenewalCharge) {
     try {
       await maybeCreditConsumablePurchase(args.subscriberId, args.purchaseId);
     } catch (err) {
@@ -301,13 +319,18 @@ async function maybeCreditConsumablePurchase(
     purchaseId,
   );
   if (!purchase) return;
-  if (purchase.product.type !== ProductType.CONSUMABLE) return;
 
-  await grantPurchaseCurrencies({
+  // No product-type gate: whether a grant fires is decided by the
+  // product's grant rows and their trigger, not by the product's type.
+  // Callers are responsible for not reaching this function at all for a
+  // renewal charge — see `runPostProcessing`'s `isRenewalCharge` gate —
+  // so this always fires the PURCHASE trigger, never RENEWAL.
+  await grantProductCurrencies({
     subscriberId,
     productId: purchase.product.id,
-    purchaseId,
+    referenceId: purchaseId,
     productIdentifier: purchase.product.identifier,
+    trigger: "PURCHASE",
   });
 
   log.debug("credited consumable purchase", { subscriberId, purchaseId });

@@ -198,6 +198,16 @@ export * from "./logger";
 // callers import it explicitly via `@rovenue/shared/crypto`.
 
 // =============================================================
+// Audit chain — canonical encoder (ROADMAP §9)
+// =============================================================
+//
+// `./audit-chain` is intentionally NOT re-exported here either, for the
+// same reason as `./crypto` immediately above: it imports `node:crypto`
+// (for the SHA-256 digest) and would crash the dashboard Vite bundle.
+// apps/api's audit writer and a future standalone verifier both import
+// it explicitly via `@rovenue/shared/audit-chain`.
+
+// =============================================================
 // Experiments — types (Flag / ProductGroup / Paywall / Element),
 // bucketing primitives, and audience targeting
 // =============================================================
@@ -268,6 +278,12 @@ export { stripeMinorUnitExponent, decimalToMinorUnits } from "./currency";
 // =============================================================
 
 export * from "./copilot";
+
+// =============================================================
+// Virtual currencies — grant trigger matrix (ROADMAP §12.4)
+// =============================================================
+
+export * from "./virtual-currencies";
 
 // =============================================================
 // Integrations — canonical event keys and provider types
@@ -344,3 +360,14 @@ export * from "./revenue-types";
 // `ReferenceError: Cannot access 'ERROR_CODE' before initialization`.
 // Import it via the dedicated subpath instead: `@rovenue/shared/error-catalog`.
 // =============================================================
+
+// =============================================================
+// Retention policy registry (ROADMAP §9.2)
+// =============================================================
+//
+// Pure data + one resolution function, no `node:crypto` and nothing
+// else that would break the dashboard's Vite bundle — matches the
+// re-exported shape of the other pure registries above (billing,
+// revenue-types, etc.) rather than the crypto-dependent exclusions.
+
+export * from "./retention/policies";
