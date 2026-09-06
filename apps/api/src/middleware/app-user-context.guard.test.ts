@@ -32,16 +32,14 @@ import { join } from "node:path";
 // handler changes. Behavioural coverage lives in the per-route
 // `*-dead-ended` suites.
 
-// `src/lib` and `src/workers` are in scope too: the resolver itself
-// lives in src/lib, and a worker writing on behalf of a subscriber is
-// the same hazard as a route doing it.
-const SCAN_ROOTS = [
-  "src/routes",
-  "src/services",
-  "src/middleware",
-  "src/lib",
-  "src/workers",
-];
+// The WHOLE of src/, not an enumerated list of directories. An earlier
+// version named three roots, then four; a review then pointed out that
+// `src/queues` was still uncovered and structurally the same hazard as
+// `src/workers`. Enumerating directories means re-deciding this every
+// time the tree grows a new one, and the cost of forgetting is silent.
+// Scanning everything cannot be forgotten, and it is not slower in any
+// way that matters here.
+const SCAN_ROOTS = ["src"];
 
 const MIDDLEWARE_SYMBOL = "appUserContext";
 const RESOLVER_SYMBOLS = [
