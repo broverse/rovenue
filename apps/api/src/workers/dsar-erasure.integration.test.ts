@@ -655,4 +655,67 @@ describe("runDsarErasure", () => {
       .map((r) => r.action);
     expect(actions).toEqual(["dsar_request.claimed", "dsar_request.erasure_completed"]);
   }, 30_000);
+
+  it("does not stay wedged RUNNING when the FAILED transition itself throws (double fault)", async () => {
+    // Identical bug and identical fix to dsar-export.integration.test.ts's
+    // sibling test (both workers share the exact same claim-work-complete
+    // shape and the exact same fix in dsar-requests.ts's claimDsarRequest
+    // — see that file's comment for the full mechanism/interval argument).
+    //
+    // The work throws via the real "ClickHouse not configured" fail-closed
+    // path (same as "fails closed when ClickHouse is not configured"
+    // above) AND the catch block's own FAILED-transition transaction ALSO
+    // throws — injected via `failDsarRequest`, since nothing here can make
+    // a real Postgres transaction fail on demand. This is NOT a test of
+    // the ordinary failure path (that already passes above); it proves
+    // the row does not stay wedged RUNNING after a genuine double fault by
+    // simulating a later BullMQ retry — backdating `updatedAt` past
+    // DSAR_CLAIM_STALE_RUNNING_MS and calling runDsarErasure again with
+    // WORKING deps — and asserting the row reaches FAILED, not a
+    // permanent RUNNING.
+    const projectId = await seedProject();
+    const subscriberId = await seedSubscriber(projectId);
+    const dsarRequestId = await seedPendingErasureRequest(projectId, subscriberId);
+
+    const doubleFaultDeps = realDeps({
+      isClickHouseConfigured: () => false,
+      failDsarRequest: vi.fn(async () => {
+        throw new Error("transient db fault while marking FAILED");
+      }),
+    });
+
+    await expect(
+      runDsarErasure(
+        { dsarRequestId, projectId, subscriberId, type: "ERASURE" },
+        doubleFaultDeps,
+      ),
+    ).rejects.toThrow(/transient db fault/);
+
+    // The symptom: the double fault leaves the row RUNNING.
+    const wedged = await fetchRequest(dsarRequestId);
+    expect(wedged.status).toBe("RUNNING");
+    const subscriberStillIntact = await fetchSubscriber(subscriberId);
+    expect(subscriberStillIntact.deletedAt).toBeNull();
+
+    // Simulate a BullMQ retry long after the claim lease has gone stale.
+    await getDb()
+      .update(schema.dsarRequests)
+      .set({
+        updatedAt: new Date(
+          Date.now() - drizzle.dsarRequestRepo.DSAR_CLAIM_STALE_RUNNING_MS - 60_000,
+        ),
+      })
+      .where(eq(schema.dsarRequests.id, dsarRequestId));
+
+    const retryOutcome = await runDsarErasure(
+      { dsarRequestId, projectId, subscriberId, type: "ERASURE" },
+      realDeps({ isClickHouseConfigured: () => false }),
+    );
+
+    // Not wedged: the reclaimed retry ran through to a clean terminal
+    // FAILED (ClickHouse is still unconfigured), not a permanent RUNNING.
+    expect(retryOutcome.outcome).toBe("failed");
+    const healed = await fetchRequest(dsarRequestId);
+    expect(healed.status).toBe("FAILED");
+  }, 30_000);
 });

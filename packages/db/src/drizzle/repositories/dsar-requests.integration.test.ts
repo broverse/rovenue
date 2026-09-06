@@ -9,6 +9,7 @@ import {
   claimDsarRequest,
   completeDsarRequest,
   createDsarRequest,
+  DSAR_CLAIM_STALE_RUNNING_MS,
   failDsarRequest,
   findDsarRequestById,
   findOpenDsarRequest,
@@ -224,6 +225,12 @@ describe("dsar requests", () => {
   });
 
   it("claim is a no-op race loser when the request is not PENDING", async () => {
+    // Direction 1 of 2 for the stale-RUNNING reclaim guard (see the
+    // sibling test below for direction 2): a FRESH RUNNING row — claimed
+    // moments ago, well inside DSAR_CLAIM_STALE_RUNNING_MS — must NOT be
+    // reclaimable. Catches a reclaim implemented as an unconditional
+    // "PENDING OR RUNNING" claim (dropping the staleness check entirely),
+    // which would let two workers run the same export/erasure twice.
     const subscriberId = await seedSubscriber(PROJECT_ID, "claim-race");
     const created = await createDsarRequest(getDb(), {
       projectId: PROJECT_ID,
@@ -235,10 +242,51 @@ describe("dsar requests", () => {
     const winner = await claimDsarRequest(getDb(), created.id);
     expect(winner?.status).toBe("RUNNING");
 
-    // A second claim of the same (now RUNNING) request must not also
-    // "win" — that would let two workers run the same export twice.
+    // A second claim of the same (now RUNNING, still-fresh) request must
+    // not also "win".
     const loser = await claimDsarRequest(getDb(), created.id);
     expect(loser).toBeNull();
+  });
+
+  it("reclaims a RUNNING row once its lease has gone stale", async () => {
+    // Direction 2 of 2: a RUNNING row whose `updatedAt` is OLDER than
+    // DSAR_CLAIM_STALE_RUNNING_MS must BE reclaimable — this is the fix
+    // for the double-fault bug (work throws, the FAILED-transition
+    // transaction itself throws, the row is left RUNNING forever with no
+    // reaper). Catches removing the staleness branch entirely (a claim
+    // that only ever matches PENDING would leave this permanently wedged,
+    // exactly the pre-fix bug) as well as an interval so short/long it
+    // stops matching this scenario.
+    const subscriberId = await seedSubscriber(PROJECT_ID, "claim-stale-reclaim");
+    const created = await createDsarRequest(getDb(), {
+      projectId: PROJECT_ID,
+      subscriberId,
+      type: "EXPORT",
+      requestedBy: "support@customer.example",
+    });
+
+    const claimedAt = new Date();
+    const firstClaim = await claimDsarRequest(getDb(), created.id, claimedAt);
+    expect(firstClaim?.status).toBe("RUNNING");
+
+    // Simulates the worker crashing (or the double-fault above) mid-work:
+    // the row is left RUNNING with an `updatedAt` from the original claim,
+    // now older than the lease.
+    const staleNow = new Date(claimedAt.getTime() + DSAR_CLAIM_STALE_RUNNING_MS + 1_000);
+
+    const reclaimed = await claimDsarRequest(getDb(), created.id, staleNow);
+    expect(reclaimed?.status).toBe("RUNNING");
+    expect(reclaimed?.updatedAt.getTime()).toBe(staleNow.getTime());
+
+    // And it is a genuine re-claim, not a false positive from some other
+    // row: the request still resolves to completion afterwards like any
+    // other claimed row.
+    const completed = await completeDsarRequest(getDb(), {
+      id: created.id,
+      artifactKey: "dsar-exports/reclaimed.json",
+      expiresAt: new Date("2026-10-01T00:00:00.000Z"),
+    });
+    expect(completed.status).toBe("COMPLETED");
   });
 
   it("failDsarRequest records the error and leaves the row terminal", async () => {

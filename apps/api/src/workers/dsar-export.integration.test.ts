@@ -286,4 +286,69 @@ describe("runDsarExport", () => {
     const actions = await fetchAuditActionsFor(dsarRequestId);
     expect(actions).toEqual(["dsar_request.claimed", "dsar_request.export_failed"]);
   });
+
+  it("does not stay wedged RUNNING when the FAILED transition itself throws (double fault)", async () => {
+    // Reproduces the exact bug this test guards against: the work throws
+    // (storage unconfigured, same REAL path as "marks FAILED when storage
+    // is unconfigured" above) AND the catch block's own FAILED-transition
+    // transaction ALSO throws — a transient DB fault, injected here via
+    // `failDsarRequest` since nothing in this file can make a real
+    // Postgres transaction fail on demand. Before the dsar-requests.ts
+    // `claimDsarRequest` fix, that second throw escaped runDsarExport
+    // entirely (uncaught, no try/catch around the FAILED-path
+    // transaction), BullMQ would retry, and the retry's claim saw
+    // `status <> 'PENDING'` and no-op'd — leaving the row RUNNING forever
+    // with no reaper anywhere to revisit it.
+    //
+    // This test does NOT merely check the ordinary failure path still
+    // marks FAILED (that already works, see "marks FAILED when storage is
+    // unconfigured"). It reproduces the double fault, asserts the row is
+    // left RUNNING (the symptom), then simulates a later BullMQ retry —
+    // by backdating `updatedAt` past DSAR_CLAIM_STALE_RUNNING_MS and
+    // calling runDsarExport again with WORKING deps — and asserts the row
+    // reaches a terminal state instead of staying wedged.
+    const projectId = await seedProject();
+    const subscriberId = await seedSubscriber(projectId);
+    const dsarRequestId = await seedPendingExportRequest(projectId, subscriberId);
+
+    const doubleFaultDeps = realDeps({
+      isStorageConfigured: importStore.isStorageConfigured, // real: false here
+      failDsarRequest: vi.fn(async () => {
+        throw new Error("transient db fault while marking FAILED");
+      }),
+    });
+
+    await expect(
+      runDsarExport(
+        { dsarRequestId, projectId, subscriberId, type: "EXPORT" },
+        doubleFaultDeps,
+      ),
+    ).rejects.toThrow(/transient db fault/);
+
+    // The symptom: the double fault leaves the row RUNNING.
+    const wedged = await fetchRequest(dsarRequestId);
+    expect(wedged.status).toBe("RUNNING");
+
+    // Simulate a BullMQ retry long after the claim lease has gone stale.
+    await getDb()
+      .update(schema.dsarRequests)
+      .set({
+        updatedAt: new Date(
+          Date.now() - drizzle.dsarRequestRepo.DSAR_CLAIM_STALE_RUNNING_MS - 60_000,
+        ),
+      })
+      .where(eq(schema.dsarRequests.id, dsarRequestId));
+
+    const retryOutcome = await runDsarExport(
+      { dsarRequestId, projectId, subscriberId, type: "EXPORT" },
+      realDeps({ isStorageConfigured: importStore.isStorageConfigured }),
+    );
+
+    // The row is NOT wedged: the reclaimed retry ran the (still failing,
+    // storage is still unconfigured) work through to a clean terminal
+    // FAILED, not a permanent RUNNING.
+    expect(retryOutcome.outcome).toBe("failed");
+    const healed = await fetchRequest(dsarRequestId);
+    expect(healed.status).toBe("FAILED");
+  });
 });

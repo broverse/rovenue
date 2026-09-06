@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt, or } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   dsarRequests,
@@ -103,20 +103,70 @@ export async function createDsarRequest(
 // claimDsarRequest
 // ---------------------------------------------------------------------------
 
+// Both dsar-export.ts and dsar-erasure.ts run the identical
+// claim-then-work-then-complete lifecycle: on ANY failure (including a
+// failure of the FAILED-transition write itself — a transient DB fault is
+// enough) the catch's own transaction can throw and escape the worker
+// before the row is marked FAILED. BullMQ still retries the job, but the
+// retry's claim used to see `status <> 'PENDING'` and treat the row as an
+// already-claimed no-op, reporting job SUCCESS and leaving the row
+// permanently RUNNING — with no reaper anywhere to ever revisit it.
+//
+// The fix folds "orphaned RUNNING" recovery into the SAME conditional
+// UPDATE both workers already share, mirroring this codebase's existing
+// claim-lease convention: `WEBHOOK_CLAIM_LEASE_MS`
+// (webhook-events.ts's `claimWebhookEvent`) and `CLAIM_LEASE_MS`
+// (outgoing-webhooks.ts) both use this exact 5-minute window for the same
+// "was the claimant a worker that crashed, or one still legitimately
+// working" question, and both are already argued elsewhere in this
+// codebase to exceed the slowest realistic handler run by a wide margin.
+// For DSAR specifically: the erasure worker's own longest bounded step
+// (`DSAR_ERASURE_MUTATION_WAIT_TIMEOUT_MS`, dsar-erasure.ts) times out at
+// 60s, so a healthy erasure run finishes in well under two minutes; a
+// healthy export is a single subscriber's own data (never a bulk/tenant
+// export), not the kind of job expected to run for minutes. Five minutes
+// is comfortably above either's realistic runtime, so it cannot steal a
+// row from a worker that is still genuinely in flight — while staying
+// below the DSAR queues' own cumulative BullMQ backoff window before the
+// final retry attempt (30s+60s+120s+240s = 450s, from
+// `DSAR_JOB_ATTEMPTS`/`DSAR_JOB_BACKOFF_MS` in apps/api/src/queues/dsar.ts),
+// so a genuinely wedged row gets reclaimed by a retry before the job's
+// attempts are exhausted rather than staying wedged forever.
+export const DSAR_CLAIM_STALE_RUNNING_MS = 5 * 60_000;
+
 /**
- * Conditional UPDATE PENDING -> RUNNING. Returns the claimed row, or null
- * if another worker already claimed it (or it is not PENDING at all) —
- * the caller must treat null as "someone else has this", not as an error,
- * so a request is never worked twice.
+ * Conditional UPDATE PENDING|stale-RUNNING -> RUNNING. Returns the claimed
+ * row, or null if another worker already claimed it and is still within
+ * its lease (or the row is terminal). The caller must treat null as
+ * "someone else has this", not as an error, so a request is never worked
+ * twice.
+ *
+ * A row is claimable when it is PENDING, OR it is RUNNING but its
+ * `updatedAt` predates `now - DSAR_CLAIM_STALE_RUNNING_MS` — i.e. no
+ * claim/complete/fail transition has touched it inside the lease window,
+ * which only happens when the worker that claimed it crashed or hit the
+ * double-fault above. A fresh RUNNING row (updatedAt inside the window)
+ * is NOT reclaimable — see this file's `dsar-requests.integration.test.ts`
+ * counterpart for both directions.
  */
 export async function claimDsarRequest(
   db: Db,
   id: string,
+  now: Date = new Date(),
 ): Promise<DsarRequest | null> {
+  const staleBefore = new Date(now.getTime() - DSAR_CLAIM_STALE_RUNNING_MS);
   const [row] = await db
     .update(dsarRequests)
-    .set({ status: "RUNNING", updatedAt: new Date() })
-    .where(and(eq(dsarRequests.id, id), eq(dsarRequests.status, "PENDING")))
+    .set({ status: "RUNNING", updatedAt: now })
+    .where(
+      and(
+        eq(dsarRequests.id, id),
+        or(
+          eq(dsarRequests.status, "PENDING"),
+          and(eq(dsarRequests.status, "RUNNING"), lt(dsarRequests.updatedAt, staleBefore)),
+        ),
+      ),
+    )
     .returning();
   return row ?? null;
 }
