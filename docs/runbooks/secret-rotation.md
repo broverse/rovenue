@@ -11,21 +11,75 @@ own section first because getting it wrong is silent and permanent.
 
 ## `ENCRYPTION_KEY` — hazardous, read before touching
 
-This is the AES-256-GCM key that encrypts stored Apple/Google project
-credentials (`appleCredentials`/`googleCredentials` JSONB columns —
-`packages/db/src/helpers/encrypted-field.ts`). It is **not** the same key
-that encrypts backup artifacts (`BACKUP_AGE_RECIPIENT`/`BACKUP_AGE_IDENTITY`
-— see [`backup-restore.md`](../operations/backup-restore.md), which is
-emphatic that these must stay separate keypairs).
+This is the AES-256-GCM key (`packages/shared/src/crypto.ts`) that encrypts
+stored third-party credentials. It is **not** the same key that encrypts
+backup artifacts (`BACKUP_AGE_RECIPIENT`/`BACKUP_AGE_IDENTITY` — see
+[`backup-restore.md`](../operations/backup-restore.md), which is emphatic
+that these must stay separate keypairs).
 
-**Why rotating it is hazardous:** every stored credential is encrypted
-under whatever `ENCRYPTION_KEY` was active when it was written. Changing
-`ENCRYPTION_KEY` in the environment without first re-encrypting every
-existing row under the new key means the *next* receipt verification for
-any project decrypts garbage instead of Apple/Google credentials — and
-fails silently until something actually tries to use them. There is no
-error at the moment you change the env var; the failure surfaces later,
-per-project, at the worst possible time.
+### What it actually protects: three tables, four columns, two wire shapes
+
+An earlier version of this runbook said `projects` held the only encrypted
+fields. **That was wrong**, and a rotation that followed it would have left
+two tables encrypted under the compromised key with nothing to say so.
+The full surface:
+
+| Table | Column | Wire shape | Written by |
+|---|---|---|---|
+| `projects` | `appleCredentials` | **A** — tagged JSONB `{ v: 1, enc: "iv:tag:data" }` | `encryptCredential` |
+| `projects` | `googleCredentials` | **A** — tagged JSONB `{ v: 1, enc: "iv:tag:data" }` | `encryptCredential` |
+| `copilot_credentials` | `api_key_encrypted` | **B** — bare `"iv:tag:data"` text | `encrypt()` |
+| `integration_connections` | `credentials_cipher` | **B** — bare `"iv:tag:data"` text | `encrypt(JSON.stringify(…))` |
+
+**Shape A** is the wrapper in `packages/db/src/helpers/encrypted-field.ts`:
+`encryptCredential` / `decryptCredential` / `isEncryptedCredential`.
+`decryptCredential` also passes *unwrapped* plaintext JSON through, so rows
+written before encryption was wired still read — and are encrypted for the
+first time by a rotation run.
+
+**Shape B** is a plain string produced by `encrypt()` from
+`@rovenue/shared/crypto`. `isEncryptedCredential` returns **false** for
+these — it requires an object with `v === 1`, and these are strings — so
+shape B needs its own code path. Any tool that only knows shape A silently
+skips both of these columns.
+
+`projects.webhookSecret` is **not** in this list: it is stored in plaintext
+and rotated on its own, from the dashboard
+(`POST /dashboard/projects/:id/webhook-secret`). Better Auth's `twoFactor`
+secrets are encrypted too, but with `BETTER_AUTH_SECRET`, not this key.
+
+### Two values derived from this key that CANNOT be rotated
+
+Re-encryption only helps where the key produced *reversible* ciphertext.
+Two places key `ENCRYPTION_KEY` into a one-way HMAC, and no tool can
+migrate those — plan around them, do not expect a script to fix them:
+
+1. **`funnel_purchases.email_hash` / `funnel_claim_tokens.email_hash`**
+   (`apps/api/src/services/funnel/token.ts`). A keyed hash of the buyer's
+   email, derived from `ENCRYPTION_KEY`. Rotating the key changes the
+   derivation, so **every stored hash is orphaned**: the magic-link recovery
+   path (`POST /v1/sdk/claim-via-email`) stops finding pre-rotation
+   purchases, silently — the lookup simply misses, exactly as the code's own
+   comment warns. The plaintext email is *not* retained here (it lives in
+   Stripe), so the hashes cannot be recomputed from the database alone.
+   Either accept that pre-rotation purchases lose email claim, or re-derive
+   the column from Stripe's records after the rotation.
+2. **GDPR anonymous ids** (`apps/api/src/services/gdpr/anonymize-subscriber.ts`).
+   `anon_…` ids are an HMAC of the subscriber id peppered with
+   `ENCRYPTION_KEY`. Ids already written stay as they are; re-anonymizing the
+   same subscriber after a rotation yields a *different* id, so the
+   operation stops being idempotent across the rotation boundary. The code
+   documents this as the intended trade-off.
+
+### Why rotating is hazardous
+
+Every stored credential is encrypted under whatever `ENCRYPTION_KEY` was
+active when it was written. Changing `ENCRYPTION_KEY` in the environment
+without first re-encrypting every existing row under the new key means the
+*next* receipt verification, the next Copilot call, and the next integration
+delivery decrypt garbage — and fail silently until something actually tries
+to use them. There is no error at the moment you change the env var; the
+failure surfaces later, per-project, at the worst possible time.
 
 **Also relevant:** [`backup-restore.md`](../operations/backup-restore.md)
 documents that `restore.sh` refuses to restore a backup whose manifest's
@@ -39,46 +93,70 @@ it: either keep the old key retrievable (in the same secret store) for as
 long as you retain backups taken under it, or accept that those older
 backups are only restorable by an operator who still has both keys on hand.
 
-**The correct order of operations:**
+### The correct order of operations
 
 1. Generate the new key: `openssl rand -hex 32`.
-2. Re-encrypt every stored credential **in place, in the database**, from
-   the old key to the new key — **before** changing the running
-   environment's `ENCRYPTION_KEY`. Decrypting under the old key must still
-   work at the moment this step runs, which is why it comes first.
-3. Only after step 2 completes cleanly: update `ENCRYPTION_KEY` in the
+2. Take a backup **now**, under the old key, and confirm it restores. This
+   is the only copy of the data that a botched rotation can be recovered
+   from.
+3. Dry-run the rotation and read the report:
+
+   ```
+   OLD_KEY=<current hex> NEW_KEY=<new hex> \
+     pnpm --filter @rovenue/scripts rotate-encryption-key -- --dry-run
+   ```
+
+   `--dry-run` opens a transaction and rolls it back — it writes nothing.
+   Do not proceed while it reports any `[FAIL]` line (see below).
+4. Run it for real, **before** changing the running environment's
+   `ENCRYPTION_KEY`. Decrypting under the old key must still work at the
+   moment this step runs, which is why it comes first.
+
+   ```
+   OLD_KEY=<current hex> NEW_KEY=<new hex> \
+     pnpm --filter @rovenue/scripts rotate-encryption-key
+   ```
+
+   Exit status 0 with `failed=0` is the only "clean". Any other outcome
+   means stop and read the report.
+5. Only after step 4 completes cleanly: update `ENCRYPTION_KEY` in the
    deployed environment and restart every service that reads it (`api`,
-   `dispatcher`, and any worker that loads project credentials).
-4. Keep the **old** key retrievable in your secret store for as long as you
+   `dispatcher`, and any worker that loads project credentials or delivers
+   integrations).
+6. Keep the **old** key retrievable in your secret store for as long as you
    retain backups taken before this rotation (see the backup-restore
    interaction above).
 
-**The tool for step 2 does not currently work.**
-`scripts/rotate-encryption-key.ts` is intended to do exactly this — decrypt
-every project's credentials with `OLD_KEY` and re-encrypt with `NEW_KEY`,
-idempotently. Verified today, executed in this session:
+### What the tool does and does not guarantee
 
-```
-$ pnpm --filter @rovenue/scripts typecheck
-rotate-encryption-key.ts(18,8): error TS1192: Module '.../packages/db/src/index' has no default export.
-```
+`scripts/rotate-encryption-key.ts` covers all four columns above, with a
+separate code path per wire shape, and is proved against a disposable
+Postgres built from `deploy/postgres/` in
+`scripts/rotate-encryption-key.integration.test.ts`.
 
-The script does `import prisma, { ... } from "@rovenue/db"` — a leftover
-from before this codebase moved to Drizzle (see CLAUDE.md: "Drizzle not
-Prisma"). `@rovenue/db` has no default export at all, and the script's own
-`CREDENTIAL_FIELDS` list includes `stripeCredentials`, a column that
-doesn't exist in the schema (`appleCredentials`/`googleCredentials` are the
-only two encrypted JSONB fields on `projects` — Stripe uses Connect OAuth,
-not a stored encrypted credential). **Do not run this script as-is in
-production.** The three real building blocks it should be rewritten around
-already exist and do work — `encryptCredential`, `decryptCredential`, and
-`isEncryptedCredential`, all exported from `@rovenue/db`
-(`packages/db/src/helpers/encrypted-field.ts`) — a corrected version would
-use Drizzle to select/update `projects.appleCredentials`/`googleCredentials`
-directly instead of a Prisma client that isn't part of this stack. Until
-that rewrite happens, a from-scratch rotation script (or a one-off
-`tsx` invocation using those three exports directly) is required — do not
-assume the shipped script is a working tool.
+* **Atomic, therefore not "resumable" — because there is nothing to
+  resume.** Every write happens inside one transaction. If the process is
+  killed, the network drops, or Postgres restarts mid-run, the whole run
+  rolls back and every row is still readable under `OLD_KEY` — the key the
+  running API is still configured with. There is no half-rotated state to
+  recover from and no checkpoint to pick up: you simply run it again from
+  the start with the same `OLD_KEY`/`NEW_KEY`.
+* **Idempotent.** A value that already decrypts under `NEW_KEY` is skipped,
+  never re-encrypted. A second run performs zero writes (`rotated=0`). Run
+  it again freely if you are unsure whether a previous attempt committed.
+* **Loud about rows it cannot read.** A value that decrypts under neither
+  key is reported by table, column and row id, both as a `[FAIL]` line and
+  in the closing summary, and the process exits 1. Those rows are left
+  byte-for-byte untouched — never partially written, never dropped — and the
+  healthy rows around them still rotate. The run does not abort on them: a
+  row that decrypts under neither key will never rotate no matter how many
+  times the tool runs, so aborting would only guarantee that the rows which
+  *can* rotate never do.
+
+  **If you see any `[FAIL]`, do not change the deployed `ENCRYPTION_KEY`.**
+  Each named row is a credential that will be unreadable afterwards. Restore
+  it from a backup taken under the key that wrote it, or delete the row and
+  re-enter the credential from the dashboard, then re-run.
 
 ## Session and signing secrets (safe: rotate, restart, done — but invalidates active state)
 
