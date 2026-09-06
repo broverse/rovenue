@@ -446,6 +446,16 @@ vi.mock("../src/services/receipt-verify", () => ({
   verifyReceipt: vi.fn(),
 }));
 
+// Stub the product-currency grant. `1a45d168` (grant by trigger instead
+// of by product type) added grantProductCurrencies to the /v1/receipts
+// route without mocking it here, so the real service ran against the
+// @rovenue/db spies and threw — surfacing as a 500 in both receipt
+// tests. The grant itself has dedicated coverage in
+// src/routes/v1/receipts.test.ts.
+vi.mock("../src/services/purchase-credits", () => ({
+  grantProductCurrencies: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Stub access-engine.syncAccess so tests aren't exercising the
 // full reconciliation code path against mocked DB spies.
 vi.mock("../src/services/access-engine", async () => {
@@ -547,6 +557,10 @@ describe("POST /v1/receipts/apple", () => {
       subscriber: subscriberRow as any,
       product: productRow as any,
       purchase: purchaseRow as any,
+      // A customer-initiated StoreKit purchase, not an auto-renewal:
+      // this test asserts the PURCHASE-trigger grant DID fire (it
+      // expects credits back), which only happens when this is false.
+      isRenewalCharge: false,
     });
 
     dbMock.subscriberAccess.findMany.mockResolvedValue([
@@ -621,6 +635,10 @@ describe("POST /v1/receipts/google", () => {
       subscriber: subscriberRow as any,
       product: productRow as any,
       purchase: purchaseRow as any,
+      // Google is structurally always false — its storeTransactionId is
+      // the stable purchaseToken, so a re-verify reuses the same purchase
+      // row and addCredits' reference dedupe already catches a repeat.
+      isRenewalCharge: false,
     });
 
     dbMock.subscriberAccess.findMany.mockResolvedValue([]);
@@ -706,6 +724,9 @@ describe("POST /v1/subscribers/:appUserId/restore", () => {
       subscriber: subscriberRow as any,
       product: { id: "prod_1" } as any,
       purchase: { id: "pur_1" } as any,
+      // A restore replays receipts the customer already owns; it is not
+      // an Apple auto-renewal charge.
+      isRenewalCharge: false,
     });
 
     dbMock.subscriberAccess.findMany.mockResolvedValue([]);
