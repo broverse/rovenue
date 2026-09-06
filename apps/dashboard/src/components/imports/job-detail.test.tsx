@@ -40,6 +40,7 @@ function makeJob(overrides: Partial<ImportJob> = {}): ImportJob {
     createdByUserId: "u_1",
     sourceLabel: "RevenueCat export",
     presetId: null,
+    kind: "HISTORY",
     fileName: "export.csv",
     fileBytes: 1024,
     fileSha256: "abc",
@@ -162,5 +163,74 @@ describe("ImportJobDetail report link", () => {
     wrap(<ImportJobDetail projectId={PROJECT_ID} jobId={JOB_ID} />);
 
     await screen.findByTestId("import-report-download-link");
+  });
+});
+
+// =============================================================
+// GOOGLE_TOKEN_ENRICHMENT jobs
+// =============================================================
+
+describe("ImportJobDetail — enrichment jobs", () => {
+  const TOKEN_FILE_MAPPING: ImportJob["mapping"] = {
+    user_id: "subscriberExternalId",
+    google_purchase_token: "googlePurchaseToken",
+    google_product_id: "productIdentifier",
+  };
+
+  function serveEnrichmentJob(overrides: Partial<ImportJob> = {}) {
+    server.use(
+      http.get(jobUrl, () =>
+        HttpResponse.json({
+          data: {
+            job: makeJob({
+              kind: "GOOGLE_TOKEN_ENRICHMENT",
+              presetId: "revenuecat_google_token",
+              mapping: TOKEN_FILE_MAPPING,
+              status: "PENDING_MAPPING",
+              ...overrides,
+            }),
+          },
+        }),
+      ),
+    );
+  }
+
+  it("enables Start dry run for a valid three-column mapping", async () => {
+    // `validateMapping` defaults to the HISTORY required set, so calling
+    // it without `job.kind` leaves this button disabled forever on every
+    // enrichment job — with no message anywhere explaining why.
+    serveEnrichmentJob();
+
+    wrap(<ImportJobDetail projectId={PROJECT_ID} jobId={JOB_ID} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /start dry run/i })).toBeEnabled(),
+    );
+  });
+
+  it("says plainly that this pass patches existing purchases and creates nothing", async () => {
+    serveEnrichmentJob();
+
+    wrap(<ImportJobDetail projectId={PROJECT_ID} jobId={JOB_ID} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("import-job-kind")).toHaveTextContent(/second pass/i),
+    );
+    const note = screen.getByTestId("import-job-kind-description");
+    expect(note).toHaveTextContent(/creates nothing/i);
+    expect(note).toHaveTextContent(/already wrote/i);
+  });
+
+  it("shows no kind note on an ordinary history import", async () => {
+    server.use(
+      http.get(jobUrl, () =>
+        HttpResponse.json({ data: { job: makeJob({ status: "PENDING_MAPPING" }) } }),
+      ),
+    );
+
+    wrap(<ImportJobDetail projectId={PROJECT_ID} jobId={JOB_ID} />);
+
+    await waitFor(() => expect(screen.getByTestId("import-job-detail")).toBeInTheDocument());
+    expect(screen.queryByTestId("import-job-kind-description")).toBeNull();
   });
 });

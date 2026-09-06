@@ -12,12 +12,14 @@ import {
   IMPORT_UPLOAD_RATE_LIMIT_PER_MINUTE,
   IMPORT_STATUS_POLL_RATE_LIMIT_PER_MINUTE,
   CANONICAL_FIELDS,
+  REVENUECAT_GOOGLE_TOKEN_PRESET_ID,
   detectPreset,
   parseCsvStream,
   validateMapping,
   type CanonicalField,
+  type ImportJobKind,
 } from "@rovenue/shared";
-import { readDryRunCounters } from "../../services/import/report";
+import { OUTCOMES_BY_KIND, readDryRunCounters } from "../../services/import/report";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { validate } from "../../lib/validate";
@@ -224,6 +226,30 @@ const CANONICAL_FIELD_KEYS: ReadonlySet<string> = new Set(
   CANONICAL_FIELDS.map((field) => field.key),
 );
 
+/**
+ * Which KIND of import a detected preset produces.
+ *
+ * Set ONCE, at upload, from the preset the header matched — never from
+ * the mapping, and never editable afterwards. The mapping is exactly
+ * what the kind decides the required fields for, so deriving one from
+ * the other would be circular: an operator who mapped only the three
+ * enrichment fields would flip a history job into an enrichment job and
+ * lose the "you are missing store and purchaseDate" error that told them
+ * they had mapped the wrong file.
+ *
+ * A file whose header matches NO preset is a history import. That is the
+ * honest default: the enrichment file is a specific artefact RevenueCat
+ * support hand-delivers with three known column names, so a header we do
+ * not recognise is far more likely to be a hand-rolled history export
+ * than an unrecognised token file — and being wrong in this direction
+ * fails loudly at the mapping gate rather than silently patching nothing.
+ */
+function importJobKindForPreset(presetId: string | null): ImportJobKind {
+  return presetId === REVENUECAT_GOOGLE_TOKEN_PRESET_ID
+    ? "GOOGLE_TOKEN_ENRICHMENT"
+    : "HISTORY";
+}
+
 /** Final-fix-wave FIX 6: `options` is optional and, when present,
  *  independently patched onto `import_jobs.options` (a jsonb MERGE, not
  *  an overwrite — see `updateImportJobOptions`) alongside the mapping
@@ -319,8 +345,15 @@ function toDto(job: { storageKey: string } & Record<string, unknown>) {
   const { storageKey: _storageKey, ...rest } = job;
   const rawCounters = (rest.counters ?? {}) as Record<string, number>;
   const status = String(rest.status);
+  // Which bucket list to reconstruct depends on the job's KIND: a
+  // HISTORY job's dry run persists eight `dryRun_` keys, an enrichment
+  // job's persists its own six. Reading with the wrong list would report
+  // every bucket as zero — a clean, confident, entirely wrong summary.
+  // `?? "HISTORY"` mirrors the column's own default (migration 0126) for
+  // a caller that handed this a partial row.
+  const kind = (rest.kind as ImportJobKind | undefined) ?? "HISTORY";
   const counters = PRE_COMMIT_STATUSES.has(status)
-    ? readDryRunCounters(rawCounters)
+    ? readDryRunCounters(OUTCOMES_BY_KIND[kind], rawCounters)
     : rawCounters;
   return {
     ...rest,
@@ -558,6 +591,7 @@ importsRoute.post(
     // risking a match against a truncated line.
     const header = sawNewline ? await detectHeaderFromPrefix(prefix) : null;
     const detection = header ? detectPreset(header) : null;
+    const kind = importJobKindForPreset(detection?.presetId ?? null);
 
     const jobId = createId();
     const storageKey = importStore.buildStorageKey(projectId, jobId, fileName);
@@ -585,6 +619,7 @@ importsRoute.post(
           createdByUserId: user.id,
           sourceLabel: sourceLabel ?? fileName,
           presetId: detection?.presetId ?? null,
+          kind,
           storageKey,
           fileName,
           fileBytes: counter.bytes,
@@ -601,6 +636,7 @@ importsRoute.post(
             after: {
               sourceLabel: row.sourceLabel,
               presetId: row.presetId,
+              kind: row.kind,
               fileName: row.fileName,
               fileBytes: row.fileBytes,
             },
@@ -681,7 +717,12 @@ importsRoute.patch(
       mapping: Record<string, CanonicalField>;
       options?: ImportJobOptions;
     };
-    const validation = validateMapping(mapping);
+    // The job's KIND decides which fields are required. An enrichment
+    // file has three columns and neither `store` nor `purchaseDate`; the
+    // global required set would reject every mapping it can possibly
+    // produce, which is exactly why the `revenuecat_google_token` preset
+    // could be DETECTED but never imported.
+    const validation = validateMapping(mapping, job.kind);
     if (!validation.ok) {
       throw new HTTPException(400, {
         message: `Mapping is missing required fields: ${validation.missingRequired.join(", ")}`,
@@ -774,7 +815,10 @@ importsRoute.post("/:id/dry-run", uploadMutationRateLimit, async (c) => {
     });
   }
   const mapping = job.mapping as Record<string, CanonicalField>;
-  const validation = validateMapping(mapping);
+  // Same kind-aware gate as PATCH /:id/mapping above — the two must
+  // agree, or a mapping the PATCH accepted would be rejected here and
+  // the job could never leave PENDING_MAPPING.
+  const validation = validateMapping(mapping, job.kind);
   if (!validation.ok) {
     throw new HTTPException(400, {
       message: `Mapping is missing required fields: ${validation.missingRequired.join(", ")}`,

@@ -58,11 +58,15 @@ await Rovenue.restorePurchases();
 Rovenue's data import tool is a column-mapping engine with vendor presets, not
 a hand-written RevenueCat parser — it reads a CSV, maps its columns onto a
 fixed set of canonical fields (subscriber id, store, product identifier,
-purchase date, and so on), and writes the result as history. The
-Transactions export is the one preset you'll actually use end to end (see
-the note below on the supplemental Google-token file, which the tool can
-detect but cannot yet import); if a column layout ever drifts, the import
-falls back to the generic mapper below instead of guessing.
+purchase date, and so on), and writes the result as history. If a column
+layout ever drifts, the import falls back to the generic mapper below
+instead of guessing.
+
+A full RevenueCat migration is **two uploads**, not one: the Transactions
+export (your whole history), then — for Android only — the supplemental
+purchase-token file, which attaches Google Play purchase tokens to the
+Android purchases the first import already wrote. Both are covered below,
+in order.
 
 <Steps>
 <Step>
@@ -79,7 +83,7 @@ subscriber, purchase and revenue-event history, so your dashboards and LTV
 numbers are complete — but they cannot be re-verified against the Play
 Developer API, so they carry no live entitlement grant from this import.
 The dry run quantifies exactly how many rows this affects before you
-commit.
+commit, and the purchase-token second pass further down recovers them.
 </Callout>
 
 Every other row-level field the exporter needs — subscriber id, store,
@@ -106,31 +110,93 @@ grants live access for every row that already carries a usable store
 anchor (everything except Android rows, covered next).
 </Step>
 <Step>
-### Android live entitlements: not yet automated
+### Android live entitlements: the purchase-token second pass
 
-RevenueCat can hand-deliver a supplemental three-column purchase-token CSV
-(`user_id`, `google_purchase_token`, `google_product_id`) on request, and
-Rovenue's import tool can detect its header (the `revenuecat_google_token`
-preset). **There is currently no working second pass that joins that file
-to the Android rows your first import already created** — the file's three
-columns can never satisfy the mapping tool's required fields (`store`,
-`purchaseDate` are required on every import and this file has neither), so
-uploading it fails validation before a dry run can even start, and no code
-path in Rovenue joins a token file to an existing purchase by user id
-today. This is tracked as a follow-up, not a hidden feature — do not
-request the file expecting a second-pass import to work yet.
+Ask RevenueCat support for the supplemental **purchase-token CSV**. It has
+three columns — `user_id`, `google_purchase_token`, `google_product_id` —
+one row per Android subscription. Upload it to the import tool exactly like
+the Transactions export; its header matches the `revenuecat_google_token`
+preset, so the tool recognises it, proposes the three-column mapping, and
+marks the job as a **Google purchase-token second pass**.
 
-Your actual options today for Android entitlements:
-- **Leave them as history.** The import already gives you complete
-  purchase/revenue history and LTV for Android — only the LIVE
-  entitlement grant is missing until a user's device talks to the store
-  again.
-- **Let the SDK re-establish live access going forward.** Once you cut a
-  user's app over to the Rovenue SDK (last step below), their next
-  `restorePurchases()` call (or any live purchase/renewal webhook) will
-  re-verify directly against the Play Developer API and grant access from
-  then on — this does not require the supplemental file at all, it only
-  affects a device that never opens the app again.
+This pass **creates nothing**. It attaches each token to the Android
+purchase rows your history import already wrote, which is what lets Rovenue
+re-verify those subscriptions against the Play Developer API and grant live
+access. Run it *after* the history import has completed, or it will find
+nothing to attach to.
+
+<Callout type="warn">
+**Run the history import first.** A token whose subscriber or product has no
+imported Play purchase is reported as `No matching Play purchase` and
+skipped. That is also the signal to check that the product's Google store id
+is in your Rovenue catalog — the pass matches on the catalog product, not on
+the raw string.
+</Callout>
+
+The dry run classifies every row and writes nothing, exactly as it does for
+a history import. Its buckets are:
+
+| Outcome | Meaning |
+| --- | --- |
+| **Token applied** | The token was matched to one subscription and will be written to every row of it. |
+| **Already had this token** | Nothing to do — re-running the same file is a no-op. |
+| **Renewals not linked — needs an opt-in** | See below. |
+| **Ambiguous — skipped** | Reported, never guessed at. See below. |
+| **Conflicting token already stored — skipped** | A purchase row already stores a *different* token. Never overwritten. |
+| **No matching Play purchase** | No imported Play purchase for that subscriber and product. |
+| **Invalid row** | The row is missing one of the three required values. |
+
+#### What it refuses to guess
+
+A subscriber can hold more than one subscription to the same product — they
+lapsed and resubscribed. `(subscriber, product)` is therefore **not** a
+unique key on purchases, and picking one subscription silently would be a
+guess dressed up as a lookup. So when a row's subscriber and product span
+**more than one subscription chain**, the pass reports it as ambiguous and
+**skips it** rather than choosing. Stamping one subscription's token onto
+another's renewals would make verification confidently re-check the wrong
+subscription — worse than leaving the rows as history.
+
+The same applies to an ambiguity your *file* asserts: if it supplies two
+different tokens for one subscriber and product, nothing can resolve that
+and no setting overrides it.
+
+#### `enrichUngroupedChains` — the opt-in you will probably need
+
+The Transactions export has no original-transaction column. Rovenue's
+importer therefore cannot tell that a subscriber's four Android renewals
+belong to one subscription, and records each as its own one-row chain. Under
+the strict rule above, that is "four chains" and every one of them is
+refused — so on a stock RevenueCat export the second pass can end up
+enriching nothing at all.
+
+That is what the **Link unlinked renewals** checkbox
+(`enrichUngroupedChains`) is for. Turn it on and the pass treats a
+subscriber's *unlinked* renewals of one product as a single subscription.
+The dry-run summary names it, with a count, whenever rows land in that
+bucket — turn it on, save, and re-run the dry run to see what it changes
+before committing.
+
+It is deliberately narrow:
+
+- It applies **only** when the history export expressed no subscription
+  chains at all. If even one imported row carries a real
+  original-transaction id, the export *did* express chains, and more than
+  one of them is a genuine resubscribe — still refused.
+- It never resolves two different tokens for one subscriber and product.
+- It relaxes **grouping**, never **overwriting**. A stored token that
+  disagrees with your file is never replaced under any setting.
+
+It is off by default because the strict rule is the safe direction.
+
+#### If you skip this pass entirely
+
+Nothing breaks. Android rows stay as complete purchase/revenue history and
+LTV; only the live entitlement grant is missing. Once you cut a user's app
+over to the Rovenue SDK (last step below), their next `restorePurchases()`
+call — or any live purchase/renewal webhook — re-verifies directly against
+the Play Developer API and grants access from then on. The second pass is
+what covers the users whose devices never open the app again.
 </Step>
 <Step>
 ### Map anything the presets don't cover
@@ -163,9 +229,9 @@ completion); on a large export this can take a while, exactly because it
 reads the whole file. The dry run reports, per row, whether it will create
 a new purchase, update an existing one, or be skipped (unresolved product,
 sandbox, no Android token, invalid data) — including the count of rows that
-will import as history-only with no live entitlement (see the note above
-on why the Google-token file can't recover those yet). Review those
-numbers before committing.
+will import as history-only with no live entitlement — the rows the
+purchase-token second pass above exists to recover. Review those numbers
+before committing.
 </Step>
 <Step>
 ### Verify and commit

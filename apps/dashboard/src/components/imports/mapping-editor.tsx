@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   CANONICAL_FIELDS,
+  REQUIRED_FIELDS_BY_KIND,
   STORE_VALUE_MAP,
   validateMapping,
   type CanonicalField,
@@ -15,11 +16,15 @@ import {
   useImportColumns,
   useUpdateImportMapping,
   type ImportJob,
+  type ImportJobKind,
 } from "../../lib/hooks/useImports";
 import {
   IMPORT_MAPPING_EDITABLE_STATUSES,
   IMPORT_DEFAULT_SKIP_SANDBOX,
   IMPORT_DEFAULT_IMPORT_ANCHORLESS,
+  IMPORT_DEFAULT_ENRICH_UNGROUPED_CHAINS,
+  IMPORT_ENRICH_UNGROUPED_CHAINS_HINT,
+  IMPORT_ENRICH_UNGROUPED_CHAINS_LABEL,
 } from "./constants";
 
 // =============================================================
@@ -69,6 +74,38 @@ interface MappingEditorProps {
  */
 const STORE_VALUE_HINT = `Accepted values: ${Object.keys(STORE_VALUE_MAP).join(", ")} (case-insensitive).`;
 
+/**
+ * The fields this editor offers, and which of them are marked Required,
+ * for one job KIND.
+ *
+ * Both are derived from @rovenue/shared's `REQUIRED_FIELDS_BY_KIND` —
+ * the SAME table the server's `validateMapping` consults — rather than
+ * from `CANONICAL_FIELDS[].required`, which is the HISTORY set and only
+ * the history set. Before this, the editor rendered all 26 canonical
+ * fields for every job and marked `store`/`purchaseDate` Required on all
+ * of them: on a GOOGLE_TOKEN_ENRICHMENT job that is an editor offering a
+ * mapping the server will always reject, with two "Required" chips on
+ * columns the file cannot contain.
+ *
+ * For an enrichment job the offered set is exactly its required set —
+ * the token file has three columns and there is nothing optional to
+ * map. For a history job it stays every canonical field, since most of
+ * them are genuinely optional enrichments of a purchase row.
+ */
+function fieldsForKind(kind: ImportJobKind): {
+  fields: typeof CANONICAL_FIELDS[number][];
+  required: ReadonlySet<CanonicalField>;
+} {
+  const required = new Set<CanonicalField>(REQUIRED_FIELDS_BY_KIND[kind]);
+  if (kind === "HISTORY") {
+    return { fields: [...CANONICAL_FIELDS], required };
+  }
+  return {
+    fields: CANONICAL_FIELDS.filter((field) => required.has(field.key)),
+    required,
+  };
+}
+
 function mappingToColumnByField(
   mapping: Record<string, CanonicalField>,
 ): Partial<Record<CanonicalField, string>> {
@@ -94,8 +131,18 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
   const [importAnchorless, setImportAnchorless] = useState(
     job.options.importAnchorless ?? IMPORT_DEFAULT_IMPORT_ANCHORLESS,
   );
+  // GOOGLE_TOKEN_ENRICHMENT only. This PATCH is the ONLY write path the
+  // option has — `importJobOptionsPatchSchema` is a `z.object`, which
+  // strips keys it does not declare — so without this control an
+  // operator whose whole file reports `ungroupedChains` has no way to
+  // act on the dry run's own advice.
+  const [enrichUngroupedChains, setEnrichUngroupedChains] = useState(
+    job.options.enrichUngroupedChains ?? IMPORT_DEFAULT_ENRICH_UNGROUPED_CHAINS,
+  );
   const updateMapping = useUpdateImportMapping(projectId, job.id);
   const editable = IMPORT_MAPPING_EDITABLE_STATUSES.has(job.status);
+  const isEnrichment = job.kind === "GOOGLE_TOKEN_ENRICHMENT";
+  const { fields, required } = fieldsForKind(job.kind);
 
   // Only peeked while the mapping is actually editable — no point
   // spending the (cheap, but not free) peek on a locked, read-only view.
@@ -111,8 +158,12 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
       const trimmed = column?.trim();
       if (trimmed) built[trimmed] = field;
     }
-    return { mapping: built, validation: validateMapping(built) };
-  }, [columnByField]);
+    // Validated with the job's OWN kind — the same argument the PATCH
+    // route passes. Without it this button stays disabled forever on an
+    // enrichment job: the global required set demands `store` and
+    // `purchaseDate`, which its file cannot supply.
+    return { mapping: built, validation: validateMapping(built, job.kind) };
+  }, [columnByField, job.kind]);
 
   const missingLabels = validation.ok
     ? []
@@ -132,8 +183,15 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
 
   const handleSave = () => {
     if (!validation.ok) return;
+    // Only the options that apply to this kind are sent. The column is a
+    // jsonb MERGE (`updateImportJobOptions`), so sending a history job's
+    // `skipSandbox` on an enrichment job would persist a key that pass
+    // never reads and imply it does something.
+    const options = isEnrichment
+      ? { enrichUngroupedChains }
+      : { skipSandbox, importAnchorless };
     updateMapping.mutate(
-      { mapping, options: { skipSandbox, importAnchorless } },
+      { mapping, options },
       { onSuccess: (data) => onSaved?.(data.job) },
     );
   };
@@ -165,14 +223,14 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
             </tr>
           </thead>
           <tbody>
-            {CANONICAL_FIELDS.map((field) => {
+            {fields.map((field) => {
               const currentValue = columnByField[field.key] ?? "";
               const label = `Source column for ${field.label}`;
               return (
                 <tr key={field.key} className="border-b border-rv-divider last:border-0">
                   <td className="px-3 py-2">
                     <span>{field.label}</span>
-                    {field.required && (
+                    {required.has(field.key) && (
                       <Chip tone="warning" className="ml-2">
                         Required
                       </Chip>
@@ -237,40 +295,63 @@ export function MappingEditor({ projectId, job, onSaved }: MappingEditorProps) {
         </p>
       )}
 
+      {/* One control set per kind — never both. An option this pass does
+          not read would still be persisted by the jsonb merge, implying
+          it does something. */}
       <div className="mt-3 space-y-2" data-testid="import-options-controls">
-        <label className="flex cursor-pointer items-start gap-2 text-[13px]">
-          <Checkbox
-            checked={skipSandbox}
-            // `Checkbox` has no `disabled` prop — every other read-only
-            // usage in this repo is a plain visual toggle with nowhere
-            // that needs to block it, so the no-op guard belongs here,
-            // not on the (CSS-only, non-blocking) styling below.
-            onChange={() => editable && setSkipSandbox((prev) => !prev)}
-            ariaLabel="Skip sandbox rows"
-            className={cn(!editable && "pointer-events-none opacity-50")}
-          />
-          <span>
-            Skip sandbox rows
-            <span className="block text-[12px] text-rv-mute-500">
-              Test-environment purchases are excluded by default.
+        {isEnrichment ? (
+          <label className="flex cursor-pointer items-start gap-2 text-[13px]">
+            <Checkbox
+              checked={enrichUngroupedChains}
+              onChange={() => editable && setEnrichUngroupedChains((prev) => !prev)}
+              ariaLabel={IMPORT_ENRICH_UNGROUPED_CHAINS_LABEL}
+              className={cn(!editable && "pointer-events-none opacity-50")}
+            />
+            <span>
+              {IMPORT_ENRICH_UNGROUPED_CHAINS_LABEL}
+              <span className="block text-[12px] text-rv-mute-500">
+                {IMPORT_ENRICH_UNGROUPED_CHAINS_HINT}
+              </span>
             </span>
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-2 text-[13px]">
-          <Checkbox
-            checked={importAnchorless}
-            onChange={() => editable && setImportAnchorless((prev) => !prev)}
-            ariaLabel="Import anchorless (promotional / manual grant) rows"
-            className={cn(!editable && "pointer-events-none opacity-50")}
-          />
-          <span>
-            Import anchorless rows
-            <span className="block text-[12px] text-rv-mute-500">
-              Promotional / manual grants with no store transaction — imported as
-              history by default.
-            </span>
-          </span>
-        </label>
+          </label>
+        ) : (
+          <>
+            <label className="flex cursor-pointer items-start gap-2 text-[13px]">
+              <Checkbox
+                checked={skipSandbox}
+                // `Checkbox` has no `disabled` prop — every other
+                // read-only usage in this repo is a plain visual toggle
+                // with nowhere that needs to block it, so the no-op guard
+                // belongs here, not on the (CSS-only, non-blocking)
+                // styling below.
+                onChange={() => editable && setSkipSandbox((prev) => !prev)}
+                ariaLabel="Skip sandbox rows"
+                className={cn(!editable && "pointer-events-none opacity-50")}
+              />
+              <span>
+                Skip sandbox rows
+                <span className="block text-[12px] text-rv-mute-500">
+                  Test-environment purchases are excluded by default.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 text-[13px]">
+              <Checkbox
+                checked={importAnchorless}
+                onChange={() => editable && setImportAnchorless((prev) => !prev)}
+                ariaLabel="Import anchorless (promotional / manual grant) rows"
+                className={cn(!editable && "pointer-events-none opacity-50")}
+              />
+              <span>
+                Import anchorless rows
+                <span className="block text-[12px] text-rv-mute-500">
+                  Promotional / manual grants with no store transaction — imported as
+                  history by default.
+                </span>
+              </span>
+            </label>
+          </>
+        )}
       </div>
 
       {!validation.ok && (

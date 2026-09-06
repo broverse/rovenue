@@ -34,9 +34,9 @@ export type ImportJobStatus =
   | "VERIFICATION_INCOMPLETE"
   | "VERIFYING";
 
-/** Closed outcome-bucket list — mirrors apps/api/src/services/import/report.ts's
- *  `IMPORT_OUTCOMES` (not shared across the fetch boundary; see the module
- *  comment above). */
+/** Closed outcome-bucket list for a HISTORY job — mirrors
+ *  apps/api/src/services/import/report.ts's `HISTORY_OUTCOMES` (not shared
+ *  across the fetch boundary; see the module comment above). */
 export type ImportOutcome =
   | "willCreate"
   | "willUpdate"
@@ -46,6 +46,33 @@ export type ImportOutcome =
   | "androidNoToken"
   | "invalidRow"
   | "duplicateInFile";
+
+/** Closed outcome-bucket list for a GOOGLE_TOKEN_ENRICHMENT job —
+ *  mirrors report.ts's `ENRICHMENT_OUTCOMES`. A job reports the buckets
+ *  of its OWN kind and no others: the server keys `import_jobs.counters`
+ *  by `OUTCOMES_BY_KIND[kind]`, so reading a history job for `enriched`
+ *  (or an enrichment job for `willCreate`) always yields undefined,
+ *  never a meaningful zero. */
+export type EnrichmentOutcome =
+  | "enriched"
+  | "alreadyEnriched"
+  | "noMatch"
+  | "ambiguousMatch"
+  | "ungroupedChains"
+  | "conflictingToken"
+  | "invalidRow";
+
+/**
+ * Which pass this job is. Mirrors @rovenue/shared's `ImportJobKind` and
+ * the `import_jobs.kind` column (migration 0126).
+ *
+ * `HISTORY` creates purchases from a mapped export. `GOOGLE_TOKEN_ENRICHMENT`
+ * creates nothing: it patches Google Play purchase tokens onto purchases a
+ * previous history import already wrote, so those Android subscriptions
+ * can finally be re-verified against Play. Set at upload from the
+ * detected preset and never edited.
+ */
+export type ImportJobKind = "HISTORY" | "GOOGLE_TOKEN_ENRICHMENT";
 
 export type VerificationCountersScope = "wholeFile" | "inspectedSubset" | null;
 
@@ -71,10 +98,11 @@ export interface ImportDryRunSummary {
  * the server type so a `grep ImportJobOptions` finds both copies —
  * this is the one link in the chain that stays hand-maintained.
  *
- * `enrichUngroupedChains` has no UI control yet: it applies only to
- * GOOGLE_TOKEN_ENRICHMENT jobs, and the mapping editor below is the
- * HISTORY flow. It is typed here so the enrichment screen can send it
- * without re-widening this type.
+ * `enrichUngroupedChains` applies only to GOOGLE_TOKEN_ENRICHMENT jobs;
+ * the mapping editor renders its checkbox only for those, and the
+ * dry-run summary names it whenever the `ungroupedChains` bucket is
+ * non-zero — without that pairing an operator whose whole file lands in
+ * that bucket has no way to discover the option exists.
  */
 export interface ImportJobOptions {
   skipSandbox?: boolean;
@@ -88,6 +116,7 @@ export interface ImportJob {
   createdByUserId: string | null;
   sourceLabel: string;
   presetId: string | null;
+  kind: ImportJobKind;
   fileName: string;
   fileBytes: number;
   fileSha256: string;
@@ -95,7 +124,8 @@ export interface ImportJob {
   options: ImportJobOptions;
   status: ImportJobStatus;
   checkpointLine: number;
-  counters: Partial<Record<ImportOutcome, number>> & Record<string, number>;
+  counters: Partial<Record<ImportOutcome | EnrichmentOutcome, number>> &
+    Record<string, number>;
   dryRunSummary: ImportDryRunSummary | null;
   reportStorageKey: string | null;
   reportPartCount: number;

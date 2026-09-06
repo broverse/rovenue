@@ -476,3 +476,78 @@ export async function findPlayStorePurchasesBySubscriberAndProduct(
     )
     .orderBy(purchases.purchaseDate, purchases.id);
 }
+
+// =============================================================
+// Google purchase-token enrichment write
+// =============================================================
+
+/**
+ * Stamps one Google Play `purchaseToken` onto the named purchase rows,
+ * refusing — IN SQL — every row the enrichment pass must never touch.
+ *
+ * The caller (apps/api's `runEnrichmentJob`) has already decided which
+ * rows a token belongs to, but that decision was made from a read taken
+ * earlier in the run. Re-stating the invariants as predicates here means
+ * a row that changed underneath the resolver is skipped rather than
+ * overwritten, and it means the guarantees hold for ANY future caller,
+ * not only one that remembers to re-check:
+ *
+ *   - `store = 'PLAY_STORE'`: a purchaseToken has no meaning on an
+ *     Apple or Stripe row.
+ *   - the row's token is absent (NULL or blank) or ALREADY EQUAL to the
+ *     one supplied. A row holding a DIFFERENT token is never overwritten
+ *     — a stored token that disagrees with the operator's file is a data
+ *     problem to surface, not one to silently pick a winner for. Blank
+ *     counts as absent because a `text` column admits `''` and an empty
+ *     token fails a store call exactly as a null one does.
+ *   - the owning subscriber is not soft-deleted. `purchases` has no
+ *     `deletedAt` of its own, so a GDPR-erased identity's purchase rows
+ *     are reachable by id forever; write.ts's `resolveSubscriberForImport`
+ *     refuses to write onto one for the same reason, and the enrichment
+ *     resolver's own subscriber lookup does not cover a row whose
+ *     subscriber was erased AFTER that lookup.
+ *   - `projectId` scoping, so a caller holding an id from another
+ *     tenant's report cannot reach across.
+ *
+ * Returns the rows ACTUALLY written. A caller that passed N ids and gets
+ * back fewer has been told, precisely, that the refusals above fired —
+ * which is why this returns rows rather than a count. `storeTransactionId`
+ * rides along because the enrichment pass's next step (Phase B store
+ * re-validation) is keyed by it, and re-reading the rows it just wrote
+ * would be a second round trip for data the UPDATE already had.
+ *
+ * Idempotent: re-running with the same token matches the
+ * `= supplied token` arm and rewrites the same value.
+ */
+export async function enrichGooglePurchaseTokens(
+  db: DbOrTx,
+  args: { projectId: string; purchaseIds: string[]; googlePurchaseToken: string },
+): Promise<{ id: string; storeTransactionId: string }[]> {
+  if (args.purchaseIds.length === 0) return [];
+  const rows = await db
+    .update(purchases)
+    .set({ googlePurchaseToken: args.googlePurchaseToken })
+    .where(
+      and(
+        eq(purchases.projectId, args.projectId),
+        inArray(purchases.id, args.purchaseIds),
+        eq(purchases.store, "PLAY_STORE"),
+        sql`(
+          "purchases"."googlePurchaseToken" IS NULL
+          OR btrim("purchases"."googlePurchaseToken") = ''
+          OR "purchases"."googlePurchaseToken" = ${args.googlePurchaseToken}
+        )`,
+        // Columns are qualified by table on purpose: a bare
+        // `${purchases.subscriberId}` renders UNqualified inside a `sql`
+        // template and would resolve to the SUBQUERY's own scope here,
+        // making this correlated predicate silently always-true.
+        sql`EXISTS (
+          SELECT 1 FROM "subscribers"
+          WHERE "subscribers"."id" = "purchases"."subscriberId"
+            AND "subscribers"."deletedAt" IS NULL
+        )`,
+      ),
+    )
+    .returning({ id: purchases.id, storeTransactionId: purchases.storeTransactionId });
+  return rows;
+}

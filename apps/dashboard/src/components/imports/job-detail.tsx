@@ -12,6 +12,8 @@ import {
 } from "../../lib/hooks/useImports";
 import {
   IMPORT_CANCELLABLE_STATUSES,
+  IMPORT_JOB_KIND_DESCRIPTIONS,
+  IMPORT_JOB_KIND_LABELS,
   IMPORT_MAPPING_EDITABLE_STATUSES,
   IMPORT_STATUS_LABELS,
 } from "./constants";
@@ -80,18 +82,33 @@ export function ImportJobDetail({
 
   const { job } = data;
   const mappingEditable = IMPORT_MAPPING_EDITABLE_STATUSES.has(job.status);
-  const canStartDryRun = mappingEditable && validateMapping(job.mapping).ok;
+  // `job.kind` is not optional here: `validateMapping`'s default is
+  // "HISTORY", so calling it without the kind demands `store` and
+  // `purchaseDate` of a three-column token file and leaves this button
+  // permanently disabled on every enrichment job — with no message
+  // saying why, because the mapping editor's own error would be about
+  // fields the file cannot have.
+  const canStartDryRun = mappingEditable && validateMapping(job.mapping, job.kind).ok;
+  const kindDescription = IMPORT_JOB_KIND_DESCRIPTIONS[job.kind];
   const canCommit = job.status === "DRY_RUN_COMPLETE";
   const canCancel = IMPORT_CANCELLABLE_STATUSES.has(job.status);
 
   return (
-    <div className="space-y-4" data-testid="import-job-detail" data-job-status={job.status}>
+    <div
+      className="space-y-4"
+      data-testid="import-job-detail"
+      data-job-status={job.status}
+      data-job-kind={job.kind}
+    >
       <Card padded>
         <CardHeader
           title={job.sourceLabel}
           subtitle={job.fileName}
           right={
             <div className="flex items-center gap-2">
+              <Chip tone="default" data-testid="import-job-kind">
+                {IMPORT_JOB_KIND_LABELS[job.kind]}
+              </Chip>
               <Chip tone="default">{IMPORT_STATUS_LABELS[job.status]}</Chip>
               {canCancel && (
                 <Button
@@ -106,6 +123,15 @@ export function ImportJobDetail({
             </div>
           }
         />
+        {kindDescription && (
+          <p
+            role="note"
+            data-testid="import-job-kind-description"
+            className="mt-3 rounded-md border border-rv-divider bg-rv-c2 px-3 py-2 text-[12.5px] text-rv-mute-700"
+          >
+            {kindDescription}
+          </p>
+        )}
       </Card>
 
       <JobStatusBanner job={job} onResume={() => resume.mutate()} resuming={resume.isPending} />

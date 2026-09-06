@@ -37,6 +37,7 @@ function makeJob(overrides: Partial<ImportJob> = {}): ImportJob {
     createdByUserId: "u_1",
     sourceLabel: "RevenueCat export",
     presetId: null,
+    kind: "HISTORY",
     fileName: "export.csv",
     fileBytes: 1024,
     fileSha256: "abc",
@@ -337,5 +338,97 @@ describe("MappingEditor — sandbox/anchorless options (final-fix-wave FIX 6)", 
     const checkbox = screen.getByRole("checkbox", { name: /skip sandbox rows/i });
     fireEvent.click(checkbox);
     expect(checkbox).toHaveAttribute("aria-checked", "true"); // unchanged
+  });
+});
+
+// =============================================================
+// GOOGLE_TOKEN_ENRICHMENT jobs
+// =============================================================
+//
+// Before this, the editor rendered all 26 canonical fields for every job
+// and marked required-ness from the GLOBAL set. On a token file — three
+// columns, no `store`, no `purchaseDate` — that produced an editor whose
+// save button could never be enabled, showing two "Required" chips on
+// columns the file cannot contain. Both of the mismatches below are what
+// made the `revenuecat_google_token` preset detectable but unimportable.
+
+const TOKEN_FILE_MAPPING: ImportJob["mapping"] = {
+  user_id: "subscriberExternalId",
+  google_purchase_token: "googlePurchaseToken",
+  google_product_id: "productIdentifier",
+};
+
+function enrichmentJob(overrides: Partial<ImportJob> = {}): ImportJob {
+  return makeJob({
+    kind: "GOOGLE_TOKEN_ENRICHMENT",
+    presetId: "revenuecat_google_token",
+    mapping: TOKEN_FILE_MAPPING,
+    ...overrides,
+  });
+}
+
+describe("MappingEditor — enrichment jobs", () => {
+  it("accepts the three-column mapping instead of demanding store and purchaseDate", () => {
+    wrap(<MappingEditor projectId={PROJECT_ID} job={enrichmentJob()} />);
+
+    expect(screen.getByRole("button", { name: /save mapping/i })).toBeEnabled();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers only the fields this kind can map, and marks all three Required", () => {
+    wrap(<MappingEditor projectId={PROJECT_ID} job={enrichmentJob()} />);
+
+    expect(screen.getByLabelText(/Source column for Subscriber ID/i)).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(/Source column for Google purchase token/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Source column for Product identifier/i)).toBeInTheDocument();
+    // A field the file cannot supply must not be offered at all — an
+    // input for it is an invitation to map something that does not exist.
+    expect(screen.queryByLabelText(/Source column for Store$/i)).toBeNull();
+    expect(screen.queryByLabelText(/Source column for Purchase date/i)).toBeNull();
+    expect(screen.getAllByText(/^Required$/)).toHaveLength(3);
+  });
+
+  it("blocks the save when the token column is unmapped, naming that field", () => {
+    const { google_purchase_token: _dropped, ...withoutToken } = TOKEN_FILE_MAPPING;
+    wrap(
+      <MappingEditor projectId={PROJECT_ID} job={enrichmentJob({ mapping: withoutToken })} />,
+    );
+
+    expect(screen.getByRole("button", { name: /save mapping/i })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(/google purchase token/i);
+  });
+
+  it("offers the enrichUngroupedChains opt-in, and no history-only options", () => {
+    // This checkbox is the option's ONLY write path: the PATCH route's
+    // zod schema strips undeclared keys, so without a control here an
+    // operator can never act on the dry run's own `ungroupedChains`
+    // advice.
+    wrap(<MappingEditor projectId={PROJECT_ID} job={enrichmentJob()} />);
+
+    expect(
+      screen.getByRole("checkbox", { name: /link unlinked renewals/i }),
+    ).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByRole("checkbox", { name: /skip sandbox rows/i })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /import anchorless/i })).toBeNull();
+  });
+
+  it("PATCHes enrichUngroupedChains, and never a history-only option", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    server.use(
+      http.patch(mappingUrl, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ data: { job: enrichmentJob() } });
+      }),
+    );
+
+    wrap(<MappingEditor projectId={PROJECT_ID} job={enrichmentJob()} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /link unlinked renewals/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save mapping/i }));
+
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody!.options).toEqual({ enrichUngroupedChains: true });
   });
 });

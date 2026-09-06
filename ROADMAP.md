@@ -1004,17 +1004,43 @@ else in the framework/provider-breadth dimension is done.
       preset detection, a generic hand-mapper for unconfirmed schemas (Adapty), async
       mandatory dry run, and a two-phase commit (Phase A history import, Phase B store
       re-verification with resumable `VERIFICATION_INCOMPLETE`)
-- [ ] Google purchase-token second pass (final-fix-wave FIX 9, 2026-09-01 review):
-      the `revenuecat_google_token` preset can be DETECTED but never actually IMPORTED —
-      its 3-column file can never satisfy the mapper's required `store`/`purchaseDate`
-      fields, so `PATCH /mapping` and `POST /dry-run` both 400 on it, and no code path
-      joins a token file to an existing purchase by `user_id` regardless. The guide and
-      this roadmap previously described this as a working two-pass import; corrected to
-      say "not yet available" in both places 2026-09-01. Real follow-up: either (a) give
-      this preset its own validation/commit path that patches `googlePurchaseToken` onto
-      an existing purchase found by (subscriberExternalId, productIdentifier) instead of
-      running through the normal create/update writer, or (b) drop the preset entirely
-      until that path exists — do not resurrect the "detected but broken" middle state.
+- [x] Google purchase-token second pass — shipped 2026-09-06 as option (a): the
+      `revenuecat_google_token` preset now uploads as its own job kind
+      (`import_jobs.kind = GOOGLE_TOKEN_ENRICHMENT`, migration 0126), which gates the
+      required-field set per kind, and `runEnrichmentJob` patches
+      `purchases.googlePurchaseToken` (migration 0125) onto purchases a previous history
+      import already wrote, then hands the new tokens to the SAME Phase-B verification
+      the history import uses. The guide's "not yet available" note is replaced with the
+      real procedure.
+
+      Three things in this item's own proposed fix were not buildable as written, and
+      each one is why the work was larger than "give the preset its own path":
+
+      1. **There was no column to store the token.** `purchases` had no
+         `googlePurchaseToken` at all — the field existed only on the CSV row. Patching
+         it onto an existing purchase presupposed a destination that did not exist
+         (added by migration 0125).
+      2. **`(subscriberExternalId, productIdentifier)` is not a unique key.** `purchases`
+         has exactly one unique index, `(store, storeTransactionId)`. A subscriber holds
+         one row per renewal, and over time several distinct subscription chains for the
+         same product (a resubscribe after a lapse). "Find the existing purchase" by that
+         pair is ambiguous BY CONSTRUCTION; the shipped rule groups candidate rows by
+         `originalTransactionId` and refuses — reports, never guesses — when more than one
+         chain matches. That refusal turns out to catch the COMMON case, because
+         RevenueCat's export has no original-transaction column and write.ts's NOT NULL
+         fallback makes every renewal its own one-row chain, so the pass ships with an
+         explicit `enrichUngroupedChains` opt-in (off by default, surfaced in the dry-run
+         summary and documented) for exactly that shape.
+      3. **The required-field gate was doubled.** `validateMapping` ran at BOTH
+         `PATCH /mapping` and `POST /dry-run`; fixing one would have moved the 400 rather
+         than removed it.
+
+      Also fixed along the way: `purchases.googlePurchaseToken` would otherwise have been
+      a column with a producer and no consumer — the history job's Phase B discovers its
+      anchors by re-reading its own CSV, which has no token column, so those Android rows
+      would stay unverifiable forever. The enrichment commit hands its chains to a new
+      `verifyEnrichedGoogleAnchors` entry point that shares the whole store-facing half of
+      `verifyImportedAnchors`.
 - [ ] Working example apps (iOS / Android / RN / Flutter demo repos)
 - [ ] Interactive API explorer
 - [ ] Error-code catalog

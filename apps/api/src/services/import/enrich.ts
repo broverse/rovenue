@@ -98,29 +98,25 @@
 import { drizzle, type Db, type ImportJobOptions, type Purchase } from "@rovenue/db";
 import type { EnrichmentRow, StoreValue } from "@rovenue/shared";
 import { resolveProduct } from "./plan";
+import { ENRICHMENT_OUTCOMES, type EnrichmentOutcome } from "./report";
 
 /**
  * Outcome vocabulary for one enrichment pair, mirroring the history
- * import's `IMPORT_OUTCOMES` convention (report.ts) — a job's counters
- * and its report speak one language.
+ * import's `HISTORY_OUTCOMES` convention — a job's counters and its
+ * report speak one language.
+ *
+ * The list itself is DECLARED in report.ts (alongside the history
+ * buckets, so the two can never drift into two lists describing one set)
+ * and re-exported here, which is where callers of the resolver expect to
+ * find it. See report.ts's own comment for why the declaration has to
+ * sit on that side of the `enrich -> plan -> report` import edge.
  *
  * `invalidRow` is produced UPSTREAM by `normalizeEnrichmentRow`
  * (@rovenue/shared), which rejects a row missing one of the three
- * required fields. It is listed here because it belongs to the same
- * bucket vocabulary a job reports on, not because this resolver ever
- * returns it — a row that reached a pair has already passed that gate.
+ * required fields — this resolver never returns it, because a row that
+ * reached a pair has already passed that gate.
  */
-export const ENRICHMENT_OUTCOMES = [
-  "enriched",
-  "alreadyEnriched",
-  "noMatch",
-  "ambiguousMatch",
-  "ungroupedChains",
-  "conflictingToken",
-  "invalidRow",
-] as const;
-
-export type EnrichmentOutcome = (typeof ENRICHMENT_OUTCOMES)[number];
+export { ENRICHMENT_OUTCOMES, type EnrichmentOutcome };
 
 /** Why a pair was refused. Carried on `ambiguousMatch` instead of being
  *  split into two outcomes: both are "this pair is ambiguous and nothing

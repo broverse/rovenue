@@ -1,7 +1,7 @@
 // Dry-run planner for the data-import tool (Task 6).
 //
 // Parses a job's stored file through its confirmed mapping, classifies
-// every row into exactly one outcome bucket (report.ts's IMPORT_OUTCOMES),
+// every row into exactly one outcome bucket (report.ts's HISTORY_OUTCOMES),
 // and streams a report artefact — WITHOUT writing a single subscriber,
 // purchase or revenue-event row. That last property is the entire point:
 // the dry run is the operator's only chance to discover a bad mapping or
@@ -25,10 +25,11 @@ import {
 } from "@rovenue/shared";
 import * as importStore from "../../lib/import-store";
 import {
-  IMPORT_OUTCOMES,
+  HISTORY_OUTCOMES,
   createReportWriter,
   buildDryRunCounters,
-  type ImportOutcome,
+  emptyOutcomeCounters,
+  type HistoryOutcome,
   type ReportRow,
 } from "./report";
 
@@ -45,7 +46,7 @@ export type ImportPlanSummary = {
    *  only the PARTIAL scan up to the moment cancellation was noticed, and
    *  nothing was persisted to the job row — the row stays `CANCELLED`. */
   cancelled: boolean;
-  outcomes: Record<ImportOutcome, number>;
+  outcomes: Record<HistoryOutcome, number>;
   /** Observed shapes of the raw `entitlement_identifiers` cell across the
    *  file, keyed by shape name with a count each (task-6 controller
    *  context, carried-forward item 2). This is OBSERVATION, not parsing:
@@ -344,7 +345,7 @@ async function classifyRow(args: {
   skipSandbox: boolean;
   duplicateTracker: DuplicateTracker;
 }): Promise<{
-  outcome: ImportOutcome;
+  outcome: HistoryOutcome;
   reason: string | null;
   existingSubscriberId: string | null;
   /** The row's `purchaseDate` (== the eventDate a write would use), or
@@ -479,6 +480,18 @@ export async function planImport(
   if (!job) {
     throw new Error(`planImport: import job ${jobId} not found`);
   }
+  // A GOOGLE_TOKEN_ENRICHMENT job's file has neither `store` nor
+  // `purchaseDate`, so `normalizeRow` would reject every row of it and
+  // this planner would report a clean, confident "invalidRow x N" — a
+  // wrong answer that looks like a real one. Its dry run belongs to
+  // `runEnrichmentJob` (enrich-run.ts); reaching here means the
+  // dispatcher in workers/import-runner.ts sent it to the wrong pass, so
+  // fail loudly instead of producing a plausible report.
+  if (job.kind !== "HISTORY") {
+    throw new Error(
+      `planImport: job ${jobId} has kind ${job.kind} — only HISTORY jobs are planned here`,
+    );
+  }
 
   const mapping = job.mapping as Record<string, CanonicalField>;
   const skipSandbox = job.options?.skipSandbox ?? DEFAULT_SKIP_SANDBOX;
@@ -488,9 +501,7 @@ export async function planImport(
     startedAt: new Date(),
   });
 
-  const outcomes = Object.fromEntries(
-    IMPORT_OUTCOMES.map((outcome) => [outcome, 0]),
-  ) as Record<ImportOutcome, number>;
+  const outcomes = emptyOutcomeCounters(HISTORY_OUTCOMES);
   const entitlementShapeCounts: Record<string, number> = {};
   const duplicateTracker = createDuplicateTracker();
   let totalRows = 0;
@@ -619,7 +630,7 @@ export async function planImport(
       db,
       job.projectId,
       job.id,
-      buildDryRunCounters(outcomes),
+      buildDryRunCounters(HISTORY_OUTCOMES, outcomes),
     );
     // Final-fix-wave FIX 7: persist the disclosures this dry run computed
     // — before this, `entitlementShapeCounts`,

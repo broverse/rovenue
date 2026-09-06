@@ -825,21 +825,46 @@ export async function verifyImportedAnchors(
   }
   const projectId = job.projectId;
   const mapping = job.mapping as Record<string, CanonicalField>;
-  const sleep = deps.sleep ?? defaultSleep;
 
-  const {
-    groups,
-    rowsSkippedAnchorless,
-    alreadyVerifiedDuringScan,
-    rowsUnverifiableAnchor,
-    capReached,
-  } = await buildAnchorGroups(
+  const scan = await buildAnchorGroups(
     db,
     projectId,
     job.storageKey,
     mapping,
     deps.maxAnchorsPerRun ?? IMPORT_VERIFY_MAX_ANCHORS_PER_RUN,
   );
+
+  return verifyAnchorGroups({ db, projectId, jobId, deps, scan });
+}
+
+// =============================================================
+// verifyAnchorGroups — the store-facing half, shared by both entry points
+// =============================================================
+//
+// Everything below the anchor SCAN is independent of where the anchors
+// came from: pacing, the throttle circuit-breaker, cancellation, the
+// per-anchor store call, applying a verified result, `syncAccess`, the
+// two counter namespaces and the job's terminal status. Extracted
+// verbatim (no behavioural change) when `verifyEnrichedGoogleAnchors`
+// below needed the same half for anchors discovered from PURCHASE ROWS
+// rather than from a CSV — a second copy of a run-terminal-status
+// decision is exactly the kind of duplicate that drifts silently.
+async function verifyAnchorGroups(args: {
+  db: Db;
+  projectId: string;
+  jobId: string;
+  deps: ImportVerifyDeps;
+  scan: BuildAnchorGroupsResult;
+}): Promise<VerifySummary> {
+  const { db, projectId, jobId, deps, scan } = args;
+  const {
+    groups,
+    rowsSkippedAnchorless,
+    alreadyVerifiedDuringScan,
+    rowsUnverifiableAnchor,
+    capReached,
+  } = scan;
+  const sleep = deps.sleep ?? defaultSleep;
 
   const runState = newRunState();
   const touchedSubscriberIds = new Set<string>();
@@ -969,4 +994,141 @@ export async function verifyImportedAnchors(
     anchorsUnverifiable,
     rowsSkippedAnchorless,
   };
+}
+
+// =============================================================
+// verifyEnrichedGoogleAnchors — Phase B for the Google-token second pass
+// =============================================================
+//
+// The ordinary Phase B discovers its anchors by RE-READING the job's CSV
+// (`buildAnchorGroups`). A GOOGLE_TOKEN_ENRICHMENT file cannot be read
+// that way: it has three columns and no `store`/`purchaseDate`, so
+// `normalizeRow` rejects every line of it and the scan would find
+// nothing at all. Its anchors come from the purchase ROWS the commit
+// pass just stamped instead — which is the whole point of that pass, and
+// the reason `purchases.googlePurchaseToken` exists.
+//
+// This is also what makes the enrichment worth running. The rows it
+// patches were written by an earlier history import as `androidNoToken`
+// (write.ts): persisted, but with `verifiedAt` left null and skipped by
+// that job's own Phase B, because a Play row with no purchaseToken has
+// nothing to check against. Re-running the HISTORY job would skip them
+// again forever — its file still has no token column. Handing the newly
+// written tokens straight to the same verification machinery here is the
+// only path from "history only" to a live, verified entitlement.
+
+/** One (subscriber, product) chain the commit pass enriched: the token
+ *  it now carries, the product identifier the Play Developer API needs
+ *  alongside it, and every purchase row the token was written to. */
+export type EnrichedGoogleChain = {
+  purchaseToken: string;
+  productIdentifier: string;
+  /** `storeTransactionId` of each enriched row — the key
+   *  `applyVerifiedResult` updates PLAY_STORE rows by (there is no chain
+   *  column on `purchases` for Play). */
+  storeTransactionIds: string[];
+};
+
+/**
+ * Runs Phase B over chains the enrichment commit pass just wrote.
+ *
+ * Shares `verifyAnchorGroups` with `verifyImportedAnchors`, so pacing,
+ * the throttle circuit-breaker, cancellation, `syncAccess`, the counter
+ * namespaces and the job's terminal status are the SAME code, not a
+ * parallel implementation that could disagree about when a run is
+ * COMPLETED.
+ *
+ * Chains with no unverified rows left are counted as already verified
+ * and never cost a store call — which is what keeps a re-run of an
+ * already-applied enrichment file free rather than re-hammering Play.
+ */
+export async function verifyEnrichedGoogleAnchors(
+  jobId: string,
+  deps: ImportVerifyDeps,
+  chains: EnrichedGoogleChain[],
+): Promise<VerifySummary> {
+  const db = drizzle.db;
+  const job = await drizzle.importJobRepo.getImportJobById(db, jobId);
+  if (!job) {
+    throw new Error(`verifyEnrichedGoogleAnchors: import job ${jobId} not found`);
+  }
+  const projectId = job.projectId;
+  const maxAnchors = deps.maxAnchorsPerRun ?? IMPORT_VERIFY_MAX_ANCHORS_PER_RUN;
+
+  const groups = new Map<string, AnchorGroup>();
+  let alreadyVerifiedDuringScan = 0;
+  let capReached = false;
+
+  for (const chain of chains) {
+    if (capReached) break;
+    // The resume checkpoint, same as `buildAnchorGroups`': a row an
+    // earlier call already verified (`purchases.verifiedAt`) is dropped
+    // BEFORE the chain can take a cap slot, so a resumed run makes
+    // progress into chains it has not reached yet instead of
+    // re-discovering the same prefix forever.
+    const unverified: string[] = [];
+    for (const storeTransactionId of chain.storeTransactionIds) {
+      const purchase = await drizzle.purchaseRepo.findPurchaseByStoreTransaction(
+        db,
+        "PLAY_STORE",
+        storeTransactionId,
+      );
+      if (!purchase) continue;
+      if (purchase.verifiedAt) continue;
+      if (unverified.length < IMPORT_VERIFY_MAX_TRACKED_ROWS_PER_ANCHOR) {
+        unverified.push(storeTransactionId);
+      }
+    }
+    if (unverified.length === 0) {
+      alreadyVerifiedDuringScan++;
+      continue;
+    }
+    const key = `PLAY_STORE:${chain.purchaseToken}`;
+    const existing = groups.get(key);
+    if (existing) {
+      // Two pairs in one file can legitimately name the same token (the
+      // same subscription exported twice). Merge rather than replace, or
+      // the second occurrence's rows would silently never be updated.
+      for (const storeTransactionId of unverified) {
+        if (
+          existing.storeTransactionIds &&
+          existing.storeTransactionIds.size < IMPORT_VERIFY_MAX_TRACKED_ROWS_PER_ANCHOR
+        ) {
+          existing.storeTransactionIds.add(storeTransactionId);
+        }
+      }
+      continue;
+    }
+    if (groups.size >= maxAnchors) {
+      capReached = true;
+      break;
+    }
+    groups.set(key, {
+      store: "PLAY_STORE",
+      anchor: chain.purchaseToken,
+      productIdentifier: chain.productIdentifier,
+      // Read only by the APP_STORE branch of `callStoreClient`; the Play
+      // Developer API has no sandbox/production split of its own (the
+      // credential decides), so there is nothing honest to put here.
+      isSandbox: false,
+      representativeStoreTransactionId: unverified[0]!,
+      storeTransactionIds: new Set(unverified),
+    });
+  }
+
+  return verifyAnchorGroups({
+    db,
+    projectId,
+    jobId,
+    deps,
+    scan: {
+      groups,
+      // An enrichment file has no anchorless rows and no Stripe rows —
+      // both of those buckets are properties of a HISTORY scan.
+      rowsSkippedAnchorless: 0,
+      rowsUnverifiableAnchor: 0,
+      alreadyVerifiedDuringScan,
+      capReached,
+    },
+  });
 }

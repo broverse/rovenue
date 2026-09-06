@@ -5,15 +5,19 @@ import { parseCsvStream, type CanonicalField } from "@rovenue/shared";
 import { createBullConnection } from "../lib/redis";
 import { logger } from "../lib/logger";
 import * as importStore from "../lib/import-store";
-import { buildCanonicalRow, planImport } from "../services/import/plan";
+import { buildCanonicalRow, planImport, type ImportPlanSummary } from "../services/import/plan";
 import {
   writeImportBatch,
   auditImportRunCompleted,
   type ImportWriteRow,
   type BatchOutcome,
 } from "../services/import/write";
-import { createReportWriter, type ImportOutcome, type ReportWriter } from "../services/import/report";
+import { createReportWriter, type HistoryOutcome, type ReportWriter } from "../services/import/report";
 import { verifyImportedAnchors, type ImportVerifyDeps } from "../services/import/verify";
+import {
+  runEnrichmentJob,
+  type EnrichmentRunResult,
+} from "../services/import/enrich-run";
 import { createProductionImportVerifyDeps } from "../services/import/verify-store-clients";
 import {
   IMPORT_QUEUE_NAME,
@@ -188,7 +192,7 @@ export interface ImportRunResult {
   /** The job's full, PERSISTED, cumulative outcome breakdown — not just
    *  this invocation's contribution (fix round 1, FIX 1). Read straight
    *  from `import_jobs.counters` after the final checkpoint. */
-  outcomes: Record<ImportOutcome, number>;
+  outcomes: Record<HistoryOutcome, number>;
   /** Highest source line number checkpointed by the time this call
    *  returned — equal to the file's last line on COMPLETED, or the last
    *  fully-written batch's line on CANCELLED. */
@@ -233,6 +237,17 @@ export async function runImportJob(
   if (!initial) {
     throw new Error(`runImportJob: import job ${jobId} not found`);
   }
+  // A GOOGLE_TOKEN_ENRICHMENT job has its own runner (`runEnrichmentJob`)
+  // and its own outcome buckets. Running one through the history path
+  // would hand `writeImportBatch` rows with no `store`/`purchaseDate` and
+  // report a confident file-wide `invalidRow` — a wrong answer that looks
+  // like a real one. The dispatcher below routes by kind; reaching here
+  // with the wrong kind is a bug, so it is loud.
+  if (initial.kind !== "HISTORY") {
+    throw new Error(
+      `runImportJob: job ${jobId} has kind ${initial.kind} — only HISTORY jobs run here`,
+    );
+  }
   const projectId = initial.projectId;
   const batchSize = options.batchSize ?? IMPORT_BATCH_SIZE;
   const verifyDeps = options.verifyDeps ?? createProductionImportVerifyDeps();
@@ -258,7 +273,7 @@ async function processImportJob(
     return {
       jobId,
       status: "COMPLETED",
-      outcomes: (job.counters ?? {}) as Record<ImportOutcome, number>,
+      outcomes: (job.counters ?? {}) as Record<HistoryOutcome, number>,
       checkpointLine: job.checkpointLine,
     };
   }
@@ -374,7 +389,7 @@ async function processImportJob(
       return {
         jobId,
         status: "CANCELLED",
-        outcomes: (persisted.counters ?? {}) as Record<ImportOutcome, number>,
+        outcomes: (persisted.counters ?? {}) as Record<HistoryOutcome, number>,
         checkpointLine,
       };
     }
@@ -402,7 +417,7 @@ async function processImportJob(
     // above) — never a call-scoped accumulator, which would report only
     // this invocation's slice on any job that took more than one call
     // to finish.
-    const finalOutcomes = (verifyingJob.counters ?? {}) as Record<ImportOutcome, number>;
+    const finalOutcomes = (verifyingJob.counters ?? {}) as Record<HistoryOutcome, number>;
 
     // Task 9, Phase B: store re-validation runs as a SECOND phase of this
     // SAME job, after Phase A's writes (above) have already succeeded.
@@ -530,6 +545,61 @@ export async function enqueueImportDryRun(importJobId: string): Promise<void> {
   );
 }
 
+/**
+ * Routes one queued job to the right pass, on TWO axes.
+ *
+ * The BullMQ job NAME says which phase (`IMPORT_DRY_RUN_JOB_NAME` = a
+ * read-only scan; anything else = the commit run). The `import_jobs.kind`
+ * column says which KIND of import — a HISTORY export that creates
+ * purchases, or a GOOGLE_TOKEN_ENRICHMENT file that patches a token onto
+ * purchases a previous history import already wrote.
+ *
+ * Kind cannot ride on the job name instead: a job's kind is decided at
+ * upload, from the detected preset, and lives on the row — the enqueue
+ * call sites (`/commit`, `/resume`, the retry path) do not know it and
+ * must not have to. Reading it here, once, is what keeps every one of
+ * those call sites kind-agnostic.
+ *
+ * Both `planImport` and `runImportJob` re-assert `kind === "HISTORY"`
+ * themselves, and `runEnrichmentJob` asserts the converse: this
+ * dispatcher is the routing decision, not the safety property.
+ *
+ * The enrichment COMMIT takes the same per-project advisory lock the
+ * history commit does — it writes purchase rows and then runs Phase B
+ * against the store, neither of which may interleave with another import
+ * for the same project. Its dry run, like `planImport`, takes no lock:
+ * it reads and writes only its own job row.
+ */
+async function dispatchImportJob(
+  job: Job<ImportRunJobData>,
+): Promise<ImportRunResult | ImportPlanSummary | EnrichmentRunResult> {
+  const importJobId = job.data.importJobId;
+  const row = await drizzle.importJobRepo.getImportJobById(drizzle.db, importJobId);
+  if (!row) {
+    throw new Error(`import worker: import job ${importJobId} not found`);
+  }
+  const isDryRun = job.name === IMPORT_DRY_RUN_JOB_NAME;
+
+  if (row.kind === "GOOGLE_TOKEN_ENRICHMENT") {
+    if (isDryRun) {
+      return runEnrichmentJob(importJobId, { mode: "DRY_RUN" });
+    }
+    return withProjectImportLock(row.projectId, () =>
+      runEnrichmentJob(importJobId, { mode: "COMMIT" }),
+    );
+  }
+
+  // Task 10 fix round 1 (FIX 2): a HISTORY dry run is a single read-only
+  // scan (`planImport`) with none of `runImportJob`'s checkpoint/resume/
+  // per-project-lock machinery — no writes to serialize against and no
+  // partial-batch state to resume from — so it is dispatched straight to
+  // `planImport` rather than through `runImportJob`.
+  if (isDryRun) {
+    return planImport(importJobId);
+  }
+  return runImportJob(importJobId);
+}
+
 let cachedWorker: Worker<ImportRunJobData> | undefined;
 
 export function createImportRunnerWorker(): Worker<ImportRunJobData> {
@@ -537,18 +607,7 @@ export function createImportRunnerWorker(): Worker<ImportRunJobData> {
 
   cachedWorker = new Worker<ImportRunJobData>(
     IMPORT_QUEUE_NAME,
-    async (job: Job<ImportRunJobData>) => {
-      // Task 10 fix round 1 (FIX 2): a dry-run job is a single read-only
-      // scan (`planImport`) with none of `runImportJob`'s checkpoint/
-      // resume/per-project-lock machinery — it doesn't need any of that
-      // (no writes to serialize against, no partial-batch state to
-      // resume from), so it is dispatched straight to `planImport`
-      // rather than through `runImportJob`.
-      if (job.name === IMPORT_DRY_RUN_JOB_NAME) {
-        return planImport(job.data.importJobId);
-      }
-      return runImportJob(job.data.importJobId);
-    },
+    async (job: Job<ImportRunJobData>) => dispatchImportJob(job),
     {
       connection: createBullConnection("import-runner"),
       concurrency: WORKER_CONCURRENCY,

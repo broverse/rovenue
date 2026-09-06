@@ -23,6 +23,7 @@ function makeJob(overrides: Partial<ImportJob> = {}): ImportJob {
     createdByUserId: "u_1",
     sourceLabel: "RevenueCat export",
     presetId: null,
+    kind: "HISTORY",
     fileName: "export.csv",
     fileBytes: 1024,
     fileSha256: "abc",

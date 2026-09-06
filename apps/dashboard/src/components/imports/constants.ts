@@ -1,4 +1,9 @@
-import type { ImportJobStatus, ImportOutcome } from "../../lib/hooks/useImports";
+import type {
+  EnrichmentOutcome,
+  ImportJobKind,
+  ImportJobStatus,
+  ImportOutcome,
+} from "../../lib/hooks/useImports";
 
 // =============================================================
 // Data-import page — every interval, threshold and label in one place
@@ -131,6 +136,81 @@ export const IMPORT_OUTCOME_LABELS: Record<ImportOutcome, string> = {
  *  is not actionable, a count plus next step is. */
 export const IMPORT_ANDROID_NO_TOKEN_OUTCOME: ImportOutcome = "androidNoToken";
 
+// =============================================================
+// GOOGLE_TOKEN_ENRICHMENT buckets
+// =============================================================
+//
+// A separate order + label pair, not extra entries on the history lists
+// above, because a job reports the buckets of its OWN kind and no
+// others: the server keys `import_jobs.counters` by
+// `OUTCOMES_BY_KIND[kind]`. Rendering the union would show every one of
+// the other kind's buckets as absent — indistinguishable, in this UI,
+// from a real zero.
+
+export const IMPORT_ENRICHMENT_OUTCOME_ORDER: readonly EnrichmentOutcome[] = [
+  "enriched",
+  "alreadyEnriched",
+  "ungroupedChains",
+  "ambiguousMatch",
+  "conflictingToken",
+  "noMatch",
+  "invalidRow",
+];
+
+export const IMPORT_ENRICHMENT_OUTCOME_LABELS: Record<EnrichmentOutcome, string> = {
+  enriched: "Token applied",
+  alreadyEnriched: "Already had this token",
+  ungroupedChains: "Renewals not linked — needs an opt-in",
+  ambiguousMatch: "Ambiguous — skipped",
+  conflictingToken: "Conflicting token already stored — skipped",
+  noMatch: "No matching Play purchase",
+  invalidRow: "Invalid row",
+};
+
+/** Purchase-row counters the enrichment pass persists ALONGSIDE its
+ *  outcome buckets (apps/api's `ENRICHMENT_COUNTER_KEYS`). The buckets
+ *  count source rows; these count purchase rows, and one enrichment row
+ *  can cover a whole renewal chain — "3 rows" and "3 subscriptions" are
+ *  different numbers and neither is derivable from the other. */
+export const IMPORT_ENRICHED_PURCHASE_ROWS_KEY = "enrichedPurchaseRows";
+export const IMPORT_UNGROUPED_PURCHASE_ROWS_KEY = "ungroupedChainsPurchaseRows";
+
+/**
+ * The `ungroupedChains` bucket's callout — the ONLY place
+ * `enrichUngroupedChains` is discoverable from a dry run.
+ *
+ * The option is settable through `PATCH .../mapping` and read by the
+ * resolver, but nothing else surfaces it. An operator whose whole file
+ * lands in this bucket (the common case for a RevenueCat Transactions
+ * export, which has no original-transaction column — so write.ts's NOT
+ * NULL fallback made every renewal its own one-row chain) would
+ * otherwise see a file-wide refusal with no stated way forward and
+ * conclude the enrichment simply does not work.
+ */
+export function ungroupedChainsWarning(rows: number, purchaseRows: number): string {
+  const subject = rows === 1 ? "subscriber" : "subscribers";
+  return (
+    `${rows.toLocaleString()} ${subject} could not be enriched because their imported renewals ` +
+    `are not linked to each other — the history export carried no original-transaction column, ` +
+    `so each renewal became its own one-row chain. Turn on "Link unlinked renewals" below and ` +
+    `re-run the dry run to enrich ${purchaseRows.toLocaleString()} more purchase row(s). It ` +
+    `never applies where the export DID express chains, and never overwrites a stored token.`
+  );
+}
+
+/** Label + explanation for the `enrichUngroupedChains` checkbox, kept
+ *  next to the warning above so the two always describe the same thing. */
+export const IMPORT_ENRICH_UNGROUPED_CHAINS_LABEL = "Link unlinked renewals";
+export const IMPORT_ENRICH_UNGROUPED_CHAINS_HINT =
+  "Treat a subscriber's unlinked Android renewals for one product as a single subscription. " +
+  "Only applies when the history export expressed no subscription chains at all, and never when " +
+  "the file supplies two different tokens for the same subscriber and product. Off by default.";
+
+/** Mirrors the server's `DEFAULT_ENRICH_UNGROUPED_CHAINS`
+ *  (apps/api/src/services/import/enrich.ts) — the checkbox must start
+ *  from the state a job with no explicit `options` actually runs under. */
+export const IMPORT_DEFAULT_ENRICH_UNGROUPED_CHAINS = false;
+
 /**
  * Final-fix-wave minor fix: Phase B's own verification counters
  * (verify.ts's `VERIFY_COUNTER_KEYS`, a SEPARATE namespace from the
@@ -161,22 +241,27 @@ export const IMPORT_VERIFY_COUNTER_LABELS: Record<ImportVerifyCounterKey, string
 };
 
 /**
- * Final-fix-wave FIX 9: this used to tell the operator to "request the
- * supplemental Google purchase-token file... and run a second import" —
- * that second import cannot succeed today (the token file's 3 columns can
- * never satisfy the mapper's required `store`/`purchaseDate` fields, and
- * no code path joins it to an existing purchase by user id regardless;
- * see the migrating-from-revenuecat guide and ROADMAP §11 for the
- * follow-up). The count itself stays — it is accurate and valuable — but
- * the recommended action is now one that actually works today.
+ * Final-fix-wave FIX 9 told the operator to cut their app over to the SDK
+ * and wait for a `restorePurchases()` call, because the second import this
+ * message ORIGINALLY recommended could not succeed: the token file's three
+ * columns could never satisfy the then-global required `store`/
+ * `purchaseDate` fields, and nothing joined a token to an existing
+ * purchase.
+ *
+ * Both halves of that now exist (`import_jobs.kind` gates the required
+ * fields; `runEnrichmentJob` does the join), so the second pass is named
+ * FIRST — it is the action that recovers these subscriptions without
+ * waiting on the user's device — with the SDK cut-over kept as what covers
+ * anyone the token file misses.
  */
 export function androidNoTokenWarning(count: number): string {
   const rows = count === 1 ? "subscription" : "subscriptions";
   return (
     `${count.toLocaleString()} Android ${rows} will import as history only — full ` +
-    `purchase/revenue history, no live entitlement grant. Cut that user's app over to ` +
-    `the Rovenue SDK and their next restorePurchases() call (or a live renewal) will ` +
-    `re-verify against Play and grant access from then on.`
+    `purchase/revenue history, no live entitlement grant. Recover them by uploading ` +
+    `RevenueCat's supplemental purchase-token file as a second import once this one has ` +
+    `completed. Failing that, cutting the user's app over to the Rovenue SDK re-verifies ` +
+    `against Play on their next restorePurchases() call or renewal.`
   );
 }
 
@@ -195,6 +280,29 @@ export function duplicateTrackingDisclosure(disabledAfterKeys: number): string {
     `have been flagged — they were never incorrectly flagged, only possibly missed.`
   );
 }
+
+/**
+ * How each kind of import job describes itself, wherever a job's
+ * identity has to be stated rather than assumed.
+ *
+ * The enrichment entry exists because the page's whole vocabulary —
+ * "import", "will create", "commit" — is wrong for a pass that creates
+ * nothing. An operator who is not told this job PATCHES existing
+ * purchases will reasonably read a low `enriched` count as a failed
+ * import and re-upload their history file.
+ */
+export const IMPORT_JOB_KIND_LABELS: Record<ImportJobKind, string> = {
+  HISTORY: "History import",
+  GOOGLE_TOKEN_ENRICHMENT: "Google purchase-token second pass",
+};
+
+export const IMPORT_JOB_KIND_DESCRIPTIONS: Record<ImportJobKind, string | null> = {
+  HISTORY: null,
+  GOOGLE_TOKEN_ENRICHMENT:
+    "This pass creates nothing. It attaches Google Play purchase tokens to Android purchases a " +
+    "previous history import already wrote, so those subscriptions can be verified against Play " +
+    "and grant live access. Run it after the history import has completed.",
+};
 
 /** Human labels for the job-list rows and the header chip. */
 export const IMPORT_STATUS_LABELS: Record<ImportJobStatus, string> = {

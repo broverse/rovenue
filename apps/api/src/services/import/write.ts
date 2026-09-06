@@ -51,7 +51,13 @@ import { resolveSubscriberForWrite } from "../../lib/resolve-or-create-subscribe
 import { syncAccess } from "../access-engine";
 import { resolveProduct } from "./plan";
 import { oneTimeRevenueTypeFor } from "../revenue/one-time-type";
-import { IMPORT_OUTCOMES, type ImportOutcome, type ReportRow } from "./report";
+import {
+  HISTORY_OUTCOMES,
+  emptyOutcomeCounters,
+  type EnrichmentOutcome,
+  type HistoryOutcome,
+  type ReportRow,
+} from "./report";
 
 // =============================================================
 // Options + constants
@@ -98,7 +104,7 @@ export type ImportWriteRow = {
  * Result of writing one batch.
  *
  * `outcomes` reuses the dry run's bucket vocabulary (report.ts's
- * `IMPORT_OUTCOMES`) so a job's counters speak one language end to end,
+ * `HISTORY_OUTCOMES`) so a job's counters speak one language end to end,
  * with three writer-specific readings:
  *   - `willCreate` / `willUpdate` mean "did create" / "did update" — the
  *     tense is the dry run's, the meaning here is past.
@@ -123,7 +129,7 @@ export type ImportWriteRow = {
 export type BatchOutcome = {
   jobId: string;
   projectId: string;
-  outcomes: Record<ImportOutcome, number>;
+  outcomes: Record<HistoryOutcome, number>;
   /** Highest source line number seen in this batch, or 0 for an empty
    *  batch — the value Task 8 checkpoints once the batch commits. */
   lastLineNumber: number;
@@ -294,15 +300,13 @@ async function resolveSubscriberForImport(
 // writeImportBatch
 // =============================================================
 
-function emptyOutcomes(): Record<ImportOutcome, number> {
-  return Object.fromEntries(
-    IMPORT_OUTCOMES.map((outcome) => [outcome, 0]),
-  ) as Record<ImportOutcome, number>;
+function emptyOutcomes(): Record<HistoryOutcome, number> {
+  return emptyOutcomeCounters(HISTORY_OUTCOMES);
 }
 
 function reportRowFor(
   input: ImportWriteRow,
-  outcome: ImportOutcome,
+  outcome: HistoryOutcome,
   reason: string | null,
   subscriberId: string | null,
 ): ReportRow {
@@ -355,7 +359,7 @@ export async function writeImportBatch(
 
   const record = (
     input: ImportWriteRow,
-    outcome: ImportOutcome,
+    outcome: HistoryOutcome,
     reason: string | null = null,
     subscriberId: string | null = null,
   ): void => {
@@ -653,14 +657,16 @@ export async function writeImportBatch(
  * to avoid a circular import (that file imports THIS function) — the two
  * are kept structurally identical by convention, not by a shared type.
  * `outcomes` stays exactly what it always was: Phase-A's own outcome
- * buckets (`ImportOutcome`), never Phase-B's separately-namespaced verify
+ * buckets (`HistoryOutcome`) or the enrichment pass's own
+ * (`EnrichmentOutcome`) — one kind's complete bucket record, never a
+ * mix and never Phase-B's separately-namespaced verify
  * counters (see verify.ts's own module comment on why those never
  * collide with this key space) — only the terminal `status` needed to
  * become honest, not what this function considers "outcomes".
  */
 export async function auditImportRunCompleted(
   jobId: string,
-  outcomes: Record<ImportOutcome, number>,
+  outcomes: Record<HistoryOutcome, number> | Record<EnrichmentOutcome, number>,
   status: "COMPLETED" | "CANCELLED" | "VERIFICATION_INCOMPLETE",
 ): Promise<void> {
   const job = await drizzle.importJobRepo.getImportJobById(drizzle.db, jobId);

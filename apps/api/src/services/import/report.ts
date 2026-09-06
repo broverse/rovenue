@@ -8,18 +8,29 @@
 // bucket the source upload lives in (`lib/import-store.ts`). A
 // million-row file must never become a million-element array here.
 import { PassThrough } from "node:stream";
+import type { ImportJobKind } from "@rovenue/shared";
 import * as importStore from "../../lib/import-store";
 
 // =============================================================
-// Outcome buckets — closed list (plan.ts's Interfaces contract)
+// Outcome buckets — closed lists, one per job kind
 // =============================================================
 //
-// Every row the planner processes lands in EXACTLY ONE of these. See
-// plan.ts's `classifyRow` for the precedence a row is checked in when it
-// would otherwise fit more than one bucket — documented there, not here,
-// because the precedence is a classification decision, not part of the
-// bucket list's own contract.
-export const IMPORT_OUTCOMES = [
+// Every row a job processes lands in EXACTLY ONE bucket of ITS OWN
+// kind's list. See plan.ts's `classifyRow` (HISTORY) and enrich.ts's
+// module comment (GOOGLE_TOKEN_ENRICHMENT) for the precedence a row is
+// checked in when it would otherwise fit more than one bucket —
+// documented there, not here, because the precedence is a classification
+// decision, not part of the bucket list's own contract.
+//
+// These lists are what `import_jobs.counters` is keyed by, so a bucket
+// missing from the list for a job's kind is a bucket that is SILENTLY
+// UNCOUNTED — the run reports it in the NDJSON report and then loses the
+// total. That is why `OUTCOMES_BY_KIND` below is a total `Record` over
+// `ImportJobKind`: adding a kind without declaring its buckets is a
+// compile error, mirroring @rovenue/shared's `REQUIRED_FIELDS_BY_KIND`.
+
+/** HISTORY jobs: the eight buckets plan.ts/write.ts classify into. */
+export const HISTORY_OUTCOMES = [
   "willCreate",
   "willUpdate",
   "skippedSandbox",
@@ -30,7 +41,79 @@ export const IMPORT_OUTCOMES = [
   "duplicateInFile",
 ] as const;
 
-export type ImportOutcome = (typeof IMPORT_OUTCOMES)[number];
+export type HistoryOutcome = (typeof HISTORY_OUTCOMES)[number];
+
+/**
+ * GOOGLE_TOKEN_ENRICHMENT jobs: the buckets `resolveEnrichmentTarget`
+ * (enrich.ts) resolves a (subscriber, product) pair into, plus
+ * `invalidRow` for a source row `normalizeEnrichmentRow` rejected before
+ * it could ever reach a pair.
+ *
+ * DECLARED HERE, not in enrich.ts, and re-exported from there — the one
+ * declaration this list is allowed to have. enrich.ts imports plan.ts
+ * (for `resolveProduct`) and plan.ts imports THIS module, so a
+ * report.ts -> enrich.ts import would close a cycle whose top-level
+ * `const` initialisation order is entered differently depending on which
+ * module a caller reaches first; a test that imports enrich.ts directly
+ * would evaluate `IMPORT_OUTCOMES` below while `ENRICHMENT_OUTCOMES` was
+ * still in its temporal dead zone. Keeping the declaration on the leaf
+ * side of that edge is what makes "exactly one list" safe to state.
+ *
+ * `invalidRow` is deliberately shared with `HISTORY_OUTCOMES` rather
+ * than given an enrichment-specific name: it means the same thing to an
+ * operator in both flows, and `IMPORT_OUTCOMES` below de-duplicates it.
+ */
+export const ENRICHMENT_OUTCOMES = [
+  "enriched",
+  "alreadyEnriched",
+  "noMatch",
+  "ambiguousMatch",
+  "ungroupedChains",
+  "conflictingToken",
+  "invalidRow",
+] as const;
+
+export type EnrichmentOutcome = (typeof ENRICHMENT_OUTCOMES)[number];
+
+/** Any bucket any kind of import job can report. */
+export type ImportOutcome = HistoryOutcome | EnrichmentOutcome;
+
+const HISTORY_OUTCOME_SET: ReadonlySet<string> = new Set(HISTORY_OUTCOMES);
+
+/**
+ * Every distinct bucket, across every kind, de-duplicated
+ * (`invalidRow` belongs to both lists) — the vocabulary a kind-agnostic
+ * reader (a report parser, a counter-key sanity check) validates
+ * against. A job's OWN counters are keyed by `OUTCOMES_BY_KIND[kind]`,
+ * never by this union: a HISTORY job must not persist six zeroed
+ * enrichment keys, and vice versa.
+ */
+export const IMPORT_OUTCOMES: readonly ImportOutcome[] = [
+  ...HISTORY_OUTCOMES,
+  ...ENRICHMENT_OUTCOMES.filter((outcome) => !HISTORY_OUTCOME_SET.has(outcome)),
+];
+
+/** The closed bucket list for one job kind. Total over `ImportJobKind`
+ *  on purpose — see the section comment above. */
+export const OUTCOMES_BY_KIND: Record<ImportJobKind, readonly ImportOutcome[]> = {
+  HISTORY: HISTORY_OUTCOMES,
+  GOOGLE_TOKEN_ENRICHMENT: ENRICHMENT_OUTCOMES,
+};
+
+/**
+ * A complete, all-zero counter record over one kind's bucket list.
+ *
+ * Takes the LIST rather than the kind so the returned record is typed to
+ * exactly those buckets (`Record<HistoryOutcome, number>` for
+ * `HISTORY_OUTCOMES`), which is what lets `buildDryRunCounters` below
+ * require a complete record instead of defaulting absent keys to zero —
+ * a default is how a bucket that stopped being counted goes unnoticed.
+ */
+export function emptyOutcomeCounters<K extends ImportOutcome>(
+  outcomes: readonly K[],
+): Record<K, number> {
+  return Object.fromEntries(outcomes.map((outcome) => [outcome, 0])) as Record<K, number>;
+}
 
 // =============================================================
 // Dry-run counter namespace (final-fix-wave FIX 3)
@@ -64,24 +147,29 @@ export function dryRunCounterKey(outcome: ImportOutcome): string {
 
 /** Builds the full prefixed-key object `setImportJobCounters` persists
  *  for one dry-run attempt — always the complete, from-scratch count for
- *  every bucket, never a delta. */
-export function buildDryRunCounters(
-  outcomes: Record<ImportOutcome, number>,
+ *  every bucket of THAT JOB'S KIND, never a delta and never another
+ *  kind's buckets. Pass the same list the counts were accumulated over
+ *  (`HISTORY_OUTCOMES` / `ENRICHMENT_OUTCOMES`). */
+export function buildDryRunCounters<K extends ImportOutcome>(
+  outcomes: readonly K[],
+  counts: Record<K, number>,
 ): Record<string, number> {
   return Object.fromEntries(
-    IMPORT_OUTCOMES.map((outcome) => [dryRunCounterKey(outcome), outcomes[outcome]]),
+    outcomes.map((outcome) => [dryRunCounterKey(outcome), counts[outcome]]),
   );
 }
 
-/** Reverses `buildDryRunCounters` — reads the dry-run planner's own
- *  counts back out of a job's persisted `counters` object, defaulting an
- *  absent key to 0 (a job that has never had a dry run yet). */
-export function readDryRunCounters(
+/** Reverses `buildDryRunCounters` — reads the dry-run pass's own counts
+ *  back out of a job's persisted `counters` object, defaulting an absent
+ *  key to 0 (a job that has never had a dry run yet). `outcomes` is the
+ *  bucket list for the job's kind, normally `OUTCOMES_BY_KIND[job.kind]`. */
+export function readDryRunCounters<K extends ImportOutcome>(
+  outcomes: readonly K[],
   counters: Record<string, number>,
-): Record<ImportOutcome, number> {
+): Record<K, number> {
   return Object.fromEntries(
-    IMPORT_OUTCOMES.map((outcome) => [outcome, counters[dryRunCounterKey(outcome)] ?? 0]),
-  ) as Record<ImportOutcome, number>;
+    outcomes.map((outcome) => [outcome, counters[dryRunCounterKey(outcome)] ?? 0]),
+  ) as Record<K, number>;
 }
 
 /** One line of the NDJSON report artefact. Deliberately narrow — enough

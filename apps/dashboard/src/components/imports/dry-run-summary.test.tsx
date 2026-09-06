@@ -27,6 +27,7 @@ function makeJob(overrides: Partial<ImportJob> = {}): ImportJob {
     createdByUserId: "u_1",
     sourceLabel: "RevenueCat export",
     presetId: "revenuecat-transactions",
+    kind: "HISTORY",
     fileName: "export.csv",
     fileBytes: 1024,
     fileSha256: "abc",
@@ -303,5 +304,59 @@ describe("DryRunSummary — disclosures (final-fix-wave FIX 7)", () => {
 
     expect(screen.queryByTestId("import-dry-run-disclosures")).not.toBeInTheDocument();
     expect(screen.queryByTestId("import-duplicate-tracking-disclosure")).not.toBeInTheDocument();
+  });
+});
+
+// =============================================================
+// GOOGLE_TOKEN_ENRICHMENT summaries
+// =============================================================
+
+describe("DryRunSummary — enrichment jobs", () => {
+  function enrichmentJob(counters: Record<string, number>): ImportJob {
+    return makeJob({ kind: "GOOGLE_TOKEN_ENRICHMENT", counters });
+  }
+
+  it("renders the enrichment buckets under their own labels", () => {
+    render(
+      <DryRunSummary job={enrichmentJob({ enriched: 12, alreadyEnriched: 3, noMatch: 1 })} />,
+    );
+
+    const enriched = screen.getByTestId("import-outcome-enriched");
+    expect(enriched).toHaveTextContent("Token applied");
+    expect(enriched).toHaveTextContent("12");
+    expect(screen.getByTestId("import-outcome-alreadyEnriched")).toHaveTextContent(
+      "Already had this token",
+    );
+    expect(screen.getByTestId("import-outcome-noMatch")).toBeInTheDocument();
+  });
+
+  it("names enrichUngroupedChains whenever that bucket is non-zero", () => {
+    // The whole point: an operator whose file lands here has no other
+    // way to learn the option exists.
+    render(
+      <DryRunSummary
+        job={enrichmentJob({ ungroupedChains: 4, ungroupedChainsPurchaseRows: 11 })}
+      />,
+    );
+
+    const warning = screen.getByTestId("import-ungrouped-chains-warning");
+    expect(warning).toHaveTextContent(/link unlinked renewals/i);
+    expect(warning).toHaveTextContent("4");
+    expect(warning).toHaveTextContent("11");
+  });
+
+  it("does not show that warning when nothing landed in the bucket", () => {
+    render(<DryRunSummary job={enrichmentJob({ enriched: 2 })} />);
+
+    expect(screen.queryByTestId("import-ungrouped-chains-warning")).toBeNull();
+  });
+
+  it("never shows the android-no-token advice on an enrichment job", () => {
+    // That message tells the operator to request a token file and run a
+    // second import — which is exactly the job they are already looking
+    // at.
+    render(<DryRunSummary job={enrichmentJob({ enriched: 1, androidNoToken: 9 })} />);
+
+    expect(screen.queryByTestId("import-android-no-token-warning")).toBeNull();
   });
 });

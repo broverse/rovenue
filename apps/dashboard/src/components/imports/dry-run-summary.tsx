@@ -2,13 +2,18 @@ import { Chip } from "../../ui/chip";
 import type { ImportJob } from "../../lib/hooks/useImports";
 import {
   IMPORT_ANDROID_NO_TOKEN_OUTCOME,
+  IMPORT_ENRICHED_PURCHASE_ROWS_KEY,
+  IMPORT_ENRICHMENT_OUTCOME_LABELS,
+  IMPORT_ENRICHMENT_OUTCOME_ORDER,
   IMPORT_OUTCOME_LABELS,
   IMPORT_OUTCOME_ORDER,
+  IMPORT_UNGROUPED_PURCHASE_ROWS_KEY,
   IMPORT_VERIFICATION_SCOPE_NOTE,
   IMPORT_VERIFY_COUNTER_LABELS,
   IMPORT_VERIFY_COUNTER_ORDER,
   androidNoTokenWarning,
   duplicateTrackingDisclosure,
+  ungroupedChainsWarning,
 } from "./constants";
 
 /**
@@ -128,12 +133,27 @@ function VerificationCounters({
 // file-wide category is not something the operator needs to read past.
 
 export function DryRunSummary({ job }: { job: ImportJob }) {
-  const buckets = IMPORT_OUTCOME_ORDER.map((outcome) => ({
-    outcome,
-    count: job.counters[outcome] ?? 0,
-  })).filter((bucket) => bucket.count > 0);
+  const isEnrichment = job.kind === "GOOGLE_TOKEN_ENRICHMENT";
+  // A job reports the buckets of its OWN kind and no others — the server
+  // keys `import_jobs.counters` by `OUTCOMES_BY_KIND[kind]`. Rendering
+  // the other kind's list here would produce a summary that is entirely
+  // absent rather than obviously wrong.
+  const order: readonly string[] = isEnrichment
+    ? IMPORT_ENRICHMENT_OUTCOME_ORDER
+    : IMPORT_OUTCOME_ORDER;
+  const labels: Record<string, string> = isEnrichment
+    ? IMPORT_ENRICHMENT_OUTCOME_LABELS
+    : IMPORT_OUTCOME_LABELS;
+  const buckets = order
+    .map((outcome) => ({ outcome, count: job.counters[outcome] ?? 0 }))
+    .filter((bucket) => bucket.count > 0);
 
-  const androidCount = job.counters[IMPORT_ANDROID_NO_TOKEN_OUTCOME] ?? 0;
+  const androidCount = isEnrichment
+    ? 0
+    : job.counters[IMPORT_ANDROID_NO_TOKEN_OUTCOME] ?? 0;
+  const ungroupedCount = isEnrichment ? job.counters.ungroupedChains ?? 0 : 0;
+  const enrichedPurchaseRows = job.counters[IMPORT_ENRICHED_PURCHASE_ROWS_KEY] ?? 0;
+  const ungroupedPurchaseRows = job.counters[IMPORT_UNGROUPED_PURCHASE_ROWS_KEY] ?? 0;
   const duplicateTrackingDisabledAfterKeys =
     job.dryRunSummary?.duplicateTrackingDisabledAfterKeys ?? null;
 
@@ -166,11 +186,34 @@ export function DryRunSummary({ job }: { job: ImportJob }) {
             data-testid={`import-outcome-${outcome}`}
             className="flex items-center justify-between px-3 py-2 text-[13px]"
           >
-            <span>{IMPORT_OUTCOME_LABELS[outcome]}</span>
+            <span>{labels[outcome]}</span>
             <Chip tone="default">{count.toLocaleString()}</Chip>
           </li>
         ))}
       </ul>
+
+      {isEnrichment && enrichedPurchaseRows > 0 && (
+        <p
+          data-testid="import-enriched-purchase-rows"
+          className="mt-3 text-[12.5px] text-rv-mute-600"
+        >
+          {enrichedPurchaseRows.toLocaleString()} purchase row(s) across those subscriptions
+          carry the token — a subscription&apos;s renewals are always enriched together.
+        </p>
+      )}
+
+      {/* The ONLY place `enrichUngroupedChains` is discoverable from a
+          dry run. Without it a RevenueCat-shaped history import makes
+          this bucket the whole file, with no stated way forward. */}
+      {ungroupedCount > 0 && (
+        <p
+          role="alert"
+          data-testid="import-ungrouped-chains-warning"
+          className="mt-3 rounded-md border border-rv-warning/30 bg-rv-warning/5 px-3 py-2 text-[12.5px] text-rv-warning"
+        >
+          {ungroupedChainsWarning(ungroupedCount, ungroupedPurchaseRows)}
+        </p>
+      )}
 
       {androidCount > 0 && (
         <p
