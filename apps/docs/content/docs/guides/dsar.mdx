@@ -1,0 +1,134 @@
+---
+title: Self-Service DSAR API
+description: Let your own backend fulfil GDPR/KVKK subject-access and erasure requests for your end users, without a support ticket to Rovenue — four secret-key endpoints, what each one actually does, and what it doesn't.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A data-subject access request (export) or right-to-erasure request (erasure) is something **your backend** asks Rovenue on behalf of one of your own end users. Rovenue never authenticates that end user itself — your backend already did that, however your own auth works, before it ever calls this API.
+
+<Callout type="warn">
+Every route below requires your **secret** key (`Authorization: Bearer <rov_sec_…>`), never the public key. These are server-to-server calls only. A public key reaching `/v1/dsar/erasure` would let anyone holding your client bundle erase someone else's subscriber — the secret-key requirement is the whole reason this is safe to expose.
+</Callout>
+
+## The four endpoints
+
+| Method & path | What it does |
+|---|---|
+| `POST /v1/dsar/export` | Starts (or returns the already-running) export for one subscriber. |
+| `POST /v1/dsar/erasure` | Starts (or returns the already-running) erasure for one subscriber. |
+| `GET /v1/dsar/:id` | Polls the status of a request you started. |
+| `GET /v1/dsar/:id/download` | Streams a completed export's artifact. |
+
+### Starting a request
+
+```http
+POST /v1/dsar/export
+Authorization: Bearer <rov_sec_…>
+Content-Type: application/json
+
+{
+  "appUserId": "rov_01h...",
+  "requestedBy": "support-ticket-4821"
+}
+```
+
+`POST /v1/dsar/erasure` takes the identical body shape.
+
+<Callout type="warn">
+Despite the field's name, `appUserId` here is the subscriber's **`rovenueId`** — the permanent identifier your SDK already has on hand (`user.rovenueId` from [identifying users](/docs/guides/identifying-users), or the `appUserId` you sent on a receipt or `identify()` call — the wire protocol has called this field `appUserId` since before the `rovenueId`/`appUserId` split existed, and every SDK-facing endpoint kept the name for that reason). It is **not** looked up against your own backend's user-id label; a value that only exists as your own database's user id, and was never sent to Rovenue as an identifier, will resolve to nothing.
+</Callout>
+
+`requestedBy` is a free-text string your backend supplies to record who or what asked (a ticket id, an admin's email, an internal case number). Rovenue doesn't validate it against anything — it exists purely so the audit trail says who initiated the request, not just that one happened.
+
+The subscriber is always resolved **inside your own project** — there is no `projectId` field to fill in, and none would be trusted if you sent one. The secret key itself determines which project's subscribers you can reach.
+
+Both calls respond with the request record:
+
+```json
+{
+  "data": {
+    "request": {
+      "id": "dsr_01h...",
+      "type": "EXPORT",
+      "status": "PENDING",
+      "requestedBy": "support-ticket-4821",
+      "createdAt": "2026-09-06T12:00:00.000Z",
+      "updatedAt": "2026-09-06T12:00:00.000Z",
+      "completedAt": null,
+      "expiresAt": null,
+      "error": null,
+      "downloadReady": false
+    }
+  }
+}
+```
+
+`status` moves `PENDING → RUNNING → COMPLETED | FAILED`. The actual work runs on a background queue — this call only enqueues it and returns immediately; poll `GET /v1/dsar/:id` for the outcome.
+
+### Retrying is safe — it never starts a second job
+
+If your backend calls `POST /v1/dsar/export` again for the same subscriber while an export is still `PENDING` or `RUNNING`, you get back **the same request record**, not a new one — same `id`, same `status`. No second export runs, and no second job is enqueued. This holds whether the retry is deliberate (your backend re-asking) or accidental (a timeout that makes you unsure the first call landed): it is always safe to call `POST /v1/dsar/export` or `POST /v1/dsar/erasure` again for a subscriber you're not sure already has an open request.
+
+Once a request reaches `COMPLETED` or `FAILED`, the next call for that subscriber and type starts a genuinely new one — export is a point-in-time snapshot, not a subscription. Asking again after a completed export runs a fresh export and produces a new artifact; it does not "refresh" the old one or extend its download window.
+
+### Checking status and downloading
+
+```http
+GET /v1/dsar/:id
+Authorization: Bearer <rov_sec_…>
+```
+
+Returns the same request shape as above. `downloadReady` is `true` only once `status` is `COMPLETED`, an artifact exists, and it hasn't expired yet — check it before calling the download route rather than parsing `status` yourself.
+
+```http
+GET /v1/dsar/:id/download
+Authorization: Bearer <rov_sec_…>
+```
+
+<Callout type="warn">
+**There is no shareable download link.** This route streams the artifact directly, authenticated by your secret key on every call — there is no signed URL, no token you can hand to someone else, nothing to copy into an email. If your own product needs to hand the export to the end user, your backend fetches it from this route and relays it onward itself.
+</Callout>
+
+The response is a raw stream (`Content-Type: application/octet-stream`) — not a JSON envelope. A request that isn't `COMPLETED`, has no artifact, or whose export has expired returns `404`, checked before any bytes are sent.
+
+Both `GET` routes 404 identically for "no such request" and "that request belongs to another project" — a probing caller can't tell the difference between an id that doesn't exist and one that belongs to somebody else.
+
+## Rate limits
+
+`POST /v1/dsar/export` and `POST /v1/dsar/erasure` share **one budget of 5 requests per minute**, keyed to your API key — not 5 each. An export runs a multi-table read across a subscriber's full history, so this budget is deliberately tighter than other secret-key endpoints. `GET /v1/dsar/:id` and `GET /v1/dsar/:id/download` aren't separately throttled; they fall under the ordinary per-key envelope every `/v1` call already shares (500 requests/minute).
+
+## What an export contains, and how long it lasts
+
+An export is a point-in-time JSON snapshot of everything Rovenue holds on that subscriber — not a subscription, and not something that stays in sync with later activity. Once you have it, it reflects that moment; a subscriber's next purchase or attribute change isn't reflected until you request a new export.
+
+The completed artifact is downloadable for **30 days** from completion (`expiresAt` on the request record); after that, `GET /v1/dsar/:id/download` refuses it even though the underlying object may still physically exist in storage for a while longer — access is gated by the timestamp, not guaranteed removal. There is currently no scheduled sweep that deletes the object itself once its window has passed; the artifact simply becomes unreachable through this API.
+
+## What erasure actually does
+
+<Callout type="warn">
+Erasure **anonymises** the subscriber row — it does not delete it. The row's own id survives, its `appUserId` is replaced with a deterministic, non-reversible token, its attributes are cleared, and it's stamped `deletedAt`. Keeping the row (rather than deleting it outright) is what lets the append-only `credit_ledger` keep its guarantee: every ledger entry that ever referenced this subscriber still resolves to a real row, just one that no longer identifies anyone.
+</Callout>
+
+Erasure also purges the subscriber's rows from every ClickHouse table that stores a plain, queryable subscriber id at rest:
+
+- `raw_exposures`
+- `raw_revenue_events`
+- `raw_credit_ledger`
+- `raw_sdk_session_events`
+- `raw_paywall_events`
+
+A request is only marked `COMPLETED` once both halves are done — the Postgres anonymisation, and every one of those five ClickHouse deletes confirmed finished (not merely submitted; ClickHouse deletes run asynchronously in the background, and this worker waits for each one to actually complete before reporting success). If either half fails, the request is marked `FAILED`, never `COMPLETED` — a record that claims erasure happened while rows are still sitting there would be worse than no record at all. Retrying a failed erasure request is safe: re-running the Postgres step on an already-anonymised subscriber is a no-op, and re-submitting the ClickHouse deletes against already-purged rows matches nothing.
+
+<Callout type="warn">
+Erasure reaches everything Rovenue stores. It **cannot** reach a copy of that subscriber's data your own backend already exported and kept — from a prior `GET /v1/dsar/:id/download`, your own database, your logs, or anywhere else outside Rovenue. Fulfilling erasure for copies you hold yourself is your responsibility.
+</Callout>
+
+### Two limits worth stating plainly
+
+- **The exported/erasure artifact bucket has no expiry sweep of its own.** `expiresAt` stops the download route from serving an expired artifact, but nothing currently goes back and deletes the underlying object from storage once that date passes.
+- **Erased subscribers staying erased is enforced by each write route individually** (every route that can write to a subscriber checks whether it's soft-deleted before touching it, so an end user's next SDK call can't silently resurrect a forgotten identity) — this is true today because it's been read and checked route by route, not because a single, general guard makes it structurally impossible to reintroduce. There's no CI check that would catch a new write route skipping this.
+
+## Building this into your own flow
+
+A typical integration: your backend receives a subject-access or erasure request through whatever channel you already use (a support form, an account-settings page, a compliance inbox), authenticates that it's really from the account holder, then calls the matching endpoint here with that subscriber's `rovenueId` and something identifying the request internally. Poll `GET /v1/dsar/:id` until `status` leaves `RUNNING`, and for exports, fetch and relay the artifact via `GET /v1/dsar/:id/download` before its 30-day window closes.

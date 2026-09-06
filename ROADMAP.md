@@ -822,9 +822,38 @@ else in the framework/provider-breadth dimension is done.
 - [ ] Backup / restore documentation
 - [ ] Close the nosniff/ETag edge-layer gap (asset CDN)
 
-## 9. GDPR / KVKK tooling (85 → 95)
+## 9. GDPR / KVKK tooling (85 → 95) — CLOSED 2026-09-06
 
-- [ ] Self-service DSAR API (exposed by customers to their end users)
+- [x] Self-service DSAR API (exposed by customers to their end users) — four
+      secret-key S2S endpoints (`POST /v1/dsar/export`, `POST
+      /v1/dsar/erasure`, `GET /v1/dsar/:id`, `GET /v1/dsar/:id/download`) let
+      a customer's own backend fulfil export/erasure for its own end users
+      without a Rovenue support ticket; Rovenue never authenticates that end
+      user itself. Export and erasure run on two separate BullMQ queues (a
+      backlog of heavy exports must never delay erasure, which carries a
+      statutory deadline export does not), each with its own claim-lease
+      recovery so a crashed worker's row is reclaimed rather than stuck
+      `RUNNING` forever. A second request for a subject already `PENDING` or
+      `RUNNING` returns the same request record rather than starting a
+      second job — idempotent both by an application-level check and by the
+      database's own partial unique index as the race-proof backstop.
+      Erasure anonymises rather than deletes the Postgres row (the row's own
+      id survives, `appUserId` becomes a deterministic HMAC token, attributes
+      clear — preserving the append-only `credit_ledger`'s guarantee), then
+      purges the subscriber from every ClickHouse table carrying a plain
+      subscriberId at rest (`raw_exposures`, `raw_revenue_events`,
+      `raw_credit_ledger`, `raw_sdk_session_events`, `raw_paywall_events`),
+      polling each `ALTER ... DELETE` mutation to actual completion before
+      marking the request `COMPLETED` — never on submission alone. A
+      completed export is a point-in-time snapshot (not a subscription),
+      downloadable for 30 days through an authenticated stream with no
+      shareable link — no signed URL exists. Two open gaps, stated rather
+      than papered over: the artifact bucket has no expiry sweep of its own
+      (access is gated by `expiresAt`, the object itself isn't purged), and
+      the guard that stops an erased subscriber's next SDK call from
+      silently un-erasing them is enforced per write-route today, true by
+      audit rather than by a CI check. Documented at
+      `apps/docs/content/docs/guides/dsar.mdx`.
 - [x] Per-table data-retention policy automation — `RETENTION_POLICIES`
       (`packages/shared/src/retention/policies.ts`) is the single registry: a
       window per project resolves from its billing tier (optional — self-host
