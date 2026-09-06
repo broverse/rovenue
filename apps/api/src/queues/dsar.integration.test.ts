@@ -108,4 +108,65 @@ describe("dsar queue split (real Redis, unmocked queues/dsar)", () => {
     const erasureJobOnExportQueue = await exportQueue.getJob(erasureData.dsarRequestId);
     expect(erasureJobOnExportQueue).toBeUndefined();
   });
+
+  it("re-enqueuing an existing jobId is a safe no-op, not a silent job loss (Finding 3)", async () => {
+    // roadmap-9a final fix wave, Finding 3: routes/v1/dsar.ts now
+    // re-attempts `enqueueDsarJob` for a row it already knows is open
+    // (healing a first attempt whose enqueue may have failed to reach
+    // Redis at all). That design is only safe because BullMQ's own
+    // jobId-based dedup means calling `.add()` again for an id that
+    // ALREADY has a live job returns that SAME job rather than either
+    // creating a duplicate or discarding it — the exact failure this
+    // repo has shipped before with a pinned jobId ("every re-enqueue a
+    // silent no-op", see queues/dsar.ts's own comment). This is that
+    // property, proven against REAL Redis: add once, add again with
+    // identical data, and the queue must still hold exactly the ORIGINAL
+    // job — same BullMQ job id, same data, present and gettable — not
+    // zero jobs and not two.
+    const data = makeJobData("EXPORT");
+
+    await enqueueDsarJob(DSAR_EXPORT_JOB_NAME, data);
+    const exportQueue = getDsarExportQueue();
+    const before = await exportQueue.getJob(data.dsarRequestId);
+    expect(before).toBeDefined();
+    expect(before?.data).toEqual(data);
+
+    // The second enqueue — this is the exact call
+    // `createOrReturnOpenDsarRequest`'s heal path makes on every retry of
+    // an already-open row, whether or not the first attempt actually
+    // needed healing.
+    await enqueueDsarJob(DSAR_EXPORT_JOB_NAME, data);
+
+    const after = await exportQueue.getJob(data.dsarRequestId);
+    expect(after).toBeDefined();
+    expect(after?.id).toBe(before?.id);
+    expect(after?.data).toEqual(data);
+
+    // Exactly one job with this id sits in the queue's waiting set — the
+    // duplicate `.add()` did not fork a second entry alongside it.
+    const waitingJobs = await exportQueue.getWaiting();
+    expect(waitingJobs.filter((j) => j.id === data.dsarRequestId)).toHaveLength(1);
+  });
+
+  it("a job that was never actually created is genuinely created by the healing enqueue (Finding 3)", async () => {
+    // The other half of the same safety argument: the healing call must
+    // not ALSO be a no-op when there is truly nothing to dedupe against
+    // yet (the row committed, but the original `enqueueDsarJob` never
+    // reached Redis at all — a real Redis blip, not simulated by mocking
+    // BullMQ itself). This is simply confirming the ordinary case still
+    // works: no job exists for this id before the call, one exists,
+    // waiting and gettable, immediately after it.
+    const data = makeJobData("ERASURE");
+    const erasureQueue = getDsarErasureQueue();
+
+    expect(await erasureQueue.getJob(data.dsarRequestId)).toBeUndefined();
+
+    await enqueueDsarJob(DSAR_ERASURE_JOB_NAME, data);
+
+    const job = await erasureQueue.getJob(data.dsarRequestId);
+    expect(job).toBeDefined();
+    expect(job?.data).toEqual(data);
+    const state = await job?.getState();
+    expect(state).toBe("waiting");
+  });
 });

@@ -113,6 +113,42 @@ function serializeDsarRequest(request: DsarRequestRow) {
 }
 
 /**
+ * Enqueues (or re-enqueues) the BullMQ job for an OPEN (PENDING/RUNNING)
+ * dsar_requests row. `enqueueDsarJob` pins `jobId` to `request.id`
+ * (queues/dsar.ts), so calling this more than once for the SAME row is
+ * safe by construction, never the "silent no-op" this repo has shipped
+ * before when a re-enqueue collided with a stale jobId from a past,
+ * unrelated run (see queues/dsar.ts's own comment, and the wave-1
+ * migration-import postmortem this finding calls back to): BullMQ either
+ * finds no job with this id yet — because the row's own FIRST enqueue
+ * attempt never actually reached Redis — and creates it for the first
+ * time, or it finds the job it already added and returns that job
+ * unchanged. There is no THIRD case where this id could refer to a
+ * stale, already-REMOVED job from an earlier run of this row: a row this
+ * function is ever called for is, by construction, still open
+ * (PENDING/RUNNING — see both call sites below), and a job is only ever
+ * removed once its row has gone terminal (COMPLETED/FAILED,
+ * `removeOnComplete`/`removeOnFail` in queues/dsar.ts). Verified by test:
+ * queues/dsar.integration.test.ts's "re-enqueuing an existing jobId"
+ * case, against real Redis.
+ */
+async function healDsarJobEnqueue(
+  project: AuthenticatedProject,
+  subscriberId: string,
+  request: DsarRequestRow,
+): Promise<void> {
+  await enqueueDsarJob(
+    request.type === "EXPORT" ? DSAR_EXPORT_JOB_NAME : DSAR_ERASURE_JOB_NAME,
+    {
+      dsarRequestId: request.id,
+      projectId: project.id,
+      subscriberId,
+      type: request.type,
+    },
+  );
+}
+
+/**
  * Create-or-return-the-open-one, on top of the database's own
  * idempotency guarantee.
  *
@@ -128,10 +164,25 @@ function serializeDsarRequest(request: DsarRequestRow) {
  *      re-reads the now-existing open request and returns THAT one,
  *      exactly as if this call had lost the race gracefully.
  *
- * Enqueues a job only when THIS call is the one that actually inserted
- * the row — never on either the fast idempotent path or the race-loser
- * path — so "returns the same request when the same subject asks twice"
- * also means "never enqueues a second job for it".
+ * Finding 3 (roadmap-9a final fix wave): the original version of this
+ * function enqueued a job ONLY on the path that just inserted the row —
+ * never on the fast idempotent path or the race-loser path — on the
+ * theory that "returns the same request when asked twice" also meant
+ * "never enqueues a second job for it". That theory missed a real
+ * failure mode: `await enqueueDsarJob(...)` after the insert ran outside
+ * any try/catch, so a Redis blip left the row committed PENDING with NO
+ * job ever created, and every subsequent call — including the exact
+ * retry `dsar.mdx` documents as always safe — hit ONLY the fast path
+ * above and never tried to enqueue again. A statutory erasure could sit
+ * at PENDING forever while the API kept reporting it PENDING. Both
+ * BELOW paths now call `healDsarJobEnqueue` before returning an
+ * already-open row, healing exactly that gap: if the row's job never
+ * landed, this is the first thing that actually creates it; if it did
+ * land, this is a proven-safe no-op (see that function's own doc). A
+ * caller sees no observable difference either way — same id, same
+ * status, no second job — except that a wedged row now genuinely
+ * recovers on the very next call the docs already tell customers is
+ * always safe to make.
  */
 async function createOrReturnOpenDsarRequest(
   project: AuthenticatedProject,
@@ -144,7 +195,10 @@ async function createOrReturnOpenDsarRequest(
     drizzle.db,
     { projectId: project.id, subscriberId: subscriber.id, type },
   );
-  if (existing) return existing;
+  if (existing) {
+    await healDsarJobEnqueue(project, subscriber.id, existing);
+    return existing;
+  }
 
   let created: DsarRequestRow;
   try {
@@ -167,6 +221,10 @@ async function createOrReturnOpenDsarRequest(
           type,
           requestId: raceWinner.id,
         });
+        // The race WINNER's own enqueue could have hit the exact same
+        // Redis blip this finding is about — heal it here too, not only
+        // on the plain "already open" path above.
+        await healDsarJobEnqueue(project, subscriber.id, raceWinner);
         return raceWinner;
       }
     }

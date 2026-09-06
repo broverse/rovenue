@@ -215,8 +215,8 @@ describe("DSAR routes", () => {
   });
 
   it("returns the SAME request when the same subject asks twice", async () => {
-    // Idempotency at the route, on top of the database constraint.
-    // Assert one request id AND that a second job was not enqueued.
+    // Idempotency at the route, on top of the database constraint: one
+    // request id, no second ROW ever created.
     const key = await mintSecretKey(PROJECT_ID, "idempotent");
     const sub = await seedSubscriber(PROJECT_ID, "idempotent");
 
@@ -234,7 +234,71 @@ describe("DSAR routes", () => {
     const firstBody = (await first.json()) as any;
     const secondBody = (await second.json()) as any;
     expect(secondBody.data.request.id).toBe(firstBody.data.request.id);
-    expect(vi.mocked(enqueueDsarJob)).toHaveBeenCalledOnce();
+
+    // Finding 3 (roadmap-9a final fix wave): the SECOND call now also
+    // attempts to enqueue, healing a row whose first enqueue might have
+    // silently failed — this is intentional, not a regression of
+    // idempotency. What must stay true is what actually matters to a
+    // caller: no SECOND job id is ever produced for this subject (both
+    // calls target the exact same dsarRequestId; BullMQ's own jobId
+    // dedup — proven safe in queues/dsar.integration.test.ts against
+    // real Redis — is what keeps this a no-op when the first attempt
+    // already succeeded).
+    expect(vi.mocked(enqueueDsarJob)).toHaveBeenCalledTimes(2);
+    const jobIds = vi
+      .mocked(enqueueDsarJob)
+      .mock.calls.map(([, data]) => data.dsarRequestId);
+    expect(jobIds).toEqual([firstBody.data.request.id, firstBody.data.request.id]);
+  });
+
+  it("heals a request whose row committed but whose first enqueue never landed (Finding 3)", async () => {
+    // Reproduces the exact roadmap-9a final-fix-wave Finding 3 scenario:
+    // the FIRST POST's enqueue rejects (a Redis blip), so the caller gets
+    // a 500 but the row is still committed PENDING (the DB write and the
+    // enqueue are not in the same transaction — that's the bug). Before
+    // this fix, `findOpenDsarRequest` on the retry returned that PENDING
+    // row with 200 and never tried to enqueue again — a statutory
+    // erasure could sit PENDING forever. Now the retry (which dsar.mdx
+    // already documents as always safe to make) heals it: same request
+    // id, and THIS time enqueueDsarJob actually runs for it.
+    const key = await mintSecretKey(PROJECT_ID, "heal-enqueue");
+    const sub = await seedSubscriber(PROJECT_ID, "heal-enqueue");
+
+    vi.mocked(enqueueDsarJob).mockRejectedValueOnce(
+      new Error("simulated Redis blip"),
+    );
+
+    const first = await post("/export", key, {
+      appUserId: sub.rovenueId,
+      requestedBy: "a@customer.example",
+    });
+    expect(first.status).toBe(500);
+
+    // The row survived the enqueue failure (insert already committed).
+    const rows = await testDb
+      .select()
+      .from(schema.dsarRequests)
+      .where(eq(schema.dsarRequests.subscriberId, sub.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe("PENDING");
+    const wedgedId = rows[0]!.id;
+
+    // The documented-safe retry: enqueueDsarJob now succeeds (no
+    // rejection queued for this call).
+    const second = await post("/export", key, {
+      appUserId: sub.rovenueId,
+      requestedBy: "b@customer.example",
+    });
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as any;
+    expect(secondBody.data.request.id).toBe(wedgedId);
+
+    // enqueueDsarJob was attempted TWICE for the SAME row id — the first
+    // (failed) attempt and the healing retry — never a different id.
+    expect(vi.mocked(enqueueDsarJob)).toHaveBeenCalledTimes(2);
+    const calls = vi.mocked(enqueueDsarJob).mock.calls;
+    expect(calls[0]![1].dsarRequestId).toBe(wedgedId);
+    expect(calls[1]![1].dsarRequestId).toBe(wedgedId);
   });
 
   it("refuses a subscriber belonging to another project", async () => {
