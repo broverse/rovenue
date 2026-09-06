@@ -724,8 +724,11 @@ describe("POST /v1/subscribers/:appUserId/restore", () => {
       subscriber: subscriberRow as any,
       product: { id: "prod_1" } as any,
       purchase: { id: "pur_1" } as any,
-      // A restore replays receipts the customer already owns; it is not
-      // an Apple auto-renewal charge.
+      // Type-required only. A restored receipt CAN be a renewal
+      // transaction, so `false` is not structurally true here the way it
+      // is for Google above -- but nothing in this test asserts on the
+      // gate, and the restore route does not consult it. The gate's own
+      // coverage, both directions, is in routes/v1/receipts.test.ts.
       isRenewalCharge: false,
     });
 

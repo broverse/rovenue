@@ -455,4 +455,63 @@ describe("runDsarExport", () => {
     // must not be COMPLETED — a COMPLETED row here is the bug.
     expect(finalRow.artifactKey).toBeNull();
   });
+  it("waits on an in-flight erasure instead of racing it (the FOR UPDATE itself)", async () => {
+    // The test above proves the RE-CHECK: it lets the erasure commit
+    // first, so a plain `SELECT deletedAt` with no FOR UPDATE would pass
+    // it identically. This one proves the LOCK, which is what the fix
+    // actually rests on.
+    //
+    // A transaction stamps deletedAt and then HOLDS the row lock,
+    // uncommitted, while the export runs. Under MVCC the export's own
+    // reads cannot see that uncommitted write at all — so without
+    // FOR UPDATE the completion check reads "not erased", completes, and
+    // publishes a full-history artifact for a subject who is, moments
+    // later, erased. The lock is the only thing that makes the export
+    // wait for the erasure's outcome rather than read around it.
+    const projectId = await seedProject();
+    const subscriberId = await seedSubscriber(projectId);
+    const dsarRequestId = await seedPendingExportRequest(projectId, subscriberId);
+
+    let releaseErasure!: () => void;
+    const erasureCommitted = new Promise<void>((resolve) => {
+      releaseErasure = resolve;
+    });
+
+    const holdingErasure = getDb().transaction(async (tx) => {
+      await tx
+        .update(schema.subscribers)
+        .set({ deletedAt: new Date() })
+        .where(eq(schema.subscribers.id, subscriberId));
+      await erasureCommitted;
+    });
+
+    const deps = realDeps();
+    let settled = false;
+    const exportRun = runDsarExport(
+      { dsarRequestId, projectId, subscriberId, type: "EXPORT" },
+      deps,
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    // Long enough that an unblocked export would have finished — every
+    // other run in this file completes in single-digit milliseconds.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(
+      settled,
+      "the export completed while an erasure held the subscriber row — the FOR UPDATE is not contending",
+    ).toBe(false);
+
+    releaseErasure();
+    await holdingErasure;
+
+    const outcome = await exportRun;
+    expect(outcome.outcome).toBe("failed");
+    expect(vi.mocked(deps.deleteObject)).toHaveBeenCalledTimes(1);
+
+    const finalRow = await fetchRequest(dsarRequestId);
+    expect(finalRow.status).toBe("FAILED");
+    expect(finalRow.artifactKey).toBeNull();
+  });
 });

@@ -32,7 +32,16 @@ import { join } from "node:path";
 // handler changes. Behavioural coverage lives in the per-route
 // `*-dead-ended` suites.
 
-const SCAN_ROOTS = ["src/routes", "src/services", "src/middleware"];
+// `src/lib` and `src/workers` are in scope too: the resolver itself
+// lives in src/lib, and a worker writing on behalf of a subscriber is
+// the same hazard as a route doing it.
+const SCAN_ROOTS = [
+  "src/routes",
+  "src/services",
+  "src/middleware",
+  "src/lib",
+  "src/workers",
+];
 
 const MIDDLEWARE_SYMBOL = "appUserContext";
 const RESOLVER_SYMBOLS = [
@@ -60,9 +69,14 @@ const ALLOWED_WITHOUT_GUARD: ReadonlyArray<{ file: string; reason: string }> = [
   {
     file: "src/routes/v1/virtual-currencies.ts",
     reason:
-      "GET /me only reads balances for the already-resolved subscriber " +
-      "id and writes nothing. Guarding matters for appUserContext routes " +
-      "that WRITE -- see /v1/checkout and /v1/me/attributes.",
+      "Only the appUserContext handler is exempt: GET /me reads balances " +
+      "for the already-resolved subscriber id and writes nothing. This " +
+      "file DOES hold a write -- POST /:appUserId/:code/transactions " +
+      "debits a balance -- but that route takes requireSecretKey and " +
+      "resolveSubscriber, never appUserContext, so it is out of this " +
+      "invariant's scope rather than exempt from it. Said explicitly " +
+      "because a reviewer checking a bare \"writes nothing\" claim " +
+      "against this file would find a write and distrust the wrong line.",
   },
 ];
 
@@ -70,9 +84,19 @@ function stripComments(source: string): string {
   // A comment mentioning `deadEnded` must not satisfy the invariant --
   // that is exactly the shape of a route that documents the concern and
   // then forgets to act on it.
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[ \t]*\/\/.*$/gm, "");
+  return (
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      // TRAILING comments count, not only whole-line ones: an
+      // earlier version stripped `^\s*//…` alone, so
+      // `const s = c.get("subscriber"); // deadEnded: n/a here`
+      // satisfied the check — the exact "documents the concern, then
+      // forgets to act on it" shape this is supposed to exclude. The
+      // `(?<!:)` keeps a URL's `://` intact. Over-stripping (a `//`
+      // inside a string literal) can only REMOVE text, which makes the
+      // invariant stricter, never weaker.
+      .replace(/(?<!:)\/\/.*$/gm, "")
+  );
 }
 
 function collectSourceFiles(root: string): string[] {
