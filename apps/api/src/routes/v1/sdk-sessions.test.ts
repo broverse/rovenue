@@ -76,6 +76,16 @@ vi.mock("../../middleware/api-key-auth", async () => {
     requireSecretKey: async (_c: any, next: any) => {
       await next();
     },
+    // Mirrors the real guard rather than passing through. `sdk-sessions.ts`
+    // registers this, so a mock that omitted it made every test in this file
+    // throw "No requirePublicApiKey export is defined on the mock" — which is
+    // exactly what happened when the guard became a shared export.
+    requirePublicApiKey: async (c: any, next: any) => {
+      if (c.get("project")?.keyKind !== API_KEY_KIND.PUBLIC) {
+        throw new HTTPException(403, { message: "Public API key required" });
+      }
+      await next();
+    },
   };
 });
 

@@ -62,6 +62,38 @@ function parseSecretKeyId(rawKey: string): string | null {
 
 export type ApiKeyRequirement = ApiKeyKind | "any";
 
+/**
+ * Marks a middleware as an `apiKeyAuth()` registration.
+ *
+ * `apiKeyAuth()` is a factory, so every call site produces a *different*
+ * closure and reference equality (the trick `requireSecretKey` /
+ * `requirePublicApiKey` rely on) cannot find it. Without a tag, a route
+ * walker has to infer "is this path behind the key envelope?" from the
+ * literal string `/v1/*`, which silently mis-states the auth posture of
+ * anything mounted outside `v1Route` — and there are two such endpoints
+ * (`/v1/config/stream`, `/v1/preview/paywalls/:token`), with opposite
+ * answers.
+ *
+ * `Symbol.for()` rather than `Symbol()` for the same reason as
+ * `ROUTE_SCHEMA_TAG` in lib/validate.ts: two copies of this module in one
+ * graph must agree on the key.
+ */
+export const API_KEY_AUTH_TAG = Symbol.for("rovenue.api.apiKeyAuthTag");
+
+export interface ApiKeyAuthTag {
+  required: ApiKeyRequirement;
+}
+
+/** Recovers the `{ required }` tag an `apiKeyAuth()` middleware carries. */
+export function getApiKeyAuthTag(
+  handler: unknown,
+): ApiKeyAuthTag | undefined {
+  if (typeof handler !== "function") return undefined;
+  return (handler as unknown as Record<symbol, unknown>)[API_KEY_AUTH_TAG] as
+    | ApiKeyAuthTag
+    | undefined;
+}
+
 type ApiKeyRecord = Awaited<
   ReturnType<typeof drizzle.apiKeyRepo.findApiKeyByPublic>
 >;
@@ -84,7 +116,7 @@ async function lookupSecretKey(rawKey: string): Promise<ApiKeyRecord> {
 export function apiKeyAuth(
   required: ApiKeyRequirement = "any",
 ): MiddlewareHandler {
-  return async (c, next) => {
+  const middleware: MiddlewareHandler = async (c, next) => {
     const header = c.req.header(HEADER.AUTHORIZATION);
     if (!header || !header.toLowerCase().startsWith(BEARER_PREFIX_LOWER)) {
       throw new HTTPException(401, { message: "Bearer token required" });
@@ -133,6 +165,16 @@ export function apiKeyAuth(
 
     await next();
   };
+
+  // Non-enumerable, symbol-keyed: metadata for the route walker, not part
+  // of the middleware's public shape. Same rationale as ROUTE_SCHEMA_TAG.
+  Object.defineProperty(middleware, API_KEY_AUTH_TAG, {
+    value: { required } satisfies ApiKeyAuthTag,
+    enumerable: false,
+    configurable: true,
+  });
+
+  return middleware;
 }
 
 /**

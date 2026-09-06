@@ -31,5 +31,11 @@
     "rootDir": ".",
     "noEmit": true
   },
-  "include": ["src/**/*", "tests/**/*"]
+  // `scripts/**` and `openapi/**` ride along here for the same reason
+  // `tests/**` does: `tsconfig.json` pins `include` to `src/**`, so neither
+  // the OpenAPI generator nor the hand-written half of the document it reads
+  // was type-checked by anything. A tool that documents the API is worth
+  // exactly as much as its accuracy, and an unchecked generator can go stale
+  // against the app it walks without a single red build.
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*", "openapi/**/*"]
 }
