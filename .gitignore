@@ -73,3 +73,10 @@ packages/sdk-swift/build/
 
 # Built artifacts of the Web SDK — produced by tsup, never committed.
 packages/sdk-web/dist/
+
+# Per-SDK API reference output (ROADMAP §11, scripts/generate-sdk-docs.sh).
+# rustdoc (target/doc), the DocC archive (packages/sdk-swift/.build/), and
+# Dokka HTML (packages/sdk-kotlin/build/) are already covered by the
+# /target/ and per-package .build/ / build/ rules above.
+packages/sdk-rn/docs/
+packages/sdk-flutter/rovenue_flutter/doc/

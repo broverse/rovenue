@@ -11,6 +11,14 @@ description = "Rovenue SDK core — shared business logic for Swift, Kotlin, Rea
 name = "rovenue"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
+# Reference generation (ROADMAP §11): `cargo doc --no-deps -p librovenue`
+# builds fine locally with the default rlib target, but docs.rs builds every
+# crate-type in `[lib]` unless told otherwise — cdylib/staticlib are opaque to
+# rustdoc and would waste the docs.rs build budget for zero extra pages. No
+# feature flags exist yet, so this only pins the doc target.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
 [dependencies]
 uniffi = { workspace = true }
 thiserror = { workspace = true }

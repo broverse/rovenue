@@ -1058,7 +1058,13 @@ else in the framework/provider-breadth dimension is done.
 
 ## 11. Docs & developer experience (65 → 95)
 
-- [ ] Quickstart + full API reference per SDK (auto-generated: rustdoc / DocC / Dokka / TypeDoc)
+- [x] Quickstart + full API reference per SDK (auto-generated: rustdoc / DocC / Dokka / TypeDoc)
+      — quickstart already existed (`apps/docs/content/docs/getting-started/quickstart.mdx`,
+      tasks 13/16/17); 2026-09-06 added the five generators (rustdoc, DocC, Dokka, TypeDoc,
+      and dartdoc for the fifth SDK the original line didn't name) plus a root
+      `pnpm docs:sdk-ref` that runs whatever toolchain is present and fails loud, not silent,
+      on a present-but-broken one. Coverage is still floor-level per SDK (25–86%, see
+      `scripts/sdk-doc-coverage.json`) — raising it is a separate, not-yet-scheduled item.
 - [x] "Migrate from RevenueCat" and "Migrate from Adapty" guides — strategically the two
       most valuable docs (correction: the RevenueCat guide already existed as a lean
       concept-mapping page before this line was written — it was never unwritten, only

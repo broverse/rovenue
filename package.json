@@ -22,6 +22,7 @@
     "cargo:fmt": "cargo fmt --all -- --check",
     "cargo:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
     "sdk:bindings": "./packages/core-rs/scripts/build-bindings.sh",
+    "docs:sdk-ref": "./scripts/generate-sdk-docs.sh",
     "db:migrate": "pnpm --filter @rovenue/db db:migrate",
     "db:migrate:fresh": "pnpm --filter @rovenue/db db:migrate:fresh",
     "db:migrate:generate": "pnpm --filter @rovenue/db db:migrate:generate",

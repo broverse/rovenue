@@ -14,6 +14,13 @@ let package = Package(
     products: [
         .library(name: "Rovenue", targets: ["Rovenue"]),
     ],
+    dependencies: [
+        // Doc-only, dev-time dependency (ROADMAP §11): drives
+        // `swift package generate-documentation`, producing a .doccarchive
+        // from Sources/Rovenue/Rovenue.docc. Not linked into the Rovenue
+        // library target, so it adds nothing to consumers' builds.
+        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.3.0"),
+    ],
     targets: [
         .binaryTarget(
             name: "RovenueFFI",

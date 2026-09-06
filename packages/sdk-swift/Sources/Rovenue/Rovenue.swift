@@ -734,14 +734,6 @@ public final class Rovenue: @unchecked Sendable {
         return mapPaywall(ffi, offering: offering)
     }
 
-    /// Report that `paywall` was actually shown to the subscriber. Builds a
-    /// `paywall_view` event (sourced from `paywall.presentedContext`) and
-    /// enqueues it via `track(envelopeJson:)` — the same at-least-once
-    /// `POST /v1/events` sender every other SDK-emitted event goes through;
-    /// this does not open a new network path. Best-effort: fire-and-forget,
-    /// matching the RC/Adapty `logShown`/`logPaywallShown` contract (no
-    /// `async throws` — a paywall-impression beacon must never block or
-    /// fail the caller's UI code).
     /// Parse a spec D1 bundled fallback-placements file (once, replacing any
     /// previously-loaded set) into memory so `getPaywall` can serve
     /// placements offline when both the network and disk cache miss.
