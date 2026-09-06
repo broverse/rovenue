@@ -19,7 +19,7 @@ Calling the HTTP API directly instead of through an SDK? See [API Errors](/docs/
 ## Migrating from 0.15.x → 0.16.0
 
 <Callout type="warn">
-**Breaking change in 0.16.0** — the per-type error subclasses and Swift `Rovenue.Error` enum cases are replaced by a single `RovenueError`/`RovenueException` with a `kind` string discriminant, and `.pending` purchases are now a non-throwing `Deferred` outcome.
+**Breaking change in 0.16.0** — the per-type error subclasses and Swift `Rovenue.Error` enum cases are replaced by a single `RovenueError`/`RovenueException` with a `kind` string discriminant, and a pending (Ask-to-Buy) purchase is now a non-throwing `isDeferred` outcome rather than a thrown error.
 </Callout>
 
 ### React Native: `instanceof` → `e.kind`
@@ -39,8 +39,9 @@ import { RovenueError } from '@rovenue/react-native-sdk';
 try {
   const result = await Rovenue.purchase(pkg);
   if (result.isDeferred) {
-    // Ask-to-Buy / parental controls — not an error, poll or wait for the
-    // PURCHASES_UPDATED listener before granting entitlements.
+    // Ask-to-Buy / parental controls — not an error. Wait for
+    // Rovenue.addChangeListener to report 'ENTITLEMENTS_CHANGED' before
+    // granting entitlements (see "Handling the Deferred purchase state" below).
     showToast('Your purchase is awaiting approval.');
     return;
   }
@@ -98,11 +99,18 @@ try {
 
 ### Handling the Deferred purchase state
 
-`purchase()` no longer throws for Ask-to-Buy / parental-control holds. Instead, it returns a `StorePurchaseOutcome` with `isDeferred = true`. You should:
+`purchase()` no longer throws for Ask-to-Buy / parental-control holds. Instead, it returns a `PurchaseResult` (the same return type as a normal successful purchase) with `isDeferred = true`. You should:
 
 1. Show a friendly message (e.g. "Your purchase is awaiting approval from your family organizer.").
 2. Do **not** grant entitlements — entitlements are only granted after the purchase completes asynchronously.
-3. Listen for the `PURCHASES_UPDATED` notification (RN: `Rovenue.addPurchasesUpdatedListener`; Swift: `RovenueDelegate.purchasesDidUpdate`; Kotlin: `PurchasesUpdatedListener`) to know when the deferred purchase resolves.
+3. There is no purchase-specific notification — the SDK reconciles the pending
+   transaction in the background and reports the result the same way as any
+   other entitlement change. Listen for `ChangeEvent`'s `ENTITLEMENTS_CHANGED`
+   value on each platform's change stream to know when the deferred purchase
+   resolves: RN `Rovenue.addChangeListener((event) => { if (event ===
+   'ENTITLEMENTS_CHANGED') { /* re-check entitlements */ } })`; Swift/Kotlin —
+   collect `Rovenue.shared.changes` (`AsyncStream<ChangeEvent>` / `SharedFlow<ChangeEvent>`)
+   and match `.entitlementsChanged` / `ENTITLEMENTS_CHANGED`.
 
 ---
 
@@ -139,29 +147,38 @@ The only reliable fix is ordering: call `configure()` before anything else, ever
 
 ## Error table
 
-| When it fires | React Native (class) | Swift (enum case) | Kotlin (exception) |
-|---------------|---------------------|-------------------|--------------------|
-| API key is missing, malformed, or rejected by the server | `InvalidApiKeyError` | `.invalidApiKey` | `RovenueException.InvalidApiKey` |
-| An argument was invalid — e.g. an empty string passed to `identify()` | `InvalidArgumentError` | `.invalidArgument` | `RovenueException.InvalidArgument` |
-| Server returned a non-recoverable error response | `ServerError` | `.serverError` | `RovenueException.ServerException` |
-| Device has no network connectivity | `NetworkUnavailableError` | `.networkUnavailable` | `RovenueException.NetworkUnavailable` |
-| Request exceeded the allowed time limit | `TimeoutError` | `.timeout` | `RovenueException.Timeout` |
-| Too many requests — SDK is being rate-limited; back off and retry | `RateLimitedError` | `.rateLimited` | `RovenueException.RateLimited` |
-| Local persistent storage (MMKV) read/write failure | `StorageError` | `.storage` | `RovenueException.Storage` |
-| Returned by the server when a virtual-currency spend transaction has insufficient balance (server-side API only — no client SDK method throws this) | `InsufficientCreditsError` | `.insufficientCredits` | `RovenueException.InsufficientCredits` |
-| Receipt could not be validated by the store or server | `ReceiptInvalidError` | `.receiptInvalid` | `RovenueException.ReceiptInvalid` |
-| Unexpected internal SDK error | `InternalError` | `.internalError` | `RovenueException.Internal` |
-| User cancelled the store purchase sheet | `PurchaseCancelledError` | `.purchaseCancelled` | `PurchaseCancelledException` |
-| Purchase is pending approval (Ask-to-Buy / parental controls) | `PurchasePendingError` | `.purchasePending` | `PurchasePendingException` |
-| The selected product is not available in the user's storefront | `ProductNotAvailableError` | `.productNotAvailable` | `ProductNotAvailableException` |
-| The store returned a non-specific billing or connectivity error | `StoreProblemError` | `.storeProblem` | `StoreProblemException` |
+Every row names the actual value to check — there is no per-kind subclass or nested
+type on any platform (see the platform notes at the top of this page). React Native
+and Swift check `RovenueError.kind`; Kotlin checks `RovenueException.kind`.
+
+| When it fires | React Native (`kind`) | Swift (`kind`) | Kotlin (`kind`) |
+|---------------|------------------------|-----------------|-------------------|
+| API key is missing, malformed, or rejected by the server | `'InvalidApiKey'` | `.invalidApiKey` | `ErrorKind.INVALID_API_KEY` |
+| An argument was invalid — e.g. an empty string passed to `identify()` | `'InvalidArgument'` | `.invalidArgument` | `ErrorKind.INVALID_ARGUMENT` |
+| Server returned a non-recoverable error response | `'ServerError'` | `.serverError` | `ErrorKind.SERVER_ERROR` |
+| Device has no network connectivity | `'NetworkUnavailable'` | `.networkUnavailable` | `ErrorKind.NETWORK_UNAVAILABLE` |
+| Request exceeded the allowed time limit | `'Timeout'` | `.timeout` | `ErrorKind.TIMEOUT` |
+| Too many requests — SDK is being rate-limited; back off and retry | `'RateLimited'` | `.rateLimited` | `ErrorKind.RATE_LIMITED` |
+| Local persistent storage (MMKV) read/write failure | `'Storage'` | `.storage` | `ErrorKind.STORAGE` |
+| Returned by the server when a virtual-currency spend transaction has insufficient balance (server-side API only — no client SDK method throws this) | `'InsufficientCredits'` | `.insufficientCredits` | `ErrorKind.INSUFFICIENT_CREDITS` |
+| Receipt could not be validated by the store or server | `'ReceiptInvalid'` | `.receiptInvalid` | `ErrorKind.RECEIPT_INVALID` |
+| Unexpected internal SDK error | `'Internal'` | `.internal` | `ErrorKind.INTERNAL` |
+| User cancelled the store purchase sheet | `'PurchaseCanceled'` | `.purchaseCanceled` | `ErrorKind.PURCHASE_CANCELED` |
+| The selected product is not available in the user's storefront | `'ProductNotAvailable'` | `.productNotAvailable` | `ErrorKind.PRODUCT_NOT_AVAILABLE` |
+| The store returned a non-specific billing or connectivity error | `'StoreProblem'` | `.storeProblem` | `ErrorKind.STORE_PROBLEM` |
+
+There is no `PurchasePending` (or equivalent) row: as covered above,
+Ask-to-Buy / parental-control holds are not an error on any platform as of
+0.16.0 — `purchase()` returns a `PurchaseResult` with `isDeferred = true`
+instead of throwing. See [Handling the Deferred purchase
+state](#handling-the-deferred-purchase-state).
 
 <Callout type="warn">
-**`InvalidApiKeyError` vs `InvalidArgumentError`**
+**`InvalidApiKey` vs `InvalidArgument`**
 
-`InvalidApiKeyError` fires when the SDK detects that your API key is malformed (wrong prefix) at `configure()` time, or when the server rejects it on the first network request. It indicates a **configuration problem** — check your dashboard key.
+`InvalidApiKey` fires when the SDK detects that your API key is malformed (wrong prefix) at `configure()` time, or when the server rejects it on the first network request. It indicates a **configuration problem** — check your dashboard key.
 
-`InvalidArgumentError` fires when your code passes an invalid value to a method at call time — for example, an empty string to `identify()`. It indicates a **programming error** in your call site.
+`InvalidArgument` fires when your code passes an invalid value to a method at call time — for example, an empty string to `identify()`. It indicates a **programming error** in your call site.
 </Callout>
 
 ---
@@ -173,35 +190,30 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    import {
-      Rovenue,
-      PurchaseCancelledError,
-      PurchasePendingError,
-      ProductNotAvailableError,
-      ReceiptInvalidError,
-      NetworkUnavailableError,
-    } from '@rovenue/react-native-sdk';
+    import { Rovenue, RovenueError } from '@rovenue/react-native-sdk';
 
     // --- Purchase flow ---
     try {
       const result = await Rovenue.purchase(pkg);
-      // success
+      // success — check result.isDeferred for Ask-to-Buy (see below;
+      // it does not throw)
     } catch (e) {
-      if (e instanceof PurchaseCancelledError) {
-        // User dismissed the store sheet — no action needed
-      } else if (e instanceof PurchasePendingError) {
-        // Ask-to-Buy — inform the user to wait for parental approval
-        showToast('Your purchase is awaiting approval.');
-      } else if (e instanceof ProductNotAvailableError) {
-        // Product not available in this storefront
-        showToast('This product is not available in your region.');
-      } else if (e instanceof ReceiptInvalidError) {
-        // Receipt validation failed — offer a retry
-        showRetryPrompt();
-      } else if (e instanceof NetworkUnavailableError) {
-        showToast('No internet connection. Please try again.');
-      } else {
-        throw e; // re-throw unexpected errors
+      if (!(e instanceof RovenueError)) throw e; // not an SDK error — re-throw
+      switch (e.kind) {
+        case 'PurchaseCanceled':
+          // User dismissed the store sheet — no action needed
+          break;
+        case 'ProductNotAvailable':
+          showToast('This product is not available in your region.');
+          break;
+        case 'ReceiptInvalid':
+          showRetryPrompt();
+          break;
+        case 'NetworkUnavailable':
+          showToast('No internet connection. Please try again.');
+          break;
+        default:
+          throw e; // re-throw unexpected SDK errors
       }
     }
     ```
@@ -213,21 +225,23 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
     // --- Purchase flow ---
     do {
       let result = try await Rovenue.shared.purchase(pkg)
-      // success
-    } catch Rovenue.Error.purchaseCancelled {
-      // User dismissed the store sheet — no action needed
-    } catch Rovenue.Error.purchasePending {
-      // Ask-to-Buy — inform the user to wait for parental approval
-      showToast("Your purchase is awaiting approval.")
-    } catch Rovenue.Error.productNotAvailable {
-      showToast("This product is not available in your region.")
-    } catch Rovenue.Error.receiptInvalid {
-      // Receipt validation failed — offer a retry
-      showRetryPrompt()
-    } catch Rovenue.Error.networkUnavailable {
-      showToast("No internet connection. Please try again.")
+      // success — check result.isDeferred for Ask-to-Buy (see below;
+      // it does not throw)
+    } catch let e as RovenueError {
+      switch e.kind {
+      case .purchaseCanceled:
+        break // User dismissed the store sheet — no action needed
+      case .productNotAvailable:
+        showToast("This product is not available in your region.")
+      case .receiptInvalid:
+        showRetryPrompt()
+      case .networkUnavailable:
+        showToast("No internet connection. Please try again.")
+      default:
+        throw e // re-throw unexpected SDK errors
+      }
     } catch {
-      throw error // re-throw unexpected errors
+      throw error // not a RovenueError — re-throw
     }
     ```
   </Tab>
@@ -265,21 +279,24 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
 </Tabs>
 
 <Callout type="info">
-`PurchaseCancelledError` is **not an error** from the user's perspective. It fires whenever the store sheet is dismissed without a completed payment — including when the user deliberately taps Cancel. Do not show an error dialog for this case.
+A `PurchaseCanceled` `kind` is **not an error** from the user's perspective. It fires whenever the store sheet is dismissed without a completed payment — including when the user deliberately taps Cancel. Do not show an error dialog for this case.
 </Callout>
 
 ---
 
 ## Which methods throw which errors
 
-| Method | Possible errors |
+Values below are `kind`s (see the [error table](#error-table) above for the exact
+per-platform spelling of each).
+
+| Method | Possible `kind`s |
 |--------|----------------|
-| [`configure()`](/docs/reference/methods#configuration) | `InvalidApiKeyError` |
-| [`identify(appUserId)`](/docs/reference/methods#identify) | `InvalidArgumentError` |
-| [`refreshEntitlements()`](/docs/reference/methods#refreshentitlements) | `NetworkUnavailableError`, `ServerError` |
-| [`refreshVirtualCurrencies()`](/docs/reference/methods#refreshvirtualcurrencies) | `NetworkUnavailableError`, `ServerError` |
-| [`getOfferings()`](/docs/reference/methods#getofferings) | `NetworkUnavailableError`, `ServerError` |
-| [`purchase()`](/docs/reference/methods#purchase) | `PurchaseCancelledError`, `PurchasePendingError`, `ProductNotAvailableError`, `StoreProblemError`, `ReceiptInvalidError`, `NetworkUnavailableError` |
-| [`restorePurchases()`](/docs/reference/methods#restorepurchases) | `NetworkUnavailableError`, `ServerError` |
-| [`getAppAccountToken()`](/docs/reference/methods#account-token) | `StorageError` |
-| All methods | `InternalError` (unexpected failures) — see [Calling the SDK before `configure()`](#calling-the-sdk-before-configure) for what happens if `configure()` was skipped; it is not one of these errors |
+| [`configure()`](/docs/reference/methods#configuration) | [`InvalidApiKey`](#error-table) |
+| [`identify(appUserId)`](/docs/reference/methods#identify) | [`InvalidArgument`](#error-table) |
+| [`refreshEntitlements()`](/docs/reference/methods#refreshentitlements) | [`NetworkUnavailable`](#error-table), [`ServerError`](#error-table) |
+| [`refreshVirtualCurrencies()`](/docs/reference/methods#refreshvirtualcurrencies) | [`NetworkUnavailable`](#error-table), [`ServerError`](#error-table) |
+| [`getOfferings()`](/docs/reference/methods#getofferings) | [`NetworkUnavailable`](#error-table), [`ServerError`](#error-table) |
+| [`purchase()`](/docs/reference/methods#purchase) | [`PurchaseCanceled`](#error-table), [`ProductNotAvailable`](#error-table), [`StoreProblem`](#error-table), [`ReceiptInvalid`](#error-table), [`NetworkUnavailable`](#error-table) — plus a non-throwing `isDeferred` outcome, see [Handling the Deferred purchase state](#handling-the-deferred-purchase-state) |
+| [`restorePurchases()`](/docs/reference/methods#restorepurchases) | [`NetworkUnavailable`](#error-table), [`ServerError`](#error-table) |
+| [`getAppAccountToken()`](/docs/reference/methods#account-token) | [`Storage`](#error-table) |
+| All methods | [`Internal`](#error-table) (unexpected failures) — see [Calling the SDK before `configure()`](#calling-the-sdk-before-configure) for what happens if `configure()` was skipped; it is not one of these `kind`s |
