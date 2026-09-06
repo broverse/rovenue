@@ -13,9 +13,25 @@ export const withRovenueAndroid: ConfigPlugin<Options> = (config, opts) => {
   const kotlinPath = opts?.rovenueKotlinPath ?? "../../../packages/sdk-kotlin";
 
   config = withSettingsGradle(config, (cfg) => {
-    const line = `includeBuild("${kotlinPath}")`;
-    if (!cfg.modResults.contents.includes(line)) {
-      cfg.modResults.contents = `${line}\n${cfg.modResults.contents}`;
+    const includeLine = `includeBuild("${kotlinPath}")`;
+    // Gradle's default composite-build substitution matches an
+    // `implementation` dependency to an included build by the included
+    // project's OWN name (sdk-kotlin's settings.gradle.kts sets
+    // `rootProject.name = "sdk-kotlin"`), not by its maven-publish
+    // coordinate (`dev.rovenue:sdk`, declared in sdk-kotlin's
+    // build.gradle.kts). Without an explicit `dependencySubstitution`
+    // rule mapping the coordinate onto the included project,
+    // `implementation("dev.rovenue:sdk:...")` in the consumer's
+    // app/build.gradle never resolves. Mirrors
+    // packages/sdk-flutter/rovenue_flutter_android/android/settings.gradle,
+    // which carries the identical rule for the identical reason.
+    const block = `${includeLine} {
+    dependencySubstitution {
+        substitute module("dev.rovenue:sdk") using project(":")
+    }
+}`;
+    if (!cfg.modResults.contents.includes(includeLine)) {
+      cfg.modResults.contents = `${block}\n${cfg.modResults.contents}`;
     }
     return cfg;
   });
