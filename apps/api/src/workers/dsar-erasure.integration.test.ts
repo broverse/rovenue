@@ -471,7 +471,7 @@ describe("runDsarErasure", () => {
       const deps = realDeps({
         purgeSubscriberFromClickHouse: (id: string) =>
           purgeSubscriberFromClickHouseTables(id, {
-            timeoutMs: STUCK_MUTATION_TIMEOUT_MS,
+            totalBudgetMs: STUCK_MUTATION_TIMEOUT_MS,
             pollIntervalMs: STUCK_MUTATION_POLL_INTERVAL_MS,
           }),
       });

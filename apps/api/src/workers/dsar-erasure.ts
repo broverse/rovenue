@@ -46,9 +46,11 @@ import {
 //   2. ClickHouse purge (`purgeSubscriberFromClickHouseTables`) —
 //      issues `ALTER TABLE ... DELETE WHERE subscriberId = ?` against
 //      every STORED ClickHouse table that carries a plain, queryable
-//      subscriberId column, then POLLS `system.mutations` until each
-//      mutation reports `is_done`, bounded by
-//      `DSAR_ERASURE_MUTATION_WAIT_TIMEOUT_MS`. ClickHouse mutations
+//      subscriberId column, then POLLS `system.mutations` until every
+//      mutation reports `is_done`, bounded by ONE deadline shared across
+//      all of them (`DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS`,
+//      packages/db's dsar-requests.ts — see that file for why it lives
+//      there) — not a fresh budget per table. ClickHouse mutations
 //      are asynchronous — submitting one only *schedules* the delete,
 //      it does not perform it — so marking the request COMPLETED on
 //      submission would be a false promise: a request record that
@@ -140,6 +142,16 @@ import {
 // mutation executor work on all five concurrently instead of forcing
 // them to complete strictly in sequence.
 //
+// Fix Round 2: the WAIT below used to give each table its own
+// independent `DSAR_ERASURE_MUTATION_WAIT_TIMEOUT_MS` (60s) budget, so
+// the strict worst case scaled with the table count — 5 x 60s = 300s,
+// exactly `DSAR_CLAIM_STALE_RUNNING_MS` with zero margin, and a sixth
+// table would have silently pushed it past that threshold again. The
+// five waits below now share ONE deadline
+// (`DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS`), computed once
+// before the loop, so the worst case is fixed regardless of how many
+// tables this worker ever purges.
+//
 // Every state change the row goes through is audited, same convention
 // as dsar-export.ts: PENDING -> RUNNING on claim, then RUNNING ->
 // COMPLETED or RUNNING -> FAILED on the terminal outcome. This is
@@ -176,16 +188,23 @@ export const DSAR_ERASURE_CLICKHOUSE_TABLES = [
   "raw_paywall_events",
 ] as const;
 
-// Poll interval and bounded wait for `system.mutations.is_done`. 500ms
-// keeps the total number of polls modest against the timeout budget
-// below while staying well under any latency a caller would notice;
-// 60s comfortably covers a heavily-loaded ClickHouse working through a
-// backlog of large parts without leaving a job RUNNING indefinitely on
-// a truly stuck mutation — a timeout always resolves to FAILED (never
-// a silent COMPLETED), so a customer is never told erasure succeeded
-// while rows are still physically present.
+// Poll interval for `system.mutations.is_done`. 500ms keeps the total
+// number of polls modest against the total wait budget
+// (`DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS`, imported below from
+// packages/db — see that file's dsar-requests.ts for why it is owned
+// there) while staying well under any latency a caller would notice. A
+// timeout always resolves to FAILED (never a silent COMPLETED), so a
+// customer is never told erasure succeeded while rows are still
+// physically present.
 export const DSAR_ERASURE_MUTATION_POLL_INTERVAL_MS = 500;
-export const DSAR_ERASURE_MUTATION_WAIT_TIMEOUT_MS = 60_000;
+
+// Re-exported under this worker's own name for readability at call
+// sites in this file and its tests — the VALUE is owned by
+// packages/db's dsar-requests.ts (`DSAR_CLAIM_STALE_RUNNING_MS` derives
+// from that same constant), so this is an alias, never a second
+// definition that could drift from it.
+export const DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS =
+  drizzle.dsarRequestRepo.DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS;
 
 // dsarErasureSkippedTotal reason labels.
 const SKIP_REASON_RACE = "race";
@@ -210,7 +229,14 @@ export type DsarErasureOutcome =
   | { outcome: "failed"; error: string };
 
 interface MutationWaitOptions {
-  timeoutMs: number;
+  /**
+   * Absolute deadline (`Date.now()`-based ms), computed ONCE per
+   * `purgeSubscriberFromClickHouseTables` call and shared across every
+   * table's `waitForMutation` — never a fresh budget per table. See
+   * that function and packages/db's dsar-requests.ts for why a shared
+   * deadline is the fix, not just a bigger per-table number.
+   */
+  deadline: number;
   pollIntervalMs: number;
 }
 
@@ -222,9 +248,10 @@ interface MutationStatusRow {
 /**
  * Polls `system.mutations` for one table's most recently submitted
  * erasure mutation until it reports `is_done`, bounded by
- * `options.timeoutMs`. Never resolves early on a guess — a timeout
- * always throws, which the caller turns into a FAILED request, never
- * a COMPLETED one.
+ * `options.deadline` — an absolute point in time shared with every
+ * OTHER table waited on in the same purge, not a fresh budget of its
+ * own. Never resolves early on a guess — a timeout always throws, which
+ * the caller turns into a FAILED request, never a COMPLETED one.
  *
  * Mutations are matched by `command LIKE '%<subscriberId>%'` rather
  * than by tracking a query id: ClickHouse's HTTP `query_id` is not the
@@ -243,7 +270,6 @@ async function waitForMutation(
   subscriberId: string,
   options: MutationWaitOptions,
 ): Promise<void> {
-  const deadline = Date.now() + options.timeoutMs;
   for (;;) {
     const result = await ch.query({
       query: `
@@ -272,26 +298,41 @@ async function waitForMutation(
       }
       return;
     }
-    if (Date.now() >= deadline) {
+    if (Date.now() >= options.deadline) {
       throw new Error(
-        `ClickHouse erasure mutation on ${DSAR_ERASURE_CLICKHOUSE_DATABASE}.${table} did not finish within ${options.timeoutMs}ms`,
+        `ClickHouse erasure mutation on ${DSAR_ERASURE_CLICKHOUSE_DATABASE}.${table} did not finish within the shared ClickHouse purge budget (deadline ${new Date(options.deadline).toISOString()})`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, options.pollIntervalMs));
   }
 }
 
+export interface ClickHousePurgeOptions {
+  /**
+   * TOTAL wait budget for this purge, shared across every table in
+   * `DSAR_ERASURE_CLICKHOUSE_TABLES` — NOT a per-table allotment. This
+   * is Fix Round 2's actual fix: previously each table got its own
+   * full `DSAR_ERASURE_MUTATION_WAIT_TIMEOUT_MS`, so the worst case
+   * scaled linearly with the table count (5 x 60s = 300s, exactly
+   * `DSAR_CLAIM_STALE_RUNNING_MS` with zero margin). A single shared
+   * budget means a sixth table can never push the worst case past this
+   * one constant.
+   */
+  totalBudgetMs: number;
+  pollIntervalMs: number;
+}
+
 /**
  * Submits `ALTER TABLE ... DELETE WHERE subscriberId = ?` against
  * every table in `DSAR_ERASURE_CLICKHOUSE_TABLES`, then waits for
- * every submitted mutation to finish. See the module doc for why all
- * five are submitted up front rather than one at a time, and why
- * "submitted" is never treated as "complete".
+ * every submitted mutation to finish against ONE shared deadline. See
+ * the module doc for why all five are submitted up front rather than
+ * one at a time, and why "submitted" is never treated as "complete".
  */
 export async function purgeSubscriberFromClickHouseTables(
   subscriberId: string,
-  options: MutationWaitOptions = {
-    timeoutMs: DSAR_ERASURE_MUTATION_WAIT_TIMEOUT_MS,
+  options: ClickHousePurgeOptions = {
+    totalBudgetMs: DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS,
     pollIntervalMs: DSAR_ERASURE_MUTATION_POLL_INTERVAL_MS,
   },
 ): Promise<void> {
@@ -304,8 +345,17 @@ export async function purgeSubscriberFromClickHouseTables(
     });
   }
 
+  // ONE deadline, computed ONCE here, shared by every waitForMutation
+  // call below — this is what makes options.totalBudgetMs a TOTAL
+  // rather than a per-table timeout. Each wait is bounded by whatever
+  // of the budget remains when its turn comes, not by a fresh
+  // allotment of its own.
+  const deadline = Date.now() + options.totalBudgetMs;
   for (const table of DSAR_ERASURE_CLICKHOUSE_TABLES) {
-    await waitForMutation(ch, table, subscriberId, options);
+    await waitForMutation(ch, table, subscriberId, {
+      deadline,
+      pollIntervalMs: options.pollIntervalMs,
+    });
   }
 }
 

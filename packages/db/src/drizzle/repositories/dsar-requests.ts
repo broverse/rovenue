@@ -120,19 +120,85 @@ export async function createDsarRequest(
 // "was the claimant a worker that crashed, or one still legitimately
 // working" question, and both are already argued elsewhere in this
 // codebase to exceed the slowest realistic handler run by a wide margin.
-// For DSAR specifically: the erasure worker's own longest bounded step
-// (`DSAR_ERASURE_MUTATION_WAIT_TIMEOUT_MS`, dsar-erasure.ts) times out at
-// 60s, so a healthy erasure run finishes in well under two minutes; a
+//
+// For DSAR specifically — Fix Round 2 (this file's own history has two
+// people re-deriving this wrong, so the number is pinned here instead of
+// left to a comment someone has to re-check by hand):
+//
+// An EARLIER version of this comment quoted the erasure worker's
+// single-mutation timeout (60s) as if it were the job's longest bounded
+// step. That was already false when it was written: the ClickHouse table
+// list the worker purges (`DSAR_ERASURE_CLICKHOUSE_TABLES`,
+// apps/api/src/workers/dsar-erasure.ts) had grown from the task spec's
+// two tables to five, and `purgeSubscriberFromClickHouseTables` waited
+// for each table's mutation with its OWN independent 60s budget — so the
+// real worst case was 5 x 60s = 300000ms, exactly equal to this constant
+// with ZERO margin, before even counting the Postgres anonymisation,
+// audit rows, or the five mutation submissions themselves. The fix is
+// `purgeSubscriberFromClickHouseTables` sharing ONE total wait budget
+// across every table instead of giving each its own — see
+// `DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS` immediately below,
+// which is owned HERE (not in dsar-erasure.ts) specifically so this
+// threshold can be defined as a sum instead of a re-typed number: a
+// future change to the purge budget moves this threshold with it
+// automatically, and a sixth ClickHouse table added to that worker's
+// list can never silently push the real worst case past what this
+// threshold assumes, because the worst case no longer scales with the
+// table count at all.
+//
+// `DSAR_CLAIM_STALE_RUNNING_MARGIN_MS` covers everything in a healthy
+// erasure run OUTSIDE that ClickHouse wait — the Postgres
+// `anonymizeSubscriber` write and its audit row, the five `ALTER TABLE
+// ... DELETE` submission round-trips (fast HTTP calls, not the wait
+// itself), and the final complete/audit transaction — plus slack so a
+// healthy run never realistically approaches the combined threshold. A
 // healthy export is a single subscriber's own data (never a bulk/tenant
-// export), not the kind of job expected to run for minutes. Five minutes
-// is comfortably above either's realistic runtime, so it cannot steal a
-// row from a worker that is still genuinely in flight — while staying
-// below the DSAR queues' own cumulative BullMQ backoff window before the
-// final retry attempt (30s+60s+120s+240s = 450s, from
+// export), so it finishes in a small fraction of either number.
+//
+// The resulting threshold (240s) stays comfortably below the DSAR
+// queues' own cumulative BullMQ backoff window before the final retry
+// attempt (30s+60s+120s+240s = 450s, from
 // `DSAR_JOB_ATTEMPTS`/`DSAR_JOB_BACKOFF_MS` in apps/api/src/queues/dsar.ts),
-// so a genuinely wedged row gets reclaimed by a retry before the job's
-// attempts are exhausted rather than staying wedged forever.
-export const DSAR_CLAIM_STALE_RUNNING_MS = 5 * 60_000;
+// so a genuinely wedged row still gets reclaimed by a retry before the
+// job's attempts are exhausted rather than staying wedged forever.
+
+/**
+ * The TOTAL wait budget `purgeSubscriberFromClickHouseTables`
+ * (apps/api/src/workers/dsar-erasure.ts) shares across every table in
+ * `DSAR_ERASURE_CLICKHOUSE_TABLES` — a single deadline computed once per
+ * purge, not a fresh budget per table. Owned here rather than in
+ * dsar-erasure.ts: apps/api depends on packages/db, never the reverse, so
+ * `DSAR_CLAIM_STALE_RUNNING_MS` below can only derive from this value
+ * (rather than re-stating it) if it lives on this side of that boundary.
+ * apps/api imports this constant (`drizzle.dsarRequestRepo
+ * .DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS`) as the default total
+ * budget for that purge, so the two numbers cannot drift apart.
+ *
+ * 90s: 1.5x the previous single-table 60s figure, to absorb realistic
+ * contention between mutations ClickHouse now runs CONCURRENTLY (all
+ * five DELETEs are submitted up front — see dsar-erasure.ts's module
+ * doc), while staying a single constant that does not grow with the
+ * table count.
+ */
+export const DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS = 90_000;
+
+/**
+ * Slack added on top of `DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS` to
+ * get `DSAR_CLAIM_STALE_RUNNING_MS`. See the module doc above for what it
+ * covers.
+ */
+export const DSAR_CLAIM_STALE_RUNNING_MARGIN_MS = 150_000;
+
+// Worst case this constant assumes: 90s (ClickHouse purge, shared total)
+// + 150s (everything else, argued above) = 240s. That is >1.6x the purge
+// budget alone, and the combined 240s stays well under the 450s BullMQ
+// backoff window checked above. Expressed as a sum of two named
+// constants, not a re-typed literal, so raising the purge budget without
+// revisiting this line is structurally impossible — see
+// `dsar-requests.integration.test.ts`'s (or the sibling unit test's) pin
+// on this exact relationship.
+export const DSAR_CLAIM_STALE_RUNNING_MS =
+  DSAR_ERASURE_CLICKHOUSE_PURGE_TOTAL_BUDGET_MS + DSAR_CLAIM_STALE_RUNNING_MARGIN_MS;
 
 /**
  * Conditional UPDATE PENDING|stale-RUNNING -> RUNNING. Returns the claimed
