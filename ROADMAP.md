@@ -1058,20 +1058,39 @@ else in the framework/provider-breadth dimension is done.
 
 ## 11. Docs & developer experience (65 → 95)
 
-- [ ] Quickstart + full API reference per SDK (auto-generated: rustdoc / DocC / Dokka / TypeDoc)
-      — the reference half SHIPPED 2026-09-06: `.github/workflows/sdk-docs.yml` generates all six
-      (rustdoc, DocC, Dokka, TypeDoc for sdk-rn AND sdk-web, dartdoc) on runners that can actually
-      build each toolchain and uploads them as artifacts; `apps/docs/Dockerfile` downloads them
-      into `apps/docs/public/api/<sdk>/` before `react-router build` and FAILS the image build by
-      name if one is missing (never a silent 404); `release-images.yml`'s `rovenue-docs` build was
-      split out to depend on that generation step. The hub page
-      (`apps/docs/content/docs/reference/sdk-reference.mdx`) renders one card per SDK, linking the
-      generated site when present and saying plainly when it wasn't generated in this build — a
-      dead-simple `docs:sdk-ref` local build (missing DocC/Dokka toolchains) now shows exactly that
-      state instead of a broken link. Still not done: no per-SDK quickstart ending at a working
-      purchase has been written (earlier tasks only corrected existing platform pages; `web.mdx`
-      doesn't mention purchase at all). Coverage is still floor-level per SDK (25–86%, see
-      `scripts/sdk-doc-coverage.json`) — raising it is a separate, not-yet-scheduled item.
+- [x] Quickstart + full API reference per SDK (auto-generated: rustdoc / DocC / Dokka / TypeDoc)
+      — shipped 2026-09-06. Six SDKs, not five — `@rovenue/web-sdk` was omitted from the original
+      plan and added: `.github/workflows/sdk-docs.yml` generates all six (rustdoc, DocC, Dokka,
+      TypeDoc for sdk-rn AND sdk-web, dartdoc) on runners that can actually build each toolchain
+      and verified producing real output (rustdoc 402 files, DocC 6082, Dokka 902, TypeDoc-rn 52,
+      TypeDoc-web 35, dartdoc 348); `apps/docs/Dockerfile` downloads them into
+      `apps/docs/public/api/<sdk>/` before `react-router build` and FAILS the image build by name
+      if one is missing (never a silent 404); served at `docs.rovenue.app/api/<sdk>/`. A quickstart
+      was written on each of the five platform pages, each verified to match its example app's real
+      code (`examples/*`) rather than invented — `web.mdx` is the one exception by necessity: the
+      web SDK has no `purchase()`, so its "quickstart" ends at a Stripe Checkout redirect instead
+      of a native purchase.
+
+      **This is a fully-documented FAÇADE over a partially-documented type layer — not full
+      coverage.** Façade doc coverage was raised across the five SDKs whose façade doc-pass was in
+      scope (core-rs, sdk-swift, sdk-kotlin, sdk-rn, sdk-flutter — ~96 methods total); sdk-web's
+      façade doc-pass was explicitly out of scope and sits at its measured floor alongside
+      everything else. Across all six SDKs, roughly 1,390 DTO fields, enum variants and internal
+      plumbing remain undocumented — that's its own, not-yet-scheduled ROADMAP item. A doc-coverage
+      ratchet (`scripts/sdk-doc-coverage.mjs` + `.json`) now fails CI if any SDK's measured
+      documented-symbol density drops below its recorded floor: core-rs 32.8%, sdk-swift 25.4%,
+      sdk-kotlin 32.1%, sdk-rn 65.5%, sdk-web 38.8%, sdk-flutter 85.9%.
+
+      Writing the quickstarts against the real example apps (rather than trusting the existing
+      platform pages) surfaced real, pre-existing doc bugs: fictional purchase-cancel/pending error
+      types on the iOS/Android/RN platform pages (`.purchaseCancelled`/`.purchasePending` etc. —
+      none of those names exist in any SDK; the real shape is one error type with an `ErrorKind`),
+      a `debug: boolean` config field that was removed when logging moved to `logLevel` but still
+      documented on five platform pages plus the `methods.mdx`/`types.mdx` reference (all now
+      fixed), Android `configure()` examples missing `context` (so purchases would fail with
+      `STORE_PROBLEM` while `configure()` itself appeared to succeed), and a Flutter change-listener
+      example that called `refreshEntitlements()` from inside `onChange` — the exact re-emit
+      infinite-loop footgun the SDK's own doc comment warns against.
 - [x] "Migrate from RevenueCat" and "Migrate from Adapty" guides — strategically the two
       most valuable docs (correction: the RevenueCat guide already existed as a lean
       concept-mapping page before this line was written — it was never unwritten, only

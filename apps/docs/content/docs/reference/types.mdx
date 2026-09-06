@@ -22,7 +22,7 @@ The configuration object passed to [`configure()`](/docs/reference/methods#confi
 type RovenueConfig = {
   apiKey: string;
   baseUrl?: string;
-  debug?: boolean;
+  logLevel?: 'off' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   appVersion?: string;
 };
 ```
@@ -33,7 +33,7 @@ type RovenueConfig = {
 |-------|------|----------|-------------|
 | `apiKey` | `string` | Yes | Your project's public API key. Prefix `rov_pub_`. Obtain it from the Rovenue dashboard → API Keys. |
 | `baseUrl` | `string` | No | API endpoint URL. Defaults to the hosted endpoint `https://api.rovenue.io`; override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
-| `debug` | `boolean` | No | When `true`, the SDK emits verbose log entries. Defaults to `false`. |
+| `logLevel` | `'off' \| 'error' \| 'warn' \| 'info' \| 'debug' \| 'trace'` | No | Verbosity of SDK logs. Defaults to `'warn'` — turn up to `'info'`/`'debug'` locally, never ship `'debug'`/`'trace'` in production. |
 | `appVersion` | `string` | No | App version string forwarded to the server. Defaults to the value reported by the OS. |
 
 **Returned by / used by:** [`configure()`](/docs/reference/methods#configuration)
@@ -45,7 +45,7 @@ import { Rovenue } from '@rovenue/react-native-sdk';
 
 Rovenue.configure({
   apiKey: 'rov_pub_…',
-  debug: __DEV__,
+  logLevel: 'info',
   appVersion: '3.1.0',
   // baseUrl: 'https://api.acme.com', // optional — only when self-hosting
 });
@@ -980,7 +980,7 @@ type LogEntry = {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `level` | `'debug' \| 'info' \| 'warn' \| 'error'` | Severity level. `debug` entries are only emitted when `debug: true` is set in [`RovenueConfig`](#rovenueconfig). |
+| `level` | `'debug' \| 'info' \| 'warn' \| 'error'` | Severity level. `debug` entries are only emitted when `logLevel` is set to `'debug'` or `'trace'` in [`RovenueConfig`](#rovenueconfig). |
 | `message` | `string` | Human-readable log message from the SDK. |
 | `timestamp` | `string` | ISO 8601 timestamp of when the entry was generated (e.g. `"2026-06-15T10:30:00.000Z"`). |
 
