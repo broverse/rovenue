@@ -419,6 +419,71 @@ rootProject.name = 'sampleApp'
       /could not safely locate the end/i,
     );
   });
+
+  // Round-3-review regression coverage. The scanner shipped in that round
+  // routed unhandled constructs to AMBIGUOUS_HEADER only when the overall
+  // scan ran off the end of the content with braces still open — but a
+  // stray `}` inside an UNHANDLED construct (one skipOpaqueSpan doesn't
+  // recognize at all) DECREMENTS the depth counter just like a real
+  // structural brace, so the scan can terminate SUCCESSFULLY at depth 0 —
+  // at a confidently WRONG offset, with nothing ever throwing. The
+  // reviewer demonstrated this end-to-end on three constructs, each
+  // producing `includeBuild {...}` spliced into the middle of a literal.
+  // The fix inverts the default: skipOpaqueSpan now returns a distinct
+  // UNHANDLED_CONSTRUCT signal the INSTANT it meets one of these forms,
+  // propagated as an immediate refusal rather than left to fall through
+  // to brace-counting. These three fixtures are the reviewer's exact
+  // constructs, each embedded in a real-shaped pluginManagement+plugins
+  // header so both AMBIGUOUS_HEADER and the mod's throw path are covered.
+  describe("unhandled constructs refuse immediately, not just at end-of-content", () => {
+    const wrap = (statement: string) => `pluginManagement {
+  ${statement}
+  repositories { google() }
+}${HEADER_TAIL}`;
+
+    it("a Groovy slashy /.../ literal containing a stray `}` refuses", () => {
+      const fixture = wrap("def re = /some } stray brace/");
+      expect(findInsertionPointAfterLeadingSettingsHeader(fixture)).toBe(AMBIGUOUS_HEADER);
+    });
+
+    it("a Groovy dollar-slashy $/.../$ literal containing a stray `}` refuses", () => {
+      const fixture = wrap("def re = $/some } stray brace/$");
+      expect(findInsertionPointAfterLeadingSettingsHeader(fixture)).toBe(AMBIGUOUS_HEADER);
+    });
+
+    it("a GString interpolation with a nested SAME-delimiter quote (the JSDoc's own cited example) refuses", () => {
+      // This is deliberately the exact form cited as an unhandled edge
+      // case: `${...}` whose interpolated expression opens a nested
+      // string reusing the enclosing `"` delimiter, without ever
+      // legitimately closing the interpolation or the outer string.
+      const fixture = wrap(`def x = "computed: \${foo("} tail"`);
+      expect(findInsertionPointAfterLeadingSettingsHeader(fixture)).toBe(AMBIGUOUS_HEADER);
+    });
+
+    it.each([
+      ["slashy", "def re = /some } stray brace/"],
+      ["dollar-slashy", "def re = $/some } stray brace/$"],
+      ["nested-same-delimiter-quote GString", `def x = "computed: \${foo("} tail"`],
+    ])(
+      "withRovenueAndroid's settingsGradle mod throws a diagnosable error for %s, rather than splicing includeBuild into the literal",
+      async (_label, statement) => {
+        const fixture = wrap(statement);
+        const cfg = withRovenueAndroid(makeFakeConfig(), undefined);
+        const patchedOrError = await runSettingsGradleMod(cfg, fixture).then(
+          (v) => ({ resolved: v as string }),
+          (e) => ({ rejected: e as Error }),
+        );
+        expect("rejected" in patchedOrError).toBe(true);
+        if ("rejected" in patchedOrError) {
+          expect(patchedOrError.rejected.message).toMatch(/could not safely locate the end/i);
+          // The message must actually tell the consumer what to do, not
+          // just that something failed.
+          expect(patchedOrError.rejected.message).toContain("includeBuild(");
+          expect(patchedOrError.rejected.message).toContain("dependencySubstitution");
+        }
+      },
+    );
+  });
 });
 
 describe("withRovenueAndroid — app/build.gradle", () => {
