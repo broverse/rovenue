@@ -46,11 +46,15 @@ export const ERROR_CATALOG: Record<keyof typeof ERROR_CODE, ErrorCatalogEntry> =
   // ---- Generic / transport-level ---------------------------------
   HTTP_ERROR: {
     code: ERROR_CODE.HTTP_ERROR,
+    // No single status is honest here — see the summary. 409 is the plurality
+    // (dozens of bare `new HTTPException(409, ...)` call sites with no
+    // `cause`, roughly 4x the next most common), not "the" status this code
+    // means. Do not read this field as diagnostic for this entry.
     httpStatus: 409,
     summary:
-      "The catch-all `middleware/error.ts` falls back to when an HTTPException's status isn't one of the specifically-mapped ones (400/401/403/404/429/501). Its one concrete producer today is the refund routes (dashboard/subscriptions.ts and dashboard/transactions.ts) returning 409 for 'this purchase was already refunded'.",
+      "`mapHttpStatus` in middleware/error.ts returns this for EVERY HTTPException whose status is not one of the six explicitly mapped ones (400/401/403/404/429/501, which each get their own specific code) and whose `cause` isn't a recognized ERROR_CODE. In practice this is dozens of call sites across apps/api/src — invitations, paywalls, imports, products, cohorts, funnel-payment, copilot credentials, Stripe integration — throwing bare `new HTTPException(status, { message })` with no `cause` at a status outside that list of six. A repo-wide scan of every such call site found this actually happening at status 409, 410, 412, 413, 422, 500, 502, and 503, with 409 the plurality (roughly four times the next most common). This code is therefore NOT a signal of any single failure class or status the way every other code in this catalog is — it is what's left over. Notably, it includes 500s: `dashboard/invitations.ts`'s 'just-created invitation vanished' check throws a bare `HTTPException(500, ...)`, which arrives on the wire as HTTP_ERROR, not INTERNAL_ERROR (see that entry).",
     resolution:
-      "Read `message` for the actual cause — this code by itself only tells you the request conflicted with current state. For the refund case specifically, treat it as terminal: don't retry, the purchase is already refunded.",
+      "Do not branch on this code alone — it groups together conflicts, preconditions, payload-size rejections, upstream failures, and even some 500s that all happen to route through an HTTPException without a typed `cause`. Read the actual HTTP status and `message` on the response to know what really happened; if you need to react programmatically to a specific one of these cases, ask for it to be promoted to its own typed code (give the throw site a `cause: ERROR_CODE.<NEW_CODE>`) rather than parsing `message`.",
   },
   VALIDATION_ERROR: {
     code: ERROR_CODE.VALIDATION_ERROR,
@@ -64,9 +68,9 @@ export const ERROR_CATALOG: Record<keyof typeof ERROR_CODE, ErrorCatalogEntry> =
     code: ERROR_CODE.INTERNAL_ERROR,
     httpStatus: 500,
     summary:
-      "The final fallback in middleware/error.ts for any thrown value that is neither an HTTPException nor a ZodError — an unexpected bug, not a modeled failure mode. The real error is logged server-side; the client only ever sees a generic message.",
+      "The final fallback in middleware/error.ts for any thrown value that is neither an HTTPException nor a ZodError — an unexpected bug, not a modeled failure mode. The real error is logged server-side; the client only ever sees a generic message. IMPORTANT: not every 500 arrives as this code — a bare `new HTTPException(500, { message })` with no `cause` (e.g. dashboard/invitations.ts's 'just-created invitation vanished' check) falls through to `HTTP_ERROR` instead, because middleware/error.ts's specific-status map doesn't include 500. Don't assume `error.code === 'INTERNAL_ERROR'` on every 500 response — check `HTTP_ERROR` too.",
     resolution:
-      "Retry with backoff once (some causes are transient — a dropped DB connection, an unhandled edge case under load), then stop and report it if it persists. There is nothing the caller can do to avoid triggering this; it means the server hit a case it didn't expect.",
+      "Retry with backoff once (some causes are transient — a dropped DB connection, an unhandled edge case under load), then stop and report it if it persists. There is nothing the caller can do to avoid triggering this; it means the server hit a case it didn't expect. If you're specifically trying to catch all server-side failures, match on the HTTP status (>= 500) rather than this code alone, since some 500s arrive as HTTP_ERROR.",
   },
   UNAUTHORIZED: {
     code: ERROR_CODE.UNAUTHORIZED,
