@@ -784,6 +784,12 @@ public final class Rovenue: @unchecked Sendable {
         return try setFallbackPlacements(json: json)
     }
 
+    /// Record that `paywall` was presented to the user. Fire-and-forget:
+    /// builds the `paywall_view` envelope and enqueues it onto the durable,
+    /// process-kill-safe paywall event queue (not the plain `track()` path),
+    /// so the event survives an app kill before the next drain. Call this
+    /// yourself only for a custom-rendered paywall — the built-in
+    /// `RovenuePaywallView` renderer already emits it automatically.
     public func logPaywallShown(_ paywall: Paywall) {
         guard let envelope = paywallViewEnvelope(
             paywall: paywall,
@@ -797,6 +803,11 @@ public final class Rovenue: @unchecked Sendable {
         }
     }
 
+    /// Record that `paywall` was dismissed without completing a purchase.
+    /// Same delivery contract as `logPaywallShown(_:)` — enqueued
+    /// (`paywall_close`) onto the durable queue, fire-and-forget. Call it
+    /// yourself only for a custom-rendered paywall; `RovenuePaywallView`
+    /// already emits it on dismiss.
     public func logPaywallClosed(_ paywall: Paywall) {
         guard let envelope = paywallCloseEnvelope(
             paywall: paywall,
@@ -937,6 +948,12 @@ public final class Rovenue: @unchecked Sendable {
         core.installId()
     }
 
+    /// Whether this install has already successfully claimed a funnel token
+    /// (deep-link / QR-code / email attribution). A synchronous local read
+    /// backed by persisted install state — no network call. Use this to gate
+    /// first-launch attribution orchestration so `claimFunnelToken`/
+    /// `claimInstall`/`claimViaEmail` only run once per install, even across
+    /// app restarts.
     public func hasResolvedFunnelClaim() -> Bool {
         core.hasResolvedFunnelClaim()
     }

@@ -6,9 +6,9 @@
     "total": 619
   },
   "sdk-swift": {
-    "floor": 25,
+    "floor": 25.4,
     "measuredAt": "2026-09-06",
-    "documented": 174,
+    "documented": 177,
     "total": 697
   },
   "sdk-kotlin": {
