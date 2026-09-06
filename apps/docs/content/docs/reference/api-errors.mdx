@@ -1,0 +1,496 @@
+---
+title: API Errors
+description: Every error code the API can return, documented by its exact wire value.
+---
+
+{/*
+  GENERATED FILE — DO NOT EDIT BY HAND.
+  Source: packages/shared/src/error-catalog.ts
+  Regenerate: pnpm --filter @rovenue/docs generate:errors
+  (also runs automatically as part of this app's `build` script)
+*/}
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Every Rovenue API response is either `{ data: T }` or `{ error: { code, message } }`. This page documents every value `error.code` can take — the exact string returned on the wire, alongside the HTTP status it ships with, what it means, and what to do about it.
+
+Looking for **SDK** errors instead — the `RovenueError`/`RovenueException` `kind` thrown by the React Native, Swift, and Kotlin SDKs? See [SDK Errors](/docs/reference/errors); this page is the *API's* `{ error: { code, message } }` envelope, a different (and larger) set aimed at anyone calling the HTTP API directly rather than through an SDK.
+
+<Callout type="warn">
+Five codes are lowercase on the wire even though their name in the API's source is SCREAMING_CASE: `asset_in_use`, `asset_missing`, `purchase_not_paid`, `apple_offer_signing_unavailable`, `apple_offer_signing_failed`. Match on the exact string in the table below — not an uppercased guess.
+</Callout>
+
+---
+
+## Quick reference
+
+| Code | HTTP status |
+|------|-------------|
+| [`HTTP_ERROR`](#http_error) | `409` |
+| [`VALIDATION_ERROR`](#validation_error) | `400` |
+| [`INTERNAL_ERROR`](#internal_error) | `500` |
+| [`UNAUTHORIZED`](#unauthorized) | `401` |
+| [`FORBIDDEN`](#forbidden) | `403` |
+| [`NOT_FOUND`](#not_found) | `404` |
+| [`NOT_IMPLEMENTED`](#not_implemented) | `501` |
+| [`RATE_LIMITED`](#rate_limited) | `429` |
+| [`ROVI_NOT_CONFIGURED`](#rovi_not_configured) | `412` |
+| [`ROVI_QUOTA_EXCEEDED`](#rovi_quota_exceeded) | `429` |
+| [`BEARER_REQUIRED`](#bearer_required) | `401` |
+| [`INVALID_API_KEY`](#invalid_api_key) | `401` |
+| [`INVALID_API_KEY_FORMAT`](#invalid_api_key_format) | `401` |
+| [`API_KEY_KIND_MISMATCH`](#api_key_kind_mismatch) | `403` |
+| [`STORE_NOT_CONFIGURED`](#store_not_configured) | `400` |
+| [`STORE_API_ERROR`](#store_api_error) | `502` |
+| [`APP_STORE_LOOKUP_FAILED`](#app_store_lookup_failed) | `422` |
+| [`APP_NOT_FOUND`](#app_not_found) | `422` |
+| [`apple_offer_signing_unavailable`](#apple_offer_signing_unavailable) | `400` |
+| [`apple_offer_signing_failed`](#apple_offer_signing_failed) | `400` |
+| [`GENERATION_INVALID`](#generation_invalid) | `422` |
+| [`TRANSLATION_INVALID`](#translation_invalid) | `422` |
+| [`PREVIEW_SESSION_INVALID`](#preview_session_invalid) | `404` |
+| [`FONT_FORMAT_UNSUPPORTED`](#font_format_unsupported) | `400` |
+| [`FONT_FILE_TOO_LARGE`](#font_file_too_large) | `400` |
+| [`FONT_QUOTA_EXCEEDED`](#font_quota_exceeded) | `400` |
+| [`FONT_FAMILY_NOT_FOUND`](#font_family_not_found) | `404` |
+| [`ASSET_FORMAT_UNSUPPORTED`](#asset_format_unsupported) | `400` |
+| [`ASSET_FILE_TOO_LARGE`](#asset_file_too_large) | `413` |
+| [`ASSET_QUOTA_EXCEEDED`](#asset_quota_exceeded) | `402` |
+| [`ASSET_STORAGE_UNAVAILABLE`](#asset_storage_unavailable) | `503` |
+| [`ASSET_INVALID_NAME`](#asset_invalid_name) | `400` |
+| [`ASSET_PROCESSING_FAILED`](#asset_processing_failed) | `400` |
+| [`asset_in_use`](#asset_in_use) | `409` |
+| [`asset_missing`](#asset_missing) | `400` |
+| [`IMPORT_FILE_TOO_LARGE`](#import_file_too_large) | `413` |
+| [`IMPORT_STORAGE_UNAVAILABLE`](#import_storage_unavailable) | `503` |
+| [`purchase_not_paid`](#purchase_not_paid) | `400` |
+| [`PAYLOAD_TOO_LARGE`](#payload_too_large) | `413` |
+| [`STRIPE_NOT_CONNECTED`](#stripe_not_connected) | `503` |
+| [`STRIPE_CUSTOMER_NOT_FOUND`](#stripe_customer_not_found) | `404` |
+| [`RETURN_URL_NOT_ALLOWED`](#return_url_not_allowed) | `400` |
+
+---
+
+## Codes
+
+### `HTTP_ERROR`
+
+**HTTP status:** `409`
+
+<Callout type="warn">
+`mapHttpStatus` in middleware/error.ts returns this for EVERY HTTPException whose status is not one of the six explicitly mapped ones (400/401/403/404/429/501, which each get their own specific code) and whose `cause` isn't a recognized ERROR_CODE. In practice this is dozens of call sites across apps/api/src — invitations, paywalls, imports, products, cohorts, funnel-payment, copilot credentials, Stripe integration — throwing bare `new HTTPException(status, { message })` with no `cause` at a status outside that list of six. A repo-wide scan of every such call site found this actually happening at status 409, 410, 412, 413, 422, 500, 502, and 503, with 409 the plurality (roughly four times the next most common). This code is therefore NOT a signal of any single failure class or status the way every other code in this catalog is — it is what's left over. Notably, it includes 500s: `dashboard/invitations.ts`'s 'just-created invitation vanished' check throws a bare `HTTPException(500, ...)`, which arrives on the wire as HTTP_ERROR, not INTERNAL_ERROR (see that entry).
+</Callout>
+
+**What to do:** Do not branch on this code alone — it groups together conflicts, preconditions, payload-size rejections, upstream failures, and even some 500s that all happen to route through an HTTPException without a typed `cause`. Read the actual HTTP status and `message` on the response to know what really happened; if you need to react programmatically to a specific one of these cases, ask for it to be promoted to its own typed code (give the throw site a `cause: ERROR_CODE.<NEW_CODE>`) rather than parsing `message`.
+
+---
+
+### `VALIDATION_ERROR`
+
+**HTTP status:** `400`
+
+The default for a rejected HTTPException(400, ...) and for any unhandled ZodError (body/query/param schema failure) — by far the most common error code in the API. It is also returned at 422 from the two refund routes for 'this store doesn't support refunding this purchase' (apple_unsupported) or 'no store reference to refund against' (missing_store_ref); 400 is the primary status.
+
+**What to do:** Fix the request: re-check required fields, types, and enum values against the route's schema in `message`. This is a client-side mistake, not a transient failure — retrying unchanged will fail again.
+
+---
+
+### `INTERNAL_ERROR`
+
+**HTTP status:** `500`
+
+<Callout type="warn">
+The final fallback in middleware/error.ts for any thrown value that is neither an HTTPException nor a ZodError — an unexpected bug, not a modeled failure mode. The real error is logged server-side; the client only ever sees a generic message. IMPORTANT: not every 500 arrives as this code — a bare `new HTTPException(500, { message })` with no `cause` (e.g. dashboard/invitations.ts's 'just-created invitation vanished' check) falls through to `HTTP_ERROR` instead, because middleware/error.ts's specific-status map doesn't include 500. Don't assume `error.code === 'INTERNAL_ERROR'` on every 500 response — check `HTTP_ERROR` too.
+</Callout>
+
+**What to do:** Retry with backoff once (some causes are transient — a dropped DB connection, an unhandled edge case under load), then stop and report it if it persists. There is nothing the caller can do to avoid triggering this; it means the server hit a case it didn't expect. If you're specifically trying to catch all server-side failures, match on the HTTP status (>= 500) rather than this code alone, since some 500s arrive as HTTP_ERROR.
+
+---
+
+### `UNAUTHORIZED`
+
+**HTTP status:** `401`
+
+The status→code mapping's answer for any HTTPException(401, ...) whose `cause` isn't a recognized ERROR_CODE — which today is every 401 in the codebase, since none of the dedicated auth codes (BEARER_REQUIRED, INVALID_API_KEY, INVALID_API_KEY_FORMAT) are actually wired up. Covers a missing/malformed Authorization header and an unknown, revoked, or expired API key alike.
+
+**What to do:** Re-check the Authorization header is present as `Bearer <key>` and that the key itself is current in the dashboard (not revoked or expired). There is currently no way to tell these apart from the code alone — read `message` for which one it was.
+
+---
+
+### `FORBIDDEN`
+
+**HTTP status:** `403`
+
+The status→code mapping's answer for any HTTPException(403, ...) without a recognized `cause` — the authenticated caller is real but not allowed to do this. Producers include a public key used where a secret key is required (`requireSecretKey`), a public/secret key presented where the route demanded the other kind, and a dashboard user's role lacking the capability the route checks (`assertProjectCapability`/`assertProjectAccess`).
+
+**What to do:** For SDK callers: switch to a secret key for server-to-server endpoints (credit grants and similar) — never ship a secret key in a client app. For dashboard callers: the signed-in user's project role doesn't include the needed capability; ask a project owner to grant it.
+
+---
+
+### `NOT_FOUND`
+
+**HTTP status:** `404`
+
+Returned both by the generic status→code mapping for any bare HTTPException(404, ...) and directly by many routes for 'no row with that id in this project' (subscriptions, transactions, assets, font faces, projects). It never distinguishes 'never existed' from 'exists in a different project' — both look identical to avoid leaking cross-project existence.
+
+**What to do:** Double-check the id and that it belongs to the project the request is authenticated against — a valid id for someone else's project 404s exactly like a nonexistent one. Don't treat this as retryable.
+
+---
+
+### `NOT_IMPLEMENTED`
+
+**HTTP status:** `501`
+
+Reserved slot in the status→code mapping for an HTTPException(501, ...); at the time of writing no route in apps/api/src throws status 501, so this code has never actually been observed on the wire. It exists so a future not-yet-built endpoint stub has a machine-readable code to return instead of a bare 500.
+
+**What to do:** If you see this in practice, treat it the same as a permanent client-side dead end — the endpoint exists in the route table but its implementation isn't live yet. Don't retry; check the changelog for when it ships.
+
+---
+
+### `RATE_LIMITED`
+
+**HTTP status:** `429`
+
+Thrown by the shared `endpointRateLimit`/`apiKeyRateLimit` middleware (middleware/rate-limit.ts) whenever a caller exceeds a route's per-minute cap — asset uploads, the paywall preview poll, and general API-key traffic are all gated this way. `ROVI_QUOTA_EXCEEDED` below is a distinct, unrelated 429 for a different limit (monthly AI usage, not request rate).
+
+**What to do:** Back off and retry after a short delay; the response should carry standard rate-limit headers to tell you how long. If this fires under normal usage, the per-minute cap for that route is probably too low for your traffic pattern — reduce polling frequency or batch requests.
+
+---
+
+### `ROVI_NOT_CONFIGURED`
+
+**HTTP status:** `412`
+
+The project has no working AI provider for Rovi (copilot chat, AI paywall generation, and auto-translate all route through the same `resolveProviderForProject`): no BYOK credentials saved for the project AND no server-wide default provider/API key configured in env either.
+
+**What to do:** An operator must fix configuration: either save BYOK provider credentials for this project in the dashboard, or set `ROVI_DEFAULT_PROVIDER`/`ROVI_DEFAULT_API_KEY` (and friends) in the API's environment. A caller cannot work around this by retrying.
+
+---
+
+### `ROVI_QUOTA_EXCEEDED`
+
+**HTTP status:** `429`
+
+The project's monthly Rovi usage (message count or token count, whichever the tier caps first) has been exhausted, per `evaluateQuota`/`resolveTier` in middleware/rovi-quota-guard.ts. The response body carries `tier`, `exceeded`, and `resetAt` alongside the envelope for a client to show a real countdown.
+
+**What to do:** Wait until `resetAt` (the first of next month, UTC) or upgrade the project's billing tier for a higher cap. Retrying before the reset always fails identically — this is not a transient rate limit.
+
+---
+
+### `BEARER_REQUIRED`
+
+**HTTP status:** `401`
+
+Named for 'the Authorization header is missing or not a Bearer token', which `middleware/api-key-auth.ts` does check for — but that check throws a bare `HTTPException(401, { message: 'Bearer token required' })` with no `cause`, so it resolves through the generic status mapping to UNAUTHORIZED on the wire, never to this code. No current call site sets `cause: ERROR_CODE.BEARER_REQUIRED`.
+
+**What to do:** Do not match on this code today — a missing/malformed Authorization header currently arrives as the generic UNAUTHORIZED (401) instead. If you need to detect this specific case, inspect `message` for 'Bearer token required' until the middleware is updated to set the typed cause.
+
+---
+
+### `INVALID_API_KEY`
+
+**HTTP status:** `401`
+
+Named for an API key that doesn't resolve to a live record — unknown, revoked, or expired. `api-key-auth.ts`'s actual check throws a bare `HTTPException(401, { message: 'Invalid or expired API key' })` with no `cause`, so this also resolves to the generic UNAUTHORIZED on the wire. No current call site produces this exact code.
+
+**What to do:** Do not match on this code today — treat any UNAUTHORIZED (401) from a `/v1` route as covering this case, and inspect `message` if you need to distinguish it from a missing header. Rotate the key in the dashboard if it's genuinely invalid or expired.
+
+---
+
+### `INVALID_API_KEY_FORMAT`
+
+**HTTP status:** `401`
+
+Named for a Bearer token that doesn't match either recognized key prefix (`rov_pub_`/`rov_sec_`, via `detectKind`). The actual check in `api-key-auth.ts` throws a bare `HTTPException(401, { message: 'Invalid API key format' })` with no `cause`, so it also resolves to the generic UNAUTHORIZED, never to this code.
+
+**What to do:** Do not match on this code today. Verify the key was copied in full and unmodified from the dashboard — a truncated or hand-edited key is the usual cause of a format mismatch, which currently surfaces as generic UNAUTHORIZED (401).
+
+---
+
+### `API_KEY_KIND_MISMATCH`
+
+**HTTP status:** `403`
+
+Named for presenting a public key where a secret key is required, or vice versa. `api-key-auth.ts`'s `required !== detected` branch throws a bare `HTTPException(403, { message: '<kind> API key required' })` with no `cause`, so it resolves to the generic FORBIDDEN, never to this code; `requireSecretKey` follows the same pattern.
+
+**What to do:** Do not match on this code today — a wrong-kind key currently surfaces as generic FORBIDDEN (403). Read `message` for which kind was required, and use a secret key for server-to-server endpoints (never ship one in a client app) or a public key for SDK/client endpoints.
+
+---
+
+### `STORE_NOT_CONFIGURED`
+
+**HTTP status:** `400`
+
+The dashboard product-catalog lookup (`getStoreCatalog`) has no usable store credentials for the requested platform: Apple App Store Connect creds missing keyId/issuerId/privateKey, or no Google Play service-account credentials saved for the project at all.
+
+**What to do:** An operator must add the missing store credentials for this project in the dashboard (App Store Connect API key, or the Google Play service-account JSON) before the catalog can be fetched. Not retryable without that.
+
+---
+
+### `STORE_API_ERROR`
+
+**HTTP status:** `502`
+
+The store's own API (App Store Connect or Google Play Developer API) returned an error while listing products, fetching a subscription, or looking up a transaction — credentials were valid enough to authenticate, but the upstream call itself failed (rate limit, transient outage, a malformed/unauthorized request Apple or Google rejected).
+
+**What to do:** Retry after a short delay — most causes are transient upstream issues. If it persists, check the store's own status page and verify the configured credentials still have the needed scopes/permissions (an API key that used to work can be revoked or downgraded on Apple/Google's side).
+
+---
+
+### `APP_STORE_LOOKUP_FAILED`
+
+**HTTP status:** `422`
+
+The AI paywall 'import from App Store listing' flow (paywall-ai/app-store-import.ts) called Apple's public iTunes lookup API for the pasted apps.apple.com URL and got a non-OK HTTP response — the lookup service itself failed, not 'no such app'.
+
+**What to do:** Retry — this is usually a transient failure of Apple's public lookup endpoint. If it keeps failing, verify the pasted URL is a real, reachable apps.apple.com listing page.
+
+---
+
+### `APP_NOT_FOUND`
+
+**HTTP status:** `422`
+
+The same App Store import flow got a successful response from Apple's iTunes lookup API, but `resultCount` was zero — the URL parsed as a plausible App Store listing link, but no app exists at that id/bundle in Apple's catalog (removed, region-restricted, or a mistyped id).
+
+**What to do:** Verify the App Store URL points at an app that's actually live in the store, and that the id in it hasn't changed. This is not retryable as-is — a different URL is needed, or build the paywall by hand instead of importing.
+
+---
+
+### `apple_offer_signing_unavailable`
+
+**HTTP status:** `400`
+
+`POST /v1/apple-offer-signature` couldn't load complete Apple credentials for the project (missing private key, keyId, or bundleId) — promotional-offer signing needs the same in-app-purchase signing key used for StoreKit offer signatures, and it isn't fully configured.
+
+**What to do:** An operator must upload the project's Apple in-app-purchase signing key (and confirm keyId/bundleId are set) in the dashboard before this endpoint can sign offers. Not something the SDK caller can fix.
+
+---
+
+### `apple_offer_signing_failed`
+
+**HTTP status:** `400`
+
+Credentials were present, but `signOfferPayload` threw while actually producing the cryptographic signature for the promotional offer — most likely a malformed or corrupted stored private key, since the payload itself is built from validated request fields.
+
+**What to do:** Not retryable by the SDK caller as-is; if this is new, an operator should re-upload the project's Apple in-app-purchase signing key in the dashboard, since the stored key material is likely invalid. If it was working and suddenly isn't, check for a recent credential rotation.
+
+---
+
+### `GENERATION_INVALID`
+
+**HTTP status:** `422`
+
+The Rovi-backed 'generate a paywall from a prompt' flow (paywall-ai/generate.ts) either got back a response it couldn't turn into a valid builder config, or the prompt itself was rejected before ever calling the model. Distinct from `ROVI_NOT_CONFIGURED` (no provider available) and from `STORE_API_ERROR`-style upstream failures.
+
+**What to do:** Rephrase the prompt and try again — this usually means the request was too vague or ambiguous for the model to produce a usable paywall tree, not a transient failure. If it repeats on a clearly reasonable prompt, it may indicate a real generation-pipeline bug worth reporting.
+
+---
+
+### `TRANSLATION_INVALID`
+
+**HTTP status:** `422`
+
+The Rovi auto-translate flow rejected the REQUEST itself — an empty translation batch, more keys than the per-call cap, or a request to translate a locale into itself. This is distinct from an individual key coming back badly translated: bad-but-present translations return 200 with those keys listed in `rejected`, because the good ones in the same batch are still worth applying.
+
+**What to do:** Fix the request shape: ensure the batch is non-empty, under the per-call key cap, and that source and target locales differ. This is a client-side request problem, not a translation-quality issue — retrying unchanged will fail again.
+
+---
+
+### `PREVIEW_SESSION_INVALID`
+
+**HTTP status:** `404`
+
+By deliberate design, `GET /v1/preview/paywalls/:token` returns this exact code and status for every failure mode — missing, expired, revoked, and garbage tokens are made indistinguishable so a scanning attacker can't use response shape as an oracle to enumerate live preview sessions.
+
+**What to do:** Mint a fresh preview session from the dashboard (`POST /dashboard/projects/:projectId/paywalls/:id/preview-sessions`) and re-scan the QR code — this code never tells you which specific thing was wrong with the old token, by design.
+
+---
+
+### `FONT_FORMAT_UNSUPPORTED`
+
+**HTTP status:** `400`
+
+The uploaded font file's bytes didn't match any allowed font format under `detectFontFormat`'s magic-byte check. This is a shape check on the actual bytes, never the filename — a `.ttf`-named file carrying non-font bytes (or bytes for an unsupported format) triggers this regardless of its extension.
+
+**What to do:** Upload an actual TTF/OTF/WOFF/WOFF2 font file (whichever formats `detectFontFormat` currently allows) — renaming a file's extension does not change how it's detected. Verify the file wasn't corrupted in transfer.
+
+---
+
+### `FONT_FILE_TOO_LARGE`
+
+**HTTP status:** `400`
+
+The uploaded font face exceeds `FONT_FACE_MAX_BYTES`. Returned by two gates that produce the identical code/message on purpose: `hono/body-limit`'s transport-level rejection for a body large enough to exceed even the framing allowance, and the in-handler `file.size` check for the ordinary case where the file itself is just too big.
+
+**What to do:** Compress or subset the font file (e.g. drop unused glyphs/hinting) to fit under the documented per-face size limit before uploading again.
+
+---
+
+### `FONT_QUOTA_EXCEEDED`
+
+**HTTP status:** `400`
+
+The project already has `FONT_FACES_MAX_PER_PROJECT` font faces and this upload would add a new one (not replace an existing `(familyId, weight, style)` combination, which is exempt from this check since it replaces a row rather than growing the count).
+
+**What to do:** Delete an unused font face first, or upload this as a replacement weight/style for an existing family instead of a new face. This is a hard per-project cap, not a billing-tier limit that can be upgraded away.
+
+---
+
+### `FONT_FAMILY_NOT_FOUND`
+
+**HTTP status:** `404`
+
+A client-supplied `familyId` (on face upload, or on the family-level routes) doesn't resolve to a live font family owned by this project — missing entirely, belonging to a different project, or soft-deleted.
+
+**What to do:** Re-fetch the project's current font families and use a live `familyId` from that list. A previously valid id that now 404s here was most likely deleted since you last fetched it.
+
+---
+
+### `ASSET_FORMAT_UNSUPPORTED`
+
+**HTTP status:** `400`
+
+The uploaded bytes don't match the asset kind the upload route claims (image/video/lottie), per `detectAssetKind`'s magic-byte check — for example, non-video bytes posted to the `video` upload endpoint. Like the font check, this is a byte-shape check, never a filename or declared-Content-Type check.
+
+**What to do:** Upload to the endpoint matching the file's actual kind (`/image`, `/video`, or `/lottie`), and confirm the file isn't corrupted or a placeholder — SVG is deliberately blocked here regardless of endpoint (see the asset-CDN libvips allowlist).
+
+---
+
+### `ASSET_FILE_TOO_LARGE`
+
+**HTTP status:** `413`
+
+The uploaded asset exceeds that asset kind's own size cap (`ASSET_MAX_BYTES[kind]`), enforced entirely at the transport level by a per-kind `hono/body-limit` registration — each of `/image`, `/video`, and `/lottie` has its own cap, so this always means the specific kind's own limit, not a shared one.
+
+**What to do:** Compress the asset (re-encode the image/video, or strip unused data from the Lottie JSON) to fit the size limit for its kind, or use a smaller source file.
+
+---
+
+### `ASSET_QUOTA_EXCEEDED`
+
+**HTTP status:** `402`
+
+The project's total paywall-asset storage usage has reached its billing-tier limit (`getStorageUsage` against the tier's cap) — checked before any normalization or upload work is done, so this is returned cheaply without ever touching the file's bytes.
+
+**What to do:** Delete unused assets to free up quota, or upgrade the project's billing tier for a higher storage cap — this is a paid-plan limit, not a per-request or per-file cap.
+
+---
+
+### `ASSET_STORAGE_UNAVAILABLE`
+
+**HTTP status:** `503`
+
+Either the asset storage backend (S3-compatible object store) isn't configured for this deployment at all (`store.isStorageConfigured()` false), or it was configured but the actual write to it failed — both return the same code so a caller doesn't need to distinguish 'not set up' from 'temporarily down'.
+
+**What to do:** Retry shortly for the transient-outage case. If it never succeeds, an operator needs to check the deployment's object-storage configuration (endpoint, credentials, bucket) — this is not something an SDK/dashboard caller can fix by retrying indefinitely.
+
+---
+
+### `ASSET_INVALID_NAME`
+
+**HTTP status:** `400`
+
+The `name` query parameter on an asset upload failed `isValidAssetName` — missing, empty, or containing characters the asset naming scheme doesn't allow.
+
+**What to do:** Pass a non-empty `name` using only the allowed character set (see `isValidAssetName`) — this is checked before authentication-adjacent work runs, so it's the cheapest possible rejection and always means the request itself is malformed.
+
+---
+
+### `ASSET_PROCESSING_FAILED`
+
+**HTTP status:** `400`
+
+Image normalization (`normalizeImage` — resizing, EXIF/GPS stripping, format conversion via libvips/sharp) threw while processing an otherwise format-valid image. The bytes passed the magic-byte format check but libvips couldn't actually decode/process them — a truncated, corrupted, or unusually malformed file.
+
+**What to do:** Re-export the image from its source application and re-upload — this usually means the file is subtly corrupted or uses an edge-case encoding libvips can't handle, not that the format itself is wrong (that's `ASSET_FORMAT_UNSUPPORTED`).
+
+---
+
+### `asset_in_use`
+
+**HTTP status:** `409`
+
+A `DELETE` on a paywall asset was refused because it's still referenced by at least one published paywall version or a draft's `builderConfig` — the response message lists which paywalls reference it. Hard-deleting the underlying object anyway would turn that reference into a device-visible broken image.
+
+**What to do:** Remove the asset from the paywalls listed in the error message first, or re-issue the same delete request with `?force=true` if you specifically intend to break those references (the S3 object is then hard-deleted immediately).
+
+---
+
+### `asset_missing`
+
+**HTTP status:** `400`
+
+Publishing a paywall version was refused because its builder config references one of this project's own asset URLs whose row is soft-deleted or no longer exists. External image URLs (not on this project's asset CDN) are never checked and always pass.
+
+**What to do:** Re-upload the missing asset(s) named in the error message, or edit the paywall to point at a still-live asset before publishing again — this always means a genuinely stale reference, never a false positive on an external URL.
+
+---
+
+### `IMPORT_FILE_TOO_LARGE`
+
+**HTTP status:** `413`
+
+The uploaded subscriber-import file (CSV) exceeds `IMPORT_MAX_UPLOAD_BYTES`, enforced by `hono/body-limit` at the transport level on `POST /dashboard/projects/:projectId/imports` before the body is ever fully buffered.
+
+**What to do:** Split the import into smaller batches under the documented size limit, or remove unnecessary columns/rows from the CSV before re-uploading.
+
+---
+
+### `IMPORT_STORAGE_UNAVAILABLE`
+
+**HTTP status:** `503`
+
+The dedicated private import-file bucket (never the public paywall-asset bucket — see `lib/import-store.ts`) is either unconfigured for this deployment or the write to it failed. Both cases return the same code, mirroring the `ASSET_STORAGE_UNAVAILABLE` pattern.
+
+**What to do:** Retry shortly for a possible transient outage. If it never succeeds, an operator needs to check the deployment's import-storage configuration — this bucket is configured separately from the public asset CDN bucket and both must be set up independently.
+
+---
+
+### `purchase_not_paid`
+
+**HTTP status:** `400`
+
+A Google receipt was submitted for verification while the underlying purchase is still `PENDING` (subscription `subscriptionState` or one-time `purchaseState`) — the user has started but not finished paying (e.g. a pending cash/carrier-billing payment method). This is machine-readable specifically because the purchase may still complete.
+
+**What to do:** Retry receipt verification after the payment actually completes on-device — don't treat this as a hard failure or show a generic purchase-failed error. Poll or wait for the client's own purchase-update callback before re-verifying.
+
+---
+
+### `PAYLOAD_TOO_LARGE`
+
+**HTTP status:** `413`
+
+The API-wide global body-size ceiling (`app.ts`'s root `bodyLimit`) was exceeded on a route that doesn't own a larger, more specific limit of its own (asset/font/import uploads are carved out with their own bigger caps via `ROUTE_OWNED_BODY_LIMIT_PATH`). This code exists specifically because Hono's default body-limit rejection surfaced as `HTTP_ERROR` with an EMPTY message before it was added — a real incident, not a hypothetical.
+
+**What to do:** This means the request body is far larger than any ordinary JSON payload this API expects on a non-upload route — check you're posting to the right endpoint, and use one of the dedicated upload routes (assets/fonts/imports) for large file bodies instead.
+
+---
+
+### `STRIPE_NOT_CONNECTED`
+
+**HTTP status:** `503`
+
+On `POST /v1/billing-portal` (the SDK-facing endpoint), the project has no active Stripe Connect account to open a portal session on. Note: the funnel-builder validation route and the public funnel-payment checkout route separately reject with the SAME string `STRIPE_NOT_CONNECTED`, but embedded inside a JSON-stringified `message` on a generic HTTPException — those do NOT set this as the envelope's actual `error.code` (they resolve to VALIDATION_ERROR/HTTP_ERROR on the wire), so don't expect this code from those two routes.
+
+**What to do:** An operator must connect Stripe for this project (dashboard's Stripe Connect flow) before the billing portal can be used. For the funnel/checkout routes specifically, parse `message` as JSON to see the embedded `{ code: 'STRIPE_NOT_CONNECTED' }` instead of relying on `error.code`.
+
+---
+
+### `STRIPE_CUSTOMER_NOT_FOUND`
+
+**HTTP status:** `404`
+
+The authenticated subscriber (resolved from `X-Rovenue-App-User-Id`) has no Stripe customer record on file. This is the normal, expected case for a subscriber whose entitlements come entirely from Apple or Google — not an error state in the usual sense.
+
+**What to do:** Don't show this as a generic error to an Apple/Google-only subscriber — hide or disable the 'manage billing' entry point for them instead of surfacing this code as a failure, since it's expected rather than exceptional.
+
+---
+
+### `RETURN_URL_NOT_ALLOWED`
+
+**HTTP status:** `400`
+
+The `returnUrl` posted to `/v1/billing-portal` isn't one of the project's verified custom domains served over https — this request's URL is never echoed back to Stripe unchecked, precisely because the returned session URL grants access to payment data.
+
+**What to do:** Verify the domain in the dashboard's project settings first, and pass an https URL on that exact verified domain. This is a security check, not something to work around by retrying with the same value.

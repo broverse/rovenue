@@ -12,6 +12,8 @@ Every Rovenue SDK error originates from the same Rust-core `RovenueError` type a
 - **Swift** — thrown as `RovenueError` (a struct conforming to `LocalizedError`) with a `kind: ErrorKind` discriminant. Catch with `catch let e as RovenueError`.
 - **Kotlin** — thrown as `RovenueException` (sealed class) with a `kind: ErrorKind` discriminant. Catch by `kind` or the sealed base.
 
+Calling the HTTP API directly instead of through an SDK? See [API Errors](/docs/reference/api-errors) for the `{ error: { code, message } }` envelope's `code` values — a different, larger set than the `kind`s below.
+
 ---
 
 ## Migrating from 0.15.x → 0.16.0

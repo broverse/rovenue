@@ -4,16 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "react-router build",
+    "build": "pnpm run generate:errors && react-router build",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && fumadocs-mdx && tsc --noEmit",
     "check:links": "node ./scripts/check-links.mjs",
+    "generate:errors": "tsx scripts/generate-error-catalog.mjs",
     "postinstall": "fumadocs-mdx"
   },
   "dependencies": {
     "@react-router/node": "^7.17.0",
     "@react-router/serve": "^7.17.0",
+    "@rovenue/shared": "workspace:*",
     "@takumi-rs/image-response": "^1.8.1",
     "fumadocs-core": "16.10.2",
     "fumadocs-docgen": "^3.0.10",
@@ -35,6 +37,7 @@
     "@types/react-dom": "^19.2.3",
     "react-router-devtools": "^6.2.1",
     "tailwindcss": "^4.3.0",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "^8.0.16"
   }

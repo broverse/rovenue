@@ -328,6 +328,19 @@ export * from "./revenue-types";
 // ERROR_CODE key, typed as a total Record so an undocumented code is
 // a compile error. See error-catalog.ts's header for the full
 // rationale.
+//
+// Deliberately NOT re-exported here (`export * from "./error-catalog"`,
+// like most sibling modules above): error-catalog.ts imports `ERROR_CODE`
+// from this very file and dereferences it eagerly, at module-evaluation
+// time, inside the `ERROR_CATALOG` object literal (not lazily inside a
+// function body, the way every other cross-reference into this barrel
+// is). Re-exporting it here makes this file and error-catalog.ts mutually
+// dependent — under a bundler-aware resolver (Vite/Vitest) that hid it
+// completely, `ERROR_CATALOG` came back fine, but plain Node ESM (a
+// `tsx` script, e.g. the docs' `generate-error-catalog.mjs`) evaluates
+// this file's dependencies — including error-catalog.ts, pulled in by
+// that `export *` — before this file's own top-level `ERROR_CODE` ever
+// initializes, so error-catalog.ts's `ERROR_CODE.HTTP_ERROR` access threw
+// `ReferenceError: Cannot access 'ERROR_CODE' before initialization`.
+// Import it via the dedicated subpath instead: `@rovenue/shared/error-catalog`.
 // =============================================================
-
-export * from "./error-catalog";

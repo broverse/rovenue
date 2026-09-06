@@ -49,6 +49,10 @@
     "./experiments/bucketing-web": {
       "types": "./src/experiments/bucketing-web.ts",
       "default": "./src/experiments/bucketing-web.ts"
+    },
+    "./error-catalog": {
+      "types": "./src/error-catalog.ts",
+      "default": "./src/error-catalog.ts"
     }
   },
   "scripts": {
