@@ -840,6 +840,7 @@ type PurchaseResult = {
   virtualCurrencies: Record<string, number>;
   productId: string;
   storeTransactionId: string;
+  isDeferred: boolean;
 };
 ```
 
@@ -847,10 +848,11 @@ type PurchaseResult = {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `entitlements` | [`Entitlement[]`](#entitlement) | The user's full set of active entitlements after the purchase. Use this to update gated UI immediately. |
+| `entitlements` | [`Entitlement[]`](#entitlement) | The user's full set of active entitlements after the purchase. Empty when `isDeferred` is `true` — nothing has been granted yet. Use this to update gated UI immediately. |
 | `virtualCurrencies` | `Record<string, number>` | The user's virtual-currency balances after the purchase (currency code → amount). Reflects any balances added by a currency-pack product. |
 | `productId` | `string` | The store product ID that was purchased (e.g. `"com.example.pro_monthly"`). |
-| `storeTransactionId` | `string` | The platform transaction ID: StoreKit 2 transaction ID on iOS, Play Billing order ID on Android. |
+| `storeTransactionId` | `string` | The platform transaction ID: StoreKit 2 transaction ID on iOS, Play Billing order ID on Android. Empty string when `isDeferred` is `true`. |
+| `isDeferred` | `boolean` | `true` when the purchase is pending external approval (e.g. Ask-to-Buy / parental controls) rather than completed. This is **not an error** — `purchase()` resolves normally. See [Handling a deferred purchase](/docs/reference/methods#handling-a-deferred-purchase). |
 
 **Returned by:** [`purchase()`](/docs/reference/methods#purchase)
 
@@ -859,10 +861,14 @@ type PurchaseResult = {
 ```ts
 const result = await Rovenue.purchase(pkg);
 
-// Grant access based on updated entitlements:
-const hasPro = result.entitlements.some(e => e.id === 'pro' && e.isActive);
-console.log(`Pro: ${hasPro}, COINS: ${result.virtualCurrencies['COINS'] ?? 0}`);
-console.log(`Transaction: ${result.storeTransactionId}`);
+if (result.isDeferred) {
+  // Ask-to-Buy — not an error. Wait for a change-stream event before granting anything.
+} else {
+  // Grant access based on updated entitlements:
+  const hasPro = result.entitlements.some(e => e.id === 'pro' && e.isActive);
+  console.log(`Pro: ${hasPro}, COINS: ${result.virtualCurrencies['COINS'] ?? 0}`);
+  console.log(`Transaction: ${result.storeTransactionId}`);
+}
 ```
 
 ---
@@ -872,24 +878,26 @@ console.log(`Transaction: ${result.storeTransactionId}`);
 Emitted by the [change stream](/docs/reference/methods#change-stream) whenever internal SDK state is updated. React to these events to keep your UI in sync without polling.
 
 ```ts
-// React Native — string union
+// React Native — string union (UPPER_SNAKE_CASE — matches the Rust core's wire values)
 type ChangeEvent =
-  | 'EntitlementsChanged'
-  | 'IdentityChanged'
-  | 'VirtualCurrenciesChanged';
+  | 'ENTITLEMENTS_CHANGED'
+  | 'IDENTITY_CHANGED'
+  | 'VIRTUAL_CURRENCIES_CHANGED'
+  | 'REMOTE_CONFIG_CHANGED';
 ```
 
-On Swift, `ChangeEvent` is a Swift enum with cases `.entitlementsChanged`, `.identityChanged`, and `.virtualCurrenciesChanged`, delivered as `AsyncStream<ChangeEvent>` via `Rovenue.shared.changes`.
+On Swift, `ChangeEvent` is a Swift enum with cases `.entitlementsChanged`, `.identityChanged`, `.virtualCurrenciesChanged`, and `.remoteConfigChanged`, delivered as `AsyncStream<ChangeEvent>` via `Rovenue.shared.changes`.
 
-On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`, `IDENTITY_CHANGED`, and `VIRTUAL_CURRENCIES_CHANGED`, delivered as `SharedFlow<ChangeEvent>` via `Rovenue.shared.changes`.
+On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`, `IDENTITY_CHANGED`, `VIRTUAL_CURRENCIES_CHANGED`, and `REMOTE_CONFIG_CHANGED`, delivered as `SharedFlow<ChangeEvent>` via `Rovenue.shared.changes`.
 
 **Values**
 
 | Value (RN) | Swift case | Kotlin constant | When it fires |
 |------------|------------|-----------------|---------------|
-| `'EntitlementsChanged'` | `.entitlementsChanged` | `ENTITLEMENTS_CHANGED` | After the entitlement cache is refreshed — e.g. after a successful purchase, `refreshEntitlements()`, or a foreground transition that triggers a background sync. |
-| `'IdentityChanged'` | `.identityChanged` | `IDENTITY_CHANGED` | After `identify()` succeeds or `logOut()` resets the user. |
-| `'VirtualCurrenciesChanged'` | `.virtualCurrenciesChanged` | `VIRTUAL_CURRENCIES_CHANGED` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
+| `'ENTITLEMENTS_CHANGED'` | `.entitlementsChanged` | `ENTITLEMENTS_CHANGED` | After the entitlement cache is refreshed — e.g. after a successful purchase, `refreshEntitlements()`, or a foreground transition that triggers a background sync. |
+| `'IDENTITY_CHANGED'` | `.identityChanged` | `IDENTITY_CHANGED` | After `identify()` succeeds or `logOut()` resets the user. |
+| `'VIRTUAL_CURRENCIES_CHANGED'` | `.virtualCurrenciesChanged` | `VIRTUAL_CURRENCIES_CHANGED` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
+| `'REMOTE_CONFIG_CHANGED'` | `.remoteConfigChanged` | `REMOTE_CONFIG_CHANGED` | After `refreshRemoteConfig()` succeeds and the remote config values changed. |
 
 **Emitted by:** [`addChangeListener()`](/docs/reference/methods#change-stream) (RN), `Rovenue.shared.changes` (Swift/Kotlin)
 
@@ -899,11 +907,11 @@ On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`,
   <Tab value="React Native">
     ```ts
     const unsub = Rovenue.addChangeListener(async (event) => {
-      if (event === 'EntitlementsChanged') {
+      if (event === 'ENTITLEMENTS_CHANGED') {
         const ent = await Rovenue.entitlement('pro');
         setHasPro(ent?.isActive ?? false);
       }
-      if (event === 'VirtualCurrenciesChanged') {
+      if (event === 'VIRTUAL_CURRENCIES_CHANGED') {
         const balances = Rovenue.virtualCurrencies();
         setCoins(balances['COINS'] ?? 0);
       }
@@ -925,6 +933,8 @@ On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`,
           await MainActor.run { self.coins = balances["COINS"] ?? 0 }
         case .identityChanged:
           break
+        case .remoteConfigChanged:
+          break
         }
       }
     }
@@ -944,6 +954,7 @@ On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`,
                     _coins.value = balances["COINS"] ?: 0
                 }
                 ChangeEvent.IDENTITY_CHANGED -> { /* re-read user if needed */ }
+                ChangeEvent.REMOTE_CONFIG_CHANGED -> { /* re-read flags/experiments */ }
             }
         }
         .launchIn(viewModelScope)

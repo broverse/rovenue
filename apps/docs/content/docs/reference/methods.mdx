@@ -1030,7 +1030,7 @@ type LogEntry = {
 
 ## Change Stream
 
-Subscribe to real-time state change notifications from the SDK. The SDK fires an event whenever the entitlement cache, identity, or virtual-currency balances are updated. React to these events to keep your UI in sync without polling.
+Subscribe to real-time state change notifications from the SDK. The SDK fires an event whenever the entitlement cache, identity, virtual-currency balances, or remote config are updated. React to these events to keep your UI in sync without polling.
 
 | Method / Property | Platform | Description |
 |-------------------|----------|-------------|
@@ -1047,6 +1047,7 @@ Swift case / Kotlin constant spelling of each):
 | `'ENTITLEMENTS_CHANGED'` | After any entitlement cache refresh (purchase, `refreshEntitlements()`, foreground sync). |
 | `'IDENTITY_CHANGED'` | After `identify()` succeeds or `logOut()` resets the user. |
 | `'VIRTUAL_CURRENCIES_CHANGED'` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
+| `'REMOTE_CONFIG_CHANGED'` | After `refreshRemoteConfig()` succeeds and the remote config values changed. |
 
 → Full type reference: [`ChangeEvent`](/docs/reference/types#changeevent)
 
@@ -1066,6 +1067,9 @@ Swift case / Kotlin constant spelling of each):
         case 'VIRTUAL_CURRENCIES_CHANGED':
           // Re-read virtualCurrencies() and update the balance display
           break;
+        case 'REMOTE_CONFIG_CHANGED':
+          // Re-read your flags/experiments
+          break;
       }
     });
 
@@ -1084,6 +1088,8 @@ Swift case / Kotlin constant spelling of each):
             // User identity has changed — re-read currentUser()
         case .virtualCurrenciesChanged:
             // Re-read virtualCurrencyBalances() and update the balance display
+        case .remoteConfigChanged:
+            // Re-read your flags/experiments
         }
     }
     ```
@@ -1097,6 +1103,7 @@ Swift case / Kotlin constant spelling of each):
                 ChangeEvent.ENTITLEMENTS_CHANGED       -> { /* re-read entitlements */ }
                 ChangeEvent.IDENTITY_CHANGED           -> { /* user identity changed */ }
                 ChangeEvent.VIRTUAL_CURRENCIES_CHANGED -> { /* re-read balances */ }
+                ChangeEvent.REMOTE_CONFIG_CHANGED      -> { /* re-read flags/experiments */ }
             }
         }
         .launchIn(viewModelScope)
@@ -1388,9 +1395,27 @@ if (result) {
 
 ### `claimFromClipboard`
 
-**iOS only.** Reads a `rovenue-funnel:<token>` marker placed on the clipboard by the web funnel, then claims it via the standard claim flow. Returns a `FunnelClaimResult` if the marker is present and matched, or `null` on Android or when no marker is found.
+**React Native only, and iOS only within that.** There is no `claimFromClipboard` on
+the native Swift or Kotlin SDKs — `Rovenue.shared` has no equivalent method on either
+platform (confirmed against `packages/sdk-swift/Sources/Rovenue/Rovenue.swift` and
+`packages/sdk-kotlin/.../Rovenue.kt`; grepping both trees for `claimFromClipboard`
+returns nothing outside the RN package). It exists purely as a convenience in
+`@rovenue/react-native-sdk`, implemented on top of the standard claim flow: it reads a
+`rovenue-funnel:<token>` marker placed on the clipboard by the web funnel, extracts the
+token, calls the same `claimFunnelToken` every platform already has, then clears the
+marker from the clipboard so it can't be re-claimed or leaked. Returns a
+`FunnelClaimResult` if the marker is present and matched, or `null` on Android or when
+no marker is found.
 
-**Call from a user-gesture handler** (e.g. a "Continue" tap on your first onboarding screen) — iOS shows a one-time paste-access banner on the clipboard read.
+**Call from a user-gesture handler** (e.g. a "Continue" tap on your first onboarding
+screen) — iOS shows a one-time paste-access banner on the clipboard read.
+
+**On native Swift or Kotlin, there is no built-in equivalent — replicate it yourself**
+using [`claimFunnelToken`](#claimfunneltoken): read the clipboard string (`UIPasteboard.general.string`
+on iOS; there's no Android equivalent, since the RN version is also a no-op there),
+check it starts with `"rovenue-funnel:"`, strip the prefix to get the token, and call
+`claimFunnelToken(token)`. Clear the clipboard afterward if you want the same
+can't-be-reclaimed behavior the RN version has.
 
 **Params** — none
 
@@ -1398,37 +1423,17 @@ if (result) {
 
 **Throws** — nothing
 
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
-  <Tab value="React Native">
-    ```ts
-    import { Rovenue } from '@rovenue/react-native-sdk';
+```ts
+import { Rovenue } from '@rovenue/react-native-sdk';
 
-    // Call from a user-gesture handler (e.g. a "Continue" button press):
-    const result = await Rovenue.claimFromClipboard();
+// Call from a user-gesture handler (e.g. a "Continue" button press):
+const result = await Rovenue.claimFromClipboard();
 
-    if (result) {
-      console.log('Clipboard funnel claim resolved:', result.subscriberId);
-    }
-    // Returns null on Android or when no rovenue-funnel: marker is present.
-    ```
-  </Tab>
-  <Tab value="Swift">
-    ```swift
-    // Call from a user-gesture handler (e.g. a "Continue" button tap):
-    if let result = await Rovenue.shared.claimFromClipboard() {
-        print("Clipboard funnel claim resolved: \(result.subscriberId)")
-    }
-    // Returns nil when no rovenue-funnel: marker is present.
-    ```
-  </Tab>
-  <Tab value="Kotlin">
-    ```kotlin
-    // No-op on Android — always returns null.
-    val result = Rovenue.shared.claimFromClipboard() // suspend fun
-    // result is always null on Android
-    ```
-  </Tab>
-</Tabs>
+if (result) {
+  console.log('Clipboard funnel claim resolved:', result.subscriberId);
+}
+// Returns null on Android or when no rovenue-funnel: marker is present.
+```
 
 ---
 
