@@ -88,6 +88,24 @@ export const meRoute = new Hono()
       const now = new Date().toISOString();
       const merged = applyMutations(current, body.attributes, "sdk", now);
 
+      // A dead-ended row (GDPR-erased, or retired by a transfer merge)
+      // must never be re-populated; report it untouched instead of
+      // resurrecting it. Mirrors routes/v1/subscribers.ts, deliberately
+      // including the 200: a 4xx would tell a device-side SDK that this
+      // subject was erased, which is a disclosure to a party that is not
+      // necessarily entitled to it and that the subject never asked for.
+      if (c.get("subscriberDeadEnded")) {
+        return c.json(
+          ok({
+            subscriber: {
+              id: subscriber.id,
+              appUserId: subscriber.appUserId,
+              attributes: flattenAttributes(subscriber.attributes),
+            },
+          }),
+        );
+      }
+
       const updated = await drizzle.subscriberRepo.upsertSubscriber(
         drizzle.db,
         {

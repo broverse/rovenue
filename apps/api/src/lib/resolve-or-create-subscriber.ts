@@ -86,15 +86,15 @@ export async function resolveOrCreateSubscriber(
   projectId: string,
   key: string,
   platform?: SdkPlatform,
-): Promise<Subscriber> {
+): Promise<ResolvedSubscriberForWrite> {
   const createAttributes = platform
     ? applyMutations({}, { platform }, "sdk", new Date().toISOString())
     : {};
-  const { subscriber } = await resolveSubscriberForWrite(
-    projectId,
-    key,
-    createAttributes,
-    true,
-  );
-  return subscriber;
+  // Returns the pair, not just the subscriber. This wrapper used to
+  // destructure `{ subscriber }` and drop `deadEnded` on the floor, so
+  // every caller behind it wrote onto soft-deleted rows -- a
+  // GDPR-erased subject's next SDK call silently un-erased them.
+  // `routes/v1/subscribers.ts` had guarded this all along; the two
+  // paths now agree.
+  return resolveSubscriberForWrite(projectId, key, createAttributes, true);
 }

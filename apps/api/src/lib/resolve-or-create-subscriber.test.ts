@@ -32,7 +32,7 @@ beforeEach(() => {
 describe("resolveOrCreateSubscriber", () => {
   it("returns the existing subscriber without creating", async () => {
     resolveByRovenueId.mockResolvedValue({ id: "s1", rovenueId: "r1" });
-    const sub = await resolveOrCreateSubscriber("p1", "r1");
+    const { subscriber: sub } = await resolveOrCreateSubscriber("p1", "r1");
     expect(sub).toEqual({ id: "s1", rovenueId: "r1" });
     expect(upsert).not.toHaveBeenCalled();
   });
@@ -40,7 +40,7 @@ describe("resolveOrCreateSubscriber", () => {
   it("creates a minimal anonymous subscriber when none exists", async () => {
     resolveByRovenueId.mockResolvedValue(null);
     upsert.mockResolvedValue({ id: "s2", rovenueId: "r2" });
-    const sub = await resolveOrCreateSubscriber("p1", "r2");
+    const { subscriber: sub } = await resolveOrCreateSubscriber("p1", "r2");
     expect(sub).toEqual({ id: "s2", rovenueId: "r2" });
     // This wrapper is reachable only from the SDK's public-key /v1
     // surface, so creating here IS an install: it stamps
@@ -60,7 +60,7 @@ describe("resolveOrCreateSubscriber", () => {
     // happens (upsert's ON CONFLICT target is the full unique index and
     // would hand back the soft-deleted row).
     resolveByRovenueId.mockResolvedValue({ id: "s_live", rovenueId: "r_old" });
-    const sub = await resolveOrCreateSubscriber("p1", "r_old");
+    const { subscriber: sub } = await resolveOrCreateSubscriber("p1", "r_old");
     expect(sub.id).toBe("s_live");
     expect(upsert).not.toHaveBeenCalled();
   });
