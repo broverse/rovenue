@@ -109,6 +109,37 @@ it has the full explanation inline, summarized here:
   talks to a real `https://` deployment does not need this block at all —
   drop it entirely rather than keeping it "just in case".
 
+  **Physical device + LAN IP needs its own exception entry.** The
+  `localhost` exception above covers only that literal host. If you follow
+  the "Physical device" instructions and point `baseURL` at your Mac's LAN
+  IP (e.g. `http://192.168.1.23:3000`), that host is *not* covered by the
+  `localhost` entry — ATS will block the request. Add a second entry under
+  `NSExceptionDomains` for that exact IP (or hostname) before running on a
+  device:
+
+  ```xml
+  <key>NSExceptionDomains</key>
+  <dict>
+      <key>localhost</key>
+      <dict>
+          <key>NSExceptionAllowsInsecureHTTPLoads</key>
+          <true/>
+          <key>NSIncludesSubdomains</key>
+          <false/>
+      </dict>
+      <key>192.168.1.23</key>
+      <dict>
+          <key>NSExceptionAllowsInsecureHTTPLoads</key>
+          <true/>
+          <key>NSIncludesSubdomains</key>
+          <false/>
+      </dict>
+  </dict>
+  ```
+
+  Replace `192.168.1.23` with your machine's actual LAN IP — and update it
+  again if that IP changes (most home/office DHCP leases aren't static).
+
 ## The "don't re-fetch inside the change listener" footgun
 
 The repo has a recorded bug class: calling a network-refresh method from

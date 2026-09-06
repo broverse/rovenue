@@ -10,6 +10,9 @@ on:
       - "packages/sdk-kotlin/**"
       - "packages/sdk-rn/**"
       - "packages/sdk-flutter/**"
+      - "examples/ios-swift/**"
+      - "examples/android-kotlin/**"
+      - "examples/sample-rn-expo/**"
       - "Cargo.toml"
       - "rust-toolchain.toml"
       - ".github/workflows/sdk.yml"
@@ -233,3 +236,104 @@ jobs:
       # This job builds and runs the plugin's Swift unit tests; it does not
       # build the example app for iOS. Whether to add `flutter build ios` here
       # is an open decision, not a blocked one.
+
+  # Four example apps live under examples/ (+ packages/sdk-flutter/example,
+  # already built by the flutter job above). Nothing compiled them in CI
+  # before this: examples/sample-rn-expo was found silently broken — it
+  # imported a hook removed in the credit→virtual-currency rename — for
+  # exactly that reason. These three jobs make "the examples build" an
+  # enforced fact, not a claim.
+  example-ios:
+    name: Example app (iOS/SwiftUI)
+    runs-on: macos-14
+    needs: bindgen-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      # examples/ios-swift consumes packages/sdk-swift as a local SwiftPM
+      # path dependency (XCLocalSwiftPackageReference), and that package's
+      # Package.swift resolves RovenueFFI via `.binaryTarget(path:)`.
+      # RovenueFFI.xcframework is a gitignored build product (see
+      # packages/sdk-swift/.gitignore) — nowhere documented before this —
+      # so on a fresh checkout SwiftPM cannot even resolve the package,
+      # let alone build it, until this script produces the artifact. Same
+      # sequence as the `swift` and `flutter-ios-native` jobs above.
+      - name: Build RovenueFFI.xcframework
+        run: ./packages/sdk-swift/scripts/build-xcframework.sh
+      - name: Build the example app (iOS Simulator)
+        run: |
+          xcodebuild -project examples/ios-swift/RovenueExample.xcodeproj \
+            -scheme RovenueExample \
+            -destination 'generic/platform=iOS Simulator' \
+            build
+
+  example-android:
+    name: Example app (Android/Compose)
+    runs-on: ubuntu-latest
+    needs: bindgen-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: System build deps (rusqlite-bundled)
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v3
+      # examples/android-kotlin consumes packages/sdk-kotlin as a Gradle
+      # composite build (includeBuild + an explicit dependencySubstitution
+      # in its settings.gradle.kts — see that file's header comment for why
+      # the substitution rule is required, and do not remove or duplicate
+      # it), which compiles sdk-kotlin from source and therefore needs the
+      # generated UniFFI Kotlin bindings, same as the `kotlin` job above.
+      - run: ./packages/core-rs/scripts/build-bindings.sh
+      - name: Build the example app's debug APK
+        working-directory: examples/android-kotlin
+        run: ./gradlew assembleDebug --no-daemon --console=plain
+
+  example-rn:
+    name: Example app (RN/Expo, typecheck only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # packages/sdk-rn's dist/ is gitignored — the example imports
+      # "@rovenue/react-native-sdk" by its published entry points
+      # (dist/index.d.ts etc.), so nothing resolves until it's built.
+      - run: pnpm --filter @rovenue/react-native-sdk build
+      # TYPECHECK ONLY — deliberately not a Metro bundle or a native build.
+      # Two independent, pre-existing hazards (both documented in detail in
+      # examples/sample-rn-expo/README.md) make either un-greenable:
+      #   1. CocoaPods hoisting: ExpoModulesCore.podspec resolves the React
+      #      Native version by shelling out to node from its own directory,
+      #      which in this pnpm workspace finds the hoisted repo-root RN
+      #      (0.86.x) instead of this app's pinned 0.74.5, baking the wrong
+      #      REACT_NATIVE_TARGET_VERSION into the Pods project and failing
+      #      to compile.
+      #   2. Version skew: packages/sdk-rn declares peerDependencies on
+      #      `expo >=52` / `react-native >=0.76`, while this example pins
+      #      `expo ~51.0.0` / `react-native 0.74.5`. That skew hoists a
+      #      newer @expo/cli to the repo root, which then requires Metro
+      #      internals (e.g. "metro/src/lib/TerminalReporter") that the
+      #      newer, hoisted `metro` package's "exports" map no longer
+      #      exposes — so `expo export` / `react-native bundle` die in
+      #      their own startup, before ever reading this app's source.
+      # Both are repo-wide dependency-graph mismatches, not app bugs, and
+      # aren't fixable by touching this example alone. `tsc --noEmit` is
+      # the verifiable proxy: it resolves the SDK's real exported surface
+      # and catches exactly the kind of "imported a removed hook" defect
+      # that shipped here undetected — a job that skipped entirely would
+      # be worse than this honest, narrower guarantee.
+      - name: Typecheck the example
+        working-directory: examples/sample-rn-expo
+        run: pnpm exec tsc --noEmit -p tsconfig.json

@@ -10,7 +10,7 @@ Every Rovenue SDK error originates from the same Rust-core `RovenueError` type a
 
 - **React Native** — thrown as `RovenueError` (a class extending `Error`) with a `kind` discriminant. Use `e.kind === "..."` to branch.
 - **Swift** — thrown as `RovenueError` (a struct conforming to `LocalizedError`) with a `kind: ErrorKind` discriminant. Catch with `catch let e as RovenueError`.
-- **Kotlin** — thrown as `RovenueException` (sealed class) with a `kind: ErrorKind` discriminant. Catch by `kind` or the sealed base.
+- **Kotlin** — thrown as `RovenueException` (a plain class, not sealed) with a `kind: ErrorKind` discriminant. There is no per-kind subclass and no exhaustive `when` over it — catch `RovenueException` and branch on `e.kind`.
 
 Calling the HTTP API directly instead of through an SDK? See [API Errors](/docs/reference/api-errors) for the `{ error: { code, message } }` envelope's `code` values — a different, larger set than the `kind`s below.
 
@@ -209,29 +209,31 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
   <Tab value="Kotlin">
     ```kotlin
     import dev.rovenue.sdk.Rovenue
-    import dev.rovenue.sdk.generated.RovenueException
-    import dev.rovenue.sdk.PurchaseCancelledException
-    import dev.rovenue.sdk.PurchasePendingException
-    import dev.rovenue.sdk.ProductNotAvailableException
+    import dev.rovenue.sdk.RovenueException
+    import dev.rovenue.sdk.generated.ErrorKind
 
     // --- Purchase flow ---
     try {
         // `activity` is your current Activity — Play Billing requires it.
         val result = Rovenue.shared.purchase(activity, pkg)
-        // success
-    } catch (e: PurchaseCancelledException) {
-        // User dismissed the store sheet — no action needed
-    } catch (e: PurchasePendingException) {
-        // Ask-to-Buy — inform the user to wait for parental approval
-        showToast("Your purchase is awaiting approval.")
-    } catch (e: ProductNotAvailableException) {
-        showToast("This product is not available in your region.")
-    } catch (e: RovenueException.ReceiptInvalid) {
-        showRetryPrompt()
-    } catch (e: RovenueException.NetworkUnavailable) {
-        showToast("No internet connection. Please try again.")
+        // success — check result.isDeferred for Ask-to-Buy (see below;
+        // it does not throw)
     } catch (e: RovenueException) {
-        throw e // re-throw unexpected SDK errors
+        when (e.kind) {
+            ErrorKind.PURCHASE_CANCELED -> {
+                // User dismissed the store sheet — no action needed
+            }
+            ErrorKind.PRODUCT_NOT_AVAILABLE -> {
+                showToast("This product is not available in your region.")
+            }
+            ErrorKind.RECEIPT_INVALID -> {
+                showRetryPrompt()
+            }
+            ErrorKind.NETWORK_UNAVAILABLE -> {
+                showToast("No internet connection. Please try again.")
+            }
+            else -> throw e // re-throw unexpected SDK errors
+        }
     }
     ```
   </Tab>

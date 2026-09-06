@@ -1041,7 +1041,50 @@ else in the framework/provider-breadth dimension is done.
       would stay unverifiable forever. The enrichment commit hands its chains to a new
       `verifyEnrichedGoogleAnchors` entry point that shares the whole store-facing half of
       `verifyImportedAnchors`.
-- [ ] Working example apps (iOS / Android / RN / Flutter demo repos)
+- [x] Working example apps (iOS / Android / RN / Flutter demo repos) — the
+      Flutter example (`packages/sdk-flutter/example`) already existed and was
+      already CI-built before this item was written, so it was partly done
+      going in. This pass added the two that were missing — a native SwiftUI
+      example (`examples/ios-swift`) and a native Jetpack Compose example
+      (`examples/android-kotlin`) — and, the actual point of the item, put a
+      CI job around EVERY example so "working" is enforced, not claimed:
+      `example-ios`, `example-android` and (Flutter's) `flutter-android-native`
+      all compile the real app in `.github/workflows/sdk.yml`. The fourth,
+      `examples/sample-rn-expo`, is CI-verified TYPECHECK-ONLY, not a full
+      Metro bundle or native build — two independent, pre-existing hazards
+      make either un-greenable: (1) a CocoaPods monorepo-hoisting bug
+      (`ExpoModulesCore.podspec` resolves the React Native version from the
+      wrong, hoisted `node_modules`, baking a mismatched
+      `REACT_NATIVE_TARGET_VERSION` into the Pods project) and (2)
+      `packages/sdk-rn` declaring `expo >=52` / `react-native >=0.76` while
+      the example pins `expo ~51` / `react-native 0.74.5`, which hoists an
+      incompatible `@expo/cli` that fails in its own startup before ever
+      reading app code. Both are documented in
+      `examples/sample-rn-expo/README.md`.
+
+      The concrete justification for doing this at all: `sample-rn-expo` was
+      found silently BROKEN — it imported a hook removed in the
+      credit→virtual-currency rename — precisely because nothing had ever
+      built it. Building things nobody had built surfaced two real SDK
+      defects along the way, not just the example's own bug:
+
+      1. `packages/sdk-rn/plugin/withRovenueAndroid.ts` patches a consuming
+         app's Gradle files with `includeBuild(...)` +
+         `implementation("dev.rovenue:sdk:0.1.0")` but adds NO
+         `dependencySubstitution` rule. Gradle's default included-build
+         substitution matches by the included project's own project name
+         (`sdk-kotlin`), not the maven coordinate (`dev.rovenue:sdk`) the
+         plugin's own `implementation(...)` line depends on — so any real
+         Expo app using this plugin gets a non-resolving Android build
+         ("Could not find dev.rovenue:sdk:0.1.0"). Confirmed by reproducing
+         it; `examples/android-kotlin/settings.gradle.kts` carries the
+         missing rule and documents the reasoning.
+      2. `packages/sdk-swift/RovenueFFI.xcframework` is a gitignored binary
+         artifact that `Package.swift` requires via `.binaryTarget(path:)` —
+         a fresh clone cannot build any native Swift consumer (including this
+         SDK's own example) until `packages/sdk-swift/scripts/build-xcframework.sh`
+         generates it, and until now that requirement was documented nowhere
+         a new consumer would think to look.
 - [ ] Interactive API explorer
 - [x] Error-code catalog — shipped 2026-09-06: `packages/shared/src/error-catalog.ts`'s
       `ERROR_CATALOG` (one entry per code — wire value, HTTP status, summary, resolution)
