@@ -273,7 +273,33 @@ triage:
 
 ## Open questions
 
-- **M1's number.** Unknown until measured; blocks D4's rollout shape.
+- **M1's number.** Measured with
+  `apps/api/src/scripts/measure-funnel-page-rules.ts` against the local
+  `rovenue-db-1` development database (2026-09-08):
+
+  ```
+  published funnels scanned: 0
+  would now fail republish:  0
+  ```
+
+  **Inconclusive — no published funnels in the environment scanned.**
+  `funnels` and `funnel_versions` are both empty in that database (a
+  0-of-0 result is not evidence of "zero funnels at risk"; it means the
+  scan had nothing to check). The table the script validates against
+  shipped smaller than this spec assumed — three entries
+  (`single_choice`/`multi_choice`/`picture_choice` → `options`), not
+  nine — because everything else has a working renderer fallback
+  (`apps/dashboard/src/components/funnel-builder/page-preview.tsx`).
+
+  Decision for D4 given the table as it now stands: ship **blocking**,
+  justified by the renderer analysis rather than this scan — all three
+  surviving rules cover pages the renderer has **no** fallback for
+  (`page.options || []` / `page.options ?? []` render zero rows), so a
+  page missing `options` is already unanswerable for real users today;
+  blocking its republish surfaces an existing defect rather than
+  creating a new one. If a re-run against a database that holds
+  published funnels later returns a non-zero count, that is new
+  information: switch to report-only and fix the listed funnels first.
 - **What `assertSaveValid` actually guarantees.** D1 makes it the
   correctness gate for writers that are not the dashboard builder, so
   its coverage matters more after this spec than before it. It is
