@@ -3,11 +3,12 @@ import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
-import { MemberRole, drizzle } from "@rovenue/db";
-import { pagesArraySchema, type Page } from "@rovenue/shared/funnel";
+import { drizzle } from "@rovenue/db";
+import { pagesArraySchema, validatePageFields, type Page } from "@rovenue/shared/funnel";
 import { ERROR_CODE } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { ok } from "../../lib/response";
 import { validateFunnelGraph } from "../../services/funnel/branching-validator";
@@ -20,11 +21,12 @@ import { normalizeFunnelSettings } from "../../services/funnel/settings-normaliz
 // =============================================================
 //
 // Sub-project A's onboarding funnel builder. Mutations are gated
-// behind the project membership middleware (DEVELOPER or above for
-// writes, baseline read access for everything else). Publish runs
-// the same validator the SDK relies on for graph correctness and
-// invalidates the runtime cache (stubbed in Phase 5; wired in
-// Phase 6 Task 27).
+// behind the `funnels:write` capability (OWNER/ADMIN/DEVELOPER/GROWTH
+// — a faithful restatement of the DEVELOPER-rank gate this replaced,
+// see capabilities.ts), baseline read access for everything else.
+// Publish runs the same graph validator the SDK relies on plus
+// per-type page field rules, invalidates the runtime cache (stubbed
+// in Phase 5; wired in Phase 6 Task 27).
 
 // -------------------------------------------------------------
 // Helpers
@@ -158,7 +160,7 @@ export const funnelsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+    await assertProjectCapability(projectId, user.id, "funnels:write");
 
     const body = c.req.valid("json");
     const slug = body.slug ?? `${kebabCase(body.name)}-${randomSuffix()}`;
@@ -213,7 +215,7 @@ export const funnelsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId or funnelId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+    await assertProjectCapability(projectId, user.id, "funnels:write");
 
     const existing = await drizzle.funnelRepo.findById(drizzle.db, funnelId);
     if (!existing || existing.projectId !== projectId) {
@@ -289,7 +291,7 @@ export const funnelsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId or funnelId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+    await assertProjectCapability(projectId, user.id, "funnels:write");
 
     const existing = await drizzle.funnelRepo.findById(drizzle.db, funnelId);
     if (!existing || existing.projectId !== projectId) {
@@ -328,7 +330,7 @@ export const funnelsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId or funnelId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+    await assertProjectCapability(projectId, user.id, "funnels:write");
 
     const funnel = await drizzle.funnelRepo.findById(drizzle.db, funnelId);
     if (!funnel || funnel.projectId !== projectId) {
@@ -354,6 +356,19 @@ export const funnelsRoute = new Hono()
         message: JSON.stringify({
           code: "FUNNEL_VALIDATION",
           issues: graph.issues,
+        }),
+      });
+    }
+
+    // Per-type page field rules. Deliberately here and not at save:
+    // drafts stay permissive so a work-in-progress funnel — human or
+    // agent-authored — is never blocked mid-edit (design spec, D4).
+    const fields = validatePageFields(pages);
+    if (!fields.ok) {
+      throw new HTTPException(400, {
+        message: JSON.stringify({
+          code: "FUNNEL_VALIDATION",
+          issues: fields.issues,
         }),
       });
     }
@@ -441,7 +456,7 @@ export const funnelsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId or funnelId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+    await assertProjectCapability(projectId, user.id, "funnels:write");
 
     const src = await drizzle.funnelRepo.findById(drizzle.db, funnelId);
     if (!src || src.projectId !== projectId) {
@@ -515,7 +530,7 @@ export const funnelsRoute = new Hono()
       });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+    await assertProjectCapability(projectId, user.id, "funnels:write");
 
     const funnel = await drizzle.funnelRepo.findById(drizzle.db, funnelId);
     if (!funnel || funnel.projectId !== projectId) {
@@ -567,7 +582,7 @@ export const funnelsRoute = new Hono()
       });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+    await assertProjectCapability(projectId, user.id, "funnels:write");
 
     const template = await drizzle.funnelTemplateRepo.findById(
       drizzle.db,

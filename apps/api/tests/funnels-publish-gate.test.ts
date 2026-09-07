@@ -59,6 +59,13 @@ vi.mock("../src/lib/project-access", () => ({
   assertProjectAccess: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Publish is a mutation route, gated on the `funnels:write` capability
+// (Task 8) rather than `assertProjectAccess`'s DEVELOPER rank check.
+vi.mock("../src/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/capabilities")>();
+  return { ...actual, assertProjectCapability: vi.fn().mockResolvedValue(undefined) };
+});
+
 vi.mock("../src/middleware/dashboard-auth", () => ({
   requireDashboardAuth: async (
     c: { set: (k: string, v: unknown) => void },
