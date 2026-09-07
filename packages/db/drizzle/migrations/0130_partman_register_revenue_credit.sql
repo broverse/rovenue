@@ -182,8 +182,10 @@ BEGIN
       -- Upgrade path (0019 ran), or a re-run of this migration.
       RAISE NOTICE
         '0130: % is already in partman.part_config — registration skipped '
-        '(no-op), retention settings reconciled below.',
-        v_parent_table;
+        '(no-op). The reconcile below still runs: it clears partman''s '
+        'retention (the retention sweep owns dropping) and raises premake '
+        'to at least %. A premake already above % is left alone.',
+        v_parent_table, PARTITION_PREMAKE, PARTITION_PREMAKE;
     ELSE
       -- First month NOT already covered by a child partition. NULL only
       -- when the parent has no non-default children at all, which no
@@ -236,12 +238,21 @@ BEGIN
     -- also drop them. NULL retention disables partman's dropper; the two
     -- keep_* flags go back to partman's own defaults so nothing reads as
     -- armed. `infinite_time_partitions` is premake behaviour and stays on.
+    --
+    -- premake is a FLOOR, not an assignment. On an upgrade-path database
+    -- an operator may have tuned it upward — that is a deliberate
+    -- operational choice about how far ahead this install wants to run,
+    -- and a migration that silently reverts it on every re-run is a
+    -- worse outcome than one that never touched it. GREATEST() ignores
+    -- NULLs in Postgres, so a NULL premake still lands on the floor.
+    -- The direction that matters for correctness is upward: too little
+    -- headroom strands inserts, too much only costs empty partitions.
     UPDATE partman.part_config
        SET retention                = NULL,
            retention_keep_table     = true,
            retention_keep_index     = true,
            infinite_time_partitions = true,
-           premake                  = PARTITION_PREMAKE
+           premake                  = GREATEST(premake, PARTITION_PREMAKE)
      WHERE parent_table = v_parent_table;
   END LOOP;
 END
