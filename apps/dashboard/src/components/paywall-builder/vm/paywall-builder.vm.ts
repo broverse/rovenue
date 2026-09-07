@@ -855,29 +855,80 @@ export class PaywallBuilderViewModel {
    * `action_paywall_editTree` intent executes (Task 5). The intent
    * handler is now the SOLE writer for that op — it already applied and
    * persisted it server-side — so this builder never re-applies the op
-   * itself; it just re-fetches the row the handler already wrote and
-   * treats it as the new saved baseline, exactly like `applyServer` on
-   * initial load (not `applyExternalTreeOp`/`applyExternalConfig`: those
-   * feed `configBeforeAiApply` for `revertAiChange`, but there's nothing
-   * to "revert" here — the server has already committed the change, and
+   * itself; it just re-fetches the row the handler already wrote (not
+   * `applyExternalTreeOp`/`applyExternalConfig`: those feed
+   * `configBeforeAiApply` for `revertAiChange`, but there's nothing to
+   * "revert" here — the server has already committed the change, and
    * undoing it locally wouldn't undo the persisted draft).
    *
-   * Best-effort and non-fatal, mirroring `reloadAfterDraftConflict`: a
-   * failed refetch just leaves the canvas showing the pre-edit draft,
-   * stale but not wrong — the next manual reload or autosave-driven
-   * conflict path will pick up the real state.
+   * Deliberately does NOT go through `applyServer` (review fix — Important
+   * 1 & 2): this is an UNSOLICITED wholesale replacement of `config`, the
+   * same shape as `reloadAfterDraftConflict`, not a load or a
+   * user-initiated revert/discard. Two things `applyServer` would get
+   * wrong here:
+   *
+   *   1. It sets `autosaveStatus = "saved"` unconditionally. If the author
+   *      had unsaved canvas edits (`isDirty`) when this fires, those edits
+   *      are discarded with NO undo — exactly like a draft-conflict
+   *      overwrite — and labelling that "saved" would be an outright lie
+   *      about what just happened. So this follows `reloadAfterDraftConflict`'s
+   *      shape instead: `syncFromDetail` + reset `lastSavedSnapshot` to
+   *      match (so `isDirty` correctly reads false against the NEW
+   *      baseline), and when there WERE discarded edits, sets
+   *      `autosaveStatus = "conflict"` — the same badge
+   *      (`topbar.tsx`'s `AutosaveBadge`) that already tells the author
+   *      "your canvas was replaced" for the analogous CAS-conflict case.
+   *      When there was nothing to lose (`isDirty` was already false),
+   *      `autosaveStatus` is left alone rather than manufacturing a false
+   *      alarm.
+   *   2. It never refreshes the publish-state pair (`loadVersions`/
+   *      `loadDiff`), unlike every OTHER draft-mutating path (`load`,
+   *      `discardDraft`, `revertTo`, `discardToPublished`, and the
+   *      autosave success path via `refreshDiffAfterSave`'s `diffStale`).
+   *      Without it, a previously-published, in-sync paywall would read
+   *      `isDirty=false` + `diffStale=false` + a stale cached `diffResult`
+   *      after this refetch — `hasUnpublishedChanges` would report false
+   *      and `canPublish` would be false, even though Rovi's edit is
+   *      sitting unpublished on the server. `refreshPublishState()` below
+   *      closes that gap — AWAITED here (not fire-and-forget like `load()`'s
+   *      call to the same method): there is no isLoading/render gate this
+   *      one needs to avoid blocking, so this method's own promise
+   *      resolving can mean the publish state is genuinely caught up.
+   *
+   * Best-effort and non-fatal on the refetch itself: a failed GET is
+   * logged (matching `load()`'s failure path) and otherwise swallowed —
+   * the canvas just keeps showing the pre-edit draft, stale but not
+   * wrong, until the next manual reload or autosave-driven conflict path
+   * picks up the real state.
    *
    * Called from `RoviProvider.dispatchPaywallPatch`'s listener
    * (`builder-shell.tsx`), fire-and-forget — the caller cannot await an
    * async refetch triggered from a synchronous notification.
    */
   async refetchAfterExternalEdit(): Promise<void> {
+    const hadUnsavedEdits = this.isDirty;
     try {
       const detail = await this.api.get(this.props.projectId, this.props.paywallId);
       if (this.disposed) return;
-      this.applyServer(detail);
-    } catch {
-      // Non-fatal — see doc comment above.
+      this.syncFromDetail(detail);
+      this.lastSavedSnapshot = this.snapshot();
+      if (hadUnsavedEdits) {
+        this.autosaveStatus = "conflict";
+      }
+      // Awaited (unlike `load()`'s fire-and-forget call to the same
+      // method): the persisted draft changed out from under this builder,
+      // so the cached publish diff no longer reflects it, and there is no
+      // render/isLoading gate here to protect — this whole method is
+      // already fire-and-forget from the caller's side (builder-shell.tsx
+      // does `void vm.refetchAfterExternalEdit()`), so awaiting internally
+      // costs nothing and makes "the refetch is done" actually mean the
+      // publish state is caught up too.
+      await this.refreshPublishState();
+    } catch (err) {
+      if (this.disposed) return;
+      // eslint-disable-next-line no-console
+      console.error("[PaywallBuilderViewModel] refetchAfterExternalEdit failed", err);
+      // Otherwise non-fatal — see doc comment above.
     }
   }
 

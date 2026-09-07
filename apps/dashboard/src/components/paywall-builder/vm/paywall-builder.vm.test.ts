@@ -1684,6 +1684,153 @@ describe("AI apply/revert (configBeforeAiApply)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// refetchAfterExternalEdit (Task 5 review fix, Important 1 & 2) — an
+// approved `action_paywall_editTree` intent is persisted server-side by
+// the intent handler; the Rovi bridge (builder-shell.tsx) calls this to
+// pull that write into the open builder. Unlike `applyServer`, this must
+// not silently discard unsaved canvas edits under a "saved" label, and it
+// must keep the publish group (`canPublish`/`hasUnpublishedChanges`)
+// truthful after the wholesale replacement — both were the review's
+// findings against the first version of this method.
+// ---------------------------------------------------------------------------
+describe("refetchAfterExternalEdit", () => {
+  it("re-fetches and applies the server draft, and refreshes the publish state so a previously in-sync PUBLISHED paywall can still be published (Important 1)", async () => {
+    const publishedDetail = () =>
+      fakeDetail({ status: "published", publishedVersionId: "pwv_1" });
+    const externalConfig = fakeConfig();
+    externalConfig.root.children.push({ type: "spacer", id: "sp_rovi", size: 4 });
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(publishedDetail()) // initial load
+      .mockResolvedValueOnce({ ...publishedDetail(), builderConfig: externalConfig, draftRevision: 1 });
+    const emptyDiff = {
+      from: { versionNo: 3, label: null },
+      to: { versionNo: null, label: null },
+      entries: [] as never[],
+    };
+    const diffWithEntry = {
+      from: { versionNo: 3, label: null },
+      to: { versionNo: null, label: null },
+      entries: [
+        {
+          kind: "added" as const,
+          scope: "node" as const,
+          nodeId: "sp_rovi",
+          nodeType: "spacer",
+          field: "root",
+          from: null,
+          to: "spacer",
+        },
+      ],
+    };
+    const listVersions = vi.fn().mockResolvedValue([]);
+    const diff = vi
+      .fn()
+      .mockResolvedValueOnce(emptyDiff) // initial load → in sync
+      .mockResolvedValueOnce(diffWithEntry); // post-refetch → Rovi's edit shows up
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn(), listVersions, diff });
+    await vm.load(() => {});
+    // A previously-published, in-sync paywall: nothing to publish yet.
+    expect(vm.hasUnpublishedChanges).toBe(false);
+    expect(vm.canPublish).toBe(false);
+    listVersions.mockClear();
+
+    await vm.refetchAfterExternalEdit();
+
+    expect(vm.config.root.children.some((c) => c.id === "sp_rovi")).toBe(true);
+    expect(vm.isDirty).toBe(false); // the new server state IS the baseline now
+    expect(listVersions).toHaveBeenCalledTimes(1);
+    // The review's Important 1: without a publish-state refresh, this would
+    // still read `hasUnpublishedChanges: false` / `canPublish: false` here
+    // even though Rovi's edit is sitting unpublished on the server — the
+    // author would see "in sync" and be unable to publish it.
+    expect(vm.hasUnpublishedChanges).toBe(true);
+    expect(vm.canPublish).toBe(true);
+  });
+
+  it("does NOT label a discarded in-flight edit as 'saved' — sets the conflict badge instead (Important 2)", async () => {
+    const externalConfig = fakeConfig();
+    externalConfig.root.children.push({ type: "spacer", id: "sp_rovi", size: 4 });
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(fakeDetail())
+      .mockResolvedValueOnce(fakeDetail({ builderConfig: externalConfig, draftRevision: 1 }));
+    const vm = makeVm({
+      get,
+      patchBuilderConfig: vi.fn(),
+      listVersions: vi.fn().mockResolvedValue([]),
+      diff: vi.fn().mockResolvedValue({
+        from: { versionNo: null, label: null },
+        to: { versionNo: null, label: null },
+        entries: [],
+      }),
+    });
+    await vm.load(() => {});
+    // An in-progress local edit the author never got to save.
+    vm.updateNode("t1", { role: "subtitle" });
+    expect(vm.isDirty).toBe(true);
+
+    await vm.refetchAfterExternalEdit();
+
+    // The local edit is gone — replaced wholesale by the server's draft —
+    // and `autosaveStatus` must say so rather than "saved", which would
+    // be a lie about what just happened to the author's in-flight work.
+    expect(vm.config.root.children.some((c) => c.id === "sp_rovi")).toBe(true);
+    expect(
+      vm.config.root.children.some((c) => c.id === "t1" && c.type === "text" && c.role === "subtitle"),
+    ).toBe(false);
+    expect(vm.autosaveStatus).toBe("conflict");
+    expect(vm.isDirty).toBe(false); // matches the NEW baseline, not stale
+  });
+
+  it("leaves autosaveStatus alone when there was nothing to discard", async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(fakeDetail())
+      .mockResolvedValueOnce(fakeDetail({ draftRevision: 1 }));
+    const vm = makeVm({
+      get,
+      patchBuilderConfig: vi.fn(),
+      listVersions: vi.fn().mockResolvedValue([]),
+      diff: vi.fn().mockResolvedValue({
+        from: { versionNo: null, label: null },
+        to: { versionNo: null, label: null },
+        entries: [],
+      }),
+    });
+    await vm.load(() => {});
+    expect(vm.autosaveStatus).toBe("saved");
+
+    await vm.refetchAfterExternalEdit();
+
+    // Nothing was discarded (the canvas was already in sync), so there is
+    // no data-loss to signal — manufacturing a "conflict" badge here would
+    // be a false alarm.
+    expect(vm.autosaveStatus).toBe("saved");
+  });
+
+  it("logs and swallows a failed refetch rather than throwing at the caller", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(fakeDetail())
+      .mockRejectedValueOnce(new Error("network down"));
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const beforeConfig = vm.config;
+
+    await expect(vm.refetchAfterExternalEdit()).resolves.toBeUndefined();
+
+    expect(vm.config).toBe(beforeConfig); // untouched — the failed GET never applied
+    expect(consoleError).toHaveBeenCalledWith(
+      "[PaywallBuilderViewModel] refetchAfterExternalEdit failed",
+      expect.any(Error),
+    );
+    consoleError.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Auto-translate apply (ROADMAP §3). The translations arrive from the API as
 // plain entries; the VM merges them through the SAME `setLocalizations` op
 // the copilot's dry-run path uses.

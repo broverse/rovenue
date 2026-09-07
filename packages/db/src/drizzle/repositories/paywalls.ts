@@ -168,9 +168,14 @@ export async function updatePaywall(
  * statement, so two concurrent callers cannot both succeed.
  *
  * `configFormatVersion` is supplied by the caller rather than recomputed
- * here — the route's `prepareBuilderConfigPatch` is the single source of
- * truth for how a `builderConfig` value maps to a format version, so this
- * function just persists whatever it already decided.
+ * here — the single source of truth for how a `builderConfig` value maps
+ * to a format version is the two named constants in apps/api's
+ * `services/paywall-ai/validate-config.ts`
+ * (`BUILDER_CONFIG_EMPTY_FORMAT_VERSION` / `BUILDER_CONFIG_TREE_FORMAT_VERSION`),
+ * which both `routes/dashboard/paywalls.ts`'s `prepareBuilderConfigPatch`
+ * and `services/copilot/intent-handlers.ts`'s `action_paywall_editTree`
+ * handler import from — this function just persists whatever the caller
+ * already decided.
  */
 export async function updatePaywallDraft(
   db: Db,
