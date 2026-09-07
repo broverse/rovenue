@@ -936,19 +936,23 @@ else in the framework/provider-breadth dimension is done.
       non-zero value; and partition naming on these two parents is now split
       (`_YYYY_MM` for the pre-2029 hand-made children, partman's `_pYYYYMMDD`
       from 2029-01 on).
-- [ ] `ensureRevenueEventPartitions` has no callers. It is the not-yet-wired
-      provisioner for the importer's back-dated rows, and lives at
-      `packages/db/src/drizzle/repositories/revenue-event-partitions.ts:341`.
-      Nothing in `apps/` or `packages/` calls it, and it is **not re-exported
-      from `packages/db/src/index.ts`** — the only references outside its own
-      file are two test files. The partition-overlap fix in `fbf4864d` (stop
-      partman proposing a range that overlaps the hand-made partitions
-      covering today's data) is proven at integration level against a real
-      partman container, but it is *not* proven through the caller that will
-      eventually wire it, because that caller does not exist yet. Whoever
-      wires it must re-verify the overlap behaviour end-to-end from the
-      importer rather than inheriting the integration test's confidence, and
-      add the barrel export.
+- [x] `ensureRevenueEventPartitions` — **this entry was wrong, and is closed as
+      mis-stated.** It claimed the provisioner had no callers and no barrel
+      export. Both are false: `apps/api/src/services/import/write.ts:411` calls
+      it in `writeImportBatch`'s pre-flight (reached from
+      `workers/import-runner.ts:325`), `plan.ts:595` uses
+      `describeRequiredPartitionSpan`, and `packages/db/src/drizzle/index.ts:102`
+      exports the namespace. Every "no callers" reading — mine, the reviewer's
+      and the implementer's — came from grepping for a *direct module import*,
+      which a `export * as revenueEventPartitionRepo` namespace re-export
+      defeats. `credit_ledger` genuinely has no import writer, so
+      `revenue_events` is correctly the only table the importer provisions.
+      The real gap was caller-level COVERAGE: the existing test used a month
+      *before* the hand-made 2024–2028 range — the one position the overlap bug
+      never bit — and probed by partition NAME, the defect's own blind spot.
+      Closed by `4e9d9809` (caller-level cases inside/before/after the range,
+      with the pre-fix overlap error watched) and `34801085` (assert coverage
+      via catalog range containment, not a partman-shaped name).
 
 ## 9. GDPR / KVKK tooling (85 → 95) — CLOSED 2026-09-06
 
@@ -1216,18 +1220,21 @@ else in the framework/provider-breadth dimension is done.
       only catch it once a bad entry is actually committed.
       (That last sentence is what `539bc8c0` answered — the generator now
       corrects the entry before it is ever committed.)
-- [ ] The Docker liveness guard's non-standard-daemon branches are unexercised.
-      `packages/db/tests/docker-daemon-guard.ts` (shipped `bf591cee`, so the
-      testcontainers pass fails loudly instead of hanging when there is no
-      daemon) probes the endpoints testcontainers itself would try —
-      `DOCKER_HOST` when set, then Docker Desktop's socket, then
-      `~/.colima/default/docker.sock`, then Rancher Desktop's. Only two paths
-      were actually exercised: a live macOS Docker Desktop socket and a dead
-      path. The Colima, Rancher Desktop and `DOCKER_HOST=tcp://…` branches
-      have never been run against a real such daemon, so a false negative
-      there would reintroduce exactly the silent-skip failure the guard
-      exists to prevent. Closing this needs a machine running one of those
-      three, not a code change.
+- [x] The Docker liveness guard's non-standard-daemon branches — exercised
+      2026-09-07 (`e66fac91`). Colima and Rancher Desktop are not installed on
+      the dev machine, but each branch's actual logic is *"does a daemon answer
+      at this path/endpoint"*, which is testable without those products: a real
+      unix socket was stood up at each probed path and a TCP forwarder for
+      `DOCKER_HOST=tcp://…`, both backed by the live daemon, inside a
+      `node:24-alpine` container with no `/var/run/docker.sock`, no
+      `$HOME/.docker/run/docker.sock` and no docker CLI — plus a control (socket
+      unmounted → throw listing all four paths) so a PASS is attributable to the
+      mount alone. Failure direction confirmed per branch: a socket file whose
+      daemon is dead throws in ~8ms rather than hanging, and the `docker version`
+      fallback does not rescue a dead `DOCKER_HOST`.
+      **Honest limit: this exercises the branch logic, not Colima or Rancher
+      Desktop themselves.** A quirk specific to one of those daemons' socket
+      behaviour would still not be covered.
 
 ## 11. Docs & developer experience (65 → 90)
 
