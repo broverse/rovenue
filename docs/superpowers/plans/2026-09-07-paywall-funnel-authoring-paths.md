@@ -769,7 +769,33 @@ cd apps/api && nice -n 19 npx vitest run src/services/copilot/intent-handlers.pa
 
 Expected: FAIL — `builderConfig` is unchanged and `draftRevision` is 0, because the handler is a dry run.
 
-- [ ] **Step 3: Rewrite the handler**
+- [ ] **Step 3: Give the format version one home**
+
+Task 4 widened `updatePaywallDraft` to require `configFormatVersion`. The
+route derives it inside the route-local `prepareBuilderConfigPatch`, which
+also parses and needs `offeringPackageIds` — so the handler cannot reuse
+that function, and hardcoding `2` would put back the magic literal Task 4's
+review had removed.
+
+Name the two versions once, in `apps/api/src/services/paywall-ai/validate-config.ts`
+(which the intent handler already imports from):
+
+```ts
+/**
+ * `builderConfig` format versions. 1 is the legacy shape — no builder tree,
+ * remote config only. 2 is a component tree. Named here rather than derived
+ * at each write site so the route and the intent handler cannot drift.
+ */
+export const BUILDER_CONFIG_EMPTY_FORMAT_VERSION = 1;
+export const BUILDER_CONFIG_TREE_FORMAT_VERSION = 2;
+```
+
+Then replace the two literals in `prepareBuilderConfigPatch`
+(`apps/api/src/routes/dashboard/paywalls.ts`, the `configFormatVersion: 1`
+and `configFormatVersion: 2` returns) with these constants, importing them
+in the route.
+
+- [ ] **Step 4: Rewrite the handler**
 
 Replace the `action_paywall_editTree` handler body in
 `apps/api/src/services/copilot/intent-handlers.ts`. Replace the
@@ -810,7 +836,11 @@ opposite of what the code does.
         ctx.projectId,
         paywallId,
         paywall.draftRevision,
-        { builderConfig: nextDraft },
+        {
+          builderConfig: nextDraft,
+          // A tree op always yields a tree, never the legacy empty shape.
+          configFormatVersion: BUILDER_CONFIG_TREE_FORMAT_VERSION,
+        },
       );
       if (!updated) {
         throw new Error(
@@ -836,7 +866,7 @@ opposite of what the code does.
   });
 ```
 
-- [ ] **Step 4: Remove the dashboard's client-side apply**
+- [ ] **Step 5: Remove the dashboard's client-side apply**
 
 Find where the builder applies an approved intent's op locally and then
 saves it, and delete that path — the builder now refetches the paywall
@@ -849,7 +879,7 @@ grep -rn "applyTreeOp\|action_paywall_editTree" apps/dashboard/src
 Expected after the edit: the dashboard no longer calls `applyTreeOp` for an
 approved intent, and refetches instead.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests to verify they pass**
 
 ```bash
 cd apps/api && nice -n 19 npx vitest run src/services/copilot --maxWorkers=2
@@ -858,7 +888,7 @@ cd apps/api && nice -n 19 npx vitest run src/services/copilot --maxWorkers=2
 Expected: PASS. The existing `action-paywall.test.ts` dry-run assertions
 will need updating in this step — that is expected, not a regression.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add apps/api/src/services/copilot apps/dashboard/src
