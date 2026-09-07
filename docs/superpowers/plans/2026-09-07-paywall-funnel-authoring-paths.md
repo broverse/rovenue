@@ -1192,6 +1192,7 @@ git commit -m "chore(funnels): measure per-type rule impact on published funnels
 
 ```ts
 const VALIDATION_STATUS = 400;
+const FORBIDDEN_STATUS = 403;
 
 it("publish rejects a funnel whose choice page has no options", async () => {
   const { cookie, projectId, funnelId } = await seedFunnelWithPages([
@@ -1229,23 +1230,35 @@ it("SAVING that same funnel still succeeds — save stays permissive", async () 
   expect(res.status).toBe(200);
 });
 
-it("GROWTH may publish a funnel; CUSTOMER_SUPPORT may not", async () => {
+it("GROWTH gets past the capability gate; CUSTOMER_SUPPORT does not", async () => {
   // funnels:write is a faithful restatement of today's DEVELOPER rank
   // gate, which GROWTH already satisfies by rank equality.
+  //
+  // Deliberately NOT asserting 200 for GROWTH. Publish checks in order:
+  // capability -> schema -> graph -> Stripe `chargesEnabled`. The graph
+  // validator requires at least one paywall page, and a paywall page
+  // requires a charge-capable Stripe account, so a valid funnel in a test
+  // project always stops at STRIPE_NOT_CONNECTED. Asserting 200 would
+  // conflate authorization with Stripe setup; asserting the Stripe error
+  // proves precisely what is under test — GROWTH passed the gate and
+  // reached the last check.
   const growth = await seedPublishableFunnelWithRole("GROWTH");
   const cs = await seedPublishableFunnelWithRole("CUSTOMER_SUPPORT");
 
-  expect(
-    (await app.request(`/projects/${growth.projectId}/funnels/${growth.funnelId}/publish`, {
-      method: "POST", headers: { cookie: growth.cookie },
-    })).status,
-  ).toBe(200);
+  const growthRes = await app.request(
+    `/projects/${growth.projectId}/funnels/${growth.funnelId}/publish`,
+    { method: "POST", headers: { cookie: growth.cookie } },
+  );
+  expect(growthRes.status).toBe(VALIDATION_STATUS);
+  expect(JSON.parse((await growthRes.json()).error.message).code).toBe(
+    "STRIPE_NOT_CONNECTED",
+  );
 
-  expect(
-    (await app.request(`/projects/${cs.projectId}/funnels/${cs.funnelId}/publish`, {
-      method: "POST", headers: { cookie: cs.cookie },
-    })).status,
-  ).toBe(403);
+  const csRes = await app.request(
+    `/projects/${cs.projectId}/funnels/${cs.funnelId}/publish`,
+    { method: "POST", headers: { cookie: cs.cookie } },
+  );
+  expect(csRes.status).toBe(FORBIDDEN_STATUS);
 });
 ```
 
