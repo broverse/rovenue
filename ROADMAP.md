@@ -1480,56 +1480,22 @@ below: `packages/sdk-rn`'s published peer floor has never been built against.
       (expo 52 / RN 0.76) is still unbuilt — the workspace hoists RN 0.86, which
       makes testing the bottom of the range awkward here. The declared range is
       therefore evidenced at its top, not across its span.
-- [ ] **iOS builds but the SDK is not in the product.** `xcodebuild` returns
-      `** BUILD SUCCEEDED **` with zero errors, `pod install` is clean,
-      `libRovenue.a` (17 MB) and `libRovenueSdkRn.a` (1.4 MB) both compile, and
-      Expo autolinking DOES register the module (`internal import RovenueSdkRn`
-      plus `RovenueModule.self` in the generated `ExpoModulesProvider.swift`) —
-      yet no file in the 200 MB `.app` bundle mentions `RovenueModule`, and the
-      app binary carries zero Rovenue symbols on either architecture.
-      A green build that ships without the SDK is worse than a red one, so this
-      is recorded as OPEN rather than counted as the iOS half of the item above.
-      Next step is to run the built app in a simulator and confirm whether the
-      module registers at runtime, then chase the link step if it does not.
-- [x] `apps/docs/content/docs/reference/methods.mdx` had no section for
-      three real, exported RN SDK method groups: Paywalls
-      (`RovenuePaywallView`, exported from `packages/sdk-rn/src/index.ts`),
-      Remote Config (`getRemoteConfig` / `refreshRemoteConfig`), and
-      Attributes (`setAttributes`). All three existed and worked; the
-      reference page simply never grew a section for them. Distinct from the
-      fiction purged from this file elsewhere in that batch — this was absent
-      coverage, not false coverage. **CLOSED 2026-09-07** (`9ee0d1f3`, +693
-      lines): `## Paywalls` (`getPaywall`, `logPaywallShown`,
-      `logPaywallClosed`), `## Remote Config` and `## Subscriber Attributes`
-      (`setAttributes`, `flushAttributes`) are all present. Two follow-ups
-      landed with it (`fd20a61c`, `f4e660f5`): a sweep of all 49 content files
-      fixed broken RN import snippets and completed the per-method throws
-      tables, and reconciled `errors.mdx` and `methods.mdx`, which the two
-      recorded defects would otherwise have left disagreeing about
-      `getPaywall`.
-- [x] Docs search did not work in the shipped image. `apps/docs`'s production
-      `Dockerfile` builds the static site in a `node:22-alpine` stage and
-      serves the output from a `caddy:2-alpine` runtime stage with no Node
-      process at all, so `/api/search`'s loader
-      (`apps/docs/app/routes/search.ts`, `fumadocs-core/search/server`) — which
-      needs a live server — was unreachable behind Caddy in production.
-      **CLOSED 2026-09-07** (`d630dce6`, `026a6630`, `b6dc381b`, `b9771195`,
-      `a631267e`): the first of the two recorded options, a static index.
-      `search-index.json` is emitted at build time and searched client-side in
-      `search-dialog.tsx`; `scripts/verify-search-index.mjs` runs as the last
-      step of `apps/docs`'s `build` script, so an image can never ship with a
-      missing or stale index. `deploy/caddy/Caddyfile.docs` serves the index
-      `no-cache` (unlike `/assets/*` it carries no content hash, so a cached
-      copy would leave returning readers on a stale index). Three defects were
-      found closing it: client navigation landing on the `ErrorBoundary`, dead
-      resource-route payloads still being emitted for every pruned route (not
-      just the search one), and Orama's unused sort index bloating the
-      exported payload.
-- [x] Interactive API explorer — shipped 2026-09-06 at `/docs/reference/api-explorer`,
-      rendering `apps/api/openapi/openapi.json` (33 canonical `/v1` endpoints) with a
-      real "try it" panel (an actual `fetch()` per endpoint, editable path/query/header
-      params and JSON body, Bearer token) plus a copyable `curl` command per endpoint as
-      the always-works fallback.
+- [x] **iOS builds and ships the SDK — verified 2026-09-07.** An earlier note here
+      claimed the opposite ("builds but the SDK is not in the product"). **That was
+      wrong**, and the error was mine: on RN 0.86 debug builds the app binary is a
+      thin launcher and all app + pod code goes into `samplernexpo.debug.dylib`. I
+      searched the launcher, found nothing, and concluded the SDK was missing. The
+      control that would have caught it immediately — checking whether ANY Expo
+      module was present — shows none of them are in the launcher either
+      (`ExpoConstants`, `ExpoFileSystem`, `ExpoModulesProvider`: all zero; the
+      binary holds 240 strings total).
+      The real artifact, `samplernexpo.debug.dylib` (33 MB), contains 800
+      `RovenueSdkRn` symbols, 304 references to the Swift `Rovenue` module,
+      `RovenuePaywallExpoView`, and 1076 rovenue/uniffi symbols including the Rust
+      core. `xcodebuild` returns `** BUILD SUCCEEDED **` with zero errors and
+      `-lRovenue`/`-lRovenueSdkRn` are in the link step.
+      So both platforms now build against the declared peer floor, with the SDK
+      verified present in the shipped artifact on each.
 
       **Honest about provenance, not a claim of full generation.** Request bodies and
       auth are GENERATED by walking Hono's route table
