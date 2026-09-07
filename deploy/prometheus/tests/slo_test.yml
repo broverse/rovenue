@@ -8,10 +8,18 @@
 # not. These tests feed synthetic series through the real rule file and
 # assert both directions.
 #
-# Run:
+# Run (the image tag is the one docker-compose.yml pins; the CI step in
+# .github/workflows/ci.yml reads it from there rather than repeating it, so
+# the rules are validated against the Prometheus version that loads them):
 #   docker run --rm --entrypoint promtool \
 #     -v "$PWD/deploy/prometheus:/p:ro" prom/prometheus:v2.54.1 \
 #     test rules /p/tests/slo_test.yml
+#
+# This is wired into CI as "Prometheus alert rules - syntax + threshold unit
+# tests". It gates thresholds and `for:` durations only: promtool feeds the
+# series itself, so a rule naming a metric the API never exports passes both
+# `check rules` and `test rules`. apps/api/tests/prometheus-alert-rules.test.ts
+# is the guard for that half.
 #
 # The tests live outside deploy/prometheus/rules/ on purpose: prometheus.yml
 # globs that directory for `*.yml`, and a test file loaded as a rule file

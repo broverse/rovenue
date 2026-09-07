@@ -116,6 +116,41 @@ jobs:
       - name: SDK doc-coverage ratchet
         run: node scripts/sdk-doc-coverage.mjs
 
+      # deploy/prometheus/tests/slo_test.yml feeds synthetic series through
+      # the real rule file and asserts both directions — the alert fires on
+      # the incident and stays quiet on a healthy service. It was written
+      # alongside the rules and never run anywhere, so every threshold and
+      # every `for:` in deploy/prometheus/rules/slo.yml was ungated: a rule
+      # could be loosened to never fire, or tightened to page constantly, and
+      # nothing on a PR would say so.
+      #
+      # This does NOT subsume apps/api/tests/prometheus-alert-rules.test.ts
+      # (run below as part of `pnpm test`), and that is the point: promtool
+      # supplies the series itself, so `check rules` AND `test rules` both
+      # reported SUCCESS on a rule naming a metric the API never exports —
+      # a rule that can never fire in production. The vitest contract test is
+      # what catches that; this step catches the thresholds. Neither covers
+      # the other.
+      #
+      # The image tag is read from docker-compose.yml rather than repeated
+      # here, so the rules are always validated against the exact Prometheus
+      # version that will load them.
+      - name: Prometheus alert rules - syntax + threshold unit tests
+        run: |
+          set -euo pipefail
+          image=$(grep -oE 'prom/prometheus:[^[:space:]"]+' docker-compose.yml | head -1)
+          if [ -z "$image" ]; then
+            echo "no prom/prometheus image pinned in docker-compose.yml" >&2
+            exit 1
+          fi
+          echo "validating against $image"
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/deploy/prometheus:/p:ro" "$image" \
+            check rules /p/rules/slo.yml
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/deploy/prometheus:/p:ro" "$image" \
+            test rules /p/tests/slo_test.yml
+
       # apps/api's `test` script is two passes: `vitest run` excludes the
       # testcontainer suites, then `VITEST_CONTAINER_PASS=1 vitest run` runs
       # them. The second pass starts its own Redpanda and ClickHouse; what it
