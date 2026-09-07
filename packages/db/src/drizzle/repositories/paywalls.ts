@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
 import { collectMediaUrls, type BuilderConfig } from "@rovenue/shared/paywall";
 import type { Db } from "../client";
 import {
@@ -124,7 +124,28 @@ export interface UpdatePaywallInput {
   status?: "draft" | "published" | "archived";
   publishedVersionId?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * Optimistic-concurrency counter for `builderConfig` — pass
+   * `BUMP_DRAFT_REVISION` to invalidate any builder tab (or other draft
+   * writer) holding the pre-write revision, without a compare-and-swap.
+   * For routes that overwrite the draft outright (revert, discard-draft)
+   * rather than racing another writer over the SAME edit — see
+   * `updatePaywallDraft` for the CAS path new builder-tab writes use.
+   */
+  draftRevision?: SQL<unknown>;
 }
+
+/**
+ * A raw `draftRevision + 1` SQL expression, reusable across statements
+ * (it's a query fragment, not a value). Every write that replaces
+ * `builderConfig` must move this counter — CAS writes via
+ * `updatePaywallDraft` bump it as part of their own `.set()`; a
+ * server-initiated rewrite that goes through `updatePaywall` instead
+ * (revert, discard-draft) passes this as its `draftRevision` field so a
+ * concurrent builder tab's next autosave 409s instead of clobbering the
+ * rewrite.
+ */
+export const BUMP_DRAFT_REVISION: SQL<unknown> = sql`${paywalls.draftRevision} + 1`;
 
 export async function updatePaywall(
   db: Db,
@@ -146,23 +167,23 @@ export async function updatePaywall(
  * that into a 409. The revision bump and the config write are one
  * statement, so two concurrent callers cannot both succeed.
  *
- * `configFormatVersion` moves in lockstep with `builderConfig` — 1 means
- * "no builder tree, remote-config only", 2 means "has one" — the same
- * derivation the route's `prepareBuilderConfigPatch` uses to shape the
- * value passed in here, so recomputing it from nullness alone is safe.
+ * `configFormatVersion` is supplied by the caller rather than recomputed
+ * here — the route's `prepareBuilderConfigPatch` is the single source of
+ * truth for how a `builderConfig` value maps to a format version, so this
+ * function just persists whatever it already decided.
  */
 export async function updatePaywallDraft(
   db: Db,
   projectId: string,
   id: string,
   expectedRevision: number,
-  patch: { builderConfig: unknown },
+  patch: { builderConfig: unknown; configFormatVersion: number },
 ): Promise<Paywall | null> {
   const [row] = await db
     .update(paywalls)
     .set({
       builderConfig: patch.builderConfig,
-      configFormatVersion: patch.builderConfig === null ? 1 : 2,
+      configFormatVersion: patch.configFormatVersion,
       draftRevision: sql`${paywalls.draftRevision} + 1`,
       updatedAt: new Date(),
     })

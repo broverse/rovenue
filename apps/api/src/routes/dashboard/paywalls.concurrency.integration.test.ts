@@ -199,4 +199,132 @@ describe("PATCH /projects/:projectId/paywalls/:id — draft concurrency", () => 
     );
     expect(res.status).toBe(400);
   });
+
+  it("a combined write's non-draft fields roll back when the draft CAS conflicts", async () => {
+    // The PATCH schema allows builderConfig alongside name/offeringId/etc
+    // in one request. If a stale draftRevision 409s the draft half, the
+    // OTHER half must not have been persisted either — otherwise the
+    // caller is told the whole write failed while part of it landed.
+    const { app, cookie, projectId, paywallId } = await seedPaywall("atomicity");
+
+    const read = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      headers: { cookie },
+    });
+    const { data } = await read.json();
+    const staleRevision: number = data.paywall.draftRevision;
+    const originalName: string = data.paywall.name;
+
+    // Consume that revision with an unrelated write — simulates a second
+    // builder tab (or a server-side agent, once Task 5 lands) winning the
+    // race first.
+    const consumed = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: staleRevision, builderConfig: draftConfig("winner") }),
+    });
+    expect(consumed.status).toBe(200);
+
+    // Now PATCH with the now-stale revision, bundling a name change with
+    // the (doomed) draft write.
+    const res = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        draftRevision: staleRevision,
+        name: "Should Not Persist",
+        builderConfig: draftConfig("loser"),
+      }),
+    });
+    expect(res.status).toBe(CONFLICT_STATUS);
+
+    const after = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      headers: { cookie },
+    });
+    const { data: afterData } = await after.json();
+    expect(afterData.paywall.name).toBe(originalName);
+    expect(afterData.paywall.builderConfig).toEqual(draftConfig("winner"));
+  });
+});
+
+describe("Server-initiated draft rewrites also move draftRevision", () => {
+  it("revert bumps draftRevision, so a stale-revision PATCH 409s afterward", async () => {
+    const { app, cookie, projectId, paywallId } = await seedPaywall("revert-bump");
+
+    const firstSave = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: 0, builderConfig: draftConfig("v1") }),
+    });
+    expect(firstSave.status).toBe(200);
+    const publishRes = await app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(publishRes.status).toBe(200);
+
+    // The revision a builder tab would be holding right before someone
+    // else reverts the draft server-side.
+    const read = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      headers: { cookie },
+    });
+    const { data } = await read.json();
+    const staleRevision: number = data.paywall.draftRevision;
+
+    const revertRes = await app.request(
+      `/projects/${projectId}/paywalls/${paywallId}/versions/1/revert`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(revertRes.status).toBe(200);
+
+    const staleWrite = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: staleRevision, builderConfig: draftConfig("clobber") }),
+    });
+    expect(staleWrite.status).toBe(CONFLICT_STATUS);
+  });
+
+  it("discard-draft bumps draftRevision, so a stale-revision PATCH 409s afterward", async () => {
+    const { app, cookie, projectId, paywallId } = await seedPaywall("discard-bump");
+
+    const firstSave = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: 0, builderConfig: draftConfig("v1") }),
+    });
+    expect(firstSave.status).toBe(200);
+    const publishRes = await app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(publishRes.status).toBe(200);
+
+    // Dirty the draft again after publishing, so discard-draft has
+    // something to discard back from.
+    const editRes = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: 1, builderConfig: draftConfig("scratch") }),
+    });
+    expect(editRes.status).toBe(200);
+
+    const read = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      headers: { cookie },
+    });
+    const { data } = await read.json();
+    const staleRevision: number = data.paywall.draftRevision;
+
+    const discardRes = await app.request(
+      `/projects/${projectId}/paywalls/${paywallId}/discard-draft`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(discardRes.status).toBe(200);
+
+    const staleWrite = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: staleRevision, builderConfig: draftConfig("clobber") }),
+    });
+    expect(staleWrite.status).toBe(CONFLICT_STATUS);
+  });
 });

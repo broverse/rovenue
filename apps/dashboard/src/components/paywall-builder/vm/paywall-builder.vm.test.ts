@@ -901,15 +901,22 @@ describe("PaywallBuilderViewModel", () => {
       expect(vm.autosaveStatus).toBe("saving");
     });
 
-    it("on a 409 draft conflict, reloads the paywall instead of retrying blindly", async () => {
+    it("on a 409 draft conflict, replaces the canvas with the server's version and marks it a conflict — no merge, no blind retry", async () => {
       // Someone else (another builder tab, a server-side agent) wrote
-      // builderConfig first. The edit just sent is gone — there is no
-      // merge — but the VM must pick up the row's CURRENT draftRevision so
-      // a later save doesn't repeat the same stale one and 409 forever.
+      // builderConfig first. There is no merge: the local edit that was
+      // just rejected must be GONE, replaced by whatever the server now
+      // holds — proven here by asserting the actual config content, not
+      // just the revision number. The VM must also pick up the row's
+      // CURRENT draftRevision so a later save doesn't repeat the same
+      // stale one and 409 forever, and `isDirty` must read false — the
+      // canvas matches what's persisted again, even though nothing of
+      // the rejected edit survived.
+      const serverWinnerConfig = fakeConfig();
+      serverWinnerConfig.localizations.en.t1_key = "Server Won";
       const get = vi
         .fn()
         .mockResolvedValueOnce(fakeDetail({ draftRevision: 0 }))
-        .mockResolvedValueOnce(fakeDetail({ draftRevision: 5 }));
+        .mockResolvedValueOnce(fakeDetail({ draftRevision: 5, builderConfig: serverWinnerConfig }));
       const patchBuilderConfig = vi
         .fn()
         .mockRejectedValue(new ApiError("PAYWALL_DRAFT_CONFLICT", "conflict", 409));
@@ -921,8 +928,14 @@ describe("PaywallBuilderViewModel", () => {
 
       expect(get).toHaveBeenCalledTimes(2);
       expect(vm.paywall?.draftRevision).toBe(5);
-      // Surfaced, not swallowed — same badge state as any other rejected write.
-      expect(vm.autosaveStatus).toBe("permanentError");
+      // The rejected local edit ("changed") is gone; the canvas shows
+      // exactly what the server now holds, not a merge of the two.
+      expect(vm.config.localizations.en.t1_key).toBe("Server Won");
+      expect(vm.isDirty).toBe(false);
+      // A conflict is surfaced distinctly, not laundered into the generic
+      // "permanentError" wording (which would suggest reloading might help
+      // fix a rejected write — this isn't that).
+      expect(vm.autosaveStatus).toBe("conflict");
     });
   });
 

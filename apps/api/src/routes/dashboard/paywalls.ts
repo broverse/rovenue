@@ -753,29 +753,44 @@ export const paywallsDashboardRoute = new Hono()
 
     let row: Paywall | null;
     if (builderPatch !== null) {
-      // The draft write (builderConfig + draftRevision) is
-      // compare-and-swapped below — a mismatch means the row was written
-      // by someone else since the caller last read it (another builder
-      // tab, or a server-side agent), and there is no merge: the loser
-      // gets a 409 and must reload. Any OTHER fields in the same request
-      // don't participate in that race, so they're applied first, in
-      // their own statement.
-      if (Object.keys(nonDraftPatch).length > 0) {
-        await drizzle.paywallRepo.updatePaywall(drizzle.db, projectId, id, nonDraftPatch);
-      }
-      const updated = await drizzle.paywallRepo.updatePaywallDraft(
-        drizzle.db,
-        projectId,
-        id,
-        body.draftRevision as number,
-        { builderConfig: builderPatch.builderConfig },
-      );
-      if (!updated) {
-        throw new HTTPException(409, {
-          message: "Paywall draft changed since it was read; reload and retry",
+      // Capture the narrowed (non-null) value for the transaction closure
+      // below — `builderPatch` itself is a `let`, and TS does not carry a
+      // narrowing across a captured mutable binding.
+      const patch = builderPatch;
+      const expectedRevision = body.draftRevision;
+      if (expectedRevision === undefined) {
+        // updateBodySchema's refine already requires draftRevision
+        // whenever builderConfig is present, so this is unreachable in
+        // practice — but it keeps `undefined` from ever reaching
+        // `eq(paywalls.draftRevision, undefined)` below if that refine is
+        // ever relaxed, rather than depending on validation ~600 lines
+        // away to guarantee a non-null value here.
+        throw new HTTPException(400, {
+          message: "draftRevision is required when builderConfig is present",
         });
       }
-      row = updated;
+      // The non-draft fields (if any) and the compare-and-swapped draft
+      // write happen in ONE transaction: a revision mismatch throws
+      // inside it, rolling back both statements, so a caller told "your
+      // write failed" never has half of it silently persisted.
+      row = await drizzle.db.transaction(async (tx) => {
+        if (Object.keys(nonDraftPatch).length > 0) {
+          await drizzle.paywallRepo.updatePaywall(tx, projectId, id, nonDraftPatch);
+        }
+        const updated = await drizzle.paywallRepo.updatePaywallDraft(
+          tx,
+          projectId,
+          id,
+          expectedRevision,
+          { builderConfig: patch.builderConfig, configFormatVersion: patch.configFormatVersion },
+        );
+        if (!updated) {
+          throw new HTTPException(409, {
+            message: "Paywall draft changed since it was read; reload and retry",
+          });
+        }
+        return updated;
+      });
     } else {
       row = await drizzle.paywallRepo.updatePaywall(drizzle.db, projectId, id, nonDraftPatch);
     }
@@ -1177,12 +1192,18 @@ export const paywallsDashboardRoute = new Hono()
 
     // Revert restores the DRAFT only. The live version is untouched until
     // the author publishes again — same semantics as funnels' revert.
+    // This bypasses the compare-and-swap PATCH path entirely (it's a
+    // server-initiated overwrite, not a race against a specific reader),
+    // but it still bumps draftRevision: a builder tab open on the
+    // pre-revert draft must 409 on its next autosave rather than
+    // clobbering the revert.
     const updated = await drizzle.db.transaction(async (tx) => {
       const row = await drizzle.paywallRepo.updatePaywall(tx, projectId, id, {
         builderConfig: version.builderConfig,
         remoteConfig: version.remoteConfig,
         offeringId: version.offeringId,
         configFormatVersion: version.configFormatVersion,
+        draftRevision: drizzle.paywallRepo.BUMP_DRAFT_REVISION,
       });
       if (!row) {
         throw new HTTPException(404, { message: "Paywall not found" });
@@ -1233,12 +1254,16 @@ export const paywallsDashboardRoute = new Hono()
       throw new HTTPException(404, { message: "Published version not found" });
     }
 
+    // Same reasoning as revert above: no compare-and-swap here (this is a
+    // server-initiated overwrite of the whole draft), but the bump still
+    // invalidates a builder tab open on the pre-discard draft.
     const updated = await drizzle.db.transaction(async (tx) => {
       const row = await drizzle.paywallRepo.updatePaywall(tx, projectId, id, {
         builderConfig: live.builderConfig,
         remoteConfig: live.remoteConfig,
         offeringId: live.offeringId,
         configFormatVersion: live.configFormatVersion,
+        draftRevision: drizzle.paywallRepo.BUMP_DRAFT_REVISION,
       });
       if (!row) {
         throw new HTTPException(404, { message: "Paywall not found" });

@@ -264,17 +264,29 @@ const AutosaveBadge = component(() => {
   const saving = vm.autosaveStatus === "saving";
   const retrying = vm.autosaveStatus === "error";
   const failed = vm.autosaveStatus === "permanentError";
+  // Distinct from `failed`: the write wasn't rejected for being invalid —
+  // someone else (another builder tab, a server-side agent) saved a
+  // newer draft first, and the canvas has already been replaced with
+  // their version. An ordinary "rejected, reload the builder" message
+  // would be misleading here — there is nothing to fix and reloading
+  // wouldn't change what's now on screen.
+  const conflict = vm.autosaveStatus === "conflict";
   return (
     <span
       title={
-        failed
+        conflict
           ? t(
-              "paywalls.builder.topbar.autosaveFailedHint",
-              "This change was rejected and will not save on its own. Reload the builder; if it persists, report it.",
+              "paywalls.builder.topbar.autosaveConflictHint",
+              "Someone else saved a newer version of this paywall. Your last change wasn't saved, and the canvas now shows their version.",
             )
-          : retrying
-            ? t("paywalls.builder.topbar.autosaveErrorHint", "Save failed — will retry on your next change")
-            : t("paywalls.builder.topbar.autosaveHint", "Autosaved on every change")
+          : failed
+            ? t(
+                "paywalls.builder.topbar.autosaveFailedHint",
+                "This change was rejected and will not save on its own. Reload the builder; if it persists, report it.",
+              )
+            : retrying
+              ? t("paywalls.builder.topbar.autosaveErrorHint", "Save failed — will retry on your next change")
+              : t("paywalls.builder.topbar.autosaveHint", "Autosaved on every change")
       }
       className="inline-flex h-7 items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-rv-mute-600"
     >
@@ -283,7 +295,7 @@ const AutosaveBadge = component(() => {
           "h-1.5 w-1.5 rounded-full",
           saving
             ? "animate-pulse bg-rv-warning"
-            : failed
+            : conflict || failed
               ? "bg-rv-danger"
               : retrying
                 ? "bg-rv-warning"
@@ -292,11 +304,13 @@ const AutosaveBadge = component(() => {
       />
       {saving
         ? t("paywalls.builder.topbar.autosaveSaving", "saving")
-        : failed
-          ? t("paywalls.builder.topbar.autosaveFailed", "not saved")
-          : retrying
-            ? t("paywalls.builder.topbar.autosaveError", "retrying")
-            : t("paywalls.builder.topbar.autosaveSaved", "saved")}
+        : conflict
+          ? t("paywalls.builder.topbar.autosaveConflict", "replaced")
+          : failed
+            ? t("paywalls.builder.topbar.autosaveFailed", "not saved")
+            : retrying
+              ? t("paywalls.builder.topbar.autosaveError", "retrying")
+              : t("paywalls.builder.topbar.autosaveSaved", "saved")}
     </span>
   );
 });

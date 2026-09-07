@@ -390,7 +390,12 @@ export class PaywallBuilderViewModel {
     }
   }
 
-  @state autosaveStatus: "saved" | "saving" | "error" | "permanentError" = "saved";
+  // "conflict" is distinct from "permanentError": the write wasn't
+  // rejected for being invalid — a draft-revision CAS lost the race, the
+  // canvas has already been replaced by `reloadAfterDraftConflict` with
+  // whoever else's newer version, and "reload the builder" (the
+  // permanentError remedy) would show the same thing, not fix anything.
+  @state autosaveStatus: "saved" | "saving" | "error" | "permanentError" | "conflict" = "saved";
   @state lastSavedAt: number | null = null;
   // JSON snapshot of the most recently saved `config`. Compared against
   // the current snapshot to drive `isDirty` — the only thing autosave
@@ -1059,7 +1064,11 @@ export class PaywallBuilderViewModel {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (this.saveController !== controller) return;
       if (err instanceof ApiError && err.status === DRAFT_CONFLICT_STATUS) {
+        // Distinct from the generic failure path below: the canvas is
+        // about to be replaced wholesale, not merely told to retry.
         await this.reloadAfterDraftConflict();
+        this.autosaveStatus = "conflict";
+        return;
       }
       this.autosaveStatus = this.autosaveFailureStatus(err);
     } finally {
@@ -1100,15 +1109,21 @@ export class PaywallBuilderViewModel {
 
   /**
    * A draft write lost the compare-and-swap race (409): someone else wrote
-   * `builderConfig` first, and the edit that was just sent is gone — there
-   * is no merge. Re-fetching here is NOT a retry of that write; it exists
-   * so the NEXT save (if the author keeps editing) carries the row's
-   * current `draftRevision` instead of repeating the same stale one
-   * forever, which would otherwise 409 on every future autosave tick.
-   * `autosaveFailureStatus` still marks this "permanentError" — the
-   * conflict is surfaced to the author (see the topbar badge), not
-   * silently swallowed. Best-effort: a failed reload here just leaves
-   * that same badge as the only signal, which is still correct.
+   * `builderConfig` first. There is no merge — by design, per the plan —
+   * so this does not queue the rejected edit for a retry. It calls
+   * `syncFromDetail`, which replaces `this.config` WHOLESALE with the
+   * server's current draft: the in-progress edit that was just rejected
+   * is gone, with no undo. `lastSavedSnapshot` is reset to match, so
+   * `isDirty` reads false — the canvas now shows exactly what is
+   * persisted, and any further editing starts a fresh diff from there
+   * (carrying the row's current `draftRevision`, so it does not repeat
+   * the same stale one and 409 forever). The caller sets
+   * `autosaveStatus = "conflict"` right after this returns, so the
+   * topbar badge tells the author their canvas was overwritten — not the
+   * generic "permanentError" wording, which would misdescribe what
+   * happened and imply a retry might help. Best-effort: a failed reload
+   * here just leaves the (still-set) "conflict" badge as the only
+   * signal, which remains correct even if this fetch itself fails.
    */
   private async reloadAfterDraftConflict() {
     try {
@@ -1181,7 +1196,11 @@ export class PaywallBuilderViewModel {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (this.saveController !== controller) return;
       if (err instanceof ApiError && err.status === DRAFT_CONFLICT_STATUS) {
+        // Distinct from the generic failure path below: the canvas is
+        // about to be replaced wholesale, not merely told to retry.
         await this.reloadAfterDraftConflict();
+        this.autosaveStatus = "conflict";
+        return;
       }
       this.autosaveStatus = this.autosaveFailureStatus(err);
     } finally {
