@@ -1,0 +1,191 @@
+# =============================================================
+# Unit tests for the alerting-pipeline rules
+# =============================================================
+#
+# Same contract as slo_test.yml: `promtool check rules` proves the PromQL
+# parses, these prove each rule fires on the failure it names and stays quiet
+# otherwise. That second half matters more here than anywhere else in the
+# repo — these five rules are the ones that tell an operator the alerting
+# path is broken, so a rule that can never fire would leave the whole
+# pipeline unverifiable by the very thing meant to verify it.
+#
+# Run (image tag read from docker-compose.yml, as CI does):
+#   docker run --rm --entrypoint promtool \
+#     -v "$PWD/deploy/prometheus:/p:ro" prom/prometheus:v2.54.1 \
+#     test rules /p/tests/alerting_pipeline_test.yml
+#
+# What these CANNOT prove, and what does: that the metric names exist. All
+# five read `prometheus_*` / `alertmanager_*` / `up` series that promtool
+# supplies itself, so a typo passes here. The names were verified by curling
+# the real /metrics of prom/prometheus:v2.54.1 and prom/alertmanager:v0.27.0
+# — the versions docker-compose.yml pins — and that is also how the
+# requests-vs-notifications distinction in the rule file was measured rather
+# than assumed.
+
+rule_files:
+  - ../rules/alerting-pipeline.yml
+
+evaluation_interval: 1m
+
+tests:
+  # -----------------------------------------------------------
+  # The heartbeat is unconditional
+  # -----------------------------------------------------------
+  #
+  # It takes no input series on purpose — `vector(1)` is a constant, so this
+  # asserts the alert exists from the first evaluation and is still firing an
+  # hour later. If someone ever gates it behind a condition, the dead-man's
+  # switch stops being one and this test goes red.
+  - interval: 1m
+    name: watchdog fires immediately and never stops
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              severity: none
+              area: alerting
+            exp_annotations:
+              summary: "Rovenue alerting pipeline heartbeat"
+              description: "This alert always fires. It proves Prometheus is evaluating rules and Alertmanager is delivering them. If it stops arriving, the alerting path is broken and every other alert in this deployment is silently going nowhere — which is exactly the state this pipeline was built to end."
+      - eval_time: 60m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              severity: none
+              area: alerting
+            exp_annotations:
+              summary: "Rovenue alerting pipeline heartbeat"
+              description: "This alert always fires. It proves Prometheus is evaluating rules and Alertmanager is delivering them. If it stops arriving, the alerting path is broken and every other alert in this deployment is silently going nowhere — which is exactly the state this pipeline was built to end."
+
+  # -----------------------------------------------------------
+  # A healthy pipeline raises nothing
+  # -----------------------------------------------------------
+  - interval: 1m
+    name: healthy alerting pipeline is quiet
+    input_series:
+      - series: "prometheus_notifications_alertmanagers_discovered"
+        values: "1+0x120"
+      - series: 'prometheus_notifications_errors_total{alertmanager="http://alertmanager:9093/api/v2/alerts"}'
+        values: "0+0x120"
+      - series: "prometheus_notifications_dropped_total"
+        values: "0+0x120"
+      - series: 'alertmanager_notification_requests_failed_total{integration="webhook"}'
+        values: "0+0x120"
+      - series: 'up{job="alertmanager"}'
+        values: "1+0x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: RovenueAlertsNotReachingAlertmanager
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: RovenuePrometheusAlertHandoffFailing
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: RovenueAlertmanagerNotificationsFailing
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: RovenueAlertmanagerDown
+        exp_alerts: []
+
+  # -----------------------------------------------------------
+  # The regression this whole change was made against
+  # -----------------------------------------------------------
+  #
+  # `alerting:` removed from prometheus.yml, or the alertmanager service
+  # dropped from the observability profile: rules keep evaluating and nothing
+  # can be delivered. Quiet before the 15m `for:`, firing after.
+  - interval: 1m
+    name: no alertmanager discovered pages after fifteen minutes
+    input_series:
+      - series: "prometheus_notifications_alertmanagers_discovered"
+        values: "0+0x120"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RovenueAlertsNotReachingAlertmanager
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: RovenueAlertsNotReachingAlertmanager
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              area: alerting
+            exp_annotations:
+              summary: "Prometheus has no Alertmanager — no alert can be delivered"
+              description: "Prometheus is evaluating rules but has discovered zero Alertmanagers, so nothing it decides can reach anyone. Check the `alerting:` block in deploy/prometheus/prometheus.yml and that the `alertmanager` service is running in the observability profile."
+
+  # -----------------------------------------------------------
+  # Discovered, but the hand-off itself is failing
+  # -----------------------------------------------------------
+  - interval: 1m
+    name: failing hand-off to alertmanager raises a ticket
+    input_series:
+      - series: 'prometheus_notifications_errors_total{alertmanager="http://alertmanager:9093/api/v2/alerts"}'
+        values: "0+2x120"
+      - series: "prometheus_notifications_dropped_total"
+        values: "0+0x120"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RovenuePrometheusAlertHandoffFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: RovenuePrometheusAlertHandoffFailing
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              area: alerting
+              alertmanager: "http://alertmanager:9093/api/v2/alerts"
+            exp_annotations:
+              summary: "Prometheus is failing or dropping alert hand-offs to Alertmanager"
+              description: "Prometheus reached its Alertmanager but errored or dropped alerts while sending. Alerts decided in this window may never have been routed."
+
+  # -----------------------------------------------------------
+  # The unconfigured-self-host signal
+  # -----------------------------------------------------------
+  #
+  # This is what a blank ROVENUE_ALERT_WEBHOOK_URL produces: every attempt to
+  # POST to the reserved `.invalid` host fails, so the per-attempt counter
+  # climbs. Deliberately NOT built on alertmanager_notifications_failed_total,
+  # which stays at zero for hours — see the rule's own comment.
+  - interval: 1m
+    name: undeliverable notifications raise a ticket within minutes
+    input_series:
+      - series: 'alertmanager_notification_requests_failed_total{integration="webhook"}'
+        values: "0+5x120"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RovenueAlertmanagerNotificationsFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: RovenueAlertmanagerNotificationsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              area: alerting
+              integration: webhook
+            exp_annotations:
+              summary: "Alertmanager cannot deliver to its receiver (webhook)"
+              description: "Alertmanager routed alerts and the destination rejected or could not be reached, so they were not delivered. If ROVENUE_ALERT_WEBHOOK_URL is unset this is the expected, deliberate signal that no destination is configured — see .env.example. Otherwise the configured endpoint has started failing."
+
+  # -----------------------------------------------------------
+  # Alertmanager not running at all
+  # -----------------------------------------------------------
+  - interval: 1m
+    name: alertmanager down raises a ticket after ten minutes
+    input_series:
+      - series: 'up{job="alertmanager"}'
+        values: "0+0x120"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: RovenueAlertmanagerDown
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: RovenueAlertmanagerDown
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              area: alerting
+              job: alertmanager
+            exp_annotations:
+              summary: "Alertmanager is down"
+              description: "The alertmanager container is not answering scrapes. While this lasts nothing routes, and the alerts that would have told you so are among the ones that cannot be delivered."

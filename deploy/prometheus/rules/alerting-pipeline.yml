@@ -1,0 +1,177 @@
+# =============================================================
+# Rovenue — alerts about the alerting pipeline itself
+# =============================================================
+#
+# Every rule in rules/slo.yml is only as good as the path that carries it.
+# For most of this repo's life that path did not exist: prometheus.yml had no
+# `alerting:` block and docker-compose.yml had no Alertmanager, so a rule
+# labelled `severity: page` evaluated, turned red in a UI, and reached
+# nobody. This file exists so that regression, and the failure modes the new
+# path introduces, announce themselves instead of being rediscovered by hand.
+#
+# THE CIRCULARITY, STATED PLAINLY. Three of the four rules below describe a
+# broken delivery path, and they are delivered over that same path. When the
+# webhook endpoint is down they fire and cannot be sent. They are still worth
+# having — they are visible in Prometheus's UI, in Grafana, and in
+# Alertmanager's own /api/v2/alerts once the first hop recovers, and they
+# distinguish "nothing is wrong" from "we cannot tell you what is wrong".
+#
+# `Watchdog` is the way out of the circle: it is always firing, so a
+# heartbeat reaches the operator's endpoint every 24h, and its ABSENCE — the
+# one signal that does not need the broken path to work — is what proves the
+# chain is down. Wire it to a dead-man's-switch monitor with a grace period
+# above 24h and silence becomes the alarm.
+#
+# Metric provenance: unlike rules/slo.yml, nothing here comes from the API.
+# `alertmanager_*` is Alertmanager's own /metrics and `prometheus_*` is
+# Prometheus's own — both scraped by deploy/alloy/config.alloy's
+# `prometheus.scrape "infra"` block and remote-written back into Prometheus.
+# Remove either target from that block and these rules go permanently silent
+# with no error anywhere, which is why the target list names them explicitly
+# rather than relying on discovery.
+
+groups:
+  - name: rovenue-alerting-pipeline
+    rules:
+      # -------------------------------------------------------
+      # The heartbeat
+      # -------------------------------------------------------
+      - alert: Watchdog
+        # Always firing, on purpose. `vector(1)` is a constant, so this alert
+        # exists from the moment Prometheus loads the file and never
+        # resolves. alertmanager.yml routes it to its own branch with a 24h
+        # repeat, so it costs one message a day.
+        #
+        # The name is the ecosystem convention (kube-prometheus ships the
+        # same alert under the same name), so an operator who already has a
+        # dead-man's-switch integration will recognise it.
+        expr: vector(1)
+        labels:
+          severity: none
+          area: alerting
+        annotations:
+          summary: "Rovenue alerting pipeline heartbeat"
+          description: >-
+            This alert always fires. It proves Prometheus is evaluating
+            rules and Alertmanager is delivering them. If it stops
+            arriving, the alerting path is broken and every other alert in
+            this deployment is silently going nowhere — which is exactly
+            the state this pipeline was built to end.
+
+      # -------------------------------------------------------
+      # Prometheus cannot see an Alertmanager
+      # -------------------------------------------------------
+      - alert: RovenueAlertsNotReachingAlertmanager
+        # The direct regression guard for the defect this file was written
+        # against: prometheus.yml losing its `alerting:` block, or the
+        # alertmanager service being dropped from the observability profile.
+        # Either way this gauge goes to 0 and every alert in the deployment
+        # stops being delivered while continuing to look healthy in the UI.
+        #
+        # 15m of `for:` rides out a restart of either container without
+        # crying wolf; anything longer would be a quarter-hour of undelivered
+        # pages that nothing notices.
+        expr: prometheus_notifications_alertmanagers_discovered < 1
+        for: 15m
+        labels:
+          severity: page
+          area: alerting
+        annotations:
+          summary: "Prometheus has no Alertmanager — no alert can be delivered"
+          description: >-
+            Prometheus is evaluating rules but has discovered zero
+            Alertmanagers, so nothing it decides can reach anyone. Check
+            the `alerting:` block in deploy/prometheus/prometheus.yml and
+            that the `alertmanager` service is running in the
+            observability profile.
+
+      # -------------------------------------------------------
+      # Prometheus found an Alertmanager but cannot hand off to it
+      # -------------------------------------------------------
+      - alert: RovenuePrometheusAlertHandoffFailing
+        # Distinct from the rule above: the Alertmanager is DISCOVERED but
+        # the POST to it is failing, or the send queue is overflowing and
+        # Prometheus is discarding alerts to keep up. Both mean alerts are
+        # being lost between the two processes — the one hop neither side's
+        # UI shows you.
+        expr: |
+          increase(prometheus_notifications_errors_total[15m]) > 0
+            or increase(prometheus_notifications_dropped_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: ticket
+          area: alerting
+        annotations:
+          summary: "Prometheus is failing or dropping alert hand-offs to Alertmanager"
+          description: >-
+            Prometheus reached its Alertmanager but errored or dropped
+            alerts while sending. Alerts decided in this window may never
+            have been routed.
+
+      # -------------------------------------------------------
+      # Alertmanager routed it and the endpoint rejected it
+      # -------------------------------------------------------
+      - alert: RovenueAlertmanagerNotificationsFailing
+        # THE UNCONFIGURED-SELF-HOST SIGNAL. With ROVENUE_ALERT_WEBHOOK_URL
+        # unset, docker-compose.yml points the receiver at a reserved
+        # `.invalid` host that cannot resolve, so this rule is what turns
+        # "you never configured a destination" from silence into a stated
+        # fact — in Prometheus's UI and in Grafana, which do not depend on
+        # the broken hop.
+        #
+        # It is equally the signal for a destination that WAS configured and
+        # has since started rejecting: a rotated Slack webhook, an expired
+        # PagerDuty routing key, a firewalled endpoint.
+        #
+        # THE METRIC HERE IS DELIBERATELY NOT THE OBVIOUS ONE. Measured
+        # against alertmanager v0.27.0 with an unreachable receiver:
+        #
+        #   alertmanager_notification_requests_failed_total  38 after ~7min
+        #   alertmanager_notifications_failed_total           0 after ~7min
+        #
+        # `notifications_failed_total` counts a notification only once
+        # Alertmanager GIVES UP retrying it, and the retry deadline is that
+        # route's `group_interval + group_wait` — 17m for the partitions
+        # route and 24h for the Watchdog route. An alert built on it would
+        # stay silent for most of a day while the pipeline was demonstrably
+        # broken, which is the failure class this file exists to end.
+        # `requests_failed_total` increments on every failed ATTEMPT, so a
+        # dead endpoint is visible within minutes.
+        #
+        # 5m of `for:` still rides out a single transient 502; Alertmanager
+        # retries those with backoff and one of them is not a ticket.
+        expr: increase(alertmanager_notification_requests_failed_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: ticket
+          area: alerting
+        annotations:
+          summary: "Alertmanager cannot deliver to its receiver ({{ $labels.integration }})"
+          description: >-
+            Alertmanager routed alerts and the destination rejected or
+            could not be reached, so they were not delivered. If
+            ROVENUE_ALERT_WEBHOOK_URL is unset this is the expected,
+            deliberate signal that no destination is configured — see
+            .env.example. Otherwise the configured endpoint has started
+            failing.
+
+      # -------------------------------------------------------
+      # Alertmanager is not running at all
+      # -------------------------------------------------------
+      - alert: RovenueAlertmanagerDown
+        # `up` comes from Alloy's scrape of alertmanager:9093. This overlaps
+        # RovenueAlertsNotReachingAlertmanager on purpose and from the other
+        # side: that rule is Prometheus's view of the hand-off, this one is
+        # an independent scrape. A configuration mistake that blinds one of
+        # them is unlikely to blind both.
+        expr: up{job="alertmanager"} == 0
+        for: 10m
+        labels:
+          severity: ticket
+          area: alerting
+        annotations:
+          summary: "Alertmanager is down"
+          description: >-
+            The alertmanager container is not answering scrapes. While this
+            lasts nothing routes, and the alerts that would have told you so
+            are among the ones that cannot be delivered.

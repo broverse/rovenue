@@ -30,10 +30,14 @@
 # Burn rate is how many times faster than the budget allows. 14.4x for an
 # hour spends 2% of a 30-day budget; 1x for three days spends 10%.
 #
-# ROUTING: there is no Alertmanager in docker-compose.yml. These rules
-# evaluate and are visible in Prometheus and Grafana either way, and Grafana
-# can alert on them through its own contact points. Operators who want
-# paging should add an Alertmanager and point `alerting.alertmanagers` at it.
+# ROUTING. The `severity` label on every alert below is load-bearing, not
+# documentation. deploy/alertmanager/alertmanager.yml routes on it:
+# `page` groups for 30s and repeats hourly, `ticket` groups for 5m and
+# repeats daily, and `area: partitions` overrides both with a slower cadence
+# because those are deadlines rather than outages. It also inhibits the
+# gentler rung of each nested-threshold ladder when the sharper one fires,
+# scoped by `table` / `slo` so it can never cross tables or SLOs. Change a
+# severity here and you change where and how often the alert lands.
 
 groups:
   # -----------------------------------------------------------
