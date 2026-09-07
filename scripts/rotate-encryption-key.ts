@@ -35,7 +35,10 @@
  *   Written by `encryptCredential`, read by `decryptCredential`, detected
  *   by `isEncryptedCredential` (packages/db/src/helpers/encrypted-field.ts).
  *   `decryptCredential` also passes UNwrapped plaintext JSON through — rows
- *   predating encryption — so this path encrypts those under NEW_KEY too.
+ *   predating encryption — so this path encrypts those under NEW_KEY too,
+ *   but only when the unwrapped value is a credential OBJECT. A string, a
+ *   number, an array or a mangled wrapper is reported as a failure rather
+ *   than encrypted (see `describeUnwrappedDamage`).
  *
  *   Shape B — a bare `encrypt()` string, "iv:tag:data", in a text column
  *     copilot_credentials.api_key_encrypted   (an API key)
@@ -69,6 +72,26 @@
  * NEW_KEY is skipped, never re-encrypted, and a second run performs zero
  * writes. That is what makes re-running safe when you are unsure whether
  * the previous attempt committed.
+ *
+ * ---------------------------------------------------------------------
+ * CONCURRENT WRITES ARE NOT HANDLED — THIS IS AN OPERATIONAL CONSTRAINT
+ * ---------------------------------------------------------------------
+ *
+ * The selects below take no row locks, and the API stays live on OLD_KEY
+ * for the whole run and until it is restarted. A credential saved from the
+ * dashboard during that window is either clobbered (this tool's UPDATE
+ * lands after it, writing the re-encryption of the value it read earlier)
+ * or missed entirely (inserted after the select, so it stays under OLD_KEY
+ * and becomes unreadable when the env var flips).
+ *
+ * `FOR UPDATE` is deliberately NOT used: it cannot lock a row that does not
+ * exist yet, so it does not close the missed case, and for the clobbered
+ * case it only makes the dashboard's write win with an OLD_KEY ciphertext
+ * — a worse end state — at the cost of locking every credential row for the
+ * length of the run. The closure is operational and lives in the runbook:
+ * freeze credential edits across the run and the restart, then run this
+ * tool a SECOND time afterwards (a no-op if nothing was written; it rotates
+ * the missed rows if something was).
  *
  * ---------------------------------------------------------------------
  * ROWS THAT DECRYPT UNDER NEITHER KEY
@@ -148,6 +171,46 @@ export interface RotationSummary {
 // Shape A — the tagged `{ v, enc }` wrapper on projects
 // =============================================================
 
+/** The keys that make a value *look like* the tagged wrapper. A value
+ *  carrying either of them but failing `isEncryptedCredential` is a
+ *  corrupted or half-written ciphertext, not a credential. */
+const WRAPPER_KEYS = ["v", "enc"] as const;
+
+/**
+ * Why a non-wrapper value in a shape-A column is NOT legacy plaintext, or
+ * `null` when it genuinely is.
+ *
+ * The only thing ever written to these columns unwrapped is a credential
+ * *object* (`{ issuerId, keyId, privateKey, … }`), which is what
+ * `decryptCredential` passes through. A string — in particular a bare
+ * shape-B `"iv:tag:data"` ciphertext that landed here by mistake — a
+ * number, an array, or a mangled `{ v, enc }` wrapper are all values that
+ * must reach the operator's failure report instead of being encrypted.
+ */
+function describeUnwrappedDamage(value: unknown): string | null {
+  if (isEncryptedString(value)) {
+    return (
+      'value is a bare "iv:tag:data" string in a { v, enc } column — ' +
+      "encrypting it would double-encrypt a ciphertext, so it is left as is"
+    );
+  }
+  if (typeof value !== "object") {
+    return `value is a bare ${typeof value}, not the { v, enc } wrapper and not a plaintext credential object`;
+  }
+  if (Array.isArray(value)) {
+    return "value is a JSON array, not the { v, enc } wrapper and not a plaintext credential object";
+  }
+  const obj = value as Record<string, unknown>;
+  if (WRAPPER_KEYS.some((key) => key in obj)) {
+    return (
+      'value carries "v"/"enc" keys but is not a valid ' +
+      '{ v: 1, enc: "iv:tag:data" } wrapper — a corrupted or half-written ' +
+      "ciphertext, not plaintext"
+    );
+  }
+  return null;
+}
+
 function rotateWrapped(
   value: unknown,
   oldKey: string,
@@ -156,6 +219,15 @@ function rotateWrapped(
   if (value === null || value === undefined) return { kind: "empty" };
 
   if (!isEncryptedCredential(value)) {
+    // "Not the wrapper" is NOT the same as "legacy plaintext". Only a
+    // plain JSON object is plaintext this tool may encrypt; anything else
+    // in one of these columns is damage, and encrypting it would wrap a
+    // value nothing can ever unwrap — reported as an [OK] line, which is
+    // the silent-loss failure mode this tool exists to prevent. Shape B
+    // has the same guard, for the same reason.
+    const damage = describeUnwrappedDamage(value);
+    if (damage !== null) return { kind: "failed", reason: damage };
+
     // A row written before encryption was wired: `decryptCredential`
     // passes it through as plaintext, so the API still reads it. Rotation
     // is the moment to bring it under a key. Not a failure.

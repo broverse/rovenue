@@ -64,6 +64,19 @@ migrate those — plan around them, do not expect a script to fix them:
    Stripe), so the hashes cannot be recomputed from the database alone.
    Either accept that pre-rotation purchases lose email claim, or re-derive
    the column from Stripe's records after the rotation.
+
+   **Setting `ENCRYPTION_KEY` for the FIRST time is a rotation of this
+   value.** When the variable is unset, `emailHashKey()` falls back to a
+   fixed development label (`token.ts`) rather than failing, so a stack that
+   has been running without the key still writes `email_hash` values — they
+   are just derived from that label. The moment you set a real key, every
+   one of those hashes is orphaned exactly as a rotation orphans them, and
+   with the same silent symptom. This is the one case that can reach a
+   *self-hosted* deployment by accident: it does not feel like a rotation,
+   because there is no old key. If your stack has ever taken a funnel
+   purchase without `ENCRYPTION_KEY` set, treat setting it as a rotation of
+   this column and plan for the same loss. (`ENCRYPTION_KEY` is required in
+   production for exactly this class of reason — see `.env.example`.)
 2. **GDPR anonymous ids** (`apps/api/src/services/gdpr/anonymize-subscriber.ts`).
    `anon_…` ids are an HMAC of the subscriber id peppered with
    `ENCRYPTION_KEY`. Ids already written stay as they are; re-anonymizing the
@@ -123,9 +136,61 @@ backups are only restorable by an operator who still has both keys on hand.
    deployed environment and restart every service that reads it (`api`,
    `dispatcher`, and any worker that loads project credentials or delivers
    integrations).
-6. Keep the **old** key retrievable in your secret store for as long as you
+6. **Run the rotation a second time, after the restart**, with the same
+   `OLD_KEY` and `NEW_KEY`:
+
+   ```
+   OLD_KEY=<old hex> NEW_KEY=<new hex> \
+     pnpm --filter @rovenue/scripts rotate-encryption-key
+   ```
+
+   On a clean rotation this is a no-op — idempotency guarantees it, and a
+   clean second run reports `rotated=0 failed=0`. It is not optional: it is
+   how a credential written during the step 4 → step 5 window gets rotated
+   instead of becoming permanently unreadable (see the hazard below).
+   `rotated>0` here means somebody did write during the window; the run
+   fixes those rows, and you should tell the owner of each named row to
+   confirm the credential in the dashboard still says what they saved.
+7. Keep the **old** key retrievable in your secret store for as long as you
    retain backups taken before this rotation (see the backup-restore
    interaction above).
+
+#### The window between step 4 and step 5 is unsafe for credential writes
+
+The rotation reads and rewrites rows in one transaction while the API is
+still live and still encrypting with the **old** key. Nothing coordinates
+the two, and there are two distinct ways a credential saved during that
+window is lost:
+
+* **Clobbered.** The rotation has already read the row's old value when the
+  dashboard writes a new one. The rotation's `UPDATE` lands afterwards and
+  writes the re-encryption of the value it read — the operator's save is
+  silently gone, with a `[OK]` line claiming success.
+* **Missed.** The row is inserted *after* the rotation's `SELECT`. It is
+  encrypted under the old key, the rotation never sees it, and it becomes
+  undecryptable the moment step 5 flips the env var. Nothing reports this;
+  it surfaces later as a failed receipt verification or integration
+  delivery.
+
+The same hazard covers everything between step 4 finishing and step 5's
+restart completing, because every service is still writing with the old key
+for that whole stretch.
+
+**So: announce a freeze on credential and integration edits for the duration
+of steps 4 and 5, and run step 6 afterwards regardless.** Step 6 recovers
+the *missed* case (the row is still readable under `OLD_KEY`, so a second
+run rotates it normally). It cannot recover the *clobbered* case — no tool
+can, the plaintext is gone — which is why the freeze matters and why step 6
+naming any row is worth a follow-up with whoever saved it.
+
+`SELECT … FOR UPDATE` is deliberately **not** used here. It would not close
+the missed case at all — a row that does not exist yet cannot be locked —
+and for the clobbered case it only swaps which writer loses: the dashboard's
+`UPDATE` would block until the rotation commits and then overwrite the
+rotated row with an *old-key* ciphertext, which is a worse end state than
+losing the edit. The cost of buying that is holding row locks on every
+credential row of three tables for the length of the run, stalling live
+requests. The freeze plus the second run closes what a lock cannot.
 
 ### What the tool does and does not guarantee
 
@@ -144,6 +209,11 @@ Postgres built from `deploy/postgres/` in
 * **Idempotent.** A value that already decrypts under `NEW_KEY` is skipped,
   never re-encrypted. A second run performs zero writes (`rotated=0`). Run
   it again freely if you are unsure whether a previous attempt committed.
+* **NOT safe against concurrent credential writes.** It takes no lock
+  against the live API, which is still encrypting with the old key while it
+  runs. See "the window between step 4 and step 5 is unsafe for credential
+  writes" above: freeze credential and integration edits for the duration,
+  and run the tool a second time after the restart.
 * **Loud about rows it cannot read.** A value that decrypts under neither
   key is reported by table, column and row id, both as a `[FAIL]` line and
   in the closing summary, and the process exits 1. Those rows are left
