@@ -1,5 +1,7 @@
 import "reflect-metadata";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { server } from "../../../../tests/msw/server";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ServiceProvider, useService } from "impair";
 import "../../../i18n/config";
@@ -24,6 +26,35 @@ import { useRovi } from "../../../lib/hooks/useRovi";
 // stubbed to null — none of them are under test here, same idiom as
 // top-bar.experiment.test.tsx's `renderShell`.
 // =============================================================
+
+// BuilderShell's mount fetches the version list and the draft-vs-published
+// diff. Neither is under test here, but leaving them unhandled made MSW log
+// six "intercepted a request without a matching request handler" errors per
+// run — which blunts `onUnhandledRequest: "error"` for every OTHER request in
+// this file, the signal that setting actually exists to give. Both shapes are
+// the real ones (`DashboardPaywallVersionRow[]`, `DashboardPaywallDiffResponse`
+// in @rovenue/shared), empty rather than invented, so nothing here can pass by
+// asserting against fabricated content.
+const PROJECT_ID = "p_1";
+const PAYWALL_ID = "pw_a";
+const PAYWALL_PATH = `/dashboard/projects/${PROJECT_ID}/paywalls/${PAYWALL_ID}`;
+
+beforeEach(() => {
+  server.use(
+    http.get(`*${PAYWALL_PATH}/versions`, () =>
+      HttpResponse.json({ data: { versions: [] } }),
+    ),
+    http.get(`*${PAYWALL_PATH}/diff`, () =>
+      HttpResponse.json({
+        data: {
+          from: { versionNo: null, label: null },
+          to: { versionNo: null, label: null },
+          entries: [],
+        },
+      }),
+    ),
+  );
+});
 
 vi.mock("../top-bar", () => ({ TopBar: () => null }));
 vi.mock("../layer-tree", () => ({ LayerTree: () => null }));
