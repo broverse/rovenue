@@ -32,6 +32,15 @@ import { configDefaults, defineConfig } from "vitest/config";
 // pass ever matches nothing, so the gate breaking is itself a red build.
 const CONTAINER_SUITES = ["tests/partman-registration.integration.test.ts"];
 
+// The split above still leaves the container pass exposed to this repo's
+// other standing footgun: with the daemon down, testcontainers does not
+// fail — it HANGS, so a developer without Docker gets a wedged terminal
+// instead of the red build the paragraph above assumes. This globalSetup
+// runs before the pass and THROWS (never skips) when no daemon answers;
+// vitest exits non-zero on a globalSetup error and `package.json`'s `&&`
+// propagates it. See the file for why a skip would be the wrong shape.
+const DOCKER_DAEMON_GUARD = ["tests/docker-daemon-guard.ts"];
+
 /** Second pass. Set by the `test` script; not meant to be used by hand. */
 const containerPass = process.env.VITEST_CONTAINER_PASS === "1";
 
@@ -46,6 +55,7 @@ export default defineConfig({
     exclude: containerPass
       ? [...configDefaults.exclude]
       : [...configDefaults.exclude, ...CONTAINER_SUITES],
+    globalSetup: containerPass ? DOCKER_DAEMON_GUARD : [],
     // One container-building file, and it builds an image: give it the
     // machine to itself rather than racing the Docker daemon.
     maxWorkers: containerPass ? 1 : 2,
