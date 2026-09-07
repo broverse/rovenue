@@ -59,6 +59,8 @@ function titleFor(iss: ValidatorIssue): string {
       return `Goes to a missing page: ${iss.goto}`;
     case "UNREACHABLE":
       return "Page is unreachable from the start";
+    case "MISSING_REQUIRED_FIELD":
+      return `Missing required field: ${iss.field}`;
   }
 }
 

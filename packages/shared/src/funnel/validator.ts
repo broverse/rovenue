@@ -7,7 +7,8 @@ export type ValidatorIssue =
   | { code: "DUPLICATE_QUESTION_ID"; message: string; questionId: string }
   | { code: "UNKNOWN_QUESTION_REF"; message: string; pageId: string; questionId: string }
   | { code: "UNKNOWN_GOTO"; message: string; pageId: string; goto: string }
-  | { code: "UNREACHABLE"; message: string; pageId: string };
+  | { code: "UNREACHABLE"; message: string; pageId: string }
+  | { code: "MISSING_REQUIRED_FIELD"; message: string; pageId: string; field: string };
 
 export type ValidationResult =
   | { ok: true; warnings: ValidatorIssue[] }
