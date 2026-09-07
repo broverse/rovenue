@@ -47,12 +47,24 @@
 -- its own `_pYYYYMMDD` naming.
 --
 -- The start month is COMPUTED from the catalog rather than hard-coded to
--- 2029-01-01, because a fresh install is not guaranteed to stop at
--- 2028-12: `ensureRevenueEventPartitions`
--- (packages/db/src/drizzle/repositories/revenue-event-partitions.ts) can
--- hand-create `<table>_<yyyy>_<mm>` children for any month an import
--- touches. Computing the boundary makes the overlap this migration exists
--- to avoid structurally impossible instead of merely unlikely today.
+-- 2029-01-01, because "the hand-made children stop at 2028-12" is a fact
+-- about the database in front of us, not a constant. A restored snapshot,
+-- an operator who pre-created a month by hand, or a future migration that
+-- extends the range all leave a parent whose newest child is some other
+-- month, and registering such a database at 2029-01 would hand partman a
+-- range a child already owns on its very first premake. Computing the
+-- boundary makes the overlap this migration exists to avoid structurally
+-- impossible instead of merely unlikely today.
+--
+-- CORRECTION (comment only; made after this file landed and before any
+-- database had applied it). An earlier draft justified the computation by
+-- saying `ensureRevenueEventPartitions`
+-- (packages/db/src/drizzle/repositories/revenue-event-partitions.ts)
+-- hand-creates `<table>_<yyyy>_<mm>` children for any month an import
+-- touches. That premise stops being true the moment THIS migration runs:
+-- with the parent in `partman.part_config` that function takes the
+-- pg_partman branch, and anything it creates is named `_pYYYYMMDD`. The
+-- computation is still right, for the reason above; only the example was.
 --
 -- -------------------------------------------------------------
 -- Retention: deliberately NOT enabled (this registers PREMAKE only)
