@@ -40,8 +40,11 @@ import {
   type StartedTestContainer,
 } from "testcontainers";
 import { Client, Pool } from "pg";
+import { drizzle as drizzleClient } from "drizzle-orm/node-postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runFreshInstall } from "../src/fresh-install";
+import * as schema from "../src/drizzle/schema";
+import { ensureRevenueEventPartitions } from "../src/drizzle/repositories/revenue-event-partitions";
 
 const POSTGRES_CONTEXT = fileURLToPath(
   new URL("../../../deploy/postgres/", import.meta.url),
@@ -105,8 +108,30 @@ const PRODUCT_ID = "prod_partman_test";
 const PURCHASE_ID = "purch_partman_test";
 const CURRENCY_ID = "vc_partman_test";
 
+/** A month INSIDE the 2024-01..2028-12 range migrations 0015/0016 already
+ *  covered by hand. Provisioning it must be a no-op: partman would name its
+ *  child `revenue_events_p20260301` and, because its existence check is by
+ *  NAME, would try to attach it over the range `revenue_events_2026_03`
+ *  already owns. That is today's data, not a 2029 edge case. */
+const HAND_MADE_MONTH = "2026-03-01 00:00:00+00";
+const HAND_MADE_MONTH_CHILD = `${REVENUE_EVENTS}_2026_03`;
+/** What partman WOULD have created for HAND_MADE_MONTH. Must never exist. */
+const HAND_MADE_MONTH_PARTMAN_CHILD = `${REVENUE_EVENTS}_p20260301`;
+/** A row inside HAND_MADE_MONTH, to prove the hand-made child still takes it. */
+const HAND_MADE_MONTH_ROW = "2026-03-15 00:00:00+00";
+
+/** BELOW the hand-made range and below partman's registered start, with no
+ *  existing child at all — partman creates a month behind its own window. */
+const UNCOVERED_PAST_MONTH = "2019-06-01 00:00:00+00";
+const UNCOVERED_PAST_CHILD = `${REVENUE_EVENTS}_p20190601`;
+
+/** At/after the registered start and beyond the premake horizon. */
+const UNCOVERED_FUTURE_MONTH = "2030-05-01 00:00:00+00";
+const UNCOVERED_FUTURE_CHILD = `${REVENUE_EVENTS}_p20300501`;
+
 let container: StartedTestContainer;
 let pool: Pool;
+let db: ReturnType<typeof drizzleClient<typeof schema>>;
 
 async function startPostgres(
   image: GenericContainer,
@@ -184,6 +209,14 @@ async function childHolding(
   return rows[0]?.child ?? "";
 }
 
+async function relationExists(qualifiedName: string): Promise<boolean> {
+  const { rows } = await pool.query<{ present: boolean }>(
+    `SELECT to_regclass($1) IS NOT NULL AS present`,
+    [qualifiedName],
+  );
+  return rows[0]?.present === true;
+}
+
 async function childCount(parent: string): Promise<number> {
   const { rows } = await pool.query<{ count: string }>(
     `SELECT count(*)::text AS count
@@ -202,6 +235,7 @@ beforeAll(async () => {
   );
   container = await startPostgres(image);
   pool = new Pool({ connectionString: connectionStringFor(container) });
+  db = drizzleClient(pool, { schema });
 
   const client = await pool.connect();
   try {
@@ -426,6 +460,154 @@ describe("migration 0130 — partman registration", () => {
         expect(row.retention_keep_table).toBe(true);
         expect(row.retention_keep_index).toBe(true);
       }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+// =============================================================
+// The provisioner that RUNS ON TOP of 0130's registration
+// =============================================================
+//
+// `ensureMonthlyPartitions` picks pg_partman's `create_partition_time` for
+// any parent in `partman.part_config`. Since 0130 that is BOTH install
+// paths, so the provisioner now takes the partman branch against a table
+// that also carries 60 hand-made `_YYYY_MM` children. partman's existence
+// check is by child NAME, so for a month those children already cover it
+// proposes `revenue_events_pYYYYMMDD` and Postgres rejects the attach with
+// the very overlap error 0130's own header quotes.
+//
+// Every partman-branch test that existed before this block used a month
+// BELOW 2024 — the safe case. The changed case (a month inside
+// 2024-01..2028-12, i.e. today's data) was never exercised anywhere. These
+// three tests cover all three positions a month can occupy relative to the
+// hand-made range and the registered start.
+
+describe("ensureRevenueEventPartitions on a 0130-registered parent", () => {
+  it(
+    "is a no-op for a month the hand-made 0015 children already cover",
+    async () => {
+      expect(
+        await relationExists(`public.${HAND_MADE_MONTH_CHILD}`),
+        `${HAND_MADE_MONTH_CHILD} is the premise of this test`,
+      ).toBe(true);
+
+      await ensureRevenueEventPartitions(db, {
+        minEventDate: new Date(HAND_MADE_MONTH),
+        maxEventDate: new Date(HAND_MADE_MONTH),
+      });
+
+      // Nothing new, and specifically not the overlapping partman-named
+      // child — its creation is what raises
+      // `would overlap partition "revenue_events_2026_03"`.
+      expect(
+        await relationExists(`public.${HAND_MADE_MONTH_PARTMAN_CHILD}`),
+      ).toBe(false);
+      expect(await relationExists(`public.${HAND_MADE_MONTH_CHILD}`)).toBe(true);
+
+      // And the month is genuinely usable afterwards, in the hand-made child.
+      await pool.query(
+        `INSERT INTO revenue_events
+           (id, "projectId", "subscriberId", "purchaseId", type, amount, currency,
+            "amountUsd", store, "productId", "eventDate")
+         VALUES ('re_handmade', $1, $2, $3, 'RENEWAL', 1.99, 'USD', 1.99,
+                 'APP_STORE', $4, $5::timestamptz)`,
+        [
+          PROJECT_ID,
+          SUBSCRIBER_ID,
+          PURCHASE_ID,
+          PRODUCT_ID,
+          HAND_MADE_MONTH_ROW,
+        ],
+      );
+      expect(await childHolding(REVENUE_EVENTS, "id", "re_handmade")).toBe(
+        HAND_MADE_MONTH_CHILD,
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "creates a month BELOW the registered start that no child covers",
+    async () => {
+      expect(await relationExists(`public.${UNCOVERED_PAST_CHILD}`)).toBe(false);
+
+      await ensureRevenueEventPartitions(db, {
+        minEventDate: new Date(UNCOVERED_PAST_MONTH),
+        maxEventDate: new Date(UNCOVERED_PAST_MONTH),
+      });
+
+      expect(await relationExists(`public.${UNCOVERED_PAST_CHILD}`)).toBe(true);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "creates a month at/after the registered start beyond partman's premake",
+    async () => {
+      expect(await relationExists(`public.${UNCOVERED_FUTURE_CHILD}`)).toBe(
+        false,
+      );
+
+      await ensureRevenueEventPartitions(db, {
+        minEventDate: new Date(UNCOVERED_FUTURE_MONTH),
+        maxEventDate: new Date(UNCOVERED_FUTURE_MONTH),
+      });
+
+      expect(await relationExists(`public.${UNCOVERED_FUTURE_CHILD}`)).toBe(
+        true,
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "spans a range that crosses from uncovered months into covered ones",
+    async () => {
+      // The realistic import shape: a file whose dates straddle the edge of
+      // the hand-made range. Every month must end up provisioned, and the
+      // covered ones must be left exactly as they were.
+      await ensureRevenueEventPartitions(db, {
+        minEventDate: new Date("2023-11-05 00:00:00+00"),
+        maxEventDate: new Date("2024-02-05 00:00:00+00"),
+      });
+
+      expect(await relationExists(`public.${REVENUE_EVENTS}_p20231101`)).toBe(
+        true,
+      );
+      expect(await relationExists(`public.${REVENUE_EVENTS}_p20231201`)).toBe(
+        true,
+      );
+      expect(await relationExists(`public.${REVENUE_EVENTS}_2024_01`)).toBe(
+        true,
+      );
+      expect(await relationExists(`public.${REVENUE_EVENTS}_p20240101`)).toBe(
+        false,
+      );
+      expect(await relationExists(`public.${REVENUE_EVENTS}_p20240201`)).toBe(
+        false,
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "is idempotent across all three positions",
+    async () => {
+      const before = await childCount(REVENUE_EVENTS);
+      await ensureRevenueEventPartitions(db, {
+        minEventDate: new Date(UNCOVERED_PAST_MONTH),
+        maxEventDate: new Date(UNCOVERED_PAST_MONTH),
+      });
+      await ensureRevenueEventPartitions(db, {
+        minEventDate: new Date(HAND_MADE_MONTH),
+        maxEventDate: new Date(HAND_MADE_MONTH),
+      });
+      await ensureRevenueEventPartitions(db, {
+        minEventDate: new Date(UNCOVERED_FUTURE_MONTH),
+        maxEventDate: new Date(UNCOVERED_FUTURE_MONTH),
+      });
+      expect(await childCount(REVENUE_EVENTS)).toBe(before);
     },
     TEST_TIMEOUT_MS,
   );

@@ -53,6 +53,42 @@ import type { Db } from "../client";
 // returns `false` and creates nothing, and a row dated 2019-03-15 lands
 // in it.
 //
+// -------------------------------------------------------------
+// WHY MONTHS ARE FILTERED AGAINST THE CATALOG FIRST
+// -------------------------------------------------------------
+//
+// partman's idempotence is by child NAME. It computes
+// `revenue_events_p20260301` for 2026-03 and, seeing no table by that
+// name, attaches it — but 0015 already owns that range under the name
+// `revenue_events_2026_03`, so Postgres refuses:
+//
+//   ERROR:  partition "revenue_events_p20260301" would overlap partition
+//           "revenue_events_2026_03"
+//
+// reproduced against this repo's image on a `runFreshInstall` database.
+// Every month in 2024-01..2028-12 — i.e. TODAY's data — is in that
+// state. The pre-0130 hand-rolled branch never hit it, because
+// `CREATE TABLE IF NOT EXISTS revenue_events_2026_03` is a no-op on the
+// name 0015 used.
+//
+// So both branches now start from `uncoveredMonths`, which asks the
+// CATALOG (pg_inherits + relpartbound ranges, exactly how partman itself
+// resolves a partition set) which months already have a child covering
+// them, whatever that child is called. A month is passed to the creating
+// branch only if no existing child's range contains its first instant.
+// That is correct for all three positions a month can occupy: inside the
+// hand-made range (covered -> skipped, and the existing child serves it),
+// below partman's registered start with no child (uncovered -> partman
+// creates a month behind its own window, which it does happily), and at
+// or after the registered start (covered by premake -> skipped, else
+// created). It is also what makes repeat calls free rather than merely
+// error-free.
+//
+// Filtering before BOTH branches rather than only the partman one is
+// deliberate: the hand-rolled branch has the same blind spot from the
+// other side (`IF NOT EXISTS` protects the name, not the range), so a
+// parent with differently-named children would fail there too.
+//
 // The hand-rolled branch is kept, not dead code: it is the correct
 // behaviour for any partitioned parent nobody registered, it is what
 // runs if 0130's availability guard skipped on a server without
@@ -78,6 +114,20 @@ const REVENUE_EVENTS_TABLE = "revenue_events";
  *  `sql.raw`, so this guard makes "how could that become injectable"
  *  a question with a checked answer instead of an assumed one. */
 const SQL_IDENTIFIER_PATTERN = /^[a-z_][a-z0-9_]*$/;
+
+/** Pull the bounds out of a child's `FOR VALUES FROM ('...') TO ('...')`.
+ *  Sent as bind parameters, so these are raw POSIX regexes — no SQL
+ *  quote-doubling. A DEFAULT partition's bound expression is the bare word
+ *  DEFAULT and matches neither, yielding NULL and dropping out of the
+ *  containment test — which is exactly right: a row landing in the default
+ *  is the failure this module exists to prevent, never proof of coverage.
+ *  An unbounded MINVALUE/MAXVALUE child matches neither either, so it reads
+ *  as "not covered"; no such child exists on these parents, and the
+ *  conservative direction is to attempt creation and fail loudly rather
+ *  than to skip silently. Mirrors `UPPER_BOUND_PATTERN` in migration 0130
+ *  and `parsePartitionBoundExpr` in apps/api's retention sweep. */
+const LOWER_BOUND_PATTERN = "FROM \\('(.*?)'\\)";
+const UPPER_BOUND_PATTERN = "TO \\('(.*?)'\\)";
 
 function assertSafeIdentifier(name: string): void {
   if (!SQL_IDENTIFIER_PATTERN.test(name)) {
@@ -153,6 +203,47 @@ async function isPartmanManaged(
   return rows.length > 0;
 }
 
+/**
+ * The subset of `months` that NO existing child of `qualifiedParentTable`
+ * already covers, in the order given.
+ *
+ * Coverage is decided by RANGE, read from the catalog, never by the name
+ * a child happens to carry — see the module header. `relpartbound` is
+ * rendered in the session TimeZone but always carries an explicit offset,
+ * so casting it back to `timestamptz` compares instants and is TimeZone-
+ * independent.
+ */
+async function uncoveredMonths(
+  db: Db,
+  qualifiedParentTable: string,
+  months: Date[],
+): Promise<Date[]> {
+  const timestamps = months.map((m) => sql`${m.toISOString()}::timestamptz`);
+  const result = await db.execute(sql`
+    SELECT "t"."ord"::int AS "ord"
+      FROM unnest(ARRAY[${sql.join(timestamps, sql`, `)}]::timestamptz[])
+           WITH ORDINALITY AS "t"("month_start", "ord")
+     WHERE NOT EXISTS (
+       SELECT 1
+         FROM "pg_inherits" "i"
+         JOIN "pg_class" "c" ON "c"."oid" = "i"."inhrelid"
+        WHERE "i"."inhparent" = ${qualifiedParentTable}::regclass
+          AND (substring(
+                pg_get_expr("c"."relpartbound", "c"."oid")
+                FROM ${LOWER_BOUND_PATTERN}
+              ))::timestamptz <= "t"."month_start"
+          AND (substring(
+                pg_get_expr("c"."relpartbound", "c"."oid")
+                FROM ${UPPER_BOUND_PATTERN}
+              ))::timestamptz > "t"."month_start"
+     )
+     ORDER BY "t"."ord"
+  `);
+  const rows = (result as unknown as { rows: Array<{ ord: number }> }).rows;
+  // `WITH ORDINALITY` is 1-based.
+  return rows.map((row) => months[row.ord - 1]!).filter((m) => m !== undefined);
+}
+
 // =============================================================
 // Generic monthly-range-partition provisioner
 // =============================================================
@@ -189,7 +280,16 @@ export async function ensureMonthlyPartitions(
   db: Db,
   args: EnsureMonthlyPartitionsArgs,
 ): Promise<void> {
-  const months = monthStartsUtc(args.minEventDate, args.maxEventDate);
+  const requested = monthStartsUtc(args.minEventDate, args.maxEventDate);
+  if (requested.length === 0) return;
+
+  // Whichever branch runs, only months no existing child already covers
+  // reach it. See "WHY MONTHS ARE FILTERED AGAINST THE CATALOG FIRST".
+  const months = await uncoveredMonths(
+    db,
+    args.qualifiedParentTable,
+    requested,
+  );
   if (months.length === 0) return;
 
   if (await isPartmanManaged(db, args.qualifiedParentTable)) {
