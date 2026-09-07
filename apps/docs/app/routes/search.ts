@@ -5,6 +5,21 @@ import { source } from '@/lib/source';
 const server = createFromSource(source, {
   // https://docs.orama.com/docs/orama-js/supported-languages
   language: 'english',
+  // Orama builds a per-property sort index (`sorting` in the export) so that
+  // `search({ sortBy })` can order hits by a field. Nothing here ever sorts:
+  // `searchAdvanced()` — the only query path `oramaStaticClient` uses — passes
+  // `groupBy`, never `sortBy`, and the client only ever `load()`s and queries
+  // this index, never inserts into it (Orama touches the sorter on insert,
+  // remove and sortBy alone). The sort index is therefore pure payload, and
+  // readers download it on their first query. Measured on this content:
+  // 5,911,638 → 4,754,867 bytes raw (-19.6%), 783,534 B gzipped where it was
+  // ~1.02 MiB before (-27%).
+  //
+  // Round-tripping is a supported path, not a trick: `save()` writes
+  // `sorting: { enabled: false }` for a disabled sorter and the client's
+  // `load()` reads that shape back explicitly, so a sort-disabled export
+  // loads into the default `initOrama` database unchanged.
+  sort: { enabled: false },
 });
 
 /**
