@@ -59,6 +59,23 @@ const { drizzleMock } = vi.hoisted(() => {
         async (): Promise<Record<string, unknown> | null> => null,
       ),
       findPurchaseWithCreditInfo: vi.fn(),
+      // A DID_RENEW dispatch reaches `retireChainBillingIssue`
+      // (services/apple/apple-recovery.ts), which calls this. Returning an
+      // empty chain is the "nothing stale to retire" case and keeps this
+      // test focused on the credit gate. NOTE: no other mock of
+      // `purchaseExtRepo` in this repo defines it either (12 files mock the
+      // namespace, none had this method) — they simply do not dispatch a
+      // path that reaches it. Any test that starts to will fail the same way.
+      findChainBillingIssuePurchases: vi.fn(
+        async (): Promise<
+          Array<{
+            id: string;
+            storeTransactionId: string;
+            subscriberId: string;
+            productId: string;
+          }>
+        > => [],
+      ),
     },
     offeringRepo: {
       findProductByStoreId: vi.fn(),
@@ -100,7 +117,12 @@ vi.mock("@rovenue/db", async () => {
   };
 });
 
-vi.mock("../access-engine", () => ({
+// Only `syncAccess` is stubbed: it writes. `entitlementExpiry` is a pure
+// computation the DID_RENEW path calls, so the real one is kept — mocking a
+// pure function here would let this test pin behaviour the implementation
+// does not have.
+vi.mock("../access-engine", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../access-engine")>()),
   syncAccess: vi.fn(async () => undefined),
 }));
 
