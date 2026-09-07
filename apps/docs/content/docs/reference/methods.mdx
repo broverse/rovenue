@@ -888,7 +888,7 @@ The resolved `Paywall` carries:
 1. When the placement resolves through a `PAYWALL` experiment, the variant draw happens **client-side** and deterministically off the subscriber's `rovenueId`, and the SDK then fires a best-effort `POST /v1/experiments/{id}/expose` exposure beacon on a background thread. Failures are logged and swallowed; the paywall you already got back is unaffected. Merely calling `getPaywall` therefore records an exposure — do not call it speculatively for a paywall you will not show.
 2. The resolved paywall's attribution snapshot is stamped into SDK state, so the next receipt POST carries it as `presentedContext`. Purchase attribution follows the most recent `getPaywall` call.
 
-**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table) (both only when neither cache nor fallback could answer), [`InvalidApiKey`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table) (both only when neither cache nor fallback could answer), [`RateLimited`](/docs/reference/errors#error-table), [`InvalidApiKey`](/docs/reference/errors#error-table), [`Forbidden`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -1498,7 +1498,7 @@ Force an immediate flush of buffered attribute mutations to the server, instead 
 
 **Ordering** — most apps never need this; the background dispatcher already flushes on its own schedule and on foreground. Reach for it when you need the server to have the attributes *now* — for example immediately before `shutdown()`, which does not flush on your behalf.
 
-**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`InvalidApiKey`](/docs/reference/errors#error-table), [`Forbidden`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">

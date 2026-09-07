@@ -897,7 +897,7 @@ On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`,
 | `'ENTITLEMENTS_CHANGED'` | `.entitlementsChanged` | `ENTITLEMENTS_CHANGED` | After the entitlement cache is refreshed — e.g. after a successful purchase, `refreshEntitlements()`, or a foreground transition that triggers a background sync. |
 | `'IDENTITY_CHANGED'` | `.identityChanged` | `IDENTITY_CHANGED` | After `identify()` succeeds or `logOut()` resets the user. |
 | `'VIRTUAL_CURRENCIES_CHANGED'` | `.virtualCurrenciesChanged` | `VIRTUAL_CURRENCIES_CHANGED` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
-| `'REMOTE_CONFIG_CHANGED'` | `.remoteConfigChanged` | `REMOTE_CONFIG_CHANGED` | After `refreshRemoteConfig()` succeeds and the remote config values changed. |
+| `'REMOTE_CONFIG_CHANGED'` | `.remoteConfigChanged` | `REMOTE_CONFIG_CHANGED` | After every successful [`refreshRemoteConfig()`](/docs/reference/methods#refreshremoteconfig). The SDK does not diff the payload, so this also fires when the refresh returned identical values. |
 
 **Emitted by:** [`addChangeListener()`](/docs/reference/methods#change-stream) (RN), `Rovenue.shared.changes` (Swift/Kotlin)
 

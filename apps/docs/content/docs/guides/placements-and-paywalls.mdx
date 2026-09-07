@@ -59,10 +59,10 @@ if let paywall = try await Rovenue.shared.getPaywall(placementId: "onboarding_en
 <Tab value="Kotlin">
 
 ```kotlin
-val paywall = Rovenue.getPaywall(placementId = "onboarding_end", locale = "en")
+val paywall = Rovenue.shared.getPaywall(placementId = "onboarding_end", locale = "en")
 if (paywall != null) {
     showPaywall(paywall) // render from paywall.remoteConfig + paywall.offering
-    Rovenue.logPaywallShown(paywall)
+    Rovenue.shared.logPaywallShown(paywall)
 }
 ```
 
@@ -70,12 +70,12 @@ if (paywall != null) {
 <Tab value="React Native">
 
 ```ts
-import { getPaywall, logPaywallShown } from '@rovenue/react-native';
+import { Rovenue } from '@rovenue/react-native-sdk';
 
-const paywall = await getPaywall('onboarding_end', 'en');
+const paywall = await Rovenue.getPaywall('onboarding_end', 'en');
 if (paywall) {
   // render from paywall.remoteConfig + paywall.offering
-  logPaywallShown(paywall);
+  Rovenue.logPaywallShown(paywall);
 }
 ```
 
@@ -268,9 +268,9 @@ Expo view that hosts the native SwiftUI / Android View above, so an RN
 paywall is drawn by exactly the same code an iOS or Android app runs:
 
 ```tsx
-import { RovenuePaywallView, getPaywall } from '@rovenue/react-native-sdk';
+import { RovenuePaywallView, Rovenue } from '@rovenue/react-native-sdk';
 
-const paywall = await getPaywall('onboarding_end', 'en');
+const paywall = await Rovenue.getPaywall('onboarding_end', 'en');
 // Renders nothing when the paywall has no builderConfig.
 <RovenuePaywallView
   paywall={paywall}
@@ -662,23 +662,23 @@ let count = try? Rovenue.shared.setFallbackPlacements(json: jsonString)
 import dev.rovenue.sdk.Rovenue
 
 // From an Android asset (recommended)
-val count = Rovenue.setFallbackPlacements(
+val count = Rovenue.shared.setFallbackPlacements(
     context = applicationContext,
     assetPath = "rovenue-fallback.json"  // in assets/
 )
 
 // Or from a JSON string
-val count = Rovenue.setFallbackPlacements(json = jsonString)
+val countFromJson = Rovenue.shared.setFallbackPlacements(json = jsonString)
 ```
 
 </Tab>
 <Tab value="React Native">
 
 ```ts
-import { setFallbackPlacements } from '@rovenue/react-native';
+import { Rovenue } from '@rovenue/react-native-sdk';
 
 // From a JSON string (bundled or fetched)
-const count = await setFallbackPlacements(jsonString);
+const count = await Rovenue.setFallbackPlacements(jsonString);
 // count: number of placements loaded from fallback
 ```
 
@@ -761,16 +761,16 @@ Rovenue.shared.logPaywallClosed(paywall)
 <Tab value="Kotlin">
 
 ```kotlin
-Rovenue.logPaywallClosed(paywall)
+Rovenue.shared.logPaywallClosed(paywall)
 ```
 
 </Tab>
 <Tab value="React Native">
 
 ```ts
-import { logPaywallClosed } from '@rovenue/react-native';
+import { Rovenue } from '@rovenue/react-native-sdk';
 
-logPaywallClosed(paywall);
+Rovenue.logPaywallClosed(paywall);
 ```
 
 </Tab>

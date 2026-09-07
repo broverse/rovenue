@@ -315,9 +315,9 @@ Android — hosted inside an Expo view, for pixel parity with the Swift and
 Kotlin SDKs. Its props are unchanged from the JS renderer it replaced:
 
 ```tsx
-import { RovenuePaywallView, getPaywall } from '@rovenue/react-native-sdk';
+import { RovenuePaywallView, Rovenue } from '@rovenue/react-native-sdk';
 
-const paywall = await getPaywall('onboarding_end', 'en');
+const paywall = await Rovenue.getPaywall('onboarding_end', 'en');
 // Renders nothing when the paywall has no builderConfig.
 <RovenuePaywallView
   paywall={paywall}
