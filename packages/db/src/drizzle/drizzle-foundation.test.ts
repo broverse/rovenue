@@ -684,3 +684,12 @@ describe("access table", () => {
     expect(messages.join(" | ")).toMatch(/duplicate key/i);
   });
 });
+
+import { paywalls } from "./schema";
+
+it("paywalls carries a non-null draftRevision defaulting to 0", () => {
+  const col = paywalls.draftRevision;
+  expect(col).toBeDefined();
+  expect(col.notNull).toBe(true);
+  expect(col.hasDefault).toBe(true);
+});

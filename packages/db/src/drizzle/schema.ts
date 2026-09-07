@@ -833,6 +833,12 @@ export const paywalls = pgTable(
     // FK is declared in SQL only (0093) — a Drizzle `.references()` here
     // would create a circular table reference with paywallVersions.
     publishedVersionId: text("publishedVersionId"),
+    // Optimistic-concurrency token for `builderConfig`. Every draft
+    // writer — the builder's autosave included — submits the revision it
+    // read; a mismatch is a 409 and no write occurs. `updatedAt` was
+    // rejected for this: unrelated updates touch it and timestamp
+    // granularity is fragile. Bumped by `updatePaywallDraft` only.
+    draftRevision: integer("draftRevision").notNull().default(0),
     metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()

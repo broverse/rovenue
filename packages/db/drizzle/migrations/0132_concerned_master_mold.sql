@@ -1,0 +1,1 @@
+ALTER TABLE "paywalls" ADD COLUMN "draftRevision" integer DEFAULT 0 NOT NULL;
