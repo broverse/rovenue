@@ -543,8 +543,10 @@ it("two concurrent draft writes: exactly one wins, the loser gets 409", async ()
     `/projects/${projectId}/paywalls/${paywallId}`,
     { headers: { cookie } },
   );
+  // GET /:id answers `{ data: { paywall: <row> } }` — the whole row, so
+  // draftRevision rides along without a serializer change.
   const { data } = await read.json();
-  const revision: number = data.draftRevision;
+  const revision: number = data.paywall.draftRevision;
 
   // Both writers read the SAME revision, as two builder tabs would.
   const [first, second] = await Promise.all([
