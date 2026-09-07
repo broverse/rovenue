@@ -30,12 +30,44 @@ export const SEARCH_INDEX_PATH = join(CLIENT_BUILD_DIR, searchIndexFile);
 export const SINGLE_FETCH_DATA_SUFFIX = '.data';
 
 /**
- * `search-index.json.data` — the single-fetch payload for the *resource* route
- * that exports the index. Nothing ever navigates to it (a resource route
- * returns raw JSON, not a page), so it is dead weight in the image; see
- * `scripts/prune-search-index-data.mjs`.
+ * Where Vite writes the hashed client bundle, including the React Router
+ * client manifest that `scripts/prune-resource-route-data.mjs` classifies
+ * routes from.
  */
-export const SEARCH_INDEX_DATA_PATH = `${SEARCH_INDEX_PATH}${SINGLE_FETCH_DATA_SUFFIX}`;
+export const CLIENT_ASSETS_DIR = join(CLIENT_BUILD_DIR, 'assets');
+
+/**
+ * The client manifest is emitted as `assets/manifest-<version>.js`, a single
+ * statement assigning one JSON object literal:
+ *
+ *   window.__reactRouterManifest={"entry":{…},"routes":{…},"version":"…"};
+ *
+ * Its `routes` table carries `hasDefaultExport` per route, which is the
+ * build's own record of which routes can render on the client — see
+ * `scripts/prune-resource-route-data.mjs`.
+ */
+export const CLIENT_MANIFEST_PREFIX = 'manifest-';
+export const CLIENT_MANIFEST_SUFFIX = '.js';
+export const CLIENT_MANIFEST_ASSIGNMENT = 'window.__reactRouterManifest=';
+
+/** How `app/routes.ts` spells a splat segment (`docs/*`, `og/docs/*`). */
+export const SPLAT_SEGMENT = '*';
+export const SPLAT_PATH_SUFFIX = `/${SPLAT_SEGMENT}`;
+
+/**
+ * Resource routes that are deliberately NOT prerendered, by route path.
+ *
+ * Every other resource route must contribute at least one `<route>.data` for
+ * `scripts/prune-resource-route-data.mjs` to remove — otherwise the prune has
+ * silently stopped covering it and the payloads are back in the image. This
+ * list is the one honest exception, and it is short on purpose.
+ *
+ * `llms.mdx/docs/*` serves per-page MDX source on demand. `react-router.config.ts`'s
+ * prerender list adds `/docs/<slug>` and `/og/docs/<slug>/image.webp` for each
+ * page and never `/llms.mdx/docs/<slug>`, so the route emits nothing at build
+ * time — no document, no payload, nothing to prune.
+ */
+export const RESOURCE_ROUTE_PATHS_NOT_PRERENDERED = ['llms.mdx/docs/*'];
 
 /** Prerendered documents are emitted as `<route>/index.html`. */
 export const PRERENDERED_DOCUMENT_GLOB = '**/index.html';

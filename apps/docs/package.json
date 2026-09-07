@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm run generate:errors && pnpm run generate:openapi && react-router build && pnpm run prune:search-index-data && pnpm run verify:route-discovery && pnpm run verify:search-index",
+    "build": "pnpm run generate:errors && pnpm run generate:openapi && react-router build && pnpm run prune:resource-route-data && pnpm run verify:route-discovery && pnpm run verify:search-index",
     "dev": "pnpm run generate:openapi && react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && fumadocs-mdx && tsc --noEmit",
     "check:links": "tsx ./scripts/check-links.mjs",
     "generate:errors": "tsx scripts/generate-error-catalog.mjs",
     "generate:openapi": "node scripts/copy-openapi.mjs",
-    "prune:search-index-data": "tsx scripts/prune-search-index-data.mjs",
+    "prune:resource-route-data": "tsx scripts/prune-resource-route-data.mjs",
     "verify:route-discovery": "tsx scripts/verify-route-discovery.mjs",
     "verify:search-index": "tsx scripts/verify-search-index.mjs",
     "postinstall": "fumadocs-mdx"
