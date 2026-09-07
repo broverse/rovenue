@@ -5,10 +5,24 @@ global:
 # SLO recording rules and alerts. The recording rules pre-compute the two
 # SLIs at every window the burn-rate alerts need, so each alert divides the
 # same two numbers rather than restating the query.
-#
-# There is no Alertmanager in docker-compose.yml, so nothing routes these to
-# a pager on its own — they evaluate, and are queryable in Prometheus and
-# alertable from Grafana's own contact points. Add an Alertmanager and an
-# `alerting:` block here to page.
 rule_files:
   - /etc/prometheus/rules/*.yml
+
+# Where firing alerts go. `alertmanager` is the service in docker-compose.yml
+# under the same `observability` profile as this Prometheus, so the two come
+# up and go down together; its routing lives in
+# deploy/alertmanager/alertmanager.yml.
+#
+# Resolved by Docker's internal DNS on the compose network, so this needs no
+# host, no port publishing and no configuration. Prometheus retries a
+# discovered-but-unreachable Alertmanager forever, so ordering at boot does
+# not matter.
+#
+# If this block goes missing again, `RovenueAlertsNotReachingAlertmanager` in
+# rules/alerting-pipeline.yml fires on
+# `prometheus_notifications_alertmanagers_discovered < 1` — the regression is
+# now watched rather than commented about.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]

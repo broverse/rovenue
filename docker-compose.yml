@@ -664,6 +664,60 @@ services:
       - rovenue-prometheus-data:/prometheus
     expose:
       - "9090"
+    depends_on:
+      - alertmanager
+    restart: unless-stopped
+
+  # Delivery path for the rules above. Without it every rule in
+  # deploy/prometheus/rules evaluates into Prometheus's own UI and stops
+  # there — an alert nobody receives is indistinguishable from no alert.
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    # Routing is cheap: Alertmanager holds a few in-memory groups and a
+    # notification log. Sized alongside the exporters, not the TSDBs.
+    cpus: 0.25
+    mem_limit: 256m
+    logging: *default-logging
+    profiles: ["observability"]
+    # Alertmanager does not expand environment variables in its config file
+    # (Caddy, Alloy and Grafana all do; this one is the exception). The one
+    # value a self-hoster must supply is the webhook URL, so it is written to
+    # a file at start-up and read back by `url_file:` in
+    # deploy/alertmanager/alertmanager.yml — which therefore stays a
+    # committed, secret-free config. The path below is a contract with that
+    # file: change it in one place and you must change it in the other.
+    #
+    # THE `.invalid` DEFAULT IS DELIBERATE. `.invalid` is reserved by
+    # RFC 2606 and can never resolve, so an operator who has not set
+    # ROVENUE_ALERT_WEBHOOK_URL gets an Alertmanager that fails every
+    # notification loudly — error lines in `docker compose logs
+    # alertmanager`, a climbing alertmanager_notifications_failed_total, and
+    # the RovenueAlertmanagerNotificationsFailing rule going off — instead of
+    # one that accepts alerts and quietly discards them. Silently swallowing
+    # them would recreate the exact defect this service was added to fix.
+    #
+    # `sh -c '<script>' alertmanager` sets $0=alertmanager so the flags in
+    # `command:` arrive as "$@" and stay visible where every other service in
+    # this file keeps them.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        printf '%s' "${ROVENUE_ALERT_WEBHOOK_URL:-http://alertmanager-webhook-unconfigured.invalid/}" > /etc/alertmanager/webhook-url
+        exec /bin/alertmanager "$$@"
+      - alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # The notification log and silences live here. Persisted so a restart
+      # does not re-notify every already-delivered group, and does not forget
+      # a silence an operator set during an incident.
+      - rovenue-alertmanager-data:/alertmanager
+    expose:
+      - "9093"
     restart: unless-stopped
 
   loki:
@@ -760,5 +814,6 @@ volumes:
   caddy-data:
   caddy-config:
   rovenue-prometheus-data:
+  rovenue-alertmanager-data:
   rovenue-loki-data:
   rovenue-grafana-data:

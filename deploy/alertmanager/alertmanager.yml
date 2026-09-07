@@ -1,0 +1,246 @@
+# =============================================================
+# Rovenue Alertmanager — the delivery path for deploy/prometheus/rules
+# =============================================================
+#
+# Prometheus decides WHEN an alert is true. This file decides WHERE it goes,
+# how alerts are batched, and how often a still-firing one is repeated.
+# Without it every rule in deploy/prometheus/rules/*.yml evaluates into a UI
+# nobody is watching, which reads as coverage and is not.
+#
+# -------------------------------------------------------------
+# THE ONE THING AN OPERATOR MUST CONFIGURE
+# -------------------------------------------------------------
+#
+# `ROVENUE_ALERT_WEBHOOK_URL` (see .env.example). Alertmanager does NOT expand
+# environment variables inside its config — unlike Caddy (`{$VAR}`), Alloy
+# (`sys.env`) and Grafana (`$__env{}`), which all do. So docker-compose.yml's
+# alertmanager entrypoint writes that one value into the file named below and
+# this config reads it with `url_file:`. The consequences are the point:
+#
+#   * no secret is ever committed — this file is safe to publish, and a
+#     self-hoster's Slack/Discord/ntfy/PagerDuty URL stays in their .env;
+#   * the value can change without editing YAML;
+#   * and when it is UNSET, docker-compose.yml substitutes a reserved
+#     `.invalid` host that cannot resolve, so notifications FAIL LOUDLY
+#     instead of being swallowed. See "FAILING LOUD" below.
+#
+# The path is a contract with docker-compose.yml's alertmanager entrypoint.
+# Change it in one place and you must change it in the other.
+#
+# -------------------------------------------------------------
+# WHY ONE RECEIVER AND NOT FIVE
+# -------------------------------------------------------------
+#
+# A self-hosted Rovenue is one operator, not a rota. Splitting `page` and
+# `ticket` into separate receivers would mean two more env vars, two more
+# unconfigured states to make visible, and a second sentinel to explain —
+# for a deployment where both would be set to the same Slack channel.
+#
+# So severity routes rather than fans out: it selects a route with its own
+# grouping and its own repeat cadence, and every payload carries
+# `labels.severity` so an operator whose endpoint DOES fan out (a webhook
+# receiver of their own, PagerDuty's Events API, an n8n/Zapier hop) can
+# branch on it. An operator who wants genuinely separate destinations edits
+# this file — it is a bind-mounted, editable config, exactly like
+# deploy/prometheus/rules and deploy/grafana/provisioning.
+#
+# -------------------------------------------------------------
+# FAILING LOUD
+# -------------------------------------------------------------
+#
+# There is deliberately NO `null`/blackhole receiver in this file, and no
+# route that can reach one. An Alertmanager that accepts alerts and drops
+# them is the same defect as having no Alertmanager: it looks configured.
+#
+# When the webhook URL is unset, delivery fails on every notification and
+# that failure is observable three ways:
+#
+#   1. `docker compose logs alertmanager` — a `level=warn` line per failed
+#      attempt, naming the receiver, the aggregation group and the exact
+#      transport error (`no such host` for the unconfigured default).
+#   2. `alertmanager_notification_requests_failed_total{integration="webhook"}`
+#      — a counter that climbs on every failed ATTEMPT, scraped by Alloy
+#      (deploy/alloy/config.alloy) into Prometheus. Note it is the REQUESTS
+#      counter, not `alertmanager_notifications_failed_total`: the latter
+#      only counts once Alertmanager stops retrying, which for these routes
+#      is 17h-24h later. Measured, not assumed — see
+#      deploy/prometheus/rules/alerting-pipeline.yml.
+#   3. `RovenueAlertmanagerNotificationsFailing` in
+#      deploy/prometheus/rules/alerting-pipeline.yml, which alerts on (2).
+#
+# (3) cannot deliver itself when the pipeline it monitors is the broken one
+# — that is inherent, not an oversight. The escape from that circle is the
+# `Watchdog` alert: it always fires, so a heartbeat arrives at the webhook
+# once a day, and its ABSENCE is the out-of-band proof that the whole chain
+# (Prometheus evaluating -> notifying -> Alertmanager routing -> the
+# operator's endpoint accepting) is broken. Point it at a dead-man's-switch
+# monitor and silence becomes the alarm.
+
+global:
+  # How long after Prometheus stops sending an alert it is declared resolved.
+  # Prometheus re-sends every firing alert each evaluation cycle, so 5m is
+  # several missed cycles — long enough not to flap, short enough that a
+  # `send_resolved` notification is still timely.
+  resolve_timeout: 5m
+
+# -------------------------------------------------------------
+# Routing tree
+# -------------------------------------------------------------
+#
+# Sub-routes inherit `receiver` from the root, so nothing can fall off the
+# tree: an alert matching no sub-route lands on the root's own receiver with
+# the root's timings. The three timing knobs mean different things and are
+# set per route on purpose:
+#
+#   group_wait      — how long to hold the FIRST alert of a new group, in
+#                     case siblings are about to join it. Buys batching at
+#                     the cost of latency.
+#   group_interval  — minimum gap before a group that has already notified
+#                     may notify again because its membership CHANGED.
+#   repeat_interval — how often an unchanged, still-firing group nags.
+route:
+  receiver: rovenue-webhook
+
+  # `area` and `slo` are the labels the rules use to say which subsystem an
+  # alert belongs to; `table` distinguishes revenue_events from credit_ledger
+  # in the partition rules. Grouping on them means a single incident that
+  # trips several rules arrives as one message, while two different tables
+  # running out of partitions stay two messages.
+  #
+  # Deliberately NOT grouped by anything unbounded. `alertname` and these
+  # three are all low-cardinality by construction.
+  group_by: ["alertname", "area", "slo", "table"]
+
+  # Root defaults, used by anything that matches no sub-route below.
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # ---------------------------------------------------------
+    # Watchdog — the heartbeat, first so nothing else claims it
+    # ---------------------------------------------------------
+    #
+    # Always firing by design. Sent immediately on start-up (group_wait 0s)
+    # and then once a day. A daily POST is cheap to mute and is the only
+    # signal that survives the failure it is meant to detect: if this stops
+    # arriving, something between the rule evaluator and the endpoint is
+    # down. Route it into a dead-man's-switch monitor
+    # (healthchecks.io, Cronitor, Better Stack heartbeats, or your own cron)
+    # and set that monitor's grace period above 24h.
+    - matchers:
+        - alertname = "Watchdog"
+      group_by: ["alertname"]
+      group_wait: 0s
+      group_interval: 24h
+      repeat_interval: 24h
+
+    # ---------------------------------------------------------
+    # Partition headroom — a deadline, not an outage
+    # ---------------------------------------------------------
+    #
+    # Placed above the severity routes on purpose. RovenuePartitionPremake-
+    # Critical and RovenuePartitionDefaultRowsStranded carry `severity: page`
+    # because they are unrecoverable-if-ignored, not because they are
+    # seconds-sensitive: the shortest of them still leaves a month of runway,
+    # and a stranded DEFAULT row will be exactly as stranded tomorrow.
+    #
+    # Waking someone at 03:00 for a deadline four weeks out trains them to
+    # ignore the channel, so these get a slower cadence than a real page:
+    # 2m of grouping (both partitioned tables report on the same maintenance
+    # run, so their alerts arrive within seconds of each other and should be
+    # one message), and a 12h nag — twice a day is enough pressure for
+    # something whose fix is "run partition maintenance".
+    - matchers:
+        - area = "partitions"
+      group_by: ["area", "table"]
+      group_wait: 2m
+      group_interval: 15m
+      repeat_interval: 12h
+
+    # ---------------------------------------------------------
+    # severity: page — the SLO burn and correctness alerts
+    # ---------------------------------------------------------
+    #
+    # These are live incidents: 14.4x error-budget burn, latency collapse,
+    # the entitlement reconciler refusing to heal. 30s of grouping keeps a
+    # multi-rule incident to one message without meaningfully delaying it;
+    # hourly repeats keep an unacknowledged outage present without becoming
+    # the reason someone mutes the channel.
+    - matchers:
+        - severity = "page"
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 1h
+
+    # ---------------------------------------------------------
+    # severity: ticket — wants an owner in working hours
+    # ---------------------------------------------------------
+    #
+    # The rules already made this distinction ("a slow burn wants an owner
+    # during working hours, not at 3am") and nothing acted on it. It does
+    # now: 5m of grouping because none of these is urgent and batching is
+    # free, and a 24h repeat so an open ticket resurfaces once a day rather
+    # than every four hours.
+    - matchers:
+        - severity = "ticket"
+      group_wait: 5m
+      group_interval: 30m
+      repeat_interval: 24h
+
+# -------------------------------------------------------------
+# Inhibition — the sharper alert silences the duller one
+# -------------------------------------------------------------
+#
+# Both rule families below are LADDERS of nested thresholds, so the severe
+# rung firing means every gentler rung is firing too. Without inhibition a
+# real incident arrives as four messages saying the same thing at four
+# levels of alarm, and the operator learns to skim.
+#
+# `equal` is what keeps this honest: inhibition applies only within the same
+# table / the same SLO. revenue_events running out of partitions must never
+# silence credit_ledger, and an availability page must never silence a
+# latency ticket.
+inhibit_rules:
+  # `< 1 month` implies `< 3 months` for the same table, always.
+  - source_matchers:
+      - alertname = "RovenuePartitionPremakeCritical"
+    target_matchers:
+      - alertname = "RovenuePartitionPremakeRunningOut"
+    equal: ["table"]
+
+  # Multi-window multi-burn-rate ladder: 14.4x implies 6x implies 3x implies
+  # 1x. The `slo=~".+"` matcher requires the label to be PRESENT, which is
+  # what scopes this to the SLO rules only — the partition and correctness
+  # alerts carry `area`, never `slo`, so they are untouched by this rule and
+  # handled by the explicit one above.
+  - source_matchers:
+      - severity = "page"
+      - slo =~ ".+"
+    target_matchers:
+      - severity = "ticket"
+      - slo =~ ".+"
+    equal: ["slo"]
+
+# -------------------------------------------------------------
+# Receivers
+# -------------------------------------------------------------
+receivers:
+  - name: rovenue-webhook
+    webhook_configs:
+        # Written at container start-up by docker-compose.yml's alertmanager
+        # entrypoint from ROVENUE_ALERT_WEBHOOK_URL. Read as a file rather
+        # than inlined because Alertmanager cannot expand env vars, and
+        # inlining would mean committing a secret URL.
+      - url_file: /etc/alertmanager/webhook-url
+
+        # Resolutions are delivered too. An operator who only ever sees
+        # "firing" has to guess whether an incident ended, and the SLO
+        # burn-rate alerts are specifically designed to stop firing on their
+        # own when an incident recovers — that recovery is information.
+        send_resolved: true
+
+        # 0 = no cap. Truncating a batch would drop alerts silently, which is
+        # the defect this whole file exists to fix. Grouping already keeps
+        # batches small.
+        max_alerts: 0
