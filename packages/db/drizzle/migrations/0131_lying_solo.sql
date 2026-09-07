@@ -1,0 +1,1 @@
+ALTER TABLE "copilot_intents" ADD COLUMN "requires_capability" text;

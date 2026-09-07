@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { drizzle, getDb, projects } from "@rovenue/db";
+import type { PaywallTreeOp } from "@rovenue/shared/paywall";
 import { auth } from "../../../lib/auth";
 import { copilotIntentsRoute } from "./intents";
 import { registerAllIntentHandlers } from "../../../services/copilot/intent-handlers";
@@ -187,5 +188,198 @@ describe("POST /projects/:projectId/copilot/intents/:id/execute — RBAC denial"
     );
 
     expect(res.status, `execute should return 403 for CUSTOMER_SUPPORT user, got ${res.status}`).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Capability-gated intent: action_paywall_editTree
+//
+// These seed a whole project/paywall fixture per test (rather than reusing
+// the module-level beforeAll state above), since each test needs a member
+// with a *different* role. Rows are tracked and removed in the afterAll
+// below; deleting the project cascades away its membership, offering,
+// paywall, thread, message, and intent rows — only `user` rows need an
+// explicit delete (see the module-level afterAll's comment).
+// ---------------------------------------------------------------------------
+
+let capabilityTestSeq = 0;
+const capabilityTestProjectIds: string[] = [];
+const capabilityTestUserIds: string[] = [];
+
+// Creates a user + Better Auth session, a project, and a membership with
+// the given role, plus one paywall in that project.
+async function seedProjectWithRole(
+  role: "OWNER" | "ADMIN" | "DEVELOPER" | "GROWTH" | "CUSTOMER_SUPPORT",
+): Promise<{ cookie: string; projectId: string; userId: string; paywallId: string }> {
+  const seq = ++capabilityTestSeq;
+  const db = getDb();
+
+  const email = `rovi_rbac_cap_${RUN_ID}_${seq}@rovenue.test`;
+  const password = "Test1234!rbaccap";
+  const name = `Rovi RBAC Capability ${RUN_ID} ${seq}`;
+
+  const signUp = await auth.api.signUpEmail({
+    body: { email, password, name },
+  });
+  if (!signUp?.user) {
+    throw new Error("seedProjectWithRole signUpEmail failed — is Postgres reachable at port 5433?");
+  }
+  const userId = signUp.user.id;
+  capabilityTestUserIds.push(userId);
+
+  const signIn = await auth.api.signInEmail({
+    body: { email, password },
+    asResponse: true,
+  });
+  const setCookieHeader = signIn.headers.get("set-cookie");
+  if (!setCookieHeader) {
+    throw new Error("seedProjectWithRole signInEmail did not return set-cookie");
+  }
+  const cookie = setCookieHeader.split(";")[0] ?? "";
+
+  const projId = `prj_rbac_cap_${RUN_ID}_${seq}`;
+  await db.insert(projects).values({
+    id: projId,
+    name: `Rovi RBAC Capability Test ${RUN_ID} ${seq}`,
+    settings: {},
+  });
+  capabilityTestProjectIds.push(projId);
+
+  await db.insert(drizzle.schema.projectMembers).values({
+    projectId: projId,
+    userId,
+    role,
+  });
+
+  const [offering] = await db
+    .insert(drizzle.schema.offerings)
+    .values({
+      projectId: projId,
+      identifier: `default_${RUN_ID}_${seq}`,
+      isDefault: true,
+      packages: [],
+    })
+    .returning();
+
+  const [paywall] = await db
+    .insert(drizzle.schema.paywalls)
+    .values({
+      projectId: projId,
+      identifier: `default_${RUN_ID}_${seq}`,
+      name: `Capability Test Paywall ${RUN_ID} ${seq}`,
+      offeringId: offering.id,
+    })
+    .returning();
+
+  return { cookie, projectId: projId, userId, paywallId: paywall.id };
+}
+
+// Inserts a pending copilot_intents row for action_paywall_editTree whose
+// payload is a valid tree op against that paywall, and whose
+// requiresCapability is "paywalls:write".
+async function seedPaywallEditIntent(
+  args: { projectId: string; paywallId: string },
+): Promise<string> {
+  const seq = ++capabilityTestSeq;
+  const db = getDb();
+
+  // Dedicated author user for the thread/message/intent FK chain — the
+  // intent's author need not be (and in production usually isn't) the
+  // member who later executes it.
+  const authorEmail = `rovi_rbac_cap_author_${RUN_ID}_${seq}@rovenue.test`;
+  const authorPassword = "Test1234!rbaccapauthor";
+  const authorName = `Rovi RBAC Capability Author ${RUN_ID} ${seq}`;
+
+  const authorSignUp = await auth.api.signUpEmail({
+    body: { email: authorEmail, password: authorPassword, name: authorName },
+  });
+  if (!authorSignUp?.user) {
+    throw new Error("seedPaywallEditIntent signUpEmail failed — is Postgres reachable at port 5433?");
+  }
+  const authorUserId = authorSignUp.user.id;
+  capabilityTestUserIds.push(authorUserId);
+
+  const thread = await drizzle.copilotThreadRepo.createThread(db, {
+    projectId: args.projectId,
+    userId: authorUserId,
+    title: "paywall edit intent capability test thread",
+    provider: "openai",
+    model: "mock",
+  });
+
+  const msg = await drizzle.copilotMessageRepo.appendMessage(db, {
+    threadId: thread.id,
+    role: "assistant",
+    parts: [],
+  });
+
+  // A valid `insert` op against the empty-draft config every fresh
+  // paywall resolves to (`resolvePaywallDraftConfig` falls back to
+  // `emptyBuilderConfig`, whose root is `{ type: "stack", id: "root",
+  // children: [] }`) — see intent-handlers.project-scope.test.ts for the
+  // same op shape exercised against `action_paywall_editTree` directly.
+  const op: PaywallTreeOp = {
+    kind: "insert",
+    parentId: "root",
+    index: 0,
+    subtree: { type: "spacer", id: `spacer_${seq}`, size: 4 },
+  };
+
+  const intent = await drizzle.copilotIntentRepo.createIntent(db, {
+    projectId: args.projectId,
+    userId: authorUserId,
+    threadId: thread.id,
+    messageId: msg.id,
+    toolName: "action_paywall_editTree",
+    payload: { paywallId: args.paywallId, op },
+    preview: { title: "Add spacer", fields: [] },
+    requiresRole: "ADMIN",
+    requiresCapability: "paywalls:write",
+  });
+
+  return intent.id;
+}
+
+afterAll(async () => {
+  const db = getDb();
+  for (const id of capabilityTestProjectIds) {
+    await db.delete(projects).where(eq(projects.id, id));
+  }
+  const { user: userTable } = drizzle.schema;
+  for (const id of capabilityTestUserIds) {
+    await db.delete(userTable).where(eq(userTable.id, id));
+  }
+});
+
+describe("POST /projects/:projectId/copilot/intents/:id/execute — capability gate (action_paywall_editTree)", () => {
+  it("a DEVELOPER may execute a paywall edit intent (capability gate)", async () => {
+    // Before this change the intent carried requiresRole "ADMIN" — the
+    // tightest RANK that was a subset of products:write — which excluded
+    // DEVELOPER even though PATCH /paywalls/:id has always allowed it.
+    const { cookie, projectId, paywallId } = await seedProjectWithRole("DEVELOPER");
+    const intentId = await seedPaywallEditIntent({ projectId, paywallId });
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${projectId}/copilot/intents/${intentId}/execute`,
+      { method: "POST", headers: { cookie } },
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("a GROWTH member may NOT execute a paywall edit intent", async () => {
+    // GROWTH shares DEVELOPER's rank, so a rank gate could not express
+    // this exclusion. The capability gate can.
+    const { cookie, projectId, paywallId } = await seedProjectWithRole("GROWTH");
+    const intentId = await seedPaywallEditIntent({ projectId, paywallId });
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${projectId}/copilot/intents/${intentId}/execute`,
+      { method: "POST", headers: { cookie } },
+    );
+
+    expect(res.status).toBe(403);
   });
 });

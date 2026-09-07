@@ -19,6 +19,7 @@ export async function createIntent(
     payload: unknown;
     preview: unknown;
     requiresRole: string;
+    requiresCapability?: string | null;
   },
 ): Promise<CopilotIntent> {
   const [row] = await db

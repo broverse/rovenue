@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 //
 // P9 on-device preview (§6.16). Mint issues a plaintext token once (never
 // persisted) and stores only its hash via Task 1's previewSessionRepo;
-// revoke marks a session revoked. Both are gated on products:write
+// revoke marks a session revoked. Both are gated on paywalls:write
 // (minting grants draft access to a physical device, same trust level as
 // a builder write) and 404 when the paywall doesn't belong to the caller's
 // project.
@@ -168,12 +168,12 @@ describe("POST /paywalls/:id/preview-sessions", () => {
     expect(insertArg.paywallId).toBe("pwA");
   });
 
-  it("gates on products:write", async () => {
+  it("gates on paywalls:write", async () => {
     await app().request("/dashboard/projects/p1/paywalls/pwA/preview-sessions", {
       method: "POST",
     });
 
-    expect(assertProjectCapability).toHaveBeenCalledWith("p1", "u1", "products:write");
+    expect(assertProjectCapability).toHaveBeenCalledWith("p1", "u1", "paywalls:write");
   });
 
   it("respects X-Forwarded-Proto for the previewUrl scheme behind a TLS-terminating proxy", async () => {
@@ -240,7 +240,7 @@ describe("DELETE /paywalls/:id/preview-sessions/:sid", () => {
     expect(state.sessions[seeded.id].revokedAt).not.toBeNull();
   });
 
-  it("gates on products:write", async () => {
+  it("gates on paywalls:write", async () => {
     const seeded = await createPreviewSession(null, {
       projectId: "p1",
       paywallId: "pwA",
@@ -253,7 +253,7 @@ describe("DELETE /paywalls/:id/preview-sessions/:sid", () => {
       method: "DELETE",
     });
 
-    expect(assertProjectCapability).toHaveBeenCalledWith("p1", "u1", "products:write");
+    expect(assertProjectCapability).toHaveBeenCalledWith("p1", "u1", "paywalls:write");
   });
 
   it("404s for a paywall belonging to another project", async () => {

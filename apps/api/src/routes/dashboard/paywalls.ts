@@ -63,7 +63,7 @@ import { parseAssetUrl } from "../../lib/asset-store";
 // A paywall is a named, versioned remote-config document rendered
 // by the SDK against a specific offering (see /v1/placements). This
 // mirrors offerings.ts: same auth (requireDashboardAuth +
-// assertProjectAccess / assertProjectCapability("products:write")),
+// assertProjectAccess / assertProjectCapability("paywalls:write")),
 // validate()/ok() envelope, and purgeProjectCatalogCache on every
 // mutation — paywalls are edge-cached under /v1/placements.
 
@@ -527,7 +527,7 @@ export const paywallsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
     const body = c.req.valid("json");
 
     const existing = await drizzle.paywallRepo.findPaywallByIdentifier(
@@ -694,7 +694,7 @@ export const paywallsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
     const body = c.req.valid("json");
 
     const existingPaywall = await drizzle.paywallRepo.findPaywallById(
@@ -768,7 +768,7 @@ export const paywallsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
 
     const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
     if (!paywall) {
@@ -1128,7 +1128,7 @@ export const paywallsDashboardRoute = new Hono()
     }
     const versionNo = parseVersionNo(c.req.param("versionNo"));
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
 
     const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
     if (!paywall) {
@@ -1179,7 +1179,7 @@ export const paywallsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
 
     const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
     if (!paywall) {
@@ -1236,7 +1236,7 @@ export const paywallsDashboardRoute = new Hono()
     }
     const versionNo = parseVersionNo(c.req.param("versionNo"));
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
     const { label } = c.req.valid("json");
 
     const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
@@ -1345,7 +1345,7 @@ export const paywallsDashboardRoute = new Hono()
   // mints a short-lived token that a physical device redeems (via
   // GET /v1/preview/paywalls/:token, Task 3) to fetch this paywall's DRAFT
   // builderConfig rather than the published snapshot /v1/placements
-  // normally serves. Gated on products:write (not the read-only
+  // normally serves. Gated on paywalls:write (not the read-only
   // CUSTOMER_SUPPORT role above): minting hands draft access to a device
   // outside the dashboard, the same trust level as a builder write. Only
   // the token's hash is ever persisted (Task 1's previewSessionRepo) — the
@@ -1359,7 +1359,7 @@ export const paywallsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
 
     const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
     if (!paywall) {
@@ -1411,7 +1411,7 @@ export const paywallsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
 
     const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
     if (!paywall) {
@@ -1445,7 +1445,7 @@ export const paywallsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "products:write");
+    await assertProjectCapability(projectId, user.id, "paywalls:write");
 
     const existing = await drizzle.paywallRepo.findPaywallById(
       drizzle.db,

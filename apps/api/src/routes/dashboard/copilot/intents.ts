@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { drizzle, MemberRole } from "@rovenue/db";
 import { requireDashboardAuth } from "../../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../../lib/project-access";
+import { assertProjectCapability, type Capability } from "../../../lib/capabilities";
 import { ok } from "../../../lib/response";
 import { executeIntent } from "../../../services/copilot/intent-executor";
 
@@ -61,11 +62,17 @@ export const copilotIntentsRoute = new Hono()
       throw new HTTPException(410, { message: "Intent expired" });
     }
 
-    const membership = await assertProjectAccess(
-      projectId,
-      user.id,
-      intent.requiresRole as MemberRole,
-    );
+    const membership = intent.requiresCapability
+      ? await assertProjectCapability(
+          projectId,
+          user.id,
+          intent.requiresCapability as Capability,
+        )
+      : await assertProjectAccess(
+          projectId,
+          user.id,
+          intent.requiresRole as MemberRole,
+        );
 
     try {
       const result = await executeIntent({

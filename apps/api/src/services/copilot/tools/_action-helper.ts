@@ -3,6 +3,7 @@ import type { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import type { ToolContext } from "./query-subscribers";
 import type { RoviIntentPreview } from "@rovenue/shared";
+import type { Capability } from "../../../lib/capabilities";
 
 export function createIntentTool<S extends z.ZodTypeAny>(args: {
   ctx: ToolContext;
@@ -10,6 +11,7 @@ export function createIntentTool<S extends z.ZodTypeAny>(args: {
   description: string;
   inputSchema: S;
   requiresRole: string;
+  requiresCapability?: Capability;
   buildPreview: (input: z.infer<S>) => RoviIntentPreview;
 }) {
   return tool({
@@ -25,6 +27,7 @@ export function createIntentTool<S extends z.ZodTypeAny>(args: {
         payload: input,
         preview: args.buildPreview(input),
         requiresRole: args.requiresRole,
+        requiresCapability: args.requiresCapability ?? null,
       });
       return {
         intentId: intent.id,

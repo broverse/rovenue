@@ -15,20 +15,24 @@ import type { ToolContext } from "./query-subscribers";
 // dry-run + persistence happens in the `action_paywall_editTree`
 // intent handler (`intent-handlers.ts`) once the user approves.
 //
-// PATCH /paywalls/:id gates on `assertProjectCapability(projectId,
-// user.id, "products:write")` (`apps/api/src/routes/dashboard/paywalls.ts`),
-// whose `CAPABILITY_ROLES` set is `["OWNER", "ADMIN", "DEVELOPER"]`
-// (`apps/api/src/lib/capabilities.ts`) — GROWTH excluded. But the
-// intent-execute gate (`assertProjectAccess` in `lib/project-access.ts`)
-// is RANK-based, not set-based, and `ROLE_RANK` gives GROWTH the SAME
-// rank as DEVELOPER (both 2) — so `requiresRole: "DEVELOPER"` would
-// silently admit GROWTH too, which products:write does not allow. A
-// rank gate cannot express a set that skips a same-rank role, so
-// `requiresRole: "ADMIN"` is the tightest rank that is a subset of
-// `products:write` (`{OWNER, ADMIN}` ⊆ `{OWNER, ADMIN, DEVELOPER}`) —
-// same precedent as the sibling `action_products_updatePrice`, which
-// shares this exact capability and already uses "ADMIN" for the same
-// reason.
+// PATCH /paywalls/:id and this tool both gate on `assertProjectCapability(
+// projectId, user.id, "paywalls:write")`, whose `CAPABILITY_ROLES` set is
+// `["OWNER", "ADMIN", "DEVELOPER"]` (`apps/api/src/lib/capabilities.ts`) —
+// GROWTH excluded. `createIntentTool`'s `requiresCapability` below is
+// authoritative at execute time (`intents.ts`'s POST /:id/execute checks
+// it before falling back to the rank gate) — see the design spec, D3.
+//
+// `requiresRole: "ADMIN"` is kept as the fallback that never fires for
+// this tool (the not-null `copilot_intents.requires_role` column still
+// needs a value). It predates the capability gate: the intent-execute
+// path used to be RANK-based (`assertProjectAccess` / `ROLE_RANK`), and
+// `ROLE_RANK` gives GROWTH the SAME rank as DEVELOPER — so
+// `requiresRole: "DEVELOPER"` would have silently admitted GROWTH too,
+// which `paywalls:write` does not allow. A rank gate cannot express a set
+// that skips a same-rank role, so "ADMIN" was the tightest rank that was
+// a subset of the capability (`{OWNER, ADMIN}` ⊆ `{OWNER, ADMIN,
+// DEVELOPER}`). Same precedent as the sibling `action_products_updatePrice`,
+// which has not migrated to `requiresCapability` and still relies on this.
 
 function describeSubtree(subtree: PaywallNode): string {
   const n = subtree as PaywallNode & { rows?: unknown[] };
@@ -102,6 +106,7 @@ export function actionPaywallTools(ctx: ToolContext) {
         "Propose a single structural edit to a paywall's builder-config tree — insert, replace, or remove a node, patch a node's props, or update localized strings for a locale. Returns a pending intent; the user must approve before it executes. Call query_paywall_tree first to get valid node ids.",
       inputSchema: EditTreeArgs,
       requiresRole: "ADMIN",
+      requiresCapability: "paywalls:write",
       buildPreview: (i) => buildEditTreePreview(i.op),
     }),
   };

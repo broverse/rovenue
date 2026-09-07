@@ -3144,6 +3144,10 @@ export const copilotIntents = pgTable(
     payload: jsonb("payload").notNull(),
     preview: jsonb("preview").notNull(),
     requiresRole: text("requires_role").notNull(),
+    // When set, this capability is the authoritative gate at execute time
+    // and `requiresRole` is ignored. Null keeps the legacy rank gate, so
+    // action tools that have not migrated are unaffected.
+    requiresCapability: text("requires_capability"),
     status: text("status", {
       enum: ["pending", "approved", "rejected", "executed", "expired", "failed"],
     })
