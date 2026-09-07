@@ -841,7 +841,7 @@ Resolve a placement into the paywall to show, then report what the subscriber di
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `getPaywall` | `getPaywall(placementId, locale?)` | `Promise<Paywall \| null>` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`InvalidApiKey`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `getPaywall` | `getPaywall(placementId, locale?)` | `Promise<Paywall \| null>` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`RateLimited`](/docs/reference/errors#error-table), [`InvalidApiKey`](/docs/reference/errors#error-table), [`Forbidden`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
 | `logPaywallShown` | `logPaywallShown(paywall)` | `void` | — |
 | `logPaywallClosed` | `logPaywallClosed(paywall)` | `void` | — |
 | `setFallbackPlacements` | `setFallbackPlacements(json)` | `Promise<number>` | [`InvalidArgument`](/docs/reference/errors#error-table) |
@@ -1285,7 +1285,7 @@ Attach arbitrary key/value metadata to the current subscriber — plus a set of 
 | `setDisplayName` | `setDisplayName(name)` | `Promise<void>` | [`Storage`](/docs/reference/errors#error-table) |
 | `setPhoneNumber` | `setPhoneNumber(phone)` | `Promise<void>` | [`Storage`](/docs/reference/errors#error-table) |
 | `setPushToken` | `setPushToken(token)` | `Promise<void>` | [`Storage`](/docs/reference/errors#error-table) |
-| `flushAttributes` | `flushAttributes()` | `Promise<number>` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `flushAttributes` | `flushAttributes()` | `Promise<number>` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`RateLimited`](/docs/reference/errors#error-table), [`InvalidApiKey`](/docs/reference/errors#error-table), [`Forbidden`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
 
 **Write model — read this before using any of them.** Every setter is a **buffered local write**. The returned promise resolves once the mutation has been written to the on-device buffer, *not* once the server has it. A background dispatcher syncs the buffer every 30 seconds, and again when the app comes to the foreground; [`flushAttributes`](#flushattributes) forces it early. So a resolved `setEmail()` means "durably queued", never "the server knows".
 

@@ -302,6 +302,6 @@ per-platform spelling of each).
 | [`setFallbackPlacements()`](/docs/reference/methods#setfallbackplacements) | [`InvalidArgument`](#error-table) |
 | [`refreshRemoteConfig()`](/docs/reference/methods#refreshremoteconfig) | [`NetworkUnavailable`](#error-table), [`Timeout`](#error-table), [`RateLimited`](#error-table), [`InvalidApiKey`](#error-table), [`ServerError`](#error-table) |
 | [`setAttributes()`](/docs/reference/methods#setattributes) — and `setEmail()`, `setDisplayName()`, `setPhoneNumber()`, `setPushToken()` | [`Storage`](#error-table) |
-| [`flushAttributes()`](/docs/reference/methods#flushattributes) | [`NetworkUnavailable`](#error-table), [`Timeout`](#error-table), [`InvalidApiKey`](#error-table), [`Forbidden`](#error-table), [`ServerError`](#error-table) |
+| [`flushAttributes()`](/docs/reference/methods#flushattributes) | [`NetworkUnavailable`](#error-table), [`Timeout`](#error-table), [`RateLimited`](#error-table), [`InvalidApiKey`](#error-table), [`Forbidden`](#error-table), [`ServerError`](#error-table) |
 | [`getAppAccountToken()`](/docs/reference/methods#account-token) | [`Storage`](#error-table) |
 | All methods | [`Internal`](#error-table) (unexpected failures) — see [Calling the SDK before `configure()`](#calling-the-sdk-before-configure) for what happens if `configure()` was skipped; it is not one of these `kind`s |
