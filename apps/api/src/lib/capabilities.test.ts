@@ -56,3 +56,33 @@ describe("roleHasCapability", () => {
     }
   });
 });
+
+import { MemberRole } from "@rovenue/db";
+
+const ALL_ROLES: MemberRole[] = [
+  "OWNER",
+  "ADMIN",
+  "DEVELOPER",
+  "GROWTH",
+  "CUSTOMER_SUPPORT",
+] as MemberRole[];
+
+describe("paywalls:write / funnels:write role sets", () => {
+  // Pinned by the design spec. `paywalls:write` mirrors what
+  // PATCH /paywalls/:id already enforced via products:write.
+  it("paywalls:write admits exactly OWNER, ADMIN, DEVELOPER", () => {
+    const admitted = ALL_ROLES.filter((r) =>
+      roleHasCapability(r, "paywalls:write"),
+    );
+    expect(admitted).toEqual(["OWNER", "ADMIN", "DEVELOPER"]);
+  });
+
+  // Mirrors exactly the set today's DEVELOPER *rank* gate admits on
+  // funnel routes — GROWTH shares DEVELOPER's rank. Nobody loses access.
+  it("funnels:write admits exactly OWNER, ADMIN, DEVELOPER, GROWTH", () => {
+    const admitted = ALL_ROLES.filter((r) =>
+      roleHasCapability(r, "funnels:write"),
+    );
+    expect(admitted).toEqual(["OWNER", "ADMIN", "DEVELOPER", "GROWTH"]);
+  });
+});

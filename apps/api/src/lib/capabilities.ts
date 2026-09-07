@@ -8,6 +8,8 @@ export type Capability =
   | "project:settings:write"
   | "members:manage"
   | "products:write"
+  | "paywalls:write"
+  | "funnels:write"
   | "sdk:write"
   | "webhooks:write"
   | "experiments:write"
@@ -30,6 +32,17 @@ const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
   "project:settings:write": ["OWNER", "ADMIN"],
   "members:manage":         ["OWNER", "ADMIN"],
   "products:write":         ["OWNER", "ADMIN", "DEVELOPER"],
+  // Paywall builder writes. Same set as products:write, which is what
+  // PATCH /paywalls/:id already enforced; naming it separately lets the
+  // intent-execute path share ONE gate with the REST route instead of
+  // approximating it with a rank (see design spec, D3).
+  "paywalls:write":         ["OWNER", "ADMIN", "DEVELOPER"],
+  // Funnel writes. Exactly the set the DEVELOPER *rank* gate already
+  // admits — ROLE_RANK gives GROWTH the same rank as DEVELOPER — so this
+  // is a faithful restatement, not a policy change. The resulting
+  // asymmetry (GROWTH may author a funnel but not a paywall) is a known
+  // product question, recorded in the design spec.
+  "funnels:write":          ["OWNER", "ADMIN", "DEVELOPER", "GROWTH"],
   "sdk:write":              ["OWNER", "ADMIN", "DEVELOPER"],
   "webhooks:write":         ["OWNER", "ADMIN", "DEVELOPER"],
   "experiments:write":      ["OWNER", "ADMIN", "DEVELOPER", "GROWTH"],
