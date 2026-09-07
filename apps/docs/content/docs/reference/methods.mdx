@@ -6,7 +6,7 @@ description: Every Rovenue SDK method, grouped by capability.
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Virtual Currencies](#virtual-currencies) · [Events](#events) · [Purchases](#purchases) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream) · [Funnel Attribution](#funnel-attribution)
+Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Virtual Currencies](#virtual-currencies) · [Events](#events) · [Purchases](#purchases) · [Paywalls](#paywalls) · [Remote Config](#remote-config) · [Subscriber Attributes](#subscriber-attributes) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream) · [Funnel Attribution](#funnel-attribution)
 
 ---
 
@@ -833,6 +833,697 @@ Re-validate the user's existing store receipts against the Rovenue server and up
 
 ---
 
+## Paywalls
+
+Resolve a placement into the paywall to show, then report what the subscriber did with it.
+
+### Method summary
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `getPaywall` | `getPaywall(placementId, locale?)` | `Promise<Paywall \| null>` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`InvalidApiKey`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `logPaywallShown` | `logPaywallShown(paywall)` | `void` | — |
+| `logPaywallClosed` | `logPaywallClosed(paywall)` | `void` | — |
+| `setFallbackPlacements` | `setFallbackPlacements(json)` | `Promise<number>` | [`InvalidArgument`](/docs/reference/errors#error-table) |
+
+On React Native these live on the `Rovenue` object (`Rovenue.getPaywall(...)`) — they are **not** named exports of `@rovenue/react-native-sdk`. Swift uses `getPaywall(placementId:locale:)`, `logPaywallShown(_:)`, `logPaywallClosed(_:)` and `setFallbackPlacements(json:)` / `setFallbackPlacements(fileURL:)`. Kotlin uses `getPaywall(placementId, locale)`, `logPaywallShown(paywall)`, `logPaywallClosed(paywall)` and `setFallbackPlacements(json)` / `setFallbackPlacements(context, assetPath)`.
+
+Rendering is your job for remote-config paywalls — read `paywall.remoteConfig` and build the UI yourself. Builder paywalls (`paywall.builderConfig`) have a native renderer, `RovenuePaywallView`, which takes the already-resolved `Paywall` rather than a placement identifier — see [React Native](/docs/platforms/react-native), [iOS](/docs/platforms/ios-swift) and [Android](/docs/platforms/android-kotlin).
+
+---
+
+### `getPaywall`
+
+Resolve a placement identifier into the paywall the current subscriber should see — either a direct assignment or the winning variant of a client-drawn `PAYWALL` experiment.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `placementId` | `string` | Yes | The placement identifier configured in the dashboard. |
+| `locale` | `string` | No | BCP-47 tag used to pick the paywall's localised text. Omitted means the server's default. Resolution matches by **language**, not the exact tag. |
+
+**Returns** — `Promise<Paywall | null>`. `null` means the placement resolved to nothing (retired, `target: none`, or an unknown identifier) — that is **not** an error, and an unknown placement never produces a 404.
+
+The resolved `Paywall` carries:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `placementIdentifier` | `string` | The identifier you asked for. |
+| `placementRevision` | `number` | Revision of the placement configuration this resolution came from. |
+| `paywallIdentifier` | `string \| null` | Identifier of the resolved paywall. |
+| `paywallName` | `string \| null` | Human-readable paywall name. |
+| `configFormatVersion` | `number` | Format version of the paywall payload. |
+| `remoteConfig` | `Record<string, unknown> \| null` | Parsed remote-config payload. `null` when there is none for the resolved locale, or the JSON does not parse into an object — a broken payload never fails the call. |
+| `remoteConfigLocale` | `string \| null` | Locale the remote-config text was resolved for. |
+| `builderConfig` | `Record<string, unknown> \| null` | Parsed builder component tree. `null` for remote-config-only paywalls, or when the JSON does not parse into an object. |
+| `offering` | `Offering \| null` | The offering bound to this paywall, already hydrated with store products. |
+| `presentedContext` | `PresentedContext \| null` | Attribution snapshot (`placementId`, `paywallId`, `variantId`, `experimentKey`, `revision`). `logPaywallShown` / `logPaywallClosed` are built from this. |
+| `servedFromFallback` | `boolean` | `true` only when this resolution came from the bundled fallback file. |
+
+**Resolution order** — network first; on a connectivity failure only (`NetworkUnavailable` / `Timeout`) the last cached response for that placement is re-resolved, and if there is no cached response either, the bundled fallback file (see [`setFallbackPlacements`](#setfallbackplacements)) is consulted. Auth and server errors are *not* absorbed this way: they propagate. Cache always beats fallback.
+
+**Side effects** — two, both worth knowing:
+
+1. When the placement resolves through a `PAYWALL` experiment, the variant draw happens **client-side** and deterministically off the subscriber's `rovenueId`, and the SDK then fires a best-effort `POST /v1/experiments/{id}/expose` exposure beacon on a background thread. Failures are logged and swallowed; the paywall you already got back is unaffected. Merely calling `getPaywall` therefore records an exposure — do not call it speculatively for a paywall you will not show.
+2. The resolved paywall's attribution snapshot is stamped into SDK state, so the next receipt POST carries it as `presentedContext`. Purchase attribution follows the most recent `getPaywall` call.
+
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table) (both only when neither cache nor fallback could answer), [`InvalidApiKey`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const paywall = await Rovenue.getPaywall('onboarding_end', 'en');
+    if (paywall) {
+      renderYourPaywall(paywall.remoteConfig);
+      Rovenue.logPaywallShown(paywall);
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    if let paywall = try await Rovenue.shared.getPaywall(placementId: "onboarding_end", locale: "en") {
+        renderYourPaywall(paywall)
+        Rovenue.shared.logPaywallShown(paywall)
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val paywall = Rovenue.shared.getPaywall(placementId = "onboarding_end", locale = "en")
+    if (paywall != null) {
+        renderYourPaywall(paywall)
+        Rovenue.shared.logPaywallShown(paywall)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`NetworkUnavailable`](/docs/reference/errors#error-table) · [`Timeout`](/docs/reference/errors#error-table) · [`InvalidApiKey`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+
+**See also:** [Placements & Paywalls guide](/docs/guides/placements-and-paywalls)
+
+---
+
+### `logPaywallShown`
+
+Report that a resolved paywall actually became visible. Builds a `paywall_view` event from `paywall.presentedContext` and enqueues it on the SDK's durable on-disk event queue, which drains in the background — so the impression survives a process kill instead of being lost like a fire-and-forget POST would be.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `paywall` | `Paywall` | Yes | The object returned by [`getPaywall`](#getpaywall). |
+
+**Returns** — `void`. Synchronous and fire-and-forget on every platform: it never blocks and never rejects, so a beacon failure cannot break your UI code.
+
+**Ordering** — call it when the paywall is on screen, not when you resolved it. A paywall whose `presentedContext` is `null` is **silently skipped** (no event is enqueued): the server's event schema requires the attribution context, so an envelope without it would be rejected anyway.
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    Rovenue.logPaywallShown(paywall);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    Rovenue.shared.logPaywallShown(paywall)
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.logPaywallShown(paywall)
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Placements & Paywalls guide](/docs/guides/placements-and-paywalls)
+
+---
+
+### `logPaywallClosed`
+
+Report that the subscriber dismissed the paywall. Exact sibling of [`logPaywallShown`](#logpaywallshown) — same durable queue, same fire-and-forget contract, same silent skip when `presentedContext` is `null` — but emits a `paywall_close` event.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `paywall` | `Paywall` | Yes | The same object you passed to [`logPaywallShown`](#logpaywallshown). |
+
+**Returns** — `void`
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    Rovenue.logPaywallClosed(paywall);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    Rovenue.shared.logPaywallClosed(paywall)
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.logPaywallClosed(paywall)
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Placements & Paywalls guide](/docs/guides/placements-and-paywalls)
+
+---
+
+### `setFallbackPlacements`
+
+Load a bundled fallback-placements export so [`getPaywall`](#getpaywall) can still resolve a placement when the network **and** the disk cache both miss. Generate the file from the dashboard (`GET /dashboard/projects/:projectId/paywalls/fallback-export`) and ship it inside your app bundle.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `json` | `string` | Yes | The contents of the fallback-placements export file. |
+
+**Returns** — `Promise<number>` — the count of placement entries actually loaded. An individual entry that fails to decode is skipped, not fatal, so this can legitimately be lower than the number of entries in the file.
+
+**Ordering** — call it once, at startup, before your first `getPaywall`. Each call **replaces** the previously loaded set rather than merging into it.
+
+**Throws** — [`InvalidArgument`](/docs/reference/errors#error-table) when the file does not parse at all, or its `formatVersion` is not literally `1`. This is deliberate and loud: bundling a stale or mismatched export must fail at call time rather than degrade silently at the next outage.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const count = await Rovenue.setFallbackPlacements(jsonString);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Synchronous and throwing on Swift, not async.
+    let count = try Rovenue.shared.setFallbackPlacements(fileURL: url)
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Not a suspend fun on Kotlin.
+    val count = Rovenue.shared.setFallbackPlacements(context, "rovenue-fallback.json")
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`InvalidArgument`](/docs/reference/errors#error-table)
+
+**See also:** [Placements & Paywalls guide](/docs/guides/placements-and-paywalls)
+
+---
+
+## Remote Config
+
+Feature flags and experiment assignments, evaluated server-side for the current subscriber and cached locally.
+
+### Method summary
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `refreshRemoteConfig` | `refreshRemoteConfig()` | `Promise<void>` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`RateLimited`](/docs/reference/errors#error-table), [`InvalidApiKey`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `getRemoteConfig` | `getRemoteConfig()` | `Promise<RemoteConfig>` | — |
+| `getFlag` | `getFlag(key, fallback)` | `Promise<T>` | — |
+| `getExperiment` | `getExperiment(key)` | `Promise<ExperimentAssignment \| null>` | — |
+| `getExperiments` | `getExperiments()` | `Promise<ExperimentAssignment[]>` | — |
+
+**Cache vs. network:** only `refreshRemoteConfig()` performs a network round-trip. The four read methods resolve from the local cache — they are `async` (the value crosses the native bridge) but they never fetch, so they work offline and never throw on a malformed payload; each degrades to its documented fallback instead.
+
+React Native also exposes reactive hooks: `useRemoteConfig()`, `useFlag(key, fallback)` and `useExperiment(key)`. They read the same local cache synchronously, prime it on first mount, and re-render on `REMOTE_CONFIG_CHANGED`.
+
+Swift and Kotlin do not have a single `getFlag` — they expose typed getters instead: `remoteConfigBool`, `remoteConfigString`, `remoteConfigInt`, `remoteConfigDouble` and `remoteConfigJson` (Swift: `remoteConfigJSON`), plus `remoteConfigKeys()`. Nor do they have a struct-returning `getRemoteConfig`: `remoteConfigAllJson()` (Swift: `remoteConfigAllJSON()`) returns the whole bundle as a raw JSON string.
+
+On React Native, structured error detail travels inside the native error `message` as a JSON envelope (the Expo JSI bridge forwards only `code` and `message`); the SDK unpacks it for you into `RovenueError.serverCode`, `.httpStatus`, `.isRetryable` and `.data.retryAfter`, so a `RateLimited` refresh still tells you how long to wait.
+
+---
+
+### `refreshRemoteConfig`
+
+Force an immediate fetch of the latest Remote Config from the server.
+
+**Params** — none
+
+**Returns** — `Promise<void>`
+
+**Side effect** — fires a [`ChangeEvent`](/docs/reference/types#changeevent) (RN: `'REMOTE_CONFIG_CHANGED'`) on every successful refresh. Never call `refreshRemoteConfig()` from inside that listener: the refresh re-emits the event, which re-invokes the listener, forever.
+
+On a connectivity failure the SDK hydrates the on-disk payload into memory *before* rethrowing, so reads keep serving the last-known config even though this call rejected.
+
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`RateLimited`](/docs/reference/errors#error-table), [`InvalidApiKey`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.refreshRemoteConfig();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.refreshRemoteConfig()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.refreshRemoteConfig() // suspend fun
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`NetworkUnavailable`](/docs/reference/errors#error-table) · [`Timeout`](/docs/reference/errors#error-table) · [`RateLimited`](/docs/reference/errors#error-table) · [`InvalidApiKey`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+
+**See also:** [Experiments guide](/docs/guides/experiments)
+
+---
+
+### `getRemoteConfig`
+
+Read the whole cached bundle — flags and experiment assignments together.
+
+**Params** — none
+
+**Returns** — `Promise<RemoteConfig>`, shaped `{ flags, experiments }`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `flags` | `Record<string, unknown>` | Flag key → evaluated value (boolean, number, string, object or array). |
+| `experiments` | `Record<string, ExperimentAssignment>` | Experiment key → this subscriber's assignment. |
+
+A malformed or empty cached payload resolves to the empty bundle (`flags: {}`, `experiments: {}`) rather than throwing.
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const config = await Rovenue.getRemoteConfig();
+    console.log(Object.keys(config.flags));
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Swift returns the bundle as a raw JSON string — decode it yourself.
+    let json = await Rovenue.shared.remoteConfigAllJSON()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Kotlin returns the bundle as a raw JSON string — decode it yourself.
+    val json = Rovenue.shared.remoteConfigAllJson()
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Experiments guide](/docs/guides/experiments)
+
+---
+
+### `getFlag`
+
+Read one flag with a typed fallback.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | `string` | Yes | The flag key as configured in the dashboard. |
+| `fallback` | `T` | Yes | Value returned when the flag is absent, or when its stored value cannot be read as `T`. |
+
+**Returns** — `Promise<T>`
+
+**How the type is chosen:** the **runtime type of `fallback`** selects the read — a `boolean` fallback reads the flag as a boolean, a `number` fallback as a double, a `string` fallback as a string. Any other fallback (object, array, `null`) falls back to a JSON read, so object and array flags resolve too; if that JSON does not parse, you get your fallback back. There is no separate integer path on React Native — numbers always go through the double getter.
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const showBanner = await Rovenue.getFlag('show_banner', false);
+    const maxItems = await Rovenue.getFlag('max_items', 10);
+    const theme = await Rovenue.getFlag<{ accent: string }>('theme', { accent: '#000' });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Typed getters, one per type — there is no generic getFlag on Swift.
+    let showBanner = await Rovenue.shared.remoteConfigBool("show_banner", default: false)
+    let maxItems = await Rovenue.shared.remoteConfigInt("max_items", default: 10)
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Typed getters, one per type — there is no generic getFlag on Kotlin.
+    val showBanner = Rovenue.shared.remoteConfigBool("show_banner", fallback = false)
+    val maxItems = Rovenue.shared.remoteConfigInt("max_items", fallback = 10L)
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Experiments guide](/docs/guides/experiments)
+
+---
+
+### `getExperiment`
+
+Read the current subscriber's assignment for a single experiment.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | `string` | Yes | The experiment key as configured in the dashboard. |
+
+**Returns** — `Promise<ExperimentAssignment | null>`. `null` when this subscriber has no assignment for that key.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `experimentId` | `string` | The experiment's ID. |
+| `key` | `string` | The experiment key you looked up. |
+| `variantId` | `string` | The assigned variant's ID. |
+| `variantName` | `string` | The assigned variant's display name. |
+| `value` | `unknown` | The variant payload, already JSON-parsed. `null` when the payload cannot be parsed. |
+
+Reading an assignment does **not** record an exposure. Exposure for a paywall experiment is recorded by [`getPaywall`](#getpaywall).
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const assignment = await Rovenue.getExperiment('checkout_copy');
+    if (assignment) console.log(assignment.variantName);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    if let assignment = await Rovenue.shared.experiment("checkout_copy") {
+        print(assignment.variantName)
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val assignment = Rovenue.shared.experiment("checkout_copy")
+    if (assignment != null) Log.d("App", assignment.variantName)
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Experiments guide](/docs/guides/experiments)
+
+---
+
+### `getExperiments`
+
+All of the current subscriber's experiment assignments.
+
+**Params** — none
+
+**Returns** — `Promise<ExperimentAssignment[]>` (empty array when there are none, or when the cache has not been primed yet)
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const assignments = await Rovenue.getExperiments();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let assignments = await Rovenue.shared.experimentsAll()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val assignments = Rovenue.shared.experimentsAll()
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Experiments guide](/docs/guides/experiments)
+
+---
+
+## Subscriber Attributes
+
+Attach arbitrary key/value metadata to the current subscriber — plus a set of reserved, `$`-prefixed keys that map to first-class fields server-side and drive the integrations.
+
+### Method summary
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `setAttributes` | `setAttributes(attributes)` | `Promise<void>` | [`Storage`](/docs/reference/errors#error-table) |
+| `setEmail` | `setEmail(email)` | `Promise<void>` | [`Storage`](/docs/reference/errors#error-table) |
+| `setDisplayName` | `setDisplayName(name)` | `Promise<void>` | [`Storage`](/docs/reference/errors#error-table) |
+| `setPhoneNumber` | `setPhoneNumber(phone)` | `Promise<void>` | [`Storage`](/docs/reference/errors#error-table) |
+| `setPushToken` | `setPushToken(token)` | `Promise<void>` | [`Storage`](/docs/reference/errors#error-table) |
+| `flushAttributes` | `flushAttributes()` | `Promise<number>` | [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+
+**Write model — read this before using any of them.** Every setter is a **buffered local write**. The returned promise resolves once the mutation has been written to the on-device buffer, *not* once the server has it. A background dispatcher syncs the buffer every 30 seconds, and again when the app comes to the foreground; [`flushAttributes`](#flushattributes) forces it early. So a resolved `setEmail()` means "durably queued", never "the server knows".
+
+`shutdown()` does not flush the buffer. If you tear the SDK down and it matters that pending mutations land, call `flushAttributes()` first.
+
+Passing `null` as a value **deletes** the key rather than storing an empty value. The four named setters are thin wrappers over `setAttributes` for the most common reserved keys.
+
+---
+
+### `setAttributes`
+
+Queue a batch of subscriber-attribute mutations.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `attributes` | `Record<string, string \| null>` | Yes | Key → value. A `null` value deletes that key. Keys prefixed with `$` are reserved and map to first-class server-side fields. |
+
+**Returns** — `Promise<void>` (resolves on the local buffered write — see the write model above)
+
+**Throws** — [`Storage`](/docs/reference/errors#error-table) if the local buffer cannot be written
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.setAttributes({
+      plan_interest: 'annual',
+      beta_optin: null, // deletes the key
+    });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.setAttributes([
+        "plan_interest": "annual",
+        "beta_optin": nil, // deletes the key
+    ])
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.setAttributes(
+        mapOf(
+            "plan_interest" to "annual",
+            "beta_optin" to null, // deletes the key
+        ),
+    )
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`Storage`](/docs/reference/errors#error-table)
+
+**See also:** [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes)
+
+---
+
+### `setEmail`
+
+Set the subscriber's email — the reserved `$email` attribute. Same buffered-write, background-flush contract as [`setAttributes`](#setattributes).
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `email` | `string \| null` | Yes | The email address; `null` clears it. |
+
+**Returns** — `Promise<void>`
+
+**Throws** — [`Storage`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.setEmail('ada@example.com');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.setEmail("ada@example.com")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.setEmail("ada@example.com")
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes)
+
+---
+
+### `setDisplayName`
+
+Set the subscriber's display name — the reserved `$displayName` attribute. Same contract as [`setEmail`](#setemail).
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | `string \| null` | Yes | The display name; `null` clears it. |
+
+**Returns** — `Promise<void>`
+
+**Throws** — [`Storage`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.setDisplayName('Ada Lovelace');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.setDisplayName("Ada Lovelace")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.setDisplayName("Ada Lovelace")
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes)
+
+---
+
+### `setPhoneNumber`
+
+Set the subscriber's phone number — the reserved `$phoneNumber` attribute. Same contract as [`setEmail`](#setemail).
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `phone` | `string \| null` | Yes | The phone number; `null` clears it. |
+
+**Returns** — `Promise<void>`
+
+**Throws** — [`Storage`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.setPhoneNumber('+15551234567');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.setPhoneNumber("+15551234567")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.setPhoneNumber("+15551234567")
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes)
+
+---
+
+### `setPushToken`
+
+Store the device's push token. The reserved key is **platform-specific** — `$apnsTokens` on iOS, `$fcmTokens` on Android — and the SDK picks the right one for the device it is running on, so you pass the token and nothing else. Same contract as [`setEmail`](#setemail).
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `token` | `string \| null` | Yes | The APNs or FCM token; `null` clears it. |
+
+**Returns** — `Promise<void>`
+
+**Throws** — [`Storage`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.setPushToken(deviceToken);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.setPushToken(deviceToken) // → $apnsTokens
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.setPushToken(deviceToken) // → $fcmTokens
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes)
+
+---
+
+### `flushAttributes`
+
+Force an immediate flush of buffered attribute mutations to the server, instead of waiting for the next background tick.
+
+**Params** — none
+
+**Returns** — `Promise<number>` — the number of mutations actually sent
+
+**Ordering** — most apps never need this; the background dispatcher already flushes on its own schedule and on foreground. Reach for it when you need the server to have the attributes *now* — for example immediately before `shutdown()`, which does not flush on your behalf.
+
+**Throws** — [`NetworkUnavailable`](/docs/reference/errors#error-table), [`Timeout`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const sent = await Rovenue.flushAttributes();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let sent = try await Rovenue.shared.flushAttributes()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val sent = Rovenue.shared.flushAttributes()
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`NetworkUnavailable`](/docs/reference/errors#error-table) · [`Timeout`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+
+**See also:** [Subscriber Identity Attributes](/docs/integrations/subscriber-identity-attributes)
+
+---
+
 ## Account Token
 
 ### `getAppAccountToken`
@@ -1047,7 +1738,7 @@ Swift case / Kotlin constant spelling of each):
 | `'ENTITLEMENTS_CHANGED'` | After any entitlement cache refresh (purchase, `refreshEntitlements()`, foreground sync). |
 | `'IDENTITY_CHANGED'` | After `identify()` succeeds or `logOut()` resets the user. |
 | `'VIRTUAL_CURRENCIES_CHANGED'` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
-| `'REMOTE_CONFIG_CHANGED'` | After `refreshRemoteConfig()` succeeds and the remote config values changed. |
+| `'REMOTE_CONFIG_CHANGED'` | After every successful [`refreshRemoteConfig()`](#refreshremoteconfig). The SDK does not diff the payload, so this also fires when the refresh returned identical values. |
 
 → Full type reference: [`ChangeEvent`](/docs/reference/types#changeevent)
 
