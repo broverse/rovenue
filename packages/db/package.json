@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc",
-    "test": "vitest run --minWorkers=1 --maxWorkers=2",
+    "test": "vitest run && VITEST_CONTAINER_PASS=1 vitest run",
     "db:migrate": "tsx --env-file-if-exists=../../.env src/migrate.ts",
     "db:migrate:fresh": "tsx --env-file-if-exists=../../.env src/migrate-fresh.ts",
     "db:migrate:baseline": "tsx --env-file-if-exists=../../.env src/migrate-baseline.ts",
