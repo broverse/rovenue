@@ -1410,20 +1410,29 @@ never delete it from the sweep silently.
 // The property the whole design rests on: authoring is safe because a
 // draft write cannot reach live traffic. Pinned so a future change to
 // placement resolution cannot quietly break it.
+//
+// `resolvePlacement`'s real signature is
+//   resolvePlacement(projectId, placement: PlacementRow, attributes,
+//                    requestedLocale?, subscriberId?)
+// — it takes the placement ROW, not an identifier, so fetch the row first.
 it("editing a draft does not change what /v1/placements serves", async () => {
-  const { projectId, paywallId, placementIdentifier } = await seedPublishedPaywall();
+  const { projectId, paywallId, placement } = await seedPublishedPaywallWithPlacement();
 
-  const before = await resolvePlacement(projectId, placementIdentifier);
+  const before = await resolvePlacement(projectId, placement, {});
 
   await drizzle.paywallRepo.updatePaywallDraft(
     drizzle.db,
     projectId,
     paywallId,
     0,
-    { builderConfig: { root: { id: "changed", type: "stack", children: [] } } },
+    {
+      builderConfig: { root: { id: "changed", type: "stack", children: [] } },
+      // Required since Task 4; a tree is always the tree format version.
+      configFormatVersion: BUILDER_CONFIG_TREE_FORMAT_VERSION,
+    },
   );
 
-  const after = await resolvePlacement(projectId, placementIdentifier);
+  const after = await resolvePlacement(projectId, placement, {});
   expect(after).toEqual(before);
 });
 ```
