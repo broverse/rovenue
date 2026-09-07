@@ -181,7 +181,7 @@ describe("paywall builder severity gate — save vs publish", () => {
     const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: configWithBlankTitle() }),
+      body: JSON.stringify({ draftRevision: 0, builderConfig: configWithBlankTitle() }),
     });
     expect(patchRes.status).toBe(200);
     const { data } = (await patchRes.json()) as { data: { paywall: Record<string, unknown> } };
@@ -215,7 +215,7 @@ describe("paywall builder severity gate — save vs publish", () => {
     const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: configWithBlankTitle() }),
+      body: JSON.stringify({ draftRevision: 0, builderConfig: configWithBlankTitle() }),
     });
     expect(patchRes.status).toBe(200);
 
@@ -256,6 +256,7 @@ describe("paywall builder severity gate — save vs publish", () => {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
+        draftRevision: 0,
         builderConfig: {
           formatVersion: 2,
           defaultLocale: "en",
@@ -276,7 +277,7 @@ describe("paywall builder severity gate — save vs publish", () => {
     const dupPatchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: configWithDuplicateNodeId() }),
+      body: JSON.stringify({ draftRevision: 1, builderConfig: configWithDuplicateNodeId() }),
     });
     expect(dupPatchRes.status).toBe(400);
 

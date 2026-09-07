@@ -537,7 +537,7 @@ describe("revert / discard-draft / label", () => {
     await app.request(`/projects/${projectId}/paywalls/${paywall.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: edited }),
+      body: JSON.stringify({ draftRevision: 0, builderConfig: edited }),
     });
 
     const res = await app.request(
@@ -568,6 +568,7 @@ describe("revert / discard-draft / label", () => {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
+        draftRevision: 0,
         builderConfig: {
           ...VALID_CONFIG,
           localizations: { en: { title: "Scratch", cta: "Buy" } },
@@ -639,6 +640,7 @@ describe("GET /paywalls/:id/diff", () => {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
+        draftRevision: 0,
         builderConfig: {
           ...VALID_CONFIG,
           localizations: { en: { title: "Changed", cta: "Buy" } },
@@ -676,6 +678,7 @@ describe("GET /paywalls/:id/diff", () => {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
+        draftRevision: 0,
         builderConfig: { ...VALID_CONFIG, root: { ...VALID_CONFIG.root, spacing: 20 } },
       }),
     });

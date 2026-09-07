@@ -45,6 +45,10 @@ export interface PaywallBuilderDetailDto {
   isActive: boolean;
   configFormatVersion: number;
   builderConfig: BuilderConfig | null;
+  /** Optimistic-concurrency counter for `builderConfig` writes — see
+   *  `DashboardPaywallRow.draftRevision`. The builder must echo this back
+   *  on its next `patchBuilderConfig()` call; a stale value 409s. */
+  draftRevision: number;
   /** Fallback default locale to seed an empty BuilderConfig with, taken from `remoteConfig.defaultLocale`. */
   defaultLocale: string;
   offeringPackageIds: string[];
@@ -67,6 +71,7 @@ function toDetailDto(
     isActive: row.isActive,
     configFormatVersion: row.configFormatVersion,
     builderConfig: (row.builderConfig as BuilderConfig | null) ?? null,
+    draftRevision: row.draftRevision,
     defaultLocale: row.remoteConfig?.defaultLocale ?? "en",
     offeringPackageIds,
     updatedAt: row.updatedAt,
@@ -111,10 +116,18 @@ export class PaywallBuilderApi {
     return toDetailDto(paywall, offeringPackageIds);
   }
 
+  /**
+   * `draftRevision` must be the value the caller last read (the builder's
+   * `paywall.draftRevision`) — the PATCH is compare-and-swapped against
+   * it server-side. A 409 means someone else (another tab, a server-side
+   * agent) wrote the draft first; there is no merge, so the caller must
+   * surface the conflict rather than retry with the same stale revision.
+   */
   async patchBuilderConfig(
     projectId: string,
     paywallId: string,
     builderConfig: BuilderConfig,
+    draftRevision: number,
     previousOfferingId: string,
     previousOfferingPackageIds: string[],
     signal?: AbortSignal,
@@ -123,7 +136,7 @@ export class PaywallBuilderApi {
       rpc.dashboard.projects[":projectId"].paywalls[":id"].$patch(
         {
           param: { projectId, id: paywallId },
-          json: { builderConfig } as never,
+          json: { builderConfig, draftRevision } as never,
         },
         { init: { signal } },
       ),

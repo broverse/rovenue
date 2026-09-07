@@ -141,6 +141,43 @@ export async function updatePaywall(
 }
 
 /**
+ * Draft write with optimistic concurrency. Returns null when
+ * `expectedRevision` does not match the stored value — the caller turns
+ * that into a 409. The revision bump and the config write are one
+ * statement, so two concurrent callers cannot both succeed.
+ *
+ * `configFormatVersion` moves in lockstep with `builderConfig` — 1 means
+ * "no builder tree, remote-config only", 2 means "has one" — the same
+ * derivation the route's `prepareBuilderConfigPatch` uses to shape the
+ * value passed in here, so recomputing it from nullness alone is safe.
+ */
+export async function updatePaywallDraft(
+  db: Db,
+  projectId: string,
+  id: string,
+  expectedRevision: number,
+  patch: { builderConfig: unknown },
+): Promise<Paywall | null> {
+  const [row] = await db
+    .update(paywalls)
+    .set({
+      builderConfig: patch.builderConfig,
+      configFormatVersion: patch.builderConfig === null ? 1 : 2,
+      draftRevision: sql`${paywalls.draftRevision} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(paywalls.projectId, projectId),
+        eq(paywalls.id, id),
+        eq(paywalls.draftRevision, expectedRevision),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/**
  * Delete a paywall, rejecting when it is still referenced by:
  *   (a) a placement row whose `target.paywallId` points at it, or
  *   (b) a PAYWALL-type experiment whose `variants` array contains a

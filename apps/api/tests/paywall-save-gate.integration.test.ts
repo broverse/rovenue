@@ -151,7 +151,9 @@ async function patchConfig(
   return app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json", cookie },
-    body: JSON.stringify({ builderConfig }),
+    // Every call site patches a paywall right after `createPaywall`, with
+    // no earlier PATCH — draftRevision is still the column default (0).
+    body: JSON.stringify({ draftRevision: 0, builderConfig }),
   });
 }
 

@@ -43,6 +43,7 @@ function fakeDetail(overrides: Partial<PaywallBuilderDetailDto> = {}): PaywallBu
     isActive: true,
     configFormatVersion: 2,
     builderConfig: fakeConfig(),
+    draftRevision: 0,
     defaultLocale: "en",
     offeringPackageIds: ["pkg_monthly", "pkg_annual"],
     updatedAt: "",
@@ -489,6 +490,7 @@ describe("PaywallBuilderViewModel", () => {
       "p_1",
       "pw_1",
       sentConfig,
+      detail.draftRevision,
       detail.offeringId,
       detail.offeringPackageIds,
       expect.anything(),
@@ -897,6 +899,30 @@ describe("PaywallBuilderViewModel", () => {
       vm.clearAutosaveError();
 
       expect(vm.autosaveStatus).toBe("saving");
+    });
+
+    it("on a 409 draft conflict, reloads the paywall instead of retrying blindly", async () => {
+      // Someone else (another builder tab, a server-side agent) wrote
+      // builderConfig first. The edit just sent is gone — there is no
+      // merge — but the VM must pick up the row's CURRENT draftRevision so
+      // a later save doesn't repeat the same stale one and 409 forever.
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce(fakeDetail({ draftRevision: 0 }))
+        .mockResolvedValueOnce(fakeDetail({ draftRevision: 5 }));
+      const patchBuilderConfig = vi
+        .fn()
+        .mockRejectedValue(new ApiError("PAYWALL_DRAFT_CONFLICT", "conflict", 409));
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      vm.setLocaleText("t1_key", "en", "changed");
+      await vm.saveNow();
+
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(vm.paywall?.draftRevision).toBe(5);
+      // Surfaced, not swallowed — same badge state as any other rejected write.
+      expect(vm.autosaveStatus).toBe("permanentError");
     });
   });
 

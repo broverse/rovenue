@@ -82,6 +82,7 @@ function fakeDetail(overrides: Partial<PaywallBuilderDetailDto> = {}): PaywallBu
     offeringId: "off_1",
     isActive: true,
     configFormatVersion: 2,
+    draftRevision: 0,
     builderConfig: fakeConfig(),
     defaultLocale: "en",
     offeringPackageIds: [],

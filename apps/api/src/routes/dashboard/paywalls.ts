@@ -114,12 +114,19 @@ const updateBodySchema = z
     offeringId: z.string().min(1).optional(),
     remoteConfig: remoteConfigSchema.optional(),
     builderConfig: z.unknown().nullable().optional(),
+    // Required whenever builderConfig is present: an un-migrated client
+    // must fail closed rather than silently clobber a concurrent edit.
+    draftRevision: z.number().int().nonnegative().optional(),
     isActive: z.boolean().optional(),
     metadata: z.record(z.unknown()).optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), {
     message: "At least one field is required",
-  });
+  })
+  .refine(
+    (b) => b.builderConfig === undefined || b.draftRevision !== undefined,
+    { message: "draftRevision is required when builderConfig is present" },
+  );
 
 async function loadOffering(
   projectId: string,
@@ -734,19 +741,44 @@ export const paywallsDashboardRoute = new Hono()
       }
     }
 
-    const row = await drizzle.paywallRepo.updatePaywall(drizzle.db, projectId, id, {
+    const nonDraftPatch = {
       ...(body.name !== undefined && { name: body.name }),
       ...(body.offeringId !== undefined && { offeringId: body.offeringId }),
       ...(body.remoteConfig !== undefined && {
         remoteConfig: body.remoteConfig,
       }),
-      ...(builderPatch !== null && {
-        builderConfig: builderPatch.builderConfig,
-        configFormatVersion: builderPatch.configFormatVersion,
-      }),
       ...(body.isActive !== undefined && { isActive: body.isActive }),
       ...(body.metadata !== undefined && { metadata: body.metadata }),
-    });
+    };
+
+    let row: Paywall | null;
+    if (builderPatch !== null) {
+      // The draft write (builderConfig + draftRevision) is
+      // compare-and-swapped below — a mismatch means the row was written
+      // by someone else since the caller last read it (another builder
+      // tab, or a server-side agent), and there is no merge: the loser
+      // gets a 409 and must reload. Any OTHER fields in the same request
+      // don't participate in that race, so they're applied first, in
+      // their own statement.
+      if (Object.keys(nonDraftPatch).length > 0) {
+        await drizzle.paywallRepo.updatePaywall(drizzle.db, projectId, id, nonDraftPatch);
+      }
+      const updated = await drizzle.paywallRepo.updatePaywallDraft(
+        drizzle.db,
+        projectId,
+        id,
+        body.draftRevision as number,
+        { builderConfig: builderPatch.builderConfig },
+      );
+      if (!updated) {
+        throw new HTTPException(409, {
+          message: "Paywall draft changed since it was read; reload and retry",
+        });
+      }
+      row = updated;
+    } else {
+      row = await drizzle.paywallRepo.updatePaywall(drizzle.db, projectId, id, nonDraftPatch);
+    }
     if (!row) {
       throw new HTTPException(404, { message: "Paywall not found" });
     }

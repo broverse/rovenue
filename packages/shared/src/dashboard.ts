@@ -2178,6 +2178,12 @@ export interface DashboardPaywallRow {
   isActive: boolean;
   status: "draft" | "published" | "archived";
   publishedVersionId: string | null;
+  /** Optimistic-concurrency counter for `builderConfig` writes — bumped by
+   *  one on every successful compare-and-swap draft PATCH. Callers that
+   *  send `builderConfig` must echo back the value they last read as
+   *  `draftRevision`; a stale value 409s instead of silently clobbering a
+   *  concurrent writer (another builder tab, a server-side agent). */
+  draftRevision: number;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -2246,6 +2252,9 @@ export interface DashboardPaywallUpdateInput {
   remoteConfig?: PaywallRemoteConfig;
   configFormatVersion?: number;
   builderConfig?: unknown;
+  /** Required whenever `builderConfig` is present — see
+   *  `DashboardPaywallRow.draftRevision`. */
+  draftRevision?: number;
   isActive?: boolean;
   metadata?: Record<string, unknown>;
 }

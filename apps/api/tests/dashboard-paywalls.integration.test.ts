@@ -416,7 +416,7 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: validBuilderConfig() }),
+      body: JSON.stringify({ draftRevision: 0, builderConfig: validBuilderConfig() }),
     });
     expect(patchRes.status).toBe(200);
     const { data } = (await patchRes.json()) as {
@@ -465,7 +465,7 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
       {
         method: "PATCH",
         headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify({ builderConfig: deepConfig }),
+        body: JSON.stringify({ draftRevision: 0, builderConfig: deepConfig }),
       },
     );
     expect(patchRes.status).toBe(400);
@@ -509,7 +509,7 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: badConfig }),
+      body: JSON.stringify({ draftRevision: 0, builderConfig: badConfig }),
     });
     expect(patchRes.status).toBe(200);
     const { data } = (await patchRes.json()) as {
@@ -546,7 +546,7 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: gapConfig }),
+      body: JSON.stringify({ draftRevision: 0, builderConfig: gapConfig }),
     });
     expect(patchRes.status).toBe(200);
     const { data } = (await patchRes.json()) as { data: { paywall: Record<string, unknown> } };
@@ -584,7 +584,7 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: warnConfig }),
+      body: JSON.stringify({ draftRevision: 0, builderConfig: warnConfig }),
     });
     expect(patchRes.status).toBe(200);
     const { data } = (await patchRes.json()) as { data: { paywall: Record<string, unknown> } };
@@ -615,7 +615,7 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     const setRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: validBuilderConfig() }),
+      body: JSON.stringify({ draftRevision: 0, builderConfig: validBuilderConfig() }),
     });
     expect(setRes.status).toBe(200);
     const { data: setData } = (await setRes.json()) as { data: { paywall: Record<string, unknown> } };
@@ -624,7 +624,7 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     const clearRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: null }),
+      body: JSON.stringify({ draftRevision: setData.paywall.draftRevision, builderConfig: null }),
     });
     expect(clearRes.status).toBe(200);
     const { data: clearData } = (await clearRes.json()) as { data: { paywall: Record<string, unknown> } };
@@ -656,7 +656,11 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ builderConfig: validBuilderConfig(), configFormatVersion: 99 }),
+      body: JSON.stringify({
+        draftRevision: 0,
+        builderConfig: validBuilderConfig(),
+        configFormatVersion: 99,
+      }),
     });
     expect(patchRes.status).toBe(200);
     const { data } = (await patchRes.json()) as { data: { paywall: Record<string, unknown> } };

@@ -81,6 +81,11 @@ const FLUSH_BARRIER_TIMED_OUT = Symbol("paywall-builder-flush-barrier-timed-out"
  */
 const PREVIEW_FLUSH_DEBOUNCE_MS = 2000;
 
+/** A draft write lost the compare-and-swap race — someone else (another
+ *  builder tab, a server-side agent) wrote `builderConfig` first. There is
+ *  no merge; see `patchBuilderConfig`'s catch handling below. */
+const DRAFT_CONFLICT_STATUS = 409;
+
 export interface PaywallBuilderProps {
   projectId: string;
   paywallId: string;
@@ -1032,6 +1037,7 @@ export class PaywallBuilderViewModel {
         this.props.projectId,
         this.props.paywallId,
         this.config,
+        this.paywall.draftRevision,
         this.paywall.offeringId,
         this.paywall.offeringPackageIds,
         controller.signal,
@@ -1052,6 +1058,9 @@ export class PaywallBuilderViewModel {
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (this.saveController !== controller) return;
+      if (err instanceof ApiError && err.status === DRAFT_CONFLICT_STATUS) {
+        await this.reloadAfterDraftConflict();
+      }
       this.autosaveStatus = this.autosaveFailureStatus(err);
     } finally {
       if (this.saveController === controller) this.saveController = null;
@@ -1087,6 +1096,29 @@ export class PaywallBuilderViewModel {
   private refreshDiffAfterSave() {
     this.diffStale = true;
     void this.loadDiff().catch(() => {});
+  }
+
+  /**
+   * A draft write lost the compare-and-swap race (409): someone else wrote
+   * `builderConfig` first, and the edit that was just sent is gone — there
+   * is no merge. Re-fetching here is NOT a retry of that write; it exists
+   * so the NEXT save (if the author keeps editing) carries the row's
+   * current `draftRevision` instead of repeating the same stale one
+   * forever, which would otherwise 409 on every future autosave tick.
+   * `autosaveFailureStatus` still marks this "permanentError" — the
+   * conflict is surfaced to the author (see the topbar badge), not
+   * silently swallowed. Best-effort: a failed reload here just leaves
+   * that same badge as the only signal, which is still correct.
+   */
+  private async reloadAfterDraftConflict() {
+    try {
+      const detail = await this.api.get(this.props.projectId, this.props.paywallId);
+      if (this.disposed) return;
+      this.syncFromDetail(detail);
+      this.lastSavedSnapshot = this.snapshot();
+    } catch {
+      // Non-fatal — see doc comment above.
+    }
   }
 
   /** Force-flush the current config to the backend, bypassing the autosave throttle. */
@@ -1131,6 +1163,7 @@ export class PaywallBuilderViewModel {
         this.props.projectId,
         this.props.paywallId,
         this.config,
+        this.paywall.draftRevision,
         this.paywall.offeringId,
         this.paywall.offeringPackageIds,
         controller.signal,
@@ -1147,6 +1180,9 @@ export class PaywallBuilderViewModel {
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (this.saveController !== controller) return;
+      if (err instanceof ApiError && err.status === DRAFT_CONFLICT_STATUS) {
+        await this.reloadAfterDraftConflict();
+      }
       this.autosaveStatus = this.autosaveFailureStatus(err);
     } finally {
       if (this.saveController === controller) this.saveController = null;

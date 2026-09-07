@@ -79,6 +79,7 @@ function detail(): PaywallBuilderDetailDto {
     offeringId: "off_1",
     isActive: true,
     configFormatVersion: 2,
+    draftRevision: 0,
     builderConfig: emptyBuilderConfig("en"),
     defaultLocale: "en",
     offeringPackageIds: [],
