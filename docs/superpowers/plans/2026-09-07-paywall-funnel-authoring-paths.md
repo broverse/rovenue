@@ -1150,11 +1150,24 @@ Paste the summary lines into
 `docs/superpowers/specs/2026-09-07-paywall-funnel-authoring-paths-design.md`
 under **M1**, replacing "Unknown until measured".
 
-**Decision rule for Task 8:** if `would now fail republish` is 0, wire the
-rules in as blocking. If it is non-zero, Task 8 ships them in report-only
-mode — issues logged and returned as `warnings`, not `issues` — and
-flipping to blocking becomes a separate follow-up once the listed funnels
-are fixed.
+**If the scan finds no published funnels at all, it is not a measurement.**
+A 0-of-0 result says nothing about blast radius, and recording it as "zero
+funnels at risk" would be false confidence dressed as evidence. Record it
+honestly as *inconclusive — no published funnels in the environment
+scanned*, and say which environment that was.
+
+**Decision rule for Task 8, given the table as it now stands:** the rules
+ship **blocking**, and the justification is the renderer analysis, not the
+scan. All three surviving rules (`single_choice`, `multi_choice`,
+`picture_choice` → `options`) cover pages the production renderer has **no
+fallback** for — `page.options || []` and `page.options ?? []` render an
+empty choice list, so such a page is already unanswerable for real users
+today. Blocking its republish surfaces a defect that already exists rather
+than creating one.
+
+If a scan against a database that *does* hold published funnels later
+returns a non-zero count, that is new information: switch to report-only
+and fix the listed funnels first.
 
 - [ ] **Step 4: Commit**
 
