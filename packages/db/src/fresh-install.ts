@@ -238,6 +238,129 @@ export async function bookkeepingExists(client: MigrationClient): Promise<boolea
   return result.rows[0]?.present === true;
 }
 
+// -------------------------------------------------------------
+// Drift: does this database still match the migration chain?
+// -------------------------------------------------------------
+//
+// WHY THIS EXISTS
+//
+// `apps/api/tests/global-setup.ts` builds a template database once and
+// KEEPS it — every later run clones it and never looks at the migration
+// chain again. So the template silently lags the moment a migration is
+// added, and the older it gets the more it hides. Measured on 2026-09-06:
+// a developer template carried 130 of the journal's 131 entries, missing
+// 0130 (pg_partman registration for revenue_events / credit_ledger), and
+// `apps/api/tests/services/import-write.integration.test.ts` — genuinely
+// RED against a current database — read GREEN locally because of it. A
+// stale template does not merely fail to catch new regressions; it makes
+// real, already-committed failures invisible.
+//
+// WHY COUNT IS THE PRIMARY SIGNAL
+//
+// This repo has TWO migration runners that record history differently:
+// `runFreshInstall` below dedupes by content hash, drizzle's migrator by
+// a `created_at` watermark. What they agree on is that each applied
+// journal entry gets exactly ONE row in `drizzle.__drizzle_migrations` —
+// so row-count vs journal-length is the one signal valid for a database
+// built by either. It costs a single `count(*)` plus one file read.
+//
+// WHY THE HASH SET IS CHECKED ONLY ON FRESH-BUILT DATABASES
+//
+// A fresh-built database's rows are, by construction, sha256 of the SQL
+// files as they exist on disk, so a per-tag hash lookup is exact: it also
+// catches a migration EDITED in place, which the count cannot see. That
+// does not hold on the upgrade path — four migration files in this repo
+// (0070, 0081, 0093, 0099) were edited after they were applied, so their
+// recorded hashes legitimately differ from disk and a hash check there
+// would be a permanent false positive. Hence: count for everyone, hashes
+// only when the fresh-install marker says they must line up.
+
+/** `isFreshInstallDatabase` errors on a database old enough to predate the
+ *  marker table. Drift detection must survive that: a template built before
+ *  the marker existed is exactly the kind this check is here to catch, so it
+ *  falls back to the count-only signal rather than blowing up. */
+async function freshInstallMarkerSaysFresh(
+  client: MigrationClient,
+): Promise<boolean> {
+  const present = await client.query<{ present: boolean }>(
+    `SELECT to_regclass('drizzle.__rovenue_install') IS NOT NULL AS present`,
+  );
+  if (present.rows[0]?.present !== true) return false;
+  return isFreshInstallDatabase(client);
+}
+
+export type MigrationDrift = {
+  /** Entries in `drizzle/migrations/meta/_journal.json`. */
+  journalEntries: number;
+  /** Rows in `drizzle.__drizzle_migrations`. */
+  appliedRows: number;
+  /** Journal tags with no matching hash row. Only populated for
+   *  fresh-install databases — see the note above. */
+  missingTags: string[];
+  /** Migration files on disk that `_journal.json` does not list. They are
+   *  invisible to BOTH runners, so a database can be in sync with the
+   *  journal and still be missing them. */
+  unjournaledTags: string[];
+  /** True when the database no longer matches the chain and must be
+   *  rebuilt before anything run against it can be trusted. */
+  isStale: boolean;
+};
+
+/**
+ * Compare a database's migration bookkeeping against the journal on disk.
+ *
+ * Cheap by design: one `count(*)`, one marker lookup, one journal parse,
+ * and — only on a fresh-install database — a read of each migration file
+ * to hash it. Never mutates anything.
+ */
+export async function findMigrationDrift(
+  client: MigrationClient,
+): Promise<MigrationDrift> {
+  const entries = await loadJournal();
+  const unjournaledTags = await findUnjournaledMigrations();
+
+  if (!(await bookkeepingExists(client))) {
+    // No bookkeeping at all: nothing here was ever migrated. Every entry
+    // is missing, which is maximally stale.
+    return {
+      journalEntries: entries.length,
+      appliedRows: 0,
+      missingTags: entries.map((e) => e.tag),
+      unjournaledTags,
+      isStale: true,
+    };
+  }
+
+  const countResult = await client.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM "drizzle"."__drizzle_migrations"`,
+  );
+  const appliedRows = Number(countResult.rows[0]?.count ?? "0");
+
+  const missingTags: string[] = [];
+  if (await freshInstallMarkerSaysFresh(client)) {
+    const hashResult = await client.query<{ hash: string }>(
+      `SELECT hash FROM "drizzle"."__drizzle_migrations"`,
+    );
+    const applied = new Set(hashResult.rows.map((r) => r.hash));
+    for (const entry of entries) {
+      const sql = await readMigrationSql(entry.tag);
+      const hash = createHash("sha256").update(sql).digest("hex");
+      if (!applied.has(hash)) missingTags.push(entry.tag);
+    }
+  }
+
+  return {
+    journalEntries: entries.length,
+    appliedRows,
+    missingTags,
+    unjournaledTags,
+    isStale:
+      appliedRows !== entries.length ||
+      missingTags.length > 0 ||
+      unjournaledTags.length > 0,
+  };
+}
+
 async function markFreshInstall(client: MigrationClient): Promise<void> {
   await client.query(
     `INSERT INTO "drizzle"."__rovenue_install" ("mode") VALUES ($1)

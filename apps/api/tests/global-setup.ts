@@ -35,14 +35,53 @@
 // deterministic, and reproducible on a machine that has never had a dev
 // database — which is what lets CI run these suites at all.
 //
-// The template is built ONCE and kept. Delete `rovenue_test_tpl` by hand to
-// force a rebuild after adding a migration.
+// WHY THE TEMPLATE IS CHECKED FOR STALENESS BEFORE IT IS REUSED
+//
+// The template is built ONCE and kept, which is what makes the second run
+// fast — but for a long time `exists()` was the ONLY thing consulted, so a
+// template built before a migration landed was reused forever and nothing
+// ever said so. That is not a missing optimisation, it is a false green:
+// measured on 2026-09-06, a developer template held 130 of the journal's
+// 131 entries (missing 0130, pg_partman registration for revenue_events /
+// credit_ledger) and made
+// `tests/services/import-write.integration.test.ts` — genuinely RED against
+// a current database — pass locally. A stale template hides failures that
+// have already been committed, which is worse than merely failing to catch
+// new ones.
+//
+// So `setup()` now asks `findMigrationDrift` whether the existing template
+// still matches the chain, and REFUSES TO RUN when it does not.
+//
+// WHY IT FAILS RATHER THAN REBUILDING ON ITS OWN
+//
+// Rebuilding silently would be convenient and was rejected:
+//
+//   * It is a `DROP DATABASE ... WITH (FORCE)` on a developer's machine,
+//     and this repo's standing rule is that destructive operations get
+//     confirmed, not assumed.
+//   * The drop is not local in effect. Worker databases are cloned from
+//     this template; a concurrent vitest run — another terminal, an editor
+//     test runner — is holding those clones, and FORCE-dropping the
+//     template out from under it turns a stale-template warning into
+//     someone else's mystery failure.
+//   * A rebuild takes minutes (131 migrations plus a seed). Doing that
+//     unannounced inside `globalSetup` reads as a hang, which is the exact
+//     confusion the Docker guard in packages/db exists to remove.
+//
+// The middle ground is an explicit opt-in: the error names
+// ROVENUE_TEST_TPL_REBUILD=1, and with that set this file does the drop
+// and the rebuild itself. The developer confirms the destructive step; the
+// fix is still one copy-pasteable command.
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
-import { runFreshInstall } from "@rovenue/db/src/fresh-install";
+import {
+  findMigrationDrift,
+  runFreshInstall,
+  type MigrationDrift,
+} from "@rovenue/db/src/fresh-install";
 
 const execFileAsync = promisify(execFile);
 
@@ -125,9 +164,96 @@ async function seedTemplate(): Promise<void> {
   );
 }
 
+/** Opt-in switch that authorises the drop-and-rebuild. Named in the
+ *  staleness error so the fix is copy-pasteable. */
+const REBUILD_ENV_VAR = "ROVENUE_TEST_TPL_REBUILD";
+/** How a developer re-runs this package's suites. */
+const TEST_COMMAND = "pnpm --filter @rovenue/api test";
+
+function rebuildAuthorised(): boolean {
+  return process.env[REBUILD_ENV_VAR] === "1";
+}
+
+/** Where the template lives, without its password — the message is printed
+ *  to a terminal and may end up in a pasted log. */
+function redactedServer(): string {
+  const u = new URL(adminUrl());
+  return `${u.hostname}:${u.port || "5432"}`;
+}
+
+function staleTemplateMessage(drift: MigrationDrift): string {
+  const lines = [
+    `Test template "${TEMPLATE_DB}" no longer matches the migration chain.`,
+    "",
+    `  journal entries : ${drift.journalEntries}`,
+    `  applied in tpl  : ${drift.appliedRows}`,
+  ];
+  if (drift.missingTags.length > 0) {
+    lines.push(
+      `  missing         : ${drift.missingTags.join(", ")}`,
+    );
+  }
+  lines.push(
+    "",
+    "Every suite in this package clones that template, so a stale one does",
+    "not just miss new coverage — it makes already-committed failures pass.",
+    "That is how import-write.integration.test.ts read GREEN on a machine",
+    "whose template predated migration 0130.",
+  );
+
+  if (drift.unjournaledTags.length > 0) {
+    lines.push(
+      "",
+      `${drift.unjournaledTags.length} migration file(s) are NOT in`,
+      "drizzle/migrations/meta/_journal.json and no runner will ever apply",
+      "them — rebuilding the template will not help until they are journaled:",
+      ...drift.unjournaledTags.map((t) => `  ${t}`),
+    );
+  }
+
+  lines.push(
+    "",
+    "Fix — rebuild the template (drops and recreates it, minutes):",
+    `  ${REBUILD_ENV_VAR}=1 ${TEST_COMMAND}`,
+    "",
+    `Or drop "${TEMPLATE_DB}" by hand on ${redactedServer()} and re-run.`,
+    "",
+    "This throws rather than rebuilding on its own because the rebuild is a",
+    "forced DROP DATABASE, and a concurrent test run is holding clones of it.",
+  );
+  return lines.join("\n");
+}
+
+/** Read-only staleness probe against the existing template. */
+async function templateDrift(): Promise<MigrationDrift> {
+  const client = new Client({ connectionString: databaseUrlFor(TEMPLATE_DB) });
+  await client.connect();
+  try {
+    return await findMigrationDrift(client);
+  } finally {
+    await client.end();
+  }
+}
+
 export async function setup(): Promise<void> {
   const alreadyBuilt = await withAdmin((client) => exists(client, TEMPLATE_DB));
-  if (alreadyBuilt) return;
+
+  if (alreadyBuilt) {
+    const drift = await templateDrift();
+    if (!drift.isStale) return;
+    // A migration file the journal does not list is not fixed by rebuilding
+    // — no runner applies it either — so that case throws even with the
+    // rebuild flag set, rather than looping through a pointless rebuild.
+    if (drift.unjournaledTags.length > 0 || !rebuildAuthorised()) {
+      throw new Error(staleTemplateMessage(drift));
+    }
+
+    console.log(
+      `[test-db] ${REBUILD_ENV_VAR}=1 — dropping stale template ` +
+        `"${TEMPLATE_DB}" (${drift.appliedRows}/${drift.journalEntries} applied)`,
+    );
+    await withAdmin((client) => dropDatabase(client, TEMPLATE_DB));
+  }
 
   console.log(`[test-db] building template "${TEMPLATE_DB}" from migrations`);
   await withAdmin(async (client) => {
@@ -151,6 +277,14 @@ export async function setup(): Promise<void> {
       await client.end();
     }
     await seedTemplate();
+
+    // Prove the freshly built template is in sync, using the same check the
+    // reuse path runs. Without this the guard can only ever fire on a
+    // template SOMEONE ELSE built: a first run on a clean machine would
+    // install its own drift (an unjournaled migration is the live example)
+    // and then trust it forever.
+    const built = await templateDrift();
+    if (built.isStale) throw new Error(staleTemplateMessage(built));
   } catch (err) {
     await withAdmin((c) => dropDatabase(c, TEMPLATE_DB));
     throw err;
