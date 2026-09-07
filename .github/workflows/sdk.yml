@@ -137,8 +137,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @rovenue/react-native-sdk test
+      # Build BEFORE test, not after. `app.plugin.js` loads the compiled
+      # `plugin/build/`, and plugin/__tests__/build-is-current.test.ts asserts
+      # that artifact is present and current — on a fresh checkout it does not
+      # exist until this step runs. The old order also meant the tests only ever
+      # exercised the TypeScript source, which is how a plugin fix shipped
+      # uncompiled and reached consumers broken (see bc223276).
       - run: pnpm --filter @rovenue/react-native-sdk build
+      - run: pnpm --filter @rovenue/react-native-sdk test
 
   flutter:
     name: Flutter façade (Dart)
