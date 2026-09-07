@@ -15,7 +15,7 @@ Scores are a self-assessment of "% of a mature best-in-class solution" as of 202
 | 8 | Self-hosting & data ownership | 95% | keep |
 | 9 | GDPR / KVKK tooling | 85% | 95% |
 | 10 | Production maturity & scale proof | 45% | 95% |
-| 11 | Docs & developer experience | 78% | 95% |
+| 11 | Docs & developer experience | 90% | 95% |
 | 12 | Feature breadth (flags, audiences, leaderboards, credits) | 85% | 95% |
 
 ## Priority order (impact / cost)
@@ -36,6 +36,57 @@ funnel predate this plan; country revenue, estimated proceeds, and the
 metrics export are new but each has a documented partial-coverage edge.
 Completing 1–2 should lift the overall picture toward ~88%; items 3–5 close
 the remaining analytics/experiments/integrations gaps on the way to 95%.
+
+## Release notes for operators
+
+Behaviour that changed for someone running or calling a deployed Rovenue, as
+opposed to work that only moved a checkbox. Newest first.
+
+**2026-09-07 — the ten recorded defects
+(`.superpowers/sdd/2026-09-06-ten-recorded-defects/`)**
+
+- **Wire-visible — out-of-range partitioned inserts now succeed instead of
+  erroring.** After migration `0130`, `revenue_events` and `credit_ledger` are
+  registered with `partman.part_config`, which attaches a DEFAULT partition to
+  each. An insert whose `event_date` falls outside every real partition
+  previously failed with `no partition of relation … found for row` (a 500);
+  it now lands in the DEFAULT partition and returns 200. This is strictly
+  better for the caller and strictly worse for the table: the stray row
+  permanently blocks attaching that month's real partition at a later
+  maintenance run (Postgres refuses with "updated partition constraint for
+  default partition would be violated by some row"), and neither partman nor
+  the maintenance worker ever relocates it. Recovery is a manual row move
+  under an exclusive lock. **Detector:** `rovenue_partition_default_rows > 0`,
+  alerting as `RovenuePartitionDefaultRowsStranded`
+  (`deploy/prometheus/rules/slo.yml:392`) — no `for:`, pages on any non-zero
+  value. Anyone self-hosting without the observability profile has no detector
+  for this and should watch the counter another way.
+- **Wire-visible — five error codes now reach clients that previously saw
+  generic ones.** `middleware/api-key-auth.ts` now sets an `HTTPException`
+  `cause`, so four SDK-auth failures return `BEARER_REQUIRED`,
+  `INVALID_API_KEY`, `INVALID_API_KEY_FORMAT` and `API_KEY_KIND_MISMATCH`
+  instead of collapsing to `UNAUTHORIZED`/`FORBIDDEN`; the funnel-builder
+  validation route and the public funnel-payment checkout route now return
+  `STRIPE_NOT_CONNECTED` instead of `VALIDATION_ERROR`/`HTTP_ERROR`. HTTP
+  statuses are unchanged — only `error.code` moved. This is intended, and
+  every one of the five is documented in the generated error catalog
+  (`/docs/reference/api-errors`). A client branching on the old generic codes
+  for these specific failures needs updating; all five SDK façades were
+  proven tolerant of an unrecognised code first (commit `a1638b15`), and
+  Swift/Kotlin/Flutter key their `ErrorKind` off HTTP status rather than the
+  code string, so they are unaffected by construction.
+- **Operator — migration `0130` runs on both install paths.** Self-hosted
+  installs created by the fresh-install runner never executed `0019` and so
+  never registered these two tables with pg_partman; `pnpm db:migrate`
+  delivers `0130` to them and to upgrade-path databases alike. On
+  upgrade-path databases `0130` also clears the 7-year `retention` window
+  `0019` left armed, because `apps/api/src/workers/retention-sweep.ts` owns
+  dropping these two tables and two droppers must not race.
+- **Operator — partition naming for these two tables is now split.** Children
+  created by `0015`/`0016` keep the `_YYYY_MM` form through 2028-12; every
+  child partman creates from 2029-01 onward uses partman v5's `_pYYYYMMDD`
+  form. Both are live on the same parent. Anyone inspecting partitions by
+  hand, or scripting against the old name shape, has to match both.
 
 ---
 
@@ -824,23 +875,31 @@ else in the framework/provider-breadth dimension is done.
 - [x] Backup / restore documentation — `docs/operations/backup-restore.md`
       (422 lines), alongside `deploy/backup/restore.sh` and its test suite.
 - [ ] Close the nosniff/ETag edge-layer gap (asset CDN)
-- [ ] `scripts/rotate-encryption-key.ts` does not typecheck and cannot run.
-      Found while writing the operator handbook's secret-rotation section
-      (`docs/runbooks/secret-rotation.md`). It does
-      `import prisma, { ... } from "@rovenue/db"` — a leftover from before
-      this codebase moved to Drizzle — and `@rovenue/db` has no default
-      export at all (`pnpm --filter @rovenue/scripts typecheck` fails on it
-      today). Its `CREDENTIAL_FIELDS` list also includes `stripeCredentials`,
-      a column that does not exist on `projects`
-      (`appleCredentials`/`googleCredentials` are the only two encrypted
-      JSONB fields there; Stripe uses Connect OAuth, not a stored encrypted
-      credential). The three real building blocks it should be rewritten
-      around already work — `encryptCredential`, `decryptCredential`,
-      `isEncryptedCredential` (`packages/db/src/helpers/encrypted-field.ts`)
-      — a corrected version would use Drizzle to select/update
-      `projects.appleCredentials`/`googleCredentials` directly. Do not point
-      an operator at the script as-is; the `ENCRYPTION_KEY` rotation tool is
-      broken.
+- [x] `scripts/rotate-encryption-key.ts` did not typecheck and could not run —
+      **CLOSED 2026-09-07** (`3d5c0399`, `62636025`, `2b07032d`). As recorded,
+      it did `import prisma, { ... } from "@rovenue/db"` (a leftover from
+      before this codebase moved to Drizzle, and `@rovenue/db` has no default
+      export at all) and its `CREDENTIAL_FIELDS` list named `stripeCredentials`,
+      a column migration `0087` had already dropped.
+
+      The bigger defect was one the original entry did not state: the script
+      **and the runbook that pointed at it both knew about one table of
+      three.** `ENCRYPTION_KEY` protects `projects.appleCredentials` /
+      `googleCredentials` (shape A — the tagged JSONB `{ v: 1, enc: … }`
+      wrapper), `copilot_credentials.api_key_encrypted` and
+      `integration_connections.credentials_cipher` (shape B — bare
+      `"iv:tag:data"` text). Following the old script during an incident would
+      have left two whole tables encrypted under the compromised key with no
+      error to say so. The rewrite covers all three tables and both wire
+      shapes over Drizzle, and `docs/runbooks/secret-rotation.md` now leads
+      with the three-table/four-column/two-shape table rather than the single
+      one it had.
+
+      A drift guard (`scripts/`) fails when a new encrypted column appears on
+      a production call site without being added to the rotation set — it was
+      first shipped detecting nothing, then narrowed to production call sites
+      only (10 sites / 16 calls) and re-proven by driving it red against a
+      planted `probeSecret` column on `projects`.
 - [x] Fresh self-hosted installs never registered `revenue_events` or
       `credit_ledger` with `partman.part_config`. Migration `0019` calls
       `partman.create_parent(...)` for both tables, but the fresh-install
@@ -867,6 +926,29 @@ else in the framework/provider-breadth dimension is done.
       partition-worker bug: the maintenance worker itself runs fine here — it
       correctly refuses to touch tables that were never registered with it,
       and now they are.
+
+      **Two consequences, both deliberate and both operator-facing** (also in
+      the release notes above): registering with partman attaches a DEFAULT
+      partition, so an out-of-range insert that used to fail with a 500 now
+      succeeds with a 200 and strands a row that blocks attaching that
+      month's real partition later — detected by
+      `rovenue_partition_default_rows > 0` (`slo.yml:392`), which pages on any
+      non-zero value; and partition naming on these two parents is now split
+      (`_YYYY_MM` for the pre-2029 hand-made children, partman's `_pYYYYMMDD`
+      from 2029-01 on).
+- [ ] `ensureRevenueEventPartitions` has no callers. It is the not-yet-wired
+      provisioner for the importer's back-dated rows, and lives at
+      `packages/db/src/drizzle/repositories/revenue-event-partitions.ts:341`.
+      Nothing in `apps/` or `packages/` calls it, and it is **not re-exported
+      from `packages/db/src/index.ts`** — the only references outside its own
+      file are two test files. The partition-overlap fix in `fbf4864d` (stop
+      partman proposing a range that overlaps the hand-made partitions
+      covering today's data) is proven at integration level against a real
+      partman container, but it is *not* proven through the caller that will
+      eventually wire it, because that caller does not exist yet. Whoever
+      wires it must re-verify the overlap behaviour end-to-end from the
+      importer rather than inheriting the integration test's confidence, and
+      add the barrel export.
 
 ## 9. GDPR / KVKK tooling (85 → 95) — CLOSED 2026-09-06
 
@@ -1098,7 +1180,21 @@ else in the framework/provider-breadth dimension is done.
       surfaced only when a test harness rebuilt a database from the journal.
       `db:migrate` now refuses to be quiet about it — it warns, by filename,
       before either runner starts.
-- [ ] Migration journal timestamps keep needing hand-fixes to stay reachable.
+- [x] Migration journal timestamps kept needing hand-fixes to stay reachable —
+      **CLOSED 2026-09-07** (`539bc8c0`). Fixed at the source rather than the
+      symptom: `packages/db/scripts/fix-journal-watermark.ts` now runs
+      immediately after `drizzle-kit generate` (they are one command,
+      `db:migrate:generate`, in `packages/db/package.json`) and lifts a newly
+      appended entry's `when` above the existing watermark when it lands
+      below it, so a silently-unreachable migration can no longer reach a
+      commit. `packages/db/tests/journal-generation-watermark.test.ts` covers
+      the script; `journal-monotonic.test.ts` stays as the backstop for
+      anything that bypasses it (hand-edited journals, older clones).
+      The synthetic cadence itself was not unwound — 0121–0129 keep their
+      hand-set future timestamps, and the corrector deliberately matches that
+      day-step convention so corrected values read consistently with their
+      neighbours. The original recording follows, for the mechanism:
+
       0121–0126 are all hand-set to the same synthetic future +86400000
       (1-day) cadence — `0121`'s `when` is 2026-09-05 22:40 UTC, `0126`'s is
       2026-09-10 22:40 UTC, each exactly one day after the last — putting the
@@ -1118,20 +1214,40 @@ else in the framework/provider-breadth dimension is done.
       still unsolved is the habit, not the coverage: nothing stops the next
       hand-set round timestamp from repeating this pattern, and the test can
       only catch it once a bad entry is actually committed.
+      (That last sentence is what `539bc8c0` answered — the generator now
+      corrects the entry before it is ever committed.)
+- [ ] The Docker liveness guard's non-standard-daemon branches are unexercised.
+      `packages/db/tests/docker-daemon-guard.ts` (shipped `bf591cee`, so the
+      testcontainers pass fails loudly instead of hanging when there is no
+      daemon) probes the endpoints testcontainers itself would try —
+      `DOCKER_HOST` when set, then Docker Desktop's socket, then
+      `~/.colima/default/docker.sock`, then Rancher Desktop's. Only two paths
+      were actually exercised: a live macOS Docker Desktop socket and a dead
+      path. The Colima, Rancher Desktop and `DOCKER_HOST=tcp://…` branches
+      have never been run against a real such daemon, so a false negative
+      there would reintroduce exactly the silent-skip failure the guard
+      exists to prevent. Closing this needs a machine running one of those
+      three, not a code change.
 
 ## 11. Docs & developer experience (65 → 90)
 
-Eight of ten items closed this batch: per-SDK quickstarts and full API references (six
-SDKs, auto-generated, doc-coverage ratchet in CI), the RevenueCat/Adapty migration guides,
-the vendor-agnostic data import tool plus its Google purchase-token second pass, working
-example apps for all four remaining platforms (each CI-built, not just claimed), the
-error-code catalog (generated, compile-time total over `ERROR_CODE`), the self-host
-operator handbook and its two runbooks, and — this task — the interactive API explorer.
-Not 95: two items are deliberately left open and recorded as their own entries above
-rather than folded into this summary — `methods.mdx`'s missing RN Paywalls/Remote
-Config/Attributes section, and docs search being unreachable behind the production
-Caddy image. Neither blocks a self-hoster from using the docs; both are real, named gaps
-for whoever picks them up next.
+All ten items are now closed (score 78 → 90). Eight closed 2026-09-06: per-SDK
+quickstarts and full API references (six SDKs, auto-generated, doc-coverage ratchet in
+CI), the RevenueCat/Adapty migration guides, the vendor-agnostic data import tool plus
+its Google purchase-token second pass, working example apps for all four remaining
+platforms (each CI-built, not just claimed), the error-code catalog (generated,
+compile-time total over `ERROR_CODE`), the self-host operator handbook and its two
+runbooks, and the interactive API explorer. The last two closed 2026-09-07 as part of
+the ten-recorded-defects batch: `methods.mdx`'s missing RN Paywalls/Remote
+Config/Attributes sections (`9ee0d1f3`) and docs search behind the production Caddy
+image (`d630dce6`).
+
+**90 and not 95, for one named reason.** This is a fully-documented FAÇADE over a
+partially-documented type layer: roughly 1,390 DTO fields, enum variants and internal
+plumbing across the six SDKs remain undocumented (see the doc-coverage floors on the
+first item below), and that is its own not-yet-scheduled item rather than something
+this batch closed. One further §11-adjacent gap is open and recorded on its own entry
+below: `packages/sdk-rn`'s published peer floor has never been built against.
 
 - [x] Quickstart + full API reference per SDK (auto-generated: rustdoc / DocC / Dokka / TypeDoc)
       — shipped 2026-09-06. Six SDKs, not five — `@rovenue/web-sdk` was omitted from the original
@@ -1255,12 +1371,28 @@ for whoever picks them up next.
          ("Could not find dev.rovenue:sdk:0.1.0"). Confirmed by reproducing
          it; `examples/android-kotlin/settings.gradle.kts` carries the
          missing rule and documents the reasoning.
+
+         **FIXED 2026-09-07** (`ba100cd6`, `678fff16`, `cce03670`,
+         `2ca2a762`): `withRovenueAndroid.ts` now emits the
+         `dependencySubstitution` rule alongside `includeBuild`, inserts the
+         whole block AFTER a leading `pluginManagement`/`plugins` header
+         rather than inside it, is idempotent across repeated prebuilds, and
+         its brace scanner is string/comment-aware and **refuses rather than
+         guesses** when a host `settings.gradle` cannot be scanned
+         unambiguously. Covered by `plugin/__tests__/withRovenueAndroid.test.ts`.
       2. `packages/sdk-swift/RovenueFFI.xcframework` is a gitignored binary
          artifact that `Package.swift` requires via `.binaryTarget(path:)` —
          a fresh clone cannot build any native Swift consumer (including this
          SDK's own example) until `packages/sdk-swift/scripts/build-xcframework.sh`
          generates it, and until now that requirement was documented nowhere
          a new consumer would think to look.
+
+         **FIXED 2026-09-07** (`8e331131`): documented as a build
+         prerequisite in `packages/sdk-swift/README.md`,
+         `examples/ios-swift/README.md` and
+         `packages/sdk-flutter/example/README.md`. Documentation only — the
+         artifact is still gitignored and still has to be generated, which is
+         the intended arrangement for a build product.
 
       Deferred follow-up, restated after verification (2026-09-07): hazard (2)
       above blames the wrong side of the skew. It reads as "the example pins
@@ -1322,23 +1454,65 @@ for whoever picks them up next.
       today's resolution is already fixed at 0.86.0, and the float only
       reappears when the lockfile is regenerated. Each would look like progress
       and verify nothing, so the peer range is left exactly as published.
-- [ ] `apps/docs/content/docs/reference/methods.mdx` has no section for
+
+      That deliberate exit is why this is **recorded, not closed** — carried
+      as its own open entry immediately below rather than left buried in a
+      ticked item.
+- [ ] **`packages/sdk-rn`'s published peer floor is unverified.** `react-native
+      >=0.76` / `expo >=52.0.0` is a compatibility claim that no test, no CI
+      job and no example app has ever exercised — the evidence is laid out in
+      full in the ticked example-apps entry above (`369c8f1d`), and this entry
+      exists so the claim is visibly open rather than implied by an [x].
+      Verifying it is a migration project, not a fix: it needs an example
+      pinned at or above the floor, a real Metro bundle, and native iOS +
+      Android builds of that example, all in CI, with unknown native and
+      codegen fallout. Two concrete sub-questions have to be answered on the
+      way:
+      1. Is the floor even right? `packages/sdk-rn/src/core/native.ts` still
+         carries a **live** Expo-SDK-51 code path — it documents "every Expo
+         SDK we support (51 → 56)" and keeps the legacy
+         `new EventEmitter(nativeModule)` subscription branch for
+         "expo-modules-core 1.x", while the manifest's `expo >=52` /
+         `expo-modules-core >=2.0.0` peers exclude SDK 51 outright. That is
+         either dead code to delete or evidence the declared floor is wrong;
+         nothing in the repo currently distinguishes the two.
+      2. `examples/sample-rn-expo` cannot be upgraded to answer (1) without
+         also clearing the CocoaPods monorepo-hoisting hazard recorded above,
+         which the SDK's own unbounded peer float feeds.
+- [x] `apps/docs/content/docs/reference/methods.mdx` had no section for
       three real, exported RN SDK method groups: Paywalls
       (`RovenuePaywallView`, exported from `packages/sdk-rn/src/index.ts`),
       Remote Config (`getRemoteConfig` / `refreshRemoteConfig`), and
-      Attributes (`setAttributes`). All three exist and work; the reference
-      page simply never grew a section for them. Distinct from the fiction
-      already purged from this file elsewhere in this batch — this is
-      absent coverage, not false coverage.
-- [ ] Docs search does not work in the shipped image. `apps/docs`'s
-      production `Dockerfile` builds the static site in a `node:22-alpine`
-      stage and serves the output from a `caddy:2-alpine` runtime stage with
-      no Node process at all. `/api/search`'s loader
-      (`apps/docs/app/routes/search.ts`, `fumadocs-core/search/server`)
-      needs a live server to answer requests, so it is unreachable behind
-      Caddy in production. Either switch to a static/client-side search
-      index (fumadocs supports this) or run the docs app as a Node server
-      instead of prerendered-static-behind-Caddy.
+      Attributes (`setAttributes`). All three existed and worked; the
+      reference page simply never grew a section for them. Distinct from the
+      fiction purged from this file elsewhere in that batch — this was absent
+      coverage, not false coverage. **CLOSED 2026-09-07** (`9ee0d1f3`, +693
+      lines): `## Paywalls` (`getPaywall`, `logPaywallShown`,
+      `logPaywallClosed`), `## Remote Config` and `## Subscriber Attributes`
+      (`setAttributes`, `flushAttributes`) are all present. Two follow-ups
+      landed with it (`fd20a61c`, `f4e660f5`): a sweep of all 49 content files
+      fixed broken RN import snippets and completed the per-method throws
+      tables, and reconciled `errors.mdx` and `methods.mdx`, which the two
+      recorded defects would otherwise have left disagreeing about
+      `getPaywall`.
+- [x] Docs search did not work in the shipped image. `apps/docs`'s production
+      `Dockerfile` builds the static site in a `node:22-alpine` stage and
+      serves the output from a `caddy:2-alpine` runtime stage with no Node
+      process at all, so `/api/search`'s loader
+      (`apps/docs/app/routes/search.ts`, `fumadocs-core/search/server`) — which
+      needs a live server — was unreachable behind Caddy in production.
+      **CLOSED 2026-09-07** (`d630dce6`, `026a6630`, `b6dc381b`, `b9771195`,
+      `a631267e`): the first of the two recorded options, a static index.
+      `search-index.json` is emitted at build time and searched client-side in
+      `search-dialog.tsx`; `scripts/verify-search-index.mjs` runs as the last
+      step of `apps/docs`'s `build` script, so an image can never ship with a
+      missing or stale index. `deploy/caddy/Caddyfile.docs` serves the index
+      `no-cache` (unlike `/assets/*` it carries no content hash, so a cached
+      copy would leave returning readers on a stale index). Three defects were
+      found closing it: client navigation landing on the `ErrorBoundary`, dead
+      resource-route payloads still being emitted for every pruned route (not
+      just the search one), and Orama's unused sort index bloating the
+      exported payload.
 - [x] Interactive API explorer — shipped 2026-09-06 at `/docs/reference/api-explorer`,
       rendering `apps/api/openapi/openapi.json` (33 canonical `/v1` endpoints) with a
       real "try it" panel (an actual `fetch()` per endpoint, editable path/query/header
@@ -1414,7 +1588,15 @@ for whoever picks them up next.
       `entry.code` throughout and a test (`error-catalog.test.ts`) pins all five.
 
       Writing real per-code prose (not templated boilerplate) surfaced two producer
-      defects, neither fixed here — raised separately:
+      defects, neither fixed here — raised separately, and **both FIXED 2026-09-07**
+      (`01be4725`, plus `9eda55e4` for a test mock the change exposed as missing
+      `requirePublicApiKey`). All five codes now reach the wire as themselves; this
+      is a wire-visible change and is in the release notes at the top of this file.
+      The five were only wired after `a1638b15` proved every one of the five SDK
+      façades tolerates an unrecognised code, and after confirming that
+      Swift/Kotlin/Flutter derive `ErrorKind` from HTTP status in
+      `core-rs`'s `error_from_status`, never from the `code` string — so a new code
+      value cannot break them by construction. The original recording follows:
       1. **Four API-key-auth codes have no producer at all.** `BEARER_REQUIRED`,
          `INVALID_API_KEY`, `INVALID_API_KEY_FORMAT`, and `API_KEY_KIND_MISMATCH` exist in
          `ERROR_CODE` but `middleware/api-key-auth.ts` throws bare `HTTPException`s with no
@@ -1427,6 +1609,13 @@ for whoever picks them up next.
          reject with the identical string but embed it inside a JSON-stringified `message`
          on a generic HTTPException with no `cause` — those two never surface the code on
          the wire (`error.code` reads `VALIDATION_ERROR`/`HTTP_ERROR` instead).
+
+      Both are closed in the tree: `middleware/api-key-auth.ts` sets
+      `cause: ERROR_CODE.BEARER_REQUIRED` / `INVALID_API_KEY_FORMAT` /
+      `API_KEY_KIND_MISMATCH` / `INVALID_API_KEY`, and
+      `routes/dashboard/funnels.ts` + `routes/public/funnel-payment.ts` both now set
+      `cause: ERROR_CODE.STRIPE_NOT_CONNECTED` alongside the message they already
+      carried.
 
       Also found and fixed while wiring the generator: `packages/shared/src/index.ts`'s
       `export * from "./error-catalog"` made the barrel and error-catalog.ts mutually
