@@ -71,12 +71,28 @@ const TIMESCALE_LEGACY_TAGS: ReadonlySet<string> = new Set([
   "0014_drop_daily_mrr_cagg",
   // 0019 registers pg_partman parents starting 2024-01-01, but 0015–0017
   // already pre-created 60 monthly partitions for the same range. partman
-  // cannot reconcile the two and aborts with "would overlap partition".
-  // The fresh-install partitioned tables already cover 2024–2028; the
-  // partition-maintenance worker will refuse to act on tables not in
-  // partman.part_config — that is the intended behaviour. Operators who
-  // want partman-managed premake/retention on a dev install can run
-  // `partman.create_parent(...)` manually after seeding.
+  // cannot reconcile the two and aborts with:
+  //
+  //   ERROR: partition "revenue_events_p20240101" would overlap partition
+  //          "revenue_events_2024_01"
+  //
+  // (partman v5 names its children `_pYYYYMMDD`; 0015/0016 named theirs
+  // `_YYYY_MM`.) So this entry stays skipped — but skipping it used to be
+  // the WHOLE story, and the consequence went unrecorded: with no
+  // `part_config` row, nothing ever created a 2029 partition, and every
+  // insert dated 2029-01-01 or later failed outright with "no partition of
+  // relation ... found for row". A dated outage, sitting in the skip list
+  // behind a comment that only explained the skip.
+  //
+  // Migration 0130 (`0130_partman_register_revenue_credit`) closes that. It
+  // is NOT in this skip set and runs on both install paths: it registers
+  // both parents starting at the first month the hand-made children do not
+  // already cover (computed from the catalog, so no range can overlap),
+  // and it registers them for PREMAKE ONLY — `apps/api/src/workers/
+  // retention-sweep.ts` owns dropping these two tables, so 0130 also clears
+  // the 7-year partman retention 0019 left on upgrade-path databases.
+  // Nothing has to be run by hand any more, on a dev install or anywhere
+  // else.
   "0019_install_pg_partman",
 ]);
 

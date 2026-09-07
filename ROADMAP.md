@@ -841,25 +841,32 @@ else in the framework/provider-breadth dimension is done.
       `projects.appleCredentials`/`googleCredentials` directly. Do not point
       an operator at the script as-is; the `ENCRYPTION_KEY` rotation tool is
       broken.
-- [ ] Fresh self-hosted installs never register `revenue_events` or
+- [x] Fresh self-hosted installs never registered `revenue_events` or
       `credit_ledger` with `partman.part_config`. Migration `0019` calls
       `partman.create_parent(...)` for both tables, but the fresh-install
       runner (`packages/db/src/fresh-install.ts`'s `TIMESCALE_LEGACY_TAGS`)
-      intentionally skips `0019` — running it against a fresh install would
-      abort with "would overlap partition" against the 60 monthly partitions
-      `0015`/`0016` already pre-create through 2028-12. That skip is
-      deliberate and already commented in the source, but nothing outside
-      the source told an operator: a fresh install's `revenue_events` and
-      `credit_ledger` are absent from `partman.part_config`, so nothing
-      creates a partition for either table once 2028-12 passes, and an
-      insert with `eventDate`/`createdAt` outside 2024–2028 fails outright
-      with "no partition found for row." Documented live (with the actual
-      `partman.part_config` query output) in `docs/operations/handbook.md`'s
-      "fresh-install divergence" section — an operator needs to run
-      `partman.create_parent(...)` by hand before 2028, or migrate onto
-      partman management sooner. Distinct from the earlier partition-worker
-      bug: the maintenance worker itself runs fine here — it correctly
-      refuses to touch tables that were never registered with it.
+      intentionally skips `0019` — running it against a fresh install aborts
+      with `partition "revenue_events_p20240101" would overlap partition
+      "revenue_events_2024_01"` against the 60 monthly partitions
+      `0015`/`0016` already pre-create through 2028-12 (partman v5 names
+      children `_pYYYYMMDD`, `0015`/`0016` named theirs `_YYYY_MM`). The skip
+      was deliberate and commented; its CONSEQUENCE was not recorded —
+      nothing created a partition once 2028-12 passed, so any insert dated
+      2029-01-01 or later failed outright with `no partition of relation
+      "revenue_events" found for row`. **CLOSED by migration
+      `0130_partman_register_revenue_credit`** (2026-09-07): it runs on both
+      install paths and registers each parent starting at the first month the
+      hand-made children do not already cover, computed from the catalog so
+      no proposed range can overlap. Registration is **premake only** —
+      `apps/api/src/workers/retention-sweep.ts` owns dropping these two
+      tables (tenant-aware, audited, floored at 365 days), so `0130` leaves
+      `retention` NULL and clears the 7-year window `0019` left on
+      upgrade-path databases rather than letting two droppers race. Covered
+      by `packages/db/tests/partman-registration.integration.test.ts` against
+      a container built from `deploy/postgres`. Distinct from the earlier
+      partition-worker bug: the maintenance worker itself runs fine here — it
+      correctly refuses to touch tables that were never registered with it,
+      and now they are.
 
 ## 9. GDPR / KVKK tooling (85 → 95) — CLOSED 2026-09-06
 

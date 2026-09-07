@@ -5,22 +5,28 @@ import type { Db } from "../client";
 // revenue_events partition provisioning (task 8a)
 // =============================================================
 //
-// `revenue_events` (migration 0015) is RANGE-partitioned by `eventDate`
-// with NO default partition. Migration 0015 bulk-created monthly
-// partitions for 2024-01..2028-12 only; migration 0019 registers
-// `partman.create_parent` for ongoing (post-2028) premake/retention. An
-// insert whose `eventDate` falls outside every existing child partition
-// fails outright: `no partition of relation "revenue_events" found for
-// row` (verified directly against this repo's Postgres image).
+// `revenue_events` (migration 0015) is RANGE-partitioned by `eventDate`.
+// Migration 0015 bulk-created monthly partitions for 2024-01..2028-12
+// only; migration 0130 registers `partman.create_parent` for ongoing
+// (post-2028) premake. An insert whose `eventDate` falls outside every
+// existing child partition used to fail outright: `no partition of
+// relation "revenue_events" found for row` (verified directly against
+// this repo's Postgres image). Since 0130 the parent also has a partman
+// `revenue_events_default`, so such a row is absorbed there instead —
+// which is NOT a licence to skip provisioning: Postgres then refuses to
+// attach the real partition for that month while the stray row sits in
+// the default, so the failure moves from the insert to a later
+// maintenance run. Provision first, as this module exists to do.
 //
 // The historical-import feature needs to write revenue dated years
 // before 2024, so it must provision the partitions it needs BEFORE
 // Phase A writes a single row (never mid-file — see write.ts).
 //
 // -------------------------------------------------------------
-// Two install paths, two provisioning strategies — VERIFIED, not assumed
+// Two strategies — VERIFIED, not assumed
 // -------------------------------------------------------------
 //
+// HISTORY, because it explains why this fork exists at all.
 // `packages/db/src/fresh-install.ts` treats `0019_install_pg_partman` as
 // TimescaleDB-era and marks it applied WITHOUT EXECUTING on every fresh
 // install (self-hosted first deploy, and — because
@@ -28,48 +34,34 @@ import type { Db } from "../client";
 // `runFreshInstall` — every test run in this repo). Its own comment
 // explains why: 0015 already bulk-created the 2024-01..2028-12
 // partitions by hand, and `partman.create_parent`'s premake from
-// `p_start_partition => '2024-01-01'` collides with them
-// ("partition ... would overlap partition"). Confirmed live against
-// this repo's dev Postgres:
+// `p_start_partition => '2024-01-01'` collides with them —
+// `partition "revenue_events_p20240101" would overlap partition
+// "revenue_events_2024_01"`, reproduced verbatim against this repo's
+// own image. So for a long time `revenue_events` was partman-managed on
+// the upgrade path and unmanaged on a fresh install, and this module
+// picked its strategy per call to be correct on both.
 //
-//   - `SELECT * FROM partman.part_config WHERE parent_table =
-//     'public.revenue_events'` returns ZERO rows on this database (a
-//     fresh install) — pg_partman is not managing this table at all
-//     here, exactly as fresh-install.ts documents.
-//   - `partman.create_partition_time('public.revenue_events', ...)`
-//     on this database raises `no config found for public.revenue_events`
-//     — pg_partman's own manual-partition API requires the part_config
-//     row 0019 never created.
-//   - `partman.create_parent(...)` on this database raises `partition
-//     "revenue_events_p20240101" would overlap partition
-//     "revenue_events_2024_01"` for any `p_start_partition` at or
-//     before 2024-01 — there is no way to register the parent after
-//     the fact without first detaching the existing children, which is
-//     destructive and out of this task's scope.
+// SINCE MIGRATION 0130 that asymmetry is gone: 0130 runs on BOTH paths
+// and registers the parent starting at the first month the hand-made
+// children do not already cover, so `public.revenue_events` is in
+// `partman.part_config` on any migrated database and this module takes
+// the pg_partman branch. Verified end to end against a database built
+// by `runFreshInstall` on this repo's image: with the parent registered
+// from 2029-01, `create_partition_time('public.revenue_events',
+// ARRAY['2019-03-01'])` creates `revenue_events_p20190301` — a month far
+// BEHIND the registered start — the second call for the same month
+// returns `false` and creates nothing, and a row dated 2019-03-15 lands
+// in it.
 //
-// So on a fresh install, pg_partman isn't in the picture for this table
-// AT ALL (its own partition-maintenance worker already treats "not in
-// part_config" as "not my table to touch" — apps/api/src/workers/
-// partition-maintenance.ts's `outgoing_webhooks` branch is precedent for
-// exactly this: hand-rolled `CREATE TABLE IF NOT EXISTS ... PARTITION
-// OF` for a table pg_partman does not manage). Hand-rolling a partition
-// here is not "fighting" pg_partman — pg_partman has no opinion about
-// this table on this install.
-//
-// On an upgrade-path database (production, where 0019 actually ran and
-// registered `public.revenue_events` in `part_config`), pg_partman DOES
-// own this parent's partition bookkeeping, and `create_partition_time`
-// is its documented, idempotent API for exactly this — "create a
-// partition for a specific time that isn't covered by the current
-// premake window" — verified end to end against a scratch pg_partman
-// parent: creating a month that already exists returns `false` and
-// creates nothing; creating a genuinely new month (including one before
-// the registered `p_start_partition`) succeeds and the new partition
-// accepts inserts immediately.
-//
-// This module picks the strategy per call by checking which install
-// state the database is actually in, so the SAME function is correct
-// on both a fresh self-host and a long-lived production database.
+// The hand-rolled branch is kept, not dead code: it is the correct
+// behaviour for any partitioned parent nobody registered, it is what
+// runs if 0130's availability guard skipped on a server without
+// pg_partman, and `apps/api/src/workers/partition-maintenance.ts`'s
+// `outgoing_webhooks` branch is the same pattern for a table partman
+// deliberately does not manage. Both branches are covered by
+// packages/db/tests/revenue-event-partitions.test.ts against a real
+// Postgres — the partman one by `revenue_events` itself, the
+// hand-rolled one by a scratch parent the test leaves unregistered.
 
 /** Matches migration 0019's registered interval; also the grain 0015's
  *  bulk-created initial partitions use. Provisioning at any other grain

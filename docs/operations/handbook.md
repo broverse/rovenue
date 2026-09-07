@@ -364,79 +364,78 @@ Runs daily at 03:00 UTC via a BullMQ repeatable job
    retention predicate is composite — status + age — and stays on the
    existing webhook-retention worker).
 
-### The fresh-install divergence — read this before assuming coverage
+### The fresh-install divergence — closed by migration 0130
+
+This section used to tell you to run `partman.create_parent` by hand before
+2029. **You no longer have to, and you should not.** Migration `0130` does it,
+on both install paths. What follows is the history, because you will still see
+two different partition NAMING schemes on the same table and it is easier to
+read a hand-inspected partition list knowing why.
 
 `revenue_events` and `credit_ledger` are the two tables migration `0019`
-registers with pg_partman (`create_parent`, 7-year retention). `0019` is one
-of eleven specific migrations the fresh-install runner
-(`packages/db/src/fresh-install.ts`'s `TIMESCALE_LEGACY_TAGS`) marks applied
-**without executing**, on any database that never ran against the old
-`timescale/timescaledb` image — which is every self-hosted install starting
-fresh against the shipped `postgres:16-bookworm` image. **The skip set is
-sparse, not a contiguous range**: `0001`–`0007`, `0009`, `0010`, `0014`, and
-`0019` — eleven of the nineteen migrations between `0001` and `0019`.
-`0008`, `0011`–`0013`, and `0015`–`0018` all execute normally on a fresh
-install (each is either a safe no-op against a fresh DB, per the runner's
-own comments on `0011`/`0012`, or — for `0015`–`0017` specifically — gets a
-targeted rewrite rather than a skip, below). On those databases:
+registers with pg_partman. `0019` is one of eleven specific migrations the
+fresh-install runner (`packages/db/src/fresh-install.ts`'s
+`TIMESCALE_LEGACY_TAGS`) marks applied **without executing**, on any database
+that never ran against the old `timescale/timescaledb` image — which is every
+self-hosted install starting fresh against the shipped `postgres:16-bookworm`
+image. **The skip set is sparse, not a contiguous range**: `0001`–`0007`,
+`0009`, `0010`, `0014`, and `0019` — eleven of the nineteen migrations between
+`0001` and `0019`. `0008`, `0011`–`0013`, and `0015`–`0018` all execute
+normally on a fresh install. On those databases:
 
 - `revenue_events`/`credit_ledger` still get partitioned — migrations
-  `0015`/`0016` **do execute** (they are not in the skip set) and bulk
-  pre-create 60 monthly partitions covering **2024-01 through 2028-12** as
-  part of the fresh-install path (verified live against this session's dev
-  database: `pg_inherits` shows exactly 60 partitions per table,
-  `revenue_events_2024_01` … `revenue_events_2028_12`). `fresh-install.ts`
-  rewrites their upgrade-path `RENAME`-to-`_legacy_hypertable` statement
-  into a no-op first (`PARTITION_RENAME_TAGS`), since a fresh install has no
-  legacy hypertable to rename away — the partitioning itself still runs.
-- Those partitions are **not** premade or retained by pg_partman going
-  forward, because `revenue_events`/`credit_ledger` are absent from
-  `partman.part_config` on a fresh install — `fresh-install.ts`'s own
-  comment on the `0019_install_pg_partman` skip says so explicitly, and it
-  was reproduced live: `SELECT parent_table FROM partman.part_config`
-  against this session's dev database returned only `public.funnel_sessions`,
-  `public.funnel_answers`, and `public.integration_deliveries` — installed
-  independently by later migrations (`0051`, `0060`) that run normally
-  because they're past the skip range. **No default partition exists on
-  either table** (`\d+ revenue_events` shows none), so an insert with an
-  `eventDate`/`createdAt` outside 2024–2028 fails outright with "no
-  partition of relation found" rather than degrading gracefully.
-- The partition-maintenance worker's own source comment states this is
-  **intended behaviour**, not a bug: "the partition-maintenance worker will
-  refuse to act on tables not in `partman.part_config`." It correctly says
-  nothing further — but nowhere told an *operator* that the clock on their
-  install's revenue/credit partitions is running out in 2028, until now.
+  `0015`/`0016` **do execute** and bulk pre-create 60 monthly partitions
+  covering **2024-01 through 2028-12**, named `revenue_events_2024_01` …
+  `revenue_events_2028_12`. `fresh-install.ts` rewrites their upgrade-path
+  `RENAME`-to-`_legacy_hypertable` statement into a no-op first
+  (`PARTITION_RENAME_TAGS`), since a fresh install has no legacy hypertable
+  to rename away — the partitioning itself still runs.
+- Until migration `0130`, that was the end of the story: both tables were
+  absent from `partman.part_config`, nothing premade a 2029 partition, and
+  neither table had a default partition — so an insert dated 2029-01-01 or
+  later failed outright with `no partition of relation "revenue_events"
+  found for row`. A dated outage, documented here as an operator chore.
 
-**Action for a self-hosted install approaching that date:** register the two
-tables with pg_partman by hand once. **NOT EXECUTED** against this session's
-dev database — it already carries other in-progress work and this would be
-a permanent, non-trivial schema change to leave on a shared box; test it on
-a disposable database before running it against a real install —
+**What `0130` changes.** It registers both parents starting at the first month
+the hand-made children do not already cover (computed from the catalog, so no
+proposed range can collide with a hand-made child — that collision,
+`partition "revenue_events_p20240101" would overlap partition
+"revenue_events_2024_01"`, is exactly why `0019` could not simply be
+un-skipped). From then on `partman.run_maintenance_proc()` — already called
+daily by the partition-maintenance worker — keeps a 12-month premake window
+rolling forward. Nothing to run by hand, on either install path.
 
-```sql
--- ClickHouse this is NOT; this is plain Postgres, run against your db:
-SELECT partman.create_parent(
-  p_parent_table    => 'public.revenue_events',
-  p_control         => 'eventDate',
-  p_interval        => '1 month',
-  p_premake         => 12,
-  p_start_partition => '2029-01-01'   -- pick up where the bulk-created range ends
-);
-UPDATE partman.part_config
-   SET retention = '7 years', retention_keep_table = false,
-       retention_keep_index = false, infinite_time_partitions = true
- WHERE parent_table = 'public.revenue_events';
--- repeat for public.credit_ledger with p_control => 'createdAt'
-```
+Two consequences worth knowing before you inspect partitions by eye:
 
-— or simply hand-create a few more years of monthly partitions the same way
-`0015`/`0016` did, before 2028 arrives. Either way, **do this before the
-partition run out**, not after the first failed insert.
+- **Two naming schemes on one table.** `revenue_events_2024_01` … `_2028_12`
+  are the hand-made children from `0015`; `revenue_events_p20290101` onward
+  are pg_partman's. This is cosmetic — partman resolves a set from
+  `pg_inherits` + partition bounds, not from names, so it reads the hand-made
+  children correctly and continues past them.
+- **There is now a default partition** (`revenue_events_default`,
+  `credit_ledger_default`), created by `create_parent` exactly as it already
+  was for `funnel_sessions`/`funnel_answers`/`integration_deliveries`. A row
+  dated beyond the premake window lands there instead of failing — but
+  Postgres will then refuse to attach the real partition for that month, so a
+  stranded row turns an immediate error into a later maintenance failure.
+  `SELECT * FROM partman.check_default();` reports the count; it should be
+  zero, and a non-zero value is a thing to fix, not to ignore.
 
-Databases that upgraded from the TimescaleDB era (i.e. actually executed
-`0019` against the old image) do not have this gap — `revenue_events`/
-`credit_ledger` are registered in `partman.part_config` from day one on
-those installs.
+**Retention is deliberately NOT enabled on these two parents.** `0019` intended
+`retention = '7 years'`; `0130` leaves `retention` NULL and clears the value
+`0019` left on upgrade-path databases. `apps/api/src/workers/retention-sweep.ts`
+owns dropping these two tables (`DROP_PARTITION` in
+`packages/shared/src/retention/policies.ts`): it drops a partition only at the
+longest window any project resolved, only when every project resolved one, and
+writes a per-project audit row into that project's hash chain first. Its floors
+are 365 days for both tables — far shorter than 7 years — so partman retention
+could only ever be a second, unconditional, unaudited dropper racing it. **Do
+not set `partman.part_config.retention` on `public.revenue_events` or
+`public.credit_ledger`.**
+
+`outgoing_webhooks` remains deliberately unregistered: its retention predicate
+is composite (status AND age), so a whole month is never uniformly expired, and
+the partition-maintenance worker hand-creates its months.
 
 ### The verification query
 
@@ -451,15 +450,23 @@ SELECT parent_table, premake, retention, retention_keep_table,
  ORDER BY parent_table;
 ```
 
-**Executed** against this session's dev database. Real output:
+**Executed** against a database built from migrations on this repo's own
+image (`deploy/postgres`). Real output — five parents, and `retention` is
+NULL on the two migration `0130` registers, by design (see above):
 
 ```
-         parent_table          | premake | retention | maintenance_last_run
---------------------------------+---------+-----------+-------------------------------
- public.funnel_answers          |       4 | 18 months | 2026-09-05 03:00:00.133259+00
- public.funnel_sessions         |       4 | 18 months | 2026-09-05 03:00:00.120653+00
- public.integration_deliveries  |       7 | 30 days   | 2026-09-05 03:00:00.156426+00
+         parent_table          | premake | retention | infinite_time_partitions
+-------------------------------+---------+-----------+--------------------------
+ public.credit_ledger          |      12 |           | t
+ public.funnel_answers         |       4 | 18 months | t
+ public.funnel_sessions        |       4 | 18 months | t
+ public.integration_deliveries |       7 | 30 days   | f
+ public.revenue_events         |      12 |           | t
 ```
+
+(`maintenance_last_run` is NULL on a database whose maintenance job has never
+run, as a freshly-migrated one is; on a live install it is the column to
+check, below.)
 
 A `maintenance_last_run` within the last ~25 hours (the job runs daily at
 03:00 UTC) is a pass; a `NULL` or stale timestamp means either the worker
@@ -472,10 +479,13 @@ manual `tsx` call) without going through the queue at all, which updates
 `part_config` but leaves no BullMQ trace — `part_config` is pg_partman's own
 source of truth regardless of how maintenance was triggered.
 
-If your tables aren't in the output at all, see the fresh-install
-divergence above — that's expected for `revenue_events`/`credit_ledger` on
-a fresh install, and a problem for anything else you expected pg_partman to
-manage.
+If `public.revenue_events` or `public.credit_ledger` is missing from the
+output, migration `0130` has not been applied (or its availability guard
+skipped because the server has no pg_partman — it says so with a `0130
+SKIPPED` notice naming the consequence). Run `pnpm db:migrate` and re-check;
+until then those tables' partitions still stop at 2028-12. Anything else
+missing that you expected pg_partman to manage is a problem in its own
+migration.
 
 ---
 

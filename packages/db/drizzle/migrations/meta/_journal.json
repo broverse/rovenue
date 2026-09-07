@@ -911,6 +911,13 @@
       "when": 1789339200000,
       "tag": "0129_freezing_corsair",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1789425600000,
+      "tag": "0130_partman_register_revenue_credit",
+      "breakpoints": true
     }
   ]
 }

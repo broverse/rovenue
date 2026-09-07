@@ -6,15 +6,26 @@
 // pg_partman installed (the docker-compose dev stack on host port 5433
 // satisfies this — same convention as tests/import-jobs.test.ts).
 //
-// This repo's only reachable Postgres is a FRESH INSTALL
-// (packages/db/src/fresh-install.ts marks 0019_install_pg_partman
-// applied WITHOUT EXECUTING on this image — verified live: querying
-// `partman.part_config` for `public.revenue_events` returns zero rows).
-// So the real `revenue_events` table exercises the hand-rolled branch
-// of `ensureMonthlyPartitions`. The pg_partman branch is exercised
-// against a SCRATCH parent this file registers with
-// `partman.create_parent` itself, so both branches get real, non-mocked
-// coverage rather than one of them being asserted from documentation.
+// WHICH BRANCH THE REAL TABLE TAKES — this changed with migration 0130
+//
+// `ensureMonthlyPartitions` picks its strategy per call: pg_partman's
+// `create_partition_time` when the parent is in `partman.part_config`,
+// a hand-rolled `CREATE TABLE ... PARTITION OF` when it is not.
+//
+// This file used to assert that `revenue_events` took the HAND-ROLLED
+// branch, because `0019_install_pg_partman` is skipped on a fresh
+// install (packages/db/src/fresh-install.ts) and nothing else ever
+// registered the parent. Migration 0130 registers it on BOTH install
+// paths, so on any migrated database `revenue_events` is partman-managed
+// and takes the partman branch — child partitions are now named
+// `revenue_events_pYYYYMMDD`, not `revenue_events_YYYY_MM`.
+//
+// So the real table now exercises the PARTMAN branch, and the
+// hand-rolled branch — still reachable for any partitioned parent
+// nobody registered — is exercised against a SCRATCH parent this file
+// creates and deliberately leaves out of `part_config`. Both branches
+// keep real, non-mocked coverage; only which table stands for which
+// branch has swapped.
 
 import { createId } from "@paralleldrive/cuid2";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -105,22 +116,24 @@ describe("describeRequiredPartitionSpan", () => {
 });
 
 // -------------------------------------------------------------
-// Hand-rolled branch — the real revenue_events table
+// The real revenue_events table — partman-managed since migration 0130
 // -------------------------------------------------------------
 
-describe("ensureRevenueEventPartitions — hand-rolled branch (this repo's fresh-install revenue_events)", () => {
+describe("ensureRevenueEventPartitions — the real revenue_events (partman-managed since 0130)", () => {
   // Cleanup: these tests add real (empty) child partitions to the
   // shared dev/test `revenue_events` table. None can ever hold a row
   // (FK constraints refuse any insert with a fabricated project /
   // subscriber / purchase id, which these tests never create), so
   // dropping them after the run leaves the table exactly as this suite
-  // found it.
+  // found it. Named the partman way (`_pYYYYMMDD`) because that is what
+  // the partman branch creates — dropping the old `_YYYY_MM` names would
+  // silently leak a child per run.
   const createdPartitions = [
-    "revenue_events_2011_03",
-    "revenue_events_2012_07",
-    "revenue_events_2013_01",
-    "revenue_events_2013_02",
-    "revenue_events_2013_03",
+    "revenue_events_p20110301",
+    "revenue_events_p20120701",
+    "revenue_events_p20130101",
+    "revenue_events_p20130201",
+    "revenue_events_p20130301",
   ];
 
   afterAll(async () => {
@@ -129,26 +142,31 @@ describe("ensureRevenueEventPartitions — hand-rolled branch (this repo's fresh
     }
   });
 
-  it("confirms the premise: pg_partman does not manage revenue_events on this database", async () => {
+  it("confirms the premise: migration 0130 registered revenue_events with pg_partman", async () => {
+    // Fails loudly on a database that predates 0130 rather than quietly
+    // agreeing with whatever it finds — the branch under test depends on
+    // this being true, so it has to be asserted, not detected.
     const result = await db.execute(
       sql`SELECT 1 AS present FROM "partman"."part_config" WHERE "parent_table" = 'public.revenue_events' LIMIT 1`,
     );
     const rows = (result as unknown as { rows: unknown[] }).rows;
-    expect(rows.length).toBe(0);
+    expect(rows.length).toBe(1);
   });
 
   it("creates a monthly partition for a pre-2024 range and makes it a real child of revenue_events", async () => {
     // A year far enough in the past that no other test/migration could
     // plausibly have created it already, so this test's own assertions
-    // are unambiguous regardless of run order.
+    // are unambiguous regardless of run order. It is also far below
+    // 0130's `p_start_partition`, which is the interesting case: partman
+    // will happily create a month behind its own registered window.
     const min = new Date("2011-03-10T00:00:00Z");
     const max = new Date("2011-03-20T00:00:00Z");
 
-    expect(await tableExists("public.revenue_events_2011_03")).toBe(false);
+    expect(await tableExists("public.revenue_events_p20110301")).toBe(false);
 
     await ensureRevenueEventPartitions(db, { minEventDate: min, maxEventDate: max });
 
-    expect(await tableExists("public.revenue_events_2011_03")).toBe(true);
+    expect(await tableExists("public.revenue_events_p20110301")).toBe(true);
   });
 
   it("is idempotent: provisioning the same range twice does not error and creates nothing new the second time", async () => {
@@ -172,9 +190,80 @@ describe("ensureRevenueEventPartitions — hand-rolled branch (this repo's fresh
 
     await ensureRevenueEventPartitions(db, { minEventDate: min, maxEventDate: max });
 
-    expect(await tableExists("public.revenue_events_2013_01")).toBe(true);
-    expect(await tableExists("public.revenue_events_2013_02")).toBe(true);
-    expect(await tableExists("public.revenue_events_2013_03")).toBe(true);
+    expect(await tableExists("public.revenue_events_p20130101")).toBe(true);
+    expect(await tableExists("public.revenue_events_p20130201")).toBe(true);
+    expect(await tableExists("public.revenue_events_p20130301")).toBe(true);
+  });
+});
+
+// -------------------------------------------------------------
+// Hand-rolled branch — a scratch parent nobody registered
+// -------------------------------------------------------------
+
+describe("ensureMonthlyPartitions — hand-rolled branch (unregistered scratch parent)", () => {
+  const scratchTable = `scratch_unmanaged_${createId().toLowerCase()}`;
+  const qualified = `public.${scratchTable}`;
+
+  beforeAll(async () => {
+    await db.execute(
+      sql`CREATE TABLE ${sql.raw(`"${scratchTable}"`)} (
+        id text NOT NULL,
+        d timestamptz NOT NULL,
+        PRIMARY KEY (id, d)
+      ) PARTITION BY RANGE (d)`,
+    );
+  });
+
+  afterAll(async () => {
+    await db.execute(sql`DROP TABLE IF EXISTS ${sql.raw(`"${scratchTable}"`)} CASCADE`);
+  });
+
+  it("confirms the premise: the scratch parent is NOT registered with pg_partman", async () => {
+    const result = await db.execute(
+      sql`SELECT 1 AS present FROM "partman"."part_config" WHERE "parent_table" = ${qualified} LIMIT 1`,
+    );
+    const rows = (result as unknown as { rows: unknown[] }).rows;
+    expect(rows.length).toBe(0);
+  });
+
+  it("creates `<table>_<yyyy>_<mm>` children directly, without pg_partman", async () => {
+    expect(await tableExists(`public.${scratchTable}_2011_03`)).toBe(false);
+
+    await ensureMonthlyPartitions(db, {
+      qualifiedParentTable: qualified,
+      unqualifiedParentTable: scratchTable,
+      minEventDate: new Date("2011-03-10T00:00:00Z"),
+      maxEventDate: new Date("2011-03-20T00:00:00Z"),
+    });
+
+    expect(await tableExists(`public.${scratchTable}_2011_03`)).toBe(true);
+  });
+
+  it("provisions every month across a multi-month range and stays idempotent", async () => {
+    const range = {
+      minEventDate: new Date("2013-01-15T00:00:00Z"),
+      maxEventDate: new Date("2013-03-05T00:00:00Z"),
+    };
+
+    await ensureMonthlyPartitions(db, {
+      qualifiedParentTable: qualified,
+      unqualifiedParentTable: scratchTable,
+      ...range,
+    });
+    const countAfterFirst = await childPartitionCount(qualified);
+
+    expect(await tableExists(`public.${scratchTable}_2013_01`)).toBe(true);
+    expect(await tableExists(`public.${scratchTable}_2013_02`)).toBe(true);
+    expect(await tableExists(`public.${scratchTable}_2013_03`)).toBe(true);
+
+    await expect(
+      ensureMonthlyPartitions(db, {
+        qualifiedParentTable: qualified,
+        unqualifiedParentTable: scratchTable,
+        ...range,
+      }),
+    ).resolves.toBeUndefined();
+    expect(await childPartitionCount(qualified)).toBe(countAfterFirst);
   });
 });
 
