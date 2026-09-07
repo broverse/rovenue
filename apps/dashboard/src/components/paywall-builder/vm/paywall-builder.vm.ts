@@ -802,15 +802,24 @@ export class PaywallBuilderViewModel {
   }
 
   /**
-   * Applies a single `PaywallTreeOp` (an approved `action_paywall_editTree`
-   * result, forwarded through `RoviProvider.dispatchPaywallPatch`) via the
-   * SAME `applyTreeOp` the server dry-runs against — one implementation,
-   * both sides. Snapshots the pre-apply config first so `revertAiChange`
-   * can undo it; the snapshot is only set once `applyTreeOp` has already
-   * succeeded, so a thrown `TreeOpError` (bad target/index) leaves
-   * `config`/`configBeforeAiApply` untouched and propagates to the caller
-   * (the bridge listener), which reports the failure back through its
-   * boolean return.
+   * Applies a single `PaywallTreeOp` locally via the SAME `applyTreeOp`
+   * the server's `action_paywall_editTree` handler runs, snapshotting the
+   * pre-apply config so `revertAiChange` can undo it — the shared
+   * "AI-apply" landing spot alongside `applyExternalConfig` below.
+   *
+   * As of Task 5, an APPROVED `action_paywall_editTree` intent no longer
+   * reaches this method: the intent handler now persists the op
+   * server-side itself, and the Rovi bridge (`RoviProvider.
+   * dispatchPaywallPatch` → `refetchAfterExternalEdit` below) just
+   * re-fetches the draft the server already wrote instead of re-applying
+   * the op locally — applying it here TOO would land it twice. This
+   * method remains the general "apply + snapshot for undo" primitive for
+   * whatever else still drives it directly (exercised by this file's
+   * tests as exactly that).
+   *
+   * The snapshot is only set once `applyTreeOp` has already succeeded, so
+   * a thrown `TreeOpError` (bad target/index) leaves `config`/
+   * `configBeforeAiApply` untouched and propagates to the caller.
    *
    * Deselects rather than selecting the touched node: an insert/replace/
    * remove can touch a node the properties panel has no story for yet
@@ -842,10 +851,42 @@ export class PaywallBuilderViewModel {
   }
 
   /**
+   * Re-syncs the draft from the server after an approved
+   * `action_paywall_editTree` intent executes (Task 5). The intent
+   * handler is now the SOLE writer for that op — it already applied and
+   * persisted it server-side — so this builder never re-applies the op
+   * itself; it just re-fetches the row the handler already wrote and
+   * treats it as the new saved baseline, exactly like `applyServer` on
+   * initial load (not `applyExternalTreeOp`/`applyExternalConfig`: those
+   * feed `configBeforeAiApply` for `revertAiChange`, but there's nothing
+   * to "revert" here — the server has already committed the change, and
+   * undoing it locally wouldn't undo the persisted draft).
+   *
+   * Best-effort and non-fatal, mirroring `reloadAfterDraftConflict`: a
+   * failed refetch just leaves the canvas showing the pre-edit draft,
+   * stale but not wrong — the next manual reload or autosave-driven
+   * conflict path will pick up the real state.
+   *
+   * Called from `RoviProvider.dispatchPaywallPatch`'s listener
+   * (`builder-shell.tsx`), fire-and-forget — the caller cannot await an
+   * async refetch triggered from a synchronous notification.
+   */
+  async refetchAfterExternalEdit(): Promise<void> {
+    try {
+      const detail = await this.api.get(this.props.projectId, this.props.paywallId);
+      if (this.disposed) return;
+      this.applyServer(detail);
+    } catch {
+      // Non-fatal — see doc comment above.
+    }
+  }
+
+  /**
    * Merges auto-translated `entries` into `locale`'s table.
    *
    * Goes through the SAME `setLocalizations` tree-op the copilot's
-   * server-dry-run path uses, which merges TABLE-level — other keys already
+   * server-side `action_paywall_editTree` handler applies, which merges
+   * TABLE-level — other keys already
    * in the locale survive untouched. WITHIN a key, though, `entries` wins:
    * callers normally only send the gap (missing keys), so this is safe in
    * the ordinary case, but it is NOT a per-key merge.

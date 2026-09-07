@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { BuilderConfig, PaywallTreeOp } from "@rovenue/shared/paywall";
-import { GeneratedConfigError } from "../paywall-ai/validate-config";
+import {
+  BUILDER_CONFIG_TREE_FORMAT_VERSION,
+  GeneratedConfigError,
+} from "../paywall-ai/validate-config";
 
 // =============================================================
 // Intent handlers — cross-project mutation guards (unit)
@@ -39,6 +42,12 @@ const { drizzleMock } = vi.hoisted(() => {
     paywallRepo: {
       findPaywallById: vi.fn(),
       updatePaywall: vi.fn(async () => ({ id: "pw_1" })),
+      updatePaywallDraft: vi.fn(
+        async (): Promise<{ id: string; draftRevision: number } | null> => ({
+          id: "pw_1",
+          draftRevision: 1,
+        }),
+      ),
     },
   };
   return { drizzleMock };
@@ -174,7 +183,7 @@ describe("intent handlers — cross-project mutation guards", () => {
 });
 
 // =============================================================
-// action.paywall.editTree — dry-run, no-write handler (Task 3)
+// action.paywall.editTree — persists via updatePaywallDraft (Task 5)
 // =============================================================
 //
 // `paywallRepo.findPaywallById` is already scoped to (projectId, id) at
@@ -182,6 +191,12 @@ describe("intent handlers — cross-project mutation guards", () => {
 // the handler's IDOR guard is "call it with ctx.projectId and treat a
 // miss as not-found" — same outcome as the other handlers' manual
 // project-id check, enforced one layer down instead.
+//
+// This suite is a MOCKED-drizzle unit test — it proves the handler
+// calls (or refuses to call) `updatePaywallDraft`, not that the write
+// is durable or that its audit row is transactionally atomic. That's
+// `intent-handlers.paywall.integration.test.ts`'s job, against real
+// Postgres (a mocked `db.transaction` can't demonstrate a rollback).
 
 const BASE_PAYWALL_CONFIG: BuilderConfig = {
   formatVersion: 2,
@@ -210,14 +225,16 @@ function selfProjectPaywall(builderConfig: BuilderConfig | null = BASE_PAYWALL_C
     projectId: "prj_self",
     builderConfig,
     remoteConfig: { defaultLocale: "en" },
+    draftRevision: 0,
   };
 }
 
-describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no writes", () => {
+describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, persists via updatePaywallDraft", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __resetIntentHandlersForTests();
     registerAllIntentHandlers();
+    drizzleMock.paywallRepo.updatePaywallDraft.mockResolvedValue({ id: "pw_1", draftRevision: 1 });
   });
 
   test("rejects a paywall from another project (scoped finder misses) and never touches applyTreeOp's result", async () => {
@@ -229,7 +246,7 @@ describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no w
         op: { kind: "remove", nodeId: "purchase" } satisfies PaywallTreeOp,
       }),
     ).rejects.toThrow(/not found in project/);
-    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+    expect(drizzleMock.paywallRepo.updatePaywallDraft).not.toHaveBeenCalled();
   });
 
   test.each<[string, PaywallTreeOp]>([
@@ -244,16 +261,23 @@ describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no w
     ["remove", { kind: "remove", nodeId: "packages" }],
     ["updateProps", { kind: "updateProps", nodeId: "title", patch: { role: "subtitle" } }],
     ["setLocalizations", { kind: "setLocalizations", locale: "en", entries: { title_key: "Go Premium" } }],
-  ])("accepts a valid %s op for the owning project, returns { op, paywallId }, never writes", async (_kind, op) => {
+  ])("accepts a valid %s op for the owning project, persists via updatePaywallDraft, returns { paywallId, draftRevision }", async (_kind, op) => {
     drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(selfProjectPaywall());
 
     const result = await run("action_paywall_editTree", { paywallId: "pw_1", op });
 
-    expect(result).toEqual({ op, paywallId: "pw_1" });
-    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+    expect(result).toEqual({ paywallId: "pw_1", draftRevision: 1 });
+    expect(drizzleMock.paywallRepo.updatePaywallDraft).toHaveBeenCalledTimes(1);
+    expect(drizzleMock.paywallRepo.updatePaywallDraft).toHaveBeenCalledWith(
+      expect.anything(),
+      "prj_self",
+      "pw_1",
+      0, // paywall.draftRevision — the CAS token read before the write
+      expect.objectContaining({ configFormatVersion: BUILDER_CONFIG_TREE_FORMAT_VERSION }),
+    );
   });
 
-  test("falls back to an empty draft (remoteConfig.defaultLocale) when builderConfig is null", async () => {
+  test("falls back to an empty draft (remoteConfig.defaultLocale) when builderConfig is null, then persists", async () => {
     drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(selfProjectPaywall(null));
     const op: PaywallTreeOp = {
       kind: "insert",
@@ -264,8 +288,8 @@ describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no w
 
     const result = await run("action_paywall_editTree", { paywallId: "pw_1", op });
 
-    expect(result).toEqual({ op, paywallId: "pw_1" });
-    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+    expect(result).toEqual({ paywallId: "pw_1", draftRevision: 1 });
+    expect(drizzleMock.paywallRepo.updatePaywallDraft).toHaveBeenCalledTimes(1);
   });
 
   test("rejects an insert that would introduce a duplicate node id via GeneratedConfigError, never writes", async () => {
@@ -281,7 +305,7 @@ describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no w
     await expect(
       run("action_paywall_editTree", { paywallId: "pw_1", op }),
     ).rejects.toThrow(GeneratedConfigError);
-    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+    expect(drizzleMock.paywallRepo.updatePaywallDraft).not.toHaveBeenCalled();
   });
 
   test("propagates a TreeOpError for a structurally invalid op (target not found), never writes", async () => {
@@ -289,7 +313,17 @@ describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no w
     const op: PaywallTreeOp = { kind: "remove", nodeId: "does_not_exist" };
 
     await expect(run("action_paywall_editTree", { paywallId: "pw_1", op })).rejects.toThrow();
-    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+    expect(drizzleMock.paywallRepo.updatePaywallDraft).not.toHaveBeenCalled();
+  });
+
+  test("throws when updatePaywallDraft returns null (draftRevision changed concurrently), never audits", async () => {
+    drizzleMock.paywallRepo.findPaywallById.mockResolvedValue(selfProjectPaywall());
+    drizzleMock.paywallRepo.updatePaywallDraft.mockResolvedValue(null);
+    const op: PaywallTreeOp = { kind: "remove", nodeId: "packages" };
+
+    await expect(
+      run("action_paywall_editTree", { paywallId: "pw_1", op }),
+    ).rejects.toThrow(/draft changed during approval/);
   });
 
   test("rejects an insert whose subtree carries a javascript: button action.url via GeneratedConfigError, never writes", async () => {
@@ -310,6 +344,6 @@ describe("action_paywall_editTree — IDOR, op kinds, duplicate-id refusal, no w
     await expect(
       run("action_paywall_editTree", { paywallId: "pw_1", op }),
     ).rejects.toThrow(GeneratedConfigError);
-    expect(drizzleMock.paywallRepo.updatePaywall).not.toHaveBeenCalled();
+    expect(drizzleMock.paywallRepo.updatePaywallDraft).not.toHaveBeenCalled();
   });
 });

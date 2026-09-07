@@ -1,23 +1,27 @@
 import { useEffect } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import type { PaywallTreeOp } from "@rovenue/shared/paywall";
 import { ApprovalCard } from "./approval-card";
 import { RoviProvider } from "../rovi-provider";
 import { useRovi } from "../../../lib/hooks/useRovi";
 
 // =============================================================
-// P8 §6.15 Task 5 — the Rovi->builder bridge, from ApprovalCard's side:
-// on an executed `action_paywall_editTree` intent it forwards the op
-// through `RoviProvider.dispatchPaywallPatch`, SCOPED to the op's own
-// `paywallId`; when no listener is registered for that exact paywall (or
-// the registered one refuses the op), it shows the "open the builder"
-// fallback with a re-apply affordance instead of silently dropping the
-// change, or worse, applying it to whichever OTHER paywall's builder
-// happens to be mounted (spec §3.3 — every paywall's root node id is
-// literally "root", so an unscoped op is valid-looking on any paywall).
+// P8 §6.15 Task 5 — the Rovi->builder bridge, from ApprovalCard's side.
+//
+// As of Task 5, `action_paywall_editTree`'s intent handler PERSISTS the
+// approved op server-side itself — it is no longer a dry run the client
+// applies. So on an executed intent, ApprovalCard just NOTIFIES
+// `RoviProvider.dispatchPaywallPatch`, SCOPED to the edit's own
+// `paywallId`, that the draft changed; there is no op payload to forward.
+// When no listener is registered for that exact paywall, it shows the
+// "open the builder" fallback with a re-apply (re-notify) affordance
+// instead of silently dropping the change, or worse, notifying whichever
+// OTHER paywall's builder happens to be mounted (spec §3.3 — every
+// paywall's root node id is literally "root", so an unscoped edit is
+// valid-looking on any paywall).
 // ai-bridge.test.tsx covers the OTHER end (builder-shell registering the
-// listener under its own paywallId, unregistering on unmount).
+// listener under its own paywallId, unregistering on unmount, and
+// re-fetching the persisted draft once notified).
 // =============================================================
 
 const executeMutateAsync = vi.fn();
@@ -35,12 +39,9 @@ beforeEach(() => {
   rejectMutateAsync.mockReset();
 });
 
-const op: PaywallTreeOp = {
-  kind: "insert",
-  parentId: "root",
-  index: 0,
-  subtree: { type: "spacer", id: "sp1", size: 8 },
-};
+// The handler's execute result shape (Task 5): `{ paywallId, draftRevision }`
+// — never an op the client would re-apply.
+const editTreeResult = { paywallId: "pw_1", draftRevision: 1 };
 
 function editTreeIntent() {
   return {
@@ -65,14 +66,16 @@ function nonTreeIntent() {
 /** Mounted alongside `ApprovalCard` inside the SAME `RoviProvider` to
  *  register a patch listener for `paywallId` while `active`, unregistering
  *  when it flips to `false` — mirrors what builder-shell.tsx does on
- *  mount/unmount, registered under ITS OWN open paywall's id. */
+ *  mount/unmount, registered under ITS OWN open paywall's id. The listener
+ *  takes no payload (Task 5): it's a "your draft changed, go refetch"
+ *  signal, not an op to apply. */
 function Registrar({
   paywallId,
   listener,
   active,
 }: {
   paywallId: string;
-  listener: (op: PaywallTreeOp) => boolean;
+  listener: () => void;
   active: boolean;
 }) {
   const { registerPaywallPatchListener } = useRovi();
@@ -108,9 +111,9 @@ describe("ApprovalCard", () => {
     await screen.findByText("Approved and executed.");
   });
 
-  it("forwards an executed action_paywall_editTree result to the listener registered for the SAME paywallId", async () => {
-    executeMutateAsync.mockResolvedValue({ op, paywallId: "pw_1" });
-    const listener = vi.fn().mockReturnValue(true);
+  it("notifies the listener registered for the SAME paywallId once the intent executes, without an op payload", async () => {
+    executeMutateAsync.mockResolvedValue(editTreeResult);
+    const listener = vi.fn();
 
     render(
       <RoviProvider>
@@ -123,16 +126,17 @@ describe("ApprovalCard", () => {
 
     await screen.findByText("Applied to the builder.");
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith(op);
+    expect(listener).toHaveBeenCalledWith();
   });
 
   it("refuses and shows the fallback when the mounted builder is for a DIFFERENT paywall (cross-paywall guard)", async () => {
-    // The op is for pw_1, but the only mounted builder is for pw_2 —
+    // The edit is for pw_1, but the only mounted builder is for pw_2 —
     // e.g. approved before navigating, or approved after navigating away.
-    // Without paywall scoping this would silently insert into pw_2's
-    // tree (its root id is also literally "root").
-    executeMutateAsync.mockResolvedValue({ op, paywallId: "pw_1" });
-    const listenerForOtherPaywall = vi.fn().mockReturnValue(true);
+    // Without paywall scoping this would silently notify pw_2's builder
+    // to refetch a draft that isn't its own (its root id is also
+    // literally "root", so an unscoped edit looks valid there too).
+    executeMutateAsync.mockResolvedValue(editTreeResult);
+    const listenerForOtherPaywall = vi.fn();
 
     render(
       <RoviProvider>
@@ -148,7 +152,7 @@ describe("ApprovalCard", () => {
   });
 
   it("shows the fallback card with a re-apply button when no listener is registered", async () => {
-    executeMutateAsync.mockResolvedValue({ op, paywallId: "pw_1" });
+    executeMutateAsync.mockResolvedValue(editTreeResult);
 
     render(
       <RoviProvider>
@@ -162,26 +166,9 @@ describe("ApprovalCard", () => {
     expect(screen.getByRole("button", { name: "Re-apply" })).toBeInTheDocument();
   });
 
-  it("renders the fallback state when the registered (same-paywall) listener refuses the op", async () => {
-    executeMutateAsync.mockResolvedValue({ op, paywallId: "pw_1" });
-    const listener = vi.fn().mockReturnValue(false);
-
-    render(
-      <RoviProvider>
-        <Registrar paywallId="pw_1" listener={listener} active />
-        <ApprovalCard intent={editTreeIntent()} />
-      </RoviProvider>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Approve & Run" }));
-
-    await screen.findByText("Open this paywall's builder to apply this change.");
-    expect(listener).toHaveBeenCalledWith(op);
-  });
-
-  it("re-apply retries the op once a same-paywall listener is registered, moving out of the fallback state", async () => {
-    executeMutateAsync.mockResolvedValue({ op, paywallId: "pw_1" });
-    const listener = vi.fn().mockReturnValue(true);
+  it("re-apply re-notifies once a same-paywall listener is registered, moving out of the fallback state", async () => {
+    executeMutateAsync.mockResolvedValue(editTreeResult);
+    const listener = vi.fn();
 
     function Harness({ active }: { active: boolean }) {
       return (
@@ -205,12 +192,12 @@ describe("ApprovalCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Re-apply" }));
 
     await screen.findByText("Applied to the builder.");
-    expect(listener).toHaveBeenCalledWith(op);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it("re-apply still refuses if the newly-registered listener is for a different paywall", async () => {
-    executeMutateAsync.mockResolvedValue({ op, paywallId: "pw_1" });
-    const listenerForOtherPaywall = vi.fn().mockReturnValue(true);
+    executeMutateAsync.mockResolvedValue(editTreeResult);
+    const listenerForOtherPaywall = vi.fn();
 
     function Harness({ active }: { active: boolean }) {
       return (
@@ -236,9 +223,9 @@ describe("ApprovalCard", () => {
     expect(listenerForOtherPaywall).not.toHaveBeenCalled();
   });
 
-  it("does not deliver the patch to a listener that unregistered before approval", async () => {
-    executeMutateAsync.mockResolvedValue({ op, paywallId: "pw_1" });
-    const listener = vi.fn().mockReturnValue(true);
+  it("does not notify a listener that unregistered before approval", async () => {
+    executeMutateAsync.mockResolvedValue(editTreeResult);
+    const listener = vi.fn();
 
     function Harness({ active }: { active: boolean }) {
       return (

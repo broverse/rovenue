@@ -2,11 +2,11 @@ import "reflect-metadata";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "../../../../tests/msw/server";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ServiceProvider, useService } from "impair";
 import "../../../i18n/config";
 import i18n from "../../../i18n/config";
-import { emptyBuilderConfig, type BuilderConfig, type PaywallTreeOp } from "@rovenue/shared/paywall";
+import { emptyBuilderConfig, type BuilderConfig } from "@rovenue/shared/paywall";
 import { BuilderShell } from "../builder-shell";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../../lib/services/paywall-builder-api";
 import { PaywallBuilderViewModel } from "../vm/paywall-builder.vm";
@@ -19,7 +19,7 @@ import { useRovi } from "../../../lib/hooks/useRovi";
 // `open`/`setOpen`, chatContext tracks the open paywall + selected node,
 // and a VM patch listener registers/unregisters with the builder's
 // mount lifecycle. approval-card.test.tsx covers the OTHER end of the
-// bridge (forwarding an executed op into `dispatchPaywallPatch`); this
+// bridge (notifying `dispatchPaywallPatch` once an intent executes); this
 // file covers builder-shell's side of the same contract.
 //
 // Every sibling panel (LayerTree/Canvas/PropertiesPanel/TopBar/…) is
@@ -95,7 +95,9 @@ function fakeDetail(overrides: Partial<PaywallBuilderDetailDto> = {}): PaywallBu
 }
 
 async function renderBridge(detailOverrides: Partial<PaywallBuilderDetailDto> = {}) {
-  vi.spyOn(PaywallBuilderApi.prototype, "get").mockResolvedValue(fakeDetail(detailOverrides));
+  const getSpy = vi
+    .spyOn(PaywallBuilderApi.prototype, "get")
+    .mockResolvedValue(fakeDetail(detailOverrides));
 
   let vm!: PaywallBuilderViewModel;
   let rovi!: ReturnType<typeof useRovi>;
@@ -133,6 +135,7 @@ async function renderBridge(detailOverrides: Partial<PaywallBuilderDetailDto> = 
   return {
     getVm: () => vm,
     getRovi: () => rovi,
+    getSpy,
     unmountBuilder: () => utils.rerender(<Harness show={false} />),
     ...utils,
   };
@@ -190,75 +193,91 @@ describe("builder-shell — chatContext", () => {
 });
 
 describe("builder-shell — VM patch listener registration", () => {
-  it("registers a listener under its OWN paywallId while mounted and unregisters it on unmount", async () => {
-    const { getVm, getRovi, unmountBuilder } = await renderBridge();
+  // As of Task 5, an approved `action_paywall_editTree` intent is
+  // PERSISTED server-side by the intent handler itself — the dashboard no
+  // longer applies the op locally (that produced a double-apply: the
+  // handler's write plus the client re-applying the same op and
+  // autosaving it landed the op twice). `dispatchPaywallPatch` now takes
+  // only a `paywallId` and the registered listener re-fetches the draft
+  // the server already wrote, instead of receiving an op to apply.
+
+  it("notifies the listener registered under its OWN paywallId while mounted, which re-fetches the persisted draft; unregisters on unmount", async () => {
+    const { getVm, getRovi, getSpy, unmountBuilder } = await renderBridge();
     const vm = getVm();
+    const callsBeforeNotify = getSpy.mock.calls.length;
 
-    const op: PaywallTreeOp = {
-      kind: "insert",
-      parentId: "root",
-      index: 0,
-      subtree: { type: "spacer", id: "sp_bridge", size: 8 },
-    };
-
-    let applied = false;
-    act(() => {
-      applied = getRovi().dispatchPaywallPatch(op, "pw_a");
+    const updatedDetail = fakeDetail();
+    (updatedDetail.builderConfig as BuilderConfig).root.children.push({
+      type: "spacer",
+      id: "sp_from_server",
+      size: 8,
     });
-    expect(applied).toBe(true);
-    expect(vm.config.root.children.some((c) => c.id === "sp_bridge")).toBe(true);
+    getSpy.mockResolvedValueOnce(updatedDetail);
+
+    let notified = false;
+    act(() => {
+      notified = getRovi().dispatchPaywallPatch("pw_a");
+    });
+    expect(notified).toBe(true);
+
+    // The listener's refetch is async (fire-and-forget from the
+    // synchronous dispatch), so the resulting config update lands on a
+    // later tick.
+    await waitFor(() => expect(getSpy.mock.calls.length).toBe(callsBeforeNotify + 1));
+    await waitFor(() =>
+      expect(vm.config.root.children.some((c) => c.id === "sp_from_server")).toBe(true),
+    );
 
     act(() => {
       unmountBuilder();
     });
 
-    let appliedAfterUnmount = true;
+    let notifiedAfterUnmount = true;
     act(() => {
-      appliedAfterUnmount = getRovi().dispatchPaywallPatch(
-        {
-          kind: "insert",
-          parentId: "root",
-          index: 0,
-          subtree: { type: "spacer", id: "sp_after_unmount", size: 8 },
-        },
-        "pw_a",
-      );
+      notifiedAfterUnmount = getRovi().dispatchPaywallPatch("pw_a");
     });
-    expect(appliedAfterUnmount).toBe(false);
+    expect(notifiedAfterUnmount).toBe(false);
+    expect(getSpy.mock.calls.length).toBe(callsBeforeNotify + 1); // no further refetch
   });
 
-  it("refuses a patch addressed to a DIFFERENT paywallId than the one this builder has open", async () => {
+  it("refuses a notification addressed to a DIFFERENT paywallId than the one this builder has open, and never refetches", async () => {
     // Cross-paywall guard (spec §3.3): every paywall's root id is
-    // literally "root", so an unscoped op would look valid here too.
-    const { getVm, getRovi } = await renderBridge();
+    // literally "root", so an unscoped op would look valid here too —
+    // the notification itself must still be scoped even though it no
+    // longer carries an op.
+    const { getVm, getRovi, getSpy } = await renderBridge();
     const vm = getVm();
     const before = JSON.stringify(vm.config);
+    const callsBeforeNotify = getSpy.mock.calls.length;
 
-    let applied = true;
+    let notified = true;
     act(() => {
-      applied = getRovi().dispatchPaywallPatch(
-        {
-          kind: "insert",
-          parentId: "root",
-          index: 0,
-          subtree: { type: "spacer", id: "sp_other_paywall", size: 8 },
-        },
-        "pw_other",
-      );
+      notified = getRovi().dispatchPaywallPatch("pw_other");
     });
 
-    expect(applied).toBe(false);
+    expect(notified).toBe(false);
+    expect(getSpy.mock.calls.length).toBe(callsBeforeNotify);
     expect(JSON.stringify(vm.config)).toBe(before);
   });
 
-  it("a failed op (bad target) is swallowed into a `false` return, not thrown at the caller", async () => {
-    const { getRovi } = await renderBridge();
+  it("a failed refetch after a notified edit is swallowed, not thrown at the caller", async () => {
+    const { getRovi, getSpy } = await renderBridge();
+    getSpy.mockRejectedValueOnce(new Error("network down"));
 
-    let applied = true;
-    act(() => {
-      applied = getRovi().dispatchPaywallPatch({ kind: "remove", nodeId: "does-not-exist" }, "pw_a");
+    let notified = false;
+    expect(() => {
+      act(() => {
+        notified = getRovi().dispatchPaywallPatch("pw_a");
+      });
+    }).not.toThrow();
+    expect(notified).toBe(true);
+
+    // Let the rejected refetch promise settle without an unhandled
+    // rejection reaching the test runner.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
     });
-    expect(applied).toBe(false);
   });
 });
 

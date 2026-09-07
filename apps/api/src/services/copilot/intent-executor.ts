@@ -10,7 +10,13 @@
 export interface IntentExecCtx {
   projectId: string;
   userId: string;
-  role: string;
+  // Optional: no registered handler reads `ctx.role` (capability checks
+  // happen at the route layer — POST /:id/execute — before a handler
+  // ever runs, per Task 2). The production route always supplies the
+  // caller's real membership role regardless; this stays optional so a
+  // direct `executeIntent()` call (integration tests) doesn't need to
+  // fabricate one.
+  role?: string;
 }
 
 export type IntentHandler = (

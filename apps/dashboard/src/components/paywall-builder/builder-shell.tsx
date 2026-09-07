@@ -60,24 +60,24 @@ export const BuilderShell = component(({ projectId }: Props) => {
   // the `beforeunload` handler. Do not add a second one here.
 
   // Rovi → builder bridge (spec §3.3): only the builder route registers a
-  // patch listener, so `ApprovalCard`'s execute handler can forward an
-  // approved `action_paywall_editTree` op while a builder is mounted, and
+  // patch listener, so `ApprovalCard`'s execute handler can notify a
+  // mounted builder once an `action_paywall_editTree` intent executes, and
   // falls back to its "open the builder" state otherwise. Registered under
-  // THIS builder's own `paywallId` — `dispatchPaywallPatch` refuses an op
-  // whose `paywallId` doesn't match, so a stale approval from a different
-  // paywall (approved before navigating here, or approved while THIS
-  // builder has since navigated away) can never land on the wrong tree:
-  // every paywall's root node id is literally `"root"`, so an unscoped
-  // "insert under root" would otherwise apply silently cross-paywall.
-  // Unregisters on unmount (route change / paywall switch).
+  // THIS builder's own `paywallId` — `dispatchPaywallPatch` refuses a
+  // notification whose `paywallId` doesn't match, so a stale approval from
+  // a different paywall (approved before navigating here, or approved
+  // while THIS builder has since navigated away) can never trigger a
+  // refetch on the wrong tree. Unregisters on unmount (route change /
+  // paywall switch).
+  //
+  // As of Task 5 the intent handler persists the op server-side itself —
+  // this builder must NOT re-apply it locally (that would land the op
+  // twice), so the listener just re-fetches the draft the handler already
+  // wrote. Fire-and-forget: `refetchAfterExternalEdit` is async and
+  // non-fatal on its own (see its doc comment on the VM).
   useEffect(() => {
-    return registerPaywallPatchListener(vm.paywallId, (op) => {
-      try {
-        vm.applyExternalTreeOp(op);
-        return true;
-      } catch {
-        return false;
-      }
+    return registerPaywallPatchListener(vm.paywallId, () => {
+      void vm.refetchAfterExternalEdit();
     });
   }, [registerPaywallPatchListener, vm, vm.paywallId]);
 

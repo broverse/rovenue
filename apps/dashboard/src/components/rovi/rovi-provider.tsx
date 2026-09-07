@@ -1,5 +1,4 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { PaywallTreeOp } from "@rovenue/shared/paywall";
 import { readStoredValue, writeStoredValue } from "../../lib/safe-storage";
 
 /**
@@ -30,22 +29,30 @@ export type RoviContextValue = {
    * Rovi → builder bridge (spec §3.3), PAYWALL-SCOPED. The builder VM
    * registers a listener keyed to the paywall it's editing while mounted;
    * `ApprovalCard` forwards an executed `action_paywall_editTree` result
-   * through `dispatchPaywallPatch`, passing the op's OWN `paywallId` (from
-   * the intent execute result, never the currently-open route/thread) —
-   * `dispatchPaywallPatch` only invokes the listener when it matches.
-   * Without this check, navigating to a different paywall's builder after
-   * approving an op for paywall A (or approving while B is already open)
-   * would silently apply A's op to B: every paywall's root node id is
-   * literally `"root"`, so an "insert under root" op is valid — and wrong —
-   * for any paywall. Only the most recently registered listener is live —
-   * the builder route is keyed per paywall so at most one builder is ever
+   * through `dispatchPaywallPatch`, passing the result's OWN `paywallId`
+   * (from the intent execute result, never the currently-open
+   * route/thread) — `dispatchPaywallPatch` only invokes the listener when
+   * it matches. Without this check, navigating to a different paywall's
+   * builder after approving an edit on paywall A (or approving while B is
+   * already open) would silently trigger a refetch on B for an edit that
+   * targeted A. Only the most recently registered listener is live — the
+   * builder route is keyed per paywall so at most one builder is ever
    * mounted at a time.
+   *
+   * As of Task 5 the intent handler PERSISTS an approved
+   * `action_paywall_editTree` op server-side itself — it is no longer a
+   * dry run the client applies. So the listener takes no payload: it is
+   * purely a "your draft changed server-side, go re-fetch it" signal
+   * (`PaywallBuilderViewModel.refetchAfterExternalEdit`), never a
+   * `PaywallTreeOp` to apply locally. Applying the op AGAIN client-side
+   * (the pre-Task-5 shape) would land it twice — an `insert` would add two
+   * nodes.
    */
-  registerPaywallPatchListener: (paywallId: string, fn: (op: PaywallTreeOp) => boolean) => () => void;
-  /** Invokes the registered listener ONLY when its registered `paywallId`
+  registerPaywallPatchListener: (paywallId: string, fn: () => void) => () => void;
+  /** Notifies the registered listener ONLY when its registered `paywallId`
    *  matches. Returns `false` (never throws) when no builder is mounted, or
-   *  the mounted builder is for a different paywall than the op targets. */
-  dispatchPaywallPatch: (op: PaywallTreeOp, paywallId: string) => boolean;
+   *  the mounted builder is for a different paywall than the edit targets. */
+  dispatchPaywallPatch: (paywallId: string) => boolean;
 };
 
 export const RoviContext = createContext<RoviContextValue | null>(null);
@@ -67,12 +74,12 @@ export function RoviProvider({ children }: { children: ReactNode }) {
   // listener wins — see `registerPaywallPatchListener`'s doc comment above.
   // Keyed by `paywallId` so a patch destined for a different (or
   // no-longer-open) paywall is refused rather than silently misapplied.
-  const patchListenerRef = useRef<{ paywallId: string; fn: (op: PaywallTreeOp) => boolean } | null>(
+  const patchListenerRef = useRef<{ paywallId: string; fn: () => void } | null>(
     null,
   );
 
   const registerPaywallPatchListener = useCallback(
-    (paywallId: string, fn: (op: PaywallTreeOp) => boolean) => {
+    (paywallId: string, fn: () => void) => {
       const entry = { paywallId, fn };
       patchListenerRef.current = entry;
       return () => {
@@ -82,10 +89,11 @@ export function RoviProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const dispatchPaywallPatch = useCallback((op: PaywallTreeOp, paywallId: string) => {
+  const dispatchPaywallPatch = useCallback((paywallId: string) => {
     const entry = patchListenerRef.current;
     if (!entry || entry.paywallId !== paywallId) return false;
-    return entry.fn(op);
+    entry.fn();
+    return true;
   }, []);
 
   const setOpen = useCallback((next: boolean) => {

@@ -40,6 +40,10 @@ import {
   translateEntries,
   TRANSLATE_MAX_ENTRIES,
 } from "../../services/paywall-ai/translate";
+import {
+  BUILDER_CONFIG_EMPTY_FORMAT_VERSION,
+  BUILDER_CONFIG_TREE_FORMAT_VERSION,
+} from "../../services/paywall-ai/validate-config";
 import { RoviConfigError } from "../../services/copilot/providers";
 import { generateClaimToken, hashToken } from "../../services/funnel/token";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -173,7 +177,7 @@ function prepareBuilderConfigPatch(
   offeringPackageIds: string[],
 ): { builderConfig: unknown; configFormatVersion: number } {
   if (rawBuilderConfig === null) {
-    return { builderConfig: null, configFormatVersion: 1 };
+    return { builderConfig: null, configFormatVersion: BUILDER_CONFIG_EMPTY_FORMAT_VERSION };
   }
 
   // Iterative pre-scan BEFORE the recursive Zod parse: builderConfigSchema
@@ -228,7 +232,7 @@ function prepareBuilderConfigPatch(
     });
   }
 
-  return { builderConfig: parsed.data, configFormatVersion: 2 };
+  return { builderConfig: parsed.data, configFormatVersion: BUILDER_CONFIG_TREE_FORMAT_VERSION };
 }
 
 const versionLabelBodySchema = z.object({

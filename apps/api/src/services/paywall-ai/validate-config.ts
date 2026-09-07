@@ -19,6 +19,14 @@ import {
 // tool-call loop, not directly inside a route handler.
 // =============================================================
 
+/**
+ * `builderConfig` format versions. 1 is the legacy shape — no builder tree,
+ * remote config only. 2 is a component tree. Named here rather than derived
+ * at each write site so the route and the intent handler cannot drift.
+ */
+export const BUILDER_CONFIG_EMPTY_FORMAT_VERSION = 1;
+export const BUILDER_CONFIG_TREE_FORMAT_VERSION = 2;
+
 export class GeneratedConfigError extends Error {
   constructor(public readonly issues: string[]) {
     super(`Generated paywall config is not save-valid: ${issues.join("; ")}`);

@@ -22,15 +22,19 @@
 //   action.featureFlags.updateRules → dashboardFeatureFlagRepo.updateFeatureFlag
 //   action.experiments.start     → experimentRepo.updateExperiment (status→"RUNNING")
 //   action.experiments.stop      → experimentRepo.updateExperiment (status→"COMPLETED")
-//   action.paywall.editTree      → DRY-RUN ONLY (applyTreeOp + assertSaveValid);
-//                                   no repo write — see the handler below.
+//   action.paywall.editTree      → paywallRepo.updatePaywallDraft (the
+//                                   sole persistence path for an approved
+//                                   op — see the handler below).
 
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import { applyTreeOp, paywallTreeOpSchema } from "@rovenue/shared/paywall";
 import { audit } from "../../lib/audit";
 import { registerIntentHandler } from "./intent-executor";
-import { assertSaveValid } from "../paywall-ai/validate-config";
+import {
+  assertSaveValid,
+  BUILDER_CONFIG_TREE_FORMAT_VERSION,
+} from "../paywall-ai/validate-config";
 import { resolvePaywallDraftConfig } from "./tools/query-paywall";
 
 const editTreePayloadSchema = z.object({
@@ -512,37 +516,63 @@ export function registerAllIntentHandlers(): void {
 
   // ------------------------------------------------------------------
   // action.paywall.editTree
-  // DRY-RUN ONLY: applies the proposed `PaywallTreeOp` to the paywall's
-  // current draft config — `resolvePaywallDraftConfig` (shared with
-  // `query_paywall_tree` in `tools/query-paywall.ts`) falls back to an
-  // empty config when no draft exists yet, mirroring the dashboard
-  // builder VM's own `detail.builderConfig ?? emptyBuilderConfig(...)`
-  // — and gates the RESULT through `assertSaveValid`. This handler NEVER
-  // calls `updatePaywall` — persistence happens through the existing
-  // PATCH /paywalls/:id route once the user reviews the diff in the
-  // dashboard, same as every other builder edit. Returning `{ op,
-  // paywallId }` on success tells the caller the op is valid to apply;
-  // it is not itself the applied config.
+  // Applies the approved `PaywallTreeOp` to the paywall's draft and
+  // PERSISTS it, in one transaction with its audit row. This is the sole
+  // carrier of persistence for an approved op — the dashboard no longer
+  // applies it client-side (see design spec, D1).
+  //
+  // Only the DRAFT is written. `/v1/placements` serves the published
+  // snapshot from `paywall_versions`, so nothing here reaches live
+  // traffic until someone publishes.
   // ------------------------------------------------------------------
   registerIntentHandler("action_paywall_editTree", async (ctx, payload) => {
     const { paywallId, op } = editTreePayloadSchema.parse(payload);
 
-    // Cross-project guard: the payload's paywallId is stored verbatim
-    // from the AI tool call, so re-scope it to ctx.projectId here (same
-    // IDOR precedent as every handler above).
-    const paywall = await drizzle.paywallRepo.findPaywallById(
-      drizzle.db,
-      ctx.projectId,
-      paywallId,
-    );
-    if (!paywall) {
-      throw new Error(`Paywall ${paywallId} not found in project`);
-    }
+    return drizzle.db.transaction(async (tx) => {
+      // Cross-project guard: paywallId arrives verbatim from a tool call.
+      const paywall = await drizzle.paywallRepo.findPaywallById(
+        tx,
+        ctx.projectId,
+        paywallId,
+      );
+      if (!paywall) {
+        throw new Error(`Paywall ${paywallId} not found in project`);
+      }
 
-    const currentDraft = resolvePaywallDraftConfig(paywall);
+      const currentDraft = resolvePaywallDraftConfig(paywall);
+      const nextDraft = assertSaveValid(applyTreeOp(currentDraft, op));
 
-    assertSaveValid(applyTreeOp(currentDraft, op));
+      const updated = await drizzle.paywallRepo.updatePaywallDraft(
+        tx,
+        ctx.projectId,
+        paywallId,
+        paywall.draftRevision,
+        {
+          builderConfig: nextDraft,
+          // A tree op always yields a tree, never the legacy empty shape.
+          configFormatVersion: BUILDER_CONFIG_TREE_FORMAT_VERSION,
+        },
+      );
+      if (!updated) {
+        throw new Error(
+          `Paywall ${paywallId} draft changed during approval; re-run the edit`,
+        );
+      }
 
-    return { op, paywallId };
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "update",
+          resource: "paywall",
+          resourceId: paywallId,
+          before: { draftRevision: paywall.draftRevision },
+          after: { draftRevision: updated.draftRevision, op },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+
+      return { paywallId, draftRevision: updated.draftRevision };
+    });
   });
 }
