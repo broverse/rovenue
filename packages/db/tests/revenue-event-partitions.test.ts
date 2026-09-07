@@ -64,6 +64,38 @@ async function tableExists(qualifiedName: string): Promise<boolean> {
   return rows[0]?.present === true;
 }
 
+// Does SOME child of `parentQualified` cover the month starting at
+// `monthStart`? Asserting a partman-shaped NAME (`_pYYYYMMDD`) instead is
+// the same by-name blind spot that produced the overlap bug this suite
+// exists to guard: a month can be legitimately covered by a hand-made
+// `_YYYY_MM` child, in which case the provisioner correctly creates
+// nothing and a name assertion fails on coverage that is actually there.
+// On a long-lived developer database that is not hypothetical — earlier
+// runs of THIS suite, back when the hand-rolled branch was taken, left
+// `revenue_events_2011_03` and friends behind.
+async function monthIsCovered(
+  parentQualified: string,
+  monthStart: string,
+): Promise<boolean> {
+  const result = await db.execute(
+    sql`SELECT EXISTS (
+          SELECT 1
+            FROM pg_inherits i
+            JOIN pg_class c ON c.oid = i.inhrelid
+           WHERE i.inhparent = ${parentQualified}::regclass
+             AND pg_get_expr(c.relpartbound, c.oid) <> 'DEFAULT'
+             AND ${monthStart}::timestamptz >= substring(
+                   pg_get_expr(c.relpartbound, c.oid) from 'FROM \\(''([^'']+)''\\)'
+                 )::timestamptz
+             AND ${monthStart}::timestamptz < substring(
+                   pg_get_expr(c.relpartbound, c.oid) from 'TO \\(''([^'']+)''\\)'
+                 )::timestamptz
+        ) AS covered`,
+  );
+  const rows = (result as unknown as { rows: Array<{ covered: boolean }> }).rows;
+  return rows[0]?.covered === true;
+}
+
 async function childPartitionCount(parentQualified: string): Promise<number> {
   const result = await db.execute(
     sql`SELECT count(*)::int AS n FROM pg_inherits WHERE inhparent = ${parentQualified}::regclass`,
@@ -162,11 +194,9 @@ describe("ensureRevenueEventPartitions — the real revenue_events (partman-mana
     const min = new Date("2011-03-10T00:00:00Z");
     const max = new Date("2011-03-20T00:00:00Z");
 
-    expect(await tableExists("public.revenue_events_p20110301")).toBe(false);
-
     await ensureRevenueEventPartitions(db, { minEventDate: min, maxEventDate: max });
 
-    expect(await tableExists("public.revenue_events_p20110301")).toBe(true);
+    expect(await monthIsCovered("public.revenue_events", "2011-03-01")).toBe(true);
   });
 
   it("is idempotent: provisioning the same range twice does not error and creates nothing new the second time", async () => {
@@ -190,9 +220,9 @@ describe("ensureRevenueEventPartitions — the real revenue_events (partman-mana
 
     await ensureRevenueEventPartitions(db, { minEventDate: min, maxEventDate: max });
 
-    expect(await tableExists("public.revenue_events_p20130101")).toBe(true);
-    expect(await tableExists("public.revenue_events_p20130201")).toBe(true);
-    expect(await tableExists("public.revenue_events_p20130301")).toBe(true);
+    expect(await monthIsCovered("public.revenue_events", "2013-01-01")).toBe(true);
+    expect(await monthIsCovered("public.revenue_events", "2013-02-01")).toBe(true);
+    expect(await monthIsCovered("public.revenue_events", "2013-03-01")).toBe(true);
   });
 });
 
