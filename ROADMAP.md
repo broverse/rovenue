@@ -1090,16 +1090,22 @@ else in the framework/provider-breadth dimension is done.
       The **status page is won't-do here**: it needs hosting and a domain, which
       is an operator decision, not a repository one. Nothing in the repo can
       close it.
-- [ ] No Alertmanager is wired into `docker-compose.yml`. `slo.yml`'s own
-      header already says so (`ROUTING: there is no Alertmanager in
-      docker-compose.yml`) — the multi-window burn-rate alerts above (99.9%
-      availability, 99% under 500ms) plus the correctness alerts labelled
-      `page` evaluate and are visible in Prometheus/Grafana, but nothing
-      actually pages anyone: `deploy/prometheus/prometheus.yml` has no
-      `alerting:` block and no `alertmanager` service exists in
-      `docker-compose.yml`. Add the service plus `alerting.alertmanagers`,
-      or point operators at Grafana's own contact points instead — the SLO
-      rules evaluate correctly either way, only routing is missing.
+- [x] Alertmanager wired — 2026-09-07 (`7061c01c`, `1f057d30`, `7907cc4b`,
+      `aa7adfc1`). An `alertmanager` service under the `observability` profile,
+      an `alerting:` block in `deploy/prometheus/prometheus.yml`, and one
+      generic HTTP receiver driven by `ROVENUE_ALERT_WEBHOOK_URL` — the only
+      destination needing no account, no vendor choice and no committed secret,
+      which is the right default for a self-hosted product. `severity` routes
+      cadence and grouping rather than a second destination.
+      Delivery was PROVEN, not assumed: six batches observed arriving at a real
+      receiver across all four routes, both inhibition rules confirmed
+      suppressing, with a negative control confirming a non-matching alert was
+      not suppressed.
+      One finding worth keeping: the obvious "notifications are failing" metric,
+      `alertmanager_notifications_failed_total`, read **0 after seven minutes**
+      against a dead endpoint while `alertmanager_notification_requests_failed_total`
+      read 38 — the former only counts once Alertmanager stops retrying, which on
+      the Watchdog route is 24h. Alerting on it would have been silent for a day.
 - [x] Chaos tests: dispatcher death + Kafka outage/recovery (2026-09-05,
       `apps/api/tests/outbox-dispatcher.integration.test.ts`). The
       dispatcher's crash window is between `producer.send` and
