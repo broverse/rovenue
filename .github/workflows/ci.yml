@@ -135,7 +135,7 @@ jobs:
       # The image tag is read from docker-compose.yml rather than repeated
       # here, so the rules are always validated against the exact Prometheus
       # version that will load them.
-      - name: Prometheus alert rules - syntax + threshold unit tests
+      - name: Prometheus alert rules + Alertmanager config - syntax, thresholds, routing
         run: |
           set -euo pipefail
           image=$(grep -oE 'prom/prometheus:[^[:space:]"]+' docker-compose.yml | head -1)
@@ -144,12 +144,31 @@ jobs:
             exit 1
           fi
           echo "validating against $image"
-          docker run --rm --entrypoint promtool \
+          # Globbed, not enumerated. prometheus.yml loads rules/*.yml, so a
+          # file listed by name here would let the NEXT rule file ship
+          # unchecked — the CI step would stay green while Prometheus
+          # refused to load the config and every alert in the deployment
+          # went dark. Same for the tests directory.
+          docker run --rm --entrypoint sh \
             -v "$PWD/deploy/prometheus:/p:ro" "$image" \
-            check rules /p/rules/slo.yml
-          docker run --rm --entrypoint promtool \
+            -c 'promtool check rules /p/rules/*.yml'
+          docker run --rm --entrypoint sh \
             -v "$PWD/deploy/prometheus:/p:ro" "$image" \
-            test rules /p/tests/slo_test.yml
+            -c 'for t in /p/tests/*_test.yml; do promtool test rules "$t" || exit 1; done'
+
+          # The delivery path the rules above depend on. An Alertmanager
+          # config that does not parse takes the container down at boot,
+          # which takes every alert with it — and nothing else in CI reads
+          # this file.
+          am_image=$(grep -oE 'prom/alertmanager:[^[:space:]"]+' docker-compose.yml | head -1)
+          if [ -z "$am_image" ]; then
+            echo "no prom/alertmanager image pinned in docker-compose.yml" >&2
+            exit 1
+          fi
+          echo "validating against $am_image"
+          docker run --rm --entrypoint amtool \
+            -v "$PWD/deploy/alertmanager:/a:ro" "$am_image" \
+            check-config /a/alertmanager.yml
 
       # apps/api's `test` script is two passes: `vitest run` excludes the
       # testcontainer suites, then `VITEST_CONTAINER_PASS=1 vitest run` runs
