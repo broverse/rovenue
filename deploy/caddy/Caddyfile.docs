@@ -9,4 +9,14 @@
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
 	header /index.html Cache-Control "no-cache"
+	# Search index (fumadocs/Orama), emitted by the docs build as
+	# build/client/search-index.json. Unlike /assets/* it has no content
+	# hash in its name, and its contents change with every docs deploy, so
+	# it needs the same revalidate-always treatment as index.html — without
+	# it Caddy sends only ETag/Last-Modified and browsers apply heuristic
+	# freshness, leaving returning readers searching a stale index (missing
+	# new pages, linking to deleted ones) for hours after a deploy.
+	# Content-Type is already correct (application/json, from the .json
+	# extension) and `encode` above compresses it, so nothing else is needed.
+	header /search-index.json Cache-Control "no-cache"
 }

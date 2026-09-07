@@ -1,9 +1,12 @@
 import { index, route, type RouteConfig } from '@react-router/dev/routes';
+import { searchIndexFile } from './lib/shared';
 
 export default [
   index('routes/home.tsx'),
   route('docs/*', 'routes/docs.tsx'),
-  route('api/search', 'routes/search.ts'),
+  // Prerendered to build/client/search-index.json — the static image has no
+  // Node process, so this is an exported index, not a query API.
+  route(searchIndexFile, 'routes/search.ts'),
   route('og/docs/*', 'routes/og.docs.tsx'),
 
   // LLM integration:

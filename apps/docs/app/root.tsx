@@ -1,3 +1,4 @@
+import { lazy } from 'react';
 import {
   isRouteErrorResponse,
   Links,
@@ -12,6 +13,15 @@ import './app.css';
 import { isMarkdownPreferred, rewritePath } from 'fumadocs-core/negotiation';
 import NotFound from './routes/not-found';
 import { docsContentRoute, docsRoute } from '@/lib/shared';
+
+/**
+ * fumadocs-ui's built-in dialog queries `/api/search` on a Node server that
+ * the static docs image does not run, so search is pointed at the
+ * prerendered index instead (app/components/search-dialog.tsx). Lazy, the
+ * same way fumadocs lazy-loads its own dialog, so Orama stays out of the
+ * root chunk until someone actually opens search.
+ */
+const StaticSearchDialog = lazy(() => import('./components/search-dialog'));
 
 export const links: Route.LinksFunction = () => [
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
@@ -36,7 +46,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
       </head>
       <body className="flex flex-col min-h-screen">
-        <RootProvider>{children}</RootProvider>
+        <RootProvider search={{ SearchDialog: StaticSearchDialog }}>
+          {children}
+        </RootProvider>
         <ScrollRestoration />
         <Scripts />
       </body>
