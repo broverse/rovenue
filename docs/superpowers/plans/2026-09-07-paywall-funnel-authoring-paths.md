@@ -25,6 +25,8 @@
 - **Funnel per-type validation runs at publish, never at save.** Saving an invalid page must keep succeeding.
 - **Every new migration must be checked against the drizzle journal watermark** before the task is considered done (see Task 3, Step 6). Migrations that land below the watermark are silently skipped forever on upgrade-path databases.
 - **Do not run `pnpm db:migrate:fresh` against a database with existing history.**
+- **Before every commit, run `git status --porcelain` and confirm no file you changed is left unstaged.** The `git add` lines in these tasks name paths explicitly and one of them has already proved incomplete — a task whose commit omits a file it edited does not compile at that commit, even though it compiles in your working tree.
+- **New DB columns follow the target table's own naming convention.** `copilot_intents` and most hot tables are snake_case; naming is genuinely mixed *across* tables, so read the table before adding to it rather than generalising.
 
 ---
 
@@ -165,7 +167,7 @@ existing rank gate is untouched. Additive, and no other tool changes.
 
 **Files:**
 - Modify: `packages/db/src/drizzle/schema.ts` (`copilotIntents`)
-- Create: `packages/db/drizzle/<next>_copilot_intent_requires_capability.sql`
+- Create: `packages/db/drizzle/migrations/<next>_copilot_intent_requires_capability.sql`
 - Modify: `packages/db/src/drizzle/repositories/copilot-intents.ts`
 - Modify: `apps/api/src/services/copilot/tools/_action-helper.ts`
 - Modify: `apps/api/src/services/copilot/tools/action-paywall.ts`
@@ -248,7 +250,7 @@ In `packages/db/src/drizzle/schema.ts`, inside the `copilotIntents` table defini
     // When set, this capability is the authoritative gate at execute time
     // and `requiresRole` is ignored. Null keeps the legacy rank gate, so
     // action tools that have not migrated are unaffected.
-    requiresCapability: text("requiresCapability"),
+    requiresCapability: text("requires_capability"),
 ```
 
 Generate the migration:
@@ -350,7 +352,7 @@ git commit -m "feat(api): gate paywall writes on paywalls:write via intent capab
 
 **Files:**
 - Modify: `packages/db/src/drizzle/schema.ts` (`paywalls`)
-- Create: `packages/db/drizzle/<next>_paywall_draft_revision.sql`
+- Create: `packages/db/drizzle/migrations/<next>_paywall_draft_revision.sql`
 - Test: `packages/db/src/drizzle/drizzle-foundation.test.ts`
 
 **Interfaces:**
@@ -421,7 +423,7 @@ entry whose `when` is lower than the highest existing entry never runs.
 ```bash
 python3 - <<'PY'
 import json
-j = json.load(open("packages/db/drizzle/meta/_journal.json"))
+j = json.load(open("packages/db/drizzle/migrations/meta/_journal.json"))
 entries = j["entries"]
 newest = max(e["when"] for e in entries)
 last = entries[-1]
@@ -434,10 +436,68 @@ PY
 Expected: `OK — above watermark`. If it prints BROKEN, raise the new
 entry's `when` above the maximum before continuing.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Replace the manual check with a guard test**
+
+The watermark check in Step 6 is a ritual a future migration author will
+forget — and forgetting it is invisible, because the migration still looks
+applied locally and is skipped only on upgrade-path databases. Convert it
+into a test.
+
+Create `packages/db/src/drizzle/journal-monotonic.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const JOURNAL_PATH = join(
+  __dirname,
+  "../../drizzle/migrations/meta/_journal.json",
+);
+
+interface JournalEntry {
+  idx: number;
+  tag: string;
+  when: number;
+}
+
+describe("drizzle migration journal", () => {
+  // Drizzle's migrator applies entries by a `created_at` watermark, so an
+  // entry whose `when` is below an earlier entry's is never executed on a
+  // database that already has history — it is silently skipped forever,
+  // while looking perfectly applied on a fresh install. This repo has been
+  // bitten by exactly that. Assert the invariant instead of remembering it.
+  it("has strictly non-decreasing `when` values", () => {
+    const journal = JSON.parse(readFileSync(JOURNAL_PATH, "utf8")) as {
+      entries: JournalEntry[];
+    };
+
+    const regressions = journal.entries
+      .map((entry, i) => ({ entry, prev: journal.entries[i - 1] }))
+      .filter(({ entry, prev }) => prev !== undefined && entry.when < prev.when)
+      .map(({ entry, prev }) => `${entry.tag} (${entry.when}) < ${prev!.tag} (${prev!.when})`);
+
+    expect(regressions).toEqual([]);
+  });
+});
+```
+
+Run it:
 
 ```bash
-git add packages/db/src/drizzle/schema.ts packages/db/drizzle
+cd packages/db && nice -n 19 npx vitest run src/drizzle/journal-monotonic.test.ts --maxWorkers=2
+```
+
+Expected: PASS. **If it fails on entries that predate this task, do not
+"fix" the historical journal** — report it as DONE_WITH_CONCERNS with the
+offending tags listed. Rewriting past `when` values would change which
+migrations existing databases consider applied, which is a data-loss-shaped
+risk, not a cleanup.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add packages/db/src/drizzle/schema.ts packages/db/drizzle packages/db/src/drizzle/journal-monotonic.test.ts
 git commit -m "feat(db): add paywalls.draftRevision for optimistic concurrency"
 ```
 
@@ -448,7 +508,7 @@ git commit -m "feat(db): add paywalls.draftRevision for optimistic concurrency"
 **Files:**
 - Modify: `packages/db/src/drizzle/repositories/paywalls.ts`
 - Modify: `apps/api/src/routes/dashboard/paywalls.ts`
-- Modify: `apps/dashboard/src/lib/services/paywall-api.ts` (autosave caller)
+- Modify: `apps/dashboard/src/lib/services/paywall-builder-api.ts` (autosave caller)
 - Test: `apps/api/src/routes/dashboard/paywalls.concurrency.integration.test.ts` (create)
 
 **Interfaces:**
@@ -606,12 +666,12 @@ the new function and answer 409 on null:
 
 - [ ] **Step 5: Send the revision from the builder's autosave**
 
-In `apps/dashboard/src/lib/services/paywall-api.ts`, include the revision
+In `apps/dashboard/src/lib/services/paywall-builder-api.ts`, include the revision
 the builder last read in the autosave PATCH body, and on a 409 response
 reload the paywall and surface the conflict rather than retrying blindly.
 
 ```bash
-grep -rn "builderConfig" apps/dashboard/src/lib/services/paywall-api.ts
+grep -rn "builderConfig" apps/dashboard/src/lib/services/paywall-builder-api.ts
 ```
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -1229,23 +1289,51 @@ added next month.
 
 - [ ] **Step 1: Write the structural authorization guard**
 
+Enumerate the routes from Hono's own `.routes` array (verified to expose
+`{ method, path }`), then prove each mutating route is gated **by
+behaviour**, not by grepping for a function name — a gate moved into a
+helper or middleware would defeat a source scan while still being correct,
+and a route that merely mentions the symbol in a comment would pass one.
+
+CUSTOMER_SUPPORT holds neither `paywalls:write` nor `funnels:write`, so
+every mutating route must reject it with 403. The capability gate runs
+before body validation, so an empty body still yields 403 on a gated
+route and 400/404/200 on an ungated one — which is exactly the failure
+this guard exists to catch.
+
 ```ts
 const MUTATING_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
+const FORBIDDEN = 403;
 
-// Derived from the router, not from a hand-maintained list: a paywall or
-// funnel mutation added later cannot silently skip the capability gate.
-it("every paywall/funnel mutation route is capability-gated", async () => {
+// Routes that legitimately need no capability gate. Every entry needs a
+// reason; an empty list is the healthy state.
+const UNGATED_BY_DESIGN: ReadonlyArray<{ method: string; path: string; why: string }> = [];
+
+function fillParams(path: string): string {
+  // Hono paths carry `:param` segments; any non-empty value reaches the
+  // gate, because authorization runs before the row is looked up.
+  return path.replace(/:[A-Za-z0-9_]+/g, "does-not-exist");
+}
+
+it("every paywall/funnel mutation route rejects a role without the capability", async () => {
+  const { cookie, projectId } = await seedProjectWithRole("CUSTOMER_SUPPORT");
   const offenders: string[] = [];
 
-  for (const [label, route, source] of [
-    ["paywalls", paywallsDashboardRoute, PAYWALLS_SOURCE],
-    ["funnels", funnelsRoute, FUNNELS_SOURCE],
+  for (const [label, route, mount] of [
+    ["paywalls", paywallsDashboardRoute, `/projects/${projectId}/paywalls`],
+    ["funnels", funnelsRoute, `/projects/${projectId}/funnels`],
   ] as const) {
     for (const r of route.routes) {
       if (!MUTATING_METHODS.has(r.method)) continue;
-      const handler = source.slice(...handlerSpanFor(source, r.method, r.path));
-      if (!handler.includes("assertProjectCapability")) {
-        offenders.push(`${label} ${r.method} ${r.path}`);
+      if (UNGATED_BY_DESIGN.some((u) => u.method === r.method && u.path === r.path)) continue;
+
+      const res = await app.request(`${mount}${fillParams(r.path)}`, {
+        method: r.method,
+        headers: { cookie, "content-type": "application/json" },
+        body: "{}",
+      });
+      if (res.status !== FORBIDDEN) {
+        offenders.push(`${label} ${r.method} ${r.path} → ${res.status}`);
       }
     }
   }
@@ -1254,11 +1342,9 @@ it("every paywall/funnel mutation route is capability-gated", async () => {
 });
 ```
 
-Read the route source with `readFileSync` at the top of the file, and
-implement `handlerSpanFor` as a small helper that locates the handler body
-for a method+path pair. If a route legitimately needs no gate, it must be
-added to a named `UNGATED_BY_DESIGN` constant with a comment saying why —
-never silently skipped.
+Mount both routers on one test app at the paths above. If a route
+legitimately needs no gate, add it to `UNGATED_BY_DESIGN` with its reason —
+never delete it from the sweep silently.
 
 - [ ] **Step 2: Write the draft-isolation invariant test**
 
