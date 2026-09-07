@@ -21,17 +21,17 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-// Single source of truth for the filename — the same constant routes.ts
-// registers the route under and the browser fetches. Imported (via tsx)
-// rather than re-typed, so a rename cannot leave this check pointed at a
-// path that no longer exists while still passing.
-import { searchIndexFile } from '../app/lib/shared.ts';
+import { relative } from 'node:path';
+// Single source of truth for the build output paths, itself derived from the
+// same `searchIndexFile` constant routes.ts registers the route under and the
+// browser fetches — so a rename cannot leave this check pointed at a path that
+// no longer exists while still passing.
+import {
+  CLIENT_BUILD_DIR,
+  SEARCH_INDEX_PATH as INDEX_PATH,
+} from './build-output.mjs';
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const CLIENT_BUILD_DIR = join(__dirname, '..', 'build', 'client');
-const INDEX_PATH = join(CLIENT_BUILD_DIR, searchIndexFile);
+const INDEX_LABEL = `build/client/${relative(CLIENT_BUILD_DIR, INDEX_PATH)}`;
 
 // The shapes `fumadocs-core`'s `staticGET()` can export, and the shape
 // `oramaStaticClient` knows how to `load()` on the client.
@@ -89,6 +89,6 @@ if (documentCount === 0) {
 }
 
 console.log(
-  `✓ verify-search-index: build/client/${searchIndexFile} ` +
+  `✓ verify-search-index: ${INDEX_LABEL} ` +
     `(${data.type}, ${documentCount} records, ${Buffer.byteLength(raw)} bytes)`,
 );
