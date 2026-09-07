@@ -243,3 +243,132 @@ docker stats --no-stream api   # sustained near the mem_limit cap in docker-comp
 3. Reclaimed rows are retried automatically — this alert is about *why*
    processes are dying, not about data loss (the reaper's whole job is to
    make sure reclaimed work isn't lost).
+
+## `RovenuePartitionPremakeRunningOut` — ticket, 1h sustained
+
+**What it means:** `rovenue_partition_premake_months_remaining{table=…}` has
+dropped below 3. That gauge is the number of months between now and the
+furthest-future partition bound on that table — i.e. how long the table
+keeps accepting rows if nothing ever creates another partition. Partition
+maintenance has stopped rolling the premake window forward.
+
+This is the alert that would have caught the defect migration 0130 fixed.
+`revenue_events` and `credit_ledger` had 60 hand-made monthly children
+ending at 2028-12 and nothing registered to extend them, so every insert
+dated 2029-01-01 or later was going to fail with `no partition of relation
+"revenue_events" found for row` — and the only symptom available before
+that date was none at all.
+
+**Confirm:**
+
+```bash
+# What the gauge is reading, straight from the catalog:
+docker compose exec db psql -U rovenue -d rovenue -c "
+  SELECT parent.relname,
+         max((substring(pg_get_expr(child.relpartbound, child.oid)
+              FROM 'TO \(''(.*?)''\)'))::timestamptz) AS last_bound
+    FROM pg_inherits i
+    JOIN pg_class child  ON child.oid  = i.inhrelid
+    JOIN pg_class parent ON parent.oid = i.inhparent
+   WHERE parent.relname IN ('revenue_events','credit_ledger','outgoing_webhooks')
+   GROUP BY parent.relname;"
+
+# Has the worker run at all? It is scheduled 03:00 UTC daily.
+docker compose logs api | grep partition-maintenance | tail -20
+```
+
+**Resolve:**
+
+1. `revenue_events` / `credit_ledger` roll forward through pg_partman.
+   Check the registration is still there and premake is what you expect:
+   `SELECT parent_table, premake, retention FROM partman.part_config;`
+   A missing row means migration 0130 never applied on this database.
+2. `outgoing_webhooks` is **not** partman-managed —
+   `apps/api/src/workers/partition-maintenance.ts` hand-rolls its next 13
+   months. If only that table is short, the worker is failing partway.
+3. Run maintenance by hand to buy runway immediately:
+   `CALL partman.run_maintenance_proc();` for the partman tables, then let
+   the worker's next run cover `outgoing_webhooks` (or restart `api`,
+   which reschedules the repeatable job).
+4. Then find out why the daily job stopped — check the BullMQ queue
+   `rovenue-partition-maintenance` for failed jobs. Also check
+   `rovenue_partition_maintenance_partman_ran` below.
+
+## `RovenuePartitionPremakeCritical` — page, 15m sustained
+
+Same gauge, under 1 month. Everything above applies; the difference is that
+the daily cadence gives you roughly 30 more chances before inserts start
+failing outright. Do step 3 first and diagnose afterwards.
+
+## `RovenuePartitionDefaultRowsStranded` — page immediately, no delay
+
+**What it means:** `partman.check_default()` found at least one row in a
+partitioned table's DEFAULT partition. **Nothing recovers this
+automatically, and it gets worse the longer it waits.**
+
+A DEFAULT partition catches rows no real partition covers. Once a row for
+period P sits there, Postgres refuses to attach the real partition for P:
+
+```
+ERROR:  updated partition constraint for default partition
+        "revenue_events_default" would be violated by some row
+```
+
+Partition maintenance for that table then fails every night, and neither
+partman nor the retention sweep ever relocates the row.
+
+**Confirm:**
+
+```bash
+docker compose exec db psql -U rovenue -d rovenue -c "SELECT * FROM partman.check_default();"
+# Which periods are stranded — this is what you have to move:
+docker compose exec db psql -U rovenue -d rovenue -c "
+  SELECT date_trunc('month', \"eventDate\") AS period, count(*)
+    FROM ONLY revenue_events_default GROUP BY 1 ORDER BY 1;"
+```
+
+**Resolve:**
+
+1. Create the real partition for each stranded period **first** — it will
+   be refused while the rows are still in the default, so:
+2. Take the rows out of the default into a temporary table, create the
+   partition, then insert them back. Under an exclusive lock, in one
+   transaction, per period. `partman.partition_data_time()` does this for
+   you on a partman-managed parent and is the preferred route.
+3. Ask how they got there: a row lands in the default only when it is
+   dated past the premake horizon (see the two alerts above) or before the
+   first partition. A backfill importing historical data is the usual
+   cause — check `import_jobs`.
+
+## `RovenuePartitionMaintenanceSkippingPartman` — ticket, 1h sustained
+
+**What it means:** `rovenue_partition_maintenance_partman_ran` is 0. The
+maintenance worker ran, found no `partman` schema, and skipped
+`partman.run_maintenance_proc()` entirely. Every partman-managed parent —
+`revenue_events`, `credit_ledger`, `funnel_sessions`, `funnel_answers`,
+`integration_deliveries` — stops rolling forward while this is true.
+
+Migration `0051_funnel_partitions.sql` installs pg_partman unguarded and
+runs on both install paths (fresh install and upgrade), so a fully-migrated
+database should never produce this. A 0 means either the database is not
+fully migrated, or the extension was dropped.
+
+**Confirm:**
+
+```bash
+docker compose exec db psql -U rovenue -d rovenue -c "
+  SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='partman') AS schema_present,
+         (SELECT extversion FROM pg_extension WHERE extname='pg_partman') AS ext_version;"
+docker compose logs api | grep "partman schema absent"
+```
+
+**Resolve:**
+
+1. If migrations are behind, run `pnpm db:migrate` — 0051 will install it.
+2. If the image itself lacks pg_partman, the database is not running
+   `deploy/postgres` (a stock `postgres:16` has no `partman.control`).
+   Rebuild from `deploy/postgres/Dockerfile`.
+3. After it is back, run `CALL partman.run_maintenance_proc();` once by
+   hand — the premake window has been standing still for as long as this
+   alert was firing, so check `rovenue_partition_premake_months_remaining`
+   afterwards rather than assuming it recovered.

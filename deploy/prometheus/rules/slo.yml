@@ -321,3 +321,103 @@ groups:
           description: >-
             The reaper is finding stale PROCESSING rows, which means API
             processes are dying while holding webhook work.
+
+  # -----------------------------------------------------------
+  # Partition headroom — the tables nothing else watches
+  # -----------------------------------------------------------
+  #
+  # `revenue_events` and `credit_ledger` are range-partitioned. Migration
+  # 0130 registered them with pg_partman and created exactly ONE month past
+  # the 60 hand-made children that end at 2028-12; every month after that
+  # exists only because apps/api/src/workers/partition-maintenance.ts calls
+  # `partman.run_maintenance_proc()` daily.
+  #
+  # Before 0130 nothing created a 2029 partition and nothing said so. The
+  # only symptom the defect could produce was `no partition of relation
+  # "revenue_events" found for row` on an insert dated 2029-01-01 — a date
+  # nobody was going to reach in testing, so it sat undetected for over a
+  # year. These rules exist so the NEXT version of that failure announces
+  # itself while there is still runway.
+  #
+  # 0130 also cleared partman's own retention on both tables, because
+  # workers/retention-sweep.ts owns dropping (tenant-scoped and audited;
+  # partman is neither). That is the right trade and it means there is no
+  # backstop dropper: if the sweep stalls these tables grow unbounded with
+  # nothing else looking at them.
+  - name: rovenue-partitions
+    rules:
+      - alert: RovenuePartitionPremakeRunningOut
+        # Three months of runway. Enough to notice, find out why
+        # maintenance stopped, and fix it before an insert fails —
+        # the worker runs daily, so three months is ~90 missed runs.
+        # `for: 1h` only filters a scrape blip: this value moves over
+        # weeks, so nothing about it is transient.
+        expr: rovenue_partition_premake_months_remaining < 3
+        for: 1h
+        labels:
+          severity: ticket
+          area: partitions
+        annotations:
+          summary: "{{ $labels.table }} has under three months of partitions left"
+          description: >-
+            {{ $labels.table }} has {{ $value | printf "%.1f" }} months
+            before its furthest-future partition bound. Partition
+            maintenance has not rolled the premake window forward. When
+            this reaches zero every insert past the bound fails with "no
+            partition of relation found for row".
+
+      - alert: RovenuePartitionPremakeCritical
+        # Under a month. At the daily cadence this is the last chance to
+        # fix it before writes start failing, so it pages.
+        expr: rovenue_partition_premake_months_remaining < 1
+        for: 15m
+        labels:
+          severity: page
+          area: partitions
+        annotations:
+          summary: "{{ $labels.table }} runs out of partitions within a month"
+          description: >-
+            {{ $labels.table }} has {{ $value | printf "%.1f" }} months of
+            partitions left. Run partition maintenance now; once the bound
+            passes, inserts fail outright.
+
+      - alert: RovenuePartitionDefaultRowsStranded
+        # ALERT ON ANY NON-ZERO VALUE, and treat it as urgent — no `for:`.
+        # A row in the DEFAULT partition permanently blocks attaching the
+        # real partition for that period: Postgres refuses with "updated
+        # partition constraint for default partition would be violated by
+        # some row". Neither partman nor the maintenance worker ever
+        # relocates it. Recovery is a manual row move under an exclusive
+        # lock, and it only gets more expensive the longer it waits.
+        expr: rovenue_partition_default_rows > 0
+        labels:
+          severity: page
+          area: partitions
+        annotations:
+          summary: "{{ $labels.table }} has rows stranded in its DEFAULT partition"
+          description: >-
+            {{ $value }} row(s) sit in {{ $labels.table }}'s DEFAULT
+            partition. Until they are moved, the real partition for that
+            period cannot be attached and partition maintenance will fail
+            for that table. Nothing recovers this automatically.
+
+      - alert: RovenuePartitionMaintenanceSkippingPartman
+        # The worker skips run_maintenance_proc when the `partman` schema
+        # is absent. That is correct on a database that genuinely has no
+        # partman and catastrophic on one that does — every registered
+        # parent stops rolling forward, silently. Migration 0051 installs
+        # pg_partman unguarded on both install paths, so on a
+        # fully-migrated database this should never be 0.
+        expr: rovenue_partition_maintenance_partman_ran == 0
+        for: 1h
+        labels:
+          severity: ticket
+          area: partitions
+        annotations:
+          summary: "Partition maintenance is skipping pg_partman entirely"
+          description: >-
+            The maintenance worker ran but found no `partman` schema, so
+            it created no partman-managed partitions. revenue_events,
+            credit_ledger, funnel_sessions, funnel_answers and
+            integration_deliveries all stop rolling forward while this
+            lasts.

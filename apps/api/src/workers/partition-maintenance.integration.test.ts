@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import type { Gauge } from "prom-client";
 import { sql } from "drizzle-orm";
 import { getDb } from "@rovenue/db";
 import { runPartitionMaintenance } from "./partition-maintenance";
+import {
+  partitionDefaultRows,
+  partitionMaintenancePartmanRan,
+  partitionPremakeMonthsRemaining,
+} from "../lib/metrics";
 
 // =============================================================
 // Partition maintenance — integration
@@ -136,5 +142,153 @@ describe("runPartitionMaintenance", () => {
     `);
 
     expect(inserted.rows[0]?.ok).toBe(true);
+  });
+});
+
+// =============================================================
+// The gauges (fix round 1, item 3)
+// =============================================================
+//
+// Migration 0130 creates ONE forward partition and hands the rest to
+// `partman.run_maintenance_proc()` running daily. Before these gauges
+// nothing observed whether that happened. These tests exist to keep
+// them able to FIRE: a gauge that is never set reads exactly like a
+// healthy one, which is how the 2029 cliff stayed invisible.
+
+/** Purpose-built parent so the DEFAULT-partition assertion never has to
+ *  strand a row in a real table (which would permanently block attaching
+ *  that month's partition — the very failure the gauge warns about). */
+const PROBE_PARENT = "partition_metrics_probe";
+const PROBE_CONTROL = "eventDate";
+/** Far enough past any premake window that the row can only land in the
+ *  DEFAULT partition. */
+const PROBE_STRANDED_ROW_DATE = "2099-06-15T00:00:00.000Z";
+const PROBE_FIRST_CHILD_FROM = "2026-01-01T00:00:00.000Z";
+const PROBE_FIRST_CHILD_TO = "2026-02-01T00:00:00.000Z";
+
+async function partmanInstalled(): Promise<boolean> {
+  const db = getDb();
+  const res = await db.execute<{ present: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM pg_namespace WHERE nspname = 'partman'
+    ) AS present
+  `);
+  return res.rows[0]?.present ?? false;
+}
+
+async function gaugeValue(
+  gauge: Gauge<string>,
+  table?: string,
+): Promise<number | undefined> {
+  const snapshot = await gauge.get();
+  const match = snapshot.values.find((v) =>
+    table === undefined ? true : v.labels.table === table,
+  );
+  return match?.value;
+}
+
+describe("partition maintenance gauges", () => {
+  afterAll(async () => {
+    const db = getDb();
+    await db.execute(
+      sql.raw(`DROP TABLE IF EXISTS "${PROBE_PARENT}" CASCADE`),
+    );
+    if (await partmanInstalled()) {
+      await db.execute(
+        sql.raw(
+          `DELETE FROM partman.part_config WHERE parent_table = 'public.${PROBE_PARENT}'`,
+        ),
+      );
+    }
+  });
+
+  it("reports premake headroom for every table this worker keeps ahead", async () => {
+    await runPartitionMaintenance();
+
+    for (const table of [
+      "revenue_events",
+      "credit_ledger",
+      OUTGOING_WEBHOOKS_TABLE,
+    ]) {
+      const months = await gaugeValue(partitionPremakeMonthsRemaining, table);
+      expect(months, `no headroom gauge for ${table}`).toBeDefined();
+      // The alert threshold is < 3. A freshly-migrated database has a
+      // full premake window, so anything at or below the threshold here
+      // means the premake is not being maintained at all — which is the
+      // exact condition the alert exists to catch.
+      expect(months, `${table} headroom`).toBeGreaterThan(3);
+    }
+  });
+
+  it("records whether partman actually ran, rather than leaving it in a log line", async () => {
+    const installed = await partmanInstalled();
+
+    // The claim the worker's header now makes: 0051_funnel_partitions
+    // installs pg_partman UNGUARDED on both install paths, so a
+    // fully-migrated database — this one included — has it. The old
+    // comment said the opposite ("CI and the test databases have no
+    // partman schema at all") and nothing ever checked.
+    expect(installed).toBe(true);
+
+    await runPartitionMaintenance();
+
+    expect(await gaugeValue(partitionMaintenancePartmanRan)).toBe(1);
+  });
+
+  it("counts rows stranded in a DEFAULT partition instead of reporting nothing", async () => {
+    const db = getDb();
+    expect(await partmanInstalled()).toBe(true);
+
+    await db.execute(
+      sql.raw(`
+        CREATE TABLE "${PROBE_PARENT}" (
+          "id" bigserial NOT NULL,
+          "${PROBE_CONTROL}" timestamptz NOT NULL,
+          PRIMARY KEY ("id", "${PROBE_CONTROL}")
+        ) PARTITION BY RANGE ("${PROBE_CONTROL}")
+      `),
+    );
+    await db.execute(
+      sql.raw(`
+        CREATE TABLE "${PROBE_PARENT}_2026_01"
+          PARTITION OF "${PROBE_PARENT}"
+          FOR VALUES FROM ('${PROBE_FIRST_CHILD_FROM}')
+                       TO ('${PROBE_FIRST_CHILD_TO}')
+      `),
+    );
+    await db.execute(
+      sql.raw(`
+        SELECT partman.create_parent(
+          p_parent_table    => 'public.${PROBE_PARENT}',
+          p_control         => '${PROBE_CONTROL}',
+          p_interval        => '1 month',
+          p_premake         => 2,
+          p_start_partition => '${PROBE_FIRST_CHILD_TO}')
+      `),
+    );
+
+    // Healthy first: check_default() returns NOTHING for a clean set, so
+    // the gauge must still publish a zero. Otherwise "no series" and
+    // "not measured" are indistinguishable.
+    await runPartitionMaintenance();
+    expect(await gaugeValue(partitionDefaultRows, "revenue_events")).toBe(0);
+    expect(await gaugeValue(partitionDefaultRows, PROBE_PARENT)).toBeUndefined();
+
+    // Now strand a row. This is the state the alert pages on: Postgres
+    // will refuse to attach the real partition for that month for as
+    // long as this row sits in the default.
+    await db.execute(
+      sql.raw(`
+        INSERT INTO "${PROBE_PARENT}" ("${PROBE_CONTROL}")
+        VALUES ('${PROBE_STRANDED_ROW_DATE}')
+      `),
+    );
+
+    await runPartitionMaintenance();
+
+    // Attributed to the PARENT, not to `<parent>_default` which is what
+    // partman.check_default() actually reports — so the label lines up
+    // with the headroom gauge and one alert can name one table.
+    expect(await gaugeValue(partitionDefaultRows, PROBE_PARENT)).toBe(1);
   });
 });

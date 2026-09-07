@@ -107,9 +107,19 @@ was "everything shipped and nobody wrote down that it existed."
   alerts, plus a **correctness** group that pages on
   `RovenueAccessDriftCircuitBreakerTripped` (any non-zero increase, no
   delay) and tickets on drift step-changes, the replay guard failing open,
-  and pods dying mid-webhook. Verified executable: `promtool check rules`
-  against this file reports **"SUCCESS: 25 rules found"** (14 recording
-  rules across the two SLIs' seven windows each, 11 alerting rules).
+  and pods dying mid-webhook, plus a **partitions** group covering the
+  premake headroom on `revenue_events` / `credit_ledger` /
+  `outgoing_webhooks` (`RovenuePartitionPremakeRunningOut` at under three
+  months, `RovenuePartitionPremakeCritical` at under one), rows stranded in
+  a DEFAULT partition (`RovenuePartitionDefaultRowsStranded`, pages on the
+  first one — nothing recovers it automatically), and the maintenance
+  worker skipping pg_partman altogether
+  (`RovenuePartitionMaintenanceSkippingPartman`). Verified executable:
+  `promtool check rules` against this file reports **"SUCCESS: 29 rules
+  found"** (14 recording rules across the two SLIs' seven windows each, 15
+  alerting rules). `promtool test rules deploy/prometheus/tests/slo_test.yml`
+  additionally proves each alert fires on a synthetic incident and stays
+  quiet on a healthy series.
 
 - **Dashboards.** `deploy/grafana` auto-provisions a dashboard titled
   **"Rovenue API — RED"** (`deploy/grafana/dashboards/rovenue-api-red.json`,

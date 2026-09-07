@@ -152,3 +152,126 @@ tests:
             exp_annotations:
               summary: "Entitlement reconciler refused to heal — drift ratio above threshold"
               description: "A sweep found more drift than MAX_DRIFT_HEAL_RATIO allows and stopped. Automated repair is halted on purpose; entitlement data needs a human before anything rewrites it."
+
+  # -----------------------------------------------------------
+  # Partition headroom
+  # -----------------------------------------------------------
+  # A healthy install has a full premake window, nothing in any DEFAULT
+  # partition, and a worker that actually called run_maintenance_proc.
+  # None of the four partition rules may fire on that.
+  - interval: 1m
+    name: healthy partitions page nobody
+    input_series:
+      - series: 'rovenue_partition_premake_months_remaining{table="revenue_events"}'
+        values: "12+0x180"
+      - series: 'rovenue_partition_premake_months_remaining{table="credit_ledger"}'
+        values: "12+0x180"
+      - series: 'rovenue_partition_default_rows{table="revenue_events"}'
+        values: "0+0x180"
+      - series: "rovenue_partition_maintenance_partman_ran"
+        values: "1+0x180"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RovenuePartitionPremakeRunningOut
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RovenuePartitionPremakeCritical
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RovenuePartitionDefaultRowsStranded
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: RovenuePartitionMaintenanceSkippingPartman
+        exp_alerts: []
+
+  # The signal that would have caught the 2029 cliff years early: headroom
+  # decaying because maintenance stopped rolling the window forward. Only
+  # the table that is actually short may alert — the label has to survive,
+  # or the page cannot say which table to fix.
+  - interval: 1m
+    name: a shrinking premake window alerts, naming the table
+    input_series:
+      - series: 'rovenue_partition_premake_months_remaining{table="revenue_events"}'
+        values: "2.5+0x180"
+      - series: 'rovenue_partition_premake_months_remaining{table="credit_ledger"}'
+        values: "12+0x180"
+    alert_rule_test:
+      # `for: 1h` — nothing at 30 minutes.
+      - eval_time: 30m
+        alertname: RovenuePartitionPremakeRunningOut
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: RovenuePartitionPremakeRunningOut
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              area: partitions
+              table: revenue_events
+            exp_annotations:
+              summary: "revenue_events has under three months of partitions left"
+              description: "revenue_events has 2.5 months before its furthest-future partition bound. Partition maintenance has not rolled the premake window forward. When this reaches zero every insert past the bound fails with \"no partition of relation found for row\"."
+      # 2.5 is above the critical threshold, so only the ticket fires.
+      - eval_time: 90m
+        alertname: RovenuePartitionPremakeCritical
+        exp_alerts: []
+
+  # Under a month left: both tiers fire, and the critical one pages.
+  - interval: 1m
+    name: a nearly-exhausted premake window pages
+    input_series:
+      - series: 'rovenue_partition_premake_months_remaining{table="credit_ledger"}'
+        values: "0.4+0x180"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: RovenuePartitionPremakeCritical
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              area: partitions
+              table: credit_ledger
+            exp_annotations:
+              summary: "credit_ledger runs out of partitions within a month"
+              description: "credit_ledger has 0.4 months of partitions left. Run partition maintenance now; once the bound passes, inserts fail outright."
+
+  # One row in a DEFAULT partition is already unrecoverable by any
+  # automated path, so this has no `for:` — it pages on the first scrape
+  # that sees it.
+  - interval: 1m
+    name: a single stranded row pages immediately
+    input_series:
+      - series: 'rovenue_partition_default_rows{table="revenue_events"}'
+        values: "0+0x30 1+0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: RovenuePartitionDefaultRowsStranded
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: RovenuePartitionDefaultRowsStranded
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              area: partitions
+              table: revenue_events
+            exp_annotations:
+              summary: "revenue_events has rows stranded in its DEFAULT partition"
+              description: "1 row(s) sit in revenue_events's DEFAULT partition. Until they are moved, the real partition for that period cannot be attached and partition maintenance will fail for that table. Nothing recovers this automatically."
+
+  # The worker running but skipping partman used to be a log line only.
+  - interval: 1m
+    name: partition maintenance skipping partman raises a ticket
+    input_series:
+      - series: "rovenue_partition_maintenance_partman_ran"
+        values: "0+0x180"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: RovenuePartitionMaintenanceSkippingPartman
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: RovenuePartitionMaintenanceSkippingPartman
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              area: partitions
+            exp_annotations:
+              summary: "Partition maintenance is skipping pg_partman entirely"
+              description: "The maintenance worker ran but found no `partman` schema, so it created no partman-managed partitions. revenue_events, credit_ledger, funnel_sessions, funnel_answers and integration_deliveries all stop rolling forward while this lasts."

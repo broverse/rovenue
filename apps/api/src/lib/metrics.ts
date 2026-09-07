@@ -10,6 +10,7 @@ import {
   Registry,
   collectDefaultMetrics,
   Counter,
+  Gauge,
   Histogram,
 } from "prom-client";
 
@@ -243,5 +244,73 @@ export const dsarErasureSkippedTotal = new Counter({
   name: "rovenue_dsar_erasure_skipped_total",
   help: "DSAR erasure jobs that did not complete, by reason",
   labelNames: ["reason"] as const,
+  registers: [registry],
+});
+
+// =============================================================
+// Partition maintenance (workers/partition-maintenance.ts)
+// =============================================================
+//
+// `revenue_events` and `credit_ledger` are range-partitioned and, since
+// migration 0130, roll forward through pg_partman — which creates exactly
+// ONE month past the hand-made 2024-01..2028-12 children at migration
+// time and then depends entirely on `partman.run_maintenance_proc()`
+// being called daily to stay ahead. `outgoing_webhooks` is not
+// partman-managed and depends on this same worker hand-rolling its next
+// thirteen months.
+//
+// Before these three gauges nothing anywhere observed any of that. The
+// original defect 0130 closed — partitions that stopped dead at 2029-01 —
+// sat undetected for over a year because the only signal it produced was
+// an insert failing on a date nobody had reached yet.
+
+// Months between now and the furthest-future partition bound on a table,
+// i.e. how long the table keeps accepting rows if maintenance never runs
+// again. This is the headroom signal: it degrades gradually and is the
+// one metric that would have surfaced the 2029 cliff years ahead of it.
+//
+// ALERT BELOW 3. Three months is enough runway to notice, diagnose and
+// fix a stalled maintenance worker before any insert fails. Only tables
+// whose partition interval is MONTHLY are reported (see
+// WATCHED_PARTITIONED_TABLES in the worker) — a daily-interval parent
+// like `integration_deliveries` legitimately sits under a month of
+// headroom and would make this threshold meaningless.
+export const partitionPremakeMonthsRemaining = new Gauge({
+  name: "rovenue_partition_premake_months_remaining",
+  help: "Months between now and the furthest-future partition upper bound, per monthly-partitioned table",
+  labelNames: ["table"] as const,
+  registers: [registry],
+});
+
+// Rows sitting in a table's DEFAULT partition, as reported by
+// `partman.check_default()`, attributed to the PARENT table (check_default
+// itself reports the default child, e.g. `public.revenue_events_default`).
+//
+// ALERT ON ANY NON-ZERO VALUE, and treat it as urgent. A row in the
+// DEFAULT partition permanently blocks attaching the real partition for
+// that month — Postgres refuses with "updated partition constraint for
+// default partition would be violated by some row" — and neither partman
+// nor this worker ever relocates it. Recovery is a manual row move under
+// an exclusive lock, and it gets more expensive every day it is ignored.
+export const partitionDefaultRows = new Gauge({
+  name: "rovenue_partition_default_rows",
+  help: "Rows stranded in a partitioned table's DEFAULT partition, per parent table",
+  labelNames: ["table"] as const,
+  registers: [registry],
+});
+
+// 1 when the last maintenance run actually called
+// `partman.run_maintenance_proc()`, 0 when it skipped because the
+// `partman` schema was absent. Skipping is correct on a database that
+// genuinely has no partman, and catastrophic on one that does — every
+// partman-managed parent stops rolling forward. Until now the difference
+// was a single log line, so a worker silently doing half its job looked
+// exactly like a worker doing all of it.
+//
+// This gauge is set on every run, so `absent()` on it also detects the
+// worker not running at all.
+export const partitionMaintenancePartmanRan = new Gauge({
+  name: "rovenue_partition_maintenance_partman_ran",
+  help: "1 if the last partition-maintenance run called partman.run_maintenance_proc(), 0 if it skipped",
   registers: [registry],
 });
