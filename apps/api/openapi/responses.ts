@@ -259,6 +259,62 @@ const ACCESS_MAP: JsonSchema = opaque(
   "Denormalised entitlement access map, keyed by entitlement identifier",
 );
 
+
+// -------------------------------------------------------------
+// Data subject requests
+// -------------------------------------------------------------
+
+const DSAR_ID_PATH: ParameterObject = {
+  name: "id",
+  in: "path",
+  required: true,
+  description: "The DSAR request id.",
+  schema: { type: "string" },
+};
+
+// Mirrors `serializeDsarRequest` in routes/v1/dsar.ts. `downloadReady` is
+// derived there, not stored: COMPLETED, with an artifact, not past
+// `expiresAt`.
+const DSAR_REQUEST_ENVELOPE: JsonSchema = {
+  type: "object",
+  required: ["request"],
+  properties: {
+    request: {
+      type: "object",
+      required: ["id", "type", "status", "requestedBy", "downloadReady"],
+      properties: {
+        id: { type: "string" },
+        type: { type: "string", enum: ["EXPORT", "ERASURE"] },
+        status: {
+          type: "string",
+          enum: ["PENDING", "RUNNING", "COMPLETED", "FAILED"],
+        },
+        requestedBy: { type: "string" },
+        createdAt: { type: "string", format: "date-time" },
+        updatedAt: { type: "string", format: "date-time" },
+        completedAt: { type: "string", format: "date-time", nullable: true },
+        expiresAt: { type: "string", format: "date-time", nullable: true },
+        error: { type: "string", nullable: true },
+        downloadReady: {
+          type: "boolean",
+          description:
+            "True only when the artifact can be fetched right now: status COMPLETED, an artifact present, and not past expiresAt.",
+        },
+      },
+    },
+  },
+};
+
+const DSAR_SUBSCRIBER_NOT_FOUND = error(
+  "No subscriber matches the supplied `appUserId` in this project.",
+);
+const DSAR_REQUEST_NOT_FOUND = error(
+  "No DSAR request with this id belongs to the calling project. Returned for another project's id too, deliberately.",
+);
+const DSAR_DOWNLOAD_UNAVAILABLE = error(
+  "No download is available: the request is not COMPLETED, has no artifact, the link has expired, or the object is no longer in storage.",
+);
+
 // -------------------------------------------------------------
 // Operations
 // -------------------------------------------------------------
@@ -271,9 +327,12 @@ const TAG_EXPERIMENTS = "Experiments";
 const TAG_TELEMETRY = "Telemetry";
 const TAG_CREDITS = "Virtual currencies";
 const TAG_FUNNELS = "Funnels";
+const TAG_DSAR = "Data subject requests";
 
 /** Description per tag. The generator emits only the tags actually used. */
 export const TAG_DESCRIPTIONS: Record<string, string> = {
+  [TAG_DSAR]:
+    "GDPR/KVKK data subject requests: open an export or erasure for a subscriber, poll its status, and download the finished artifact. Every route requires the project SECRET key, never the public one — these act on a subscriber's behalf and must not be reachable from a shipped app bundle.",
   [TAG_CONFIG]:
     "Per-subscriber feature flags and experiment assignments, by request or over a live SSE stream.",
   [TAG_SUBSCRIBERS]:
@@ -293,6 +352,70 @@ export const TAG_DESCRIPTIONS: Record<string, string> = {
 };
 
 export const HAND_AUTHORED_OPERATIONS: Record<string, HandAuthoredOperation> = {
+  // -----------------------------------------------------------
+  // Data subject requests (GDPR/KVKK)
+  //
+  // Every route here is `requireSecretKey`, not the public API key. That
+  // is deliberate and documented at routes/v1/dsar.ts:29 — these act on a
+  // subscriber's behalf and must never be reachable from a shipped app
+  // bundle. `guarded()` supplies 401/429/500.
+  // -----------------------------------------------------------
+  "POST /v1/dsar/export": {
+    summary: "Open a data-export request for a subscriber",
+    description:
+      "Server-to-server only (secret key). Enqueues an export job and returns the request row. Opening a second request of the same type while one is still PENDING or RUNNING returns the request already open rather than creating a duplicate, so the call is safe to retry.",
+    tags: [TAG_DSAR],
+    responses: guarded({
+      "200": data(DSAR_REQUEST_ENVELOPE, "The DSAR request, newly created or already open."),
+      "400": VALIDATION_FAILED,
+      "404": DSAR_SUBSCRIBER_NOT_FOUND,
+    }),
+  },
+
+  "POST /v1/dsar/erasure": {
+    summary: "Open an erasure request for a subscriber",
+    description:
+      "Server-to-server only (secret key). Enqueues an erasure job and returns the request row. Same single-open-request semantics as the export route.",
+    tags: [TAG_DSAR],
+    responses: guarded({
+      "200": data(DSAR_REQUEST_ENVELOPE, "The DSAR request, newly created or already open."),
+      "400": VALIDATION_FAILED,
+      "404": DSAR_SUBSCRIBER_NOT_FOUND,
+    }),
+  },
+
+  "GET /v1/dsar/:id": {
+    summary: "Read one DSAR request's status",
+    description:
+      "Server-to-server only (secret key). Scoped to the calling project: a request belonging to another project is reported as 404, never as 403, so the endpoint does not confirm the existence of other projects' ids.",
+    tags: [TAG_DSAR],
+    parameters: [DSAR_ID_PATH],
+    responses: guarded({
+      "200": data(DSAR_REQUEST_ENVELOPE, "The DSAR request."),
+      "404": DSAR_REQUEST_NOT_FOUND,
+    }),
+  },
+
+  "GET /v1/dsar/:id/download": {
+    summary: "Download a completed export artifact",
+    description:
+      "Server-to-server only (secret key). Streams the artifact as `application/octet-stream` with a `Content-Disposition` attachment filename — this is the one `/v1` response that is not a JSON envelope. Returns 404, not 410, for every unavailable case: the request is not COMPLETED, it has no artifact, the link has expired, or the object is gone from storage. Check `downloadReady` on the request first.",
+    tags: [TAG_DSAR],
+    parameters: [DSAR_ID_PATH],
+    responses: guarded({
+      "200": {
+        description:
+          "The export artifact, streamed. Not JSON — an opaque binary body.",
+        content: {
+          "application/octet-stream": {
+            schema: { type: "string", format: "binary" },
+          },
+        },
+      },
+      "404": DSAR_DOWNLOAD_UNAVAILABLE,
+    }),
+  },
+
   // ---------------- Remote config ----------------
   "GET /v1/config": {
     summary: "Evaluate remote config for a subscriber",

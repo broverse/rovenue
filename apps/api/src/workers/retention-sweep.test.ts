@@ -500,20 +500,38 @@ describe("runRetentionSweep", () => {
     const policiesWithoutDefault = RETENTION_POLICIES.filter(
       (p) => p.defaultDays === undefined,
     );
-    // Sanity: this test's whole premise rests on exactly these two
-    // tables carrying a default. If a future policy edit adds or
-    // removes one, this assertion fails loudly rather than the
-    // call-count math below silently proving the wrong thing.
+    // Sanity: this test's premise rests on exactly which tables carry a
+    // default. If a future policy edit adds or removes one, this fails
+    // loudly rather than letting the call-count math below silently
+    // prove the wrong thing.
+    //
+    // UPDATED 2026-09-07: `import_jobs` joined this set — its retired
+    // bespoke worker also deleted unconditionally for every project, so
+    // withholding a default had silently ended import-file retention for
+    // every tierless deployment. It is NOT swept here, though: its
+    // strategy is EXTERNAL_WORKER, which `runRetentionSweep` deliberately
+    // never dispatches (workers/import-retention.ts owns it, because it
+    // deletes object-storage files alongside the row). So the set of
+    // tables with a default and the set this sweep acts on are no longer
+    // the same set, and conflating them is what would make the count
+    // below prove nothing.
     expect(policiesWithDefault.map((p) => p.table).sort()).toEqual(
+      ["copilot_messages", "import_jobs", "webhook_events"],
+    );
+
+    const sweptPoliciesWithDefault = policiesWithDefault.filter(
+      (p) => p.strategy === "DELETE_ROWS",
+    );
+    expect(sweptPoliciesWithDefault.map((p) => p.table).sort()).toEqual(
       ["copilot_messages", "webhook_events"],
     );
 
     // webhook_events and copilot_messages DID get a DELETE_ROWS call,
     // each floored/resolved at their defaultDays (90) — not skipped.
     expect(deps.deleteRetentionRows).toHaveBeenCalledTimes(
-      policiesWithDefault.length,
+      sweptPoliciesWithDefault.length,
     );
-    for (const policy of policiesWithDefault) {
+    for (const policy of sweptPoliciesWithDefault) {
       expect(deps.deleteRetentionRows).toHaveBeenCalledWith(
         deps.db,
         policy.table,
@@ -544,8 +562,19 @@ describe("runRetentionSweep", () => {
     const dropPartitionPolicyCount = RETENTION_POLICIES.filter(
       (p) => p.strategy === "DROP_PARTITION",
     ).length;
+    // UPDATED 2026-09-07: a policy can now be skipped for a reason other
+    // than "no window". `import_jobs` gained a defaultDays, so it resolves
+    // a window — but its strategy is EXTERNAL_WORKER, which this sweep
+    // deliberately never dispatches, so it still lands on the
+    // strategy-not-implemented skip branch. Counting only
+    // `policiesWithoutDefault` therefore under-counts by exactly those.
+    const defaultedButNotSweptCount = policiesWithDefault.filter(
+      (p) => p.strategy !== "DELETE_ROWS",
+    ).length;
     expect(result.skipped).toBe(
-      policiesWithoutDefault.length + dropPartitionPolicyCount,
+      policiesWithoutDefault.length +
+        defaultedButNotSweptCount +
+        dropPartitionPolicyCount,
     );
   });
 

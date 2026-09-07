@@ -112,23 +112,25 @@ beforeEach(() => {
 });
 
 describe("runImportRetention", () => {
-  it("sweeps nothing when no project resolves a window (fleet has no tiers and no overrides)", async () => {
+  it("still sweeps a no-tier, no-override project at the 7-day default the bespoke worker applied to everyone", async () => {
+    // CORRECTED 2026-09-07. This test used to assert that such a project
+    // was SKIPPED. That was the regression, not the contract: billing is
+    // cloud-only, so "no tier and no override" is every self-hosted
+    // deployment, and skipping them silently ended import-file retention
+    // for the whole fleet while the worker still reported clean runs.
+    // `import_jobs` now carries `defaultDays: IMPORT_FILE_RETENTION_DAYS`,
+    // preserving exactly what `workers/import-retention.ts` did for every
+    // project before commit `fa1d10ca` retired the bespoke workers.
     drizzleMock.billingSubscriptionRepo.listProjectsWithTier.mockResolvedValue([
       project({ projectId: "proj_self_hosted" }),
     ]);
 
     const result = await runImportRetention(NOW);
 
-    expect(result).toEqual({
-      deletedJobs: 0,
-      deletedFiles: 0,
-      projectsSkipped: 1,
-      cutoff: NOW.toISOString(),
-    });
+    expect(result.projectsSkipped).toBe(0);
     expect(
       drizzleMock.importJobRepo.listImportJobsEligibleForFileRetention,
-    ).not.toHaveBeenCalled();
-    expect(deleteObjectMock).not.toHaveBeenCalled();
+    ).toHaveBeenCalled();
   });
 
   it("resolves a no-tier project's window from its override, floored at IMPORT_FILE_RETENTION_DAYS (7)", async () => {
@@ -240,15 +242,26 @@ describe("runImportRetention", () => {
   });
 
   it("leaves a returned job untouched when its own project's window is unresolved", async () => {
-    // Only proj_resolved contributes a window; proj_unresolved has
-    // neither a tier nor an override and is skipped. A job belonging to
-    // proj_unresolved showing up under the loosest cutoff must not be
-    // swept just because SOME other project's window was used to fetch
-    // the candidate set.
+    // A job belonging to a project whose window could not be resolved must
+    // not be swept just because SOME other project's window was used to
+    // fetch the candidate set. That property is unchanged.
+    //
+    // The SCENARIO changed on 2026-09-07. It used to make proj_unresolved
+    // tierless with no override, which no longer skips: `import_jobs` now
+    // carries `defaultDays`, so a tierless project resolves to the 7-day
+    // window the bespoke worker applied to everyone. The remaining way to
+    // be genuinely unresolved is to HAVE a tier whose `billing_tier_limits`
+    // row is missing — RETENTION_SKIP_REASON_TIER_LIMITS_NOT_FOUND, which
+    // must never be read as "doesn't care".
     drizzleMock.billingSubscriptionRepo.listProjectsWithTier.mockResolvedValue([
       project({ projectId: "proj_resolved" }),
-      project({ projectId: "proj_unresolved" }),
+      project({
+        projectId: "proj_unresolved",
+        tier: "studio",
+        cycle: "monthly",
+      }),
     ]);
+    drizzleMock.billingTierLimitsRepo.findByTierAndCycle.mockResolvedValue(null);
     drizzleMock.retentionOverrideRepo.listRetentionOverrides.mockImplementation(
       async (_db: unknown, projectId: string) =>
         projectId === "proj_resolved"
