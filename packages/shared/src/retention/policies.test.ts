@@ -40,6 +40,13 @@ const policyWithoutDefault: RetentionPolicy = {
   minimumDays: 7,
 };
 
+// The 90 days `rovi-retention.ts` and `webhook-retention.ts` applied to
+// every project, and the 7 days the pre-registry `import-retention.ts`
+// applied to every project. Named here so the expectation is not a bare
+// literal repeated per table.
+const RETIRED_WORKER_DEFAULT_DAYS_EXPECTED = 90;
+const IMPORT_FILE_RETENTION_DAYS_EXPECTED = 7;
+
 describe("resolveRetentionWindowDays", () => {
   it("uses the tier window when there is no override", () => {
     expect(
@@ -244,20 +251,43 @@ describe("RETENTION_POLICIES", () => {
     expect(findRetentionPolicy("no_such_table")).toBeUndefined();
   });
 
-  it("gives webhook_events and copilot_messages the 90-day defaultDays those tables retained unconditionally before this registry existed, and nothing else one", () => {
-    // Fix round 1, Finding 1: these two tables were deleted at a fixed
-    // 90 days for EVERY project by the bespoke workers this registry
-    // replaced, tier or no tier. Every other policy must have NO
-    // defaultDays — inventing one for a table that never had an
-    // unconditional window (audit_logs, credit_ledger, revenue_events,
-    // outgoing_webhooks, import_jobs) is the exact mistake this fix
-    // exists to avoid making in the other direction.
-    expect(findRetentionPolicy("webhook_events")?.defaultDays).toBe(90);
-    expect(findRetentionPolicy("copilot_messages")?.defaultDays).toBe(90);
+  it("gives defaultDays to exactly the tables that had an unconditional predecessor window, and to nothing else", () => {
+    // Fix round 1, Finding 1: a table gets defaultDays if and only if a
+    // bespoke worker this registry replaced already deleted it for EVERY
+    // project, tier or no tier. Inventing one for a table that never had
+    // an unconditional window (audit_logs, credit_ledger, revenue_events,
+    // outgoing_webhooks) is the mistake this guard exists to prevent.
+    //
+    // CORRECTION 2026-09-07: this guard previously listed `import_jobs`
+    // among the tables with no unconditional predecessor. That was wrong,
+    // and the error was load-bearing. Before commit `fa1d10ca`
+    // ("feat(retention): retire the three bespoke workers"),
+    // `apps/api/src/workers/import-retention.ts` computed a single
+    // `RETENTION_WINDOW_MS = IMPORT_FILE_RETENTION_DAYS * 24 * 60 * 60 *
+    // 1000` and applied it to every project, consulting no tier at all —
+    // an unconditional predecessor by exactly the definition above.
+    // Denying it defaultDays silently ended import-file retention for
+    // every project with neither a billing subscription nor an override,
+    // i.e. every self-hosted deployment (billing is cloud-only), while
+    // the worker still reported clean runs. Four cases in
+    // apps/api/tests/workers/import-retention.integration.test.ts were
+    // red on this the whole time.
+    const TABLES_WITH_UNCONDITIONAL_PREDECESSOR: Record<string, number> = {
+      webhook_events: RETIRED_WORKER_DEFAULT_DAYS_EXPECTED,
+      copilot_messages: RETIRED_WORKER_DEFAULT_DAYS_EXPECTED,
+      import_jobs: IMPORT_FILE_RETENTION_DAYS_EXPECTED,
+    };
+
+    for (const [table, days] of Object.entries(
+      TABLES_WITH_UNCONDITIONAL_PREDECESSOR,
+    )) {
+      expect(findRetentionPolicy(table)?.defaultDays).toBe(days);
+    }
 
     const tablesWithNoDefault = RETENTION_POLICIES.filter(
-      (p) => p.table !== "webhook_events" && p.table !== "copilot_messages",
+      (p) => !(p.table in TABLES_WITH_UNCONDITIONAL_PREDECESSOR),
     );
+    expect(tablesWithNoDefault.length).toBeGreaterThan(0);
     for (const policy of tablesWithNoDefault) {
       expect(policy.defaultDays).toBeUndefined();
     }

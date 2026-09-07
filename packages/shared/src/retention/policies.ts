@@ -463,6 +463,22 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     strategy: "EXTERNAL_WORKER",
     tierLimitField: "retentionDays",
     minimumDays: IMPORT_FILE_RETENTION_DAYS,
+    // See RETIRED_WORKER_DEFAULT_DAYS: this table HAD an unconditional
+    // predecessor, exactly like `copilot_messages` and `webhook_events`.
+    // Before `fa1d10ca` retired the bespoke workers,
+    // `workers/import-retention.ts` deleted every project's aged import
+    // files at a single `RETENTION_WINDOW_MS = IMPORT_FILE_RETENTION_DAYS`
+    // and never consulted a tier. Without `defaultDays` that behaviour
+    // silently STOPPED for every project with neither a billing
+    // subscription nor an override — which is every self-hosted
+    // deployment by construction, since billing is cloud-only. The files
+    // then accumulate in object storage forever while the worker reports
+    // a clean run: a storage leak that reads as green.
+    //
+    // This obeys the rule stated on `defaultDays` rather than bending it:
+    // the value only ever preserves a window that already existed and
+    // already applied to everyone. It invents nothing.
+    defaultDays: IMPORT_FILE_RETENTION_DAYS,
   },
 ] as const;
 
