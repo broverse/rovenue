@@ -91,6 +91,55 @@ const FUTURE_EXPIRY = "2028-12-01 00:00:00";
  *  found for row". */
 const PRE_2024_PURCHASE_DATE = "2011-05-10 10:00:00";
 
+// -------------------------------------------------------------
+// The three positions a requested month can occupy, and the fixtures
+// that put an import row in each one. `ensureRevenueEventPartitions`
+// has to be right in all three; only the middle one has ever been
+// wrong, and it is the one covering TODAY's data.
+// -------------------------------------------------------------
+
+/** Schema-qualified parent, as `partman.part_config` records it and as
+ *  the provisioner itself names it. */
+const REVENUE_EVENTS_QUALIFIED_TABLE = "public.revenue_events";
+
+/** POSIX regexes pulling the bounds out of a child's
+ *  `FOR VALUES FROM ('...') TO ('...')`. Sent as bind parameters, so no
+ *  SQL quote-doubling. Same pair as the provisioner's own and migration
+ *  0130's — read the module header in
+ *  packages/db/src/drizzle/repositories/revenue-event-partitions.ts. */
+const PARTITION_LOWER_BOUND_PATTERN = "FROM \\('(.*?)'\\)";
+const PARTITION_UPPER_BOUND_PATTERN = "TO \\('(.*?)'\\)";
+
+/** partman's catch-all, attached by `create_parent` in migration 0130.
+ *  A revenue row here means provisioning did NOT happen — see
+ *  `revenueEventPartitionsHoldingRows`. */
+const REVENUE_EVENTS_DEFAULT_PARTITION = "revenue_events_default";
+
+/** POSITION 2 — inside the hand-made 2024-01..2028-12 range, i.e. the
+ *  months a customer's CURRENT data lands in. Migration 0015 already
+ *  owns this month under the name below, and pg_partman (registered by
+ *  0130 on every install path) would compute `revenue_events_p20260301`
+ *  for it, see no table by that name, and try to attach a second child
+ *  over the same range — `would overlap partition
+ *  "revenue_events_2026_03"`. Everything about this fixture is chosen to
+ *  sit on that fault line. */
+const IN_HANDMADE_RANGE_MONTH = new Date(Date.UTC(2026, 2, 1));
+const IN_HANDMADE_RANGE_PURCHASE_DATE = "2026-03-10 10:00:00";
+const IN_HANDMADE_RANGE_PARTITION = "revenue_events_2026_03";
+
+/** POSITION 3 — at or after the month 0130 registered partman from
+ *  (2029-01, the first month the hand-made children do not cover), and
+ *  beyond the 12-month premake, so no child exists for it yet and
+ *  partman must genuinely create one. Without provisioning the row is
+ *  silently absorbed by `revenue_events_default`. */
+const POST_PARTMAN_START_MONTH = new Date(Date.UTC(2030, 5, 1));
+const POST_PARTMAN_START_PURCHASE_DATE = "2030-06-10 10:00:00";
+const POST_PARTMAN_START_EXPIRY = "2031-06-10 00:00:00";
+
+/** POSITION 1 — before the hand-made range, the month
+ *  `PRE_2024_PURCHASE_DATE` falls in. */
+const PRE_2024_MONTH = new Date(Date.UTC(2011, 4, 1));
+
 const SOURCE_COLUMNS = [
   "subscriber_id",
   "store",
@@ -237,19 +286,74 @@ async function countRevenueEvents(): Promise<number> {
   return row?.n ?? 0;
 }
 
+/** The name of the `revenue_events` child partition whose declared RANGE
+ *  contains `month` (a UTC month-start Date), or null when no child
+ *  covers it.
+ *
+ *  Read from the catalog (`pg_inherits` + `relpartbound`), NOT by
+ *  guessing a table name — and that distinction is the whole point.
+ *  Migration 0015 named its 60 hand-made children `revenue_events_YYYY_MM`;
+ *  pg_partman, which migration 0130 puts in charge of this parent on
+ *  EVERY install path, names the ones it creates
+ *  `revenue_events_pYYYYMMDD`. A name-based probe therefore answers "did
+ *  a child with the name I guessed appear", which is precisely the blind
+ *  spot that produced the overlap defect this suite exists to pin
+ *  (partman's own existence check is by name too). An earlier version of
+ *  this helper looked up `revenue_events_YYYY_MM` with `to_regclass` and
+ *  reported "no partition" for every month partman provisioned — green
+ *  only on a stale pre-0130 test template, red on any fresh install.
+ *
+ *  A DEFAULT partition's bound expression is the bare word DEFAULT and
+ *  matches neither pattern, so it can never be reported as coverage —
+ *  a row landing in the default is the failure being guarded against,
+ *  never proof of success. Mirrors `uncoveredMonths` in
+ *  packages/db/src/drizzle/repositories/revenue-event-partitions.ts. */
+async function revenueEventPartitionCovering(
+  month: Date,
+): Promise<string | null> {
+  const result = await db.execute(sql`
+    SELECT "c"."relname" AS "relname"
+      FROM "pg_inherits" "i"
+      JOIN "pg_class" "c" ON "c"."oid" = "i"."inhrelid"
+     WHERE "i"."inhparent" = ${REVENUE_EVENTS_QUALIFIED_TABLE}::regclass
+       AND (substring(
+             pg_get_expr("c"."relpartbound", "c"."oid")
+             FROM ${PARTITION_LOWER_BOUND_PATTERN}
+           ))::timestamptz <= ${month.toISOString()}::timestamptz
+       AND (substring(
+             pg_get_expr("c"."relpartbound", "c"."oid")
+             FROM ${PARTITION_UPPER_BOUND_PATTERN}
+           ))::timestamptz > ${month.toISOString()}::timestamptz
+  `);
+  const rows = (result as unknown as { rows: Array<{ relname: string }> }).rows;
+  return rows[0]?.relname ?? null;
+}
+
 /** True once `revenue_events` has a real child partition covering
- *  `month` (a UTC month-start Date) — used to prove
- *  `ensureRevenueEventPartitions` actually ran, not just that the
- *  insert happened to succeed some other way. */
+ *  `month` — used to prove `ensureRevenueEventPartitions` actually ran,
+ *  not just that the insert happened to succeed some other way. */
 async function hasRevenueEventPartitionFor(month: Date): Promise<boolean> {
-  const yyyy = month.getUTCFullYear();
-  const mm = String(month.getUTCMonth() + 1).padStart(2, "0");
-  const qualifiedName = `public.revenue_events_${yyyy}_${mm}`;
-  const result = await db.execute(
-    sql`SELECT to_regclass(${qualifiedName}) IS NOT NULL AS present`,
-  );
-  const rows = (result as unknown as { rows: Array<{ present: boolean }> }).rows;
-  return rows[0]?.present === true;
+  return (await revenueEventPartitionCovering(month)) !== null;
+}
+
+/** Which physical child partition(s) this project's revenue-event rows
+ *  are actually stored in, read from `tableoid`.
+ *
+ *  This is the assertion that a name check cannot make: since 0130 the
+ *  parent has a catch-all `revenue_events_default`, so an unprovisioned
+ *  month no longer fails the insert — the row is absorbed by the default
+ *  and the damage (Postgres then refuses to attach the real partition for
+ *  that month) surfaces later, somewhere else. "The insert succeeded" is
+ *  consequently NOT evidence that provisioning happened; "the row is in a
+ *  real dated partition" is. */
+async function revenueEventPartitionsHoldingRows(): Promise<string[]> {
+  const result = await db.execute(sql`
+    SELECT DISTINCT "revenue_events"."tableoid"::regclass::text AS "relname"
+      FROM "revenue_events"
+     WHERE "revenue_events"."projectId" = ${PROJECT_ID}
+  `);
+  const rows = (result as unknown as { rows: Array<{ relname: string }> }).rows;
+  return rows.map((r) => r.relname).sort();
 }
 
 async function projectStateSnapshot() {
@@ -914,17 +1018,49 @@ describe("writeImportBatch — androidNoToken rows (final-fix-wave FIX 2)", () =
 // =============================================================
 //
 // `revenue_events` (migration 0015) is range-partitioned on `eventDate`
-// with monthly partitions covering only 2024-01..2028-12 and NO default
-// partition — an import whose earliest history predates 2024 used to
-// die outright with "no partition of relation ... found for row". This
-// is the acceptance test for the fix: the feature's whole promise (carry
-// over years of history a competitor's importer drops) is worthless if
-// this doesn't pass.
+// with monthly partitions covering only 2024-01..2028-12 — an import
+// whose earliest history predates 2024 used to die outright with "no
+// partition of relation ... found for row". This is the acceptance test
+// for the fix: the feature's whole promise (carry over years of history
+// a competitor's importer drops) is worthless if this doesn't pass.
+//
+// -------------------------------------------------------------
+// WHY THERE ARE THREE CASES, NOT ONE
+// -------------------------------------------------------------
+//
+// `writeImportBatch` is the only caller of
+// `ensureRevenueEventPartitions` (write.ts's Task 8a pre-flight), and a
+// requested month can sit in exactly one of three positions relative to
+// the partition set. They exercise DIFFERENT code, and only one of them
+// has ever been broken:
+//
+//   1. BEFORE the hand-made range (2011-05). No child covers it; on a
+//      partman-registered parent partman creates a month behind its own
+//      registered start, which it does happily.
+//   2. INSIDE the hand-made range (2026-03) — TODAY's data. A child
+//      already covers it, under migration 0015's `_YYYY_MM` name.
+//      partman's existence check is by NAME, so before the catalog
+//      filter landed (commit fbf4864d) it computed
+//      `revenue_events_p20260301`, saw no such table, and tried to
+//      attach a second child over an owned range:
+//        ERROR: partition "revenue_events_p20260301" would overlap
+//               partition "revenue_events_2026_03"
+//      Every ordinary import — the common case, not an edge case — hit
+//      this. Case 2 below is the regression pin for it.
+//   3. AT OR AFTER partman's registered start and past its premake
+//      (2030-06). No child covers it and partman must really create one.
+//
+// Since 0130 the parent also carries `revenue_events_default`, so an
+// unprovisioned row in case 1 or 3 no longer fails the insert — it is
+// silently absorbed, and Postgres refuses to attach that month's real
+// partition later. That is why each case asserts WHICH physical child
+// holds the row (`revenueEventPartitionsHoldingRows`) rather than
+// settling for "the insert succeeded".
 
 describe("writeImportBatch — revenue_events partition provisioning", () => {
-  it("imports a purchase and revenue event dated before the 2024 partition floor, and the row is really there afterwards", async () => {
+  it("case 1 — imports a purchase and revenue event dated before the 2024 partition floor, and the row is really there afterwards", async () => {
     const jobId = await seedJob();
-    const preMonth = new Date(Date.UTC(2011, 4, 1)); // 2011-05
+    const preMonth = PRE_2024_MONTH;
 
     expect(await hasRevenueEventPartitionFor(preMonth)).toBe(false);
 
@@ -959,6 +1095,82 @@ describe("writeImportBatch — revenue_events partition provisioning", () => {
       new Date(`${PRE_2024_PURCHASE_DATE.replace(" ", "T")}Z`).toISOString(),
     );
     expect(Number(revenueRow?.amountUsd)).toBeCloseTo(9.99, 2);
+
+    // Stored in the child that now covers 2011-05, NOT in partman's
+    // catch-all default (which would take the row without complaint and
+    // strand that month's real partition forever).
+    const holders = await revenueEventPartitionsHoldingRows();
+    expect(holders).toEqual([await revenueEventPartitionCovering(preMonth)]);
+    expect(holders).not.toContain(REVENUE_EVENTS_DEFAULT_PARTITION);
+  });
+
+  it("case 2 — imports a row for a month INSIDE the hand-made 2024-01..2028-12 range, reusing 0015's child instead of attempting an overlapping attach", async () => {
+    // Precondition, asserted rather than assumed: migration 0015 already
+    // owns this month, under a name pg_partman would never compute.
+    expect(await revenueEventPartitionCovering(IN_HANDMADE_RANGE_MONTH)).toBe(
+      IN_HANDMADE_RANGE_PARTITION,
+    );
+
+    const jobId = await seedJob();
+    const outcome = await runFile(
+      jobId,
+      csvOf([
+        {
+          subscriberId: "rc_sub_handmade_range",
+          storeTxnId: "apple_txn_handmade_range",
+          priceUsd: "19.99",
+          purchaseDate: IN_HANDMADE_RANGE_PURCHASE_DATE,
+        },
+      ]),
+    );
+
+    expect(outcome.outcomes.willCreate).toBe(1);
+    expect(await countPurchases()).toBe(1);
+    expect(await countRevenueEvents()).toBe(1);
+
+    // The month is still served by 0015's child: provisioning skipped it
+    // rather than minting a second, overlapping one.
+    expect(await revenueEventPartitionCovering(IN_HANDMADE_RANGE_MONTH)).toBe(
+      IN_HANDMADE_RANGE_PARTITION,
+    );
+    expect(await revenueEventPartitionsHoldingRows()).toEqual([
+      IN_HANDMADE_RANGE_PARTITION,
+    ]);
+  });
+
+  it("case 3 — imports a row for a month at/after partman's registered start and past its premake, into a real partition rather than the default", async () => {
+    // Nothing covers 2030-06 yet: 0130 registers from 2029-01 with a
+    // 12-month premake, and no maintenance run has widened it.
+    expect(await revenueEventPartitionCovering(POST_PARTMAN_START_MONTH)).toBe(
+      null,
+    );
+
+    const jobId = await seedJob();
+    const outcome = await runFile(
+      jobId,
+      csvOf([
+        {
+          subscriberId: "rc_sub_post_partman_start",
+          storeTxnId: "apple_txn_post_partman_start",
+          priceUsd: "29.99",
+          purchaseDate: POST_PARTMAN_START_PURCHASE_DATE,
+          expiresDate: POST_PARTMAN_START_EXPIRY,
+        },
+      ]),
+    );
+
+    expect(outcome.outcomes.willCreate).toBe(1);
+    expect(await countRevenueEvents()).toBe(1);
+
+    const covering = await revenueEventPartitionCovering(
+      POST_PARTMAN_START_MONTH,
+    );
+    expect(covering).not.toBe(null);
+    expect(covering).not.toBe(REVENUE_EVENTS_DEFAULT_PARTITION);
+    // The row is IN that partition — the assertion the default partition
+    // makes necessary, since a missing partition no longer fails the
+    // insert, it just misfiles the row.
+    expect(await revenueEventPartitionsHoldingRows()).toEqual([covering]);
   });
 
   it("provisions partitions before Phase A writes anything: a second, overlapping import does not error", async () => {
