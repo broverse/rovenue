@@ -283,6 +283,14 @@ beforeEach(async () => {
 // This is deliberately stricter than it needs to be. A false positive costs
 // one line in the table below plus the thought that produced it; a false
 // negative costs a credential nobody can decrypt after the next rotation.
+//
+// SCOPE — production call sites only. Test files and fixtures are swept out
+// entirely. A test can call `encrypt()` a hundred times without introducing
+// an encrypted *column*: only a production write path can do that, and the
+// column is the thing rotation has to cover. Counting test calls made this
+// guard go red for edits that cannot affect rotation coverage at all — 23 of
+// its 39 counted calls lived in test files — and a guard that goes red for
+// unrelated reasons is one people learn to edit past instead of read.
 
 const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
@@ -306,13 +314,28 @@ const SKIPPED_DIRECTORIES = new Set([
   "target",
 ]);
 
-/** The crypto helpers' own definitions and tests. They *define* these
- *  symbols; sweeping them would report the implementation as a call site. */
+/** The crypto helpers' own definitions. They *define* these symbols;
+ *  sweeping them would report the implementation as a call site. Their
+ *  `.test.ts` siblings need no entry here — `TEST_FILE_PATTERN` already
+ *  excludes every test file. */
 const CRYPTO_HELPER_FILES = new Set([
   "packages/shared/src/crypto.ts",
-  "packages/shared/src/crypto.test.ts",
   "packages/db/src/helpers/encrypted-field.ts",
-  "packages/db/src/helpers/encrypted-field.test.ts",
+]);
+
+/** Test files, by filename. Covers `*.test.ts(x)`, `*.spec.ts(x)` and
+ *  therefore `*.integration.test.ts` too. */
+const TEST_FILE_PATTERN = /\.(test|spec)\.tsx?$/;
+
+/** Directories that hold only tests, fixtures or mocks. Everything under
+ *  them is excluded whatever the filename — a fixture module named
+ *  `seed-credentials.ts` is still not a production write path. */
+const TEST_DIRECTORIES = new Set([
+  "__tests__",
+  "__fixtures__",
+  "__mocks__",
+  "fixtures",
+  "tests",
 ]);
 
 /** Longest-first so `encryptCredential` is never matched as `encrypt`. */
@@ -375,7 +398,9 @@ const INTEGRATION_CIPHER_COLUMN: RotatedColumn = {
 
 /**
  * Every call of `encrypt` / `decrypt` / `encryptCredential` /
- * `decryptCredential` in `apps/` and `packages/`, classified.
+ * `decryptCredential` in the **production** sources under `apps/` and
+ * `packages/`, classified. Tests and fixtures are out of the sweep, so they
+ * never appear here.
  *
  * `projects.appleCredentials` and `projects.googleCredentials` share their
  * call sites: the dashboard route is parameterised by `store`, and the
@@ -396,12 +421,6 @@ const CRYPTO_CALL_SITES: readonly CryptoCallSite[] = [
     calls: 1,
     column: PROJECTS_GOOGLE,
     note: "writes either project credential column, by `store`",
-  },
-  {
-    site: "apps/api/tests/dashboard-credentials.test.ts:encryptCredential",
-    calls: 1,
-    column: PROJECTS_APPLE,
-    note: "test fixture",
   },
   // --- shape B: copilot_credentials.api_key_encrypted ---
   {
@@ -445,48 +464,6 @@ const CRYPTO_CALL_SITES: readonly CryptoCallSite[] = [
     calls: 1,
     column: INTEGRATION_CIPHER_COLUMN,
   },
-  {
-    site: "apps/api/src/routes/dashboard/integrations.test.ts:encrypt",
-    calls: 4,
-    column: INTEGRATION_CIPHER_COLUMN,
-    note: "test fixture",
-  },
-  {
-    site: "apps/api/src/routes/dashboard/integrations.webhook.integration.test.ts:encrypt",
-    calls: 2,
-    column: INTEGRATION_CIPHER_COLUMN,
-    note: "test fixture",
-  },
-  {
-    site: "apps/api/src/routes/dashboard/integrations.webhook.integration.test.ts:decrypt",
-    calls: 7,
-    column: INTEGRATION_CIPHER_COLUMN,
-    note: "test assertion",
-  },
-  {
-    site: "apps/api/src/services/integrations/backfill.integration.test.ts:encrypt",
-    calls: 4,
-    column: INTEGRATION_CIPHER_COLUMN,
-    note: "test fixture",
-  },
-  {
-    site: "apps/api/src/workers/integrations-deliver.integration.test.ts:encrypt",
-    calls: 2,
-    column: INTEGRATION_CIPHER_COLUMN,
-    note: "test fixture",
-  },
-  {
-    site: "apps/api/src/workers/integrations-deliver.e2e.integration.test.ts:encrypt",
-    calls: 1,
-    column: INTEGRATION_CIPHER_COLUMN,
-    note: "test fixture",
-  },
-  {
-    site: "apps/api/src/workers/integrations-webhook.e2e.integration.test.ts:encrypt",
-    calls: 2,
-    column: INTEGRATION_CIPHER_COLUMN,
-    note: "test fixture",
-  },
 ];
 
 function stripComments(source: string): string {
@@ -499,10 +476,13 @@ function* walkSource(directory: string): Generator<string> {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const full = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (!SKIPPED_DIRECTORIES.has(entry.name)) yield* walkSource(full);
+      if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+      if (TEST_DIRECTORIES.has(entry.name)) continue;
+      yield* walkSource(full);
     } else if (
       SWEPT_EXTENSION.test(entry.name) &&
-      !TYPE_DECLARATION_EXTENSION.test(entry.name)
+      !TYPE_DECLARATION_EXTENSION.test(entry.name) &&
+      !TEST_FILE_PATTERN.test(entry.name)
     ) {
       yield full;
     }
