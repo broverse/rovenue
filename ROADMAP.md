@@ -1465,27 +1465,32 @@ below: `packages/sdk-rn`'s published peer floor has never been built against.
       That deliberate exit is why this is **recorded, not closed** — carried
       as its own open entry immediately below rather than left buried in a
       ticked item.
-- [ ] **`packages/sdk-rn`'s published peer floor is unverified.** `react-native
-      >=0.76` / `expo >=52.0.0` is a compatibility claim that no test, no CI
-      job and no example app has ever exercised — the evidence is laid out in
-      full in the ticked example-apps entry above (`369c8f1d`), and this entry
-      exists so the claim is visibly open rather than implied by an [x].
-      Verifying it is a migration project, not a fix: it needs an example
-      pinned at or above the floor, a real Metro bundle, and native iOS +
-      Android builds of that example, all in CI, with unknown native and
-      codegen fallout. Two concrete sub-questions have to be answered on the
-      way:
-      1. Is the floor even right? `packages/sdk-rn/src/core/native.ts` still
-         carries a **live** Expo-SDK-51 code path — it documents "every Expo
-         SDK we support (51 → 56)" and keeps the legacy
-         `new EventEmitter(nativeModule)` subscription branch for
-         "expo-modules-core 1.x", while the manifest's `expo >=52` /
-         `expo-modules-core >=2.0.0` peers exclude SDK 51 outright. That is
-         either dead code to delete or evidence the declared floor is wrong;
-         nothing in the repo currently distinguishes the two.
-      2. `examples/sample-rn-expo` cannot be upgraded to answer (1) without
-         also clearing the CocoaPods monorepo-hoisting hazard recorded above,
-         which the SDK's own unbounded peer float feeds.
+- [x] **`packages/sdk-rn`'s peer floor — now built against, 2026-09-07 (`bc223276`).**
+      `examples/sample-rn-expo` was upgraded past the floor to Expo 56.0.12 / RN
+      0.86.0 / React 19.2.7 and **Android builds**: a 137 MB APK containing
+      `dev.rovenue.sdkrn.RovenueModule`, `dev.rovenue.sdk.Rovenue` and
+      `lib/arm64-v8a/libuniffi_librovenue.so`, i.e. RN facade -> Kotlin facade ->
+      Rust core, verified in the artifact rather than inferred from a green exit
+      code. Five defects surfaced that no test could see — a config-plugin fix
+      that had never been compiled, a missing `Coroutine` import (81 errors), Play
+      Billing leaking through sdk-kotlin's public API as `implementation`, an RN
+      bridge that had drifted from the Kotlin SDK's `StoreProduct` signature, and
+      an AGP/Gradle version floor. All fixed; see the commit.
+      **Scope of the claim: Expo 56 / RN 0.86 only.** The floor's LOWER edge
+      (expo 52 / RN 0.76) is still unbuilt — the workspace hoists RN 0.86, which
+      makes testing the bottom of the range awkward here. The declared range is
+      therefore evidenced at its top, not across its span.
+- [ ] **iOS builds but the SDK is not in the product.** `xcodebuild` returns
+      `** BUILD SUCCEEDED **` with zero errors, `pod install` is clean,
+      `libRovenue.a` (17 MB) and `libRovenueSdkRn.a` (1.4 MB) both compile, and
+      Expo autolinking DOES register the module (`internal import RovenueSdkRn`
+      plus `RovenueModule.self` in the generated `ExpoModulesProvider.swift`) —
+      yet no file in the 200 MB `.app` bundle mentions `RovenueModule`, and the
+      app binary carries zero Rovenue symbols on either architecture.
+      A green build that ships without the SDK is worse than a red one, so this
+      is recorded as OPEN rather than counted as the iOS half of the item above.
+      Next step is to run the built app in a simulator and confirm whether the
+      module registers at runtime, then chase the link step if it does not.
 - [x] `apps/docs/content/docs/reference/methods.mdx` had no section for
       three real, exported RN SDK method groups: Paywalls
       (`RovenuePaywallView`, exported from `packages/sdk-rn/src/index.ts`),
