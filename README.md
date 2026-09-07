@@ -65,7 +65,7 @@ packages/
   shared/             Types, constants, cross-package utilities
 deploy/
   caddy · postgres · clickhouse · cloudflare · apple-certs · minio ·
-  backup · grafana/prometheus/loki/alloy (observability profile)
+  backup · grafana/prometheus/alertmanager/loki/alloy (observability profile)
 docker-compose.yml    Root file — the full stack
 ```
 

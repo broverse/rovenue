@@ -121,6 +121,17 @@ was "everything shipped and nobody wrote down that it existed."
   additionally proves each alert fires on a synthetic incident and stays
   quiet on a healthy series.
 
+  A second file,
+  [`deploy/prometheus/rules/alerting-pipeline.yml`](../../deploy/prometheus/rules/alerting-pipeline.yml)
+  (**"SUCCESS: 5 rules found"**, unit-tested by
+  `deploy/prometheus/tests/alerting_pipeline_test.yml`), watches the delivery
+  path itself — the `Watchdog` heartbeat plus four rules that fire when
+  Prometheus has no Alertmanager, cannot hand off to it, cannot deliver to
+  the receiver, or when Alertmanager is down. See **Alert delivery** below.
+  Both files are loaded by `prometheus.yml`'s `rules/*.yml` glob, and CI
+  globs the same way rather than naming files, so the next rule file is
+  checked without anyone remembering to add it.
+
 - **Dashboards.** `deploy/grafana` auto-provisions a dashboard titled
   **"Rovenue API — RED"** (`deploy/grafana/dashboards/rovenue-api-red.json`,
   confirmed valid JSON, 4 panels: request rate by route, 5xx rate, p50/p95/p99
@@ -134,7 +145,9 @@ was "everything shipped and nobody wrote down that it existed."
   (lifting Pino's `level` into an indexed label, `msg`/`requestId` as
   structured metadata), and scrapes `redpanda:9644`, `clickhouse:9363`,
   `postgres-exporter:9187`, `redis-exporter:9121`, and `api:3001` into
-  Prometheus via remote-write.
+  Prometheus via remote-write — plus `alertmanager:9093` and
+  `prometheus:9090`, which are the only source of the series
+  `rules/alerting-pipeline.yml` reads.
 
 None of this is behind a special flag — it's the `observability` Compose
 profile, off by default so a bare `docker compose up` doesn't pay its
@@ -154,22 +167,108 @@ shipping real logs). The stack available while writing this was `db`,
 JSON's validity and panel queries against the real metric names in
 `metrics.ts`, and the provisioning YAML's shape.
 
-### What does not exist — say it plainly
+### Alert delivery — the one thing you must configure
 
-**No Alertmanager is wired into `docker-compose.yml`.** There is no
-`alertmanager` service, and `deploy/prometheus/prometheus.yml` has no
-`alerting:` block (verified: it's one `global:` section plus a
-`rule_files:` glob, nothing else). The rules above **evaluate** — they show
-up as firing/pending in Prometheus's own UI and in Grafana — but nothing
-**routes** them anywhere. An alert labelled `severity: page` reaches exactly
-nobody until an operator adds an Alertmanager and points
-`prometheus.yml`'s `alerting.alertmanagers` at it, or wires Grafana's own
-contact points (Grafana can alert directly off the same Prometheus
-datasource without a separate Alertmanager, which is the lower-effort
-option for a single-node self-host). Both `slo.yml` and `prometheus.yml`
-already carry this same comment in their source — this handbook is the
-first place it's said to an operator instead of to the next engineer
-reading the config.
+Until 2026-09-07 this section said the opposite of what follows: there was
+no Alertmanager, so every rule above evaluated into a UI nobody watches. That
+is fixed. An `alertmanager` service now runs in the same `observability`
+profile, `deploy/prometheus/prometheus.yml` has an `alerting:` block pointing
+at it, and `deploy/alertmanager/alertmanager.yml` holds the routing.
+
+**Set `ROVENUE_ALERT_WEBHOOK_URL`** (`.env`, documented in `.env.example`).
+It is the only required value. Any endpoint that accepts a POST of
+Alertmanager's JSON works, with no account and no secret in the repo — a
+Slack Incoming Webhook, a Discord webhook (append `/slack`), an `ntfy.sh`
+topic, a PagerDuty Events v2 integration URL, or your own HTTP handler.
+
+```bash
+# .env
+ROVENUE_ALERT_WEBHOOK_URL=https://hooks.slack.com/services/T…/B…/…
+COMPOSE_PROFILES=observability docker compose up -d
+```
+
+**Leaving it blank does not silence alerts — it makes them fail loudly.**
+`docker-compose.yml` substitutes a reserved RFC 2606 `.invalid` hostname that
+can never resolve, so every notification errors. An Alertmanager that
+accepted alerts and quietly discarded them would be exactly the defect this
+service was added to fix, so the unconfigured state is designed to be
+visible:
+
+| Where | What you see |
+|---|---|
+| `docker compose logs alertmanager` | `level=warn … msg="Notify attempt failed, will retry later" … err="… lookup alertmanager-webhook-unconfigured.invalid …: no such host"`, one per attempt |
+| `alertmanager_notification_requests_failed_total{integration="webhook"}` | climbs on every failed attempt (38 within ~7 minutes, measured) |
+| Prometheus / Grafana | `RovenueAlertmanagerNotificationsFailing` fires within ~5 minutes |
+
+Use `alertmanager_notification_requests_failed_total`, **not**
+`alertmanager_notifications_failed_total`. The latter only counts once
+Alertmanager stops retrying, and the retry deadline is that route's
+`group_interval + group_wait` — 17 minutes for the partitions route and 24
+hours for the Watchdog route. Measured on `prom/alertmanager:v0.27.0`: after
+7 minutes against a dead endpoint the requests counter read 38 and the
+notifications counter still read 0.
+
+#### How alerts are routed
+
+One receiver, `rovenue-webhook`. A self-hosted Rovenue is one operator, not a
+rota, so severity selects a *cadence*, not a destination — and every payload
+carries `labels.severity`, so an endpoint that does fan out can branch on it.
+There is deliberately no `null`/blackhole receiver anywhere in the config.
+
+| Route | Matches | `group_wait` / `group_interval` / `repeat_interval` | Why |
+|---|---|---|---|
+| Watchdog | `alertname="Watchdog"` | 0s / 24h / 24h | Heartbeat; one message a day |
+| Partitions | `area="partitions"` | 2m / 15m / 12h | A deadline, not an outage — the sharpest of these still leaves a month of runway, so it must not read like a 3am page |
+| Page | `severity="page"` | 30s / 5m / 1h | Live incident; hourly nag without becoming the reason the channel gets muted |
+| Ticket | `severity="ticket"` | 5m / 30m / 24h | Wants an owner in working hours; resurfaces once a day |
+| (root) | anything else | 30s / 5m / 4h | Nothing falls off the tree |
+
+Two inhibitions stop a single incident arriving four times at four levels of
+alarm, both scoped by `equal:` so they can never cross tables or SLOs:
+`RovenuePartitionPremakeCritical` suppresses
+`RovenuePartitionPremakeRunningOut` for the **same table**, and any
+`severity=page` SLO alert suppresses the `severity=ticket` alerts for the
+**same `slo`**.
+
+#### The heartbeat is a dead-man's switch, not noise
+
+`Watchdog` (`deploy/prometheus/rules/alerting-pipeline.yml`) always fires, so
+you receive one POST per day. Its **absence** is the signal: it is the only
+evidence that survives the failure it detects, because everything else in
+this pipeline reports a broken delivery path *over that same path*. Point it
+at a heartbeat monitor (healthchecks.io, Cronitor, Better Stack) with a grace
+period above 24h. If you mute it instead, you have accepted that a total
+alerting outage will be silent.
+
+Four more rules in that file watch the pipeline itself:
+`RovenueAlertsNotReachingAlertmanager` (the direct regression guard for the
+`alerting:` block going missing again),
+`RovenuePrometheusAlertHandoffFailing`,
+`RovenueAlertmanagerNotificationsFailing`, and `RovenueAlertmanagerDown`.
+Their series come from Alloy scraping `alertmanager:9093` and
+`prometheus:9090` — remove either target from
+`deploy/alloy/config.alloy` and these rules go permanently silent with no
+error anywhere.
+
+#### Verified end-to-end
+
+Against an isolated scratch stack running the real `prometheus.yml`, the real
+`rules/`, and the real `alertmanager.yml`, with the receiver pointed at a
+local HTTP sink: `rovenue_partition_default_rows{table="revenue_events"}=3`
+and `rovenue_partition_premake_months_remaining{table="revenue_events"}=0.5`
+made the real rules fire, and the alerts arrived at the sink as JSON on all
+four routes — `groupKey` in the payload naming the branch each took. Both
+inhibitions were confirmed suppressing, with a negative control (a `latency`
+ticket) confirmed *not* suppressed by an `availability` page.
+
+**NOT EXECUTED**: the same run inside the real `observability` profile. The
+scratch stack has no `api`, so there is no live `/metrics` and no real
+`rovenue_partition_*` series; the Alloy -> Prometheus remote-write hop and
+Grafana's rendering of these alerts were not exercised. What was proven
+end-to-end is the part that previously did not exist at all: Prometheus ->
+Alertmanager -> receiver, with the committed rules and the committed configs.
+
+### What does not exist — say it plainly
 
 **The Alloy API scrape target is static, not service-discovered.**
 `deploy/alloy/config.alloy`'s `prometheus.scrape "infra"` block hardcodes
@@ -337,7 +436,7 @@ Every service in `docker-compose.yml` sets `cpus:`/`mem_limit:` explicitly
 | `minio-init` | 0.5 | 512m |
 | Observability profile: `prometheus`, `loki`, `grafana` | 1 each | 2g / 2g / 1g |
 | Observability profile: `alloy` | 0.5 | 512m |
-| Observability profile: `postgres-exporter`, `redis-exporter` | 0.25 each | 256m each |
+| Observability profile: `postgres-exporter`, `redis-exporter`, `alertmanager` | 0.25 each | 256m each |
 
 Sum the row for whatever you actually run before sizing a host. Default
 boot (no observability, `API_REPLICAS=1`, excluding the transient
