@@ -1262,13 +1262,66 @@ for whoever picks them up next.
          generates it, and until now that requirement was documented nowhere
          a new consumer would think to look.
 
-      Deferred follow-up on hazard (2): upgrading `sample-rn-expo` to
-      `expo >=52` / `react-native >=0.76` may also dissolve hazard (1) rather
-      than just uncover it — the CocoaPods hoisting bug depends on which
-      React Native version gets hoisted where in the monorepo's
-      `node_modules`, and a version bump changes that resolution. Not
-      verified; recorded so whoever does the upgrade checks it rather than
-      assuming both hazards still need independent fixes.
+      Deferred follow-up, restated after verification (2026-09-07): hazard (2)
+      above blames the wrong side of the skew. It reads as "the example pins
+      too low", so the implied fix is "upgrade the example". Re-checking it
+      showed the newer half of the skew is `packages/sdk-rn`'s own peer floor,
+      and **that floor has never been built against by anything, ever.**
+      Evidence, each re-verified against the tree rather than inherited:
+
+      1. The floor is unbounded and pnpm installs it. `packages/sdk-rn/package.json`
+         declares `"react-native": ">=0.76"` and `"expo": ">=52.0.0"` with no
+         ceiling. `.npmrc` sets `auto-install-peers=true`, so pnpm materialises
+         those peers as real resolutions: `pnpm-lock.yaml`'s `packages/sdk-rn`
+         importer carries `react-native: specifier '>=0.76' → version 0.86.0`
+         and `expo: specifier '>=52.0.0' → version 56.0.12`. With
+         `node-linker=hoisted` (same `.npmrc`), that 0.86.0 IS the "hoisted
+         repo-root RN (0.86.x)" the CocoaPods hazard (1) already blames. The
+         example's `react-native 0.74.5` is the other side of a skew the SDK's
+         own manifest created.
+      2. The tests do not build against it. `packages/sdk-rn/vitest.config.ts`
+         aliases both halves out of the run — `"react-native": resolve(__dirname,
+         "src/__tests__/_stubReactNative.ts")` and the same for
+         `expo-modules-core` — with the comment "the stub only needs to satisfy
+         imports". `_stubReactNative.ts` is a hand-written `AppState` +
+         `StyleSheet` stand-in.
+      3. CI does not link a real RN either. The `rn` job in
+         `.github/workflows/sdk.yml` (`name: RN façade (TS)`) is exactly
+         `pnpm install --frozen-lockfile`, `pnpm --filter
+         @rovenue/react-native-sdk test`, `... build`. The test half is the
+         stubbed run from (2); the build half is `tsup` with `react-native`,
+         `expo` and `expo-modules-core` all listed in `external`. Neither
+         compiles a line of React Native. `example-rn` is
+         `name: Example app (RN/Expo, typecheck only)` and its one verification
+         step is `pnpm exec tsc --noEmit -p tsconfig.json`.
+      4. The SDK's own code still carries a live path BELOW the declared floor.
+         `packages/sdk-rn/src/core/native.ts` documents "every Expo SDK we
+         support (51 → 56)" and keeps the branch for "Expo SDK 51
+         (expo-modules-core 1.x): the module is NOT an emitter … we must
+         subscribe through the legacy `new EventEmitter(nativeModule)` JS
+         wrapper" — while the manifest's `expo >=52` / `expo-modules-core
+         >=2.0.0` peers exclude SDK 51 outright. The manifest and the code
+         disagree about what is supported, and neither claim is tested.
+
+      So the real defect is not the example's pins: **the SDK publishes a
+      compatibility claim (`react-native >=0.76`, `expo >=52`) that no test, no
+      CI job and no example has ever exercised.** Upgrading `sample-rn-expo`
+      would be the first build ever to test that claim — which makes it a
+      migration project with unknown native and codegen fallout, not a
+      dependency bump. Verifying the floor means, at minimum: an example
+      pinned at or above it, a real Metro bundle, and native iOS + Android
+      builds of it, all in CI, plus a decision on whether the SDK-51 path in
+      `native.ts` is dead code or the floor is wrong.
+
+      Nothing bounded was substituted here, deliberately. Adding a peer ceiling
+      would be a compatibility claim with exactly as little evidence as the
+      floor has. Pinning a `devDependency` on `react-native` would assert that
+      CI builds against that version, when (2) and (3) show it stubs it out. A
+      `pnpm.overrides` entry would add no determinism the committed lockfile
+      does not already give: every CI job installs `--frozen-lockfile`, so
+      today's resolution is already fixed at 0.86.0, and the float only
+      reappears when the lockfile is regenerated. Each would look like progress
+      and verify nothing, so the peer range is left exactly as published.
 - [ ] `apps/docs/content/docs/reference/methods.mdx` has no section for
       three real, exported RN SDK method groups: Paywalls
       (`RovenuePaywallView`, exported from `packages/sdk-rn/src/index.ts`),
