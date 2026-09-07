@@ -10,8 +10,32 @@
 //     through the legacy `new EventEmitter(nativeModule)` JS wrapper.
 //   - Expo SDK 52+ (expo-modules-core 2.x / 3.x): the EventEmitter moved
 //     to C++ and every native module now *extends* it. We subscribe on
-//     the module directly via its real 2-arg `addListener(name, listener)`;
-//     the legacy `new EventEmitter(module)` constructor no longer exists.
+//     the module directly via its real 2-arg `addListener(name, listener)`.
+//
+// NOTE (2026-09-07), two corrections to what this comment used to claim:
+//
+//  1. It said the legacy `new EventEmitter(module)` constructor "no longer
+//     exists" on 52+. It does. In the resolved expo-modules-core@2.5.0 it is
+//     `constructor(object: EventEmitter)`, marked `@deprecated As of Expo SDK
+//     52 the given object is already an EventEmitter` and `@hidden`. It is
+//     deprecated, not removed — but note its parameter type: on 2.x it expects
+//     something that ALREADY is an emitter, so it cannot do the wrapping job
+//     the SDK-51 branch below needs it for. That branch therefore only
+//     functions on expo-modules-core 1.x.
+//
+//  2. It said this file supports "every Expo SDK we support (51 -> 56)".
+//     `package.json` declares `expo >=52.0.0` and `expo-modules-core >=2.0.0`.
+//     Under that floor the SDK-51 branch is unreachable. Manifest and comment
+//     disagree, and that contradiction is UNRESOLVED: deciding it means either
+//     dropping the branch or lowering the floor, and neither is safe to assert
+//     until the floor is verified by a real native build. `examples/sample-rn-expo`
+//     is still pinned at expo ~51 / RN 0.74.5, below the floor, and is
+//     CI-verified typecheck-only.
+//
+//     `__tests__/native.test.ts` exercises the SDK-51 branch against a STUB
+//     EventEmitter whose constructor accepts a plain object. The real 2.x
+//     constructor does not. So that test does not evidence the branch works
+//     on any supported version.
 //
 // The emitter is resolved lazily so test injection is observed.
 
