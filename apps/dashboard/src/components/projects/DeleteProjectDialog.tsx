@@ -16,6 +16,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Input } from "../../ui/input";
 import { useDeleteProject } from "../../lib/hooks/useDeleteProject";
+import { removeStoredValue } from "../../lib/safe-storage";
 
 interface Props {
   projectId: string;
@@ -43,7 +44,7 @@ export function DeleteProjectDialog({ projectId, projectName }: Props) {
     mutate(projectId, {
       onSuccess: () => {
         try {
-          localStorage.removeItem("lastProjectId");
+          removeStoredValue("lastProjectId");
         } catch {
           // ignore storage failures
         }

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
 import { ChevronDown, Plus } from "lucide-react";
 import { useProjects } from "../../lib/hooks/useProjects";
+import { writeStoredValue } from "../../lib/safe-storage";
 
 type AppSwitcherProps = {
   projectId: string;
@@ -51,7 +52,7 @@ export function AppSwitcher({ projectId, projectName, envLabel = "prod" }: AppSw
                 onClick={() => {
                   if (p.id === projectId) return;
                   try {
-                    localStorage.setItem("lastProjectId", p.id);
+                    writeStoredValue("lastProjectId", p.id);
                   } catch {
                     /* ignore quota / private mode */
                   }

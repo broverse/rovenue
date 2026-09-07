@@ -1,5 +1,6 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PaywallTreeOp } from "@rovenue/shared/paywall";
+import { readStoredValue, writeStoredValue } from "../../lib/safe-storage";
 
 /**
  * What the currently-open page wants Rovi to know about. Threaded into
@@ -53,8 +54,7 @@ const STORAGE_KEY = "rovi:open";
 
 export function RoviProvider({ children }: { children: ReactNode }) {
   const [open, setOpenState] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(STORAGE_KEY) === "1";
+    return readStoredValue(STORAGE_KEY) === "1";
   });
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [chatContext, setChatContextState] = useState<RoviChatContext>({});
@@ -90,9 +90,7 @@ export function RoviProvider({ children }: { children: ReactNode }) {
 
   const setOpen = useCallback((next: boolean) => {
     setOpenState(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
-    }
+    writeStoredValue(STORAGE_KEY, next ? "1" : "0");
   }, []);
 
   const toggle = useCallback(() => setOpen(!open), [open, setOpen]);
