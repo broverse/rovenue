@@ -258,14 +258,20 @@ function TwoFactorSetupDialog({
         setState({ step: "error", message: res.error?.message ?? "Failed to start setup" });
         return;
       }
-      // better-auth 1.6.22 made this a discriminated union: the server
-      // answers `{ method: "otp" }` when the twoFactor plugin is configured
-      // for emailed one-time codes, and only the `totp` arm carries a
-      // totpURI and backup codes. This dialog IS the TOTP flow — QR, secret,
-      // recovery codes — so the other arm has nothing to render. Say so
-      // instead of narrowing it away: an empty QR that never verifies is a
+      // A server whose twoFactor plugin is configured for emailed one-time
+      // codes answers without a totpURI. This dialog IS the TOTP flow — QR,
+      // secret, recovery codes — so it has nothing to render in that case.
+      // Say so instead of proceeding: an empty QR that never verifies is a
       // worse outcome than a message naming the misconfiguration.
-      if (res.data.method !== "totp") {
+      //
+      // The precondition is tested by presence, NOT by a `method`
+      // discriminator: that field only exists in better-auth 1.7, and this
+      // workspace is pinned to the 1.6 patch line (see the root package.json
+      // and commit 633894b9), where `/two-factor/enable` returns a bare
+      // `{ totpURI, backupCodes }`. Probing `res.data.method` there reads
+      // `undefined` on every response, so the old guard rejected EVERY
+      // enrolment and the QR never rendered at all.
+      if (!res.data.totpURI || !res.data.backupCodes) {
         setState({
           step: "error",
           message: "Server is configured for one-time codes, not an authenticator app",
