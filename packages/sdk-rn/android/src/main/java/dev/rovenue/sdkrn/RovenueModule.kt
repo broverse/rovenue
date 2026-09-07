@@ -47,6 +47,12 @@ import dev.rovenue.sdk.generated.ClaimInstallParams
 import dev.rovenue.sdk.generated.Entitlement
 import dev.rovenue.sdk.generated.ExperimentAssignment
 import dev.rovenue.sdk.generated.SessionEventKind
+// `Coroutine` is an infix extension on AsyncFunctionBuilder living in
+// expo.modules.kotlin.functions. It needs an explicit import: without it the
+// module fails to compile with 81 `Unresolved reference 'Coroutine'` errors
+// under expo-modules-core 56.x. Verified present at this same path in the 2.x
+// line too, so this import is correct across the whole declared peer range.
+import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -240,9 +246,18 @@ class RovenueModule : Module() {
             // JS sends the lowercase DTO string; reconstruct the façade enum.
             // The façade re-resolves the real Play product by id, so
             // displayName/price are not needed here.
+            val productKind = productTypeFrom(productType)
             val product = StoreProduct(
                 id = productId,
-                type = productTypeFrom(productType),
+                type = productKind,
+                // Required, no default. Derived from the type rather than sent by JS:
+                // the DTO has no category field, and the two are not independent —
+                // only SUBSCRIPTION is a subscription.
+                productCategory = if (productKind == ProductType.SUBSCRIPTION) {
+                    ProductCategory.SUBSCRIPTION
+                } else {
+                    ProductCategory.NON_SUBSCRIPTION
+                },
                 displayName = "",
             )
             try {

@@ -158,7 +158,7 @@ final class RovenuePaywallExpoView: ExpoView {
     }
 
     /// Containment has to wait for a window, because that is when
-    /// `reactViewController()` can hand us a parent to attach to.
+    /// `hostViewController()` can hand us a parent to attach to.
     ///
     /// On losing the window we detach from the parent controller but KEEP
     /// the controller object. React Native recycles views; destroying the
@@ -207,8 +207,26 @@ final class RovenuePaywallExpoView: ExpoView {
         controller.didMove(toParent: parent)
     }
 
+    /// Walks the responder chain for the view controller managing this view.
+    ///
+    /// This replaces React Native's `reactViewController()`, a UIView category
+    /// that `ExpoModulesCore` no longer transitively exposes to Swift on
+    /// RN 0.86 — the file failed to compile with "cannot find
+    /// 'reactViewController' in scope", the single iOS error blocking the first
+    /// native build this SDK has ever had. The responder-chain walk is what that
+    /// category does, and it depends on nothing but UIKit, so it cannot break
+    /// again when React reorganises its headers.
+    private func hostViewController() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let controller = current as? UIViewController { return controller }
+            responder = current.next
+        }
+        return nil
+    }
+
     private func mount(_ paywall: Paywall?) {
-        guard let paywall, window != nil, let parent = reactViewController() else {
+        guard let paywall, window != nil, let parent = hostViewController() else {
             detachFromParent()
             return
         }

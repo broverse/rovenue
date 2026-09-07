@@ -1,5 +1,5 @@
 plugins {
-    id("com.android.library") version "8.5.2"
+    id("com.android.library") version "8.12.0"
     kotlin("android") version "1.9.24"
     kotlin("plugin.serialization") version "1.9.24"
     `maven-publish`
@@ -60,7 +60,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    implementation("com.android.billingclient:billing:9.1.0")
+    // `api`, not `implementation`: StoreProduct.rawStoreProduct exposes Play
+    // Billing's ProductDetails in this SDK's PUBLIC API, so every consumer needs
+    // the type on its own compile classpath. As `implementation` the first real
+    // Kotlin consumer failed with "Cannot access class 'ProductDetails'. Check
+    // your module classpath" — invisible until something actually compiled
+    // against this module.
+    api("com.android.billingclient:billing:9.1.0")
     implementation("androidx.lifecycle:lifecycle-process:2.6.2")
     // `carousel` node paging (wave D1). Our minSdk is 24 against this
     // library's floor of 14 -- deliberate: the alternative is a
