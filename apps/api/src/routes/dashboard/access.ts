@@ -28,7 +28,7 @@ const identifierSchema = z
   .max(64)
   .regex(/^[a-z0-9][a-z0-9_-]*$/i, "identifier must be slug-like");
 
-const createBodySchema = z.object({
+export const createBodySchema = z.object({
   identifier: identifierSchema,
   displayName: z.string().min(1).max(200),
   description: z.string().max(2000).nullable().optional(),

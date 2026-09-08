@@ -271,7 +271,8 @@ describe("assertToolAllowed", () => {
 
   it("TOOL_SURFACE marks every shipped tool read or write", () => {
     // Task 6 populated this map as tools shipped; Task 9 adds the two
-    // writes. A tool added WITHOUT an entry stays unreachable to read
+    // experiment writes, and the catalog group adds its three creates.
+    // A tool added WITHOUT an entry stays unreachable to read
     // tokens by construction (fail-closed unknown handling) — this pin
     // makes that allow-list explicit.
     expect(TOOL_SURFACE).toEqual({
@@ -285,6 +286,9 @@ describe("assertToolAllowed", () => {
       find_funnels: "read",
       start_experiment: "write",
       stop_experiment: "write",
+      create_product: "write",
+      create_offering: "write",
+      create_entitlement: "write",
     });
   });
 });

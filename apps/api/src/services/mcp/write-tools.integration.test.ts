@@ -10,7 +10,7 @@
 // =============================================================
 
 import { randomBytes } from "node:crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import bcrypt from "bcryptjs";
 import { Hono } from "hono";
 import { desc, eq } from "drizzle-orm";
@@ -25,6 +25,14 @@ import { getDb, projects, drizzle } from "@rovenue/db";
 import { errorHandler } from "../../middleware/error";
 import { MCP_PROTOCOL_REVISION } from "./server";
 import { mcpRoute } from "../../routes/mcp";
+import { registerAllIntentHandlers } from "../copilot/intent-handlers";
+
+beforeAll(() => {
+  // HANDLERS is a Map — .set() is idempotent; safe even if app.ts
+  // startup already registered. Without this the file depends on
+  // whichever suite happened to share its worker.
+  registerAllIntentHandlers();
+});
 
 const RUN_ID = Date.now();
 const TEST_BCRYPT_ROUNDS = 4;
@@ -402,5 +410,225 @@ describe("MCP write tools", () => {
     expect(res.isError).toBe(true);
     expect(res.text).toMatch(/not found in this project/i);
     expect(await getExperimentStatus(experiment.id, projectId)).toBe("DRAFT");
+  });
+});
+
+describe("MCP catalog create tools", () => {
+  it("create_product proposes, then creates on confirmation", async () => {
+    const { raw, projectId } = await seedToken("prod", "read_write");
+    const args = {
+      identifier: `mcp_prod_${RUN_ID}`,
+      type: "SUBSCRIPTION",
+      displayName: "MCP Product",
+    };
+
+    const proposal = await callTool(raw, "create_product", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have created anything.
+    expect(
+      await drizzle.productRepo.findProductByIdentifier(
+        drizzle.db,
+        projectId,
+        args.identifier,
+      ),
+    ).toBeNull();
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "create_product", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const row = await drizzle.productRepo.findProductByIdentifier(
+      drizzle.db,
+      projectId,
+      args.identifier,
+    );
+    expect(row?.displayName).toBe("MCP Product");
+    expect(row?.type).toBe("SUBSCRIPTION");
+  });
+
+  it("create_product writes an audit row naming the token's owner", async () => {
+    const { raw, projectId, userId } = await seedToken("prodaudit", "read_write");
+    const args = {
+      identifier: `mcp_prod_audit_${RUN_ID}`,
+      type: "CONSUMABLE",
+      displayName: "MCP Audited Product",
+    };
+    const proposal = await callTool(raw, "create_product", args);
+    const confirmed = await callTool(raw, "create_product", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+
+    const row = await latestAuditRow(projectId);
+    expect(row?.userId).toBe(userId);
+    expect(row?.action).toBe("product.created");
+    expect(row?.resource).toBe("product");
+  });
+
+  it("create_product refuses a duplicate identifier without creating", async () => {
+    const { raw } = await seedToken("proddup", "read_write");
+    const args = {
+      identifier: `mcp_prod_dup_${RUN_ID}`,
+      type: "SUBSCRIPTION",
+      displayName: "MCP Dup Product",
+    };
+    const first = await callTool(raw, "create_product", args);
+    const firstConfirmed = await callTool(raw, "create_product", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: first.rawResult.requestState as string,
+    });
+    expect(firstConfirmed.isError).toBe(false);
+
+    const second = await callTool(raw, "create_product", args);
+    const secondConfirmed = await callTool(raw, "create_product", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: second.rawResult.requestState as string,
+    });
+    expect(secondConfirmed.isError).toBe(true);
+    expect(secondConfirmed.text).toMatch(/already in use/i);
+  });
+
+  it("create_offering proposes, then creates on confirmation", async () => {
+    const { raw, projectId } = await seedToken("off", "read_write");
+    const product = await drizzle.productRepo.createProduct(drizzle.db, {
+      projectId,
+      identifier: `mcp_off_prod_${RUN_ID}`,
+      type: "SUBSCRIPTION",
+      displayName: "Offering Product",
+      storeIds: {},
+    });
+    const args = {
+      identifier: `mcp_off_${RUN_ID}`,
+      packages: [
+        { identifier: "standard", productId: product.id, order: 0 },
+      ],
+    };
+
+    const proposal = await callTool(raw, "create_offering", args);
+    expect(proposal.isError).toBe(false);
+    expect(
+      await drizzle.offeringRepo.findOfferingByIdentifier(
+        drizzle.db,
+        projectId,
+        args.identifier,
+      ),
+    ).toBeNull();
+
+    const confirmed = await callTool(raw, "create_offering", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const row = await drizzle.offeringRepo.findOfferingByIdentifier(
+      drizzle.db,
+      projectId,
+      args.identifier,
+    );
+    expect(row?.identifier).toBe(args.identifier);
+  });
+
+  it("create_offering declines cleanly when the user refuses", async () => {
+    const { raw, projectId } = await seedToken("offdecline", "read_write");
+    const args = { identifier: `mcp_off_dec_${RUN_ID}` };
+    const proposal = await callTool(raw, "create_offering", args);
+    const declined = await callTool(raw, "create_offering", args, {
+      inputResponses: { confirm: { action: "decline" } },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(declined.isError).toBe(true);
+    expect(
+      await drizzle.offeringRepo.findOfferingByIdentifier(
+        drizzle.db,
+        projectId,
+        args.identifier,
+      ),
+    ).toBeNull();
+  });
+
+  it("create_entitlement proposes, then creates on confirmation", async () => {
+    const { raw, projectId } = await seedToken("ent", "read_write");
+    const args = {
+      identifier: `ent_${RUN_ID}`,
+      displayName: "MCP Entitlement",
+    };
+
+    const proposal = await callTool(raw, "create_entitlement", args);
+    expect(proposal.isError).toBe(false);
+    expect(
+      await drizzle.accessCatalogRepo.findByIdentifier(
+        drizzle.db,
+        projectId,
+        args.identifier,
+      ),
+    ).toBeNull();
+
+    const confirmed = await callTool(raw, "create_entitlement", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const row = await drizzle.accessCatalogRepo.findByIdentifier(
+      drizzle.db,
+      projectId,
+      args.identifier,
+    );
+    expect(row?.displayName).toBe("MCP Entitlement");
+  });
+
+  it("a confirmation echoing different args fails closed", async () => {
+    const { raw, projectId } = await seedToken("entswap", "read_write");
+    const proposed = {
+      identifier: `ent_swap_a_${RUN_ID}`,
+      displayName: "Swap A",
+    };
+    const proposal = await callTool(raw, "create_entitlement", proposed);
+    const swapped = await callTool(
+      raw,
+      "create_entitlement",
+      { identifier: `ent_swap_b_${RUN_ID}`, displayName: "Swap B" },
+      {
+        inputResponses: {
+          confirm: { action: "accept", content: { confirm: true } },
+        },
+        requestState: proposal.rawResult.requestState as string,
+      },
+    );
+    expect(swapped.isError).toBe(true);
+    expect(swapped.text).toMatch(/does not match/i);
+    expect(
+      await drizzle.accessCatalogRepo.findByIdentifier(
+        drizzle.db,
+        projectId,
+        `ent_swap_b_${RUN_ID}`,
+      ),
+    ).toBeNull();
+  });
+
+  it("a read token cannot propose a create: protocol refusal, no intent row", async () => {
+    const before = await countIntents();
+    const { raw } = await seedToken("creadgate", "read");
+    const res = await callTool(raw, "create_product", {
+      identifier: "whatever",
+      type: "SUBSCRIPTION",
+      displayName: "Whatever",
+    });
+    expect(res.isError).toBe(true);
+    expect(await countIntents()).toBe(before);
   });
 });

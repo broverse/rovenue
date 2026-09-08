@@ -270,6 +270,10 @@ export type AuditResource =
   | "paywall_asset"
   | "import_job"
   | "leaderboard_season"
+  // The access catalog (entitlements). MCP create_entitlement writes its
+  // audit row against this; the dashboard access route writes no audit
+  // rows of its own.
+  | "access"
   // Scoped by projectId; `resourceId` is the store the rate applies to.
   | "commission_rate"
   // A dropped credit_ledger/revenue_events partition affects every

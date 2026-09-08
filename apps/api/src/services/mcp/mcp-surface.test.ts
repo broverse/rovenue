@@ -29,7 +29,13 @@ import {
 /** Task 9 established this name from the specification schema. */
 const DESTRUCTIVE_ANNOTATION = "destructiveHint";
 
-const WRITE_TOOLS = new Set(["start_experiment", "stop_experiment"]);
+const WRITE_TOOLS = new Set([
+  "start_experiment",
+  "stop_experiment",
+  "create_product",
+  "create_offering",
+  "create_entitlement",
+]);
 
 const EXPECTED_TOOLS = [
   "find_subscribers",
@@ -42,6 +48,9 @@ const EXPECTED_TOOLS = [
   "get_paywall",
   "start_experiment",
   "stop_experiment",
+  "create_product",
+  "create_offering",
+  "create_entitlement",
 ];
 
 const EXPECTED_RESOURCES = [

@@ -36,6 +36,11 @@ export const TOOL_SURFACE: Record<string, ToolSurface> = {
   // before the tool body runs, so denial leaves no intent row behind.
   start_experiment: "write",
   stop_experiment: "write",
+  // Catalog creates (products / offerings / entitlements): same gate —
+  // a `read` token is refused before any intent row exists.
+  create_product: "write",
+  create_offering: "write",
+  create_entitlement: "write",
 };
 
 /**

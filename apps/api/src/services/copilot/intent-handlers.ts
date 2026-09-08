@@ -31,6 +31,29 @@ import { drizzle } from "@rovenue/db";
 import { applyTreeOp, paywallTreeOpSchema } from "@rovenue/shared/paywall";
 import { audit } from "../../lib/audit";
 import { registerIntentHandler } from "./intent-executor";
+// The create schemas are the routes' own validation (dashboard parity:
+// the MCP tools validate with these same objects, and the handlers
+// re-parse so a forged intent payload cannot smuggle an unvalidated
+// shape past the tool boundary). This services→routes import is a
+// deliberate, narrow exception to the usual layering.
+import { createBodySchema as createProductBodySchema } from "../../routes/dashboard/products";
+import { createBodySchema as createOfferingBodySchema } from "../../routes/dashboard/offerings";
+import { createBodySchema as createAccessBodySchema } from "../../routes/dashboard/access";
+import { purgeProjectCatalogCache } from "../../lib/edge-cache";
+import { purgeResolvedPriceCache } from "../offering-price-resolver";
+import { logger } from "../../lib/logger";
+
+const log = logger.child("intent-handlers");
+
+/** Fire-and-forget resolved-price cache bust; never blocks or fails the mutation. */
+function purgeResolvedPriceCacheSafe(projectId: string): void {
+  purgeResolvedPriceCache(projectId).catch((err) => {
+    log.warn("resolved-price cache purge failed", {
+      projectId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
 import {
   assertSaveValid,
   BUILDER_CONFIG_TREE_FORMAT_VERSION,
@@ -573,6 +596,222 @@ export function registerAllIntentHandlers(): void {
       );
 
       return { paywallId, draftRevision: updated.draftRevision };
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // action.products.create (MCP create_product)
+  // Mirrors POST /dashboard/:projectId/products (products:write):
+  // duplicate identifier refused, access-id FKs re-checked, RENEWAL/
+  // BOTH grants rejected on non-subscriptions, currencies resolved
+  // before setProductGrants. Every check runs against the handler's
+  // own tx so the audit row below commits atomically with the product.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_products_create", async (ctx, payload) => {
+    const body = createProductBodySchema.parse(payload);
+
+    return drizzle.db.transaction(async (tx) => {
+      const t = tx as never;
+      const existing = await drizzle.productRepo.findProductByIdentifier(
+        t,
+        ctx.projectId,
+        body.identifier,
+      );
+      if (existing) {
+        throw new Error(
+          `Product identifier already in use: ${body.identifier}`,
+        );
+      }
+
+      if (body.accessIds && body.accessIds.length > 0) {
+        const rows = await drizzle.accessCatalogRepo.findByIds(t, [
+          ...body.accessIds,
+        ]);
+        const valid = new Set(
+          rows.filter((r) => r.projectId === ctx.projectId).map((r) => r.id),
+        );
+        const missing = body.accessIds.filter((id) => !valid.has(id));
+        if (missing.length > 0) {
+          throw new Error(`Unknown access ids: ${missing.join(", ")}`);
+        }
+      }
+
+      if (body.type !== "SUBSCRIPTION") {
+        const offending = (body.currencyGrants ?? []).find(
+          (g) => g.grantOn === "RENEWAL" || g.grantOn === "BOTH",
+        );
+        if (offending) {
+          throw new Error(
+            `grantOn "${offending.grantOn}" requires a SUBSCRIPTION product (renewals only fire for subscriptions)`,
+          );
+        }
+      }
+
+      const row = await drizzle.productRepo.createProduct(t, {
+        projectId: ctx.projectId,
+        identifier: body.identifier,
+        type: body.type,
+        displayName: body.displayName,
+        storeIds: body.storeIds ?? {},
+        accessIds: body.accessIds ?? [],
+        isActive: body.isActive ?? true,
+        metadata: body.metadata ?? {},
+        androidBasePlanId: body.androidBasePlanId ?? null,
+        androidOfferId: body.androidOfferId ?? null,
+      });
+
+      if (body.currencyGrants !== undefined) {
+        for (const g of body.currencyGrants) {
+          const vc = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
+            t,
+            ctx.projectId,
+            g.currencyId,
+          );
+          if (!vc) {
+            throw new Error(`currency not found: ${g.currencyId}`);
+          }
+        }
+        await drizzle.productCurrencyGrantRepo.setProductGrants(
+          t,
+          row.id,
+          body.currencyGrants,
+        );
+      }
+
+      purgeProjectCatalogCache(ctx.projectId);
+      purgeResolvedPriceCacheSafe(ctx.projectId);
+
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "product.created",
+          resource: "product",
+          resourceId: row.id,
+          after: {
+            identifier: body.identifier,
+            type: body.type,
+            displayName: body.displayName,
+          },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+
+      return row;
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // action.offerings.create (MCP create_offering)
+  // Mirrors POST /dashboard/:projectId/offerings (products:write):
+  // duplicate identifier refused, package productIds re-checked
+  // against this project. The repo clears a previous default inside
+  // its own (savepoint-nested) transaction.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_offerings_create", async (ctx, payload) => {
+    const body = createOfferingBodySchema.parse(payload);
+
+    return drizzle.db.transaction(async (tx) => {
+      const t = tx as never;
+      const existing = await drizzle.offeringRepo.findOfferingByIdentifier(
+        t,
+        ctx.projectId,
+        body.identifier,
+      );
+      if (existing) {
+        throw new Error(
+          `Offering identifier already in use: ${body.identifier}`,
+        );
+      }
+
+      if (body.packages && body.packages.length > 0) {
+        const rows = await drizzle.productRepo.findProductsByIds(
+          t,
+          ctx.projectId,
+          body.packages.map((p) => p.productId),
+        );
+        const found = new Set(rows.map((r) => r.id));
+        const missing = body.packages
+          .map((p) => p.productId)
+          .filter((id) => !found.has(id));
+        if (missing.length > 0) {
+          throw new Error(`Unknown product ids: ${missing.join(", ")}`);
+        }
+      }
+
+      const row = await drizzle.offeringRepo.createOffering(t, {
+        projectId: ctx.projectId,
+        identifier: body.identifier,
+        isDefault: body.isDefault ?? false,
+        packages: body.packages ?? [],
+        metadata: body.metadata ?? {},
+      });
+
+      purgeProjectCatalogCache(ctx.projectId);
+      purgeResolvedPriceCacheSafe(ctx.projectId);
+
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "product_group.created",
+          resource: "product_group",
+          resourceId: row.id,
+          after: { identifier: body.identifier },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+
+      return row;
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // action.entitlements.create (MCP create_entitlement)
+  // Mirrors POST /dashboard/:projectId/access (products:write): the
+  // access catalog IS the entitlement store, so "create entitlement"
+  // creates an access row. Duplicate identifier refused.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_entitlements_create", async (ctx, payload) => {
+    const body = createAccessBodySchema.parse(payload);
+
+    return drizzle.db.transaction(async (tx) => {
+      const t = tx as never;
+      const existing = await drizzle.accessCatalogRepo.findByIdentifier(
+        t,
+        ctx.projectId,
+        body.identifier,
+      );
+      if (existing) {
+        throw new Error(
+          `Access identifier '${body.identifier}' already exists`,
+        );
+      }
+
+      const row = await drizzle.accessCatalogRepo.create(t, {
+        projectId: ctx.projectId,
+        identifier: body.identifier,
+        displayName: body.displayName,
+        description: body.description ?? null,
+        metadata: body.metadata ?? {},
+      });
+
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "create",
+          resource: "access",
+          resourceId: row.id,
+          after: {
+            identifier: body.identifier,
+            displayName: body.displayName,
+          },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+
+      return row;
     });
   });
 }

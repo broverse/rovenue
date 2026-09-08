@@ -58,7 +58,7 @@ function hasDuplicateProductIds(
   return false;
 }
 
-const createBodySchema = z
+export const createBodySchema = z
   .object({
     identifier: z.string().trim().min(1).max(160),
     isDefault: z.boolean().optional(),
