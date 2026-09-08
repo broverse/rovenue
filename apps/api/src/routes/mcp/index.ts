@@ -6,6 +6,7 @@ import { BEARER_SCHEME, HEADER } from "@rovenue/shared";
 import { drizzle } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { buildMcpServer } from "../../services/mcp/server";
+import { assertToolAllowed, authorizeMcpRequest } from "../../services/mcp/authorize";
 import { verifyMcpToken } from "./auth";
 
 const log = logger.child("mcp-auth");
@@ -66,6 +67,35 @@ export const mcpRoute = new Hono()
           err: err instanceof Error ? err.message : String(err),
         });
       });
+
+    await next();
+  })
+  .use("*", async (c, next) => {
+    // Authorization resolves per request (Task 5). The membership is
+    // re-read on every call: no baked-in role, no cross-request cache.
+    const ctx = c.get("mcpToken");
+    await authorizeMcpRequest(ctx);
+
+    // Scope is enforced BEFORE dispatch, never inside a tool body: a
+    // rejected write leaves no intent row or other side effect. The body
+    // is read from a clone so the handler still receives an unread
+    // request; an unparseable body simply skips gating and lets the
+    // handler answer (415/400) on its own terms.
+    let method: unknown;
+    let toolName: unknown;
+    try {
+      const probed = (await c.req.raw.clone().json()) as {
+        method?: unknown;
+        params?: { name?: unknown };
+      };
+      method = probed.method;
+      toolName = probed.params?.name;
+    } catch {
+      method = undefined;
+    }
+    if (method === "tools/call") {
+      assertToolAllowed(ctx, toolName);
+    }
 
     await next();
   })
