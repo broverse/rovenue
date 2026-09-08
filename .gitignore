@@ -81,3 +81,10 @@ packages/sdk-web/dist/
 packages/sdk-rn/docs/
 packages/sdk-web/docs/
 packages/sdk-flutter/rovenue_flutter/doc/
+
+# Local pnpm content-addressable store (store-dir set inside the repo).
+# ~4 GB of hashed blobs — a build cache, never committed.
+.pnpm-store/
+
+# Agent scratch state — local tooling, not part of the project.
+.agents/
