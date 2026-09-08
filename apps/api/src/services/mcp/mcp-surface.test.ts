@@ -10,6 +10,12 @@
 // linked in-memory transports with a stub authInfo (auth is the HTTP
 // layer's job, covered by the auth tests). Registration is pure — no
 // tool body runs here, so no database is touched.
+//
+// The `initialize` handshake below is SDK transport setup, not an
+// HTTP-era claim: the public endpoint serves `server/discover` and
+// rejects the retired `initialize` (covered by the discovery tests).
+// What this guard pins is OUR registrations (tools/resources/prompts)
+// as the SDK serves them from the same factory the handler uses.
 // =============================================================
 
 import { describe, expect, it } from "vitest";

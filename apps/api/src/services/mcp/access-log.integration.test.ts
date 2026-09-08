@@ -11,7 +11,7 @@
 
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import bcrypt from "bcryptjs";
 import { Hono } from "hono";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -31,7 +31,14 @@ import { mcpRoute } from "../../routes/mcp";
 const RUN_ID = Date.now();
 const TEST_BCRYPT_ROUNDS = 4;
 
-const ACCESS_LOG_PATH = new URL("./access-log.ts", import.meta.url);
+// The tier ladder is a cloud-only billing instrument; the test env
+// defaults to self-host (ladder off). Force cloud mode file-wide so the
+// tier-trip test exercises the real gate. The abuse floor ignores this
+// flag by design, so other tests are unaffected.
+vi.mock("../../lib/host-mode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/host-mode")>()),
+  quotasUnlimited: () => false,
+}));
 
 function buildMcpApp() {
   const app = new Hono();
@@ -70,9 +77,12 @@ async function callTool(raw: string, tool: string, args: unknown) {
     headers: { ...mcpHeaders(raw, "tools/call"), "mcp-name": tool },
     body: envelope(2, "tools/call", { name: tool, arguments: args }),
   });
-  return (await res.json()) as {
-    result?: { isError?: boolean };
-    error?: { message?: string };
+  return {
+    status: res.status,
+    ...(await res.json() as {
+      result?: { isError?: boolean };
+      error?: { code?: string; message?: string };
+    }),
   };
 }
 
@@ -157,12 +167,18 @@ const seededProjectIds: string[] = [];
 afterAll(async () => {
   const db = getDb();
   for (const id of seededProjectIds) {
+    // Outbox rows carry no FK to projects: delete the trail explicitly
+    // or bulk-seeded quota rows would orphan (counts stay isolated by
+    // RUN_ID-suffixed project ids either way).
+    await db
+      .delete(drizzle.schema.outboxEvents)
+      .where(sql`${drizzle.schema.outboxEvents.payload}->>'projectId' = ${id}`);
     await db.delete(projects).where(eq(projects.id, id));
   }
 });
 
 describe("MCP access trail", () => {
-  it("emits exactly one outbox row per tool call, in the same transaction", async () => {
+  it("emits exactly one outbox row per tool call that reaches the handler", async () => {
     const { raw, projectId } = await seedReadToken("onetrail");
     const before = await countOutbox(projectId);
     await callTool(raw, "list_experiments", {});
@@ -172,8 +188,39 @@ describe("MCP access trail", () => {
   it("writes ClickHouse only through the outbox", async () => {
     // The outbox is the ONLY path to Kafka in this codebase; a direct
     // write would bypass the dispatcher and lose at-least-once.
-    const source = readFileSync(ACCESS_LOG_PATH, "utf8");
-    expect(source).not.toMatch(/clickhouse|insertInto|kafkajs|redpanda/i);
+    // Scans every non-test module under services/mcp (not just
+    // access-log.ts): a future direct write anywhere on the surface
+    // trips this, not just one in the trail helper.
+    const { readdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const roots = [
+      new URL(".", import.meta.url).pathname,
+      new URL("./evals/", import.meta.url).pathname,
+    ];
+    const offenders: string[] = [];
+    for (const dir of roots) {
+      let files: string[] = [];
+      try {
+        files = readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        if (!f.endsWith(".ts") || f.endsWith(".test.ts")) continue;
+        const src = readFileSync(join(dir, f), "utf8");
+        // Strip line comments so prose about the pipeline never counts.
+        const code = src
+          .split("\n")
+          .filter(
+            (l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"),
+          )
+          .join("\n");
+        if (/clickhouse|insertInto|kafkajs|redpanda/i.test(code)) {
+          offenders.push(join(dir, f));
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it("records the tool and the actor but not the argument values", async () => {
@@ -203,5 +250,91 @@ describe("MCP access trail", () => {
     });
     expect(verdict.allowed).toBe(false);
     expect(verdict.exceeded).toBe("mcp_calls");
+  });
+
+  it("refuses with 429 once the project exhausts its tier (cloud mode)", async () => {
+    // Cloud-only billing instrument: the test env defaults to self-host
+    // (ladder off), so force quotasUnlimited() false to exercise the
+    // cloud path. vi.mock is hoisted — the route reads the mock.
+    const { raw, projectId } = await seedReadToken("tiertrip");
+    // Free tier allows 1_000 mcpCalls: bulk-seed exactly the limit, one
+    // statement, then the next call must trip (count >= limit trips).
+    const now = new Date();
+    await getDb()
+      .insert(drizzle.schema.outboxEvents)
+      .values(
+        Array.from({ length: 1_000 }, (_, i) => ({
+          aggregateType: "MCP_ACCESS" as const,
+          aggregateId: `tiertrip-token-${i % 7}`,
+          eventType: "mcp.tool_called",
+          payload: {
+            projectId,
+            tokenId: `tiertrip-token-${i % 7}`,
+            userId: "u",
+            toolName: "list_experiments",
+            scope: "read",
+            argsDigest: "seed",
+            ok: true,
+          },
+          createdAt: now,
+        })),
+      );
+    const before = await countOutbox(projectId);
+    expect(before).toBe(1_000);
+    const res = await callTool(raw, "list_experiments", {});
+    expect(res.status).toBe(429);
+    // A refused call never reaches the handler: no new trail row.
+    expect(await countOutbox(projectId)).toBe(before);
+  });
+
+  it("cleanup retains current-month MCP_ACCESS but prunes the rest", async () => {
+    const { projectId } = await seedReadToken("retention");
+    const now = new Date();
+    const thisMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 1),
+    );
+    const prevMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15),
+    );
+    const old = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+    const db = getDb();
+    const seedRow = async (
+      suffix: string,
+      aggregateType: "MCP_ACCESS" | "BILLING",
+      createdAt: Date,
+    ) => {
+      const [row] = await db
+        .insert(drizzle.schema.outboxEvents)
+        .values({
+          aggregateType,
+          aggregateId: `retention-${suffix}`,
+          eventType: "test",
+          payload: { projectId, marker: `retention-${suffix}` },
+          createdAt,
+          publishedAt: old,
+        })
+        .returning({ id: drizzle.schema.outboxEvents.id });
+      return row!.id;
+    };
+    // Current-month MCP row past the 72h cutoff: RETAINED (the counter).
+    const keepId = await seedRow("keep", "MCP_ACCESS", thisMonth);
+    // Prior-month MCP row: deleted like everything else.
+    const dropId = await seedRow("drop", "MCP_ACCESS", prevMonth);
+    // Other-type old row: deleted (existing behavior unchanged).
+    const otherId = await seedRow("other", "BILLING", prevMonth);
+    const cutoff = new Date(now.getTime() - 72 * 60 * 60 * 1000);
+    await drizzle.outboxRepo.deletePublishedOlderThan(db, cutoff, 100, [
+      "MCP_ACCESS",
+    ]);
+    const remaining = await db
+      .select({ id: drizzle.schema.outboxEvents.id })
+      .from(drizzle.schema.outboxEvents)
+      .where(
+        sql`${drizzle.schema.outboxEvents.payload}->>'marker' LIKE 'retention-%'`,
+      );
+    const ids = remaining.map((r) => r.id);
+    expect(ids).toContain(keepId);
+    expect(ids).not.toContain(dropId);
+    expect(ids).not.toContain(otherId);
   });
 });

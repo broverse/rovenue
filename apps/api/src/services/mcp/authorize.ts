@@ -16,10 +16,10 @@ export type ToolSurface = "read" | "write";
  * before any tool body runs, so a scope rejection can never create an
  * intent row or any other side effect.
  *
- * Empty in Phase 1: no tools ship yet. Task 6 populates this map as tools
- * ship — a tool added WITHOUT an entry here is unreachable to `read`
- * tokens by construction (unknown tools fail closed below), so forgetting
- * the entry errs toward refusal, never toward leakage.
+ * Populated as tools ship (Task 6: reads; Task 9: writes) — a tool
+ * added WITHOUT an entry here is unreachable to `read` tokens by
+ * construction (unknown tools fail closed below), so forgetting the
+ * entry errs toward refusal, never toward leakage.
  */
 export const TOOL_SURFACE: Record<string, ToolSurface> = {
   // Phase 2 Task 6: the consolidated read surface. Write tools (Task 9)

@@ -112,8 +112,10 @@ export async function recordMcpAccess(
  * Count trail rows since `since`, scoped to one token (abuse floor) or
  * one project (tier ladder). Counting the trail itself is what keeps
  * this from becoming a second counting system with its own window.
- * The outbox table stays small (outbox-cleanup deletes published rows
- * hourly), so no extra index is warranted.
+ * The outbox table stays small: outbox-cleanup runs hourly and deletes
+ * published rows older than 72h — except current-calendar-month
+ * MCP_ACCESS rows, which it retains precisely so this monthly count is
+ * complete. No extra index is warranted.
  */
 export async function countMcpAccessSince(
   db: Db,

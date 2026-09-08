@@ -312,4 +312,95 @@ describe("MCP write tools", () => {
     expect(res.isError).toBe(true);
     expect(await countIntents()).toBe(before);
   });
+
+  it("rejects an expired intent without mutating", async () => {
+    const { raw, projectId } = await seedToken("expired", "read_write");
+    const experiment = await seedExperiment(projectId, "expired");
+    const proposal = await callTool(raw, "stop_experiment", {
+      experimentId: experiment.id,
+    });
+    const requestState = proposal.rawResult.requestState as string;
+    // Backdate past the 5-minute TTL directly: the retry must observe
+    // expiry server-side, not trust the echoed state.
+    await getDb()
+      .update(drizzle.schema.copilotIntents)
+      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(drizzle.schema.copilotIntents.id, requestState));
+    const res = await callTool(
+      raw,
+      "stop_experiment",
+      { experimentId: experiment.id },
+      {
+        inputResponses: {
+          confirm: { action: "accept", content: { confirm: true } },
+        },
+        requestState,
+      },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/expired/i);
+    expect(await getExperimentStatus(experiment.id, projectId)).toBe("DRAFT");
+  });
+
+  it("a confirmed intent cannot execute twice (replay is a tool error)", async () => {
+    const { raw, projectId } = await seedToken("replay", "read_write");
+    const experiment = await seedExperiment(projectId, "replay");
+    const proposal = await callTool(raw, "stop_experiment", {
+      experimentId: experiment.id,
+    });
+    const roundTrip = {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    };
+    const first = await callTool(
+      raw,
+      "stop_experiment",
+      { experimentId: experiment.id },
+      roundTrip,
+    );
+    expect(first.isError).toBe(false);
+    // Same confirmation replayed: the intent is executed, not pending.
+    const second = await callTool(
+      raw,
+      "stop_experiment",
+      { experimentId: experiment.id },
+      roundTrip,
+    );
+    expect(second.isError).toBe(true);
+    expect(second.text).toMatch(/already executed/i);
+  });
+
+  it("a forged cross-project intent id fails closed", async () => {
+    const { raw, projectId } = await seedToken("forged", "read_write");
+    const experiment = await seedExperiment(projectId, "forged");
+    // An intent from ANOTHER project: the retry echoes its id, but the
+    // server re-checks project ownership against live auth, not the echo.
+    const other = await seedProject("forged-other");
+    const foreign = await drizzle.copilotIntentRepo.createIntent(drizzle.db, {
+      projectId: other.id,
+      userId: "someone-else",
+      threadId: "",
+      messageId: "",
+      toolName: "action_experiments_stop",
+      payload: { experimentId: experiment.id, reason: "" },
+      preview: { title: "trap", fields: [] },
+      requiresRole: "ADMIN",
+    });
+    const res = await callTool(
+      raw,
+      "stop_experiment",
+      { experimentId: experiment.id },
+      {
+        inputResponses: {
+          confirm: { action: "accept", content: { confirm: true } },
+        },
+        requestState: foreign.id,
+      },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/not found in this project/i);
+    expect(await getExperimentStatus(experiment.id, projectId)).toBe("DRAFT");
+  });
 });

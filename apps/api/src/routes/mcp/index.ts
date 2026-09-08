@@ -7,6 +7,12 @@ import { drizzle, type MemberRole } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { buildMcpServer } from "../../services/mcp/server";
 import { assertToolAllowed, authorizeMcpRequest } from "../../services/mcp/authorize";
+import { env } from "../../lib/env";
+import { quotasUnlimited } from "../../lib/host-mode";
+import {
+  evaluateQuota,
+  resolveTier,
+} from "../../services/copilot/quota";
 import {
   countMcpAccessSince,
   isAbuseFloorExceeded,
@@ -130,6 +136,54 @@ export const mcpRoute = new Hono()
         throw new HTTPException(429, {
           message: `Monthly MCP call limit reached (${used}/${mcpAbuseFloorLimit()}); resets ${resetAt}`,
         });
+      }
+
+      // Tier ladder (spec R3: "the tier ladder still applies on top, in
+      // cloud mode only, as the billing instrument"). Counts the SAME
+      // trail by project — no second counting system. Skipped entirely
+      // when unlimited (self-host / enterprise): the ladder is off there
+      // by design, and skipping avoids two DB reads per call.
+      // Each surface enforces only the axis it consumes: chat passes
+      // mcpCalls: 0, MCP passes messages/tokens: 0. Cross-gating (chat
+      // usage blocking MCP or vice versa) would couple unrelated
+      // resources; the shared budget is per-axis, not per-surface.
+      if (!quotasUnlimited()) {
+        const project = await drizzle.projectRepo.findProjectById(
+          drizzle.db,
+          ctx.projectId,
+        );
+        if (!project) {
+          throw new HTTPException(404, { message: "Project not found" });
+        }
+        const { tier } = resolveTier({
+          project: {
+            metadata: project.settings as Record<string, unknown> | null,
+          },
+          env,
+          unlimited: false,
+        });
+        const mcpCalls = await countMcpAccessSince(
+          drizzle.db,
+          { projectId: ctx.projectId },
+          monthStartUtc(),
+        );
+        const verdict = evaluateQuota({
+          tier,
+          unlimited: false,
+          usage: { messages: 0, inputTokens: 0, outputTokens: 0, mcpCalls },
+        });
+        if (!verdict.allowed) {
+          const resetAt = new Date(
+            Date.UTC(
+              new Date().getUTCFullYear(),
+              new Date().getUTCMonth() + 1,
+              1,
+            ),
+          ).toISOString();
+          throw new HTTPException(429, {
+            message: `Monthly ${verdict.exceeded} limit reached for tier ${tier}; resets ${resetAt}`,
+          });
+        }
       }
     }
 

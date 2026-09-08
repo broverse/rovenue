@@ -53,10 +53,14 @@ export async function runOutboxCleanup(
   let batches = 0;
 
   for (; batches < MAX_BATCHES_PER_RUN; batches++) {
+    // MCP_ACCESS rows of the current calendar month are retained: they
+    // are the abuse-floor/tier counter, and pruning them at 72h would
+    // silently convert the monthly ceiling into a trailing-72h one.
     const batchDeleted = await drizzle.outboxRepo.deletePublishedOlderThan(
       drizzle.db,
       cutoff,
       BATCH_SIZE,
+      ["MCP_ACCESS"],
     );
     deleted += batchDeleted;
     if (batchDeleted < BATCH_SIZE) {

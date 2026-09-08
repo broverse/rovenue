@@ -149,11 +149,18 @@ export async function countUnpublished(db: Db): Promise<number> {
  * (Plan 3 §F.2). The outbox is fan-out, not a journal: 24h is
  * enough headroom for replay; longer-window replays come from the
  * authoritative `revenue_events` / `credit_ledger` tables.
+ *
+ * `retainCurrentMonthTypes`: aggregate types whose CURRENT-calendar-month
+ * rows survive even past the cutoff. The MCP access trail (MCP_ACCESS) is
+ * the abuse-floor and tier-ladder counter — deleting it after 72h would
+ * silently turn the monthly ceiling into a trailing-72h one. Prior-month
+ * rows of retained types still delete normally.
  */
 export async function deletePublishedOlderThan(
   db: Db,
   cutoff: Date,
   batchSize: number,
+  retainCurrentMonthTypes: string[] = [],
 ): Promise<number> {
   const result = await db.execute(sql`
     DELETE FROM ${outboxEvents}
@@ -161,6 +168,13 @@ export async function deletePublishedOlderThan(
        SELECT id FROM ${outboxEvents}
         WHERE ${outboxEvents.publishedAt} IS NOT NULL
           AND ${outboxEvents.publishedAt} < ${cutoff}
+          AND (
+            NOT (${outboxEvents.aggregateType} = ANY(${retainCurrentMonthTypes}))
+            -- UTC months, matching the floor/tier window (monthStartUtc):
+            -- the DB session TimeZone must not decide the boundary.
+            OR date_trunc('month', ${outboxEvents.createdAt} AT TIME ZONE 'UTC')
+             < date_trunc('month', NOW() AT TIME ZONE 'UTC')
+          )
         ORDER BY ${outboxEvents.publishedAt} ASC
         LIMIT ${batchSize}
      )
