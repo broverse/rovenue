@@ -687,9 +687,17 @@ describe("access table", () => {
 
 import { paywalls } from "./schema";
 
+/** The value the fail-closed backfill story depends on: every pre-existing
+ *  row (and every row created without an explicit revision) starts at
+ *  exactly this, so a migrated client's first CAS write sends 0 and
+ *  matches. `hasDefault` alone would stay green if the default were
+ *  changed to 1 — which would silently 409 every first write. */
+const EXPECTED_INITIAL_DRAFT_REVISION = 0;
+
 it("paywalls carries a non-null draftRevision defaulting to 0", () => {
   const col = paywalls.draftRevision;
   expect(col).toBeDefined();
   expect(col.notNull).toBe(true);
   expect(col.hasDefault).toBe(true);
+  expect(col.default).toBe(EXPECTED_INITIAL_DRAFT_REVISION);
 });

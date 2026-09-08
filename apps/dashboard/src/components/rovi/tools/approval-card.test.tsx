@@ -124,7 +124,7 @@ describe("ApprovalCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Approve & Run" }));
 
-    await screen.findByText("Applied to the builder.");
+    await screen.findByText("Saved to the draft; the builder has been refreshed.");
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledWith();
   });
@@ -147,7 +147,7 @@ describe("ApprovalCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Approve & Run" }));
 
-    await screen.findByText("Open this paywall's builder to apply this change.");
+    await screen.findByText("Saved to this paywall's draft. Open its builder to see the change.");
     expect(listenerForOtherPaywall).not.toHaveBeenCalled();
   });
 
@@ -162,11 +162,11 @@ describe("ApprovalCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Approve & Run" }));
 
-    await screen.findByText("Open this paywall's builder to apply this change.");
-    expect(screen.getByRole("button", { name: "Re-apply" })).toBeInTheDocument();
+    await screen.findByText("Saved to this paywall's draft. Open its builder to see the change.");
+    expect(screen.getByRole("button", { name: "Refresh builder" })).toBeInTheDocument();
   });
 
-  it("re-apply re-notifies once a same-paywall listener is registered, moving out of the fallback state", async () => {
+  it("Refresh builder re-notifies once a same-paywall listener is registered, moving out of the fallback state", async () => {
     executeMutateAsync.mockResolvedValue(editTreeResult);
     const listener = vi.fn();
 
@@ -182,20 +182,20 @@ describe("ApprovalCard", () => {
     const { rerender } = render(<Harness active={false} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Approve & Run" }));
-    await screen.findByText("Open this paywall's builder to apply this change.");
+    await screen.findByText("Saved to this paywall's draft. Open its builder to see the change.");
     expect(listener).not.toHaveBeenCalled();
 
     act(() => {
       rerender(<Harness active />);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Re-apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh builder" }));
 
-    await screen.findByText("Applied to the builder.");
+    await screen.findByText("Saved to the draft; the builder has been refreshed.");
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it("re-apply still refuses if the newly-registered listener is for a different paywall", async () => {
+  it("Refresh builder still refuses if the newly-registered listener is for a different paywall", async () => {
     executeMutateAsync.mockResolvedValue(editTreeResult);
     const listenerForOtherPaywall = vi.fn();
 
@@ -211,15 +211,17 @@ describe("ApprovalCard", () => {
     const { rerender } = render(<Harness active={false} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Approve & Run" }));
-    await screen.findByText("Open this paywall's builder to apply this change.");
+    await screen.findByText("Saved to this paywall's draft. Open its builder to see the change.");
 
     act(() => {
       rerender(<Harness active />); // the NEWLY-mounted builder is still pw_2, not pw_1
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Re-apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh builder" }));
 
-    expect(screen.getByText("Open this paywall's builder to apply this change.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Saved to this paywall's draft. Open its builder to see the change."),
+    ).toBeInTheDocument();
     expect(listenerForOtherPaywall).not.toHaveBeenCalled();
   });
 
@@ -243,7 +245,7 @@ describe("ApprovalCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Approve & Run" }));
 
-    await screen.findByText("Open this paywall's builder to apply this change.");
+    await screen.findByText("Saved to this paywall's draft. Open its builder to see the change.");
     expect(listener).not.toHaveBeenCalled();
   });
 });

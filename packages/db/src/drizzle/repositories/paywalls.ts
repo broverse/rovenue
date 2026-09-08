@@ -189,7 +189,7 @@ export async function updatePaywallDraft(
     .set({
       builderConfig: patch.builderConfig,
       configFormatVersion: patch.configFormatVersion,
-      draftRevision: sql`${paywalls.draftRevision} + 1`,
+      draftRevision: BUMP_DRAFT_REVISION,
       updatedAt: new Date(),
     })
     .where(

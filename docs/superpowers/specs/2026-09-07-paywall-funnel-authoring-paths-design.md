@@ -146,6 +146,19 @@ counter says what it means.
 problem with its own failure modes. The builder receives 409, reloads,
 and the user sees the current state.
 
+**Publish carries the revision too** (added in the review fix wave).
+"Authoring is safe because publishing is the guarded step" only holds if
+publish ships *the draft its author reviewed*. `POST /:id/publish`
+therefore states an expected `draftRevision` and 409s on a mismatch,
+under the same fail-closed rule as the draft write: a request that omits
+it is rejected, not defaulted. Without it, a Publish click whose
+pre-publish flush lost the CAS would snapshot the *winner's* draft — the
+content the author has never seen, quite possibly an agent's — into
+vN+1 and point `/v1/placements` at it. The dashboard also aborts its own
+publish after a lost flush, but that half is a UX affordance: the
+server-side check is what covers the non-dashboard callers this spec
+exists to enable.
+
 ### D3 — Reconcile authorization onto capabilities
 
 Define two capabilities and route every paywall/funnel **mutation**
@@ -211,6 +224,20 @@ has historically landed *below* the journal watermark and been silently
 skipped on upgrade-path databases. The migration adding `draftRevision`
 must be checked against the journal's current watermark before it is
 considered done.
+
+**M4 — Migrate BEFORE deploying the API. Release-checklist item, not a
+nice-to-have.** Two migrations are load-bearing for this work and the
+first one fails *wide*:
+
+| Migration | Adds | Blast radius if the API ships first |
+|---|---|---|
+| `0131_lying_solo` | `copilot_intents.requires_capability` | **Every copilot intent, of every kind.** `createIntent` inserts the column unconditionally (`services/copilot/tools/_action-helper.ts` always passes `requiresCapability ?? null`), so on an un-migrated database the INSERT fails on an undefined column — the Copilot cannot propose *any* action, not merely paywall ones. |
+| `0132_concerned_master_mold` | `paywalls.draftRevision` | Every paywall draft write and every publish — both read/compare the column. |
+
+Neither degrades gracefully, and the first is not scoped to the feature
+it belongs to, so "roll the API forward and migrate shortly after" is not
+a survivable ordering. Run `pnpm db:migrate` to completion first, then
+deploy the API.
 
 ---
 
@@ -303,8 +330,13 @@ triage:
 - **What `assertSaveValid` actually guarantees.** D1 makes it the
   correctness gate for writers that are not the dashboard builder, so
   its coverage matters more after this spec than before it. It is
-  schema parse + `assertUrlSchemes` + the *blocking* subset of
-  `validateBuilderConfig`. Two things are unresolved:
+  the `measureNodeTree` size bound (`MAX_BUILDER_NODES` /
+  `MAX_BUILDER_DEPTH` — added in the review fix wave, so both writers
+  share one gate; without it an agent could persist a draft the
+  builder's own autosave could never save again, because the REST route
+  applies the same bound and would 400 forever) + schema parse +
+  `assertUrlSchemes` + the *blocking* subset of `validateBuilderConfig`.
+  Two things are unresolved:
   - Whether the blocking set covers the **three-platform decoder
     contract** (`packages/shared/src/paywall/render-fixtures.json`).
     A tree that renders on web but not in SwiftUI or Android Views

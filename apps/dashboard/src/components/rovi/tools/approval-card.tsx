@@ -50,10 +50,13 @@ export function ApprovalCard({ intent }: { intent: IntentPayload }) {
   const [error, setError] = useState<string | null>(null);
   // Only ever populated for `action_paywall_editTree` — the backend has
   // ALREADY persisted the edit by the time this lands (Task 5); this is
-  // kept around so "Re-apply" can retry the NOTIFICATION (never the op
-  // itself — there is nothing left to apply) once a builder is mounted
-  // to receive it (spec §3.3: "the intent is already executed; the card
-  // keeps it re-appliable for the session").
+  // kept around so "Refresh builder" can retry the NOTIFICATION (never
+  // the op itself — there is nothing left to apply) once a builder is
+  // mounted to receive it. The copy says exactly that: the edit is saved
+  // either way, and the only thing a mounted builder adds is showing it.
+  // ("Re-apply" and "open the builder to apply this change" described the
+  // pre-Task-5 dry-run handler, where the edit really was unlanded until
+  // the client applied it.)
   const [pendingEdit, setPendingEdit] = useState<EditTreeResult | null>(null);
   const [notified, setNotified] = useState(false);
 
@@ -142,20 +145,22 @@ export function ApprovalCard({ intent }: { intent: IntentPayload }) {
       ) : decision === "approved" && pendingEdit && !notified ? (
         <div className="mt-3 flex items-center justify-between gap-2">
           <p className="text-[11px] text-rv-mute-600">
-            Open this paywall's builder to apply this change.
+            Saved to this paywall's draft. Open its builder to see the change.
           </p>
           <button
             type="button"
             onClick={reapply}
             className="h-7 shrink-0 rounded-md border border-rv-divider px-2.5 text-[11px] text-rv-mute-700 transition hover:bg-rv-c4 hover:text-foreground"
           >
-            Re-apply
+            Refresh builder
           </button>
         </div>
       ) : (
         <p className="mt-3 text-[11px] text-rv-mute-600">
           {decision === "approved" &&
-            (pendingEdit ? "Applied to the builder." : "Approved and executed.")}
+            (pendingEdit
+              ? "Saved to the draft; the builder has been refreshed."
+              : "Approved and executed.")}
           {decision === "rejected" && "Cancelled."}
           {decision === "failed" && (error ?? "Execution failed.")}
         </p>
