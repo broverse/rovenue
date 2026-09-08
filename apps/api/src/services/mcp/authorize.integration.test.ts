@@ -248,7 +248,10 @@ describe("assertToolAllowed", () => {
     expect(await countIntents(project.id)).toBe(before);
   });
 
-  it("allows read tools on a read token and write tools on read_write", () => {
+  it("grants write and unknown tools only to read_write scope", () => {
+    // NOTE: no `read`-marked tool exists while TOOL_SURFACE is empty, so
+    // the allow branch for read tokens has zero coverage here. Task 6 adds
+    // an allow-path case when it populates the map.
     const readCtx = {
       tokenId: "t-read",
       projectId: "p",
