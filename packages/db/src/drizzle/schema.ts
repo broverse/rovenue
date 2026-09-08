@@ -640,6 +640,53 @@ export const apiKeys = pgTable(
 );
 
 // =============================================================
+// mcp_tokens (MCP client tokens — one project per token)
+// =============================================================
+//
+// A new table, not a third kind in `api_keys`. `apiKeyAuth("any")`
+// classifies by prefix and accepts PUBLIC or SECRET; adding a kind there
+// would make every /v1/* route start accepting MCP tokens unless every
+// call site were audited. A distinct table plus a distinct `rov_mcp_`
+// prefix means `apiKeyAuth` cannot classify the token and fails closed.
+// `environment` and `allowedOrigins` are deliberately not carried over:
+// neither means anything for a user-bound token.
+export const mcpTokens = pgTable(
+  "mcp_tokens",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    // The reason this table exists rather than a third kind in `api_keys`:
+    // a token is bound to a PERSON, so the audit actor is a real user id
+    // and not "an API key". Cascade on user deletion — a token outliving
+    // its owner would be an orphan with live access.
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    // Least privilege applies to the TOKEN, not only to the human: an
+    // OWNER must be able to mint a read-only token.
+    scope: text("scope").notNull(),
+    keyPublic: text("keyPublic").notNull().unique(),
+    keySecretHash: text("keySecretHash").notNull(),
+    lastUsedAt: timestamp("lastUsedAt", { withTimezone: true }),
+    expiresAt: timestamp("expiresAt", { withTimezone: true }),
+    revokedAt: timestamp("revokedAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdIdx: index("mcp_tokens_projectId_idx").on(t.projectId),
+    userIdIdx: index("mcp_tokens_userId_idx").on(t.userId),
+  }),
+);
+
+// =============================================================
 // access (catalog of access rights — replaces free-form
 // entitlement key strings). One row per (projectId, identifier).
 // Referenced from products.accessIds[] and subscriber_access.accessId.
@@ -2346,6 +2393,9 @@ export type NewAuditLogRow = typeof auditLogs.$inferInsert;
 
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
+
+export type McpToken = typeof mcpTokens.$inferSelect;
+export type NewMcpToken = typeof mcpTokens.$inferInsert;
 
 export type AccessRow = typeof access.$inferSelect;
 export type NewAccessRow = typeof access.$inferInsert;

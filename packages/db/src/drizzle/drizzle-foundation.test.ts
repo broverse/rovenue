@@ -12,6 +12,7 @@ import {
   experimentAssignments,
   experiments,
   featureFlags,
+  mcpTokens,
   outboxEvents,
   outgoingWebhooks,
   offerings,
@@ -77,6 +78,7 @@ describe("schema shapes compile", () => {
       experiments,
       experimentAssignments,
       featureFlags,
+      mcpTokens,
       auditLogs,
     ]) {
       expect(table).toBeDefined();
@@ -118,6 +120,22 @@ describe("schema shapes compile", () => {
     expect(outgoingWebhooks.createdAt.name).toBe("createdAt");
   });
 
+  // The only scopes Task 4's dashboard mint may issue. Kept beside the
+  // shape assertions so a new scope is a conscious edit here, not drift.
+  const EXPECTED_SCOPES = ["read", "read_write"] as const;
+
+  it("mcp_tokens binds a token to a user and one project", () => {
+    expect(mcpTokens.userId.notNull).toBe(true);
+    expect(mcpTokens.projectId.notNull).toBe(true);
+    expect(mcpTokens.scope.notNull).toBe(true);
+    expect(EXPECTED_SCOPES).toHaveLength(2);
+  });
+
+  it("mcp_tokens can be revoked and expired independently", () => {
+    // Both nullable: null means "not revoked" / "never expires".
+    expect(mcpTokens.revokedAt.notNull).toBe(false);
+    expect(mcpTokens.expiresAt.notNull).toBe(false);
+  });
 });
 
 describe("inferred types", () => {

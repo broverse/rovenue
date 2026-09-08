@@ -26,6 +26,7 @@ export * as accessRepo from "./repositories/access";
 export * as accessCatalogRepo from "./repositories/access-catalog";
 export * as creditLedgerRepo from "./repositories/credit-ledger";
 export * as apiKeyRepo from "./repositories/api-keys";
+export * as mcpTokenRepo from "./repositories/mcp-tokens";
 export * as projectRepo from "./repositories/projects";
 export * as audienceRepo from "./repositories/audiences";
 export * as outboxRepo from "./repositories/outbox";
