@@ -74,6 +74,7 @@ const STATIC_NAMES = [
   "query_audiences_list",
   "query_experiments_list",
   "query_featureFlags_list",
+  "find_funnels",
   "action_subscriptions_cancel",
   "action_subscriptions_refund",
   "action_subscribers_grantAccess",

@@ -61,7 +61,9 @@ describe("find_funnels", () => {
     expect(drizzleMock.funnelRepo.listByProject).toHaveBeenCalledWith(
       expect.anything(),
       "prj_1",
-      expect.objectContaining({}),
+      // Status passthrough (undefined here) and the limit+1 has-more probe
+      // are the load-bearing parts of the call — pin them exactly.
+      { status: undefined, limit: 51 },
     );
     expect(result.funnels).toHaveLength(3);
     // pagesJson never ships: an agent needs something to act on, not a

@@ -283,6 +283,27 @@ describe("MCP consolidated surface", () => {
     expect(JSON.stringify(structured)).not.toContain("pagesJson");
   });
 
+  it("find_funnels detail reports zero pages before first publish", async () => {
+    const { raw, projectId } = await seedReadToken("funnel-detail");
+    const [funnelId] = await seedFunnels(projectId, 1);
+    const res = await callTool(raw, "find_funnels", { id: funnelId });
+    expect(res.isError).toBe(false);
+    const structured = res.structured as {
+      funnel?: { id: string; pageCount: number; slug: string };
+    } | null;
+    expect(structured?.funnel?.id).toBe(funnelId);
+    expect(structured?.funnel?.pageCount).toBe(0);
+  });
+
+  it("a foreign funnel id is a tool error, not a leak", async () => {
+    const { raw } = await seedReadToken("funnel-foreign");
+    const other = await seedProject("funnel-foreign-proj");
+    const [foreignId] = await seedFunnels(other.id, 1);
+    const res = await callTool(raw, "find_funnels", { id: foreignId });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/not found/i);
+  });
+
   it("a missing id is a tool error the model can act on, not a protocol error", async () => {
     const { raw } = await seedReadToken("missing");
     const res = await callTool(raw, "get_paywall", { paywallId: "nope" });
