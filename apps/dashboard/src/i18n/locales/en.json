@@ -246,6 +246,7 @@
       "charts": "Charts",
       "queries": "Queries",
       "leaderboards": "Leaderboards",
+      "mcp": "MCP",
       "apps": "Apps & integrations",
       "sdk": "SDK & API keys",
       "stores": "Stores",
@@ -5103,6 +5104,55 @@
         "status": "Live uptime + incident history.",
         "security": "SOC 2, KVKK, GDPR posture and reports."
       }
+    }
+  },
+  "mcp": {
+    "title": "MCP",
+    "subtitle": "Give AI agents scoped access to this project over the Model Context Protocol.",
+    "loading": "Loading MCP tokens…",
+    "failed": "Couldn't load MCP tokens. Please try again.",
+    "actions": {
+      "create": "New token"
+    },
+    "endpoint": {
+      "title": "Connection",
+      "subtitle": "Point any MCP client at {endpoint} with a token below in the Authorization header."
+    },
+    "tokens": {
+      "title": "Tokens",
+      "subtitle": "Each token is scoped to this project. Secrets are shown once, at creation.",
+      "empty": "No MCP tokens yet. Create one to connect an agent.",
+      "actions": {
+        "create": "New token",
+        "revoke": "Revoke token"
+      },
+      "scopes": {
+        "read": "Read",
+        "read_write": "Read & write"
+      },
+      "lastUsed": "last used {when}",
+      "expires": "expires {date}",
+      "revokedCount": "{count} revoked",
+      "revokeConfirm": {
+        "title": "Revoke this token?",
+        "body": "Agents using it lose access immediately. This cannot be undone.",
+        "confirm": "Revoke token",
+        "failed": "Couldn't revoke the token. Please try again.",
+        "failedTitle": "Couldn't revoke token"
+      }
+    },
+    "dialog": {
+      "title": "New MCP token",
+      "createdTitle": "Copy your token",
+      "secretWarning": "This secret is shown exactly once. Copy it now — it cannot be recovered.",
+      "secretLabel": "Token secret",
+      "labelLabel": "Label",
+      "labelPlaceholder": "e.g. claude-local",
+      "scopeLabel": "Scope",
+      "scopeHint": "Read allows discovery and reads. Read & write additionally allows proposing experiment start/stop, which still needs your confirmation in the agent.",
+      "create": "Create token",
+      "done": "Done",
+      "failed": "Couldn't create the token. Please try again."
     }
   },
   "members": {

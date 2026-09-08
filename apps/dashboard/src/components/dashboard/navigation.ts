@@ -1,4 +1,5 @@
 import {
+  Bot,
   Box,
   CirclePlus,
   Coins,
@@ -195,6 +196,7 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     items: [
       { id: "apps", labelKey: "sidebar.items.apps", icon: Plug, to: "/projects/$projectId/apps" },
       { id: "sdk", labelKey: "sidebar.items.sdk", icon: KeyRound, to: "/projects/$projectId/sdk" },
+      { id: "mcp", labelKey: "sidebar.items.mcp", icon: Bot, to: "/projects/$projectId/mcp" },
       { id: "stores", labelKey: "sidebar.items.stores", icon: Store, to: "/projects/$projectId/stores" },
     ],
   },
