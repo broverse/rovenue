@@ -8,6 +8,7 @@ export interface QuotaInput {
     messages: number;
     inputTokens: number;
     outputTokens: number;
+    mcpCalls: number;
   };
 }
 
@@ -15,6 +16,7 @@ export type ExceededAxis =
   | "messages"
   | "input_tokens"
   | "output_tokens"
+  | "mcp_calls"
   | null;
 
 export interface QuotaResult {
@@ -31,6 +33,8 @@ export function evaluateQuota(input: QuotaInput): QuotaResult {
     return { allowed: false, exceeded: "input_tokens" };
   if (input.usage.outputTokens >= limits.outputTokens)
     return { allowed: false, exceeded: "output_tokens" };
+  if (input.usage.mcpCalls >= limits.mcpCalls)
+    return { allowed: false, exceeded: "mcp_calls" };
   return { allowed: true, exceeded: null };
 }
 

@@ -52,6 +52,15 @@ const envSchema = z
       .enum(["true", "false"])
       .default("true")
       .transform((v) => v === "true"),
+    // Abuse floor for MCP tool calls, per token per calendar month. This
+    // is NOT a billing limit (raising it buys nothing) and deliberately
+    // ignores quotasUnlimited()/HOST_MODE: self-hosted instances need a
+    // ceiling most, since they least likely sit behind a gateway (R3).
+    MCP_MAX_CALLS_PER_TOKEN_PER_MONTH: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(50_000),
     // Expose Prometheus metrics on the INTERNAL listener (/metrics).
     // Set to "false" to disable metric collection entirely (e.g. in
     // ephemeral test environments where prom-client's default-metrics

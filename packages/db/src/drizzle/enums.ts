@@ -147,6 +147,7 @@ export const aggregateTypeEnum = pgEnum("aggregate_type", [
   "FUNNEL",
   "PAYWALL_EVENT",
   "SUBSCRIPTION",
+  "MCP_ACCESS",
 ]);
 
 export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [

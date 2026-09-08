@@ -4,6 +4,12 @@ export interface TierLimits {
   messages: number;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * Monthly MCP tool calls per project. Judgment values, not measured:
+   * MCP calls are cheap metadata reads, so the ladder sits an order of
+   * magnitude above the chat-message ladder it parallels.
+   */
+  mcpCalls: number;
   allowedModels: string[];
 }
 
@@ -12,12 +18,14 @@ export const TIER_LIMITS: Record<RoviTier, TierLimits> = {
     messages: 50,
     inputTokens: 250_000,
     outputTokens: 50_000,
+    mcpCalls: 1_000,
     allowedModels: ["gpt-4o-mini", "claude-haiku-4-5"],
   },
   team: {
     messages: 1_000,
     inputTokens: 5_000_000,
     outputTokens: 1_000_000,
+    mcpCalls: 10_000,
     allowedModels: [
       "gpt-4o-mini",
       "gpt-4o",
@@ -29,12 +37,14 @@ export const TIER_LIMITS: Record<RoviTier, TierLimits> = {
     messages: 10_000,
     inputTokens: 50_000_000,
     outputTokens: 10_000_000,
+    mcpCalls: 100_000,
     allowedModels: ["*"],
   },
   enterprise: {
     messages: Number.POSITIVE_INFINITY,
     inputTokens: Number.POSITIVE_INFINITY,
     outputTokens: Number.POSITIVE_INFINITY,
+    mcpCalls: Number.POSITIVE_INFINITY,
     allowedModels: ["*"],
   },
 };

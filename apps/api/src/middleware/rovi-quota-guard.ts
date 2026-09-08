@@ -36,6 +36,11 @@ export function roviQuotaGuard(): MiddlewareHandler {
         messages: usage.messages,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
+        // Chat makes no MCP calls: the mcp_calls axis is fed by the MCP
+        // access trail, enforced on the MCP route. Passing 0 keeps this
+        // guard's behavior unchanged; a shared-budget guard that sums
+        // both surfaces is a follow-up, not smuggled in here.
+        mcpCalls: 0,
       },
     });
 

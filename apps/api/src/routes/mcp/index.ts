@@ -7,6 +7,13 @@ import { drizzle, type MemberRole } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { buildMcpServer } from "../../services/mcp/server";
 import { assertToolAllowed, authorizeMcpRequest } from "../../services/mcp/authorize";
+import {
+  countMcpAccessSince,
+  isAbuseFloorExceeded,
+  mcpAbuseFloorLimit,
+  monthStartUtc,
+  recordMcpAccess,
+} from "../../services/mcp/access-log";
 import { verifyMcpToken } from "./auth";
 
 const log = logger.child("mcp-auth");
@@ -103,17 +110,38 @@ export const mcpRoute = new Hono()
     }
     if (method === "tools/call") {
       assertToolAllowed(ctx, toolName);
+
+      // Abuse floor (Task 10, R3): per token per calendar month, enforced
+      // in BOTH host modes — deliberately no quotasUnlimited() check. The
+      // trail itself is the counter; no second counting system.
+      const used = await countMcpAccessSince(
+        drizzle.db,
+        { tokenId: ctx.tokenId },
+        monthStartUtc(),
+      );
+      if (isAbuseFloorExceeded(used)) {
+        const resetAt = new Date(
+          Date.UTC(
+            new Date().getUTCFullYear(),
+            new Date().getUTCMonth() + 1,
+            1,
+          ),
+        ).toISOString();
+        throw new HTTPException(429, {
+          message: `Monthly MCP call limit reached (${used}/${mcpAbuseFloorLimit()}); resets ${resetAt}`,
+        });
+      }
     }
 
     await next();
   })
-  .all("*", (c) => {
+  .all("*", async (c) => {
     // Project-scoped identity for tool execution, via the handler's
     // pass-through `authInfo` seam (extra = the SDK's designed slot for
     // additional auth-attached data). Verified token + live membership,
     // resolved above on this same request.
     const ctx = c.get("mcpToken");
-    return mcpHandler.fetch(c.req.raw, {
+    const res = await mcpHandler.fetch(c.req.raw, {
       authInfo: {
         token: ctx.tokenId,
         clientId: ctx.userId,
@@ -121,4 +149,35 @@ export const mcpRoute = new Hono()
         extra: { projectId: ctx.projectId, role: c.get("mcpRole") },
       },
     });
+
+    // Access trail: exactly one MCP_ACCESS outbox row per tool call that
+    // reached the handler. Awaited before returning so a counted call
+    // always has its row; a trail failure must never rewrite the tool
+    // result the handler already produced, so it logs instead of
+    // throwing (touchLastUsed above follows the same precedent).
+    let probed: { method?: unknown; params?: { name?: unknown; arguments?: unknown } };
+    try {
+      probed = (await c.req.raw.clone().json()) as typeof probed;
+    } catch {
+      probed = {};
+    }
+    if (probed.method === "tools/call" && typeof probed.params?.name === "string") {
+      try {
+        await recordMcpAccess(drizzle.db, {
+          projectId: ctx.projectId,
+          tokenId: ctx.tokenId,
+          userId: ctx.userId,
+          toolName: probed.params.name,
+          scope: ctx.scope,
+          args: probed.params.arguments ?? null,
+          ok: res.status < 400,
+        });
+      } catch (err: unknown) {
+        log.warn("mcp access trail write failed", {
+          tokenId: ctx.tokenId,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return res;
   });

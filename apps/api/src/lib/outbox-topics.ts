@@ -25,6 +25,7 @@ export const AGGREGATE_TO_TOPIC: Record<OutboxAggregateType, string> = {
   FUNNEL: "rovenue.funnel",
   PAYWALL_EVENT: "rovenue.paywall_events",
   SUBSCRIPTION: "rovenue.subscription",
+  MCP_ACCESS: "rovenue.mcp_access",
 };
 
 /** Topic for an aggregateType read back from the DB as a plain string.

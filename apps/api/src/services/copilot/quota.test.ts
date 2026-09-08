@@ -6,7 +6,7 @@ describe("evaluateQuota", () => {
     const out = evaluateQuota({
       tier: "free",
       unlimited: true,
-      usage: { messages: 50, inputTokens: 250_000, outputTokens: 50_000 },
+      usage: { messages: 50, inputTokens: 250_000, outputTokens: 50_000, mcpCalls: 0 },
     });
     expect(out.allowed).toBe(true);
     expect(out.exceeded).toBeNull();
@@ -16,7 +16,7 @@ describe("evaluateQuota", () => {
     const out = evaluateQuota({
       tier: "free",
       unlimited: false,
-      usage: { messages: 50, inputTokens: 0, outputTokens: 0 },
+      usage: { messages: 50, inputTokens: 0, outputTokens: 0, mcpCalls: 0 },
     });
     expect(out.allowed).toBe(false);
     expect(out.exceeded).toBe("messages");
@@ -26,17 +26,27 @@ describe("evaluateQuota", () => {
     const out = evaluateQuota({
       tier: "free",
       unlimited: false,
-      usage: { messages: 10, inputTokens: 250_000, outputTokens: 0 },
+      usage: { messages: 10, inputTokens: 250_000, outputTokens: 0, mcpCalls: 0 },
     });
     expect(out.allowed).toBe(false);
     expect(out.exceeded).toBe("input_tokens");
+  });
+
+  it("blocks when the MCP call cap is reached", () => {
+    const out = evaluateQuota({
+      tier: "free",
+      unlimited: false,
+      usage: { messages: 0, inputTokens: 0, outputTokens: 0, mcpCalls: 1_000 },
+    });
+    expect(out.allowed).toBe(false);
+    expect(out.exceeded).toBe("mcp_calls");
   });
 
   it("allows under all caps", () => {
     const out = evaluateQuota({
       tier: "team",
       unlimited: false,
-      usage: { messages: 100, inputTokens: 1_000, outputTokens: 100 },
+      usage: { messages: 100, inputTokens: 1_000, outputTokens: 100, mcpCalls: 100 },
     });
     expect(out.allowed).toBe(true);
   });
