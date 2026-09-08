@@ -82,6 +82,15 @@ importers:
       '@hono/zod-validator':
         specifier: ^0.7.6
         version: 0.7.6(hono@4.12.26)(zod@3.25.76)
+      '@modelcontextprotocol/core':
+        specifier: 2.0.0
+        version: 2.0.0
+      '@modelcontextprotocol/hono':
+        specifier: 2.0.0
+        version: 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.12.26)
+      '@modelcontextprotocol/server':
+        specifier: 2.0.0
+        version: 2.0.0
       '@paralleldrive/cuid2':
         specifier: ^3.3.0
         version: 3.3.0
@@ -2862,6 +2871,21 @@ packages:
 
   '@mjackson/node-fetch-server@0.2.0':
     resolution: {integrity: sha512-EMlH1e30yzmTpGLQjlFmaDAjyOeZhng1/XCd7DExR8PNAnG/G1tyruZxEoUe11ClnwGhGrtsdnyyUx1frSzjng==}
+
+  '@modelcontextprotocol/core@2.0.0':
+    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
+    engines: {node: '>=20'}
+
+  '@modelcontextprotocol/hono@2.0.0':
+    resolution: {integrity: sha512-lKCSXRusLxpX63G+6og9ewcRkqVbjB2xSxpvU/VJhxcUkpvGgpDrmcgNRQ4dTapGr8AspNFdRBdmJc500Vhl/A==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@modelcontextprotocol/server': ^2.0.0
+      hono: ^4.11.4
+
+  '@modelcontextprotocol/server@2.0.0':
+    resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
+    engines: {node: '>=20'}
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     resolution: {integrity: sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw==}
@@ -13125,7 +13149,7 @@ snapshots:
       postcss: 8.5.28
       resolve-from: 5.0.0
     optionalDependencies:
-      expo: 56.0.12(@babel/core@7.29.0)(@expo/dom-webview@56.0.5)(expo-router@3.5.24)(react-dom@19.2.7(react@19.2.7))(react-native@0.86.0(@babel/core@7.29.0)(@react-native-community/cli@13.6.9)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
+      expo: 56.0.12(@babel/core@7.29.0)(@expo/dom-webview@56.0.5)(expo-router@3.5.24)(react-dom@18.3.1(react@18.3.1))(react-native@0.86.0(@babel/core@7.29.0)(@react-native-community/cli@13.6.9)(@types/react@18.3.31)(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -13723,6 +13747,20 @@ snapshots:
       - supports-color
 
   '@mjackson/node-fetch-server@0.2.0': {}
+
+  '@modelcontextprotocol/core@2.0.0':
+    dependencies:
+      zod: 4.4.3
+
+  '@modelcontextprotocol/hono@2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.12.26)':
+    dependencies:
+      '@modelcontextprotocol/server': 2.0.0
+      hono: 4.12.26
+
+  '@modelcontextprotocol/server@2.0.0':
+    dependencies:
+      '@modelcontextprotocol/core': 2.0.0
+      zod: 4.4.3
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     optional: true
@@ -16715,7 +16753,7 @@ snapshots:
       react-refresh: 0.14.2
     optionalDependencies:
       '@babel/runtime': 7.29.2
-      expo: 56.0.12(@babel/core@7.29.0)(@expo/dom-webview@56.0.5)(expo-router@3.5.24)(react-dom@19.2.7(react@19.2.7))(react-native@0.86.0(@babel/core@7.29.0)(@react-native-community/cli@13.6.9)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
+      expo: 56.0.12(@babel/core@7.29.0)(@expo/dom-webview@56.0.5)(expo-router@3.5.24)(react-dom@18.3.1(react@18.3.1))(react-native@0.86.0(@babel/core@7.29.0)(@react-native-community/cli@13.6.9)(@types/react@18.3.31)(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
     transitivePeerDependencies:
       - '@babel/core'
       - supports-color
@@ -18238,7 +18276,7 @@ snapshots:
   expo-splash-screen@0.27.7(expo-modules-autolinking@56.0.16(typescript@5.9.3))(expo@56.0.12):
     dependencies:
       '@expo/prebuild-config': 7.0.9(expo-modules-autolinking@56.0.16(typescript@5.9.3))
-      expo: 56.0.12(@babel/core@7.29.0)(@expo/dom-webview@56.0.5)(expo-router@3.5.24)(react-dom@19.2.7(react@19.2.7))(react-native@0.86.0(@babel/core@7.29.0)(@react-native-community/cli@13.6.9)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
+      expo: 56.0.12(@babel/core@7.29.0)(@expo/dom-webview@56.0.5)(expo-router@3.5.24)(react-dom@18.3.1(react@18.3.1))(react-native@0.86.0(@babel/core@7.29.0)(@react-native-community/cli@13.6.9)(@types/react@18.3.31)(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
     transitivePeerDependencies:
       - encoding
       - expo-modules-autolinking

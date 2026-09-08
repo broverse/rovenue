@@ -17,6 +17,7 @@ import {
   billingRoute,
   dashboardRoute,
   healthRoute,
+  mcpRoute,
   v1Route,
   webhooksRoute,
 } from "./routes";
@@ -270,7 +271,8 @@ export function createApp() {
     .route("/public/magic", publicFunnelMagicRoute)
     .route("/universal", publicFunnelUniversalRoute)
     .route("/stripe/oauth", stripeOAuthRoute)
-    .route("/dashboard", dashboardRoute);
+    .route("/dashboard", dashboardRoute)
+    .route("/mcp", mcpRoute);
 
   app.onError(errorHandler);
 
