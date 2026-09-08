@@ -20,7 +20,7 @@ import {
 } from "./tools";
 
 /**
- * The two write tools (spec D5). They never mutate directly: the first
+ * The two write tools (design D5). They never mutate directly: the first
  * call creates a copilot intent — preview, requiresRole, expiry, status
  * machine — exactly as the dashboard does, and returns input_required.
  * Only a retried call carrying an accepted `confirm` elicitation executes,
@@ -64,6 +64,10 @@ interface McpRetryContext {
 interface WriteSpec {
   /** Chat action tool backing this MCP tool (intent toolName). */
   actionTool: "action_experiments_start" | "action_experiments_stop";
+  // requiresRole, not requiresCapability: the chat action tools this
+  // mirrors set ADMIN only (no experiments:write), and the dashboard
+  // execute route prefers requiresCapability when set — storing one here
+  // would gate the SAME intent differently depending on who proposed it.
   requiresRole: "ADMIN";
   buildPreview: (input: {
     experimentId: string;
@@ -85,7 +89,7 @@ async function loadPendingIntent(
   requestState: unknown,
   ctx: McpToolContext,
   spec: WriteSpec,
-  experimentId: string,
+  echo: { experimentId: string; winnerVariantId?: string; reason: string },
 ) {
   const failed = (error: string) => ({ intent: null, error });
   if (typeof requestState !== "string" || requestState === "") {
@@ -106,11 +110,15 @@ async function loadPendingIntent(
     winnerVariantId?: unknown;
     reason?: unknown;
   };
-  // Bind the confirmation to the proposed experiment: the retry must echo
-  // the same args, and execution uses the previewed payload, never the
-  // retry's (possibly swapped) arguments.
-  if (payload.experimentId !== experimentId) {
-    return failed("confirmation does not match the proposed experiment");
+  // Bind the confirmation to the proposed call: the retry must echo ALL
+  // of the original arguments, and execution uses the previewed payload,
+  // never the retry's (possibly swapped) arguments.
+  if (
+    payload.experimentId !== echo.experimentId ||
+    (payload.winnerVariantId ?? null) !== (echo.winnerVariantId ?? null) ||
+    (payload.reason ?? "") !== echo.reason
+  ) {
+    return failed("confirmation does not match the proposed call");
   }
   if (intent.status !== "pending") {
     return failed(`intent already ${intent.status}; propose again`);
@@ -253,12 +261,11 @@ function registerWriteTool(
       // inside the mutation transaction). Any failure is a tool result
       // the model can act on, never a protocol error.
       try {
-        const loaded = await loadPendingIntent(
-          requestState,
-          ctx,
-          spec,
-          args.experimentId,
-        );
+        const loaded = await loadPendingIntent(requestState, ctx, spec, {
+          experimentId: args.experimentId,
+          winnerVariantId: args.winnerVariantId,
+          reason: args.reason,
+        });
         if (!loaded.intent) return errPayload(loaded.error ?? "unknown error");
         const { intent } = loaded;
 
@@ -319,9 +326,10 @@ function registerWriteTool(
 
 /**
  * Register the two write tools on a per-request server. Annotations
- * differ honestly (spec D4, verified against ToolAnnotationsSchema in the
- * installed SDK): stopping concludes enrollment and records a winner —
- * destructive; starting begins enrollment and is reversible via stop.
+ * differ honestly (design D4; field names verified against the protocol's
+ * ToolAnnotationsSchema in the installed SDK): stopping concludes
+ * enrollment and records a winner — destructive; starting begins
+ * enrollment and is reversible via stop.
  */
 export function registerMcpWriteTools(
   server: McpServer,
