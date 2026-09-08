@@ -120,15 +120,12 @@ describe("schema shapes compile", () => {
     expect(outgoingWebhooks.createdAt.name).toBe("createdAt");
   });
 
-  // The only scopes Task 4's dashboard mint may issue. Kept beside the
-  // shape assertions so a new scope is a conscious edit here, not drift.
-  const EXPECTED_SCOPES = ["read", "read_write"] as const;
-
   it("mcp_tokens binds a token to a user and one project", () => {
     expect(mcpTokens.userId.notNull).toBe(true);
     expect(mcpTokens.projectId.notNull).toBe(true);
+    // Scope values ("read" | "read_write") are Task 4's mint contract; the
+    // column is intentionally free text, so there is nothing to pin here.
     expect(mcpTokens.scope.notNull).toBe(true);
-    expect(EXPECTED_SCOPES).toHaveLength(2);
   });
 
   it("mcp_tokens can be revoked and expired independently", () => {
