@@ -836,7 +836,19 @@ it("counts MCP calls against the tier ladder, not a parallel limiter", async () 
 
 - [ ] **Step 2: Run it to verify it fails**, then implement.
 
-**Quota reuses the existing ladder.** `resolveTier` / `evaluateQuota` already express tier-based monthly limits and already honour `quotasUnlimited()` from host-mode. Add an axis to `ExceededAxis`, which today is `"messages" | "input_tokens" | "output_tokens" | null` — so the new value is `"mcp_calls"`, matching its snake_case siblings. Do not build a second counting system with its own window — it would drift from the billing ladder the moment either changed. The global IP rate limit stays as a backstop only; per-IP is the wrong primary instrument when one agent bursts from one address and a shared office IP punishes unrelated users.
+**Two limits, not one — this is the resolution of R3.** `quotasUnlimited()`
+returns `isSelfHosted()`, so the tier ladder is off on self-hosted instances.
+Making the tier quota MCP's only ceiling would leave the primary abuse
+control absent exactly where the endpoint is least likely to sit behind a
+gateway.
+
+1. **An abuse floor that ignores `quotasUnlimited()`** and applies in *both*
+   modes: `MCP_MAX_CALLS_PER_TOKEN_PER_MONTH`, default `50_000`, env-overridable.
+   This is not a billing limit and must not be wired into the tier ladder's
+   billing semantics — a self-hoster who raises it is not buying anything.
+2. **The tier ladder on top, cloud only**, as the billing instrument.
+
+**The tier half reuses the existing ladder.** `resolveTier` / `evaluateQuota` already express tier-based monthly limits and already honour `quotasUnlimited()` from host-mode. Add an axis to `ExceededAxis`, which today is `"messages" | "input_tokens" | "output_tokens" | null` — so the new value is `"mcp_calls"`, matching its snake_case siblings. Do not build a second counting system with its own window — it would drift from the billing ladder the moment either changed. The global IP rate limit stays as a backstop only; per-IP is the wrong primary instrument when one agent bursts from one address and a shared office IP punishes unrelated users.
 
 **The access trail does not go in `audit_logs`.** That table is a per-project append-only hash chain and a row per read would bloat it for no benefit. It goes to ClickHouse the only legitimate way: an `outbox_events` row the dispatcher publishes. `aggregate_type` is a Postgres enum, so it needs `ADD VALUE` — generate the migration with `pnpm db:migrate:generate` and run the journal watermark check.
 
@@ -932,7 +944,7 @@ git commit -m "test(mcp): surface guard and a tool-selection eval set"
 
 **Known gaps in this plan, stated rather than hidden.**
 
-1. **R3 is unresolved and unassigned.** The spec asks whether A ships in self-host, cloud, or both, and no task answers it. It is a product decision, not an implementation one — but it must be settled before Task 2 mounts a publicly reachable endpoint, because "both at once" and "cloud only" imply different exposure defaults.
+1. **R3 is resolved** (2026-09-08): A ships in **both** modes, and Task 10 carries the consequence — an abuse floor independent of `quotasUnlimited()`, because that flag conflates "we do not bill you" with "unbounded is safe". No longer a blocker on Task 2.
 2. **`get_metrics` is conditional on Task 1.** If Task 1 finds sandbox revenue contaminating ClickHouse, Task 6 ships seven tools instead of eight and a separate item opens. The plan does not pretend to know which.
 3. **The SDK's API is not in this plan.** Task 2 records it; Tasks 6, 8 and 9 consume that record. If Task 2's findings contradict this plan's structure, the plan is what gives way.
 4. **`user` cascade — checked, and it holds.** Task 3 cascades `mcp_tokens` on user deletion. The `user` table (`schema.ts:108-126`) has no soft-delete column, so deletion is a real DELETE and the cascade fires. Recorded because the opposite would have been a token outliving its owner's access, and "the FK will handle it" is exactly the kind of assumption worth one grep.

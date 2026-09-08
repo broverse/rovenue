@@ -382,10 +382,27 @@ user-supplied and can carry prompt injection through MCP into the customer's
 client. The copilot already has `prompt-injection.integration.test.ts`; A
 inherits that posture deliberately, not by accident.
 
-**R3 — `HOST_MODE` (self | cloud) was never considered in the original
-sketch.** Exposing `/mcp` on a self-hosted instance behind a firewall and on
-the cloud offering are different problems with different auth expectations.
-Decide explicitly whether A ships in both modes at once.
+**R3 — `HOST_MODE` (self | cloud) — RESOLVED 2026-09-08.** A ships in
+**both** modes.
+
+The concrete problem, which the original sketch of this risk stated too
+vaguely: `quotasUnlimited()` returns `isSelfHosted()`
+(`apps/api/src/lib/host-mode.ts`), so the tier ladder is disabled on
+self-hosted instances. D6 makes the per-token quota MCP's primary abuse
+control — which would therefore not exist on self-host, exactly the
+deployment least likely to have a WAF or API gateway in front of it. A
+leaked token would face no ceiling at all.
+
+That flag conflates two different statements: *"we do not bill you"* and
+*"unbounded usage is safe"*. The first is correct for self-host; the second
+is not, for anything reachable over the network.
+
+**Resolution:** MCP gets an **abuse floor that ignores `quotasUnlimited()`** —
+a per-token monthly ceiling that applies in both modes. It is not a billing
+limit and must not be wired into the tier ladder's billing semantics. Default
+50,000 tool calls per token per month, overridable by environment variable so
+a self-hoster who genuinely needs more can raise it deliberately. The tier
+ladder still applies on top, in cloud mode only, as the billing instrument.
 
 **R4 — The three-platform decoder contract.** `assertSaveValid`'s node and
 depth bound was closed in B. Whether its blocking set covers
@@ -470,7 +487,6 @@ the core story.
   `get_metrics` (which now has an exit ramp if the answer is expensive).
 - **Annotation field names** in the current specification revision. Blocks
   D4's write-tool metadata. Write them from the schema, not from memory.
-- **R3** — does A ship in self-host, cloud, or both at once?
 
 *Confirmed while revising:* 2026-07-28 is still the current specification
 revision, and its retirement of `initialize` / `Mcp-Session-Id` in favour of
