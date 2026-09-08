@@ -86,6 +86,13 @@ const PREVIEW_FLUSH_DEBOUNCE_MS = 2000;
  *  no merge; see `patchBuilderConfig`'s catch handling below. */
 const DRAFT_CONFLICT_STATUS = 409;
 
+/** Surfaced as `publishError` when the pre-publish flush lost that race.
+ *  Nothing was published and nothing was saved — the canvas the author is
+ *  now looking at is the OTHER writer's draft, which they have not
+ *  reviewed, so the message has to say both halves. */
+const PUBLISH_ABORTED_ON_CONFLICT_MESSAGE =
+  "Someone else changed this paywall's draft, so your edit was not saved and nothing was published. The canvas now shows their version — review it, then publish again.";
+
 export interface PaywallBuilderProps {
   projectId: string;
   paywallId: string;
@@ -1216,6 +1223,17 @@ export class PaywallBuilderViewModel {
    * happened and imply a retry might help. Best-effort: a failed reload
    * here just leaves the (still-set) "conflict" badge as the only
    * signal, which remains correct even if this fetch itself fails.
+   *
+   * Awaited `refreshPublishState()` at the end, for exactly the reason
+   * `refetchAfterExternalEdit` (this method's sibling — same wholesale
+   * replacement of the persisted draft, same badge) documents: once
+   * `isDirty` and `diffStale` are both false, `hasUnpublishedChanges`
+   * falls through to the CACHED `diffResult`, which was computed against
+   * the pre-conflict draft. Leaving it would let a previously-in-sync
+   * paywall report "in sync" with Publish disabled while the WINNER's
+   * edit sits unpublished. Awaiting is free here (the caller is already
+   * inside an async save path) and makes "the conflict has been handled"
+   * mean the publish group is caught up too.
    */
   private async reloadAfterDraftConflict() {
     try {
@@ -1223,6 +1241,7 @@ export class PaywallBuilderViewModel {
       if (this.disposed) return;
       this.syncFromDetail(detail);
       this.lastSavedSnapshot = this.snapshot();
+      await this.refreshPublishState();
     } catch {
       // Non-fatal — see doc comment above.
     }
@@ -1330,7 +1349,10 @@ export class PaywallBuilderViewModel {
   }
 
   async publish() {
-    if (!this.canPublish) return;
+    // `paywall` carries the `draftRevision` the publish request must
+    // state; it is only ever null before the first successful load, when
+    // there is nothing to publish anyway.
+    if (!this.canPublish || !this.paywall) return;
     this.publishState = "publishing";
     this.publishError = null;
     try {
@@ -1338,7 +1360,26 @@ export class PaywallBuilderViewModel {
       // edit still sitting behind the 30s autosave throttle would
       // silently not ship.
       await this.saveNow();
-      await this.api.publish(this.props.projectId, this.props.paywallId);
+      // ...and STOP if that flush lost the CAS. `saveNowInner` handles a
+      // 409 by returning normally (it has already replaced the canvas with
+      // the winner's draft — see `reloadAfterDraftConflict`), so without
+      // this check publish would carry straight on and ship content the
+      // author has never seen, to live traffic, under a success message.
+      // The author's own rejected edit is gone; the only safe move is to
+      // let them look at what replaced it first.
+      if (this.autosaveStatus === "conflict") {
+        this.publishState = "error";
+        this.publishError = PUBLISH_ABORTED_ON_CONFLICT_MESSAGE;
+        return;
+      }
+      await this.api.publish(
+        this.props.projectId,
+        this.props.paywallId,
+        // Re-read AFTER the flush: a successful save returns a bumped
+        // revision, and publishing the pre-save one would 409 on the
+        // author's own edit.
+        this.paywall.draftRevision,
+      );
       this.status = "published";
       await this.refreshPublishState();
       // publish returns only { versionNo }; the live version's id comes from

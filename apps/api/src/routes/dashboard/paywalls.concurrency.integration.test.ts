@@ -258,7 +258,8 @@ describe("Server-initiated draft rewrites also move draftRevision", () => {
     expect(firstSave.status).toBe(200);
     const publishRes = await app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
       method: "POST",
-      headers: { cookie },
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: 1 }),
     });
     expect(publishRes.status).toBe(200);
 
@@ -295,7 +296,8 @@ describe("Server-initiated draft rewrites also move draftRevision", () => {
     expect(firstSave.status).toBe(200);
     const publishRes = await app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
       method: "POST",
-      headers: { cookie },
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: 1 }),
     });
     expect(publishRes.status).toBe(200);
 
@@ -326,5 +328,124 @@ describe("Server-initiated draft rewrites also move draftRevision", () => {
       body: JSON.stringify({ draftRevision: staleRevision, builderConfig: draftConfig("clobber") }),
     });
     expect(staleWrite.status).toBe(CONFLICT_STATUS);
+  });
+});
+
+// =============================================================
+// Publish states the revision it reviewed (S1)
+//
+// Authoring is only safe because publishing is the guarded step — that is
+// the property the whole design leans on. With a SECOND writer now on the
+// draft (the copilot's `action_paywall_editTree` handler persists
+// server-side), a publish that just snapshots "whatever the row holds"
+// ships content its author never saw to live traffic, since
+// /v1/placements serves the published snapshot. The dashboard aborts its
+// own publish after a lost flush, but a client-side-only guard cannot
+// cover the non-dashboard callers this sub-project exists to enable — so
+// the route carries the check too, fail-closed like the PATCH route's.
+// =============================================================
+describe("POST /projects/:projectId/paywalls/:id/publish — reviewed-draft CAS", () => {
+  /** Saves a draft (revision 0 -> 1) so the paywall has something
+   *  publishable, then returns the revision a client would now hold. */
+  async function saveInitialDraft(
+    app: ReturnType<typeof buildApp>,
+    cookie: string,
+    projectId: string,
+    paywallId: string,
+  ): Promise<number> {
+    const res = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: 0, builderConfig: draftConfig("reviewed") }),
+    });
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    return data.paywall.draftRevision as number;
+  }
+
+  it("rejects a publish whose draftRevision is stale, and ships nothing", async () => {
+    const { app, cookie, projectId, paywallId } = await seedPaywall("publish-stale");
+    const reviewedRevision = await saveInitialDraft(app, cookie, projectId, paywallId);
+
+    // A concurrent writer (another tab, or the copilot's server-side tree
+    // edit) lands its own draft. The first author's Publish click is still
+    // carrying `reviewedRevision`.
+    const concurrent = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        draftRevision: reviewedRevision,
+        builderConfig: draftConfig("never-reviewed"),
+      }),
+    });
+    expect(concurrent.status).toBe(200);
+
+    const publishRes = await app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: reviewedRevision }),
+    });
+    expect(publishRes.status).toBe(CONFLICT_STATUS);
+
+    // Nothing shipped: no version row, and the paywall still points at
+    // nothing. A 409 that had already minted vN+1 would be worse than no
+    // check at all.
+    const versions = await app.request(
+      `/projects/${projectId}/paywalls/${paywallId}/versions`,
+      { headers: { cookie } },
+    );
+    const { data: versionsData } = await versions.json();
+    expect(versionsData.versions).toEqual([]);
+    const read = await app.request(`/projects/${projectId}/paywalls/${paywallId}`, {
+      headers: { cookie },
+    });
+    const { data } = await read.json();
+    expect(data.paywall.publishedVersionId).toBeNull();
+    expect(data.paywall.status).toBe("draft");
+  });
+
+  it("rejects a publish that omits draftRevision entirely — fail closed, never defaulted", async () => {
+    // The same convention `updateBodySchema` uses: an un-migrated client
+    // must be told no, not have a revision inferred for it.
+    const { app, cookie, projectId, paywallId } = await seedPaywall("publish-norev");
+    await saveInitialDraft(app, cookie, projectId, paywallId);
+
+    const publishRes = await app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(publishRes.status).toBe(400);
+
+    const versions = await app.request(
+      `/projects/${projectId}/paywalls/${paywallId}/versions`,
+      { headers: { cookie } },
+    );
+    const { data: versionsData } = await versions.json();
+    expect(versionsData.versions).toEqual([]);
+  });
+
+  it("publishes the reviewed revision, and does not consume it — a re-publish of the same draft still works", async () => {
+    // Publish must NOT move draftRevision: the builder holds one revision
+    // across a publish, and a second publish of the same draft (or an
+    // open tab's next autosave) would otherwise 409 for no reason.
+    const { app, cookie, projectId, paywallId } = await seedPaywall("publish-ok");
+    const reviewedRevision = await saveInitialDraft(app, cookie, projectId, paywallId);
+
+    const first = await app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: reviewedRevision }),
+    });
+    expect(first.status).toBe(200);
+
+    const second = await app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ draftRevision: reviewedRevision }),
+    });
+    expect(second.status).toBe(200);
+    const { data } = await second.json();
+    expect(data.version.versionNo).toBe(2);
   });
 });

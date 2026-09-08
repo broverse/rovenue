@@ -150,6 +150,24 @@ async function createPaywall(suffix: string, builderConfig: unknown) {
   return body.data.paywall;
 }
 
+/**
+ * `POST /:id/publish` now requires the `draftRevision` the caller
+ * reviewed — a publish stating a stale one 409s instead of snapshotting a
+ * concurrent writer's draft into a live version (see the route's
+ * `publishBodySchema`). These tests are about the publish behaviour, not
+ * the CAS, so each one reads the row's CURRENT revision and states that.
+ * A paywall that does not exist reads as null and falls back to the column
+ * default, so the route still reaches its 404 rather than 409ing first.
+ */
+async function publishInit(paywallId: string): Promise<RequestInit> {
+  const row = await drizzle.paywallRepo.findPaywallById(db, projectId, paywallId);
+  return {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ draftRevision: row?.draftRevision ?? 0 }),
+  };
+}
+
 // =============================================================
 // Asset usage index (Task 10) — the composed resolver, end to end
 // =============================================================
@@ -221,7 +239,7 @@ describe("POST /paywalls/:id/publish — asset usage index (Task 10)", () => {
 
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/publish`,
-      { method: "POST", headers: { cookie } },
+      await publishInit(paywall.id),
     );
     expect(res.status).toBe(200);
     const { data } = await res.json();
@@ -240,7 +258,7 @@ describe("POST /paywalls/:id/publish — asset usage index (Task 10)", () => {
 
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/publish`,
-      { method: "POST", headers: { cookie } },
+      await publishInit(paywall.id),
     );
     expect(res.status).toBe(200);
     const { data } = await res.json();
@@ -257,7 +275,7 @@ describe("POST /paywalls/:id/publish — asset usage index (Task 10)", () => {
 
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/publish`,
-      { method: "POST", headers: { cookie } },
+      await publishInit(paywall.id),
     );
     expect(res.status).toBe(200);
     const { data } = await res.json();
@@ -280,10 +298,7 @@ describe("POST /paywalls/:id/publish — asset usage index (Task 10)", () => {
 describe("POST /paywalls/:id/publish — asset existence check (Task 9)", () => {
   async function publish(paywallId: string) {
     const app = buildApp();
-    return app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    return app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, await publishInit(paywallId));
   }
 
   it("400s with asset_missing when the tree references a soft-deleted asset", async () => {
@@ -346,7 +361,7 @@ describe("POST /paywalls/:id/publish", () => {
     purgeSpy.mockClear();
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/publish`,
-      { method: "POST", headers: { cookie } },
+      await publishInit(paywall.id),
     );
     expect(res.status).toBe(200);
     const { data } = await res.json();
@@ -362,13 +377,10 @@ describe("POST /paywalls/:id/publish", () => {
   it("increments versionNo on the second publish", async () => {
     const app = buildApp();
     const paywall = await createPaywall("pub2", VALID_CONFIG);
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/publish`,
-      { method: "POST", headers: { cookie } },
+      await publishInit(paywall.id),
     );
     const { data } = await res.json();
     expect(data.version.versionNo).toBe(2);
@@ -379,7 +391,7 @@ describe("POST /paywalls/:id/publish", () => {
     const paywall = await createPaywall("empty", null);
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/publish`,
-      { method: "POST", headers: { cookie } },
+      await publishInit(paywall.id),
     );
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -407,7 +419,7 @@ describe("POST /paywalls/:id/publish", () => {
     });
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/publish`,
-      { method: "POST", headers: { cookie } },
+      await publishInit(paywall.id),
     );
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -420,7 +432,9 @@ describe("POST /paywalls/:id/publish", () => {
     const app = buildApp();
     const res = await app.request(
       `/projects/${projectId}/paywalls/does-not-exist/publish`,
-      { method: "POST", headers: { cookie } },
+      // A schema-satisfying body: the publish CAS check runs AFTER the row
+      // lookup, so a nonexistent paywall must still 404 rather than 409.
+      await publishInit("does-not-exist"),
     );
     expect(res.status).toBe(404);
   });
@@ -430,14 +444,8 @@ describe("GET /paywalls/:id/versions", () => {
   it("lists newest first and flags the live version", async () => {
     const app = buildApp();
     const paywall = await createPaywall("list", VALID_CONFIG);
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
 
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/versions`,
@@ -470,10 +478,7 @@ describe("GET /paywalls/:id/versions/:versionNo", () => {
   it("returns the full snapshot", async () => {
     const app = buildApp();
     const paywall = await createPaywall("detail", VALID_CONFIG);
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
 
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/versions/1`,
@@ -524,10 +529,7 @@ describe("revert / discard-draft / label", () => {
   it("revert copies a snapshot back into the draft without republishing", async () => {
     const app = buildApp();
     const paywall = await createPaywall("revert", VALID_CONFIG);
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
 
     // Edit the draft: change the title string.
     const edited = {
@@ -560,10 +562,7 @@ describe("revert / discard-draft / label", () => {
   it("discard-draft resets the draft to the live version", async () => {
     const app = buildApp();
     const paywall = await createPaywall("discard", VALID_CONFIG);
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
     await app.request(`/projects/${projectId}/paywalls/${paywall.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
@@ -600,10 +599,7 @@ describe("revert / discard-draft / label", () => {
   it("PATCH versions/:n sets and clears the label", async () => {
     const app = buildApp();
     const paywall = await createPaywall("label", VALID_CONFIG);
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
 
     const set = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/versions/1`,
@@ -632,10 +628,7 @@ describe("GET /paywalls/:id/diff", () => {
   it("defaults to live-published → draft", async () => {
     const app = buildApp();
     const paywall = await createPaywall("diff", VALID_CONFIG);
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
     await app.request(`/projects/${projectId}/paywalls/${paywall.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
@@ -670,10 +663,7 @@ describe("GET /paywalls/:id/diff", () => {
   it("accepts explicit version numbers on both sides", async () => {
     const app = buildApp();
     const paywall = await createPaywall("diff2", VALID_CONFIG);
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
     await app.request(`/projects/${projectId}/paywalls/${paywall.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
@@ -682,10 +672,7 @@ describe("GET /paywalls/:id/diff", () => {
         builderConfig: { ...VALID_CONFIG, root: { ...VALID_CONFIG.root, spacing: 20 } },
       }),
     });
-    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-      method: "POST",
-      headers: { cookie },
-    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, await publishInit(paywall.id));
 
     const res = await app.request(
       `/projects/${projectId}/paywalls/${paywall.id}/diff?from=1&to=2`,
@@ -740,12 +727,13 @@ describe("POST /paywalls/:id/publish — concurrency", () => {
     // transactions read the same MAX(versionNo) and both insert N+1 —
     // the unique (paywallId, versionNo) index then 500s the loser.
     const N = 10;
+    // One init reused across all N: publish does not move draftRevision,
+    // so every concurrent request states the same (correct) one — the
+    // race under test is the version-number one, not the CAS.
+    const init = await publishInit(paywall.id);
     const results = await Promise.all(
       Array.from({ length: N }, () =>
-        app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
-          method: "POST",
-          headers: { cookie },
-        }),
+        app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, init),
       ),
     );
 

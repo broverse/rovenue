@@ -651,9 +651,13 @@ describe("PaywallBuilderViewModel", () => {
       const publish = vi.fn().mockResolvedValue({ versionNo: 3 });
       const listVersions = vi.fn().mockResolvedValue([LIVE_VERSION]);
       const diff = vi.fn().mockResolvedValue(EMPTY_DIFF);
-      const patchBuilderConfig = vi.fn().mockResolvedValue(fakeDetail());
+      // The flush bumps the revision server-side; publish must carry the
+      // POST-flush value (4), not the one loaded before the edit (0) —
+      // the route 409s a stale one, which would make Publish unusable
+      // for the author's own edit.
+      const patchBuilderConfig = vi.fn().mockResolvedValue(fakeDetail({ draftRevision: 4 }));
       const vm = makeVm({
-        get: vi.fn().mockResolvedValue(fakeDetail()),
+        get: vi.fn().mockResolvedValue(fakeDetail({ draftRevision: 3 })),
         patchBuilderConfig,
         publish,
         listVersions,
@@ -666,11 +670,48 @@ describe("PaywallBuilderViewModel", () => {
       await vm.publish();
 
       expect(patchBuilderConfig).toHaveBeenCalled();
-      expect(publish).toHaveBeenCalledWith("p_1", "pw_1");
+      expect(publish).toHaveBeenCalledWith("p_1", "pw_1", 4);
       expect(vm.versions[0]?.versionNo).toBe(3);
       expect(vm.status).toBe("published");
       expect(vm.publishState).toBe("idle");
       expect(vm.hasUnpublishedChanges).toBe(false);
+    });
+
+    it("publish() aborts when the pre-publish flush loses the draft CAS — it never ships the winner's unreviewed draft", async () => {
+      // The whole spec rests on "authoring is safe, publishing is the
+      // guarded step". `saveNowInner` handles a 409 by RETURNING NORMALLY
+      // after replacing the canvas with the winner's draft, so a publish
+      // that just carried on would snapshot content the author has never
+      // seen into vN+1 and point /v1/placements at it — while the UI
+      // reported success. `canPublish` is checked before the flush and
+      // cannot catch this.
+      const serverWinnerConfig = fakeConfig();
+      serverWinnerConfig.localizations.en.t1_key = "Agent Won";
+      const publish = vi.fn().mockResolvedValue({ versionNo: 4 });
+      const vm = makeVm({
+        get: vi
+          .fn()
+          .mockResolvedValueOnce(fakeDetail())
+          .mockResolvedValueOnce(fakeDetail({ draftRevision: 9, builderConfig: serverWinnerConfig })),
+        patchBuilderConfig: vi
+          .fn()
+          .mockRejectedValue(new ApiError("PAYWALL_DRAFT_CONFLICT", "conflict", 409)),
+        publish,
+        listVersions: vi.fn().mockResolvedValue([LIVE_VERSION]),
+        diff: vi.fn().mockResolvedValue(EMPTY_DIFF),
+      });
+      await vm.load(() => {});
+
+      vm.addNode("spacer", "root");
+      await vm.publish();
+
+      expect(publish).not.toHaveBeenCalled();
+      expect(vm.publishState).toBe("error");
+      expect(vm.publishError).toContain("nothing was published");
+      expect(vm.status).not.toBe("published");
+      // And the author is looking at the winner's draft, so "review it,
+      // then publish again" is actually actionable.
+      expect(vm.config.localizations.en.t1_key).toBe("Agent Won");
     });
 
     it("publish() surfaces the server's blocking-issue error", async () => {
@@ -936,6 +977,78 @@ describe("PaywallBuilderViewModel", () => {
       // "permanentError" wording (which would suggest reloading might help
       // fix a rejected write — this isn't that).
       expect(vm.autosaveStatus).toBe("conflict");
+    });
+
+    it("on a 409, refreshes the publish state too — the winner's edit is unpublished and must not read as 'in sync'", async () => {
+      // The identical regression already fixed in `refetchAfterExternalEdit`
+      // (its own doc comment spells it out): after the persisted draft moves
+      // under this builder, `isDirty` is false and `diffStale` is false, so
+      // `hasUnpublishedChanges` falls back to the CACHED `diffResult` —
+      // which was computed against the PRE-conflict draft. On a
+      // previously-in-sync paywall that cache is empty, so the publish group
+      // says "in sync" and disables Publish while the winner's edit (e.g.
+      // the copilot's server-side editTree write) sits unshipped. The two
+      // paths are siblings and set the same badge; they must agree.
+      const serverWinnerConfig = fakeConfig();
+      serverWinnerConfig.localizations.en.t1_key = "Agent Won";
+      const publishedRow = { status: "published" as const, publishedVersionId: "pwv_1" };
+      const liveVersion = {
+        id: "pwv_1",
+        versionNo: 3,
+        label: null,
+        offeringId: "off_1",
+        configFormatVersion: 2,
+        publishedAt: "2026-09-07T00:00:00.000Z",
+        publishedBy: "u_1",
+        isLive: true,
+      };
+      const emptyDiff = {
+        from: { versionNo: 3, label: null },
+        to: { versionNo: null, label: null },
+        entries: [],
+      };
+      const diffAfterWinner = {
+        ...emptyDiff,
+        entries: [
+          {
+            kind: "changed" as const,
+            scope: "localization" as const,
+            nodeId: null,
+            nodeType: null,
+            field: "en.t1_key",
+            from: '"Hello"',
+            to: '"Agent Won"',
+          },
+        ],
+      };
+
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce(fakeDetail({ ...publishedRow, draftRevision: 0 }))
+        .mockResolvedValueOnce(
+          fakeDetail({ ...publishedRow, draftRevision: 7, builderConfig: serverWinnerConfig }),
+        );
+      const diff = vi.fn().mockResolvedValueOnce(emptyDiff).mockResolvedValue(diffAfterWinner);
+      const vm = makeVm({
+        get,
+        patchBuilderConfig: vi
+          .fn()
+          .mockRejectedValue(new ApiError("PAYWALL_DRAFT_CONFLICT", "conflict", 409)),
+        listVersions: vi.fn().mockResolvedValue([liveVersion]),
+        diff,
+      });
+      await vm.load(() => {});
+      // Precondition: this paywall really is in sync before the conflict —
+      // otherwise the assertion below could pass for the wrong reason.
+      expect(vm.hasUnpublishedChanges).toBe(false);
+
+      vm.setLocaleText("t1_key", "en", "changed");
+      await vm.saveNow();
+
+      expect(vm.autosaveStatus).toBe("conflict");
+      expect(diff).toHaveBeenCalledTimes(2);
+      expect(vm.hasUnpublishedChanges).toBe(true);
+      expect(vm.canPublish).toBe(true);
     });
   });
 

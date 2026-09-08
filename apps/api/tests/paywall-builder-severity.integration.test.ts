@@ -221,7 +221,15 @@ describe("paywall builder severity gate — save vs publish", () => {
 
     const publishRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}/publish`, {
       method: "POST",
-      headers: { cookie },
+      headers: { "content-type": "application/json", cookie },
+      // Publish states the revision the caller reviewed (see the route's
+      // `publishBodySchema`) — read the row's current one, so what is
+      // under test here stays the publish gate, not the CAS.
+      body: JSON.stringify({
+        draftRevision:
+          (await drizzle.paywallRepo.findPaywallById(getDb(), project.id, paywallId))
+            ?.draftRevision ?? 0,
+      }),
     });
     expect(publishRes.status).toBe(400);
     const { error } = (await publishRes.json()) as { error: { message: string } };
@@ -293,7 +301,15 @@ describe("paywall builder severity gate — save vs publish", () => {
 
     const publishRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}/publish`, {
       method: "POST",
-      headers: { cookie },
+      headers: { "content-type": "application/json", cookie },
+      // Publish states the revision the caller reviewed (see the route's
+      // `publishBodySchema`) — read the row's current one, so what is
+      // under test here stays the publish gate, not the CAS.
+      body: JSON.stringify({
+        draftRevision:
+          (await drizzle.paywallRepo.findPaywallById(getDb(), project.id, paywallId))
+            ?.draftRevision ?? 0,
+      }),
     });
     expect(publishRes.status).toBe(400);
     const { error } = (await publishRes.json()) as { error: { message: string } };

@@ -239,6 +239,28 @@ const versionLabelBodySchema = z.object({
   label: z.string().trim().min(1).max(120).nullable(),
 });
 
+/**
+ * Publish is "ship exactly the draft I reviewed", so it carries the same
+ * compare-and-swap the draft WRITE path does: the caller states the
+ * `draftRevision` it is publishing, and a mismatch is a 409 rather than a
+ * silent snapshot of whoever wrote last.
+ *
+ * This is not belt-and-braces around a client check. A second writer now
+ * genuinely exists — the copilot's `action_paywall_editTree` handler
+ * persists server-side — so between an author's last read and their
+ * Publish click, the row can hold content they have never seen. Publishing
+ * it mints vN+1 and points /v1/placements at it, i.e. it reaches live
+ * traffic. A client-side-only guard cannot cover the non-dashboard callers
+ * this sub-project exists to enable.
+ *
+ * Required, never defaulted — the same fail-closed convention
+ * `updateBodySchema` uses: an un-migrated client must be rejected rather
+ * than have a revision inferred for it.
+ */
+const publishBodySchema = z.object({
+  draftRevision: z.number().int().nonnegative(),
+});
+
 // -------------------------------------------------------------
 // P9 on-device preview — mint token lifetime (§6.16).
 // -------------------------------------------------------------
@@ -812,7 +834,7 @@ export const paywallsDashboardRoute = new Hono()
   // serves that snapshot, never the draft.
   // -----------------------------------------------------------
 
-  .post("/:id/publish", async (c) => {
+  .post("/:id/publish", validate("json", publishBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     const id = c.req.param("id");
     if (!projectId || !id) {
@@ -820,10 +842,24 @@ export const paywallsDashboardRoute = new Hono()
     }
     const user = c.get("user");
     await assertProjectCapability(projectId, user.id, "paywalls:write");
+    const { draftRevision: expectedRevision } = c.req.valid("json");
 
     const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
     if (!paywall) {
       throw new HTTPException(404, { message: "Paywall not found" });
+    }
+    // Compare-and-swap on the REVIEWED draft (see publishBodySchema).
+    // A plain read-then-compare rather than a conditional UPDATE, and
+    // that is sufficient here: the version row inserted below snapshots
+    // THIS `paywall` object — the very bytes just compared — not a fresh
+    // read, so a draft write landing after this check cannot change what
+    // gets published. It would only bump draftRevision, and the next
+    // publish would then have to state the new one.
+    if (paywall.draftRevision !== expectedRevision) {
+      throw new HTTPException(409, {
+        message:
+          "Paywall draft changed since it was read; reload and review before publishing",
+      });
     }
     if (paywall.builderConfig === null) {
       throw new HTTPException(400, {

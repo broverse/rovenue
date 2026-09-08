@@ -148,14 +148,19 @@ export class PaywallBuilderApi {
     return toDetailDto(paywall, offeringPackageIds);
   }
 
+  /** `draftRevision` is the revision the author reviewed — the route
+   *  409s rather than snapshotting a concurrent writer's draft (e.g. the
+   *  copilot's server-side tree edit) into a live version. Required by
+   *  the route, never defaulted. */
   async publish(
     projectId: string,
     paywallId: string,
+    draftRevision: number,
     signal?: AbortSignal,
   ): Promise<{ versionNo: number }> {
     const { version } = await unwrap<{ version: { versionNo: number } }>(
       rpc.dashboard.projects[":projectId"].paywalls[":id"].publish.$post(
-        { param: { projectId, id: paywallId } },
+        { param: { projectId, id: paywallId }, json: { draftRevision } },
         { init: { signal } },
       ),
     );

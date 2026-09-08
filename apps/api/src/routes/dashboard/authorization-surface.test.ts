@@ -19,6 +19,15 @@
 // Better Auth session cookie for a CUSTOMER_SUPPORT member of the seeded
 // project, so a 403 here can only be the capability gate.
 //
+// WHICH capability, by name. A sweep that merely looks for a 403 saying
+// "lacks capability" proves that *a* capability fired, not that the right
+// one did — every capability in the table excludes CUSTOMER_SUPPORT, so a
+// paywall mutation gated on `flags:write` (or on any other) would sweep
+// perfectly clean. `assertProjectCapability` names the capability it
+// rejected on, so each route is asserted against the capability it is
+// EXPECTED to carry: its router's resource capability, or the one
+// recorded for it in GATED_ON_ANOTHER_CAPABILITY below.
+//
 // Body-validation ordering gotcha (measured empirically, see task-9
 // report): `validate("json", schema)` is composed as Hono middleware
 // BEFORE the handler, so it runs and can short-circuit with 400 before a
@@ -165,6 +174,42 @@ function isUngatedByDesign(method: string, path: string): boolean {
   return UNGATED_BY_DESIGN.some((u) => u.method === method && u.path === path);
 }
 
+// Routes gated on a capability OTHER than their own resource's, with a
+// reason — the companion to UNGATED_BY_DESIGN above, and read the same
+// way: never add a route here to make the sweep pass, only to record a
+// deliberate decision. Sweeping for "some 403 mentioning a capability"
+// cannot tell `paywalls:write` from any other capability, so a route
+// gated on the WRONG one looks identical to a correctly gated one. The
+// sweep below therefore asserts the EXPECTED capability by name, which
+// only works if the exceptions are named here.
+const GATED_ON_ANOTHER_CAPABILITY: ReadonlyArray<{
+  method: string;
+  path: string;
+  capability: string;
+  why: string;
+}> = [
+  {
+    method: "POST",
+    path: "/:id/experiments",
+    capability: "experiments:write",
+    why:
+      "Atomic builder A/B launch (§6.19). Gated on experiments:write = {OWNER, ADMIN, DEVELOPER, GROWTH}, but its handler CREATES a paywall (the variant-B duplicate) — so GROWTH can create a paywall here while paywalls:write = {OWNER, ADMIN, DEVELOPER} deliberately excludes GROWTH. Recorded, not resolved: who may create a paywall via an experiment launch is a pre-existing product decision (the same GROWTH asymmetry the design spec records under D3), outside this sub-project's scope.",
+  },
+];
+
+/** The capability a route is expected to reject on: its router's own
+ *  resource capability, unless it is recorded above as gated on another. */
+function expectedCapabilityFor(
+  method: string,
+  path: string,
+  resourceCapability: string,
+): string {
+  return (
+    GATED_ON_ANOTHER_CAPABILITY.find((r) => r.method === method && r.path === path)
+      ?.capability ?? resourceCapability
+  );
+}
+
 // A schema-satisfying (but otherwise inert) body for every mutating route
 // whose `validate("json", schema)` middleware runs BEFORE the handler's
 // capability check and would 400 on `{}` before that check is ever
@@ -179,6 +224,7 @@ const PAYWALLS_BODY_OVERRIDES: Readonly<Record<string, unknown>> = {
   },
   "PATCH /:id": { name: "Sweep Test" },
   "PATCH /:id/versions/:versionNo": { label: "sweep" },
+  "POST /:id/publish": { draftRevision: 0 },
   "POST /:id/experiments": {
     name: "Sweep Test",
     variantB: { kind: "duplicate", name: "Variant B" },
@@ -200,6 +246,9 @@ interface RouterFixture {
   router: { routes: ReadonlyArray<RouteUnderTest> };
   mount: string;
   bodyOverrides: Readonly<Record<string, unknown>>;
+  /** The capability every mutating route on this router is expected to
+   *  gate on, unless GATED_ON_ANOTHER_CAPABILITY says otherwise. */
+  resourceCapability: string;
 }
 
 describe("structural authorization sweep — paywalls + funnels mutations", () => {
@@ -229,20 +278,23 @@ describe("structural authorization sweep — paywalls + funnels mutations", () =
         router: paywallsDashboardRoute,
         mount: `/projects/${projectId}/paywalls`,
         bodyOverrides: PAYWALLS_BODY_OVERRIDES,
+        resourceCapability: "paywalls:write",
       },
       {
         label: "funnels",
         router: funnelsRoute,
         mount: `/projects/${projectId}/funnels`,
         bodyOverrides: FUNNELS_BODY_OVERRIDES,
+        resourceCapability: "funnels:write",
       },
     ];
 
     const offenders: string[] = [];
     let mutatingRoutesChecked = 0;
     let ungatedRoutesSkipped = 0;
+    let foreignCapabilityRoutes = 0;
 
-    for (const { label, router, mount, bodyOverrides } of fixtures) {
+    for (const { label, router, mount, bodyOverrides, resourceCapability } of fixtures) {
       // Hono's `.routes` lists one entry PER MIDDLEWARE/HANDLER attached to
       // a method+path (e.g. `validate()` + the async handler both appear),
       // so the same route can show up two or three times. Dedupe by
@@ -284,10 +336,26 @@ describe("structural authorization sweep — paywalls + funnels mutations", () =
         // project" from a broken seed) is just as much a false pass as a
         // 200 — the sweep exists to prove the CAPABILITY check fired, not
         // merely that the status code happened to be 403.
+        //
+        // And it must be the RIGHT capability: `assertProjectCapability`
+        // names the one it rejected on, so asserting that name is what
+        // distinguishes a route gated on `paywalls:write` from one gated
+        // on some other capability that merely also excludes
+        // CUSTOMER_SUPPORT. Without this, a paywall mutation gated on
+        // (say) `flags:write` would sweep clean.
+        const expectedCapability = expectedCapabilityFor(
+          r.method,
+          r.path,
+          resourceCapability,
+        );
+        if (expectedCapability !== resourceCapability) foreignCapabilityRoutes += 1;
         const isCapabilityRejection =
-          res.status === FORBIDDEN && text.includes("lacks capability");
+          res.status === FORBIDDEN &&
+          text.includes(`lacks capability ${expectedCapability}`);
         if (!isCapabilityRejection) {
-          offenders.push(`${label} ${r.method} ${r.path} -> ${res.status} ${text}`);
+          offenders.push(
+            `${label} ${r.method} ${r.path} -> ${res.status} (expected 403 lacking ${expectedCapability}) ${text}`,
+          );
         }
       }
     }
@@ -301,7 +369,8 @@ describe("structural authorization sweep — paywalls + funnels mutations", () =
     // the test run's own output, not just the report written by hand.
     console.log(
       `authorization-surface sweep: ${mutatingRoutesChecked} mutating routes checked, ` +
-        `${ungatedRoutesSkipped} skipped as UNGATED_BY_DESIGN`,
+        `${ungatedRoutesSkipped} skipped as UNGATED_BY_DESIGN, ` +
+        `${foreignCapabilityRoutes} asserted against a recorded GATED_ON_ANOTHER_CAPABILITY entry`,
     );
 
     expect(offenders).toEqual([]);

@@ -163,9 +163,14 @@ async function publish(
   paywallId: string,
   cookie: string,
 ) {
+  // Publish states the revision the caller reviewed (see the route's
+  // `publishBodySchema`); read the row's current one so these tests
+  // exercise the publish GATE, not the compare-and-swap.
+  const row = await drizzle.paywallRepo.findPaywallById(getDb(), projectId, paywallId);
   return app.request(`/projects/${projectId}/paywalls/${paywallId}/publish`, {
     method: "POST",
-    headers: { cookie },
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ draftRevision: row?.draftRevision ?? 0 }),
   });
 }
 
