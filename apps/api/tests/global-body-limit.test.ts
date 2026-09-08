@@ -97,12 +97,18 @@ describe("global body limit", () => {
     [`${PROJECT_PATH}/assets/lottie`],
     [`${PROJECT_PATH}/fonts`],
     [`${PROJECT_PATH}/imports`],
+    // The MCP ticketed font upload owns its own 2 MiB cap (same
+    // exemption as the ticketed asset uploads). Unauthenticated it
+    // 401s from the Bearer [REDACTED] — the point is the request reaches the
+    // route rather than dying on the global cap.
+    [`/mcp/font-uploads/font`],
   ])("does not reject %s for exceeding the 1 MiB global cap", async (path) => {
     const res = await post(path, OVER_GLOBAL_UNDER_ROUTE_BYTES);
 
     // Unauthenticated, so the expected answer is 401 from
-    // `requireDashboardAuth` — the point is that the request got as far
-    // as the route at all rather than dying on the global cap.
+    // `requireDashboardAuth` (or the MCP Bearer [REDACTED] — the point is that
+    // the request got as far as the route at all rather than dying on
+    // the global cap.
     expect(await errorCode(res)).not.toBe(ERROR_CODE.PAYLOAD_TOO_LARGE);
     expect(res.status).not.toBe(STATUS_PAYLOAD_TOO_LARGE);
   });

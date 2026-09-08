@@ -41,6 +41,7 @@ const CONTAINER_SUITES = [
   "src/services/metrics/schema-contract.integration.test.ts",
   "src/services/analytics-router.experiment.integration.test.ts",
   "tests/routes/mcp/uploads.integration.test.ts",
+  "tests/routes/mcp/font-uploads.integration.test.ts",
 ];
 
 /** Second pass. Set by the `test` script; not meant to be used by hand. */

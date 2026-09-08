@@ -273,7 +273,8 @@ describe("assertToolAllowed", () => {
     // Task 6 populated this map as tools shipped; Task 9 adds the two
     // experiment writes, the catalog group its three creates, the
     // placements-audiences group its two creates, the assets group
-    // its delete, the currency group its virtual currency create, the
+    // its delete and its staged upload, the fonts group its staged
+    // upload, the currency group its virtual currency create, the
     // funnels group its create + edit, and the paywalls group its
     // create + edit.
     // A tool added WITHOUT an entry stays unreachable to read
@@ -297,6 +298,7 @@ describe("assertToolAllowed", () => {
       create_audience: "write",
       delete_asset: "write",
       stage_asset_upload: "write",
+      stage_font_upload: "write",
       create_virtual_currency: "write",
       create_funnel: "write",
       update_funnel: "write",

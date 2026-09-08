@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -71,10 +72,10 @@ import { buildFontFaceFileUrl } from "../v1/fonts";
 // known, accepted TOCTOU — consistent with how this codebase handles
 // read-then-write sequences elsewhere; deliberately left open.)
 
-const FONT_WEIGHT_MIN = 100;
-const FONT_WEIGHT_MAX = 900;
-const FONT_STYLES = ["normal", "italic"] as const;
-const FONT_FAMILY_NAME_MAX_LENGTH = 120;
+export const FONT_WEIGHT_MIN = 100;
+export const FONT_WEIGHT_MAX = 900;
+export const FONT_STYLES = ["normal", "italic"] as const;
+export const FONT_FAMILY_NAME_MAX_LENGTH = 120;
 // `bodyLimit` below measures the ENTIRE multipart body — boundary
 // lines, each field's Content-Disposition/Content-Type headers, and
 // the four other form fields — not just the file part's bytes, so
@@ -369,3 +370,228 @@ export const fontsRoute = new Hono()
 
     return c.json(ok({ deleted: true }));
   });
+
+// =============================================================
+// MCP staged-upload reuse (additive only — the multipart handler
+// above is untouched)
+// =============================================================
+//
+// The staged font upload (routes/mcp/font-uploads.ts + the
+// `stage_font_upload` MCP tool) carries raw bytes, not multipart:
+// the metadata (family locator, weight, style) rides inside the
+// HMAC ticket's `name` field as JSON, and the bytes ride as the
+// POST body. What that transport needs from this file is exported
+// here — the transport cap, the locator validation, and the whole
+// byte-core — so the two surfaces cannot drift apart. Nothing below
+// changes the multipart route above.
+
+/**
+ * The locator half of a font upload: every metadata field the
+ * byte-core needs beyond the raw bytes. The multipart route above
+ * validates these same fields via its own form schema (which coerces
+ * `weight` because multipart fields arrive as strings); this strict
+ * JSON twin carries the identical accepted values for the ticketed
+ * transport and the `stage_font_upload` tool — same bounds, same
+ * exactly-one-of rule, never a weaker re-declaration.
+ */
+export const fontLocatorSchema = z
+  .object({
+    familyName: z.string().min(1).max(FONT_FAMILY_NAME_MAX_LENGTH).optional(),
+    familyId: z.string().min(1).optional(),
+    weight: z.number().int().min(FONT_WEIGHT_MIN).max(FONT_WEIGHT_MAX),
+    style: z.enum(FONT_STYLES),
+  })
+  .refine((v) => Boolean(v.familyName) !== Boolean(v.familyId), {
+    message: "Provide exactly one of familyName or familyId",
+  });
+
+export type FontLocator = z.infer<typeof fontLocatorSchema>;
+
+/**
+ * This transport's cap as middleware. The raw body IS the file —
+ * no multipart framing overhead — so this binds exactly
+ * `FONT_FACE_MAX_BYTES` (unlike the multipart route above, which
+ * adds `FONT_UPLOAD_MULTIPART_FRAMING_ALLOWANCE_BYTES` for the
+ * boundary and part headers). Same typed `FONT_FILE_TOO_LARGE`
+ * envelope and message as the dashboard either way.
+ */
+export function fontUploadBodyLimit() {
+  return bodyLimit({
+    maxSize: FONT_FACE_MAX_BYTES,
+    onError: (c) =>
+      c.json(
+        fail(ERROR_CODE.FONT_FILE_TOO_LARGE, FONT_FILE_TOO_LARGE_MESSAGE),
+        400,
+      ),
+  });
+}
+
+/**
+ * The font byte-core: every gate below the transport cap plus the
+ * full pipeline (magic-byte format, family ownership/liveness,
+ * quota with skip-on-replace, family create / face upsert + audit),
+ * reading the raw file bytes off `c.req`.
+ *
+ * Exported for the MCP ticketed upload (routes/mcp/font-uploads.ts)
+ * — the same deliberate, narrow routes→routes reuse as the asset
+ * byte-core (`processAssetUpload`). Auth is the caller's job: the
+ * multipart handler above passes the session user, the ticketed
+ * route passes the verified MCP token owner AFTER its own
+ * Bearer/scope/role/ticket checks. Everything from the capability
+ * check down runs identically for both callers.
+ *
+ * Replay lands on `upsertFace`: a re-played ticket carrying the
+ * same bytes to the same (familyId, weight, style) replaces the
+ * same row — no second face, no quota growth. The familyName branch
+ * always mints a fresh family (dashboard parity), so idempotent
+ * replay is a property of the familyId branch.
+ */
+export async function processFontUpload(
+  c: Context,
+  params: {
+    projectId: string;
+    userId: string;
+    familyName?: string;
+    familyId?: string;
+    weight: number;
+    style: string;
+  },
+) {
+  const { projectId, userId, familyName, familyId, weight, style } = params;
+  if (Boolean(familyName) === Boolean(familyId)) {
+    return c.json(
+      fail(
+        ERROR_CODE.VALIDATION_ERROR,
+        "Provide exactly one of familyName or familyId",
+      ),
+      400,
+    );
+  }
+  await assertProjectCapability(projectId, userId, "fonts:write");
+
+  const bytes = Buffer.from(await c.req.arrayBuffer());
+  if (bytes.byteLength === 0) {
+    return c.json(
+      fail(ERROR_CODE.VALIDATION_ERROR, "A font file is required"),
+      400,
+    );
+  }
+  // Exact authority on the file size: the transport cap above IS this
+  // same number (raw body, no framing), so this is normally
+  // unreachable — it stays as the precise second gate, mirroring the
+  // multipart handler's Gate 2.
+  if (bytes.byteLength > FONT_FACE_MAX_BYTES) {
+    return c.json(
+      fail(ERROR_CODE.FONT_FILE_TOO_LARGE, FONT_FILE_TOO_LARGE_MESSAGE),
+      400,
+    );
+  }
+
+  // Magic bytes only — a shape check, never a parse. The filename is
+  // never consulted; the bytes decide the format, full stop.
+  const format = detectFontFormat(bytes);
+  if (!format) {
+    return c.json(
+      fail(
+        ERROR_CODE.FONT_FORMAT_UNSUPPORTED,
+        "File bytes do not match any allowed font format",
+      ),
+      400,
+    );
+  }
+
+  // Whether this upload replaces a face that already exists at
+  // (familyId, weight, style) — if so, the quota gate below must be
+  // skipped, since upsertFace won't grow the row count.
+  let targetsExistingFace = false;
+  if (familyId) {
+    const existingFamily = await drizzle.fontRepo.findLiveFamilyForProject(
+      drizzle.db,
+      { projectId, familyId },
+    );
+    if (!existingFamily) {
+      return c.json(
+        fail(ERROR_CODE.FONT_FAMILY_NOT_FOUND, FONT_FAMILY_NOT_FOUND_MESSAGE),
+        404,
+      );
+    }
+
+    const existingFace = await drizzle.fontRepo.findFaceByKey(drizzle.db, {
+      familyId,
+      weight,
+      style,
+    });
+    targetsExistingFace = Boolean(existingFace);
+  }
+
+  if (!targetsExistingFace) {
+    const faceCount = await drizzle.fontRepo.countFacesForProject(
+      drizzle.db,
+      projectId,
+    );
+    if (faceCount >= FONT_FACES_MAX_PER_PROJECT) {
+      return c.json(
+        fail(
+          ERROR_CODE.FONT_QUOTA_EXCEEDED,
+          `This project has reached its ${FONT_FACES_MAX_PER_PROJECT}-face limit`,
+        ),
+        400,
+      );
+    }
+  }
+
+  const face = await drizzle.db.transaction(async (tx) => {
+    let resolvedFamilyId = familyId;
+    if (!resolvedFamilyId) {
+      const family = await drizzle.fontRepo.createFamily(tx, {
+        projectId,
+        name: familyName!,
+      });
+      resolvedFamilyId = family.id;
+    }
+
+    const upserted = await drizzle.fontRepo.upsertFace(tx, {
+      familyId: resolvedFamilyId,
+      weight,
+      style,
+      format,
+      bytes,
+    });
+
+    await audit(
+      {
+        projectId,
+        userId,
+        action: "font.uploaded",
+        resource: "font_face",
+        resourceId: upserted.id,
+        after: {
+          familyId: resolvedFamilyId,
+          weight: upserted.weight,
+          style: upserted.style,
+          format: upserted.format,
+          byteSize: upserted.byteSize,
+        },
+        ...extractRequestContext(c),
+      },
+      tx,
+    );
+
+    return upserted;
+  });
+
+  return c.json(
+    ok({
+      id: face.id,
+      familyId: face.familyId,
+      weight: face.weight,
+      style: face.style,
+      format: face.format,
+      byteSize: face.byteSize,
+      contentHash: face.contentHash,
+      // Ready-to-use; the caller must not build this URL itself —
+      // see buildFontFaceFileUrl's own comment.
+      fileUrl: buildFontFaceFileUrl(face.id, face.contentHash),
+    }),
+  );
+}

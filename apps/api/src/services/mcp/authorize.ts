@@ -51,6 +51,9 @@ export const TOOL_SURFACE: Record<string, ToolSurface> = {
   // Staged asset upload: same gate — a `read` token is refused before
   // any ticket is minted (minting itself is the propose step).
   stage_asset_upload: "write",
+  // Staged font upload: same gate — a `read` token is refused before
+  // any ticket is minted (minting itself is the propose step).
+  stage_font_upload: "write",
   // Virtual currency create: same gate — a `read` token is refused
   // before any intent row exists.
   create_virtual_currency: "write",

@@ -16,7 +16,7 @@ import {
 // Input validation is the routes' own create schemas (dashboard parity —
 // never a weaker MCP-side re-declaration). Same deliberate, narrow
 // services→routes exception as intent-handlers.ts.
-import { isValidAssetName } from "@rovenue/shared";
+import { FONT_FACES_MAX_PER_PROJECT, isValidAssetName } from "@rovenue/shared";
 import * as store from "../../lib/asset-store";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { getStorageUsage } from "../../services/assets/quota";
@@ -39,6 +39,12 @@ import {
   updateBodySchema as updatePaywallBodySchema,
 } from "../../routes/dashboard/paywalls";
 import { deleteAssetQuerySchema } from "../../routes/dashboard/assets";
+import { fontLocatorSchema } from "../../routes/dashboard/fonts";
+import {
+  encodeFontTicketName,
+  FONT_UPLOAD_TICKET_KIND,
+  FONT_UPLOAD_URL_PATH,
+} from "../../routes/mcp/font-uploads";
 // The dashboard virtual-currencies route validates POST with this same
 // shared schema (the route exports no local createBodySchema) —
 // dashboard parity, never a weaker MCP-side re-declaration.
@@ -341,6 +347,23 @@ export function buildAssetStagePreview(input: {
     fields: [
       { label: "Kind", after: input.kind },
       { label: "Name", after: input.name },
+    ],
+  };
+}
+
+export function buildFontStagePreview(input: {
+  familyName?: string;
+  familyId?: string;
+  weight: number;
+  style: string;
+}): RoviIntentPreview {
+  const family = input.familyName ?? input.familyId ?? "";
+  return {
+    title: `Stage font upload "${family}"`,
+    fields: [
+      { label: "Family", after: family },
+      { label: "Weight", after: String(input.weight) },
+      { label: "Style", after: input.style },
     ],
   };
 }
@@ -805,9 +828,11 @@ export function registerMcpWriteTools(
       buildPreview: buildAssetDeletePreview,
       describe: (args: { id: string; force?: unknown }) =>
         `asset ${args.id}${args.force === true || args.force === "true" ? " (forced)" : ""}`,
+      }),
     },
   );
   registerAssetStageTool(server, ctx);
+  registerFontStageTool(server, ctx);
 }
 
 /**
@@ -886,3 +911,119 @@ function registerAssetStageTool(
   );
 }
 
+/**
+ * `stage_font_upload`: the propose step of the staged font upload.
+ * Cheap checks only (ADMIN tier, locator shape, capability, family
+ * ownership/liveness, face-quota pre-check with the same
+ * skip-on-replace the dashboard applies) and returns a short-lived
+ * HMAC ticket + the raw-body upload URL + expiry. Nothing mutates —
+ * so, like the asset stage tool, no intent row is created: there is
+ * nothing to confirm via elicitation yet. The CONFIRM step is the
+ * ticketed upload itself (POST the bytes to `uploadUrl?ticket=…`
+ * with the same MCP Bearer [REDACTED] which runs the full pipeline incl.
+ * audit — and re-checks every gate, so staging grants no authority
+ * beyond a 15-minute, locator/project-bound ticket.
+ *
+ * The ticket reuses the assets group's `lib/upload-ticket.ts`
+ * unchanged: kind is this transport's own value and the locator
+ * rides in the ticket's `name` field as JSON. No new DB table, no
+ * sweeper — replay safety is the face upsert, same as the dashboard.
+ *
+ * Unlike assets, fonts persist to Postgres `bytea`, not object
+ * storage — so there is no `isStorageConfigured` gate and no byte
+ * quota pre-check here, only the face-count quota the dashboard
+ * enforces. Registered here (not in tools.ts) and marked `write` in
+ * TOOL_SURFACE so `read` tokens are refused before the body runs —
+ * same gate as every other write tool.
+ */
+function registerFontStageTool(
+  server: McpServer,
+  ctx: McpToolContext,
+): void {
+  server.registerTool(
+    "stage_font_upload",
+    {
+      description:
+        "Stage a project font-face upload in the current project (exactly one of familyName or familyId, plus weight 100-900 and style normal/italic). Cheap checks only — returns a short-lived upload ticket, the raw-body upload URL, and expiry. Then POST the font file bytes to the upload URL with ?ticket= and your MCP Bearer [REDACTED] to execute the upload (that step runs the full pipeline incl. audit). Nothing changes until you POST.",
+      inputSchema: asMcpInputSchema(fontLocatorSchema),
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (rawArgs: unknown) => {
+      // The dashboard's own locator validation (same bounds, same
+      // exactly-one-of rule) — never a weaker MCP-side re-declaration.
+      const parsed = fontLocatorSchema.safeParse(rawArgs);
+      if (!parsed.success) {
+        return errPayload(
+          `stage_font_upload: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+        );
+      }
+      const { familyName, familyId, weight, style } = parsed.data;
+      try {
+        // MCP write tier: ADMIN-gated like every other write tool
+        // (the dashboard's fonts:write also admits DEVELOPER).
+        await assertProjectAccess(ctx.projectId, ctx.userId, MemberRole.ADMIN);
+        // The same capability check the dashboard upload runs —
+        // cheap here, re-checked authoritatively at upload time.
+        await assertProjectCapability(ctx.projectId, ctx.userId, "fonts:write");
+        // Whether this upload replaces a face that already exists —
+        // if so, the quota pre-check below must be skipped, since the
+        // upload won't grow the row count (dashboard parity).
+        let targetsExistingFace = false;
+        if (familyId) {
+          const existingFamily =
+            await drizzle.fontRepo.findLiveFamilyForProject(drizzle.db, {
+              projectId: ctx.projectId,
+              familyId,
+            });
+          if (!existingFamily) {
+            return errPayload(
+              "stage_font_upload: familyId does not reference an active font family in this project",
+            );
+          }
+          const existingFace = await drizzle.fontRepo.findFaceByKey(
+            drizzle.db,
+            { familyId, weight, style },
+          );
+          targetsExistingFace = Boolean(existingFace);
+        }
+        if (!targetsExistingFace) {
+          const faceCount = await drizzle.fontRepo.countFacesForProject(
+            drizzle.db,
+            ctx.projectId,
+          );
+          if (faceCount >= FONT_FACES_MAX_PER_PROJECT) {
+            return errPayload(
+              `stage_font_upload: this project has reached its ${FONT_FACES_MAX_PER_PROJECT}-face limit`,
+            );
+          }
+        }
+        const { ticket, expiresAt } = mintUploadTicket(
+          {
+            projectId: ctx.projectId,
+            kind: FONT_UPLOAD_TICKET_KIND,
+            name: encodeFontTicketName({ familyName, familyId, weight, style }),
+          },
+          getUploadTicketKey(),
+        );
+        // `familyName`, not `name`: okPayload sterilizes PII-shaped keys
+        // and `name` is one of them (same precedent as the asset stage
+        // tool's `fileName`). The ticket binds the real locator
+        // server-side, so nothing is lost.
+        return okPayload({
+          ticket,
+          uploadUrl: FONT_UPLOAD_URL_PATH,
+          expiresAt,
+          kind: FONT_UPLOAD_TICKET_KIND,
+          weight,
+          style,
+          ...(familyName !== undefined ? { familyName } : {}),
+          ...(familyId !== undefined ? { familyId } : {}),
+        });
+      } catch (err) {
+        return errPayload(
+          `stage_font_upload failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+  );
+}
