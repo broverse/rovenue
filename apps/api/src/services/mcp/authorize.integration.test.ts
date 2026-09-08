@@ -272,8 +272,8 @@ describe("assertToolAllowed", () => {
   it("TOOL_SURFACE marks every shipped tool read or write", () => {
     // Task 6 populated this map as tools shipped; Task 9 adds the two
     // experiment writes, the catalog group its three creates, the
-    // placements-audiences group its two creates, and the assets group
-    // its delete.
+    // placements-audiences group its two creates, the assets group
+    // its delete, and the currency group its virtual currency create.
     // A tool added WITHOUT an entry stays unreachable to read
     // tokens by construction (fail-closed unknown handling) — this pin
     // makes that allow-list explicit.
@@ -294,6 +294,7 @@ describe("assertToolAllowed", () => {
       create_placement: "write",
       create_audience: "write",
       delete_asset: "write",
+      create_virtual_currency: "write",
     });
   });
 });

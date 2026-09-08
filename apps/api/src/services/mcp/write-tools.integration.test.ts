@@ -972,3 +972,113 @@ describe("MCP asset delete tool", () => {
     expect(await countIntents()).toBe(before);
   });
 });
+
+describe("MCP virtual currency create tool", () => {
+  it("create_virtual_currency proposes, then creates on confirmation", async () => {
+    const { raw, projectId } = await seedToken("vcur", "read_write");
+    const args = { code: `GEM${RUN_ID % 100000}`, name: "MCP Gems" };
+
+    const proposal = await callTool(raw, "create_virtual_currency", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have created anything.
+    expect(
+      await drizzle.virtualCurrencyRepo.findVirtualCurrencyByCode(
+        drizzle.db,
+        projectId,
+        args.code,
+      ),
+    ).toBeNull();
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "create_virtual_currency", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const row =
+      await drizzle.virtualCurrencyRepo.findVirtualCurrencyByCode(
+        drizzle.db,
+        projectId,
+        args.code,
+      );
+    expect(row?.name).toBe("MCP Gems");
+  });
+
+  it("create_virtual_currency writes an audit row naming the token's owner", async () => {
+    const { raw, projectId, userId } = await seedToken("vcuraudit", "read_write");
+    const args = { code: `AUD${RUN_ID % 100000}`, name: "MCP Audited Gems" };
+    const proposal = await callTool(raw, "create_virtual_currency", args);
+    const confirmed = await callTool(raw, "create_virtual_currency", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+
+    const row = await latestAuditRow(projectId);
+    expect(row?.userId).toBe(userId);
+    expect(row?.action).toBe("virtual_currency.created");
+    expect(row?.resource).toBe("virtual_currency");
+  });
+
+  it("create_virtual_currency declines cleanly when the user refuses", async () => {
+    const { raw, projectId } = await seedToken("vcurdec", "read_write");
+    const args = { code: `DEC${RUN_ID % 100000}`, name: "MCP Declined Gems" };
+    const proposal = await callTool(raw, "create_virtual_currency", args);
+    const declined = await callTool(raw, "create_virtual_currency", args, {
+      inputResponses: { confirm: { action: "decline" } },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(declined.isError).toBe(true);
+    expect(
+      await drizzle.virtualCurrencyRepo.findVirtualCurrencyByCode(
+        drizzle.db,
+        projectId,
+        args.code,
+      ),
+    ).toBeNull();
+  });
+
+  it("create_virtual_currency refuses a duplicate code without creating", async () => {
+    const { raw } = await seedToken("vcurdup", "read_write");
+    const args = { code: `DUP${RUN_ID % 100000}`, name: "MCP Dup Gems" };
+    const first = await callTool(raw, "create_virtual_currency", args);
+    const firstConfirmed = await callTool(raw, "create_virtual_currency", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: first.rawResult.requestState as string,
+    });
+    expect(firstConfirmed.isError).toBe(false);
+
+    const second = await callTool(raw, "create_virtual_currency", args);
+    const secondConfirmed = await callTool(
+      raw,
+      "create_virtual_currency",
+      args,
+      {
+        inputResponses: {
+          confirm: { action: "accept", content: { confirm: true } },
+        },
+        requestState: second.rawResult.requestState as string,
+      },
+    );
+    expect(secondConfirmed.isError).toBe(true);
+    expect(secondConfirmed.text).toMatch(/already in use/i);
+  });
+
+  it("a read token cannot propose a currency create: protocol refusal, no intent row", async () => {
+    const before = await countIntents();
+    const { raw } = await seedToken("vcreadgate", "read");
+    const res = await callTool(raw, "create_virtual_currency", {
+      code: "GEMS",
+      name: "Whatever",
+    });
+    expect(res.isError).toBe(true);
+    expect(await countIntents()).toBe(before);
+  });
+});

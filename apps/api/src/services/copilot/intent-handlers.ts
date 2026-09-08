@@ -50,6 +50,11 @@ import {
   createBodySchema as createPlacementBodySchema,
 } from "../../routes/dashboard/placements";
 import { deleteAssetQuerySchema } from "../../routes/dashboard/assets";
+// The dashboard virtual-currencies route validates POST with this same
+// shared schema (the route exports no local createBodySchema), so the
+// handler re-parses with the identical object — dashboard parity, never
+// a re-declaration.
+import { createVirtualCurrencyRequestSchema } from "@rovenue/shared";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { purgeResolvedPriceCache } from "../offering-price-resolver";
 import { logger } from "../../lib/logger";
@@ -995,5 +1000,54 @@ export function registerAllIntentHandlers(): void {
     }
 
     return { deleted: true };
+  });
+
+  // ------------------------------------------------------------------
+  // action.virtual_currencies.create (MCP create_virtual_currency)
+  // Mirrors POST /dashboard/:projectId/virtual-currencies
+  // (virtual-currency:manage): duplicate code refused, active cap of
+  // 50 enforced, create + audit commit atomically in one transaction.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_virtual_currencies_create", async (ctx, payload) => {
+    const body = createVirtualCurrencyRequestSchema.parse(payload);
+
+    return drizzle.db.transaction(async (tx) => {
+      const t = tx as never;
+      const existing =
+        await drizzle.virtualCurrencyRepo.findVirtualCurrencyByCode(
+          t,
+          ctx.projectId,
+          body.code,
+        );
+      if (existing) {
+        throw new Error(`Currency code already in use: ${body.code}`);
+      }
+      const active =
+        await drizzle.virtualCurrencyRepo.countActiveVirtualCurrencies(
+          t,
+          ctx.projectId,
+        );
+      if (active >= 50) {
+        throw new Error("Maximum of 50 currencies per project");
+      }
+      const row = await drizzle.virtualCurrencyRepo.createVirtualCurrency(t, {
+        projectId: ctx.projectId,
+        code: body.code,
+        name: body.name,
+      });
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "virtual_currency.created",
+          resource: "virtual_currency",
+          resourceId: row.id,
+          before: null,
+          after: { code: row.code, name: row.name },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+      return row;
+    });
   });
 }

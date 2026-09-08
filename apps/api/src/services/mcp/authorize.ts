@@ -48,6 +48,9 @@ export const TOOL_SURFACE: Record<string, ToolSurface> = {
   // Asset delete: same gate — a `read` token is refused before any
   // intent row exists.
   delete_asset: "write",
+  // Virtual currency create: same gate — a `read` token is refused
+  // before any intent row exists.
+  create_virtual_currency: "write",
 };
 
 /**

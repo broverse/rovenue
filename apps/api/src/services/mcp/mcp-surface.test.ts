@@ -38,6 +38,7 @@ const WRITE_TOOLS = new Set([
   "create_placement",
   "create_audience",
   "delete_asset",
+  "create_virtual_currency",
 ]);
 
 const EXPECTED_TOOLS = [
@@ -57,6 +58,7 @@ const EXPECTED_TOOLS = [
   "create_placement",
   "create_audience",
   "delete_asset",
+  "create_virtual_currency",
 ];
 
 const EXPECTED_RESOURCES = [

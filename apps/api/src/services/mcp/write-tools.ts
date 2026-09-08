@@ -22,6 +22,10 @@ import { createBodySchema as createAccessBodySchema } from "../../routes/dashboa
 import { createBodySchema as createPlacementBodySchema } from "../../routes/dashboard/placements";
 import { createAudienceBodySchema } from "../../routes/dashboard/audiences";
 import { deleteAssetQuerySchema } from "../../routes/dashboard/assets";
+// The dashboard virtual-currencies route validates POST with this same
+// shared schema (the route exports no local createBodySchema) —
+// dashboard parity, never a weaker MCP-side re-declaration.
+import { createVirtualCurrencyRequestSchema } from "@rovenue/shared";
 import {
   asMcpInputSchema,
   errPayload,
@@ -184,6 +188,19 @@ export function buildPlacementCreatePreview(input: {
     title: `Create placement ${input.identifier}`,
     fields: [
       { label: "Identifier", after: input.identifier },
+      { label: "Name", after: input.name },
+    ],
+  };
+}
+
+export function buildVirtualCurrencyCreatePreview(input: {
+  code: string;
+  name: string;
+}): RoviIntentPreview {
+  return {
+    title: `Create virtual currency ${input.code}`,
+    fields: [
+      { label: "Code", after: input.code },
       { label: "Name", after: input.name },
     ],
   };
@@ -572,6 +589,21 @@ export function registerMcpWriteTools(
       buildPreview: buildAudienceCreatePreview,
       describe: (args: z.infer<typeof CreateAudienceMcpSchema>) =>
         `for audience "${args.name}"`,
+    },
+  );
+  registerWriteTool(
+    server,
+    ctx,
+    "create_virtual_currency",
+    "Create a virtual currency in the current project (code, name). Proposes a pending intent first — nothing changes until you confirm the elicitation.",
+    createVirtualCurrencyRequestSchema,
+    { readOnlyHint: false, destructiveHint: false },
+    {
+      actionTool: "action_virtual_currencies_create",
+      requiresRole: "ADMIN",
+      buildPreview: buildVirtualCurrencyCreatePreview,
+      describe: (args: z.infer<typeof createVirtualCurrencyRequestSchema>) =>
+        `for virtual currency "${args.code}"`,
     },
   );
   registerWriteTool(

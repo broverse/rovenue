@@ -18,6 +18,7 @@ import {
   buildOfferingCreatePreview,
   buildPlacementCreatePreview,
   buildProductCreatePreview,
+  buildVirtualCurrencyCreatePreview,
   canonicalizeIntentPayload,
   DeleteAssetMcpSchema,
   intentPayloadsEqual,
@@ -109,6 +110,18 @@ describe("placement and audience create previews", () => {
   it("names the audience", () => {
     const preview = buildAudienceCreatePreview({ name: "Churned" });
     expect(preview.title).toContain("Churned");
+  });
+});
+
+describe("virtual currency create preview", () => {
+  it("names the currency code", () => {
+    const preview = buildVirtualCurrencyCreatePreview({
+      code: "GEMS",
+      name: "Gems",
+    });
+    expect(preview.title).toContain("GEMS");
+    expect(preview.fields).toContainEqual({ label: "Code", after: "GEMS" });
+    expect(preview.fields).toContainEqual({ label: "Name", after: "Gems" });
   });
 });
 
