@@ -53,9 +53,28 @@ These were settled during brainstorming and are inputs, not open questions:
 ### D1 — Transport
 
 Streamable HTTP, mounted at `/mcp` in `apps/api`, using the official
-`@modelcontextprotocol/sdk`. Do not hand-roll JSON-RPC: the SDK carries
-discovery, notifications and error codes, all of which are easy to get
-subtly wrong by hand.
+TypeScript SDK. Do not hand-roll JSON-RPC: the SDK carries discovery,
+notifications and error codes, all of which are easy to get subtly wrong by
+hand.
+
+**Take the v2 packages, not `@modelcontextprotocol/sdk`.** Verified against
+the registry on 2026-09-08:
+
+| Package | Latest | Role |
+|---|---|---|
+| `@modelcontextprotocol/core` | 2.0.0 | shared protocol core |
+| `@modelcontextprotocol/server` | 2.0.0 | server implementation |
+| `@modelcontextprotocol/hono` | 2.0.0 | Hono adapter, peers on `hono@^4.11.4` and `@modelcontextprotocol/server@^2.0.0` |
+| `@modelcontextprotocol/sdk` | 1.30.0 | **the v1 line — do not use** |
+
+The v2 SDK was split into three packages and renamed; `@modelcontextprotocol/sdk`
+is the *old* line and still implements the `initialize` / `Mcp-Session-Id`
+generation this design explicitly moved off. Naming it would have been a
+compounding error: the wrong package delivering the wrong protocol
+generation. All three v2 packages are stable releases, not prereleases.
+
+`apps/api` already has `hono@^4.12.25`, which satisfies the adapter's peer
+range, so no Hono upgrade is required.
 
 **Discovery is `server/discover`, not an initialize handshake.** The
 `initialize`/`initialized` exchange and the `Mcp-Session-Id` header were
@@ -72,10 +91,10 @@ the Node-style transport is not merely unnecessary — it would bypass Hono's
 response pipeline, so `metricsMiddleware`, `requestLoggerMiddleware` and the
 error middleware would observe a response that never happens.
 
-*Verify at implementation time:* the exact package name and that the Hono
-middleware is in a released version, not only in docs. If it is not, the
-fallback is the Node transport plus an explicit decision about what the
-bypassed middleware costs — not a silent bridge.
+This was an open question in the first draft of this spec, resolved by
+checking the registry rather than trusting documentation prose: the Hono
+adapter is published and stable, so the Node-transport fallback and its
+bypassed-middleware trade-off are moot.
 
 **Stateless.** A new transport and server instance per request; the SDK
 documents that sharing one instance causes request-id collisions between
@@ -449,13 +468,11 @@ the core story.
 
 - **R1's resolution** — does sandbox revenue reach ClickHouse? Blocks
   `get_metrics` (which now has an exit ramp if the answer is expensive).
-- **The SDK's Hono middleware** — released, or docs-only? Blocks D1's shape.
-  This is the one remaining claim in this spec taken from documentation prose
-  rather than verified against a package.
 - **Annotation field names** in the current specification revision. Blocks
   D4's write-tool metadata. Write them from the schema, not from memory.
 - **R3** — does A ship in self-host, cloud, or both at once?
 
 *Confirmed while revising:* 2026-07-28 is still the current specification
 revision, and its retirement of `initialize` / `Mcp-Session-Id` in favour of
-`server/discover` is now reflected in D1.
+`server/discover` is now reflected in D1. The SDK question is closed too —
+the v2 packages are published and stable, and D1 names them.
