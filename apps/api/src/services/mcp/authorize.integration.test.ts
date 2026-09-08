@@ -271,7 +271,8 @@ describe("assertToolAllowed", () => {
 
   it("TOOL_SURFACE marks every shipped tool read or write", () => {
     // Task 6 populated this map as tools shipped; Task 9 adds the two
-    // experiment writes, and the catalog group adds its three creates.
+    // experiment writes, the catalog group its three creates, and the
+    // placements-audiences group its two creates.
     // A tool added WITHOUT an entry stays unreachable to read
     // tokens by construction (fail-closed unknown handling) — this pin
     // makes that allow-list explicit.
@@ -289,6 +290,8 @@ describe("assertToolAllowed", () => {
       create_product: "write",
       create_offering: "write",
       create_entitlement: "write",
+      create_placement: "write",
+      create_audience: "write",
     });
   });
 });

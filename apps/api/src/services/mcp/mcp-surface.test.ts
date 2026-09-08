@@ -35,6 +35,8 @@ const WRITE_TOOLS = new Set([
   "create_product",
   "create_offering",
   "create_entitlement",
+  "create_placement",
+  "create_audience",
 ]);
 
 const EXPECTED_TOOLS = [
@@ -51,6 +53,8 @@ const EXPECTED_TOOLS = [
   "create_product",
   "create_offering",
   "create_entitlement",
+  "create_placement",
+  "create_audience",
 ];
 
 const EXPECTED_RESOURCES = [

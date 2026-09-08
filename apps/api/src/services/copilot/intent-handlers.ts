@@ -39,6 +39,10 @@ import { registerIntentHandler } from "./intent-executor";
 import { createBodySchema as createProductBodySchema } from "../../routes/dashboard/products";
 import { createBodySchema as createOfferingBodySchema } from "../../routes/dashboard/offerings";
 import { createBodySchema as createAccessBodySchema } from "../../routes/dashboard/access";
+import {
+  assertRowRefsOwnedByProject,
+  createBodySchema as createPlacementBodySchema,
+} from "../../routes/dashboard/placements";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { purgeResolvedPriceCache } from "../offering-price-resolver";
 import { logger } from "../../lib/logger";
@@ -806,6 +810,64 @@ export function registerAllIntentHandlers(): void {
           after: {
             identifier: body.identifier,
             displayName: body.displayName,
+          },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+
+      return row;
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // action.placements.create (MCP create_placement)
+  // Mirrors POST /dashboard/:projectId/placements (products:write):
+  // duplicate identifier refused, row audience/paywall/experiment refs
+  // re-checked against this project (dangling/foreign refs fail with
+  // INVALID_ROW_REF, never silently stored). The ref check is the
+  // route's own exported helper — read-only, so it runs outside the
+  // write transaction; create + audit commit atomically inside it.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_placements_create", async (ctx, payload) => {
+    const body = createPlacementBodySchema.parse(payload);
+
+    if (body.rows) {
+      await assertRowRefsOwnedByProject(ctx.projectId, body.rows);
+    }
+
+    return drizzle.db.transaction(async (tx) => {
+      const t = tx as never;
+      const existing = await drizzle.placementRepo.findPlacementByIdentifier(
+        t,
+        ctx.projectId,
+        body.identifier,
+      );
+      if (existing) {
+        throw new Error(
+          `Placement identifier already in use: ${body.identifier}`,
+        );
+      }
+
+      const row = await drizzle.placementRepo.createPlacement(t, {
+        projectId: ctx.projectId,
+        identifier: body.identifier,
+        name: body.name,
+        rows: body.rows ?? [],
+        ...(body.isActive !== undefined && { isActive: body.isActive }),
+      });
+
+      purgeProjectCatalogCache(ctx.projectId);
+
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "create",
+          resource: "placement",
+          resourceId: row.id,
+          after: {
+            identifier: body.identifier,
+            name: body.name,
           },
         },
         tx as Parameters<typeof audit>[1],

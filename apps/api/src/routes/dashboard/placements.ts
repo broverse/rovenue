@@ -29,7 +29,10 @@ import { computePlacementMetrics } from "../../services/placement-metrics";
 // dangling/foreign reference is rejected up-front with 400
 // INVALID_ROW_REF rather than silently skipped at resolve-time.
 
-const createBodySchema = z.object({
+// Exported for the MCP create_placement write tool and its intent
+// handler: same deliberate, narrow services→routes exception as the
+// catalog creates (dashboard parity — never a weaker re-declaration).
+export const createBodySchema = z.object({
   identifier: z.string().trim().min(1).max(160),
   name: z.string().trim().min(1).max(200),
   rows: placementRowsSchema.optional(),
@@ -58,8 +61,14 @@ function invalidRowRef(message: string): never {
  * belongs to the project, and that experiment targets reference a
  * type=PAYWALL experiment. Batches lookups rather than querying per
  * row.
+ *
+ * Exported for the action_placements_create intent handler so a
+ * confirmed MCP intent cannot smuggle dangling/foreign row refs past
+ * the dashboard's up-front 400 (same services→routes exception as
+ * the create schema above). Read-only: safe to call outside the
+ * handler's write transaction.
  */
-async function assertRowRefsOwnedByProject(
+export async function assertRowRefsOwnedByProject(
   projectId: string,
   rows: PlacementRows,
 ): Promise<void> {

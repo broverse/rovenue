@@ -1,5 +1,5 @@
 // =============================================================
-// MCP catalog write tools: DB-free unit coverage.
+// MCP catalog + placement/audience write tools: DB-free unit coverage.
 //
 // The propose/confirm flow itself is covered by
 // write-tools.integration.test.ts (host-run, needs Postgres). This
@@ -11,8 +11,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  buildAudienceCreatePreview,
   buildEntitlementCreatePreview,
   buildOfferingCreatePreview,
+  buildPlacementCreatePreview,
   buildProductCreatePreview,
   canonicalizeIntentPayload,
   intentPayloadsEqual,
@@ -89,5 +91,20 @@ describe("catalog create previews", () => {
       displayName: "Premium",
     });
     expect(preview.title).toContain("premium");
+  });
+});
+
+describe("placement and audience create previews", () => {
+  it("names the placement identifier", () => {
+    const preview = buildPlacementCreatePreview({
+      identifier: "home_top",
+      name: "Home Top",
+    });
+    expect(preview.title).toContain("home_top");
+  });
+
+  it("names the audience", () => {
+    const preview = buildAudienceCreatePreview({ name: "Churned" });
+    expect(preview.title).toContain("Churned");
   });
 });

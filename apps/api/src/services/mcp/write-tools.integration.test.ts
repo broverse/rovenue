@@ -632,3 +632,130 @@ describe("MCP catalog create tools", () => {
     expect(await countIntents()).toBe(before);
   });
 });
+
+describe("MCP placement and audience create tools", () => {
+  it("create_placement proposes, then creates on confirmation", async () => {
+    const { raw, projectId } = await seedToken("place", "read_write");
+    const args = {
+      identifier: `mcp_place_${RUN_ID}`,
+      name: "MCP Placement",
+    };
+
+    const proposal = await callTool(raw, "create_placement", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have created anything.
+    expect(
+      await drizzle.placementRepo.findPlacementByIdentifier(
+        drizzle.db,
+        projectId,
+        args.identifier,
+      ),
+    ).toBeNull();
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "create_placement", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const row = await drizzle.placementRepo.findPlacementByIdentifier(
+      drizzle.db,
+      projectId,
+      args.identifier,
+    );
+    expect(row?.name).toBe("MCP Placement");
+  });
+
+  it("create_placement declines cleanly when the user refuses", async () => {
+    const { raw, projectId } = await seedToken("placedec", "read_write");
+    const args = {
+      identifier: `mcp_place_dec_${RUN_ID}`,
+      name: "MCP Declined Placement",
+    };
+    const proposal = await callTool(raw, "create_placement", args);
+    const declined = await callTool(raw, "create_placement", args, {
+      inputResponses: { confirm: { action: "decline" } },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(declined.isError).toBe(true);
+    expect(
+      await drizzle.placementRepo.findPlacementByIdentifier(
+        drizzle.db,
+        projectId,
+        args.identifier,
+      ),
+    ).toBeNull();
+  });
+
+  it("create_placement refuses a duplicate identifier without creating", async () => {
+    const { raw } = await seedToken("placedup", "read_write");
+    const args = {
+      identifier: `mcp_place_dup_${RUN_ID}`,
+      name: "MCP Dup Placement",
+    };
+    const first = await callTool(raw, "create_placement", args);
+    const firstConfirmed = await callTool(raw, "create_placement", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: first.rawResult.requestState as string,
+    });
+    expect(firstConfirmed.isError).toBe(false);
+
+    const second = await callTool(raw, "create_placement", args);
+    const secondConfirmed = await callTool(raw, "create_placement", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: second.rawResult.requestState as string,
+    });
+    expect(secondConfirmed.isError).toBe(true);
+    expect(secondConfirmed.text).toMatch(/already in use/i);
+  });
+
+  it("create_audience proposes, then creates on confirmation", async () => {
+    const { raw, projectId } = await seedToken("aud", "read_write");
+    const args = {
+      name: `MCP Audience ${RUN_ID}`,
+      rules: {},
+    };
+
+    const proposal = await callTool(raw, "create_audience", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have created anything.
+    const before = await drizzle.audienceRepo.listAudiences(
+      drizzle.db,
+      projectId,
+    );
+    expect(before.some((a) => a.name === args.name)).toBe(false);
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "create_audience", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const after = await drizzle.audienceRepo.listAudiences(
+      drizzle.db,
+      projectId,
+    );
+    expect(after.some((a) => a.name === args.name)).toBe(true);
+  });
+
+  it("a read token cannot propose a placement create: protocol refusal, no intent row", async () => {
+    const before = await countIntents();
+    const { raw } = await seedToken("preadgate", "read");
+    const res = await callTool(raw, "create_placement", {
+      identifier: "whatever",
+      name: "Whatever",
+    });
+    expect(res.isError).toBe(true);
+    expect(await countIntents()).toBe(before);
+  });
+});

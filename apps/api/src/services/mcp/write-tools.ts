@@ -19,6 +19,8 @@ import {
 import { createBodySchema as createProductBodySchema } from "../../routes/dashboard/products";
 import { createBodySchema as createOfferingBodySchema } from "../../routes/dashboard/offerings";
 import { createBodySchema as createAccessBodySchema } from "../../routes/dashboard/access";
+import { createBodySchema as createPlacementBodySchema } from "../../routes/dashboard/placements";
+import { createAudienceBodySchema } from "../../routes/dashboard/audiences";
 import {
   asMcpInputSchema,
   errPayload,
@@ -46,6 +48,14 @@ import {
 const CONFIRM_KEY = "confirm";
 
 const ConfirmSchema = z.object({ confirm: z.boolean() });
+
+// The dashboard audiences route carries projectId in the body (it is
+// not project-path-scoped); MCP tools are project-scoped via ctx, so
+// the tool takes the route's schema minus projectId — same field
+// validations, never a re-declaration.
+const CreateAudienceMcpSchema = createAudienceBodySchema.omit({
+  projectId: true,
+});
 
 const StartExperimentArgs = z.object({
   experimentId: z.string().min(1),
@@ -77,7 +87,9 @@ interface WriteSpec<A extends Record<string, unknown>> {
   // storing one here would gate the SAME intent differently depending on
   // who proposed it. The catalog creates have no chat counterpart at
   // all, and stay ADMIN-gated here as the least-privilege agent tier
-  // (the dashboard's products:write also admits DEVELOPER).
+  // (the dashboard's products:write also admits DEVELOPER). Same for
+  // the placement/audience creates below: create_audience's chat
+  // counterpart admits DEVELOPER, but the MCP tool stays ADMIN-gated.
   requiresRole: "ADMIN";
   buildPreview: (args: A) => unknown;
   /** One-line human summary for the confirm elicitation message. */
@@ -147,6 +159,32 @@ export function buildEntitlementCreatePreview(input: {
     fields: [
       { label: "Identifier", after: input.identifier },
       { label: "Display Name", after: input.displayName },
+    ],
+  };
+}
+
+export function buildPlacementCreatePreview(input: {
+  identifier: string;
+  name: string;
+}): RoviIntentPreview {
+  return {
+    title: `Create placement ${input.identifier}`,
+    fields: [
+      { label: "Identifier", after: input.identifier },
+      { label: "Name", after: input.name },
+    ],
+  };
+}
+
+export function buildAudienceCreatePreview(input: {
+  name: string;
+  description?: string;
+}): RoviIntentPreview {
+  return {
+    title: `Create audience "${input.name}"`,
+    fields: [
+      { label: "Name", after: input.name },
+      { label: "Description", after: input.description ?? "" },
     ],
   };
 }
@@ -469,6 +507,36 @@ export function registerMcpWriteTools(
       buildPreview: buildEntitlementCreatePreview,
       describe: (args: z.infer<typeof createAccessBodySchema>) =>
         `for entitlement "${args.identifier}"`,
+    },
+  );
+  registerWriteTool(
+    server,
+    ctx,
+    "create_placement",
+    "Create a placement in the current project (identifier, name, optional rows, optional active flag). Proposes a pending intent first — nothing changes until you confirm the elicitation.",
+    createPlacementBodySchema,
+    { readOnlyHint: false, destructiveHint: false },
+    {
+      actionTool: "action_placements_create",
+      requiresRole: "ADMIN",
+      buildPreview: buildPlacementCreatePreview,
+      describe: (args: z.infer<typeof createPlacementBodySchema>) =>
+        `for placement "${args.identifier}"`,
+    },
+  );
+  registerWriteTool(
+    server,
+    ctx,
+    "create_audience",
+    "Create an audience in the current project (name, optional description, rules). Proposes a pending intent first — nothing changes until you confirm the elicitation.",
+    CreateAudienceMcpSchema,
+    { readOnlyHint: false, destructiveHint: false },
+    {
+      actionTool: "action_audiences_create",
+      requiresRole: "ADMIN",
+      buildPreview: buildAudienceCreatePreview,
+      describe: (args: z.infer<typeof CreateAudienceMcpSchema>) =>
+        `for audience "${args.name}"`,
     },
   );
 }

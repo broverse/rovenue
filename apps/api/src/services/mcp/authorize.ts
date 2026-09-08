@@ -41,6 +41,10 @@ export const TOOL_SURFACE: Record<string, ToolSurface> = {
   create_product: "write",
   create_offering: "write",
   create_entitlement: "write",
+  // Placement / audience creates: same gate — a `read` token is
+  // refused before any intent row exists.
+  create_placement: "write",
+  create_audience: "write",
 };
 
 /**
