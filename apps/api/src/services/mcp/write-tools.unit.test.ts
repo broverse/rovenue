@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAssetDeletePreview,
+  buildAssetStagePreview,
   buildAudienceCreatePreview,
   buildEntitlementCreatePreview,
   buildFunnelCreatePreview,
@@ -26,6 +27,7 @@ import {
   canonicalizeIntentPayload,
   DeleteAssetMcpSchema,
   intentPayloadsEqual,
+  StageAssetUploadSchema,
   UpdateFunnelMcpSchema,
   UpdatePaywallMcpSchema,
 } from "./write-tools";
@@ -128,6 +130,33 @@ describe("virtual currency create preview", () => {
     expect(preview.title).toContain("GEMS");
     expect(preview.fields).toContainEqual({ label: "Code", after: "GEMS" });
     expect(preview.fields).toContainEqual({ label: "Name", after: "Gems" });
+  });
+});
+
+describe("asset stage schema and preview", () => {
+  it("accepts the three dashboard kinds", () => {
+    for (const kind of ["image", "video", "lottie"]) {
+      expect(
+        StageAssetUploadSchema.safeParse({ kind, name: "hero.webp" }).success,
+      ).toBe(true);
+    }
+  });
+
+  it("rejects an unknown kind and an empty name", () => {
+    expect(
+      StageAssetUploadSchema.safeParse({ kind: "font", name: "x" }).success,
+    ).toBe(false);
+    expect(
+      StageAssetUploadSchema.safeParse({ kind: "image", name: "" }).success,
+    ).toBe(false);
+  });
+
+  it("names the kind and file in the preview", () => {
+    const preview = buildAssetStagePreview({ kind: "image", name: "hero.webp" });
+    expect(preview.title).toContain("image");
+    expect(preview.title).toContain("hero.webp");
+    expect(preview.fields).toContainEqual({ label: "Kind", after: "image" });
+    expect(preview.fields).toContainEqual({ label: "Name", after: "hero.webp" });
   });
 });
 

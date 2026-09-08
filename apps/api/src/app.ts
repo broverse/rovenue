@@ -21,6 +21,7 @@ import {
   v1Route,
   webhooksRoute,
 } from "./routes";
+import { mcpAssetUploadRoute } from "./routes/mcp/uploads";
 import { configStreamRoute } from "./routes/v1/config-stream";
 import { paywallPreviewRoute } from "./routes/v1/paywall-preview";
 import { publicInvitationsRoute } from "./routes/public/invitations";
@@ -64,8 +65,9 @@ const GLOBAL_BODY_LIMIT_BYTES = 1024 * 1024;
  * at all. So the shadowing was invisible from the client and from the
  * route's own tests, which mount `assetsRoute` on a bare Hono app.
  *
- * Matched paths are exactly the two upload endpoints, and only for the
- * POST that uploads. The method is part of the match rather than left
+ * Matched paths are exactly the upload endpoints (dashboard assets +
+ * fonts, data-import, and the MCP ticketed asset upload), and only for
+ * the POST that uploads. The method is part of the match rather than left
  * implicit in "the siblings carry no body": a body-carrying verb added
  * at one of these paths later would otherwise inherit an exemption
  * nobody wrote for it, silently and with no compile-time signal.
@@ -77,7 +79,7 @@ const GLOBAL_BODY_LIMIT_BYTES = 1024 * 1024;
  * tests/global-body-limit.test.ts's own regression history.
  */
 const ROUTE_OWNED_BODY_LIMIT_PATH =
-  /^\/dashboard\/projects\/[^/]+\/(?:assets\/(?:image|video|lottie)|fonts|imports)$/;
+  /^\/(?:dashboard\/projects\/[^/]+\/(?:assets\/(?:image|video|lottie)|fonts|imports)|mcp\/uploads\/(?:image|video|lottie))$/;
 
 const globalBodyLimit = bodyLimit({
   maxSize: GLOBAL_BODY_LIMIT_BYTES,
@@ -272,6 +274,11 @@ export function createApp() {
     .route("/universal", publicFunnelUniversalRoute)
     .route("/stripe/oauth", stripeOAuthRoute)
     .route("/dashboard", dashboardRoute)
+    // The MCP ticketed upload. Registered BEFORE `.route("/mcp",
+    // mcpRoute): Hono composes sub-apps in registration order, and
+    // mcpRoute's `.all("*")` protocol handler would otherwise swallow
+    // these POSTs before this route ever ran.
+    .route("/mcp/uploads", mcpAssetUploadRoute)
     .route("/mcp", mcpRoute);
 
   app.onError(errorHandler);

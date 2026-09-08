@@ -296,6 +296,7 @@ describe("assertToolAllowed", () => {
       create_placement: "write",
       create_audience: "write",
       delete_asset: "write",
+      stage_asset_upload: "write",
       create_virtual_currency: "write",
       create_funnel: "write",
       update_funnel: "write",

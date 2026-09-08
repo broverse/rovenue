@@ -736,8 +736,68 @@ async function streamVideo(
 }
 
 // =============================================================
-// Shared gate + dispatch
+// Shared gate + dispatch (also reused by the MCP ticketed upload)
 // =============================================================
+
+/**
+ * This kind's transport cap as middleware. Exported (not inlined in
+ * the loop below) so the MCP ticketed upload binds EXACTLY this cap —
+ * one shared factory, never two numbers that can drift.
+ */
+export function assetUploadBodyLimit(kind: AssetKind) {
+  return bodyLimit({
+    maxSize: ASSET_MAX_BYTES[kind],
+    onError: (c) =>
+      c.json(
+        fail(ERROR_CODE.ASSET_FILE_TOO_LARGE, KIND_TOO_LARGE_MESSAGE[kind]),
+        413,
+      ),
+  });
+}
+
+/**
+ * The asset byte-core: every gate below the transport cap plus the
+ * full pipeline (normalise, dedup, quota reservation, object write,
+ * row commit + audit), reading the raw body off `c.req`.
+ *
+ * Exported for the MCP ticketed upload (routes/mcp/uploads.ts) — the
+ * same deliberate, narrow routes→routes reuse as deleteAssetQuerySchema
+ * above. Auth is the caller's job: the dashboard handler below passes
+ * the session user, the ticketed route passes the verified MCP token
+ * owner AFTER its own Bearer/scope/role/ticket checks. Everything from
+ * the name validation down (capability, storage, quota pre-check, the
+ * pipeline incl. audit) runs identically for both callers.
+ */
+export async function processAssetUpload(
+  c: Context,
+  params: { kind: AssetKind; projectId: string; name: string; userId: string },
+) {
+  const { kind, projectId, name, userId } = params;
+  if (!isValidAssetName(name)) {
+    return c.json(fail(ERROR_CODE.ASSET_INVALID_NAME, "Invalid asset name"), 400);
+  }
+  await assertProjectCapability(projectId, userId, "assets:write");
+
+  if (!store.isStorageConfigured()) {
+    return c.json(
+      fail(ERROR_CODE.ASSET_STORAGE_UNAVAILABLE, "Asset storage is not configured"),
+      503,
+    );
+  }
+
+  // Gate: is the project already at its cap? Cheap (no sharp, no
+  // stream read), and it avoids paying for normalisation/upload on a
+  // result that cannot be stored.
+  const usage = await getStorageUsage(drizzle.db, projectId);
+  if (usage.limitBytes !== null && usage.usedBytes >= usage.limitBytes) {
+    return c.json(fail(ERROR_CODE.ASSET_QUOTA_EXCEEDED, "Storage quota exhausted"), 402);
+  }
+
+  if (kind === "video") {
+    return handleStreamedVideo(c, projectId, name, userId);
+  }
+  return handleBuffered(c, kind, projectId, name, userId);
+}
 
 function uploadHandler(kind: AssetKind) {
   return async (c: Context) => {
@@ -748,30 +808,7 @@ function uploadHandler(kind: AssetKind) {
     const user = c.get("user");
     const name = c.req.query("name") ?? "";
 
-    if (!isValidAssetName(name)) {
-      return c.json(fail(ERROR_CODE.ASSET_INVALID_NAME, "Invalid asset name"), 400);
-    }
-    await assertProjectCapability(projectId, user.id, "assets:write");
-
-    if (!store.isStorageConfigured()) {
-      return c.json(
-        fail(ERROR_CODE.ASSET_STORAGE_UNAVAILABLE, "Asset storage is not configured"),
-        503,
-      );
-    }
-
-    // Gate: is the project already at its cap? Cheap (no sharp, no
-    // stream read), and it avoids paying for normalisation/upload on a
-    // result that cannot be stored.
-    const usage = await getStorageUsage(drizzle.db, projectId);
-    if (usage.limitBytes !== null && usage.usedBytes >= usage.limitBytes) {
-      return c.json(fail(ERROR_CODE.ASSET_QUOTA_EXCEEDED, "Storage quota exhausted"), 402);
-    }
-
-    if (kind === "video") {
-      return handleStreamedVideo(c, projectId, name, user.id);
-    }
-    return handleBuffered(c, kind, projectId, name, user.id);
+    return processAssetUpload(c, { kind, projectId, name, userId: user.id });
   };
 }
 
@@ -791,18 +828,7 @@ export const assetsRoute = new Hono()
 // exactly why this is three `.post()` calls (one per kind's own cap)
 // rather than one shared registration at the loosest (video) limit.
 for (const kind of ["image", "video", "lottie"] as const) {
-  assetsRoute.post(
-    `/${kind}`,
-    bodyLimit({
-      maxSize: ASSET_MAX_BYTES[kind],
-      onError: (c) =>
-        c.json(
-          fail(ERROR_CODE.ASSET_FILE_TOO_LARGE, KIND_TOO_LARGE_MESSAGE[kind]),
-          413,
-        ),
-    }),
-    uploadHandler(kind),
-  );
+  assetsRoute.post(`/${kind}`, assetUploadBodyLimit(kind), uploadHandler(kind));
 }
 
 // =============================================================

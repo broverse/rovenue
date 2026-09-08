@@ -16,6 +16,15 @@ import {
 // Input validation is the routes' own create schemas (dashboard parity —
 // never a weaker MCP-side re-declaration). Same deliberate, narrow
 // services→routes exception as intent-handlers.ts.
+import { isValidAssetName } from "@rovenue/shared";
+import * as store from "../../lib/asset-store";
+import { assertProjectCapability } from "../../lib/capabilities";
+import { getStorageUsage } from "../../services/assets/quota";
+import {
+  getUploadTicketKey,
+  mintUploadTicket,
+  uploadTicketPath,
+} from "../../lib/upload-ticket";
 import { createBodySchema as createProductBodySchema } from "../../routes/dashboard/products";
 import { createBodySchema as createOfferingBodySchema } from "../../routes/dashboard/offerings";
 import { createBodySchema as createAccessBodySchema } from "../../routes/dashboard/access";
@@ -311,6 +320,27 @@ export function buildPaywallUpdatePreview(
         label: "Changed fields",
         after: changed.length > 0 ? changed.join(", ") : "(no changes)",
       },
+    ],
+  };
+}
+
+// The dashboard upload kinds, re-declared here as the tool's own input
+// enum (the route reads the kind off the URL path, so it exports no
+// schema to reuse — unlike the catalog creates above).
+export const StageAssetUploadSchema = z.object({
+  kind: z.enum(["image", "video", "lottie"]),
+  name: z.string().min(1),
+});
+
+export function buildAssetStagePreview(input: {
+  kind: string;
+  name: string;
+}): RoviIntentPreview {
+  return {
+    title: `Stage ${input.kind} upload "${input.name}"`,
+    fields: [
+      { label: "Kind", after: input.kind },
+      { label: "Name", after: input.name },
     ],
   };
 }
@@ -777,4 +807,82 @@ export function registerMcpWriteTools(
         `asset ${args.id}${args.force === true || args.force === "true" ? " (forced)" : ""}`,
     },
   );
+  registerAssetStageTool(server, ctx);
 }
+
+/**
+ * `stage_asset_upload`: the propose step of the staged asset upload.
+ * Cheap checks only (ADMIN tier, name shape, capability, storage
+ * configured, quota pre-check) and returns a short-lived HMAC ticket
+ * + the raw-body upload URL + expiry. Nothing mutates — so, unlike
+ * the intent-backed writes above, no intent row is created: there is
+ * nothing to confirm via elicitation yet. The CONFIRM step is the
+ * ticketed upload itself (POST the bytes to `uploadUrl?ticket=…`
+ * with the same MCP Bearer [REDACTED] which runs the full pipeline incl.
+ * audit — and re-checks every gate, so staging grants no authority
+ * beyond a 15-minute, kind/name/project-bound ticket.
+ *
+ * Registered here (not in tools.ts) and marked `write` in
+ * TOOL_SURFACE so `read` tokens are refused before the body runs —
+ * same gate as every other write tool.
+ */
+function registerAssetStageTool(
+  server: McpServer,
+  ctx: McpToolContext,
+): void {
+  server.registerTool(
+    "stage_asset_upload",
+    {
+      description:
+        "Stage a paywall asset upload (image, video, or Lottie) in the current project. Cheap checks only — returns a short-lived upload ticket, the raw-body upload URL, and expiry. Then POST the file bytes to the upload URL with ?ticket= and your MCP Bearer [REDACTED] to execute the upload (that step runs the full pipeline incl. audit). Nothing changes until you POST.",
+      inputSchema: asMcpInputSchema(StageAssetUploadSchema),
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (rawArgs: unknown) => {
+      const parsed = StageAssetUploadSchema.safeParse(rawArgs);
+      if (!parsed.success) {
+        return errPayload(
+          `stage_asset_upload: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+        );
+      }
+      const { kind, name } = parsed.data;
+      try {
+        // MCP write tier: ADMIN-gated like every other write tool
+        // (the dashboard's assets:write also admits DEVELOPER).
+        await assertProjectAccess(ctx.projectId, ctx.userId, MemberRole.ADMIN);
+        if (!isValidAssetName(name)) {
+          return errPayload("stage_asset_upload: invalid asset name");
+        }
+        // The same capability check the dashboard upload runs —
+        // cheap here, re-checked authoritatively at upload time.
+        await assertProjectCapability(ctx.projectId, ctx.userId, "assets:write");
+        if (!store.isStorageConfigured()) {
+          return errPayload("stage_asset_upload: asset storage is not configured");
+        }
+        const usage = await getStorageUsage(drizzle.db, ctx.projectId);
+        if (usage.limitBytes !== null && usage.usedBytes >= usage.limitBytes) {
+          return errPayload("stage_asset_upload: storage quota exhausted");
+        }
+        const { ticket, expiresAt } = mintUploadTicket(
+          { projectId: ctx.projectId, kind, name },
+          getUploadTicketKey(),
+        );
+        // `fileName`, not `name`: okPayload sterilizes PII-shaped keys
+        // and `name` is one of them. The ticket binds the real name
+        // server-side, so nothing is lost.
+        return okPayload({
+          ticket,
+          uploadUrl: uploadTicketPath(kind),
+          expiresAt,
+          kind,
+          fileName: name,
+        });
+      } catch (err) {
+        return errPayload(
+          `stage_asset_upload failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+  );
+}
+
