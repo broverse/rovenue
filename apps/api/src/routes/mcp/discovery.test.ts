@@ -8,6 +8,7 @@ import { app } from "../../app";
 import { MCP_PROTOCOL_REVISION } from "../../services/mcp/server";
 
 const FORBIDDEN = 403;
+const OK = 200;
 const DISALLOWED_ORIGIN = "https://evil.example";
 
 const DISCOVER_HEADERS = {
@@ -61,12 +62,13 @@ describe("POST /mcp discovery", () => {
       headers: DISCOVER_HEADERS,
       body: discoverBody(1),
     });
+    expect(res.status).toBe(OK);
     const body = (await res.json()) as {
       result?: { capabilities?: Record<string, unknown> };
     };
-    const declared = Object.keys(body.result?.capabilities ?? {});
-    expect(declared).toContain("tools");
-    expect(declared).toContain("resources");
-    expect(declared).not.toContain("prompts");
+    // Exact set, not subset: a newly advertised primitive (prompts, logging,
+    // …) must fail here rather than slip past a toContain check.
+    const declared = Object.keys(body.result?.capabilities ?? {}).sort();
+    expect(declared).toEqual(["resources", "tools"]);
   });
 });
