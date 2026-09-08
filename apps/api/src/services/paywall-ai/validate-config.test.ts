@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { assertSaveValid, GeneratedConfigError } from "./validate-config";
-import type { BuilderConfig } from "@rovenue/shared/paywall";
+import {
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_NODES,
+  type BuilderConfig,
+  type PaywallNode,
+  type StackNode,
+} from "@rovenue/shared/paywall";
 
 function baseConfig(overrides: Partial<BuilderConfig> = {}): BuilderConfig {
   return {
@@ -182,5 +188,76 @@ describe("assertSaveValid", () => {
       },
     });
     expect(() => assertSaveValid(config)).toThrow(GeneratedConfigError);
+  });
+});
+
+// =============================================================
+// Size bounds (S1 review, finding S2)
+//
+// `prepareBuilderConfigPatch` in routes/dashboard/paywalls.ts runs an
+// iterative `measureNodeTree` pre-scan before its recursive Zod parse for
+// two reasons: bound the tree, and keep a deeply-nested tree from blowing
+// the call stack inside `safeParse` (a RangeError `safeParse` does NOT
+// contain, which would turn a 400 into a 500). Since the copilot's
+// `action_paywall_editTree` handler persists directly, `assertSaveValid`
+// is the ONLY gate on that path — there is no REST route downstream to
+// re-run the bound. Without it an agent can persist a draft the builder's
+// own autosave can never save again (every subsequent PATCH 400s), which
+// is exactly the failure the save-gate phase existed to remove.
+// =============================================================
+
+/** A `stack` nesting `depth` levels deep — one child per level. */
+function deepStack(depth: number): PaywallNode {
+  let node: PaywallNode = { type: "stack", id: "leaf", axis: "v", children: [] };
+  for (let i = depth - 1; i > 0; i -= 1) {
+    node = { type: "stack", id: `s${i}`, axis: "v", children: [node] };
+  }
+  return node;
+}
+
+/** A flat `stack` holding `count - 1` spacer children (the stack itself
+ *  counts as a node), so the whole tree measures exactly `count`. */
+function wideStack(count: number): PaywallNode {
+  return {
+    type: "stack",
+    id: "root",
+    axis: "v",
+    children: Array.from({ length: count - 1 }, (_, i) => ({
+      type: "spacer" as const,
+      id: `sp${i}`,
+      size: 8,
+    })),
+  };
+}
+
+describe("assertSaveValid — tree size bounds", () => {
+  it("rejects a tree deeper than MAX_BUILDER_DEPTH", () => {
+    const root = deepStack(MAX_BUILDER_DEPTH + 2) as StackNode;
+    const config = baseConfig({ root });
+    try {
+      assertSaveValid(config);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GeneratedConfigError);
+      expect((err as GeneratedConfigError).issues.join(" ")).toContain("CONFIG_TOO_LARGE");
+    }
+  });
+
+  it("rejects a tree with more than MAX_BUILDER_NODES nodes", () => {
+    const config = baseConfig({ root: wideStack(MAX_BUILDER_NODES + 2) as StackNode });
+    try {
+      assertSaveValid(config);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GeneratedConfigError);
+      expect((err as GeneratedConfigError).issues.join(" ")).toContain("CONFIG_TOO_LARGE");
+    }
+  });
+
+  it("accepts a tree exactly at the node cap", () => {
+    // The bound is the same `>` comparison the REST route uses, so a tree
+    // AT the cap must still save — otherwise the two writers disagree
+    // about what is persistable, which is the whole point of sharing it.
+    expect(() => assertSaveValid(baseConfig({ root: wideStack(MAX_BUILDER_NODES) as StackNode }))).not.toThrow();
   });
 });

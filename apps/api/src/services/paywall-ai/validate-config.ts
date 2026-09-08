@@ -1,6 +1,9 @@
 import {
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_NODES,
   builderConfigSchema,
   isBlockingIssue,
+  measureNodeTree,
   validateBuilderConfig,
   type BuilderConfig,
   type PaywallNode,
@@ -120,6 +123,23 @@ function assertUrlSchemes(config: BuilderConfig): void {
  * hand-authored draft is.
  */
 export function assertSaveValid(config: unknown): BuilderConfig {
+  // Iterative pre-scan BEFORE the recursive Zod parse — the SAME bound
+  // `prepareBuilderConfigPatch` applies in routes/dashboard/paywalls.ts,
+  // for the same two reasons: (a) a hostile deeply-nested tree overflows
+  // the call stack inside `safeParse`, a RangeError safeParse does NOT
+  // contain; (b) an over-cap draft that lands in `paywalls.builderConfig`
+  // makes every subsequent builder autosave 400 permanently, because the
+  // REST route re-runs this bound on the whole config. Since the copilot's
+  // `action_paywall_editTree` handler now persists directly, there is no
+  // REST route downstream of it to catch either — this is the only gate on
+  // that path, so both writers must share it.
+  const bounds = measureNodeTree(config);
+  if (bounds.depth > MAX_BUILDER_DEPTH || bounds.nodes > MAX_BUILDER_NODES) {
+    throw new GeneratedConfigError([
+      `CONFIG_TOO_LARGE: config exceeds limits (max depth ${MAX_BUILDER_DEPTH}, max nodes ${MAX_BUILDER_NODES})`,
+    ]);
+  }
+
   const parsed = builderConfigSchema.safeParse(config);
   if (!parsed.success) {
     throw new GeneratedConfigError(

@@ -39,7 +39,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { drizzle, getDb, projects } from "@rovenue/db";
 import type { BuilderConfig, PaywallTreeOp } from "@rovenue/shared/paywall";
-import { emptyBuilderConfig } from "@rovenue/shared/paywall";
+import { MAX_BUILDER_NODES, emptyBuilderConfig } from "@rovenue/shared/paywall";
 import { executeIntent } from "./intent-executor";
 import { registerAllIntentHandlers } from "./intent-handlers";
 import { BUILDER_CONFIG_TREE_FORMAT_VERSION } from "../paywall-ai/validate-config";
@@ -52,6 +52,28 @@ const INSERT_TEXT_NODE_OP: PaywallTreeOp = {
   parentId: "root",
   index: 0,
   subtree: { type: "text", id: "new_text", key: "new_text_key", role: "body" },
+};
+
+/** An insert whose subtree alone blows `MAX_BUILDER_NODES`. Structurally
+ *  VALID — every node parses — so nothing but the size bound can reject
+ *  it. Before finding S2, `assertSaveValid` had no bound at all, so this
+ *  persisted: a draft the builder's own autosave can never save again,
+ *  because the REST route's `prepareBuilderConfigPatch` DOES bound the
+ *  tree and 400s on every subsequent PATCH. */
+const OVER_CAP_INSERT_OP: PaywallTreeOp = {
+  kind: "insert",
+  parentId: "root",
+  index: 0,
+  subtree: {
+    type: "stack",
+    id: "huge",
+    axis: "v",
+    children: Array.from({ length: MAX_BUILDER_NODES }, (_, i) => ({
+      type: "spacer" as const,
+      id: `sp${i}`,
+      size: 8,
+    })),
+  },
 };
 
 // "root" is the only node id `emptyBuilderConfig` creates — this id is
@@ -277,6 +299,32 @@ describe("action_paywall_editTree — persistence (Task 5)", () => {
     // write — only the racer's own direct `updatePaywallDraft` call ran
     // here, and that call never goes through the intent handler's audit
     // step at all, so the count must be completely unchanged.
+    expect(await countAuditRows(projectId)).toBe(before);
+  });
+
+  it("an op whose result blows MAX_BUILDER_NODES is rejected, leaving the draft and the audit log untouched", async () => {
+    // The intent handler is the SOLE writer on this path — there is no
+    // REST route downstream to re-run the size bound (finding S2). An
+    // over-cap draft that lands here is not merely large: it is
+    // unrecoverable from the builder, whose every autosave would then 400
+    // against `prepareBuilderConfigPatch`'s identical bound.
+    const { projectId, userId, paywallId } = await seedPaywallWithDraft();
+    const before = await countAuditRows(projectId);
+
+    await expect(
+      executeIntent({
+        ctx: { projectId, userId, role: "OWNER" },
+        intent: {
+          id: "i4",
+          toolName: "action_paywall_editTree",
+          payload: { paywallId, op: OVER_CAP_INSERT_OP },
+        },
+      }),
+    ).rejects.toThrow(/CONFIG_TOO_LARGE/);
+
+    const after = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, paywallId);
+    expect(after?.draftRevision).toBe(0);
+    expect(after?.builderConfig).toBeNull();
     expect(await countAuditRows(projectId)).toBe(before);
   });
 });
