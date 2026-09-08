@@ -28,8 +28,14 @@
 
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
-import { applyTreeOp, paywallTreeOpSchema } from "@rovenue/shared/paywall";
+import {
+  applyTreeOp,
+  collectMediaUrls,
+  paywallTreeOpSchema,
+  type BuilderConfig,
+} from "@rovenue/shared/paywall";
 import { audit } from "../../lib/audit";
+import { deleteObject, parseAssetUrl } from "../../lib/asset-store";
 import { registerIntentHandler } from "./intent-executor";
 // The create schemas are the routes' own validation (dashboard parity:
 // the MCP tools validate with these same objects, and the handlers
@@ -43,6 +49,7 @@ import {
   assertRowRefsOwnedByProject,
   createBodySchema as createPlacementBodySchema,
 } from "../../routes/dashboard/placements";
+import { deleteAssetQuerySchema } from "../../routes/dashboard/assets";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { purgeResolvedPriceCache } from "../offering-price-resolver";
 import { logger } from "../../lib/logger";
@@ -68,6 +75,51 @@ const editTreePayloadSchema = z.object({
   paywallId: z.string().min(1),
   op: paywallTreeOpSchema,
 });
+
+// The dashboard DELETE reads the id from the path and `force` from the
+// query; an intent payload carries both, so the payload schema is the
+// route's own query schema extended with the path param — the `force`
+// validation (enum-then-transform, never coerce) stays exactly the
+// dashboard's, and a forged payload cannot smuggle another shape past
+// the tool boundary.
+const deleteAssetPayloadSchema = deleteAssetQuerySchema.extend({
+  id: z.string().min(1),
+});
+
+/**
+ * Mirror of the DELETE route's `findReferencingPaywalls`
+ * (routes/dashboard/assets.ts): the UNION of the published usage index
+ * and a walk of every current draft builderConfig, deduped by paywall
+ * id. Kept as a local mirror rather than an import because the route's
+ * helper is module-private and services must not depend on routes for
+ * logic — only for validation schemas (the narrow exception above).
+ */
+async function findAssetReferencingPaywalls(
+  projectId: string,
+  assetId: string,
+): Promise<{ id: string; name: string }[]> {
+  const [published, drafts] = await Promise.all([
+    drizzle.assetRepo.listPublishedUsage(drizzle.db, assetId),
+    drizzle.paywallRepo.listDraftBuilderConfigs(drizzle.db, projectId),
+  ]);
+  const referencing = new Map<string, { id: string; name: string }>();
+  for (const paywall of published) referencing.set(paywall.id, paywall);
+  for (const draft of drafts) {
+    if (referencing.has(draft.id)) continue;
+    const referenced = collectMediaUrls(
+      draft.builderConfig as BuilderConfig,
+    ).some((url) => {
+      const resolved = parseAssetUrl(url);
+      return (
+        resolved !== null &&
+        resolved.projectId === projectId &&
+        resolved.assetId === assetId
+      );
+    });
+    if (referenced) referencing.set(draft.id, { id: draft.id, name: draft.name });
+  }
+  return [...referencing.values()];
+}
 
 export function registerAllIntentHandlers(): void {
   // ------------------------------------------------------------------
@@ -875,5 +927,73 @@ export function registerAllIntentHandlers(): void {
 
       return row;
     });
+  });
+
+  // ------------------------------------------------------------------
+  // action.assets.delete (MCP delete_asset)
+  // Mirrors DELETE /dashboard/:projectId/assets/:id (assets:write):
+  // unknown ids are refused, the published + draft in-use guard runs
+  // first (`force` skips it entirely, exactly as the dashboard does),
+  // and the row is soft-deleted inside a transaction with the audit
+  // entry. The bucket object delete stays best-effort AFTER the commit
+  // (row first, object second): a storage failure must not surface as
+  // a failure once every read path already treats the asset as gone —
+  // the orphan sweeper reclaims the object.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_assets_delete", async (ctx, payload) => {
+    const body = deleteAssetPayloadSchema.parse(payload);
+
+    const asset = await drizzle.assetRepo.findAssetById(
+      drizzle.db,
+      ctx.projectId,
+      body.id,
+    );
+    if (!asset) {
+      throw new Error(`Asset ${body.id} not found in project`);
+    }
+
+    if (!body.force) {
+      const referencing = await findAssetReferencingPaywalls(
+        ctx.projectId,
+        body.id,
+      );
+      if (referencing.length > 0) {
+        const refs = referencing
+          .map((paywall) => `"${paywall.name}" (${paywall.id})`)
+          .join(", ");
+        throw new Error(
+          `Asset is referenced by ${referencing.length} paywall(s): ${refs}. Re-run with force=true to delete it anyway.`,
+        );
+      }
+    }
+
+    await drizzle.db.transaction(async (tx) => {
+      await drizzle.assetRepo.softDeleteAsset(tx, ctx.projectId, body.id);
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "asset.deleted",
+          resource: "paywall_asset",
+          resourceId: body.id,
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+    });
+
+    try {
+      await deleteObject(asset.storageKey);
+    } catch (err) {
+      log.error(
+        "asset row deleted but storage object delete failed; sweeper will reclaim",
+        {
+          assetId: body.id,
+          storageKey: asset.storageKey,
+          err: err instanceof Error ? err.message : String(err),
+        },
+      );
+    }
+
+    return { deleted: true };
   });
 }

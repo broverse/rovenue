@@ -45,6 +45,9 @@ export const TOOL_SURFACE: Record<string, ToolSurface> = {
   // refused before any intent row exists.
   create_placement: "write",
   create_audience: "write",
+  // Asset delete: same gate — a `read` token is refused before any
+  // intent row exists.
+  delete_asset: "write",
 };
 
 /**

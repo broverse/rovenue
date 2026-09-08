@@ -837,7 +837,10 @@ for (const kind of ["image", "video", "lottie"] as const) {
 /** DELETE `?force=` — the explicit opt-out of the in-use guard. An
  *  enum-then-transform rather than `z.coerce.boolean()`, because coerce
  *  treats ANY non-empty string ("false" included) as true. */
-const deleteAssetQuerySchema = z.object({
+// Exported for the MCP delete_asset write tool and its intent handler:
+// same deliberate, narrow services→routes exception as the catalog
+// creates (dashboard parity — never a weaker re-declaration).
+export const deleteAssetQuerySchema = z.object({
   force: z
     .enum(["true", "false"])
     .default("false")

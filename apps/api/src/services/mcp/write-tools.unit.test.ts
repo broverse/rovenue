@@ -1,5 +1,6 @@
 // =============================================================
-// MCP catalog + placement/audience write tools: DB-free unit coverage.
+// MCP catalog + placement/audience + asset write tools: DB-free unit
+// coverage.
 //
 // The propose/confirm flow itself is covered by
 // write-tools.integration.test.ts (host-run, needs Postgres). This
@@ -11,12 +12,14 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  buildAssetDeletePreview,
   buildAudienceCreatePreview,
   buildEntitlementCreatePreview,
   buildOfferingCreatePreview,
   buildPlacementCreatePreview,
   buildProductCreatePreview,
   canonicalizeIntentPayload,
+  DeleteAssetMcpSchema,
   intentPayloadsEqual,
 } from "./write-tools";
 
@@ -106,5 +109,79 @@ describe("placement and audience create previews", () => {
   it("names the audience", () => {
     const preview = buildAudienceCreatePreview({ name: "Churned" });
     expect(preview.title).toContain("Churned");
+  });
+});
+
+describe("asset delete preview", () => {
+  it("names the asset id", () => {
+    const preview = buildAssetDeletePreview({ id: "as_1" });
+    expect(preview.title).toContain("as_1");
+  });
+
+  it("renders unforced when force is absent", () => {
+    const preview = buildAssetDeletePreview({ id: "as_1" });
+    expect(preview.fields).toContainEqual({
+      label: "Force",
+      after: "false",
+    });
+  });
+
+  it('renders forced for the dashboard-accepted "true" string', () => {
+    const preview = buildAssetDeletePreview({ id: "as_1", force: "true" });
+    expect(preview.fields).toContainEqual({
+      label: "Force",
+      after: "true (skips the in-use check)",
+    });
+  });
+
+  it("renders forced for a boolean true echo", () => {
+    const preview = buildAssetDeletePreview({ id: "as_1", force: true });
+    expect(preview.fields).toContainEqual({
+      label: "Force",
+      after: "true (skips the in-use check)",
+    });
+  });
+
+  it('renders unforced for the "false" string', () => {
+    const preview = buildAssetDeletePreview({ id: "as_1", force: "false" });
+    expect(preview.fields).toContainEqual({
+      label: "Force",
+      after: "false",
+    });
+  });
+});
+
+describe("delete asset MCP schema", () => {
+  it("defaults an absent force to false (dashboard parity)", () => {
+    expect(DeleteAssetMcpSchema.parse({ id: "as_1" })).toEqual({
+      id: "as_1",
+      force: false,
+    });
+  });
+
+  it('parses force "true" to boolean true', () => {
+    expect(DeleteAssetMcpSchema.parse({ id: "as_1", force: "true" })).toEqual({
+      id: "as_1",
+      force: true,
+    });
+  });
+
+  it("requires the asset id", () => {
+    expect(() =>
+      DeleteAssetMcpSchema.parse({ force: "true" }),
+    ).toThrow();
+    expect(() => DeleteAssetMcpSchema.parse({ id: "" })).toThrow();
+  });
+
+  it("rejects unknown force values (dashboard parity — never coerce)", () => {
+    expect(() =>
+      DeleteAssetMcpSchema.parse({ id: "as_1", force: "yes" }),
+    ).toThrow();
+    // A JSON boolean is not what the dashboard DELETE accepts (its
+    // query string carries "true"/"false"), so it is refused rather
+    // than coerced — "false" must never become true.
+    expect(() =>
+      DeleteAssetMcpSchema.parse({ id: "as_1", force: true }),
+    ).toThrow();
   });
 });

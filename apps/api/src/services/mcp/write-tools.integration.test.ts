@@ -22,6 +22,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { MCP_TOKEN_PREFIX } from "@rovenue/shared";
 import { getDb, projects, drizzle } from "@rovenue/db";
+import { buildStorageKey } from "../../lib/asset-store";
 import { errorHandler } from "../../middleware/error";
 import { MCP_PROTOCOL_REVISION } from "./server";
 import { mcpRoute } from "../../routes/mcp";
@@ -755,6 +756,218 @@ describe("MCP placement and audience create tools", () => {
       identifier: "whatever",
       name: "Whatever",
     });
+    expect(res.isError).toBe(true);
+    expect(await countIntents()).toBe(before);
+  });
+});
+
+describe("MCP asset delete tool", () => {
+  async function seedAsset(projectId: string, suffix: string) {
+    const assetId = createId();
+    return drizzle.assetRepo.createAsset(drizzle.db, {
+      id: assetId,
+      projectId,
+      kind: "image",
+      name: `MCP Asset ${suffix}`,
+      storageKey: buildStorageKey(projectId, assetId, "image"),
+      contentHash: `mcp_hash_${RUN_ID}_${suffix}`,
+      contentType: "image/webp",
+      byteSize: 100,
+      width: null,
+      height: null,
+      sourceFormat: null,
+      sourceWidth: null,
+      sourceHeight: null,
+      policyVersion: 0,
+    });
+  }
+
+  // Pins the asset behind a CURRENT published version's usage index
+  // (the env-independent half of the in-use guard — the draft walk
+  // needs ASSET_PUBLIC_BASE_URL, which the test env never sets, so
+  // parseAssetUrl degrades to "no references" here by design).
+  async function seedPublishedUsage(
+    projectId: string,
+    assetId: string,
+    suffix: string,
+  ) {
+    const db = getDb();
+    const [offering] = await db
+      .insert(drizzle.schema.offerings)
+      .values({ projectId, identifier: `off_mcpasset_${RUN_ID}_${suffix}` })
+      .returning();
+    const [paywall] = await db
+      .insert(drizzle.schema.paywalls)
+      .values({
+        projectId,
+        identifier: `pw_mcpasset_${RUN_ID}_${suffix}`,
+        name: `MCP Asset Paywall ${suffix}`,
+        offeringId: offering!.id,
+        remoteConfig: { defaultLocale: "en" },
+        builderConfig: null,
+      })
+      .returning();
+    const [version] = await db
+      .insert(drizzle.schema.paywallVersions)
+      .values({
+        paywallId: paywall!.id,
+        versionNo: 1,
+        remoteConfig: { defaultLocale: "en" },
+        offeringId: offering!.id,
+      })
+      .returning();
+    await db
+      .update(drizzle.schema.paywalls)
+      .set({ publishedVersionId: version!.id })
+      .where(eq(drizzle.schema.paywalls.id, paywall!.id));
+    await db.insert(drizzle.schema.paywallAssetUsages).values({
+      assetId,
+      paywallId: paywall!.id,
+      versionId: version!.id,
+    });
+    return paywall!;
+  }
+
+  async function liveAsset(projectId: string, assetId: string) {
+    return drizzle.assetRepo.findAssetById(drizzle.db, projectId, assetId);
+  }
+
+  it("delete_asset proposes, then deletes on confirmation", async () => {
+    const { raw, projectId } = await seedToken("assetdel", "read_write");
+    const asset = await seedAsset(projectId, "del");
+    const args = { id: asset.id };
+
+    const proposal = await callTool(raw, "delete_asset", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have deleted anything.
+    expect(await liveAsset(projectId, asset.id)).not.toBeNull();
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "delete_asset", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    expect(await liveAsset(projectId, asset.id)).toBeNull();
+  });
+
+  it("delete_asset writes an audit row naming the token's owner", async () => {
+    const { raw, projectId, userId } = await seedToken(
+      "assetaudit",
+      "read_write",
+    );
+    const asset = await seedAsset(projectId, "audit");
+    const args = { id: asset.id };
+    const proposal = await callTool(raw, "delete_asset", args);
+    const confirmed = await callTool(raw, "delete_asset", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+
+    const row = await latestAuditRow(projectId);
+    expect(row?.userId).toBe(userId);
+    expect(row?.action).toBe("asset.deleted");
+    expect(row?.resource).toBe("paywall_asset");
+  });
+
+  it("delete_asset declines cleanly when the user refuses", async () => {
+    const { raw, projectId } = await seedToken("assetdec", "read_write");
+    const asset = await seedAsset(projectId, "dec");
+    const args = { id: asset.id };
+    const proposal = await callTool(raw, "delete_asset", args);
+    const declined = await callTool(raw, "delete_asset", args, {
+      inputResponses: { confirm: { action: "decline" } },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(declined.isError).toBe(true);
+    expect(await liveAsset(projectId, asset.id)).not.toBeNull();
+  });
+
+  it("refuses an in-use asset without force", async () => {
+    const { raw, projectId } = await seedToken("assetuse", "read_write");
+    const asset = await seedAsset(projectId, "use");
+    await seedPublishedUsage(projectId, asset.id, "use");
+    const args = { id: asset.id };
+
+    const proposal = await callTool(raw, "delete_asset", args);
+    expect(proposal.isError).toBe(false);
+    const refused = await callTool(raw, "delete_asset", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/referenced by/i);
+    expect(await liveAsset(projectId, asset.id)).not.toBeNull();
+  });
+
+  it("force deletes an in-use asset", async () => {
+    const { raw, projectId } = await seedToken("assetforce", "read_write");
+    const asset = await seedAsset(projectId, "force");
+    await seedPublishedUsage(projectId, asset.id, "force");
+    const args = { id: asset.id, force: "true" };
+
+    const proposal = await callTool(raw, "delete_asset", args);
+    expect(proposal.isError).toBe(false);
+    const confirmed = await callTool(raw, "delete_asset", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    expect(await liveAsset(projectId, asset.id)).toBeNull();
+  });
+
+  it("fails closed on an unknown asset id", async () => {
+    const { raw, projectId } = await seedToken("assetmiss", "read_write");
+    const args = { id: "as_missing" };
+    const proposal = await callTool(raw, "delete_asset", args);
+    expect(proposal.isError).toBe(false);
+    const res = await callTool(raw, "delete_asset", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/not found/i);
+    expect(await liveAsset(projectId, "as_missing")).toBeNull();
+  });
+
+  it("a confirmation echoing a different id fails closed", async () => {
+    const { raw, projectId } = await seedToken("assetswap", "read_write");
+    const kept = await seedAsset(projectId, "swap-kept");
+    const other = await seedAsset(projectId, "swap-other");
+    const proposal = await callTool(raw, "delete_asset", { id: kept.id });
+    const swapped = await callTool(
+      raw,
+      "delete_asset",
+      { id: other.id },
+      {
+        inputResponses: {
+          confirm: { action: "accept", content: { confirm: true } },
+        },
+        requestState: proposal.rawResult.requestState as string,
+      },
+    );
+    expect(swapped.isError).toBe(true);
+    expect(swapped.text).toMatch(/does not match/i);
+    expect(await liveAsset(projectId, kept.id)).not.toBeNull();
+    expect(await liveAsset(projectId, other.id)).not.toBeNull();
+  });
+
+  it("a read token cannot propose a delete: protocol refusal, no intent row", async () => {
+    const before = await countIntents();
+    const { raw } = await seedToken("areadgate", "read");
+    const res = await callTool(raw, "delete_asset", { id: "whatever" });
     expect(res.isError).toBe(true);
     expect(await countIntents()).toBe(before);
   });

@@ -21,6 +21,7 @@ import { createBodySchema as createOfferingBodySchema } from "../../routes/dashb
 import { createBodySchema as createAccessBodySchema } from "../../routes/dashboard/access";
 import { createBodySchema as createPlacementBodySchema } from "../../routes/dashboard/placements";
 import { createAudienceBodySchema } from "../../routes/dashboard/audiences";
+import { deleteAssetQuerySchema } from "../../routes/dashboard/assets";
 import {
   asMcpInputSchema,
   errPayload,
@@ -57,6 +58,16 @@ const CreateAudienceMcpSchema = createAudienceBodySchema.omit({
   projectId: true,
 });
 
+// The dashboard DELETE reads the id from the path and `force` from the
+// query; an MCP tool carries both as arguments, so the tool schema is
+// the route's own query schema extended with the path param — the
+// `force` validation (enum-then-transform, never coerce) stays exactly
+// the dashboard's. Served to clients as a string enum ("true"/"false",
+// default "false"); the intent handler parses the same shape.
+export const DeleteAssetMcpSchema = deleteAssetQuerySchema.extend({
+  id: z.string().min(1),
+});
+
 const StartExperimentArgs = z.object({
   experimentId: z.string().min(1),
   reason: z.string().default(""),
@@ -90,6 +101,8 @@ interface WriteSpec<A extends Record<string, unknown>> {
   // (the dashboard's products:write also admits DEVELOPER). Same for
   // the placement/audience creates below: create_audience's chat
   // counterpart admits DEVELOPER, but the MCP tool stays ADMIN-gated.
+  // Same for the asset delete below: the dashboard's assets:write also
+  // admits DEVELOPER, but the MCP tool stays ADMIN-gated.
   requiresRole: "ADMIN";
   buildPreview: (args: A) => unknown;
   /** One-line human summary for the confirm elicitation message. */
@@ -185,6 +198,27 @@ export function buildAudienceCreatePreview(input: {
     fields: [
       { label: "Name", after: input.name },
       { label: "Description", after: input.description ?? "" },
+    ],
+  };
+}
+
+// `force` stays `unknown` on purpose: the preview runs on the RAW
+// echoed arguments (pre-parse — the string "true", a boolean, or an
+// absent key), never on the handler's parsed payload. Only the exact
+// dashboard-accepted truthy shapes render as forced.
+export function buildAssetDeletePreview(input: {
+  id: string;
+  force?: unknown;
+}): RoviIntentPreview {
+  const forced = input.force === true || input.force === "true";
+  return {
+    title: `Delete asset ${input.id}`,
+    fields: [
+      { label: "Asset ID", after: input.id },
+      {
+        label: "Force",
+        after: forced ? "true (skips the in-use check)" : "false",
+      },
     ],
   };
 }
@@ -428,7 +462,8 @@ function registerWriteTool<A extends Record<string, unknown>>(
  * ToolAnnotationsSchema in the installed SDK): stopping concludes
  * enrollment and records a winner — destructive; starting begins
  * enrollment and is reversible via stop. Creates only add rows and are
- * reversible via the dashboard delete paths — non-destructive.
+ * reversible via the dashboard delete paths — non-destructive. Asset
+ * deletion removes the row and its bucket bytes — destructive.
  */
 export function registerMcpWriteTools(
   server: McpServer,
@@ -537,6 +572,21 @@ export function registerMcpWriteTools(
       buildPreview: buildAudienceCreatePreview,
       describe: (args: z.infer<typeof CreateAudienceMcpSchema>) =>
         `for audience "${args.name}"`,
+    },
+  );
+  registerWriteTool(
+    server,
+    ctx,
+    "delete_asset",
+    'Delete a paywall asset in the current project by id. Refuses when a paywall still references it unless force is the string "true" (dashboard parity with DELETE ?force=). Proposes a pending intent first — nothing changes until you confirm the elicitation.',
+    DeleteAssetMcpSchema,
+    { readOnlyHint: false, destructiveHint: true },
+    {
+      actionTool: "action_assets_delete",
+      requiresRole: "ADMIN",
+      buildPreview: buildAssetDeletePreview,
+      describe: (args: { id: string; force?: unknown }) =>
+        `asset ${args.id}${args.force === true || args.force === "true" ? " (forced)" : ""}`,
     },
   );
 }
