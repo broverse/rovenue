@@ -3,12 +3,20 @@ import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import { sterilizeToolResult } from "../sterilize";
 
+export type ToolSurfaceName = "chat" | "mcp";
+
 export interface ToolContext {
   projectId: string;
   userId: string;
   role: string;
   threadId: string;
   messageId: string;
+  /**
+   * Which surface is loading tools. Undefined means chat (the only caller
+   * before MCP existed) — the chat path must not change. Factories return
+   * `{}` for surfaces a tool does not serve; see the MCP foundation spec.
+   */
+  surface?: ToolSurfaceName;
   /**
    * The dashboard route the chat request was sent from (`context.route` in
    * the chat body — see `chat.ts`). Route-gated tool sets (e.g. the paywall
@@ -19,7 +27,7 @@ export interface ToolContext {
   route?: string;
 }
 
-const SearchArgs = z.object({
+export const SearchArgs = z.object({
   filter: z
     .object({
       q: z.string().optional(),

@@ -2,8 +2,8 @@ import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./query-subscribers";
 
-export function uiTools(_ctx: ToolContext) {
-  return {
+export function uiTools(ctx: ToolContext) {
+  const tools = {
     "ui_navigate": tool({
       description: "Navigate the dashboard to a specific page.",
       inputSchema: z.object({
@@ -35,4 +35,7 @@ export function uiTools(_ctx: ToolContext) {
       execute: async (input) => ({ uiAction: "openSubscriber", ...input }),
     }),
   };
+  // Chat-only: these drive the dashboard UI and mean nothing to an agent.
+  if (ctx.surface === "mcp") return {} as typeof tools;
+  return tools;
 }

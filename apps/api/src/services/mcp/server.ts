@@ -1,5 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import type { McpRequestContext } from "@modelcontextprotocol/server";
+import type {
+  AuthInfo,
+  McpRequestContext,
+} from "@modelcontextprotocol/server";
+import { registerMcpTools } from "./tools";
 
 /** Server identity clients see in `server/discover`. */
 export const MCP_SERVER_NAME = "rovenue-mcp";
@@ -45,8 +49,37 @@ export const MCP_INSTRUCTIONS =
  * SDK's auto-derivation, so the declared set is a decision in this file,
  * not an emergent property of whichever tools happen to be registered.
  */
+/**
+ * Project-scoped identity for tool execution, carried in the handler's
+ * `authInfo.extra` (the SDK's designed slot for "additional data that
+ * needs to be attached to the auth info"). The route fills it from the
+ * verified token + live membership on every request.
+ */
+function toMcpToolContext(authInfo: AuthInfo | undefined): {
+  projectId: string;
+  userId: string;
+  role: string;
+} {
+  const extra = authInfo?.extra as
+    | { projectId?: unknown; role?: unknown }
+    | undefined;
+  const projectId = extra?.projectId;
+  const userId = authInfo?.clientId;
+  const role = extra?.role;
+  if (
+    typeof projectId !== "string" ||
+    typeof userId !== "string" ||
+    typeof role !== "string"
+  ) {
+    // Loud fail-closed: the route always attaches authInfo, so reaching
+    // here is a wiring bug, and a tool running without a project scope
+    // must never silently happen.
+    throw new Error("mcp: missing auth context for tool execution");
+  }
+  return { projectId, userId, role };
+}
+
 export function buildMcpServer(ctx: McpRequestContext): McpServer {
-  void ctx;
   const server = new McpServer(
     { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
     {
@@ -54,5 +87,6 @@ export function buildMcpServer(ctx: McpRequestContext): McpServer {
       instructions: MCP_INSTRUCTIONS,
     },
   );
+  registerMcpTools(server, toMcpToolContext(ctx.authInfo));
   return server;
 }

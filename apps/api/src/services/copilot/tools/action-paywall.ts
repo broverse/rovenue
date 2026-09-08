@@ -98,7 +98,7 @@ const EditTreeArgs = z.object({
 });
 
 export function actionPaywallTools(ctx: ToolContext) {
-  return {
+  const tools = {
     "action_paywall_editTree": createIntentTool({
       ctx,
       toolName: "action_paywall_editTree",
@@ -110,4 +110,9 @@ export function actionPaywallTools(ctx: ToolContext) {
       buildPreview: (i) => buildEditTreePreview(i.op),
     }),
   };
+  // MCP serves no action tools yet (writes arrive in Task 9
+  // through the intent flow, never as direct ports). Fail closed here so
+  // a future unconditional spread cannot leak a mutation tool.
+  if (ctx.surface === "mcp") return {} as typeof tools;
+  return tools;
 }

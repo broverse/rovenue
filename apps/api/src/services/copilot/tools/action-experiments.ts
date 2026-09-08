@@ -3,7 +3,7 @@ import { createIntentTool } from "./_action-helper";
 import type { ToolContext } from "./query-subscribers";
 
 export function actionExperimentsTools(ctx: ToolContext) {
-  return {
+  const tools = {
     "action_experiments_start": createIntentTool({
       ctx,
       toolName: "action_experiments_start",
@@ -45,4 +45,9 @@ export function actionExperimentsTools(ctx: ToolContext) {
       }),
     }),
   };
+  // MCP serves no action tools yet (writes arrive in Task 9
+  // through the intent flow, never as direct ports). Fail closed here so
+  // a future unconditional spread cannot leak a mutation tool.
+  if (ctx.surface === "mcp") return {} as typeof tools;
+  return tools;
 }

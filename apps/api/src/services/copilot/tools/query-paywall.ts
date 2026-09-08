@@ -19,7 +19,7 @@ import type { ToolContext } from "./query-subscribers";
 // default-locale strings (so it can read copy without a second round
 // trip through `localizations`).
 
-const GetArgs = z.object({ paywallId: z.string().min(1) });
+export const GetArgs = z.object({ paywallId: z.string().min(1) });
 
 interface PaywallNodeSummary {
   id: string;

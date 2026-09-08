@@ -44,7 +44,15 @@ export function loadTools(ctx: ToolContext) {
     ...actionFeatureFlagsTools(ctx),
     ...actionExperimentsTools(ctx),
     ...uiTools(ctx),
-    ...(isBuilderRoute(ctx.route)
+    // Paywall tools are the one surface split: the builder-route gate is a
+    // chat concept (BUILDER_ROUTE_RE also feeds system-prompt), while MCP
+    // has no route — so MCP always gets the read side and never the edit
+    // side. Each factory additionally self-guards its own surface above.
+    // Two binary spreads (never a nested ternary): spreading `X | {}` keeps
+    // the old optional-prop shape, while a 3-way union spread breaks
+    // indexing for registry.test.ts and the ToolSet assignment in chat.ts.
+    ...(ctx.surface === "mcp" ? { ...queryPaywallTools(ctx) } : {}),
+    ...(ctx.surface !== "mcp" && isBuilderRoute(ctx.route)
       ? { ...queryPaywallTools(ctx), ...actionPaywallTools(ctx) }
       : {}),
   };

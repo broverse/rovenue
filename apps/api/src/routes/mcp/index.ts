@@ -3,7 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { localhostOriginValidation } from "@modelcontextprotocol/hono";
 import { BEARER_SCHEME, HEADER } from "@rovenue/shared";
-import { drizzle } from "@rovenue/db";
+import { drizzle, type MemberRole } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { buildMcpServer } from "../../services/mcp/server";
 import { assertToolAllowed, authorizeMcpRequest } from "../../services/mcp/authorize";
@@ -30,6 +30,12 @@ const mcpHandler = createMcpHandler((ctx) => buildMcpServer(ctx), {
 });
 
 const BEARER_PREFIX_LOWER = `${BEARER_SCHEME.toLowerCase()} `;
+
+declare module "hono" {
+  interface ContextVariableMap {
+    mcpRole: MemberRole;
+  }
+}
 
 /**
  * Origin is validated before anything else. HTTP transports are exposed to
@@ -73,8 +79,10 @@ export const mcpRoute = new Hono()
   .use("*", async (c, next) => {
     // Authorization resolves per request (Task 5). The membership is
     // re-read on every call: no baked-in role, no cross-request cache.
+    // The live role is stashed for tool execution below.
     const ctx = c.get("mcpToken");
-    await authorizeMcpRequest(ctx);
+    const { role } = await authorizeMcpRequest(ctx);
+    c.set("mcpRole", role);
 
     // Scope is enforced BEFORE dispatch, never inside a tool body: a
     // rejected write leaves no intent row or other side effect. The body
@@ -99,4 +107,18 @@ export const mcpRoute = new Hono()
 
     await next();
   })
-  .all("*", (c) => mcpHandler.fetch(c.req.raw));
+  .all("*", (c) => {
+    // Project-scoped identity for tool execution, via the handler's
+    // pass-through `authInfo` seam (extra = the SDK's designed slot for
+    // additional auth-attached data). Verified token + live membership,
+    // resolved above on this same request.
+    const ctx = c.get("mcpToken");
+    return mcpHandler.fetch(c.req.raw, {
+      authInfo: {
+        token: ctx.tokenId,
+        clientId: ctx.userId,
+        scopes: [ctx.scope],
+        extra: { projectId: ctx.projectId, role: c.get("mcpRole") },
+      },
+    });
+  });

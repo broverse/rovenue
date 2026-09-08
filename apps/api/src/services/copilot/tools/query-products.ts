@@ -4,7 +4,7 @@ import { drizzle } from "@rovenue/db";
 import { sterilizeToolResult } from "../sterilize";
 import type { ToolContext } from "./query-subscribers";
 
-const ListProductsArgs = z.object({
+export const ListProductsArgs = z.object({
   search: z.string().optional(),
   includeInactive: z.boolean().default(false),
   limit: z.number().int().positive().max(100).default(50),

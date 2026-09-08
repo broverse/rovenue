@@ -267,10 +267,18 @@ describe("assertToolAllowed", () => {
     expect(() => assertToolAllowed(readCtx, "stop_experiment")).toThrow();
   });
 
-  it("TOOL_SURFACE starts empty: no tools ship in Phase 1", () => {
-    // Task 6 populates this map as tools ship. An empty map plus
-    // fail-closed unknown handling means a tool added without a surface
-    // entry is unreachable to read tokens by construction.
-    expect(Object.keys(TOOL_SURFACE)).toHaveLength(0);
+  it("TOOL_SURFACE marks every shipped tool read", () => {
+    // Task 6 populated this map as tools shipped. A tool added WITHOUT an
+    // entry stays unreachable to read tokens by construction (fail-closed
+    // unknown handling) — this pin makes that allow-list explicit.
+    expect(TOOL_SURFACE).toEqual({
+      find_subscribers: "read",
+      list_subscriptions: "read",
+      list_catalog: "read",
+      list_audiences: "read",
+      list_feature_flags: "read",
+      list_experiments: "read",
+      get_paywall: "read",
+    });
   });
 });

@@ -20,7 +20,7 @@ const DateRangeArgs = z.object({
 });
 
 export function queryMetricsTools(ctx: ToolContext) {
-  return {
+  const tools = {
     "query_metrics_mrr": tool({
       description:
         "Get daily MRR (Monthly Recurring Revenue) data for the current project from ClickHouse. Returns an array of {bucket, grossUsd, eventCount, activeSubscribers} points.",
@@ -55,4 +55,11 @@ export function queryMetricsTools(ctx: ToolContext) {
       },
     } as unknown as ReturnType<typeof tool>),
   };
+  // Chat-only until the sandbox-revenue fix lands (spec R1: sandbox revenue
+  // is mixed into production analytics, so get_metrics does not ship over
+  // MCP). The dashboard and chat numbers share the same contamination —
+  // tracked as its own item — but MCP must not hand the commingled number
+  // to an agent that states it as fact.
+  if (ctx.surface === "mcp") return {} as typeof tools;
+  return tools;
 }

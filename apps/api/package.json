@@ -62,7 +62,8 @@
     "stripe": "^15.0.0",
     "tsx": "^4.22.4",
     "undici": "^6.27.0",
-    "zod": "^3.22.0"
+    "zod": "^3.22.0",
+    "zod-to-json-schema": "3.25.2"
   },
   "devDependencies": {
     "@seriousme/openapi-schema-validator": "2.9.1",
@@ -77,7 +78,6 @@
     "testcontainers": "^10.15.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
-    "vitest": "^3.2.6",
-    "zod-to-json-schema": "3.25.2"
+    "vitest": "^3.2.6"
   }
 }

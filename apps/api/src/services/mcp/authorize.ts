@@ -21,7 +21,17 @@ export type ToolSurface = "read" | "write";
  * tokens by construction (unknown tools fail closed below), so forgetting
  * the entry errs toward refusal, never toward leakage.
  */
-export const TOOL_SURFACE: Record<string, ToolSurface> = {};
+export const TOOL_SURFACE: Record<string, ToolSurface> = {
+  // Phase 2 Task 6: the consolidated read surface. Write tools (Task 9)
+  // add their entries here as they ship — each "write".
+  find_subscribers: "read",
+  list_subscriptions: "read",
+  list_catalog: "read",
+  list_audiences: "read",
+  list_feature_flags: "read",
+  list_experiments: "read",
+  get_paywall: "read",
+};
 
 /**
  * Resolve the live membership on EVERY request and return its role. No

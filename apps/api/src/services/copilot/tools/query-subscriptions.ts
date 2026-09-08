@@ -4,7 +4,7 @@ import { listSubscriptions } from "../../metrics/subscriptions";
 import { sterilizeToolResult } from "../sterilize";
 import type { ToolContext } from "./query-subscribers";
 
-const ListArgs = z.object({
+export const ListArgs = z.object({
   scope: z
     .enum(["all", "active", "trial", "grace", "canceling", "issues", "churned"])
     .default("active"),
