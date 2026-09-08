@@ -160,21 +160,32 @@ export async function deletePublishedOlderThan(
   db: Db,
   cutoff: Date,
   batchSize: number,
-  retainCurrentMonthTypes: string[] = [],
+  retainCurrentMonthTypes: OutboxEvent["aggregateType"][] = [],
 ): Promise<number> {
+  // Built with `inArray`, never a bare `= ANY(${array})`: embedding a JS
+  // array in a `sql` template binds it as ONE scalar parameter, which
+  // Postgres rejects with 22P02 "malformed array literal" — the whole
+  // sweep then throws and the outbox stops draining. `inArray` expands to
+  // one placeholder per value, so it also carries the enum type across.
+  // An empty retain list drops the clause entirely rather than rendering
+  // a degenerate `IN ()`.
+  const retainGuard =
+    retainCurrentMonthTypes.length > 0
+      ? sql`
+          AND (
+            NOT (${inArray(outboxEvents.aggregateType, retainCurrentMonthTypes)})
+            -- UTC months, matching the floor/tier window (monthStartUtc):
+            -- the DB session TimeZone must not decide the boundary.
+            OR date_trunc('month', ${outboxEvents.createdAt} AT TIME ZONE 'UTC')
+             < date_trunc('month', NOW() AT TIME ZONE 'UTC')
+          )`
+      : sql``;
   const result = await db.execute(sql`
     DELETE FROM ${outboxEvents}
      WHERE id IN (
        SELECT id FROM ${outboxEvents}
         WHERE ${outboxEvents.publishedAt} IS NOT NULL
-          AND ${outboxEvents.publishedAt} < ${cutoff}
-          AND (
-            NOT (${outboxEvents.aggregateType} = ANY(${retainCurrentMonthTypes}))
-            -- UTC months, matching the floor/tier window (monthStartUtc):
-            -- the DB session TimeZone must not decide the boundary.
-            OR date_trunc('month', ${outboxEvents.createdAt} AT TIME ZONE 'UTC')
-             < date_trunc('month', NOW() AT TIME ZONE 'UTC')
-          )
+          AND ${outboxEvents.publishedAt} < ${cutoff}${retainGuard}
         ORDER BY ${outboxEvents.publishedAt} ASC
         LIMIT ${batchSize}
      )
