@@ -97,7 +97,7 @@ const ListFeatureFlagsArgs = FeatureFlagsListArgs.extend({ limit: McpLimit });
 const ListExperimentsArgs = ExperimentsListArgs.extend({ limit: McpLimit });
 const FindFunnelsMcpArgs = FindFunnelsArgs.extend({ limit: McpLimit });
 
-function toToolContext(ctx: McpToolContext): ToolContext {
+export function toToolContext(ctx: McpToolContext): ToolContext {
   return {
     projectId: ctx.projectId,
     userId: ctx.userId,
@@ -164,7 +164,7 @@ function errPayload(message: string) {
 
 type LoadedTools = ReturnType<typeof loadTools>;
 
-async function runChatTool(
+export async function runChatTool(
   loaded: LoadedTools,
   name: keyof LoadedTools,
   args: Record<string, unknown>,

@@ -1,18 +1,13 @@
 // =============================================================
-// MCP resources: project info, funnel structure, experiment status.
+// MCP resources: the spec-D4 / plan-Task-8 surface.
 //
-// URI decision: the design spec (D2) names project://, funnel://, and
-// experiment:// with scheme-per-entity rationale. The Task 8 brief sketch
-// uses rovenue://paywall| catalog|experiments without explanation — the
-// ratified spec wins, so the test pins the SPEC's three URIs. Likewise
-// project://info carries only data that exists (id, name, server
-// version): there is no plan/limits source to mirror.
-//
-// Mirror rule: client support for resources is uneven, so nothing
-// ACTIONABLE may live only in a resource. funnel:// and experiment://
-// re-read entity state reachable via find_funnels / list_experiments;
-// project://info is static reference context with no actionable payload,
-// so it asserts a fixed key set instead of a tool mirror.
+// Three resources ship — rovenue://paywall/{id}, rovenue://catalog/products,
+// rovenue://experiments — each a thin read over the same chat handler its
+// mirror tool calls (get_paywall, list_catalog, list_experiments).
+// rovenue://schema/clickhouse ships only with run_analytics_query (spec D4
+// + D7: "its only mirror is that tool's schema mode") and stays out while
+// that tool does. Mirror rule: client support for resources is uneven, so
+// nothing load-bearing may live only in a resource.
 // =============================================================
 
 import { randomBytes } from "node:crypto";
@@ -36,8 +31,9 @@ const RUN_ID = Date.now();
 const TEST_BCRYPT_ROUNDS = 4;
 
 const MIRRORS: Record<string, string> = {
-  "funnel://{id}/structure": "find_funnels",
-  "experiment://{id}/status": "list_experiments",
+  "rovenue://catalog/products": "list_catalog",
+  "rovenue://experiments": "list_experiments",
+  "rovenue://paywall/{id}": "get_paywall",
 };
 
 function buildMcpApp() {
@@ -169,15 +165,6 @@ async function seedReadToken(suffix: string) {
   return { raw, projectId: project.id };
 }
 
-async function seedFunnel(projectId: string, suffix: string) {
-  const row = await drizzle.funnelRepo.insert(drizzle.db, {
-    projectId,
-    slug: `res-funnel-${RUN_ID}-${suffix}`,
-    name: `Resources Funnel ${suffix}`,
-  });
-  return row;
-}
-
 async function seedExperiment(projectId: string, suffix: string) {
   const audience = await drizzle.audienceRepo.createAudience(drizzle.db, {
     projectId,
@@ -198,6 +185,27 @@ async function seedExperiment(projectId: string, suffix: string) {
     metrics: [{ key: "conversion" }],
   });
   return experiment;
+}
+
+async function seedPaywall(projectId: string, suffix: string) {
+  const db = getDb();
+  const [offering] = await db
+    .insert(drizzle.schema.offerings)
+    .values({
+      projectId,
+      identifier: `res-offering-${RUN_ID}-${suffix}`,
+    })
+    .returning();
+  const [paywall] = await db
+    .insert(drizzle.schema.paywalls)
+    .values({
+      projectId,
+      identifier: `res-paywall-${RUN_ID}-${suffix}`,
+      name: `Resources Paywall ${suffix}`,
+      offeringId: offering!.id,
+    })
+    .returning();
+  return paywall!;
 }
 
 async function listMcpToolNames(raw: string): Promise<string[]> {
@@ -222,57 +230,59 @@ afterAll(async () => {
 });
 
 describe("MCP resources", () => {
-  it("every resource is mirrored by a tool", async () => {
+  it("serves exactly the three spec resources, each mirrored by a tool", async () => {
     const { raw } = await seedReadToken("mirror");
     const resources = await listMcpResources(raw);
     const tools = await listMcpToolNames(raw);
-    expect(resources).toContain("project://info");
+    expect(resources.sort()).toEqual(Object.keys(MIRRORS).sort());
     for (const uri of resources) {
-      if (uri === "project://info") continue;
       expect(tools).toContain(MIRRORS[uri]);
     }
   });
 
-  it("project://info is fixed reference context, nothing actionable", async () => {
-    const { raw, projectId } = await seedReadToken("info");
-    const info = (await readResource(raw, "project://info")) as Record<
-      string,
-      unknown
-    >;
-    expect(Object.keys(info).sort()).toEqual([
-      "mcpServerVersion",
-      "projectId",
-      "projectName",
-    ]);
-    expect(info.projectId).toBe(projectId);
-  });
-
-  it("a funnel resource is scoped to the token's project", async () => {
-    const { raw } = await seedReadToken("funnel-scope");
-    const other = await seedProject("funnel-scope-other");
-    const foreign = await seedFunnel(other.id, "foreign");
-    await expect(
-      readResource(raw, `funnel://${foreign.id}/structure`),
-    ).rejects.toThrow();
-  });
-
-  it("an experiment resource is scoped to the token's project", async () => {
-    const { raw } = await seedReadToken("exp-scope");
-    const other = await seedProject("exp-scope-other");
-    const foreign = await seedExperiment(other.id, "foreign");
-    await expect(
-      readResource(raw, `experiment://${foreign.id}/status`),
-    ).rejects.toThrow();
-  });
-
-  it("funnel structure carries the page skeleton, never page JSON", async () => {
-    const { raw, projectId } = await seedReadToken("funnel-pages");
-    const funnel = await seedFunnel(projectId, "pages");
-    const structure = (await readResource(
+  it("rovenue://catalog/products reads the project's catalog", async () => {
+    const { raw } = await seedReadToken("catalog");
+    const catalog = (await readResource(
       raw,
-      `funnel://${funnel.id}/structure`,
-    )) as { pages?: unknown[] };
-    expect(structure.pages).toBeInstanceOf(Array);
-    expect(JSON.stringify(structure)).not.toContain("elements");
+      "rovenue://catalog/products",
+    )) as {
+      products?: unknown[];
+      productGroups?: unknown[];
+      truncationNote?: unknown;
+    };
+    expect(catalog.products).toBeInstanceOf(Array);
+    expect(catalog.productGroups).toBeInstanceOf(Array);
+    expect("truncationNote" in catalog).toBe(true);
+  });
+
+  it("rovenue://experiments lists the project's experiments", async () => {
+    const { raw, projectId } = await seedReadToken("explist");
+    await seedExperiment(projectId, "listed");
+    const body = (await readResource(raw, "rovenue://experiments")) as {
+      experiments?: Array<{ id?: string }>;
+    };
+    expect(body.experiments).toBeInstanceOf(Array);
+    expect(body.experiments!.length).toBeGreaterThan(0);
+  });
+
+  it("a paywall resource is scoped to the token's project", async () => {
+    const { raw } = await seedReadToken("paywall-scope");
+    const other = await seedProject("paywall-scope-other");
+    const foreign = await seedPaywall(other.id, "foreign");
+    await expect(
+      readResource(raw, `rovenue://paywall/${foreign.id}`),
+    ).rejects.toThrow();
+  });
+
+  it("rovenue://paywall/{id} serves the tree summary, never raw config", async () => {
+    const { raw, projectId } = await seedReadToken("paywall-tree");
+    const paywall = await seedPaywall(projectId, "tree");
+    const body = (await readResource(
+      raw,
+      `rovenue://paywall/${paywall.id}`,
+    )) as { paywallId?: string; nodes?: unknown[] };
+    expect(body.paywallId).toBe(paywall.id);
+    expect(body.nodes).toBeInstanceOf(Array);
+    expect(JSON.stringify(body)).not.toContain("builderConfig");
   });
 });

@@ -90,9 +90,6 @@ export function buildMcpServer(ctx: McpRequestContext): McpServer {
   );
   const toolCtx = toMcpToolContext(ctx.authInfo);
   registerMcpTools(server, toolCtx);
-  registerMcpResources(server, {
-    projectId: toolCtx.projectId,
-    userId: toolCtx.userId,
-  });
+  registerMcpResources(server, toolCtx);
   return server;
 }

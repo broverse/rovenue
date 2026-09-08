@@ -1,21 +1,13 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
-import { drizzle } from "@rovenue/db";
-// Deferred use only (inside read callbacks, long after module init), so
-// this import cycle with ./server is safe by construction. The version is
-// the server's identity, not a second constant.
-import { MCP_SERVER_VERSION } from "./server";
+import { loadTools } from "../copilot/tools";
 import { sterilizeToolResult } from "../copilot/sterilize";
-import { MCP_MAX_PAGE, capRows } from "./tools";
-
-/**
- * The project-scoped identity every MCP resource reads as. Built per
- * request from the handler's `authInfo`, same as tools — resources are
- * never world-readable.
- */
-export interface McpResourceContext {
-  projectId: string;
-  userId: string;
-}
+import {
+  MCP_MAX_PAGE,
+  capRows,
+  runChatTool,
+  toToolContext,
+  type McpToolContext,
+} from "./tools";
 
 const JSON_MIME = "application/json";
 
@@ -25,6 +17,9 @@ function jsonContents(uri: { href: string }, value: unknown) {
       {
         uri: uri.href,
         mimeType: JSON_MIME,
+        // Handlers sterilize their own results; this second pass is
+        // idempotent (pure key-drop walk) and keeps the resource boundary
+        // safe even if a handler ever forgets.
         text: JSON.stringify(sterilizeToolResult(value)),
       },
     ],
@@ -32,121 +27,97 @@ function jsonContents(uri: { href: string }, value: unknown) {
 }
 
 /**
- * Register the reference surface. Resources serve data a model RE-READS
- * (structure snapshots, status snapshots, project wiring) — nothing
- * actionable lives only here; every entity resource is mirrored by a tool
- * (find_funnels / list_experiments), asserted by the mirror test.
+ * Register the spec-D4 resource surface. Three resources ship, each a thin
+ * read over the SAME chat handler its mirror tool calls — catalog/products
+ * and experiments over the list handlers, paywall/{id} over
+ * query_paywall_tree — so the mirror relation is structural, not asserted.
+ * `rovenue://schema/clickhouse` ships only with `run_analytics_query`
+ * (spec D4 + D7) and stays out while that tool does.
  */
 export function registerMcpResources(
   server: McpServer,
-  ctx: McpResourceContext,
+  ctx: McpToolContext,
 ): void {
-  // project://info — static reference context. Fixed key set, no
-  // actionable payload: there is no plan/limits source to mirror, so this
-  // carries only identity (id, name, server version).
+  // One load per request, same as tools: every read below runs inside the
+  // caller's project scope, never world-readable.
+  const loaded = loadTools(toToolContext(ctx));
+  const run = (
+    name: Parameters<typeof runChatTool>[1],
+    args: Record<string, unknown>,
+  ) => runChatTool(loaded, name, args);
+
+  // rovenue://catalog/products — full catalog snapshot (unfiltered: no
+  // search, inactive excluded, the list_catalog default call).
   server.registerResource(
-    "project-info",
-    "project://info",
+    "catalog-products",
+    "rovenue://catalog/products",
     {
-      title: "Project info",
+      title: "Catalog products",
       mimeType: JSON_MIME,
     },
     async (uri) => {
-      const project = await drizzle.projectRepo.findProjectById(
-        drizzle.db,
-        ctx.projectId,
+      const probe = MCP_MAX_PAGE + 1;
+      const [productsResult, groupsResult] = (await Promise.all([
+        run("query_products_list", { includeInactive: false, limit: probe }),
+        run("query_productGroups_list", { limit: probe }),
+      ])) as [{ products: unknown[] }, { productGroups: unknown[] }];
+      const products = capRows(productsResult.products, MCP_MAX_PAGE);
+      const productGroups = capRows(groupsResult.productGroups, MCP_MAX_PAGE);
+      const notes = [products.truncationNote, productGroups.truncationNote].filter(
+        (n): n is string => n !== null,
       );
-      if (!project) {
-        throw new Error("project not found for this token");
-      }
       return jsonContents(uri, {
-        projectId: project.id,
-        projectName: project.name,
-        mcpServerVersion: MCP_SERVER_VERSION,
+        products: products.rows,
+        productGroups: productGroups.rows,
+        truncationNote: notes.length > 0 ? notes.join(" ") : null,
       });
     },
   );
 
-  // funnel://{id}/structure — page skeleton of the current version.
-  // Funnel pages carry no typed-node graph (unlike paywall builder trees),
-  // so the structure is {id, elementCount} per page; element internals
-  // never ship (cap safety by construction, counts only).
+  // rovenue://experiments — full experiment-list snapshot (unfiltered, the
+  // list_experiments default call).
   server.registerResource(
-    "funnel-structure",
-    new ResourceTemplate("funnel://{id}/structure", { list: undefined }),
+    "experiments",
+    "rovenue://experiments",
     {
-      title: "Funnel structure",
+      title: "Experiments",
       mimeType: JSON_MIME,
     },
-    async (uri, variables) => {
-      const id = variables.id;
-      const row = await drizzle.funnelRepo.findById(
-        drizzle.db,
-        Array.isArray(id) ? (id[0] ?? "") : (id ?? ""),
+    async (uri) => {
+      const result = (await run("query_experiments_list", {
+        limit: MCP_MAX_PAGE + 1,
+      })) as { experiments: unknown[] };
+      const { rows, truncationNote } = capRows(
+        result.experiments,
+        MCP_MAX_PAGE,
       );
-      // Same IDOR precedent as every handler: a verbatim id from another
-      // project is a miss, and a miss is an error, never an empty shape
-      // that a model could misread as "no structure".
-      if (!row || row.projectId !== ctx.projectId) {
-        throw new Error("funnel not found in this project");
-      }
-      let pages: unknown[] = [];
-      if (row.currentVersionId) {
-        const version = await drizzle.funnelVersionRepo.findById(
-          drizzle.db,
-          row.currentVersionId,
-        );
-        pages = Array.isArray(version?.pagesJson) ? version.pagesJson : [];
-      }
-      const skeleton = pages.map((p) => {
-        const page = p as { id?: unknown; elements?: unknown };
-        return {
-          id: typeof page.id === "string" ? page.id : null,
-          elementCount: Array.isArray(page.elements) ? page.elements.length : 0,
-        };
-      });
-      const { rows, truncationNote } = capRows(skeleton, MCP_MAX_PAGE);
-      return jsonContents(uri, {
-        funnelId: row.id,
-        slug: row.slug,
-        defaultLocale: row.defaultLocale,
-        pages: rows,
-        truncationNote,
-      });
+      return jsonContents(uri, { experiments: rows, truncationNote });
     },
   );
 
-  // experiment://{id}/status — status snapshot. Variants/metrics ship raw
-  // (reference data, exactly what resources are for); no computed split —
-  // the stored shapes vary and inventing one would be lying.
+  // rovenue://paywall/{id} — paywall builder-tree summary. The handler
+  // returns null on a miss (same IDOR precedent as every handler: a
+  // verbatim id from another project is a miss, never an empty shape),
+  // and a miss is an error, never a resource-shaped lie.
   server.registerResource(
-    "experiment-status",
-    new ResourceTemplate("experiment://{id}/status", { list: undefined }),
+    "paywall",
+    new ResourceTemplate("rovenue://paywall/{id}", { list: undefined }),
     {
-      title: "Experiment status",
+      title: "Paywall",
       mimeType: JSON_MIME,
     },
     async (uri, variables) => {
       const id = variables.id;
-      const row = await drizzle.experimentRepo.findByIdInProject(
-        drizzle.db,
-        Array.isArray(id) ? (id[0] ?? "") : (id ?? ""),
-        ctx.projectId,
-      );
-      if (!row) {
-        throw new Error("experiment not found in this project");
+      const paywallId = Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
+      const result = (await run("query_paywall_tree", {
+        paywallId,
+      })) as Record<string, unknown> | null;
+      if (!result) {
+        throw new Error(`paywall "${paywallId}" not found in this project`);
       }
-      return jsonContents(uri, {
-        id: row.id,
-        key: row.key,
-        status: row.status,
-        type: row.type,
-        variants: row.variants,
-        metrics: row.metrics,
-        startedAt: row.startedAt?.toISOString() ?? null,
-        completedAt: row.completedAt?.toISOString() ?? null,
-        winnerVariantId: row.winnerVariantId,
-      });
+      const nodes = Array.isArray(result.nodes) ? result.nodes : [];
+      const { rows, truncationNote } = capRows(nodes, MCP_MAX_PAGE);
+      return jsonContents(uri, { ...result, nodes: rows, truncationNote });
     },
   );
 }
