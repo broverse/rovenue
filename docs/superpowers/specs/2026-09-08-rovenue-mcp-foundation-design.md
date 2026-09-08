@@ -53,9 +53,17 @@ These were settled during brainstorming and are inputs, not open questions:
 ### D1 — Transport
 
 Streamable HTTP, mounted at `/mcp` in `apps/api`, using the official
-`@modelcontextprotocol/sdk`. Do not hand-roll JSON-RPC: the SDK carries the
-initialize handshake, protocol-version negotiation, notifications and error
-codes, all of which are easy to get subtly wrong by hand.
+`@modelcontextprotocol/sdk`. Do not hand-roll JSON-RPC: the SDK carries
+discovery, notifications and error codes, all of which are easy to get
+subtly wrong by hand.
+
+**Discovery is `server/discover`, not an initialize handshake.** The
+`initialize`/`initialized` exchange and the `Mcp-Session-Id` header were
+**retired** in the 2026-07-28 revision; a client calls `server/discover` to
+learn the server's supported versions and capabilities before doing anything
+else. An earlier draft of this design described the retired handshake — do
+not carry that mental model into implementation, and do not write a contract
+test against it.
 
 **Use the SDK's Hono middleware.** The SDK publishes optional middleware for
 specific runtimes and frameworks including Hono. Reaching into
@@ -69,17 +77,23 @@ middleware is in a released version, not only in docs. If it is not, the
 fallback is the Node transport plus an explicit decision about what the
 bypassed middleware costs — not a silent bridge.
 
-**Stateless mode.** `sessionIdGenerator: undefined`, and **a new transport
-and server instance per request**. The SDK documents that sharing one
-instance causes request-id collisions between concurrent clients. This also
-matters operationally: Rovenue deploys via Docker Compose and may run
-multiple API replicas, so a session held in one process's memory would break
-behind a load balancer. The cost is losing resumability, which this tool set
-does not need.
+**Stateless.** A new transport and server instance per request; the SDK
+documents that sharing one instance causes request-id collisions between
+concurrent clients. This is not a trade-off being chosen against the grain:
+the 2026-07-28 revision moved the protocol to a **stateless core** that runs
+on ordinary HTTP infrastructure, and retiring `Mcp-Session-Id` is part of
+that. It also happens to be what Rovenue needs — the API may run multiple
+replicas behind a load balancer, where a session in one process's memory
+would break.
 
-**Protocol version is negotiated, not pinned.** A contract test pins the
-minimum supported revision and the negotiation behaviour — not a single
-value, which would reject clients on older revisions.
+**Advertise capabilities honestly at discovery.** The server declares only
+the primitives it actually implements (see D4a on prompts) and a `name`,
+`version` and `instructions` string. `instructions` is the one place to tell
+a client's model how this server expects to be used — that a token is scoped
+to exactly one project, that reads are sterilized, that writes require a
+confirmation step. Write it deliberately; it is part of the interface, not
+boilerplate. A contract test pins the declared capability set so a primitive
+cannot be advertised without being implemented.
 
 **Validate the `Origin` header.** HTTP transports are exposed to DNS
 rebinding; this is not optional and was missing from the first draft of this
@@ -195,12 +209,46 @@ that resource leaves with it rather than shipping unmirrored.
 **Per-tool requirements:**
 
 - Pagination with a hard cap, and truncation stated explicitly in the
-  response (`"47 of 1,203 rows"`), never silent.
+  response (`"47 of 1,203 rows"`), never silent. **Concrete defaults, so an
+  implementer does not invent them:** 50 rows per page, 200 maximum, and a
+  256 KB response ceiling whichever comes first. `run_analytics_query`, if it
+  ships, gets 1,000 rows and 1 MB — larger because its whole purpose is the
+  question the fixed tools cannot answer, and still bounded because an
+  unbounded result would blow the model's context in one call.
 - Return ids the agent can use in a follow-up call, not opaque blobs.
-- Error messages tell the model what to do next, not just a status.
+- **Distinguish a failed tool from a failed protocol.** MCP separates a tool
+  that ran and returned an error (`isError` on the result, which the model
+  sees and can act on) from a protocol-level error (which it cannot). A
+  subscriber that does not exist, a date range with no data, a query the
+  deny-list rejects — all of these are tool results the model should read and
+  react to, not transport failures. Reserve protocol errors for
+  authentication, authorization and malformed requests. Getting this backwards
+  makes an agent retry things that will never succeed.
+- Error text tells the model what to do next — "`experimentId` not found; call
+  `list_experiments` for valid ids" — not just a status code.
 - Write tools carry the specification's destructive/read-only annotations.
   *Verify the current annotation field names against the specification
   schema at implementation time rather than writing them from memory.*
+
+### D4a — Prompts are deliberately out of A
+
+MCP servers expose three primitives: tools, resources and **prompts**. This
+design implements two. Prompts are the one primitive that is *user*-selected
+rather than model-selected — a menu the person picks from — which makes them
+the natural answer to "twelve tools, what do I even ask?"
+
+They are still out of A, and the reason is scope rather than merit: A already
+carries a transport, a token subsystem with its own migration, twelve tools,
+four resources, quota and an access-log pipeline. Prompts add a third
+primitive to implement, test and version, and they block nothing — a user can
+ask in natural language today, and the tool descriptions do that work.
+
+Recorded as the first candidate for the sub-project after C. If it turns out
+customers cannot find the surface, that is the evidence to add them, and a
+prompt composes existing tools rather than needing new backend logic.
+
+**This is an omission with a reason, not an oversight.** An earlier draft of
+this spec simply did not mention prompts at all.
 
 ### D5 — Writes go through the intent flow, with in-band elicitation
 
@@ -231,9 +279,16 @@ strictly weaker.
 ### D6 — Quota and the read trail
 
 **Quota is per token, not per IP.** One agent bursts many tool calls from
-one address, and a shared office IP would punish unrelated users. Follow the
-`rovi-quota-guard` pattern. The global IP rate limit still applies as a
-backstop; it is the wrong primary instrument.
+one address, and a shared office IP would punish unrelated users. The global
+IP rate limit still applies as a backstop; it is the wrong primary
+instrument.
+
+**Reuse the existing quota ladder — do not build a parallel limiter.**
+`resolveTier` / `evaluateQuota` (`services/copilot/quota.ts`) already express
+tier-based monthly limits and already honour `quotasUnlimited()` from
+host-mode. MCP adds a new axis to `ExceededAxis`, not a second counting
+system with its own window and its own numbers. A parallel per-hour limiter
+would drift from the billing ladder the moment either changed.
 
 **Reads leave a trail, but not in `audit_logs`.** That table is a per-project
 append-only hash chain; writing a row per read would bloat the chain and is
@@ -271,6 +326,14 @@ are available and the spec requires both:
 proves larger than expected, it leaves A and becomes its own item — with
 `rovenue://schema/clickhouse` — and the remaining eleven tools are unaffected.
 
+**On long-running queries.** The 2026-07-28 revision adds a Tasks extension
+for work that outlives a single request, and an analytics query over a large
+dataset is the shape it exists for. A does **not** adopt it: the 1 MB / 1,000
+row ceiling above already bounds the work, and a query that cannot finish
+inside a normal request timeout under those bounds is a query that should be
+rejected rather than backgrounded. Recorded so the next author knows it was
+considered, not missed.
+
 ---
 
 ## Named risks
@@ -287,6 +350,12 @@ fact, to a user with no context to notice. **This must be resolved before
 `get_metrics` ships** — either by establishing that sandbox purchases never
 reach ClickHouse, or by adding the dimension. Do not ship a metrics tool over
 numbers whose environment semantics are unverified.
+
+**And it gets the same exit ramp as `run_analytics_query`:** if resolving it
+turns out to be its own project, `get_metrics` leaves A and the remaining
+tools ship without it. An earlier draft gave one blocked tool an exit and not
+the other, which was inconsistent — a tool blocked on an unresolved data
+question is in the same position whichever question it is.
 
 **R2 — Tool results are untrusted input to the customer's own agent.**
 Subscriber custom attributes, paywall copy and imported CSV fields are all
@@ -336,8 +405,26 @@ block A, which writes no paywall content — but it gates C.
 - **Sterilization holds** across every tool that returns subscriber data,
   and `run_analytics_query`'s deny-list rejects an aliased PII column
   (`SELECT email AS x`) — the exact bypass that motivates D7.
-- **Protocol negotiation** against the pinned minimum revision.
+- **Declared capabilities match implemented primitives** — the server cannot
+  advertise a primitive it does not serve (see D4a: prompts are not declared).
 - **`Origin` rejection** for a disallowed origin.
+- **The access trail is actually written.** D6 specifies an `outbox_events`
+  row per tool call that the dispatcher publishes to ClickHouse. Assert the
+  row is emitted in the same transaction as the call it records, and that no
+  code path writes ClickHouse directly — the outbox is the only route. An
+  earlier draft of this spec designed this pipeline and then tested none of
+  it.
+
+**Tool-selection evals, separate from the test suite.** This design claims
+that consolidating seventeen chat-shaped tools into twelve agent-shaped ones
+improves the model's accuracy. Unit and integration tests cannot show that —
+they prove each tool works when called, not that the right one gets called.
+Build a small eval set of real questions ("what was MRR last month", "which
+experiment is winning", "find the subscriber with this id") and check which
+tool the model reaches for. This is also the instrument that decides the
+open question in D4: if selection quality degrades, `list_audiences` and
+`list_feature_flags` are the first two to merge or drop, being furthest from
+the core story.
 
 ## Migration and rollout
 
@@ -361,8 +448,14 @@ block A, which writes no paywall content — but it gates C.
 ## Open questions
 
 - **R1's resolution** — does sandbox revenue reach ClickHouse? Blocks
-  `get_metrics`.
+  `get_metrics` (which now has an exit ramp if the answer is expensive).
 - **The SDK's Hono middleware** — released, or docs-only? Blocks D1's shape.
+  This is the one remaining claim in this spec taken from documentation prose
+  rather than verified against a package.
 - **Annotation field names** in the current specification revision. Blocks
-  D4's write-tool metadata.
+  D4's write-tool metadata. Write them from the schema, not from memory.
 - **R3** — does A ship in self-host, cloud, or both at once?
+
+*Confirmed while revising:* 2026-07-28 is still the current specification
+revision, and its retirement of `initialize` / `Mcp-Session-Id` in favour of
+`server/discover` is now reflected in D1.
