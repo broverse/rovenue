@@ -8,7 +8,7 @@ import { app } from "../../app";
 import { MCP_PROTOCOL_REVISION } from "../../services/mcp/server";
 
 const FORBIDDEN = 403;
-const OK = 200;
+const UNAUTHORIZED = 401;
 const DISALLOWED_ORIGIN = "https://evil.example";
 
 const DISCOVER_HEADERS = {
@@ -53,22 +53,15 @@ describe("POST /mcp discovery", () => {
     expect(res.status).toBe(FORBIDDEN);
   });
 
-  it("declares only the primitives it implements", async () => {
-    // Prompts are deliberately out of scope (design spec, D4a). The server
-    // must not advertise a primitive it does not serve — a client that sees
-    // `prompts` will call `prompts/list` and get a protocol error.
+  it("requires authentication even for discovery", async () => {
+    // Since Task 4 every /mcp request carries a user-bound token. The
+    // exact-set capability assertion moved to auth.integration.test.ts,
+    // where a live token exercises it behind auth.
     const res = await app.request("/mcp", {
       method: "POST",
       headers: DISCOVER_HEADERS,
       body: discoverBody(1),
     });
-    expect(res.status).toBe(OK);
-    const body = (await res.json()) as {
-      result?: { capabilities?: Record<string, unknown> };
-    };
-    // Exact set, not subset: a newly advertised primitive (prompts, logging,
-    // …) must fail here rather than slip past a toContain check.
-    const declared = Object.keys(body.result?.capabilities ?? {}).sort();
-    expect(declared).toEqual(["resources", "tools"]);
+    expect(res.status).toBe(UNAUTHORIZED);
   });
 });

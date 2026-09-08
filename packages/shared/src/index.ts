@@ -123,6 +123,15 @@ export const API_KEY_PREFIX = {
   [API_KEY_KIND.SECRET]: "rov_sec_",
 } as const satisfies Record<ApiKeyKind, string>;
 
+/**
+ * MCP tokens are deliberately NOT a third `API_KEY_KIND`. `apiKeyAuth("any")`
+ * classifies by prefix and accepts PUBLIC or SECRET; adding a kind there
+ * would make every /v1/* route using "any" start accepting MCP tokens
+ * unless every call site were audited. A distinct prefix on a distinct
+ * table means `apiKeyAuth` cannot classify it and fails closed.
+ */
+export const MCP_TOKEN_PREFIX = "rov_mcp_";
+
 // =============================================================
 // HTTP header names
 // =============================================================

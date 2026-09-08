@@ -28,6 +28,7 @@ import { invitationsRoute } from "./invitations";
 import { notificationsRoute } from "./notifications";
 import { projectNotificationDefaultsRoute } from "./project-notification-defaults";
 import { pushDevicesRoute } from "./push-devices";
+import { mcpTokensRoute } from "./mcp-tokens";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
@@ -93,6 +94,7 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/integrations", integrationsRoute)
   .route("/projects/:projectId/leaderboards", leaderboardsRoute)
   .route("/projects/:projectId/invitations", invitationsRoute)
+  .route("/projects/:projectId/mcp-tokens", mcpTokensRoute)
   .route("/projects/:projectId/members", membersRoute)
   .route(
     "/projects/:projectId/notification-defaults",

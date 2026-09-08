@@ -45,6 +45,9 @@ export type AuditAction =
   | "api_key.created"
   | "api_key.revoked"
   | "api_key.allowed_origins_updated"
+  // --- mcp token ---
+  | "mcp_token.created"
+  | "mcp_token.revoked"
   // --- credentials ---
   | "credential.updated"
   | "credential.cleared"
@@ -244,6 +247,7 @@ export type AuditResource =
   | "feature_flag"
   | "project"
   | "api_key"
+  | "mcp_token"
   | "product"
   | "product_group"
   | "purchase"

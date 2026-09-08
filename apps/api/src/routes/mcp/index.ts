@@ -1,7 +1,14 @@
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { localhostOriginValidation } from "@modelcontextprotocol/hono";
+import { BEARER_SCHEME, HEADER } from "@rovenue/shared";
+import { drizzle } from "@rovenue/db";
+import { logger } from "../../lib/logger";
 import { buildMcpServer } from "../../services/mcp/server";
+import { verifyMcpToken } from "./auth";
+
+const log = logger.child("mcp-auth");
 
 /**
  * One handler for the whole subtree. Statelessness lives in the factory:
@@ -21,6 +28,8 @@ const mcpHandler = createMcpHandler((ctx) => buildMcpServer(ctx), {
   legacy: "reject",
 });
 
+const BEARER_PREFIX_LOWER = `${BEARER_SCHEME.toLowerCase()} `;
+
 /**
  * Origin is validated before anything else. HTTP transports are exposed to
  * DNS rebinding; this is not optional.
@@ -34,4 +43,30 @@ const mcpHandler = createMcpHandler((ctx) => buildMcpServer(ctx), {
  */
 export const mcpRoute = new Hono()
   .use("*", localhostOriginValidation())
+  .use("*", async (c, next) => {
+    // Every /mcp request carries a user-bound token (Task 4). A missing or
+    // unverifiable Bearer [REDACTED] is the same 401 — never leak which check failed.
+    const header = c.req.header(HEADER.AUTHORIZATION);
+    const raw =
+      header && header.toLowerCase().startsWith(BEARER_PREFIX_LOWER)
+        ? header.slice(BEARER_PREFIX_LOWER.length).trim()
+        : null;
+    const ctx = raw ? await verifyMcpToken(raw) : null;
+    if (!ctx) {
+      throw new HTTPException(401, { message: "Invalid or expired MCP token" });
+    }
+    c.set("mcpToken", ctx);
+
+    // Fire-and-forget last-used touch.
+    drizzle.mcpTokenRepo
+      .touchLastUsed(drizzle.db, ctx.tokenId)
+      .catch((err: unknown) => {
+        log.warn("lastUsedAt update failed", {
+          tokenId: ctx.tokenId,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+    await next();
+  })
   .all("*", (c) => mcpHandler.fetch(c.req.raw));
