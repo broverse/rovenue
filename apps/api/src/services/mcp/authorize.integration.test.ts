@@ -279,6 +279,7 @@ describe("assertToolAllowed", () => {
       list_feature_flags: "read",
       list_experiments: "read",
       get_paywall: "read",
+      find_funnels: "read",
     });
   });
 });

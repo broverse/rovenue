@@ -5,6 +5,7 @@ import { queryMetricsTools } from "./query-metrics";
 import { queryAudiencesTools } from "./query-audiences";
 import { queryExperimentsTools } from "./query-experiments";
 import { queryFeatureFlagsTools } from "./query-feature-flags";
+import { queryFunnelsTools } from "./query-funnels";
 import { actionSubscriptionsTools } from "./action-subscriptions";
 import { actionSubscribersTools } from "./action-subscribers";
 import { actionProductsTools } from "./action-products";
@@ -37,6 +38,7 @@ export function loadTools(ctx: ToolContext) {
     ...queryAudiencesTools(ctx),
     ...queryExperimentsTools(ctx),
     ...queryFeatureFlagsTools(ctx),
+    ...queryFunnelsTools(ctx),
     ...actionSubscriptionsTools(ctx),
     ...actionSubscribersTools(ctx),
     ...actionProductsTools(ctx),

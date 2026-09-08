@@ -13,6 +13,7 @@ import { ListArgs as AudiencesListArgs } from "../copilot/tools/query-audiences"
 import { ListArgs as ExperimentsListArgs } from "../copilot/tools/query-experiments";
 import { ListArgs as FeatureFlagsListArgs } from "../copilot/tools/query-feature-flags";
 import { GetArgs as PaywallGetArgs } from "../copilot/tools/query-paywall";
+import { FindFunnelsArgs } from "../copilot/tools/query-funnels";
 import { sterilizeToolResult } from "../copilot/sterilize";
 
 /**
@@ -91,6 +92,7 @@ const ListCatalogArgs = ListProductsArgs.extend({ limit: McpLimit });
 const ListAudiencesArgs = AudiencesListArgs.extend({ limit: McpLimit });
 const ListFeatureFlagsArgs = FeatureFlagsListArgs.extend({ limit: McpLimit });
 const ListExperimentsArgs = ExperimentsListArgs.extend({ limit: McpLimit });
+const FindFunnelsMcpArgs = FindFunnelsArgs.extend({ limit: McpLimit });
 
 function toToolContext(ctx: McpToolContext): ToolContext {
   return {
@@ -370,6 +372,45 @@ export function registerMcpTools(server: McpServer, ctx: McpToolContext): void {
       } catch (err) {
         return errPayload(
           `list_experiments failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+  );
+
+  // find_funnels ← query tool of the same name (Task 7 built it
+  // consolidated from the start). Lists normalize to {rows} like every
+  // other list tool; detail returns the single funnel object.
+  server.registerTool(
+    "find_funnels",
+    {
+      description:
+        "Find funnels in the current project. Pass id for one funnel's detail (slug and published page count), or status/limit to list. At most 200 rows per call; the response states when it is truncated.",
+      inputSchema: asMcpInputSchema(FindFunnelsMcpArgs),
+      annotations: { readOnlyHint: true },
+    },
+    async (rawArgs: unknown) => {
+      const { id, status, limit } = rawArgs as z.infer<typeof FindFunnelsMcpArgs>;
+      try {
+        if (id) {
+          const result = (await run("find_funnels", { id })) as {
+            funnel: Record<string, unknown>;
+          } | null;
+          if (!result) {
+            return errPayload(
+              `funnel "${id}" not found in this project; call find_funnels without id to list`,
+            );
+          }
+          return okPayload(result);
+        }
+        const result = (await run("find_funnels", {
+          status,
+          limit: Math.min(limit, MCP_MAX_PAGE) + 1,
+        })) as { funnels: unknown[] };
+        const { rows, truncationNote } = capRows(result.funnels, limit);
+        return okPayload({ rows, truncationNote });
+      } catch (err) {
+        return errPayload(
+          `find_funnels failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     },

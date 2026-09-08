@@ -37,6 +37,7 @@ const READ_TOOLS = [
   "list_feature_flags",
   "list_experiments",
   "get_paywall",
+  "find_funnels",
 ];
 
 function buildMcpApp() {
@@ -180,6 +181,19 @@ async function seedReadToken(suffix: string) {
   return { raw, projectId: project.id };
 }
 
+async function seedFunnels(projectId: string, n: number) {
+  const ids: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const row = await drizzle.funnelRepo.insert(drizzle.db, {
+      projectId,
+      slug: `tools-funnel-${RUN_ID}-${i}`,
+      name: `Tools Funnel ${i}`,
+    });
+    ids.push(row.id);
+  }
+  return ids;
+}
+
 async function seedSubscribers(projectId: string, n: number) {
   for (let i = 0; i < n; i++) {
     await drizzle.subscriberRepo.createSubscriber(drizzle.db, {
@@ -255,6 +269,18 @@ describe("MCP consolidated surface", () => {
     const res = await callTool(raw, "find_subscribers", {});
     expect(res.isError).toBe(false);
     expect(JSON.stringify(res)).not.toContain("@");
+  });
+
+  it("find_funnels lists project funnels without page JSON", async () => {
+    const { raw, projectId } = await seedReadToken("funnels");
+    await seedFunnels(projectId, 2);
+    const res = await callTool(raw, "find_funnels", {});
+    expect(res.isError).toBe(false);
+    const structured = res.structured as {
+      rows?: Array<{ id: string; slug: string }>;
+    } | null;
+    expect(structured?.rows).toHaveLength(2);
+    expect(JSON.stringify(structured)).not.toContain("pagesJson");
   });
 
   it("a missing id is a tool error the model can act on, not a protocol error", async () => {
