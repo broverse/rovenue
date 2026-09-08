@@ -35,6 +35,9 @@ export const MCP_DEFAULT_PAGE = 50;
 export const MCP_MAX_PAGE = 200;
 export const MCP_MAX_RESPONSE_BYTES = 256 * 1024;
 
+// Shared with resources.ts: the same page/byte ceiling governs every
+// shaped payload, tool or resource.
+
 const McpLimit = z.number().int().positive().max(MCP_MAX_PAGE).default(MCP_DEFAULT_PAGE);
 
 /**
@@ -119,7 +122,7 @@ interface PagedRows {
  * count no repository provides. The "+" in "200 of 200+ rows" is doing
  * real work — it marks the unknown, unlike a silently cut list.
  */
-function capRows(all: unknown[], limit: number): PagedRows {
+export function capRows(all: unknown[], limit: number): PagedRows {
   const cap = Math.min(Math.max(limit, 1), MCP_MAX_PAGE);
   const window = all.slice(0, cap + 1);
   let rows = window.length > cap ? window.slice(0, cap) : window;

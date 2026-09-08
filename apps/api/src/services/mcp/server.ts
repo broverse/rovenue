@@ -3,6 +3,7 @@ import type {
   AuthInfo,
   McpRequestContext,
 } from "@modelcontextprotocol/server";
+import { registerMcpResources } from "./resources";
 import { registerMcpTools } from "./tools";
 
 /** Server identity clients see in `server/discover`. */
@@ -87,6 +88,11 @@ export function buildMcpServer(ctx: McpRequestContext): McpServer {
       instructions: MCP_INSTRUCTIONS,
     },
   );
-  registerMcpTools(server, toMcpToolContext(ctx.authInfo));
+  const toolCtx = toMcpToolContext(ctx.authInfo);
+  registerMcpTools(server, toolCtx);
+  registerMcpResources(server, {
+    projectId: toolCtx.projectId,
+    userId: toolCtx.userId,
+  });
   return server;
 }

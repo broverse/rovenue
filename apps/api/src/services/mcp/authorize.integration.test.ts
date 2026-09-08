@@ -90,7 +90,9 @@ async function callMcp(raw: string) {
 async function callTool(raw: string, tool: string, args: unknown) {
   return buildMcpApp().request("/mcp", {
     method: "POST",
-    headers: { ...mcpHeaders(raw), "mcp-method": "tools/call" },
+    // Mcp-Name must agree with params.name (SEP-2243 header/body
+    // agreement); without it the entry answers 400 before any gate runs.
+    headers: { ...mcpHeaders(raw), "mcp-method": "tools/call", "mcp-name": tool },
     body: toolCallBody(2, tool, args),
   });
 }

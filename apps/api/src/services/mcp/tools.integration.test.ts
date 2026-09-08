@@ -86,7 +86,9 @@ async function listMcpToolNames(raw: string): Promise<string[]> {
 async function callTool(raw: string, tool: string, args: unknown) {
   const res = await buildMcpApp().request("/mcp", {
     method: "POST",
-    headers: mcpHeaders(raw, "tools/call"),
+    // Mcp-Name must agree with params.name (SEP-2243 header/body
+    // agreement); without it the entry answers 400 before any gate runs.
+    headers: { ...mcpHeaders(raw, "tools/call"), "mcp-name": tool },
     body: envelope(2, "tools/call", { name: tool, arguments: args }),
   });
   const body = (await res.json()) as {
