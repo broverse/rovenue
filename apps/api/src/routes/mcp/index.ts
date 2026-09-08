@@ -44,9 +44,25 @@ const mcpHandler = createMcpHandler((ctx) => buildMcpServer(ctx), {
 
 const BEARER_PREFIX_LOWER = `${BEARER_SCHEME.toLowerCase()} `;
 
+/**
+ * The JSON-RPC envelope, parsed ONCE per request.
+ *
+ * It cannot be read twice: `mcpHandler.fetch(c.req.raw)` consumes the
+ * request body, and `Request.clone()` throws on an already-disturbed body
+ * ("unusable"). A second probe after the handler therefore always failed
+ * closed and silently skipped the access trail — which is the counter both
+ * MCP ceilings read, so neither was ever enforced. Parse before dispatch,
+ * carry the result forward.
+ */
+interface McpEnvelope {
+  method?: unknown;
+  params?: { name?: unknown; arguments?: unknown };
+}
+
 declare module "hono" {
   interface ContextVariableMap {
     mcpRole: MemberRole;
+    mcpEnvelope: McpEnvelope;
   }
 }
 
@@ -102,18 +118,19 @@ export const mcpRoute = new Hono()
     // is read from a clone so the handler still receives an unread
     // request; an unparseable body simply skips gating and lets the
     // handler answer (415/400) on its own terms.
-    let method: unknown;
-    let toolName: unknown;
+    //
+    // This is also the LAST point at which the body is readable, so the
+    // parsed envelope is stashed for the access trail below rather than
+    // probed a second time after dispatch.
+    let envelope: McpEnvelope = {};
     try {
-      const probed = (await c.req.raw.clone().json()) as {
-        method?: unknown;
-        params?: { name?: unknown };
-      };
-      method = probed.method;
-      toolName = probed.params?.name;
+      envelope = (await c.req.raw.clone().json()) as McpEnvelope;
     } catch {
-      method = undefined;
+      envelope = {};
     }
+    c.set("mcpEnvelope", envelope);
+    const method = envelope.method;
+    const toolName = envelope.params?.name;
     if (method === "tools/call") {
       assertToolAllowed(ctx, toolName);
 
@@ -209,12 +226,7 @@ export const mcpRoute = new Hono()
     // always has its row; a trail failure must never rewrite the tool
     // result the handler already produced, so it logs instead of
     // throwing (touchLastUsed above follows the same precedent).
-    let probed: { method?: unknown; params?: { name?: unknown; arguments?: unknown } };
-    try {
-      probed = (await c.req.raw.clone().json()) as typeof probed;
-    } catch {
-      probed = {};
-    }
+    const probed = c.get("mcpEnvelope") ?? {};
     if (probed.method === "tools/call" && typeof probed.params?.name === "string") {
       try {
         await recordMcpAccess(drizzle.db, {
