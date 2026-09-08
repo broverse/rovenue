@@ -5,6 +5,7 @@ import type {
 } from "@modelcontextprotocol/server";
 import { registerMcpResources } from "./resources";
 import { registerMcpTools } from "./tools";
+import { registerMcpWriteTools } from "./write-tools";
 
 /** Server identity clients see in `server/discover`. */
 export const MCP_SERVER_NAME = "rovenue-mcp";
@@ -91,5 +92,6 @@ export function buildMcpServer(ctx: McpRequestContext): McpServer {
   const toolCtx = toMcpToolContext(ctx.authInfo);
   registerMcpTools(server, toolCtx);
   registerMcpResources(server, toolCtx);
+  registerMcpWriteTools(server, toolCtx);
   return server;
 }

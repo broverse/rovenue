@@ -53,7 +53,7 @@ const McpLimit = z.number().int().positive().max(MCP_MAX_PAGE).default(MCP_DEFAU
  * silently change semantics), while the generated JSON Schema serves only
  * the display + pre-dispatch slots it agrees with by construction.
  */
-function asMcpInputSchema(schema: z.ZodTypeAny): StandardSchemaWithJSON {
+export function asMcpInputSchema(schema: z.ZodTypeAny): StandardSchemaWithJSON {
   // zod-to-json-schema@3.25.2 types declare a Promise, but the installed
   // build returns the schema synchronously (verified at runtime:
   // constructor Object, no .then). Cast with a loud guard so a future
@@ -146,7 +146,7 @@ export function capRows(all: unknown[], limit: number): PagedRows {
   return { rows, truncationNote };
 }
 
-function okPayload(payload: Record<string, unknown>) {
+export function okPayload(payload: Record<string, unknown>) {
   const sterile = sterilizeToolResult(payload) as Record<string, unknown>;
   return {
     content: [{ type: "text" as const, text: JSON.stringify(sterile) }],
@@ -154,7 +154,7 @@ function okPayload(payload: Record<string, unknown>) {
   };
 }
 
-function errPayload(message: string) {
+export function errPayload(message: string) {
   // A tool that ran and failed: model-readable, never a protocol error.
   return {
     content: [{ type: "text" as const, text: message }],

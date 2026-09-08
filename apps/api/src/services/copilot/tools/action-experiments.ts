@@ -1,6 +1,42 @@
 import { z } from "zod";
 import { createIntentTool } from "./_action-helper";
+import type { RoviIntentPreview } from "@rovenue/shared";
 import type { ToolContext } from "./query-subscribers";
+
+/**
+ * Preview builders shared by the chat action tools and the MCP write
+ * tools: one source of truth for what the approver sees. MCP passes the
+ * same fields (reason optional there — the brief's call shape carries no
+ * reason, and the audit row records what was given).
+ */
+export function buildExperimentStartPreview(input: {
+  experimentId: string;
+  reason: string;
+}): RoviIntentPreview {
+  return {
+    title: `Start experiment ${input.experimentId}`,
+    fields: [
+      { label: "Experiment", after: input.experimentId },
+      { label: "Action", after: "start" },
+      { label: "Reason", after: input.reason },
+    ],
+  };
+}
+
+export function buildExperimentStopPreview(input: {
+  experimentId: string;
+  winnerVariantId?: string;
+  reason: string;
+}): RoviIntentPreview {
+  return {
+    title: `Stop experiment ${input.experimentId}`,
+    fields: [
+      { label: "Experiment", after: input.experimentId },
+      { label: "Winning Variant", after: input.winnerVariantId ?? "none" },
+      { label: "Reason", after: input.reason },
+    ],
+  };
+}
 
 export function actionExperimentsTools(ctx: ToolContext) {
   const tools = {
@@ -14,14 +50,7 @@ export function actionExperimentsTools(ctx: ToolContext) {
         reason: z.string().min(1),
       }),
       requiresRole: "ADMIN",
-      buildPreview: (i) => ({
-        title: `Start experiment ${i.experimentId}`,
-        fields: [
-          { label: "Experiment", after: i.experimentId },
-          { label: "Action", after: "start" },
-          { label: "Reason", after: i.reason },
-        ],
-      }),
+      buildPreview: buildExperimentStartPreview,
     }),
 
     "action_experiments_stop": createIntentTool({
@@ -35,14 +64,7 @@ export function actionExperimentsTools(ctx: ToolContext) {
         reason: z.string().min(1),
       }),
       requiresRole: "ADMIN",
-      buildPreview: (i) => ({
-        title: `Stop experiment ${i.experimentId}`,
-        fields: [
-          { label: "Experiment", after: i.experimentId },
-          { label: "Winning Variant", after: i.winnerVariantId ?? "none" },
-          { label: "Reason", after: i.reason },
-        ],
-      }),
+      buildPreview: buildExperimentStopPreview,
     }),
   };
   // MCP serves no action tools yet (writes arrive in Task 9

@@ -32,6 +32,10 @@ export const TOOL_SURFACE: Record<string, ToolSurface> = {
   list_experiments: "read",
   get_paywall: "read",
   find_funnels: "read",
+  // Phase 2 Task 9: the only writes in A. A `read` token is refused
+  // before the tool body runs, so denial leaves no intent row behind.
+  start_experiment: "write",
+  stop_experiment: "write",
 };
 
 /**

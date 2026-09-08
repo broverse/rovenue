@@ -269,10 +269,11 @@ describe("assertToolAllowed", () => {
     expect(() => assertToolAllowed(readCtx, "stop_experiment")).toThrow();
   });
 
-  it("TOOL_SURFACE marks every shipped tool read", () => {
-    // Task 6 populated this map as tools shipped. A tool added WITHOUT an
-    // entry stays unreachable to read tokens by construction (fail-closed
-    // unknown handling) — this pin makes that allow-list explicit.
+  it("TOOL_SURFACE marks every shipped tool read or write", () => {
+    // Task 6 populated this map as tools shipped; Task 9 adds the two
+    // writes. A tool added WITHOUT an entry stays unreachable to read
+    // tokens by construction (fail-closed unknown handling) — this pin
+    // makes that allow-list explicit.
     expect(TOOL_SURFACE).toEqual({
       find_subscribers: "read",
       list_subscriptions: "read",
@@ -282,6 +283,8 @@ describe("assertToolAllowed", () => {
       list_experiments: "read",
       get_paywall: "read",
       find_funnels: "read",
+      start_experiment: "write",
+      stop_experiment: "write",
     });
   });
 });
