@@ -50,6 +50,11 @@ import {
   createBodySchema as createPlacementBodySchema,
 } from "../../routes/dashboard/placements";
 import { deleteAssetQuerySchema } from "../../routes/dashboard/assets";
+import {
+  createFunnelBodySchema,
+  updateFunnelBodySchema,
+} from "../../routes/dashboard/funnels";
+import { normalizeFunnelSettings } from "../funnel/settings-normalize";
 // The dashboard virtual-currencies route validates POST with this same
 // shared schema (the route exports no local createBodySchema), so the
 // handler re-parses with the identical object — dashboard parity, never
@@ -1050,4 +1055,144 @@ export function registerAllIntentHandlers(): void {
       return row;
     });
   });
+
+  // ------------------------------------------------------------------
+  // action.funnels.create (MCP create_funnel)
+  // Mirrors POST /dashboard/:projectId/funnels (funnels:write): the
+  // slug is auto-generated when absent, and create + audit commit
+  // atomically in one transaction. The slug helpers are a local mirror
+  // of the route's module-private helpers — services must not depend
+  // on routes for logic, only for validation schemas.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_funnels_create", async (ctx, payload) => {
+    const body = createFunnelBodySchema.parse(payload);
+    const slug = body.slug ?? `${kebabCaseName(body.name)}-${randomSuffix()}`;
+
+    return drizzle.db.transaction(async (tx) => {
+      const row = await drizzle.funnelRepo.insert(tx, {
+        projectId: ctx.projectId,
+        slug,
+        name: body.name,
+        createdBy: ctx.userId,
+      });
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "funnel.created",
+          resource: "funnel",
+          resourceId: row.id,
+          after: { name: row.name, slug: row.slug },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+      return row;
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // action.funnels.update (MCP update_funnel)
+  // Mirrors PATCH /dashboard/:projectId/funnels/:funnelId
+  // (funnels:write): unknown ids are refused, draft JSON columns stay
+  // opaque working copies (strict validation happens at publish, never
+  // here), camelCase settings are normalized to the snake_case reader
+  // shape, and update + audit commit atomically in one transaction.
+  // Only the DRAFT is written — nothing here reaches live traffic
+  // until someone publishes.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_funnels_update", async (ctx, payload) => {
+    const { funnelId, ...fields } = updateFunnelPayloadSchema.parse(payload);
+
+    const existing = await drizzle.funnelRepo.findById(drizzle.db, funnelId);
+    if (!existing || existing.projectId !== ctx.projectId) {
+      throw new Error(`Funnel ${funnelId} not found in project`);
+    }
+
+    const patch: Parameters<typeof drizzle.funnelRepo.updateById>[2] = {};
+    if (fields.name !== undefined) patch.name = fields.name;
+    if (fields.slug !== undefined) patch.slug = fields.slug;
+    if (fields.draft_pages_json !== undefined) {
+      patch.draftPagesJson = fields.draft_pages_json;
+    }
+    if (fields.draft_theme_json !== undefined) {
+      patch.draftThemeJson = fields.draft_theme_json;
+    }
+    if (fields.draft_settings_json !== undefined) {
+      patch.draftSettingsJson = normalizeFunnelSettings(
+        fields.draft_settings_json,
+      );
+    }
+    if (fields.default_locale !== undefined) {
+      patch.defaultLocale = fields.default_locale;
+    }
+    if (fields.locales !== undefined) {
+      patch.locales = fields.locales;
+    }
+
+    // Cross-field guard for the "only one of the two was sent" case —
+    // the body-schema refine only fires when both arrive together.
+    const nextDefault = fields.default_locale ?? existing.defaultLocale;
+    const nextLocales = fields.locales ?? existing.locales;
+    if (!nextLocales.includes(nextDefault)) {
+      throw new Error("default_locale must be one of locales");
+    }
+
+    return drizzle.db.transaction(async (tx) => {
+      const row = await drizzle.funnelRepo.updateById(tx, funnelId, patch);
+      if (!row) {
+        throw new Error(`Funnel ${funnelId} not found in project`);
+      }
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "funnel.updated",
+          resource: "funnel",
+          resourceId: funnelId,
+          after: { fields: Object.keys(patch) },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+      return row;
+    });
+  });
 }
+
+/**
+ * Local mirror of the funnels route's module-private slug helpers
+ * (routes/dashboard/funnels.ts): services must not import route logic,
+ * only validation schemas.
+ */
+const FUNNEL_SLUG_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+function randomSuffix(len = 4): string {
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    out +=
+      FUNNEL_SLUG_ALPHABET[
+        Math.floor(Math.random() * FUNNEL_SLUG_ALPHABET.length)
+      ];
+  }
+  return out;
+}
+
+function kebabCaseName(input: string): string {
+  return (
+    input
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "funnel"
+  );
+}
+
+// The dashboard PATCH reads the id from the path; an intent payload
+// carries it, so the payload schema is the route's own update schema
+// intersected with the path param — every field validation and refine
+// stays exactly the dashboard's, and a forged payload cannot smuggle
+// another shape past the tool boundary.
+const updateFunnelPayloadSchema = updateFunnelBodySchema.and(
+  z.object({ funnelId: z.string().min(1) }),
+);

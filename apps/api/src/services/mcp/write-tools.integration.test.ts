@@ -1082,3 +1082,186 @@ describe("MCP virtual currency create tool", () => {
     expect(await countIntents()).toBe(before);
   });
 });
+
+describe("MCP funnel create and edit tools", () => {
+  it("create_funnel proposes, then creates on confirmation", async () => {
+    const { raw, projectId, userId } = await seedToken("funnel", "read_write");
+    const args = { name: `MCP Funnel ${RUN_ID}` };
+
+    const proposal = await callTool(raw, "create_funnel", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have created anything.
+    expect(
+      (await drizzle.funnelRepo.listByProject(drizzle.db, projectId)).some(
+        (f) => f.name === args.name,
+      ),
+    ).toBe(false);
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "create_funnel", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const rows = await drizzle.funnelRepo.listByProject(
+      drizzle.db,
+      projectId,
+    );
+    const row = rows.find((f) => f.name === args.name);
+    expect(row?.createdBy).toBe(userId);
+    expect(row?.slug).toMatch(/mcp-funnel/);
+  });
+
+  it("create_funnel writes an audit row naming the token's owner", async () => {
+    const { raw, projectId, userId } = await seedToken(
+      "funnelaudit",
+      "read_write",
+    );
+    const args = { name: `MCP Audited Funnel ${RUN_ID}` };
+    const proposal = await callTool(raw, "create_funnel", args);
+    const confirmed = await callTool(raw, "create_funnel", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+
+    const row = await latestAuditRow(projectId);
+    expect(row?.userId).toBe(userId);
+    expect(row?.action).toBe("funnel.created");
+    expect(row?.resource).toBe("funnel");
+  });
+
+  it("create_funnel declines cleanly when the user refuses", async () => {
+    const { raw, projectId } = await seedToken("funneldec", "read_write");
+    const args = { name: `MCP Declined Funnel ${RUN_ID}` };
+    const proposal = await callTool(raw, "create_funnel", args);
+    const declined = await callTool(raw, "create_funnel", args, {
+      inputResponses: { confirm: { action: "decline" } },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(declined.isError).toBe(true);
+    expect(
+      (await drizzle.funnelRepo.listByProject(drizzle.db, projectId)).some(
+        (f) => f.name === args.name,
+      ),
+    ).toBe(false);
+  });
+
+  it("update_funnel proposes, then renames the draft on confirmation", async () => {
+    const { raw, projectId, userId } = await seedToken(
+      "funneledit",
+      "read_write",
+    );
+    const funnel = await drizzle.funnelRepo.insert(drizzle.db, {
+      projectId,
+      slug: `mcp-edit-${RUN_ID}`,
+      name: `MCP Edit Funnel ${RUN_ID}`,
+      createdBy: userId,
+    });
+    const args = { funnelId: funnel.id, name: `MCP Renamed ${RUN_ID}` };
+
+    const proposal = await callTool(raw, "update_funnel", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have changed anything.
+    expect(
+      (await drizzle.funnelRepo.findById(drizzle.db, funnel.id))?.name,
+    ).toBe(`MCP Edit Funnel ${RUN_ID}`);
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "update_funnel", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const updated = await drizzle.funnelRepo.findById(
+      drizzle.db,
+      funnel.id,
+    );
+    expect(updated?.name).toBe(`MCP Renamed ${RUN_ID}`);
+    // Draft-only edit: the funnel is still unpublished.
+    expect(updated?.status).toBe("draft");
+
+    const row = await latestAuditRow(projectId);
+    expect(row?.userId).toBe(userId);
+    expect(row?.action).toBe("funnel.updated");
+    expect(row?.resource).toBe("funnel");
+  });
+
+  it("update_funnel fails closed on an unknown funnel id", async () => {
+    const { raw } = await seedToken("funnelmis", "read_write");
+    const args = { funnelId: "fn_missing", name: "Renamed" };
+    const proposal = await callTool(raw, "update_funnel", args);
+    expect(proposal.isError).toBe(false);
+    const res = await callTool(raw, "update_funnel", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/not found/i);
+    expect(
+      await drizzle.funnelRepo.findById(drizzle.db, "fn_missing"),
+    ).toBeNull();
+  });
+
+  it("a confirmation echoing different args fails closed", async () => {
+    const { raw, projectId, userId } = await seedToken(
+      "funnelswap",
+      "read_write",
+    );
+    const funnel = await drizzle.funnelRepo.insert(drizzle.db, {
+      projectId,
+      slug: `mcp-swap-${RUN_ID}`,
+      name: `MCP Swap Funnel ${RUN_ID}`,
+      createdBy: userId,
+    });
+    const proposal = await callTool(raw, "update_funnel", {
+      funnelId: funnel.id,
+      name: `MCP Swap A ${RUN_ID}`,
+    });
+    const swapped = await callTool(
+      raw,
+      "update_funnel",
+      { funnelId: funnel.id, name: `MCP Swap B ${RUN_ID}` },
+      {
+        inputResponses: {
+          confirm: { action: "accept", content: { confirm: true } },
+        },
+        requestState: proposal.rawResult.requestState as string,
+      },
+    );
+    expect(swapped.isError).toBe(true);
+    expect(swapped.text).toMatch(/does not match/i);
+    expect(
+      (await drizzle.funnelRepo.findById(drizzle.db, funnel.id))?.name,
+    ).toBe(`MCP Swap Funnel ${RUN_ID}`);
+  });
+
+  it("a read token cannot propose a funnel create: protocol refusal, no intent row", async () => {
+    const before = await countIntents();
+    const { raw } = await seedToken("freadgate", "read");
+    const res = await callTool(raw, "create_funnel", { name: "Whatever" });
+    expect(res.isError).toBe(true);
+    expect(await countIntents()).toBe(before);
+  });
+
+  it("a read token cannot propose a funnel edit: protocol refusal, no intent row", async () => {
+    const before = await countIntents();
+    const { raw } = await seedToken("fereadgate", "read");
+    const res = await callTool(raw, "update_funnel", {
+      funnelId: "whatever",
+      name: "Whatever",
+    });
+    expect(res.isError).toBe(true);
+    expect(await countIntents()).toBe(before);
+  });
+});

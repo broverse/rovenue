@@ -66,7 +66,10 @@ const slugSchema = z
 // Body schemas
 // -------------------------------------------------------------
 
-const createFunnelBodySchema = z.object({
+// Exported for the MCP write tools + intent handlers (dashboard parity —
+// never a weaker MCP-side re-declaration). Same deliberate, narrow
+// services→routes exception as intent-handlers.ts.
+export const createFunnelBodySchema = z.object({
   name: z.string().min(1).max(120),
   slug: slugSchema.optional(),
 });
@@ -91,7 +94,7 @@ const bcp47Schema = z
   });
 const localesSchema = z.array(bcp47Schema).min(1).max(50);
 
-const updateFunnelBodySchema = z
+export const updateFunnelBodySchema = z
   .object({
     name: z.string().min(1).max(120).optional(),
     slug: slugSchema.optional(),

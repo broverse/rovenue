@@ -273,7 +273,8 @@ describe("assertToolAllowed", () => {
     // Task 6 populated this map as tools shipped; Task 9 adds the two
     // experiment writes, the catalog group its three creates, the
     // placements-audiences group its two creates, the assets group
-    // its delete, and the currency group its virtual currency create.
+    // its delete, the currency group its virtual currency create, and
+    // the funnels group its create + edit.
     // A tool added WITHOUT an entry stays unreachable to read
     // tokens by construction (fail-closed unknown handling) — this pin
     // makes that allow-list explicit.
@@ -295,6 +296,8 @@ describe("assertToolAllowed", () => {
       create_audience: "write",
       delete_asset: "write",
       create_virtual_currency: "write",
+      create_funnel: "write",
+      update_funnel: "write",
     });
   });
 });

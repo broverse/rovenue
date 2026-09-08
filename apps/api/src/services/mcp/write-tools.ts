@@ -21,6 +21,10 @@ import { createBodySchema as createOfferingBodySchema } from "../../routes/dashb
 import { createBodySchema as createAccessBodySchema } from "../../routes/dashboard/access";
 import { createBodySchema as createPlacementBodySchema } from "../../routes/dashboard/placements";
 import { createAudienceBodySchema } from "../../routes/dashboard/audiences";
+import {
+  createFunnelBodySchema,
+  updateFunnelBodySchema,
+} from "../../routes/dashboard/funnels";
 import { deleteAssetQuerySchema } from "../../routes/dashboard/assets";
 // The dashboard virtual-currencies route validates POST with this same
 // shared schema (the route exports no local createBodySchema) —
@@ -71,6 +75,16 @@ const CreateAudienceMcpSchema = createAudienceBodySchema.omit({
 export const DeleteAssetMcpSchema = deleteAssetQuerySchema.extend({
   id: z.string().min(1),
 });
+
+// The dashboard PATCH reads the funnel id from the path; an MCP tool
+// carries it as an argument, so the tool schema is the route's own
+// update schema intersected with the path param — every field
+// validation and refine stays exactly the dashboard's. `.extend`
+// cannot apply: the update schema carries `.refine`s (a ZodEffects),
+// which `extend` does not preserve.
+export const UpdateFunnelMcpSchema = updateFunnelBodySchema.and(
+  z.object({ funnelId: z.string().min(1) }),
+);
 
 const StartExperimentArgs = z.object({
   experimentId: z.string().min(1),
@@ -215,6 +229,40 @@ export function buildAudienceCreatePreview(input: {
     fields: [
       { label: "Name", after: input.name },
       { label: "Description", after: input.description ?? "" },
+    ],
+  };
+}
+
+export function buildFunnelCreatePreview(input: {
+  name: string;
+  slug?: string;
+}): RoviIntentPreview {
+  return {
+    title: `Create funnel "${input.name}"`,
+    fields: [
+      { label: "Name", after: input.name },
+      { label: "Slug", after: input.slug ?? "(auto-generated)" },
+    ],
+  };
+}
+
+// Draft JSON columns are opaque working copies — the preview names the
+// changed fields, never the (potentially large) draft payloads.
+export function buildFunnelUpdatePreview(
+  input: { funnelId: string } & Record<string, unknown>,
+): RoviIntentPreview {
+  const { funnelId, ...fields } = input;
+  const changed = Object.keys(fields).filter(
+    (key) => fields[key] !== undefined,
+  );
+  return {
+    title: `Update funnel ${funnelId}`,
+    fields: [
+      { label: "Funnel ID", after: funnelId },
+      {
+        label: "Changed fields",
+        after: changed.length > 0 ? changed.join(", ") : "(no changes)",
+      },
     ],
   };
 }
@@ -604,6 +652,36 @@ export function registerMcpWriteTools(
       buildPreview: buildVirtualCurrencyCreatePreview,
       describe: (args: z.infer<typeof createVirtualCurrencyRequestSchema>) =>
         `for virtual currency "${args.code}"`,
+    },
+  );
+  registerWriteTool(
+    server,
+    ctx,
+    "create_funnel",
+    "Create a funnel (onboarding flow) in the current project (name, optional slug). Proposes a pending intent first — nothing changes until you confirm the elicitation.",
+    createFunnelBodySchema,
+    { readOnlyHint: false, destructiveHint: false },
+    {
+      actionTool: "action_funnels_create",
+      requiresRole: "ADMIN",
+      buildPreview: buildFunnelCreatePreview,
+      describe: (args: z.infer<typeof createFunnelBodySchema>) =>
+        `for funnel "${args.name}"`,
+    },
+  );
+  registerWriteTool(
+    server,
+    ctx,
+    "update_funnel",
+    "Edit a funnel's draft in the current project by id (name, slug, draft pages/theme/settings, locales). Only the draft changes — nothing reaches live traffic until someone publishes. Proposes a pending intent first — nothing changes until you confirm the elicitation.",
+    UpdateFunnelMcpSchema,
+    { readOnlyHint: false, destructiveHint: false },
+    {
+      actionTool: "action_funnels_update",
+      requiresRole: "ADMIN",
+      buildPreview: buildFunnelUpdatePreview,
+      describe: (args: z.infer<typeof UpdateFunnelMcpSchema>) =>
+        `funnel ${args.funnelId}`,
     },
   );
   registerWriteTool(

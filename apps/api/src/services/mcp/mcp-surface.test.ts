@@ -39,6 +39,8 @@ const WRITE_TOOLS = new Set([
   "create_audience",
   "delete_asset",
   "create_virtual_currency",
+  "create_funnel",
+  "update_funnel",
 ]);
 
 const EXPECTED_TOOLS = [
@@ -59,6 +61,8 @@ const EXPECTED_TOOLS = [
   "create_audience",
   "delete_asset",
   "create_virtual_currency",
+  "create_funnel",
+  "update_funnel",
 ];
 
 const EXPECTED_RESOURCES = [

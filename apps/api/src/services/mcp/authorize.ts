@@ -51,6 +51,10 @@ export const TOOL_SURFACE: Record<string, ToolSurface> = {
   // Virtual currency create: same gate — a `read` token is refused
   // before any intent row exists.
   create_virtual_currency: "write",
+  // Funnel create / edit: same gate — a `read` token is refused
+  // before any intent row exists.
+  create_funnel: "write",
+  update_funnel: "write",
 };
 
 /**

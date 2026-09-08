@@ -15,6 +15,8 @@ import {
   buildAssetDeletePreview,
   buildAudienceCreatePreview,
   buildEntitlementCreatePreview,
+  buildFunnelCreatePreview,
+  buildFunnelUpdatePreview,
   buildOfferingCreatePreview,
   buildPlacementCreatePreview,
   buildProductCreatePreview,
@@ -22,6 +24,7 @@ import {
   canonicalizeIntentPayload,
   DeleteAssetMcpSchema,
   intentPayloadsEqual,
+  UpdateFunnelMcpSchema,
 } from "./write-tools";
 
 describe("intentPayloadsEqual", () => {
@@ -161,6 +164,77 @@ describe("asset delete preview", () => {
       label: "Force",
       after: "false",
     });
+  });
+});
+
+describe("funnel create and update previews", () => {
+  it("names the funnel", () => {
+    const preview = buildFunnelCreatePreview({ name: "Onboarding" });
+    expect(preview.title).toContain("Onboarding");
+    expect(preview.fields).toContainEqual({
+      label: "Slug",
+      after: "(auto-generated)",
+    });
+  });
+
+  it("names an explicit slug", () => {
+    const preview = buildFunnelCreatePreview({
+      name: "Onboarding",
+      slug: "onboarding",
+    });
+    expect(preview.fields).toContainEqual({
+      label: "Slug",
+      after: "onboarding",
+    });
+  });
+
+  it("names the funnel id and changed fields, never draft payloads", () => {
+    const preview = buildFunnelUpdatePreview({
+      funnelId: "fn_1",
+      name: "Renamed",
+      draft_pages_json: [{ id: "p1" }],
+    });
+    expect(preview.title).toContain("fn_1");
+    expect(preview.fields).toContainEqual({
+      label: "Changed fields",
+      after: "name, draft_pages_json",
+    });
+    expect(JSON.stringify(preview)).not.toContain("p1");
+  });
+});
+
+describe("update funnel MCP schema (route parity)", () => {
+  it("parses a name edit with the path id", () => {
+    expect(
+      UpdateFunnelMcpSchema.parse({ funnelId: "fn_1", name: "Renamed" }),
+    ).toEqual({ funnelId: "fn_1", name: "Renamed" });
+  });
+
+  it("requires the funnel id", () => {
+    expect(() => UpdateFunnelMcpSchema.parse({ name: "Renamed" })).toThrow();
+    expect(() =>
+      UpdateFunnelMcpSchema.parse({ funnelId: "", name: "Renamed" }),
+    ).toThrow();
+  });
+
+  it("rejects an empty patch (dashboard parity)", () => {
+    expect(() => UpdateFunnelMcpSchema.parse({ funnelId: "fn_1" })).toThrow();
+  });
+
+  it("rejects a default_locale outside locales (dashboard parity)", () => {
+    expect(() =>
+      UpdateFunnelMcpSchema.parse({
+        funnelId: "fn_1",
+        default_locale: "fr",
+        locales: ["en"],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a non-kebab slug (dashboard parity)", () => {
+    expect(() =>
+      UpdateFunnelMcpSchema.parse({ funnelId: "fn_1", slug: "Not A Slug" }),
+    ).toThrow();
   });
 });
 
