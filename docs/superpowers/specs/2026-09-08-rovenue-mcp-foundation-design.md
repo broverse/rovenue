@@ -371,21 +371,54 @@ MCP-only problem, and `get_metrics` does not ship until it is fixed.**
    `purchases.isSandbox`. The `REVENUE_EVENT` outbox row it writes in the
    same transaction (`revenue-events.ts:288-307`) carries no `environment`
    field in its payload at all.
-2. **None of the 13 call sites gate on environment either.** Checked every
-   reachable path: `apps/api/src/services/receipt-verify.ts:363,662,801`,
+2. **On the live receipt and webhook paths — the paths that actually
+   produce SANDBOX-tagged purchases — no call site gates on environment.**
+   Checked every reachable path: `apps/api/src/services/receipt-verify.ts:363,662,801`,
    `apps/api/src/services/apple/apple-webhook.ts:1793`,
    `apps/api/src/services/google/google-webhook.ts:511,749`,
    `apps/api/src/services/stripe/stripe-webhook.ts:892,993,1014,1165`,
    `apps/api/src/workers/expiry-checker.ts:354`,
    `apps/api/src/services/funnel/complete-purchase.ts:271`,
-   `apps/api/src/services/import/write.ts:572`,
-   `apps/api/src/workers/google-reconciliation.ts:377`. Every one of these
-   calls `createRevenueEvent` unconditionally when it has a priced
-   transaction to record. `environment`/`isSandbox` values computed nearby
-   (e.g. `receipt-verify.ts:227-230,285`, `apple-webhook.ts:1193-1196,1385`)
-   are written onto the `purchases` row itself; grepping for `isSandbox` and
+   `apps/api/src/workers/google-reconciliation.ts:377` — 13 of the 14 total
+   call sites (`grep -rn "createRevenueEvent(" apps/api/src --include=*.ts
+   | grep -v .test. | grep -v revenue-events.ts` returns 14 lines; the
+   revised count corrects an earlier draft that copied "thirteen" from a
+   stale count in `revenue-events.ts:172`'s own comment rather than
+   re-deriving it — that comment is now itself stale and worth a separate
+   fix, out of scope here). All 13 call `createRevenueEvent`
+   unconditionally when they have a priced transaction to record.
+   `environment`/`isSandbox` values computed nearby (e.g.
+   `receipt-verify.ts:227-230,285`, `apple-webhook.ts:1193-1196,1385`) are
+   written onto the `purchases` row itself; grepping for `isSandbox` and
    `SANDBOX` across these files shows the value is never read back to skip
-   or tag a revenue event — it is a write-only field for this purpose.
+   or tag a revenue event on these 13 paths — it is write-only there.
+
+   **The 14th site is an existing, partial, operator-overridable
+   exception: the CSV importer already gates on sandbox.**
+   `apps/api/src/services/import/write.ts:572` sits behind an explicit
+   check at `write.ts:468-471` (`if (normalized.isSandbox && skipSandbox)
+   { record(input, "skippedSandbox"); continue; }`), driven by
+   `skipSandbox = job.options?.skipSandbox ?? DEFAULT_SKIP_SANDBOX`
+   (`write.ts:350`) where `DEFAULT_SKIP_SANDBOX = true` (`write.ts:70`,
+   documented at `write.ts:66-69`: sandbox rows are noise in almost every
+   migration, dropped by default, and the dry-run planner shares the same
+   default so the report an operator approves matches what the run does).
+   An earlier draft of this finding overstated this as "no gate exists
+   anywhere between a sandbox purchase and a ClickHouse row" — false, and
+   falsified by this exact citation. The outcome does not change: the
+   importer is not how live sandbox purchases reach the pipeline, so
+   "sandbox is mixed in" still stands for live traffic. But the claim is
+   now scoped to where it is actually true.
+
+   **Prior art, not just a counterexample.** A fix for the live paths
+   designed on the premise that no sandbox awareness exists anywhere in
+   this codebase would invent a second convention and leave two different
+   answers to the same question. The importer already establishes one:
+   skip by default, let the operator opt in per job
+   (`write.ts:350,468-471`), and keep the dry-run planner's default
+   identical to the real run's so the preview an operator approved matches
+   what executes. Whatever closes this gap on the receipt/webhook paths
+   should follow that same shape rather than inventing its own.
 3. **The ClickHouse schema has no environment dimension to filter on even
    if the payload carried one.** `raw_revenue_events`
    (`packages/db/clickhouse/migrations/0004_revenue_kafka_engine.sql:30-46`)
@@ -411,16 +444,19 @@ supports `SANDBOX` (`packages/db/src/drizzle/enums.ts:20-23`:
 sandbox activity in this environment's data, not a schema constraint. A
 0-of-0 result here proves nothing on its own (the same trap as the earlier
 funnel measurement), which is why the finding above rests on the code path,
-not on this count. The two agree: the mechanism that would need to exist to
-keep sandbox out — a filter somewhere between purchase and ClickHouse row —
-does not exist anywhere in the chain, and the only data available is
-consistent with (not proof of) that.
+not on this count. The two agree: on the live receipt/webhook paths, the
+mechanism that would need to exist to keep sandbox out — a filter
+somewhere between purchase and ClickHouse row — does not exist, and the
+only data available is consistent with (not proof of) that.
 
 **Consequence.** This is not new with A. `listDailyMrr` already backs the
-copilot's existing MRR tool and (via the dashboard's own analytics
-services) the dashboard chart a person reads today — both are reading
-production-and-sandbox revenue commingled, right now, with no code change
-required to observe it once any sandbox purchase completes. A does not
+copilot's existing MRR tool (`apps/api/src/services/copilot/tools/query-metrics.ts:29`)
+and the dashboard's own MRR read
+(`apps/api/src/routes/dashboard/metrics.ts:93`, imported at `:9`) — both
+call the same `listDailyMrr` shown in item 4 above to have no environment
+predicate, so both are reading production-and-sandbox revenue commingled,
+right now, with no code change required to observe it once any sandbox
+purchase completes on the live paths. A does not
 create this defect; it hands the same commingled number to an agent that
 will state it as fact with no human in the loop to notice it looks off.
 **`get_metrics` does not ship until this is fixed.** Track the fix as its
@@ -433,7 +469,10 @@ existing `raw_revenue_events` rows that predate the column (they have no
 recorded environment and cannot be reclassified from CH data alone — the
 source of truth is `purchases.environment` in Postgres, joinable by
 `purchaseId`). The dashboard's own numbers are wrong today independent of
-MCP; say so plainly.
+MCP; say so plainly. Whatever the fix is, it should adopt the importer's
+existing convention (item 2 above: `write.ts:70,350,468-471`) — skip
+sandbox by default, let the operator opt in, keep the preview and the run
+in sync — rather than inventing a second, inconsistent one.
 
 **Exit ramp, same as `run_analytics_query`:** if fixing this turns out to
 be its own project, `get_metrics` leaves A and the remaining tools ship
