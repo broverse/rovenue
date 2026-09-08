@@ -356,3 +356,26 @@ triage:
   possible; this spec takes the broader one because leaving some funnel
   mutations on the rank gate re-creates the two-gate problem inside a
   single resource.
+
+## Deferred minor findings
+
+Raised during implementation review and triaged as non-blocking by the
+whole-branch review. Recorded here rather than lost with the scratch
+workspace.
+
+- capabilities.test.ts:60 — new `import { MemberRole }` sits mid-file after the first describe block rather than with the top imports. Cosmetic; no lint rule enforces import/first here. Triage at final review.
+- none outstanding.
+- drizzle-foundation.test.ts:688 — mid-file import of `paywalls` where a top-level `import * as schema` already exists. Brief-literal; file has precedent at line 468. Triage at final review.
+- 409 carries no machine-readable code (sibling 409s ship one); the VM test invents an ApiError code no server path emits.
+- DashboardPaywallUpdateInput.draftRevision is optional, so enforcement is runtime-only.
+- `{ draftRevision: 3 }` alone satisfies the at-least-one-field refine and produces a no-op UPDATE touching only updatedAt.
+- applyExternalTreeOp is now production-dead, retained as a harness for ~15 VM tests; mark test-only or re-plumb in a follow-up.
+- route lines 180/235 exceed the file's usual wrap width.
+- multi_choice lacks an empty-array test and picture_choice lacks a missing-entirely test (all three share one code path); the dynamic field lookup casts `page as Record<string, unknown>` for a table that now names one field, worth a comment.
+- `loading` and `result` page types have NO render case in page-preview.tsx at all — a possible pre-existing renderer gap, unrelated to this work. Worth its own triage.
+- `void main()` has no .catch, so a DB failure surfaces as an unhandled rejection (mirrors the brief's own code); byCode counts issues not funnels, which could inflate the tally if REQUIRED_FIELDS grows.
+- funnels-publish-gate.test.ts still never asserts assertProjectCapability was called, so that mocked suite would stay green if the gate were deleted; only the new real-Postgres integration test proves enforcement. Pre-existing weakness, not introduced here.
+- the new test file types page fixtures as unknown[] and casts to Page[] at seed time, deferring shape errors to run time.
+- UNGATED_BY_DESIGN says the three exempt routes "write nothing", but /:id/paywall-generate and /:id/translate both call copilotUsageRepo.bumpUsage. The exemption's CONCLUSION holds (no paywall authoring state is written) but the wording should say "writes nothing to paywall/funnel authoring state".
+- authorization-surface.test.ts uses real Postgres like its siblings but lacks their `.integration.test.ts` suffix — harmless today, a trap if a unit-only lane ever filters on it.
+- body-validation-before-authorization on 6 routes (paywalls POST /, PATCH /:id, PATCH /:id/versions/:versionNo, POST /:id/experiments; funnels POST /, PATCH /:funnelId) is recorded only in test comments; worth a tracked follow-up.
