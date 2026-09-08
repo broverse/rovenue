@@ -55,6 +55,10 @@ export const TOOL_SURFACE: Record<string, ToolSurface> = {
   // before any intent row exists.
   create_funnel: "write",
   update_funnel: "write",
+  // Paywall create / edit: same gate — a `read` token is refused
+  // before any intent row exists.
+  create_paywall: "write",
+  update_paywall: "write",
 };
 
 /**

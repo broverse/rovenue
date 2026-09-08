@@ -195,6 +195,29 @@ async function seedExperiment(projectId: string, suffix: string) {
   return experiment;
 }
 
+async function seedOffering(projectId: string, suffix: string) {
+  return drizzle.offeringRepo.createOffering(drizzle.db, {
+    projectId,
+    identifier: `mcp_off_${RUN_ID}_${suffix}`.toLowerCase(),
+    isDefault: false,
+    packages: [],
+  });
+}
+
+async function seedPaywall(
+  projectId: string,
+  offeringId: string,
+  suffix: string,
+) {
+  return drizzle.paywallRepo.createPaywall(drizzle.db, {
+    projectId,
+    identifier: `mcp-pw-${RUN_ID}-${suffix}`.toLowerCase(),
+    name: `MCP Paywall ${suffix}`,
+    offeringId,
+    remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+  });
+}
+
 async function getExperimentStatus(experimentId: string, projectId: string) {
   const row = await drizzle.experimentRepo.findByIdInProject(
     drizzle.db,
@@ -1259,6 +1282,267 @@ describe("MCP funnel create and edit tools", () => {
     const { raw } = await seedToken("fereadgate", "read");
     const res = await callTool(raw, "update_funnel", {
       funnelId: "whatever",
+      name: "Whatever",
+    });
+    expect(res.isError).toBe(true);
+    expect(await countIntents()).toBe(before);
+  });
+});
+
+describe("MCP paywall create and edit tools", () => {
+  function createArgs(offeringId: string, suffix: string) {
+    return {
+      identifier: `mcp-pw-${RUN_ID}-${suffix}`.toLowerCase(),
+      name: `MCP Paywall ${suffix}`,
+      offeringId,
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+    };
+  }
+
+  it("create_paywall proposes, then creates on confirmation", async () => {
+    const { raw, projectId } = await seedToken("paywall", "read_write");
+    const offering = await seedOffering(projectId, "create");
+    const args = createArgs(offering.id, "create");
+
+    const proposal = await callTool(raw, "create_paywall", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have created anything.
+    expect(
+      await drizzle.paywallRepo.findPaywallByIdentifier(
+        drizzle.db,
+        projectId,
+        args.identifier,
+      ),
+    ).toBeNull();
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "create_paywall", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const row = await drizzle.paywallRepo.findPaywallByIdentifier(
+      drizzle.db,
+      projectId,
+      args.identifier,
+    );
+    expect(row?.name).toBe(args.name);
+    expect(row?.offeringId).toBe(offering.id);
+  });
+
+  it("create_paywall writes an audit row naming the token's owner", async () => {
+    const { raw, projectId, userId } = await seedToken(
+      "paywallaudit",
+      "read_write",
+    );
+    const offering = await seedOffering(projectId, "audit");
+    const args = createArgs(offering.id, "audit");
+    const proposal = await callTool(raw, "create_paywall", args);
+    const confirmed = await callTool(raw, "create_paywall", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+
+    const row = await latestAuditRow(projectId);
+    expect(row?.userId).toBe(userId);
+    expect(row?.action).toBe("create");
+    expect(row?.resource).toBe("paywall");
+  });
+
+  it("create_paywall declines cleanly when the user refuses", async () => {
+    const { raw, projectId } = await seedToken("paywalldec", "read_write");
+    const offering = await seedOffering(projectId, "decline");
+    const args = createArgs(offering.id, "decline");
+    const proposal = await callTool(raw, "create_paywall", args);
+    const declined = await callTool(raw, "create_paywall", args, {
+      inputResponses: { confirm: { action: "decline" } },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(declined.isError).toBe(true);
+    expect(
+      await drizzle.paywallRepo.findPaywallByIdentifier(
+        drizzle.db,
+        projectId,
+        args.identifier,
+      ),
+    ).toBeNull();
+  });
+
+  it("create_paywall refuses a duplicate identifier without creating", async () => {
+    const { raw, projectId } = await seedToken("paywalldup", "read_write");
+    const offering = await seedOffering(projectId, "dup");
+    const args = createArgs(offering.id, "dup");
+    const first = await callTool(raw, "create_paywall", args);
+    const firstConfirmed = await callTool(raw, "create_paywall", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: first.rawResult.requestState as string,
+    });
+    expect(firstConfirmed.isError).toBe(false);
+
+    const second = await callTool(raw, "create_paywall", args);
+    const secondConfirmed = await callTool(raw, "create_paywall", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: second.rawResult.requestState as string,
+    });
+    expect(secondConfirmed.isError).toBe(true);
+    expect(secondConfirmed.text).toMatch(/already in use/i);
+  });
+
+  it("create_paywall fails closed on an unknown offering", async () => {
+    const { raw } = await seedToken("paywalloff", "read_write");
+    const args = {
+      identifier: `mcp-pw-${RUN_ID}-badoff`.toLowerCase(),
+      name: "MCP Bad Offering Paywall",
+      offeringId: "off_missing",
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+    };
+    const proposal = await callTool(raw, "create_paywall", args);
+    expect(proposal.isError).toBe(false);
+    const res = await callTool(raw, "create_paywall", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/unknown offering/i);
+  });
+
+  it("update_paywall proposes, then renames on confirmation", async () => {
+    const { raw, projectId, userId } = await seedToken(
+      "paywalledit",
+      "read_write",
+    );
+    const offering = await seedOffering(projectId, "edit");
+    const paywall = await seedPaywall(projectId, offering.id, "edit");
+    const args = { paywallId: paywall.id, name: `MCP Renamed ${RUN_ID}` };
+
+    const proposal = await callTool(raw, "update_paywall", args);
+    expect(proposal.isError).toBe(false);
+    // The first call must NOT have changed anything.
+    expect(
+      (await drizzle.paywallRepo.findPaywallById(
+        drizzle.db,
+        projectId,
+        paywall.id,
+      ))?.name,
+    ).toBe(`MCP Paywall edit`);
+    expect(proposal.rawResult.resultType).toBe("input_required");
+    expect(proposal.rawResult.inputRequests).toHaveProperty("confirm");
+
+    const confirmed = await callTool(raw, "update_paywall", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(confirmed.isError).toBe(false);
+    const updated = await drizzle.paywallRepo.findPaywallById(
+      drizzle.db,
+      projectId,
+      paywall.id,
+    );
+    expect(updated?.name).toBe(`MCP Renamed ${RUN_ID}`);
+
+    const row = await latestAuditRow(projectId);
+    expect(row?.userId).toBe(userId);
+    expect(row?.action).toBe("update");
+    expect(row?.resource).toBe("paywall");
+  });
+
+  it("update_paywall fails closed on an unknown paywall id", async () => {
+    const { raw } = await seedToken("paywallmis", "read_write");
+    const args = { paywallId: "pw_missing", name: "Renamed" };
+    const proposal = await callTool(raw, "update_paywall", args);
+    expect(proposal.isError).toBe(false);
+    const res = await callTool(raw, "update_paywall", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/not found/i);
+  });
+
+  it("update_paywall refuses an identifier change (immutable)", async () => {
+    const { raw, projectId } = await seedToken("paywallimm", "read_write");
+    const offering = await seedOffering(projectId, "imm");
+    const paywall = await seedPaywall(projectId, offering.id, "imm");
+    const args = { paywallId: paywall.id, identifier: "different-id" };
+    const proposal = await callTool(raw, "update_paywall", args);
+    expect(proposal.isError).toBe(false);
+    const res = await callTool(raw, "update_paywall", args, {
+      inputResponses: {
+        confirm: { action: "accept", content: { confirm: true } },
+      },
+      requestState: proposal.rawResult.requestState as string,
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/immutable/i);
+    expect(
+      (await drizzle.paywallRepo.findPaywallById(
+        drizzle.db,
+        projectId,
+        paywall.id,
+      ))?.identifier,
+    ).toBe(paywall.identifier);
+  });
+
+  it("a confirmation echoing different args fails closed", async () => {
+    const { raw, projectId } = await seedToken("paywallswap", "read_write");
+    const offering = await seedOffering(projectId, "swap");
+    const paywall = await seedPaywall(projectId, offering.id, "swap");
+    const proposal = await callTool(raw, "update_paywall", {
+      paywallId: paywall.id,
+      name: `MCP Swap A ${RUN_ID}`,
+    });
+    const swapped = await callTool(
+      raw,
+      "update_paywall",
+      { paywallId: paywall.id, name: `MCP Swap B ${RUN_ID}` },
+      {
+        inputResponses: {
+          confirm: { action: "accept", content: { confirm: true } },
+        },
+        requestState: proposal.rawResult.requestState as string,
+      },
+    );
+    expect(swapped.isError).toBe(true);
+    expect(swapped.text).toMatch(/does not match/i);
+    expect(
+      (await drizzle.paywallRepo.findPaywallById(
+        drizzle.db,
+        projectId,
+        paywall.id,
+      ))?.name,
+    ).toBe(`MCP Paywall swap`);
+  });
+
+  it("a read token cannot propose a paywall create: protocol refusal, no intent row", async () => {
+    const before = await countIntents();
+    const { raw, projectId } = await seedToken("preadgate", "read");
+    const offering = await seedOffering(projectId, "readgate");
+    const res = await callTool(raw, "create_paywall", createArgs(offering.id, "readgate"));
+    expect(res.isError).toBe(true);
+    expect(await countIntents()).toBe(before);
+  });
+
+  it("a read token cannot propose a paywall edit: protocol refusal, no intent row", async () => {
+    const before = await countIntents();
+    const { raw } = await seedToken("pereadgate", "read");
+    const res = await callTool(raw, "update_paywall", {
+      paywallId: "whatever",
       name: "Whatever",
     });
     expect(res.isError).toBe(true);

@@ -30,8 +30,14 @@ import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import {
   applyTreeOp,
+  builderConfigSchema,
   collectMediaUrls,
+  isBlockingIssue,
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_NODES,
+  measureNodeTree,
   paywallTreeOpSchema,
+  validateBuilderConfig,
   type BuilderConfig,
 } from "@rovenue/shared/paywall";
 import { audit } from "../../lib/audit";
@@ -54,6 +60,11 @@ import {
   createFunnelBodySchema,
   updateFunnelBodySchema,
 } from "../../routes/dashboard/funnels";
+import {
+  createBodySchema as createPaywallBodySchema,
+  updateBodySchema as updatePaywallBodySchema,
+} from "../../routes/dashboard/paywalls";
+import { packagesSchema } from "../../lib/offering-hydration";
 import { normalizeFunnelSettings } from "../funnel/settings-normalize";
 // The dashboard virtual-currencies route validates POST with this same
 // shared schema (the route exports no local createBodySchema), so the
@@ -77,6 +88,7 @@ function purgeResolvedPriceCacheSafe(projectId: string): void {
 }
 import {
   assertSaveValid,
+  BUILDER_CONFIG_EMPTY_FORMAT_VERSION,
   BUILDER_CONFIG_TREE_FORMAT_VERSION,
 } from "../paywall-ai/validate-config";
 import { resolvePaywallDraftConfig } from "./tools/query-paywall";
@@ -1156,6 +1168,238 @@ export function registerAllIntentHandlers(): void {
       return row;
     });
   });
+
+  // ------------------------------------------------------------------
+  // action.paywalls.create (MCP create_paywall)
+  // Mirrors POST /dashboard/:projectId/paywalls (paywalls:write):
+  // duplicate identifier refused, offeringId re-checked against this
+  // project, builderConfig validated through the same SAVE gate the
+  // route applies (save-tier issues 400, publish-tier and warnings
+  // persist fine — the publish route catches those). Create + audit
+  // commit atomically in one transaction, and the edge catalog cache
+  // is purged like the route does — paywalls are served under
+  // /v1/placements.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_paywalls_create", async (ctx, payload) => {
+    const body = createPaywallBodySchema.parse(payload);
+
+    return drizzle.db.transaction(async (tx) => {
+      const t = tx as never;
+      const existing = await drizzle.paywallRepo.findPaywallByIdentifier(
+        t,
+        ctx.projectId,
+        body.identifier,
+      );
+      if (existing) {
+        throw new Error(
+          `Paywall identifier already in use: ${body.identifier}`,
+        );
+      }
+
+      const offering = await drizzle.offeringRepo.findOfferingById(
+        t,
+        ctx.projectId,
+        body.offeringId,
+      );
+      if (!offering) {
+        throw new Error(`Unknown offeringId: ${body.offeringId}`);
+      }
+
+      const builderPatch =
+        body.builderConfig !== undefined
+          ? preparePaywallBuilderConfigPatch(
+              body.builderConfig,
+              extractOfferingPackageIds(offering),
+            )
+          : null;
+
+      const row = await drizzle.paywallRepo.createPaywall(t, {
+        projectId: ctx.projectId,
+        identifier: body.identifier,
+        name: body.name,
+        offeringId: body.offeringId,
+        remoteConfig: body.remoteConfig,
+        ...(builderPatch !== null && {
+          builderConfig: builderPatch.builderConfig,
+          configFormatVersion: builderPatch.configFormatVersion,
+        }),
+        ...(body.isActive !== undefined && { isActive: body.isActive }),
+        metadata: body.metadata ?? {},
+      });
+
+      purgeProjectCatalogCache(ctx.projectId);
+
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "create",
+          resource: "paywall",
+          resourceId: row.id,
+          after: { identifier: body.identifier, name: body.name },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+
+      return row;
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // action.paywalls.update (MCP update_paywall)
+  // Mirrors PATCH /dashboard/:projectId/paywalls/:id (paywalls:write):
+  // unknown ids are refused, `identifier` is immutable once set, an
+  // offering change re-validates the builder draft against the NEW
+  // offering, and a builderConfig write goes through the same
+  // compare-and-swapped draft path (revision mismatch fails closed so
+  // a concurrent builder autosave is never clobbered). Update + audit
+  // commit atomically in one transaction.
+  // ------------------------------------------------------------------
+  registerIntentHandler("action_paywalls_update", async (ctx, payload) => {
+    const { paywallId, ...fields } = updatePaywallPayloadSchema.parse(payload);
+
+    const existingPaywall = await drizzle.paywallRepo.findPaywallById(
+      drizzle.db,
+      ctx.projectId,
+      paywallId,
+    );
+    if (!existingPaywall) {
+      throw new Error(`Paywall ${paywallId} not found in project`);
+    }
+
+    if (
+      fields.identifier &&
+      fields.identifier !== existingPaywall.identifier
+    ) {
+      throw new Error("identifier is immutable once set");
+    }
+
+    // If offeringId is also changing in this request, builderConfig
+    // validation runs against the NEW offering, not the paywall's
+    // current one.
+    let newOffering: Awaited<
+      ReturnType<typeof drizzle.offeringRepo.findOfferingById>
+    > | null = null;
+    if (fields.offeringId) {
+      newOffering = await drizzle.offeringRepo.findOfferingById(
+        drizzle.db,
+        ctx.projectId,
+        fields.offeringId,
+      );
+      if (!newOffering) {
+        throw new Error(`Unknown offeringId: ${fields.offeringId}`);
+      }
+    }
+
+    let builderPatch: ReturnType<
+      typeof preparePaywallBuilderConfigPatch
+    > | null = null;
+    if (fields.builderConfig !== undefined) {
+      if (fields.builderConfig === null) {
+        builderPatch = preparePaywallBuilderConfigPatch(null, []);
+      } else {
+        const offeringForValidation =
+          newOffering ??
+          (await drizzle.offeringRepo.findOfferingById(
+            drizzle.db,
+            ctx.projectId,
+            existingPaywall.offeringId,
+          ));
+        if (!offeringForValidation) {
+          throw new Error(
+            `Unknown offeringId: ${existingPaywall.offeringId}`,
+          );
+        }
+        builderPatch = preparePaywallBuilderConfigPatch(
+          fields.builderConfig,
+          extractOfferingPackageIds(offeringForValidation),
+        );
+      }
+    }
+
+    const nonDraftPatch: Parameters<typeof drizzle.paywallRepo.updatePaywall>[3] =
+      {
+        ...(fields.name !== undefined && { name: fields.name }),
+        ...(fields.offeringId !== undefined && {
+          offeringId: fields.offeringId,
+        }),
+        ...(fields.remoteConfig !== undefined && {
+          remoteConfig: fields.remoteConfig,
+        }),
+        ...(fields.isActive !== undefined && { isActive: fields.isActive }),
+        ...(fields.metadata !== undefined && { metadata: fields.metadata }),
+      };
+
+    // The non-draft fields (if any) and the compare-and-swapped draft
+    // write happen in ONE transaction: a revision mismatch throws
+    // inside it, rolling back both statements, so a caller told "your
+    // write failed" never has half of it silently persisted.
+    const row = await drizzle.db.transaction(async (tx) => {
+      if (Object.keys(nonDraftPatch).length > 0) {
+        await drizzle.paywallRepo.updatePaywall(
+          tx,
+          ctx.projectId,
+          paywallId,
+          nonDraftPatch,
+        );
+      }
+      let updated = await drizzle.paywallRepo.findPaywallById(
+        tx,
+        ctx.projectId,
+        paywallId,
+      );
+      if (!updated) {
+        throw new Error(`Paywall ${paywallId} not found in project`);
+      }
+      if (builderPatch !== null) {
+        // Capture the narrowed (non-null) value for the closure below —
+        // `builderPatch` itself is a `let`, and TS does not carry a
+        // narrowing across a captured mutable binding.
+        const patch = builderPatch;
+        const expectedRevision = fields.draftRevision;
+        if (expectedRevision === undefined) {
+          // updatePaywallPayloadSchema's refine already requires
+          // draftRevision whenever builderConfig is present, so this is
+          // unreachable in practice — but it keeps `undefined` from ever
+          // reaching the CAS compare if that refine is ever relaxed.
+          throw new Error(
+            "draftRevision is required when builderConfig is present",
+          );
+        }
+        const drafted = await drizzle.paywallRepo.updatePaywallDraft(
+          tx,
+          ctx.projectId,
+          paywallId,
+          expectedRevision,
+          {
+            builderConfig: patch.builderConfig,
+            configFormatVersion: patch.configFormatVersion,
+          },
+        );
+        if (!drafted) {
+          throw new Error(
+            "Paywall draft changed since it was read; reload and retry",
+          );
+        }
+        updated = drafted;
+      }
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "update",
+          resource: "paywall",
+          resourceId: paywallId,
+          after: { fields: Object.keys({ ...nonDraftPatch, ...(builderPatch !== null ? { builderConfig: true } : {}) }) },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+      return updated;
+    });
+
+    purgeProjectCatalogCache(ctx.projectId);
+    return row;
+  });
 }
 
 /**
@@ -1196,3 +1440,82 @@ function kebabCaseName(input: string): string {
 const updateFunnelPayloadSchema = updateFunnelBodySchema.and(
   z.object({ funnelId: z.string().min(1) }),
 );
+
+// The dashboard paywalls PATCH reads the id from the path; an intent
+// payload carries it, so the payload schema is the route's own update
+// schema intersected with the path param — every field validation and
+// refine stays exactly the dashboard's. `.extend` cannot apply: the
+// update schema carries `.refine`s (a ZodEffects), which `extend` does
+// not preserve.
+const updatePaywallPayloadSchema = updatePaywallBodySchema.and(
+  z.object({ paywallId: z.string().min(1) }),
+);
+
+/**
+ * Local mirror of the paywalls route's module-private
+ * `extractOfferingPackageIds` (routes/dashboard/paywalls.ts): services
+ * must not import route logic, only validation schemas.
+ */
+function extractOfferingPackageIds(offering: {
+  packages: unknown;
+}): string[] {
+  const parsed = packagesSchema.safeParse(offering.packages);
+  return parsed.success ? parsed.data.map((p) => p.identifier) : [];
+}
+
+/**
+ * Local mirror of the paywalls route's module-private
+ * `prepareBuilderConfigPatch` (routes/dashboard/paywalls.ts): services
+ * must not import route logic, only validation schemas. `null` clears
+ * the draft (revert to format 1); a non-null value must pass the same
+ * iterative bounds pre-scan, Zod node-tree parse, and SAVE-gate
+ * validation. Only `save`-tier issues throw here — `publish`-tier and
+ * warnings persist fine and are caught by the publish route. A forged
+ * intent payload carrying an oversized or unparseable config fails
+ * closed with a plain Error (handlers never mint HTTP statuses).
+ */
+function preparePaywallBuilderConfigPatch(
+  rawBuilderConfig: unknown,
+  offeringPackageIds: string[],
+): { builderConfig: unknown; configFormatVersion: number } {
+  if (rawBuilderConfig === null) {
+    return {
+      builderConfig: null,
+      configFormatVersion: BUILDER_CONFIG_EMPTY_FORMAT_VERSION,
+    };
+  }
+
+  const bounds = measureNodeTree(rawBuilderConfig);
+  if (bounds.depth > MAX_BUILDER_DEPTH || bounds.nodes > MAX_BUILDER_NODES) {
+    throw new Error(
+      `config exceeds limits (max depth ${MAX_BUILDER_DEPTH}, max nodes ${MAX_BUILDER_NODES})`,
+    );
+  }
+
+  let parsed: ReturnType<typeof builderConfigSchema.safeParse>;
+  try {
+    parsed = builderConfigSchema.safeParse(rawBuilderConfig);
+  } catch {
+    throw new Error("config is not parseable");
+  }
+  if (!parsed.success) {
+    const details = parsed.error.issues
+      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+      .join("; ");
+    throw new Error(`INVALID_BUILDER_CONFIG: ${details}`);
+  }
+
+  const issues = validateBuilderConfig(parsed.data, { offeringPackageIds });
+  const blocking = issues.filter(isBlockingIssue);
+  if (blocking.length > 0) {
+    const details = blocking
+      .map((issue) => `${issue.code}: ${issue.message}`)
+      .join("; ");
+    throw new Error(`INVALID_BUILDER_CONFIG: ${details}`);
+  }
+
+  return {
+    builderConfig: parsed.data,
+    configFormatVersion: BUILDER_CONFIG_TREE_FORMAT_VERSION,
+  };
+}

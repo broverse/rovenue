@@ -25,6 +25,10 @@ import {
   createFunnelBodySchema,
   updateFunnelBodySchema,
 } from "../../routes/dashboard/funnels";
+import {
+  createBodySchema as createPaywallBodySchema,
+  updateBodySchema as updatePaywallBodySchema,
+} from "../../routes/dashboard/paywalls";
 import { deleteAssetQuerySchema } from "../../routes/dashboard/assets";
 // The dashboard virtual-currencies route validates POST with this same
 // shared schema (the route exports no local createBodySchema) —
@@ -84,6 +88,16 @@ export const DeleteAssetMcpSchema = deleteAssetQuerySchema.extend({
 // which `extend` does not preserve.
 export const UpdateFunnelMcpSchema = updateFunnelBodySchema.and(
   z.object({ funnelId: z.string().min(1) }),
+);
+
+// The dashboard paywalls PATCH reads the paywall id from the path; an
+// MCP tool carries it as an argument, so the tool schema is the route's
+// own update schema intersected with the path param — every field
+// validation and refine stays exactly the dashboard's. `.extend`
+// cannot apply: the update schema carries `.refine`s (a ZodEffects),
+// which `extend` does not preserve.
+export const UpdatePaywallMcpSchema = updatePaywallBodySchema.and(
+  z.object({ paywallId: z.string().min(1) }),
 );
 
 const StartExperimentArgs = z.object({
@@ -259,6 +273,40 @@ export function buildFunnelUpdatePreview(
     title: `Update funnel ${funnelId}`,
     fields: [
       { label: "Funnel ID", after: funnelId },
+      {
+        label: "Changed fields",
+        after: changed.length > 0 ? changed.join(", ") : "(no changes)",
+      },
+    ],
+  };
+}
+
+export function buildPaywallCreatePreview(input: {
+  identifier: string;
+  name: string;
+}): RoviIntentPreview {
+  return {
+    title: `Create paywall ${input.identifier}`,
+    fields: [
+      { label: "Identifier", after: input.identifier },
+      { label: "Name", after: input.name },
+    ],
+  };
+}
+
+// remoteConfig and builderConfig are opaque working copies — the preview
+// names the changed fields, never the (potentially large) payloads.
+export function buildPaywallUpdatePreview(
+  input: { paywallId: string } & Record<string, unknown>,
+): RoviIntentPreview {
+  const { paywallId, ...fields } = input;
+  const changed = Object.keys(fields).filter(
+    (key) => fields[key] !== undefined,
+  );
+  return {
+    title: `Update paywall ${paywallId}`,
+    fields: [
+      { label: "Paywall ID", after: paywallId },
       {
         label: "Changed fields",
         after: changed.length > 0 ? changed.join(", ") : "(no changes)",
@@ -682,6 +730,36 @@ export function registerMcpWriteTools(
       buildPreview: buildFunnelUpdatePreview,
       describe: (args: z.infer<typeof UpdateFunnelMcpSchema>) =>
         `funnel ${args.funnelId}`,
+    },
+  );
+  registerWriteTool(
+    server,
+    ctx,
+    "create_paywall",
+    "Create a paywall in the current project (identifier, name, offering, remote config, optional builder config and active flag). Proposes a pending intent first — nothing changes until you confirm the elicitation.",
+    createPaywallBodySchema,
+    { readOnlyHint: false, destructiveHint: false },
+    {
+      actionTool: "action_paywalls_create",
+      requiresRole: "ADMIN",
+      buildPreview: buildPaywallCreatePreview,
+      describe: (args: z.infer<typeof createPaywallBodySchema>) =>
+        `for paywall "${args.identifier}"`,
+    },
+  );
+  registerWriteTool(
+    server,
+    ctx,
+    "update_paywall",
+    "Edit a paywall in the current project by id (name, offering, remote config, active flag, metadata, builder draft with compare-and-swapped draftRevision). Proposes a pending intent first — nothing changes until you confirm the elicitation.",
+    UpdatePaywallMcpSchema,
+    { readOnlyHint: false, destructiveHint: false },
+    {
+      actionTool: "action_paywalls_update",
+      requiresRole: "ADMIN",
+      buildPreview: buildPaywallUpdatePreview,
+      describe: (args: z.infer<typeof UpdatePaywallMcpSchema>) =>
+        `paywall ${args.paywallId}`,
     },
   );
   registerWriteTool(

@@ -95,7 +95,10 @@ const remoteConfigSchema = z
 // it's server-derived from whether builderConfig is present (see
 // prepareBuilderConfigPatch below). Any configFormatVersion sent by the
 // client is silently stripped by zod's default object parsing.
-const createBodySchema = z.object({
+// Exported for the MCP write tools + intent handlers (dashboard parity —
+// never a weaker MCP-side re-declaration). Same deliberate, narrow
+// services→routes exception as intent-handlers.ts.
+export const createBodySchema = z.object({
   identifier: z.string().trim().min(1).max(160).regex(PAYWALL_IDENTIFIER_RE),
   name: z.string().trim().min(1).max(200),
   offeringId: z.string().min(1),
@@ -105,7 +108,7 @@ const createBodySchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
-const updateBodySchema = z
+export const updateBodySchema = z
   .object({
     identifier: z
       .string()

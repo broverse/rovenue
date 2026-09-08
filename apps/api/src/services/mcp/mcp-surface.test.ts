@@ -41,6 +41,8 @@ const WRITE_TOOLS = new Set([
   "create_virtual_currency",
   "create_funnel",
   "update_funnel",
+  "create_paywall",
+  "update_paywall",
 ]);
 
 const EXPECTED_TOOLS = [
@@ -63,6 +65,8 @@ const EXPECTED_TOOLS = [
   "create_virtual_currency",
   "create_funnel",
   "update_funnel",
+  "create_paywall",
+  "update_paywall",
 ];
 
 const EXPECTED_RESOURCES = [

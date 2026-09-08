@@ -18,6 +18,8 @@ import {
   buildFunnelCreatePreview,
   buildFunnelUpdatePreview,
   buildOfferingCreatePreview,
+  buildPaywallCreatePreview,
+  buildPaywallUpdatePreview,
   buildPlacementCreatePreview,
   buildProductCreatePreview,
   buildVirtualCurrencyCreatePreview,
@@ -25,6 +27,7 @@ import {
   DeleteAssetMcpSchema,
   intentPayloadsEqual,
   UpdateFunnelMcpSchema,
+  UpdatePaywallMcpSchema,
 } from "./write-tools";
 
 describe("intentPayloadsEqual", () => {
@@ -234,6 +237,71 @@ describe("update funnel MCP schema (route parity)", () => {
   it("rejects a non-kebab slug (dashboard parity)", () => {
     expect(() =>
       UpdateFunnelMcpSchema.parse({ funnelId: "fn_1", slug: "Not A Slug" }),
+    ).toThrow();
+  });
+});
+
+describe("paywall create and update previews", () => {
+  it("names the paywall identifier", () => {
+    const preview = buildPaywallCreatePreview({
+      identifier: "pro-monthly",
+      name: "Pro Monthly",
+    });
+    expect(preview.title).toContain("pro-monthly");
+    expect(preview.fields).toContainEqual({
+      label: "Name",
+      after: "Pro Monthly",
+    });
+  });
+
+  it("names the paywall id and changed fields, never config payloads", () => {
+    const preview = buildPaywallUpdatePreview({
+      paywallId: "pw_1",
+      name: "Renamed",
+      remoteConfig: { defaultLocale: "en", locales: { en: { k: "v" } } },
+    });
+    expect(preview.title).toContain("pw_1");
+    expect(preview.fields).toContainEqual({
+      label: "Changed fields",
+      after: "name, remoteConfig",
+    });
+    expect(JSON.stringify(preview)).not.toContain("defaultLocale");
+  });
+});
+
+describe("update paywall MCP schema (route parity)", () => {
+  it("parses a name edit with the path id", () => {
+    expect(
+      UpdatePaywallMcpSchema.parse({ paywallId: "pw_1", name: "Renamed" }),
+    ).toEqual({ paywallId: "pw_1", name: "Renamed" });
+  });
+
+  it("requires the paywall id", () => {
+    expect(() => UpdatePaywallMcpSchema.parse({ name: "Renamed" })).toThrow();
+    expect(() =>
+      UpdatePaywallMcpSchema.parse({ paywallId: "", name: "Renamed" }),
+    ).toThrow();
+  });
+
+  it("rejects an empty patch (dashboard parity)", () => {
+    expect(() => UpdatePaywallMcpSchema.parse({ paywallId: "pw_1" })).toThrow();
+  });
+
+  it("rejects a builderConfig without draftRevision (dashboard parity)", () => {
+    expect(() =>
+      UpdatePaywallMcpSchema.parse({
+        paywallId: "pw_1",
+        builderConfig: null,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a defaultLocale outside locales (dashboard parity)", () => {
+    expect(() =>
+      UpdatePaywallMcpSchema.parse({
+        paywallId: "pw_1",
+        remoteConfig: { defaultLocale: "fr", locales: { en: {} } },
+      }),
     ).toThrow();
   });
 });
