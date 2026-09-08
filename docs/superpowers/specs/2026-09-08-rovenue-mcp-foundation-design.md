@@ -357,23 +357,88 @@ considered, not missed.
 
 ## Named risks
 
-**R1 — Sandbox and production revenue are indistinguishable in analytics.**
-`purchases` carries an `environment` column, but the ClickHouse schema has
-**no environment dimension at all** (no migration under
-`packages/db/clickhouse/migrations` mentions one), and `listDailyMrr` — the
-service behind the copilot's MRR tool — does not filter on it either.
+**R1 — RESOLVED 2026-09-08: sandbox revenue is mixed into production
+analytics, unfiltered. This is a pre-existing correctness bug, not an
+MCP-only problem, and `get_metrics` does not ship until it is fixed.**
 
-A does not create this. A *amplifies* it: today the numbers are read by a
-person inside a dashboard; A hands them to an agent that will state them as
-fact, to a user with no context to notice. **This must be resolved before
-`get_metrics` ships** — either by establishing that sandbox purchases never
-reach ClickHouse, or by adding the dimension. Do not ship a metrics tool over
-numbers whose environment semantics are unverified.
+**Finding, from the code path (does not depend on data existing):**
 
-**And it gets the same exit ramp as `run_analytics_query`:** if resolving it
-turns out to be its own project, `get_metrics` leaves A and the remaining
-tools ship without it. An earlier draft gave one blocked tool an exit and not
-the other, which was inconsistent — a tool blocked on an unresolved data
+1. **The producer never reads or filters on `purchases.environment`.**
+   `createRevenueEvent` (`packages/db/src/drizzle/repositories/revenue-events.ts:163-254`)
+   checks exactly one gate before writing a revenue event — Apple Family
+   Sharing ownership (`revenue-events.ts:198-205`, reading
+   `purchases.ownershipType`). It never reads `purchases.environment` or
+   `purchases.isSandbox`. The `REVENUE_EVENT` outbox row it writes in the
+   same transaction (`revenue-events.ts:288-307`) carries no `environment`
+   field in its payload at all.
+2. **None of the 13 call sites gate on environment either.** Checked every
+   reachable path: `apps/api/src/services/receipt-verify.ts:363,662,801`,
+   `apps/api/src/services/apple/apple-webhook.ts:1793`,
+   `apps/api/src/services/google/google-webhook.ts:511,749`,
+   `apps/api/src/services/stripe/stripe-webhook.ts:892,993,1014,1165`,
+   `apps/api/src/workers/expiry-checker.ts:354`,
+   `apps/api/src/services/funnel/complete-purchase.ts:271`,
+   `apps/api/src/services/import/write.ts:572`,
+   `apps/api/src/workers/google-reconciliation.ts:377`. Every one of these
+   calls `createRevenueEvent` unconditionally when it has a priced
+   transaction to record. `environment`/`isSandbox` values computed nearby
+   (e.g. `receipt-verify.ts:227-230,285`, `apple-webhook.ts:1193-1196,1385`)
+   are written onto the `purchases` row itself; grepping for `isSandbox` and
+   `SANDBOX` across these files shows the value is never read back to skip
+   or tag a revenue event — it is a write-only field for this purpose.
+3. **The ClickHouse schema has no environment dimension to filter on even
+   if the payload carried one.** `raw_revenue_events`
+   (`packages/db/clickhouse/migrations/0004_revenue_kafka_engine.sql:30-46`)
+   and its feeding materialized view `mv_revenue_to_raw` (same file,
+   lines 48-67) have no `environment` column, and extract no such field
+   from the Kafka payload. `grep -rl "environment"
+   packages/db/clickhouse/migrations/` matches **zero** of the 24
+   migration files (0001-0024) — confirmed by running it, not assumed.
+4. **`listDailyMrr` corroborates: no filter to apply even if the data
+   supported one.** `apps/api/src/services/metrics/mrr.ts:37-71` queries
+   `rovenue.v_mrr_daily` with only `projectId`/date-range predicates
+   (`mrr.ts:49-51`) — there is no `environment` column on that view to
+   filter by.
+
+**Data corroboration attempted, inconclusive by design of the trap:** the
+dev DB has 94 `PRODUCTION` purchases and **0 `SANDBOX`** purchases
+(`docker exec rovenue-db-1 psql -U rovenue -d rovenue -tAc "select
+environment, count(*) from purchases group by environment;"` →
+`PRODUCTION|94`, no SANDBOX row at all). The `environment` enum genuinely
+supports `SANDBOX` (`packages/db/src/drizzle/enums.ts:20-23`:
+`pgEnum("Environment", ["PRODUCTION", "SANDBOX"])`; the column is
+`NOT NULL` on `purchases` — `schema.ts:1017`) — this is a real absence of
+sandbox activity in this environment's data, not a schema constraint. A
+0-of-0 result here proves nothing on its own (the same trap as the earlier
+funnel measurement), which is why the finding above rests on the code path,
+not on this count. The two agree: the mechanism that would need to exist to
+keep sandbox out — a filter somewhere between purchase and ClickHouse row —
+does not exist anywhere in the chain, and the only data available is
+consistent with (not proof of) that.
+
+**Consequence.** This is not new with A. `listDailyMrr` already backs the
+copilot's existing MRR tool and (via the dashboard's own analytics
+services) the dashboard chart a person reads today — both are reading
+production-and-sandbox revenue commingled, right now, with no code change
+required to observe it once any sandbox purchase completes. A does not
+create this defect; it hands the same commingled number to an agent that
+will state it as fact with no human in the loop to notice it looks off.
+**`get_metrics` does not ship until this is fixed.** Track the fix as its
+own item, separate from this MCP sub-project's scope, because it requires:
+an `environment` column threaded through the outbox payload
+(`revenue-events.ts:292-306`), a ClickHouse migration adding it to
+`raw_revenue_events`/`mv_revenue_to_raw` and every downstream view
+`listDailyMrr` and the dashboard read from, and a backfill decision for
+existing `raw_revenue_events` rows that predate the column (they have no
+recorded environment and cannot be reclassified from CH data alone — the
+source of truth is `purchases.environment` in Postgres, joinable by
+`purchaseId`). The dashboard's own numbers are wrong today independent of
+MCP; say so plainly.
+
+**Exit ramp, same as `run_analytics_query`:** if fixing this turns out to
+be its own project, `get_metrics` leaves A and the remaining tools ship
+without it. An earlier draft gave one blocked tool an exit and not the
+other, which was inconsistent — a tool blocked on an unresolved data
 question is in the same position whichever question it is.
 
 **R2 — Tool results are untrusted input to the customer's own agent.**
@@ -483,8 +548,12 @@ the core story.
 
 ## Open questions
 
-- **R1's resolution** — does sandbox revenue reach ClickHouse? Blocks
-  `get_metrics` (which now has an exit ramp if the answer is expensive).
+- **R1 is resolved** (2026-09-08): sandbox revenue reaches ClickHouse
+  unfiltered, mixed with production, in a pre-existing bug that also
+  affects the dashboard. See R1 above. What remains open is the fix
+  itself — tracked as its own item outside this sub-project — and
+  `get_metrics` stays blocked until it lands (or the fix proves large
+  enough to invoke the exit ramp, in which case `get_metrics` leaves A).
 - **Annotation field names** in the current specification revision. Blocks
   D4's write-tool metadata. Write them from the schema, not from memory.
 
