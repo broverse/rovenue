@@ -54,7 +54,13 @@ function envelope(id: number, method: string, params: unknown) {
       _meta: {
         [PROTOCOL_VERSION_META_KEY]: MCP_PROTOCOL_REVISION,
         [CLIENT_INFO_META_KEY]: { name: "write-tools-test", version: "0.0.1" },
-        [CLIENT_CAPABILITIES_META_KEY]: {},
+        // Form elicitation, declared — the read-surface suites can send
+        // `{}` because reads ask the client nothing, but a propose call
+        // that cannot ask for `confirm` is refused by the SDK before the
+        // handler runs (-32021). A client that never declares this cannot
+        // complete the confirm round-trip at all, so simulating one here
+        // would test the refusal, not the flow.
+        [CLIENT_CAPABILITIES_META_KEY]: { elicitation: { form: {} } },
       },
     },
   });
@@ -410,11 +416,15 @@ describe("MCP write tools", () => {
     // An intent from ANOTHER project: the retry echoes its id, but the
     // server re-checks project ownership against live auth, not the echo.
     const other = await seedProject("forged-other");
+    const otherUser = await seedUser("forged-other");
     const foreign = await drizzle.copilotIntentRepo.createIntent(drizzle.db, {
       projectId: other.id,
-      userId: "someone-else",
-      threadId: "",
-      messageId: "",
+      // A real user and NULL thread/message: copilot_intents carries FKs
+      // on all three, so a placeholder id makes this fixture unseedable
+      // rather than a forgery the server has to reject.
+      userId: otherUser.id,
+      threadId: null,
+      messageId: null,
       toolName: "action_experiments_stop",
       payload: { experimentId: experiment.id, reason: "" },
       preview: { title: "trap", fields: [] },
@@ -1531,7 +1541,9 @@ describe("MCP paywall create and edit tools", () => {
 
   it("a read token cannot propose a paywall create: protocol refusal, no intent row", async () => {
     const before = await countIntents();
-    const { raw, projectId } = await seedToken("preadgate", "read");
+    // Distinct from the placement read-gate above: seedProject keys on
+    // the suffix, so a shared one collides on projects_pkey.
+    const { raw, projectId } = await seedToken("pwreadgate", "read");
     const offering = await seedOffering(projectId, "readgate");
     const res = await callTool(raw, "create_paywall", createArgs(offering.id, "readgate"));
     expect(res.isError).toBe(true);

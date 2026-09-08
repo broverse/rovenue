@@ -154,6 +154,20 @@ interface WriteSpec<A extends Record<string, unknown>> {
   buildPreview: (args: A) => unknown;
   /** One-line human summary for the confirm elicitation message. */
   describe: (args: A) => string;
+  /**
+   * The intent payload for these args, in the INTENT HANDLER's own input
+   * shape. Defaults to the args as validated.
+   *
+   * Override it wherever the tool's schema TRANSFORMS a field. The SDK
+   * hands the handler the post-validation value, and the intent handler
+   * re-parses the stored payload with the same schema — so a transformed
+   * value round-trips into a type its own schema rejects (delete_asset's
+   * `force`: stored as boolean, re-parsed as `'true' | 'false'`), and the
+   * failure lands at EXECUTE time, after a human already confirmed.
+   * Applied to the stored payload and to the retry echo alike, so the
+   * compare-and-swap between them still holds.
+   */
+  toIntentPayload?: (args: A) => Record<string, unknown>;
 }
 
 /**
@@ -480,7 +494,12 @@ function registerWriteTool<A extends Record<string, unknown>>(
     { description, inputSchema: asMcpInputSchema(inputSchema), annotations },
     async (rawArgs: unknown, sdkCtx?: McpRetryContext) => {
       const args = rawArgs as A;
-      const echoArgs = args as Record<string, unknown>;
+      // The handler's input shape, not necessarily the validated args —
+      // see WriteSpec.toIntentPayload. Both the stored payload and the
+      // retry echo go through it, so they stay comparable.
+      const echoArgs = spec.toIntentPayload
+        ? spec.toIntentPayload(args)
+        : (args as Record<string, unknown>);
       const responses = sdkCtx?.mcpReq?.inputResponses;
       const requestState = sdkCtx?.mcpReq?.requestState?.();
       const dropped = sdkCtx?.mcpReq?.droppedInputResponseKeys ?? [];
@@ -507,8 +526,10 @@ function registerWriteTool<A extends Record<string, unknown>>(
           {
             projectId: ctx.projectId,
             userId: ctx.userId,
-            threadId: "",
-            messageId: "",
+            // NULL, not "": these columns carry FKs to the chat tables,
+            // and MCP has no thread behind the call.
+            threadId: null,
+            messageId: null,
             toolName: spec.actionTool,
             // The canonical echo shape, not the raw retry args: execution
             // binds to THIS payload, never to what the retry carries.
@@ -828,6 +849,13 @@ export function registerMcpWriteTools(
       buildPreview: buildAssetDeletePreview,
       describe: (args: { id: string; force?: unknown }) =>
         `asset ${args.id}${args.force === true || args.force === "true" ? " (forced)" : ""}`,
+      // `force` is the one transformed field on the write surface: the
+      // route's schema parses "true"/"false" INTO a boolean, and the
+      // intent handler parses the stored payload with that same schema.
+      // Store the wire enum it expects, not the boolean it produces.
+      toIntentPayload: (args: { id: string; force?: unknown }) => ({
+        id: args.id,
+        force: args.force === true || args.force === "true" ? "true" : "false",
       }),
     },
   );

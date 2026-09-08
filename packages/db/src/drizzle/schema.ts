@@ -3190,12 +3190,19 @@ export const copilotIntents = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    threadId: text("thread_id")
-      .notNull()
-      .references(() => copilotThreads.id, { onDelete: "cascade" }),
-    messageId: text("message_id")
-      .notNull()
-      .references(() => copilotMessages.id, { onDelete: "cascade" }),
+    // Nullable because an intent does not require a chat: the MCP surface
+    // proposes the same intents with no thread and no message behind them.
+    // They were NOT NULL with FKs, so the MCP write path's placeholder ""
+    // violated copilot_intents_thread_id_copilot_threads_id_fk and every
+    // write tool failed at the propose step. NULL is the honest value; a
+    // synthetic thread row would pollute the chat tables to satisfy a
+    // constraint that carries no meaning here.
+    threadId: text("thread_id").references(() => copilotThreads.id, {
+      onDelete: "cascade",
+    }),
+    messageId: text("message_id").references(() => copilotMessages.id, {
+      onDelete: "cascade",
+    }),
     toolName: text("tool_name").notNull(),
     payload: jsonb("payload").notNull(),
     preview: jsonb("preview").notNull(),

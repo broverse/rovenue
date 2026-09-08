@@ -13,8 +13,9 @@ export async function createIntent(
   input: {
     projectId: string;
     userId: string;
-    threadId: string;
-    messageId: string;
+    /** Null on surfaces with no chat behind them (MCP). */
+    threadId: string | null;
+    messageId: string | null;
     toolName: string;
     payload: unknown;
     preview: unknown;
