@@ -237,7 +237,10 @@ describe("MCP consolidated surface", () => {
   it("caps a page and says so rather than truncating silently", async () => {
     const { raw, projectId } = await seedReadToken("caps");
     await seedSubscribers(projectId, MAX_PAGE + 50);
-    const res = await callTool(raw, "find_subscribers", { limit: 1000 });
+    // At the cap (not past it): limit 1000 would die in the SDK's
+    // pre-dispatch zod validation (max 200) before any tool code runs.
+    // 250 rows against a 200 cap exercises the real truncation path.
+    const res = await callTool(raw, "find_subscribers", { limit: MAX_PAGE });
     const structured = res.structured as {
       rows?: unknown[];
       truncationNote?: string | null;
@@ -259,6 +262,13 @@ describe("MCP consolidated surface", () => {
     const res = await callTool(raw, "get_paywall", { paywallId: "nope" });
     expect(res.isError).toBe(true);
     expect(res.text).toMatch(/list|not found/i);
+  });
+
+  it("a missing subscriber id names the search fallback", async () => {
+    const { raw } = await seedReadToken("missing-sub");
+    const res = await callTool(raw, "find_subscribers", { id: "nope" });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/not found/i);
   });
 });
 

@@ -395,7 +395,12 @@ export function registerMcpTools(server: McpServer, ctx: McpToolContext): void {
         if (!result) {
           return errPayload(`paywallId "${paywallId}" not found in this project`);
         }
-        return okPayload(result);
+        // The tree summary is compact by construction (no raw config), but
+        // node count is unbounded — the 200-row / 256 KB ceiling applies
+        // here like everywhere else.
+        const nodes = Array.isArray(result.nodes) ? result.nodes : [];
+        const { rows, truncationNote } = capRows(nodes, MCP_MAX_PAGE);
+        return okPayload({ ...result, nodes: rows, truncationNote });
       } catch (err) {
         return errPayload(
           `get_paywall failed: ${err instanceof Error ? err.message : String(err)}`,
