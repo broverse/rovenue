@@ -125,10 +125,20 @@ jobs:
         run: swift package --disable-sandbox generate-documentation --target Rovenue --output-path .build/docc-archive
       - name: Confirm DocC output
         run: test -d packages/sdk-swift/.build/docc-archive/data
+      # Tarred, unlike every other docs job, which uploads its directory as
+      # is. DocC names a page after the symbol it documents, and a Swift
+      # selector carries colons — `actionButtonVisible(_:hasRestoreHandler:)`
+      # becomes …(_:hasrestorehandler:).json. upload-artifact rejects a colon
+      # in a path outright ("Invalid characters include: ... Colon :"), for
+      # NTFS's sake, and fails the whole upload on the first one. A tar
+      # carries the names through untouched; release-images.yml unpacks it
+      # back into the same directory layout the docs image expects.
+      - name: Archive the DocC output
+        run: tar -czf packages/sdk-swift/.build/docc-archive.tar.gz -C packages/sdk-swift/.build/docc-archive .
       - uses: actions/upload-artifact@v4
         with:
           name: sdk-docs-sdk-swift
-          path: packages/sdk-swift/.build/docc-archive
+          path: packages/sdk-swift/.build/docc-archive.tar.gz
           if-no-files-found: error
 
   dokka:

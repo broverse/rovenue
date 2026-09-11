@@ -163,6 +163,15 @@ jobs:
             d="${d%/}"
             mv "$d" "${d#sdk-docs-}"
           done
+          # sdk-swift arrives as a tarball rather than a directory: DocC
+          # names pages after symbols, Swift selectors contain colons, and
+          # upload-artifact refuses a colon anywhere in a path. sdk-docs.yml
+          # tars it; unpacking here restores the same layout every other SDK
+          # already has.
+          if [ -f sdk-swift/docc-archive.tar.gz ]; then
+            tar -xzf sdk-swift/docc-archive.tar.gz -C sdk-swift
+            rm sdk-swift/docc-archive.tar.gz
+          fi
           ls -la .
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
