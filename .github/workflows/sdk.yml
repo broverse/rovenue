@@ -30,7 +30,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # `--force-warn missing_docs` keeps every other clippy lint fatal while
+      # letting this one stay a warning. lib.rs sets `#![warn(missing_docs)]`
+      # and a crate attribute outranks a plain `-A` on the command line, so
+      # `-D warnings` was promoting all 493 undocumented public items in
+      # librovenue to errors: the job could not pass, and a gate that can
+      # never pass gates nothing. Documentation is ratcheted instead, by
+      # scripts/sdk-doc-coverage.mjs in ci.yml, which fails if core-rs drops
+      # below its recorded floor — so coverage can only go up, without
+      # demanding all 493 in one commit.
+      - run: cargo clippy --workspace --all-targets -- -D warnings --force-warn missing_docs
       - run: cargo test --workspace --all-targets
 
   bindgen-host:
