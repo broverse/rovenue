@@ -220,6 +220,21 @@ jobs:
       - name: gradle test (plugin unit tests)
         working-directory: packages/sdk-flutter/rovenue_flutter_android/android
         run: ./gradlew test --no-daemon --console=plain
+      # The example app resolves `dev.rovenue:sdk` from mavenLocal — its
+      # android/build.gradle.kts declares that repository for exactly this,
+      # and nothing publishes the coordinate anywhere else yet. Without this
+      # step the APK build fails at :app:mergeDebugAssets with "Could not
+      # find dev.rovenue:sdk:0.16.0".
+      #
+      # Publishing rather than composing sdk-kotlin in: a composite build
+      # drags sdk-kotlin's Android Gradle plugin into the app's build next to
+      # the app's own, and Gradle refuses two ("Using multiple versions of the
+      # Android Gradle plugin(8.12.0, 9.1.0) in the same build is not
+      # allowed"). Publishing keeps them separate builds and matches what a
+      # real consumer does — it gets an AAR.
+      - name: Publish sdk-kotlin to mavenLocal for the example to resolve
+        working-directory: packages/sdk-kotlin
+        run: ./gradlew publishToMavenLocal --no-daemon --console=plain
       - name: Build the example's debug APK
         working-directory: packages/sdk-flutter/example
         run: flutter build apk --debug
