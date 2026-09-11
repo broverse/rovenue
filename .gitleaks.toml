@@ -1,0 +1,50 @@
+title = "Rovenue secret scan"
+
+# Gitleaks' own rule set, plus the narrow allowlist below.
+#
+# CI scans the working tree (`gitleaks dir`), not the commit history. History
+# is immutable and this repository is public, so a historical finding can
+# never be made to go away — gating on it would pin CI red forever. What CI
+# can enforce is that the tree about to ship carries no live credential.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Build output and dependencies — not ours, and not shipped from here"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)(dist|build|target|coverage)/''',
+  '''(^|/)\.(turbo|astro|git)/''',
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)Cargo\.lock$''',
+]
+
+# Every entry below was read before it was added. Keep it that way: add a path
+# only after looking at the match, and say what it is. A blanket allowlist
+# teaches people to route around the scanner, which is worse than no scanner.
+[[allowlists]]
+description = "Test fixtures: constants the suites assert against"
+paths = [
+  # Signing keys and webhook secrets the tests sign with, e.g. the PKCS8 EC
+  # P-256 key in apps/api/src/services/apple/app-store-connect.test.ts, which
+  # says so on the line above it.
+  '''\.test\.(ts|tsx)$''',
+]
+
+[[allowlists]]
+description = "Placeholders that exist to be replaced"
+paths = [
+  # Matches on variable NAMES with empty values, e.g. GRAFANA_ADMIN_PASSWORD=
+  # which ships blank on purpose with a note to generate one.
+  '''(^|/)\.env\.example$''',
+  # UI strings showing an operator the shape of the credential to paste: the
+  # bare "-----BEGIN PRIVATE KEY-----" header, no key body.
+  '''(^|/)apps/dashboard/src/i18n/locales/.*\.json$''',
+  # A rov_pub_ key for a local demo project against http://localhost:3000.
+  # Public SDK keys are designed to ship inside client apps.
+  '''(^|/)examples/sample-rn-expo/App\.tsx$''',
+]
+
+[[allowlists]]
+description = "The redaction unit under test — it must contain sample tokens to prove it scrubs them"
+paths = ['''(^|/)packages/core-rs/src/logging/redact\.rs$''']
