@@ -12,6 +12,20 @@ import XCTest
 @available(iOS 15.0, macOS 12.0, *)
 final class PromotionalOfferPurchaseTests: XCTestCase {
 
+    // What the `signOffer` closure was called with. Actor-backed rather than
+    // a captured `var`: signOffer is an async closure that runs concurrently,
+    // so assigning to a local from inside it is "mutation of captured var in
+    // concurrently-executing code" — an error under Swift 6.
+    actor SignSpy {
+        private(set) var args: (productId: String, offerId: String, token: String)?
+        private(set) var called = false
+        func record(productId: String, offerId: String, token: String) {
+            args = (productId, offerId, token)
+            called = true
+        }
+        func markCalled() { called = true }
+    }
+
     // A capturing fake that records the `signedOffer` and `appAccountToken`
     // the flow passes so tests can assert the correct values are threaded through.
     final class CapturingStore: AppleStore, @unchecked Sendable {
@@ -26,12 +40,12 @@ final class PromotionalOfferPurchaseTests: XCTestCase {
 
     func testPromotionalOfferIsSignedAndInjected() async throws {
         let store = CapturingStore()
-        var signArgs: (String, String, String)?
+        let spy = SignSpy()
         let flow = ApplePurchaseFlow(
             store: store,
             validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) },
             signOffer: { productId, offerId, token in
-                signArgs = (productId, offerId, token)
+                await spy.record(productId: productId, offerId: offerId, token: token)
                 return AppleSignedOffer(offerId: offerId, keyId: "K", nonce: "11111111-1111-1111-1111-111111111111", signatureBase64: "AAAA", timestamp: 123)
             }
         )
@@ -39,21 +53,26 @@ final class PromotionalOfferPurchaseTests: XCTestCase {
         XCTAssertEqual(store.capturedOffer?.offerId, "winback10")
         XCTAssertEqual(store.capturedOffer?.keyId, "K")
         XCTAssertEqual(store.capturedToken, "abc")           // same token used for sign + purchase
-        XCTAssertEqual(signArgs?.0, "premium_monthly")
-        XCTAssertEqual(signArgs?.1, "winback10")
-        XCTAssertEqual(signArgs?.2, "abc")
+        let signArgs = await spy.args
+        XCTAssertEqual(signArgs?.productId, "premium_monthly")
+        XCTAssertEqual(signArgs?.offerId, "winback10")
+        XCTAssertEqual(signArgs?.token, "abc")
     }
 
     func testNoOfferDoesNotSign() async throws {
         let store = CapturingStore()
-        var signCalled = false
+        let spy = SignSpy()
         let flow = ApplePurchaseFlow(
             store: store,
             validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) },
-            signOffer: { _, _, _ in signCalled = true; return AppleSignedOffer(offerId: "", keyId: "", nonce: "", signatureBase64: "", timestamp: 0) }
+            signOffer: { _, _, _ in
+                await spy.markCalled()
+                return AppleSignedOffer(offerId: "", keyId: "", nonce: "", signatureBase64: "", timestamp: 0)
+            }
         )
         _ = try await flow.run(productId: "p", appAccountToken: nil, promotionalOfferId: nil)
         XCTAssertNil(store.capturedOffer)
+        let signCalled = await spy.called
         XCTAssertFalse(signCalled)
     }
 

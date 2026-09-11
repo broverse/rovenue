@@ -8,7 +8,12 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.5.2'
+        // Must equal the AGP in packages/sdk-kotlin/build.gradle.kts: this
+        // build composes sdk-kotlin in (see settings.gradle) and Gradle
+        // refuses two AGP versions in one build — "Using multiple versions
+        // of the Android Gradle plugin(8.12.0, 8.5.2) in the same build is
+        // not allowed", which is what this was.
+        classpath 'com.android.tools.build:gradle:8.12.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
