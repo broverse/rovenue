@@ -131,9 +131,15 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v3
       - run: ./packages/core-rs/scripts/build-bindings.sh
+      # ./gradlew, not `gradle`: the wrapper pins 8.13, which is what
+      # sdk-kotlin's AGP 8.12.0 needs. The system Gradle that
+      # gradle/actions/setup-gradle installs is 9.6+, where the internal API
+      # AGP 8.12 uses was removed — "Could not create service of type
+      # InternalProblems", which is what this step failed on. Same fix as the
+      # Kotlin façade job in sdk.yml.
       - name: gradle dokkaHtml
         working-directory: packages/sdk-kotlin
-        run: gradle dokkaHtml --no-daemon
+        run: ./gradlew dokkaHtml --no-daemon
       - name: Confirm Dokka output
         run: test -f packages/sdk-kotlin/build/dokka/html/index.html
       - uses: actions/upload-artifact@v4
