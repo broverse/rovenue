@@ -1,5 +1,6 @@
 {
   "name": "@rovenue/landing",
+  "//cookie": "cookie is not imported by this site. Astro 7 prerenders through dist/.prerender, which resolves \"cookie\" at runtime from the output directory upward; .npmrc sets node-linker=hoisted for Expo, so the workspace root holds cookie@0.7.2 (CommonJS) and the build dies on the missing named export parseCookie. Declaring it here puts cookie@2 in apps/landing/node_modules, which wins first. Remove it and `astro build` breaks.",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,7 +12,8 @@
     "astro": "astro"
   },
   "dependencies": {
-    "astro": "^6.4.8"
+    "astro": "^7.3.2",
+    "cookie": "^2.0.1"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
