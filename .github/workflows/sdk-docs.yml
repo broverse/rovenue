@@ -88,12 +88,28 @@ jobs:
 
   docc:
     name: DocC (sdk-swift)
-    runs-on: macos-14
+    # macos-15, not macos-14 like the other Apple jobs. On macos-14's default
+    # Xcode the docc plugin built the module, then "Extracting symbol
+    # information for 'Rovenue'" started and finished in two milliseconds
+    # having emitted nothing: DocC then reported "No symbol matched
+    # 'Rovenue'" and "No TechnologyRoot to organize article-only
+    # documentation", wrote an archive with no data/ directory, and exited 0.
+    # The same command on a current toolchain spends ~2 minutes in extraction
+    # and produces the archive. Symbol extraction across this package's
+    # binary target (RovenueFFI.xcframework) is what the older toolchain does
+    # not manage. Nothing else in this repo needs the newer image, so only
+    # this job moves.
+    runs-on: macos-15
     needs: bindgen-host
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
+      # Printed, not asserted: the failure above is toolchain-dependent and
+      # silent, so the version that produced a given archive belongs in the
+      # log rather than in someone's reconstruction later.
+      - name: Toolchain versions
+        run: swift --version && xcodebuild -version
       # RovenueFFI.xcframework is gitignored yet required by Package.swift —
       # DocC cannot resolve the package without it. Same script the `swift`
       # and `flutter-ios-native` jobs in sdk.yml use; it regenerates the
