@@ -407,6 +407,7 @@ describe("outboxEvents", () => {
       "FUNNEL",
       "PAYWALL_EVENT",
       "SUBSCRIPTION",
+      "MCP_ACCESS",
     ]);
   });
 

@@ -186,6 +186,23 @@ jobs:
       # them. The second pass starts its own Redpanda and ClickHouse; what it
       # cannot start is the Postgres above, which it clones a template
       # database from, one per vitest worker.
+      # packages/db's repository suites are integration tests against a live
+      # Postgres: they open a pool on DATABASE_URL and query real tables, with
+      # no globalSetup that builds a schema (unlike apps/api, which clones a
+      # template database it migrates itself). On a workstation DATABASE_URL
+      # points at the dev stack, which has been migrated; the Postgres above
+      # is empty, so every one of them failed with `relation "projects" does
+      # not exist`. This is the step that makes the two environments match.
+      #
+      # The database has no migration history, so this takes db:migrate's
+      # fresh-install path: the TimescaleDB-era migrations 0001-0019 are
+      # marked applied without executing (the deploy/postgres image has no
+      # timescaledb.control and they cannot run), and the rest execute.
+      - name: Migrate the test database
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://rovenue:rovenue@localhost:5433/rovenue
+
       - name: Test
         run: pnpm test
         env:
