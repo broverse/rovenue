@@ -164,6 +164,19 @@ private actor FinishFlag {
     func mark() { finished = true }
 }
 
+// What the `validate` closure was handed. Actor-backed for the same reason
+// FinishFlag is: `validate` is an async closure that runs concurrently, so
+// assigning to a captured `var` from inside it is "mutation of captured var
+// in concurrently-executing code" under Swift 6 and does not compile.
+private actor ValidateCapture {
+    private(set) var jws: String?
+    private(set) var productId: String?
+    func record(jws: String, productId: String) {
+        self.jws = jws
+        self.productId = productId
+    }
+}
+
 private struct FakeStore: AppleStore {
     let outcome: StorePurchaseOutcome
     func purchase(productId: String, appAccountToken: String?, signedOffer: AppleSignedOffer?) async throws -> StorePurchaseOutcome {
@@ -234,15 +247,13 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
 
     func test_success_validates_then_finishes_then_returns_result() async throws {
         let finished = FinishFlag()
-        var capturedJws: String?
-        var capturedProductId: String?
+        let captured = ValidateCapture()
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .success(jws: "jws-blob", transactionId: "txn-42", finish: {
                 await finished.mark()
             })),
             validate: { jws, pid in
-                capturedJws = jws
-                capturedProductId = pid
+                await captured.record(jws: jws, productId: pid)
                 // finish must NOT have run before validation succeeds.
                 let wasFinished = await finished.finished
                 XCTAssertFalse(wasFinished, "finish() must run after validate, not before")
@@ -253,6 +264,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
 
         let result = try await flow.run(productId: "premium_monthly", appAccountToken: "tok")
 
+        let capturedJws = await captured.jws
+        let capturedProductId = await captured.productId
         XCTAssertEqual(capturedJws, "jws-blob")
         XCTAssertEqual(capturedProductId, "premium_monthly")
         let didFinish = await finished.finished

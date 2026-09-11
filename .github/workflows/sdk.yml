@@ -111,7 +111,7 @@ jobs:
       - run: ./packages/core-rs/scripts/build-bindings.sh
       - name: gradle test
         working-directory: packages/sdk-kotlin
-        run: gradle test --no-daemon
+        run: ./gradlew test --no-daemon
 
   web:
     name: Web SDK (TS)
