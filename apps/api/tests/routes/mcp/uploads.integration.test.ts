@@ -166,17 +166,25 @@ async function stagedTicket(raw: string, name: string) {
   return { ticket: structured!.ticket, expiresAt: structured!.expiresAt };
 }
 
-async function realPng(rgb: [number, number, number]): Promise<Buffer> {
-  return sharp({
+// Returns a Uint8Array over a plain ArrayBuffer, not sharp's Buffer. A
+// Buffer is typed Buffer<ArrayBufferLike>, which may be backed by a
+// SharedArrayBuffer and so is not a BodyInit; the copy narrows the backing
+// store instead of casting the type away.
+async function realPng(rgb: [number, number, number]): Promise<Uint8Array<ArrayBuffer>> {
+  const png = await sharp({
     create: { width: 32, height: 32, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } },
   })
     .png()
     .toBuffer();
+  return new Uint8Array(png);
 }
 
 function upload(
   kind: string,
-  body: BlobPart,
+  // BodyInit, not BlobPart: this goes straight to request() as a body, and
+  // sharp hands back Buffer<ArrayBufferLike>, which BlobPart rejects because
+  // it may be backed by a SharedArrayBuffer.
+  body: BodyInit,
   ticket: string,
   raw?: string,
   contentLength?: number,

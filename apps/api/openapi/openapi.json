@@ -22,6 +22,10 @@
       "description": "Store receipts, offerings and the Stripe checkout/billing-portal handoff."
     },
     {
+      "name": "Data subject requests",
+      "description": "GDPR/KVKK data subject requests: open an export or erasure for a subscriber, poll its status, and download the finished artifact. Every route requires the project SECRET key, never the public one — these act on a subscriber's behalf and must not be reachable from a shipped app bundle."
+    },
+    {
       "name": "Experiments",
       "description": "Exposure and conversion recording, and the ClickHouse-backed results read."
     },
@@ -732,6 +736,589 @@
             }
           }
         ]
+      }
+    },
+    "/v1/dsar/{id}": {
+      "get": {
+        "operationId": "getV1DsarById",
+        "summary": "Read one DSAR request's status",
+        "tags": [
+          "Data subject requests"
+        ],
+        "security": [
+          {
+            "secretApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The DSAR request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "request"
+                      ],
+                      "properties": {
+                        "request": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "type",
+                            "status",
+                            "requestedBy",
+                            "downloadReady"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "EXPORT",
+                                "ERASURE"
+                              ]
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "PENDING",
+                                "RUNNING",
+                                "COMPLETED",
+                                "FAILED"
+                              ]
+                            },
+                            "requestedBy": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "completedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "downloadReady": {
+                              "type": "boolean",
+                              "description": "True only when the artifact can be fetched right now: status COMPLETED, an artifact present, and not past expiresAt."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, revoked or expired API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No DSAR request with this id belongs to the calling project. Returned for another project's id too, deliberately.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — the global per-IP limiter or the 500 req/min per-API-key envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unhandled server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "description": "Server-to-server only (secret key). Scoped to the calling project: a request belonging to another project is reported as 404, never as 403, so the endpoint does not confirm the existence of other projects' ids.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The DSAR request id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/dsar/{id}/download": {
+      "get": {
+        "operationId": "getV1DsarByIdDownload",
+        "summary": "Download a completed export artifact",
+        "tags": [
+          "Data subject requests"
+        ],
+        "security": [
+          {
+            "secretApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The export artifact, streamed. Not JSON — an opaque binary body.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, revoked or expired API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No download is available: the request is not COMPLETED, has no artifact, the link has expired, or the object is no longer in storage.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — the global per-IP limiter or the 500 req/min per-API-key envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unhandled server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "description": "Server-to-server only (secret key). Streams the artifact as `application/octet-stream` with a `Content-Disposition` attachment filename — this is the one `/v1` response that is not a JSON envelope. Returns 404, not 410, for every unavailable case: the request is not COMPLETED, it has no artifact, the link has expired, or the object is gone from storage. Check `downloadReady` on the request first.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The DSAR request id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/dsar/erasure": {
+      "post": {
+        "operationId": "postV1DsarErasure",
+        "summary": "Open an erasure request for a subscriber",
+        "tags": [
+          "Data subject requests"
+        ],
+        "security": [
+          {
+            "secretApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The DSAR request, newly created or already open.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "request"
+                      ],
+                      "properties": {
+                        "request": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "type",
+                            "status",
+                            "requestedBy",
+                            "downloadReady"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "EXPORT",
+                                "ERASURE"
+                              ]
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "PENDING",
+                                "RUNNING",
+                                "COMPLETED",
+                                "FAILED"
+                              ]
+                            },
+                            "requestedBy": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "completedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "downloadReady": {
+                              "type": "boolean",
+                              "description": "True only when the artifact can be fetched right now: status COMPLETED, an artifact present, and not past expiresAt."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request body failed Zod validation (`VALIDATION_ERROR`), or a required identity/parameter was absent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, revoked or expired API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No subscriber matches the supplied `appUserId` in this project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — the global per-IP limiter or the 500 req/min per-API-key envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unhandled server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "description": "Server-to-server only (secret key). Enqueues an erasure job and returns the request row. Same single-open-request semantics as the export route.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appUserId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "requestedBy": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "appUserId",
+                  "requestedBy"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dsar/export": {
+      "post": {
+        "operationId": "postV1DsarExport",
+        "summary": "Open a data-export request for a subscriber",
+        "tags": [
+          "Data subject requests"
+        ],
+        "security": [
+          {
+            "secretApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The DSAR request, newly created or already open.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "request"
+                      ],
+                      "properties": {
+                        "request": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "type",
+                            "status",
+                            "requestedBy",
+                            "downloadReady"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "EXPORT",
+                                "ERASURE"
+                              ]
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "PENDING",
+                                "RUNNING",
+                                "COMPLETED",
+                                "FAILED"
+                              ]
+                            },
+                            "requestedBy": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "completedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "downloadReady": {
+                              "type": "boolean",
+                              "description": "True only when the artifact can be fetched right now: status COMPLETED, an artifact present, and not past expiresAt."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request body failed Zod validation (`VALIDATION_ERROR`), or a required identity/parameter was absent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, revoked or expired API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No subscriber matches the supplied `appUserId` in this project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — the global per-IP limiter or the 500 req/min per-API-key envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unhandled server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "description": "Server-to-server only (secret key). Enqueues an export job and returns the request row. Opening a second request of the same type while one is still PENDING or RUNNING returns the request already open rather than creating a duplicate, so the call is safe to retry.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appUserId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "requestedBy": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "appUserId",
+                  "requestedBy"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
       }
     },
     "/v1/events": {
