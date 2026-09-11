@@ -76,6 +76,39 @@ jobs:
           done
           echo "postgres never became ready"; docker logs rovenue-pg; exit 1
 
+      # Seven apps/api suites are integration tests against a live ClickHouse
+      # on the port apps/api/tests/setup.ts defaults to, and they are NOT in
+      # vitest.config.ts's CONTAINER_SUITES — so unlike the second pass, they
+      # start nothing themselves. On a workstation the compose stack answers
+      # on 8124 and they pass; here they failed with ECONNREFUSED 8124.
+      #
+      # Plain image credentials, not deploy/clickhouse. That config removes
+      # the default user (users.d/rovenue.xml: `<default remove="remove"/>`),
+      # and the image's entrypoint creates CLICKHOUSE_DB *as* default — so
+      # booting it on an empty volume exits 4 on AUTHENTICATION_FAILED, which
+      # is what happened when this step was first written that way. The
+      # hardening in that config (network allow-list, readonly profile, a
+      # database allow-list) is a deployment concern; nothing under test
+      # asserts it. What the suites need is the URL, user, password and
+      # database, which CLICKHOUSE_USER/PASSWORD/DB give directly.
+      - name: Start ClickHouse
+        run: |
+          image=$(grep -oE 'clickhouse/clickhouse-server:[^[:space:]"]+' docker-compose.yml | head -1)
+          echo "starting $image"
+          docker run -d --name rovenue-ch -p 8124:8123 \
+            -e CLICKHOUSE_DB=rovenue \
+            -e CLICKHOUSE_USER=rovenue \
+            -e CLICKHOUSE_PASSWORD=rovenue \
+            --ulimit nofile=262144:262144 \
+            "$image"
+          for i in $(seq 1 40); do
+            if docker exec rovenue-ch clickhouse-client --user rovenue --password rovenue --query "SELECT 1" >/dev/null 2>&1; then
+              echo "clickhouse ready after ${i} attempts"; exit 0
+            fi
+            sleep 3
+          done
+          echo "clickhouse never became ready"; docker logs rovenue-ch; exit 1
+
       - run: pnpm install --frozen-lockfile
 
       # Suppressions and the reason each one exists are documented in
@@ -202,6 +235,15 @@ jobs:
         run: pnpm db:migrate
         env:
           DATABASE_URL: postgresql://rovenue:rovenue@localhost:5433/rovenue
+
+      # Same reasoning as the Postgres migration above: the suites query real
+      # ClickHouse tables and nothing creates them. 25 migrations.
+      - name: Migrate ClickHouse
+        run: pnpm --filter @rovenue/db db:clickhouse:migrate
+        env:
+          CLICKHOUSE_URL: http://localhost:8124
+          CLICKHOUSE_USER: rovenue
+          CLICKHOUSE_PASSWORD: rovenue
 
       - name: Test
         run: pnpm test
