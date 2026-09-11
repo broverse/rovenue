@@ -38,6 +38,7 @@ import { errorHandler } from "../../../src/middleware/error";
 import { MCP_PROTOCOL_REVISION } from "../../../src/services/mcp/server";
 import { mcpRoute } from "../../../src/routes/mcp";
 import { mcpFontUploadRoute } from "../../../src/routes/mcp/font-uploads";
+import { getUploadTicketKey, mintUploadTicket } from "../../../src/lib/upload-ticket";
 
 const RUN_ID = Date.now();
 const TEST_BCRYPT_ROUNDS = 4;
@@ -275,28 +276,18 @@ describe("MCP staged font upload", () => {
 
     // Another project's token, even valid, cannot spend this ticket.
     expect((await upload(bytes, staged.ticket, b.raw)).status).toBe(403);
-    // Nor can a ticket staged for an asset kind upload a font.
-    const { ticket: assetTicket } = await (async () => {
-      const res = await buildApp().request("/mcp", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          "mcp-method": "tools/call",
-          "mcp-name": "stage_asset_upload",
-          authorization: `Bearer ${a.raw}`,
-        },
-        body: envelope(2, "tools/call", {
-          name: "stage_asset_upload",
-          arguments: { kind: "image", name: "hero.webp" },
-        }),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        result?: { structuredContent?: { ticket: string } };
-      };
-      return { ticket: body.result!.structuredContent!.ticket };
-    })();
+    // Nor can a ticket staged for an asset kind upload a font. Minted
+    // directly rather than by calling stage_asset_upload through the MCP
+    // endpoint: that tool checks asset storage is configured before it mints
+    // anything, so on a runner with no MinIO it answers with an error
+    // envelope and the old code read `.ticket` off an undefined `result`.
+    // The claim under test is the ticket's `kind` binding, which does not
+    // involve storage at all — this mints exactly what stage_asset_upload
+    // would, with the same helper and key the route verifies against.
+    const { ticket: assetTicket } = mintUploadTicket(
+      { projectId: a.projectId, kind: "image", name: "hero.webp" },
+      getUploadTicketKey(),
+    );
     expect((await upload(bytes, assetTicket, a.raw)).status).toBe(400);
     // Nor can a tampered ticket pass the HMAC.
     const [bodyPart, sig] = staged.ticket.split(".");
